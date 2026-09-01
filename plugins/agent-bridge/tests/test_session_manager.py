@@ -626,7 +626,7 @@ async def test_codespace_handshake_failure_releases_claim(
     released = []
     monkeypatch.setattr(
         "agent_bridge.session_manager._claim_codespace",
-        lambda *_args: (True, ""),
+        lambda *_args, **_kwargs: ("ok", ""),
     )
     monkeypatch.setattr(
         "agent_bridge.session_manager._release_codespace_claim",
@@ -3026,12 +3026,16 @@ class TestCodespaceExclusiveClaim:
     """
 
     @staticmethod
-    def _cs_target(caller_worktree: str | None = None) -> SpawnTarget:
+    def _cs_target(
+        caller_worktree: str | None = None,
+        caller_owner_ref: str | None = None,
+    ) -> SpawnTarget:
         acp = "cd /workspaces/example && copilot --acp --stdio --allow-all-tools"
         return SpawnTarget(
             type="command",
             cwd="/workspaces/example",
             caller_worktree=caller_worktree,
+            caller_owner_ref=caller_owner_ref,
             codespace={
                 "name": "example-codespace",
                 "repo": "example/repo",
@@ -3040,8 +3044,16 @@ class TestCodespaceExclusiveClaim:
             },
         )
 
-    async def _start(self, tmp_db, monkeypatch, *, claim_result, caller_worktree,
-                     caller_id=None):
+    async def _start(
+        self,
+        tmp_db,
+        monkeypatch,
+        *,
+        claim_result,
+        caller_worktree,
+        caller_id=None,
+        caller_owner_ref=None,
+    ):
         monkeypatch.setattr(
             "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
             lambda *a, **k: SimpleNamespace(transport=object()),
@@ -3050,10 +3062,10 @@ class TestCodespaceExclusiveClaim:
             "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
             AsyncMock(return_value=[]),
         )
-        claim_calls: list[tuple[str, str]] = []
+        claim_calls: list[tuple[str, str, str | None]] = []
 
-        def fake_claim(name, owner):
-            claim_calls.append((name, owner))
+        def fake_claim(name, owner, *, holder_ref=None):
+            claim_calls.append((name, owner, holder_ref))
             return claim_result
 
         monkeypatch.setattr(
@@ -3071,7 +3083,7 @@ class TestCodespaceExclusiveClaim:
         )
         manager = SessionManager(tmp_db)
         session = await manager.start_session(
-            self._cs_target(caller_worktree),
+            self._cs_target(caller_worktree, caller_owner_ref),
             agent_name="codespace:example",
             caller_id=caller_id,
         )
@@ -3085,10 +3097,12 @@ class TestCodespaceExclusiveClaim:
         comes up IDLE."""
         _, session, claim_calls = await self._start(
             tmp_db, monkeypatch,
-            claim_result=(True, ""),
+            claim_result=("ok", ""),
             caller_worktree="/wt/dispatcher-a",
         )
-        assert claim_calls == [("example-codespace", "/wt/dispatcher-a")]
+        assert claim_calls == [
+            ("example-codespace", "/wt/dispatcher-a", None)
+        ]
         assert session.status == SessionStatus.IDLE
 
     @pytest.mark.asyncio
@@ -3099,11 +3113,33 @@ class TestCodespaceExclusiveClaim:
         (bound onto the target as caller_worktree earlier in start_session)."""
         _, _session, claim_calls = await self._start(
             tmp_db, monkeypatch,
-            claim_result=(True, ""),
+            claim_result=("ok", ""),
             caller_worktree=None,
             caller_id="/wt/dispatcher-b",
         )
-        assert claim_calls == [("example-codespace", "/wt/dispatcher-b")]
+        assert claim_calls == [
+            ("example-codespace", "/wt/dispatcher-b", None)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_claim_forwards_caller_owner_ref(
+        self, tmp_db, monkeypatch
+    ) -> None:
+        _, session, claim_calls = await self._start(
+            tmp_db,
+            monkeypatch,
+            claim_result=("ok", ""),
+            caller_worktree="/wt/dispatcher-a",
+            caller_owner_ref="machine/project/worktree",
+        )
+        assert claim_calls == [
+            (
+                "example-codespace",
+                "/wt/dispatcher-a",
+                "machine/project/worktree",
+            )
+        ]
+        assert session.status == SessionStatus.IDLE
 
     @pytest.mark.asyncio
     async def test_conflict_bounces_session_failed(
@@ -3114,12 +3150,30 @@ class TestCodespaceExclusiveClaim:
         transport error."""
         _, session, _calls = await self._start(
             tmp_db, monkeypatch,
-            claim_result=(False, "[BUSY] held by /wt/other"),
+            claim_result=("conflict", "[BUSY] held by /wt/other"),
             caller_worktree="/wt/dispatcher-a",
         )
         assert session.status == SessionStatus.FAILED
         types = [e.event for e in session.event_log.get_events()]
         assert "codespace_claim_conflict" in types
+
+    @pytest.mark.asyncio
+    async def test_coordination_rejection_blocks_transport(
+        self, tmp_db, monkeypatch
+    ) -> None:
+        _, session, _calls = await self._start(
+            tmp_db,
+            monkeypatch,
+            claim_result=(
+                "coordination-rejected",
+                "[BLOCKED] knowledge_binding_required",
+            ),
+            caller_worktree="/wt/dispatcher-a",
+            caller_owner_ref="machine/project/worktree",
+        )
+        assert session.status == SessionStatus.FAILED
+        types = [e.event for e in session.event_log.get_events()]
+        assert "codespace_coordination_rejected" in types
 
     @pytest.mark.asyncio
     async def test_end_session_releases_claim(
@@ -3134,7 +3188,7 @@ class TestCodespaceExclusiveClaim:
         )
         manager, session, _calls = await self._start(
             tmp_db, monkeypatch,
-            claim_result=(True, ""),
+            claim_result=("ok", ""),
             caller_worktree="/wt/dispatcher-a",
         )
         await manager.end_session(session.session_id, force=True)
@@ -3154,8 +3208,8 @@ class TestClaimCodespaceHelper:
             sm.subprocess, "run",
             lambda *a, **k: SimpleNamespace(returncode=75, stdout="", stderr="[BUSY] x"),
         )
-        ok, detail = sm._claim_codespace("cs", "/wt/a")
-        assert ok is False
+        status, detail = sm._claim_codespace("cs", "/wt/a")
+        assert status == "conflict"
         assert "BUSY" in detail
 
     def test_success_on_zero_exit(self, monkeypatch) -> None:
@@ -3167,7 +3221,7 @@ class TestClaimCodespaceHelper:
             sm.subprocess, "run",
             lambda *a, **k: SimpleNamespace(returncode=0, stdout="[OK]", stderr=""),
         )
-        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+        assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
 
     def test_other_nonzero_is_degrade_safe(self, monkeypatch) -> None:
         from agent_bridge import session_manager as sm
@@ -3178,7 +3232,34 @@ class TestClaimCodespaceHelper:
             sm.subprocess, "run",
             lambda *a, **k: SimpleNamespace(returncode=2, stdout="", stderr="boom"),
         )
-        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+        assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
+
+    def test_coordination_rejection_is_blocking(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
+        seen = {}
+
+        def run(command, **kwargs):
+            seen["command"] = command
+            return SimpleNamespace(
+                returncode=78,
+                stdout="",
+                stderr="[BLOCKED] knowledge_binding_required",
+            )
+
+        monkeypatch.setattr(sm.subprocess, "run", run)
+        result = sm._claim_codespace(
+            "cs",
+            "/wt/a",
+            holder_ref="machine/project/worktree",
+        )
+        assert result[0] == "coordination-rejected"
+        assert seen["command"][-2:] == [
+            "--holder-ref",
+            "machine/project/worktree",
+        ]
 
     def test_no_owner_is_skip(self, monkeypatch) -> None:
         from agent_bridge import session_manager as sm
@@ -3190,7 +3271,7 @@ class TestClaimCodespaceHelper:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(sm.subprocess, "run", _run)
-        assert sm._claim_codespace("cs", "") == (True, "")
+        assert sm._claim_codespace("cs", "") == ("ok", "")
         assert called["ran"] is False
 
     def test_missing_binstub_is_skip(self, monkeypatch) -> None:
@@ -3198,7 +3279,7 @@ class TestClaimCodespaceHelper:
 
         monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
         monkeypatch.setattr(sm.shutil, "which", lambda _: None)
-        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+        assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
 
     def test_disabled_env_is_skip(self, monkeypatch) -> None:
         from agent_bridge import session_manager as sm
@@ -3211,8 +3292,35 @@ class TestClaimCodespaceHelper:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(sm.subprocess, "run", _run)
-        assert sm._claim_codespace("cs", "/wt/a") == (True, "")
+        assert sm._claim_codespace("cs", "/wt/a") == ("ok", "")
         assert called["ran"] is False
+
+    def test_disabled_env_with_holder_ref_still_preflights(
+        self, monkeypatch
+    ) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-codespaces")
+        seen = {}
+
+        def run(command, **kwargs):
+            seen["command"] = command
+            return SimpleNamespace(
+                returncode=78,
+                stdout="",
+                stderr="[BLOCKED] knowledge_binding_required",
+            )
+
+        monkeypatch.setattr(sm.subprocess, "run", run)
+        status, detail = sm._claim_codespace(
+            "cs",
+            "/wt/a",
+            holder_ref="machine/project/worktree",
+        )
+        assert status == "coordination-rejected"
+        assert "knowledge_binding_required" in detail
+        assert "--holder-ref" in seen["command"]
 
 
 class TestReleaseCodespaceClaimHelper:

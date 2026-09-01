@@ -48,6 +48,33 @@ def test_claim_blocks_on_cross_machine_conflict(leases, monkeypatch):
     assert lease_mod.get_lease("cs-one") is None
 
 
+def test_claim_blocks_on_coordination_rejection_before_local_state(
+    leases,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        lease_mod.coordination,
+        "preflight",
+        lambda holder: coord.PreflightResult(
+            "rejected",
+            code="knowledge_binding_required",
+            detail="repair binding",
+        ),
+    )
+    monkeypatch.setattr(
+        lease_mod.coordination,
+        "acquire",
+        lambda *a, **k: pytest.fail("rejected claim attempted lease acquisition"),
+    )
+
+    with pytest.raises(
+        lease_mod.CoordinationRejected,
+        match="knowledge_binding_required",
+    ):
+        lease_mod.claim("cs-one", "/wt/a", holder_ref="myhost/p/my-wt")
+    assert lease_mod.get_lease("cs-one") is None
+
+
 def test_force_over_cross_machine_conflict_proceeds_without_token(leases, monkeypatch):
     monkeypatch.setattr(
         lease_mod.coordination, "acquire",
@@ -92,6 +119,13 @@ def test_reclaim_same_owner_renews_l2(leases, monkeypatch):
     monkeypatch.setattr(
         lease_mod.coordination, "acquire",
         lambda *a, **k: pytest.fail("re-claim by same owner must renew, not acquire"),
+    )
+    monkeypatch.setattr(
+        lease_mod.coordination,
+        "preflight",
+        lambda *a, **k: pytest.fail(
+            "existing lease renewal must not rerun acquisition preflight"
+        ),
     )
     monkeypatch.setattr(lease_mod.coordination, "renew", fake_renew)
     lease = lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")

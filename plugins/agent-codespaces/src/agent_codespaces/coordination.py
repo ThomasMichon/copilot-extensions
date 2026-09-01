@@ -8,21 +8,20 @@ imports ``agent_worktrees``, so it *shells* the binstub (the same loose-coupling
 seam as ``resolve_owner_worktree``).
 
 **Degrade-safe by construction.** When the ``agent-worktrees`` binstub is absent,
-the ``lease`` verb is unavailable, or no store origin is configured, L2 is
-treated as **UNAVAILABLE** and the caller falls back to L1-only (today's
-behavior). Only a *definitive* lease conflict (exit 3) blocks a claim. This keeps
-same-box behavior identical when the cross-machine store is not wired.
+older than the versioned coordination preflight, malformed, or otherwise
+unavailable, the caller falls back to standalone L1 behavior. A compatible
+preflight that explicitly rejects state-root binding blocks before any local
+claim or provider work. A definitive lease conflict also blocks.
 
 Holder identity is the qualified ClaimRef (``machine/project/worktree_id
 [#session]``) obtained from ``agent-worktrees get owner-ref`` -- the same
 identity ``claimant`` liveness resolves, so the fencing token (atomic acquire)
 and the holder ref (cross-machine liveness for stale takeover) compose.
 
-The store origin follows ``agent-worktrees lease``'s own resolution (the project
-remote, overridable via ``AGENT_WORKTREES_LEASE_ORIGIN`` / ``--origin``). Pin it
-to the harness control-plane repo via that env to coordinate *all* harness agents
-regardless of project; unset, agents coordinate per-project (the common
-same-project, cross-machine CodeSpace case).
+New agent-worktrees-owned operations first query the owner's project-scoped
+coordination readiness. The lease command then resolves the bound state
+repository; an explicit origin can identify that same repository but cannot
+bypass a required binding.
 """
 
 from __future__ import annotations
@@ -41,6 +40,12 @@ log = logging.getLogger("agent-codespaces")
 #: Exit codes from ``agent-worktrees lease`` (see lease_cli.run_lease).
 _EXIT_OK = 0
 _EXIT_CONFLICT = 3  # LeaseConflict / LeaseLost
+_EXIT_COORDINATION_REJECTED = 5
+_PREFLIGHT_VERSION = 1
+_PREFLIGHT_REJECTION_CODES = frozenset({
+    "knowledge_binding_required",
+    "state_root_resolution_failed",
+})
 
 #: The resource kind used for CodeSpace leases in the shared namespace.
 KIND = "codespace"
@@ -74,10 +79,8 @@ DEFAULT_CLEAN_TTL = 6 * 3600
 class L2Result:
     """Outcome of an L2 (cross-machine) lease operation.
 
-    ``status`` is one of ``"ok"`` (the op succeeded; ``token`` is the current
-    fencing token), ``"conflict"`` (a live lease is held by another holder;
-    ``holder`` names it), or ``"unavailable"`` (L2 is not wired / not reachable
-    -- the caller degrades to L1-only).
+    ``status`` is ``"ok"``, ``"conflict"``, ``"rejected"`` (a compatible
+    coordination preflight denied new ownership), or ``"unavailable"``.
     """
 
     status: str
@@ -96,6 +99,31 @@ class L2Result:
     @property
     def unavailable(self) -> bool:
         return self.status == "unavailable"
+
+    @property
+    def rejected(self) -> bool:
+        return self.status == "rejected"
+
+
+@dataclass(frozen=True)
+class PreflightResult:
+    """Versioned optional-peer readiness result."""
+
+    status: str
+    code: str = ""
+    detail: str = ""
+
+    @property
+    def ready(self) -> bool:
+        return self.status == "ready"
+
+    @property
+    def rejected(self) -> bool:
+        return self.status == "rejected"
+
+    @property
+    def absent(self) -> bool:
+        return self.status == "absent"
 
 
 @dataclass
@@ -163,6 +191,49 @@ def owner_ref(explicit: str | None = None, session_id: str | None = None) -> str
     if proc is None or proc.returncode != 0:
         return None
     return proc.stdout.strip() or None
+
+
+def _owner_project(holder_ref: str) -> str | None:
+    base = (holder_ref or "").split("#", 1)[0]
+    parts = base.split("/")
+    if len(parts) != 3 or any(not part.strip() for part in parts):
+        return None
+    return parts[1].strip()
+
+
+def preflight(holder_ref: str) -> PreflightResult:
+    """Query optional agent-worktrees readiness for the owning project."""
+    project = _owner_project(holder_ref)
+    if not project:
+        return PreflightResult("absent", detail="owner project is unavailable")
+    proc = _run(
+        ["--project", project, "coordination-readiness"],
+        timeout=10,
+    )
+    if proc is None:
+        return PreflightResult("absent", detail="agent-worktrees is unavailable")
+    try:
+        payload = json.loads(proc.stdout)
+    except (TypeError, ValueError):
+        return PreflightResult("absent", detail="preflight output is not JSON")
+    if not isinstance(payload, dict) or payload.get("version") != _PREFLIGHT_VERSION:
+        return PreflightResult(
+            "absent", detail="preflight version is absent or incompatible"
+        )
+    ready = payload.get("ready")
+    code = payload.get("code")
+    error = payload.get("error")
+    if ready is True and code == "ready" and proc.returncode == _EXIT_OK:
+        return PreflightResult("ready", code="ready")
+    if (
+        ready is False
+        and code in _PREFLIGHT_REJECTION_CODES
+        and proc.returncode == _EXIT_CONFLICT
+        and isinstance(error, str)
+        and error
+    ):
+        return PreflightResult("rejected", code=code, detail=error)
+    return PreflightResult("absent", detail="preflight response is incompatible")
 
 
 def journal_obligation(name: str, holder_ref: str | None) -> bool:
@@ -351,9 +422,8 @@ def acquire(
 ) -> L2Result:
     """Attempt an atomic cross-machine acquire of the CodeSpace lease.
 
-    Returns ``ok`` (with the fencing ``token``), ``conflict`` (with the current
-    ``holder``), or ``unavailable`` (L2 not wired/reachable). A ``conflict`` is
-    the only blocking outcome; every degradation is ``unavailable``.
+    Returns ``ok``, ``conflict``, ``rejected`` (binding unavailable), or
+    ``unavailable`` (optional peer not wired/reachable).
     """
     args = ["lease", "acquire", KIND, key, "--holder", holder]
     if ttl is not None:
@@ -369,6 +439,19 @@ def acquire(
         rec = inspect(key, origin=origin)
         holder_of = str(rec.get("holder", "")) if rec else ""
         return L2Result("conflict", holder=holder_of, detail=(proc.stderr or "").strip())
+    if proc.returncode == _EXIT_COORDINATION_REJECTED:
+        try:
+            payload = json.loads(proc.stderr)
+        except (TypeError, ValueError):
+            payload = {}
+        code = str(payload.get("code", "")) if isinstance(payload, dict) else ""
+        detail = (
+            str(payload.get("error", ""))
+            if isinstance(payload, dict)
+            else ""
+        )
+        if code in _PREFLIGHT_REJECTION_CODES and detail:
+            return L2Result("rejected", detail=f"{code}: {detail}")
     # config/protocol (2) or git (4) error -> degrade to L1-only.
     log.debug("L2 acquire degraded (exit %s): %s", proc.returncode, (proc.stderr or "").strip())
     return L2Result("unavailable", detail=(proc.stderr or "").strip())

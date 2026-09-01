@@ -14,7 +14,7 @@ from agent_codespaces import coordination as coord
 # module (which tests the shim itself) can restore the real implementations.
 _REAL = {
     name: getattr(coord, name)
-    for name in ("owner_ref", "acquire", "renew", "release", "inspect",
+    for name in ("owner_ref", "preflight", "acquire", "renew", "release", "inspect",
                  "list_leases", "publish_cleanliness", "list_cleanliness")
 }
 
@@ -62,6 +62,77 @@ def test_acquire_config_error_degrades_to_unavailable(monkeypatch):
 def test_acquire_missing_binstub_is_unavailable(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: None)
     assert coord.acquire("cs-one", "m/p/w").unavailable
+
+
+def test_preflight_ready_for_owner_project(monkeypatch):
+    payload = {"version": 1, "ready": True, "code": "ready", "error": None}
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        return _proc(0, json.dumps(payload))
+
+    monkeypatch.setattr(coord, "_run", fake_run)
+    result = coord.preflight("machine/project/worktree#session")
+    assert result.ready
+    assert seen["args"] == [
+        "--project", "project", "coordination-readiness"
+    ]
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["knowledge_binding_required", "state_root_resolution_failed"],
+)
+def test_preflight_preserves_compatible_rejection(monkeypatch, code):
+    payload = {
+        "version": 1,
+        "ready": False,
+        "code": code,
+        "error": "repair binding",
+    }
+    monkeypatch.setattr(
+        coord, "_run", lambda *a, **k: _proc(3, json.dumps(payload))
+    )
+    result = coord.preflight("machine/project/worktree")
+    assert result.rejected
+    assert result.code == code
+    assert result.detail == "repair binding"
+
+
+@pytest.mark.parametrize(
+    "process",
+    [
+        _proc(1, stderr="unknown command"),
+        _proc(0, "not json"),
+        _proc(0, json.dumps({"ready": True, "code": "ready"})),
+        _proc(0, json.dumps({"version": 2, "ready": True, "code": "ready"})),
+        _proc(3, json.dumps({
+            "version": 1,
+            "ready": False,
+            "code": "future_code",
+            "error": "future",
+        })),
+    ],
+)
+def test_preflight_incompatible_peer_degrades_as_absent(monkeypatch, process):
+    monkeypatch.setattr(coord, "_run", lambda *a, **k: process)
+    assert coord.preflight("machine/project/worktree").absent
+
+
+def test_acquire_preserves_structured_binding_rejection(monkeypatch):
+    payload = {
+        "error": "repair binding",
+        "code": "knowledge_binding_required",
+    }
+    monkeypatch.setattr(
+        coord,
+        "_run",
+        lambda *a, **k: _proc(5, stderr=json.dumps(payload)),
+    )
+    result = coord.acquire("cs-one", "m/p/w")
+    assert result.rejected
+    assert "knowledge_binding_required" in result.detail
 
 
 def test_renew_requires_token(monkeypatch):
