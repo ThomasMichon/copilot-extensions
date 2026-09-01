@@ -8,6 +8,7 @@ dataclass mapping, and a headless render/screenshot -- with no live engine.
 from __future__ import annotations
 
 import asyncio
+import html
 import io
 import json
 import threading
@@ -78,8 +79,9 @@ def test_capture_svg_contains_title_and_demo_data():
                                  project=demo.DEMO_PROJECT, size=(110, 32))
     assert "<svg" in svg
     assert "Worktree" in svg  # the app title (may be split across SVG spans)
-    # A distinctive demo string proves the boundary fed the render.
-    assert "lemons" in svg or "GLaDOS" in svg
+    # The summary count is source-derived and remains visible at every viewport.
+    rendered = html.unescape(svg)
+    assert f"{len(demo.aperture_worktrees())}\N{NO-BREAK SPACE}worktree(s)" in rendered
 
 
 def test_app_populates_table_from_source():
