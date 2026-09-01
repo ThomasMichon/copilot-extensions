@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import heapq
 import json
@@ -21,6 +22,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+import session_context_conformance as conformance
+
 SCHEMA = "copilot-extensions.session-context-contributors"
 MAX_INPUT_BYTES = 64 * 1024
 MAX_AGGREGATE_BYTES = 64 * 1024
@@ -33,6 +39,7 @@ RENDEZVOUS_DEADLINE_SECONDS = 25
 MAX_WORKERS = 16
 PROCESS_START_GRACE_SECONDS = 5 if os.name == "nt" else 0
 COMMAND_CATALOG_BUDGET_BYTES = 32 * 1024
+MAX_STACK_FINGERPRINT_FILE_BYTES = 1024 * 1024
 ADOPTION_SCHEMA = "copilot-extensions.context-injection"
 ADOPTION_CONFIG = Path(".context-injection/config.yaml")
 MAX_ADOPTION_CONFIG_BYTES = 4096
@@ -141,7 +148,7 @@ def _spill_context(
 def _load_json(path: Path) -> dict | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
 
@@ -662,6 +669,8 @@ def _staged_active_plugins(
 def _active_plugins(
     repo: Path,
     staged_roots: tuple[Path, ...] | None = None,
+    *,
+    violations: list[conformance.Violation] | None = None,
 ) -> list[ActivePlugin] | None:
     loaded = _settings(repo)
     if loaded is None:
@@ -671,11 +680,23 @@ def _active_plugins(
         return _staged_active_plugins(enabled, staged_roots)
     active: list[ActivePlugin] = []
     installed = (Path.home() / ".copilot" / "installed-plugins").resolve()
+    failed = False
     for source in sorted(key for key, value in enabled.items() if value):
         parsed = _plugin_identity(source)
         if parsed is None:
-            _diagnose(f"invalid enabled plugin identity: {source!r}")
-            return None
+            message = f"invalid enabled plugin identity: {source!r}"
+            if violations is not None:
+                violations.append(
+                    conformance.Violation(
+                        "active-plugin-identity-invalid",
+                        message,
+                        source=source,
+                    )
+                )
+            else:
+                _diagnose(message)
+            failed = True
+            continue
         name, marketplace = parsed
         declaration, base = marketplaces.get(marketplace, ({}, repo))
         root = _directory_plugin(repo, marketplace, name, declaration, base)
@@ -685,21 +706,57 @@ def _active_plugins(
                 root = root.resolve(strict=True)
                 root.relative_to(installed)
             except OSError:
-                _diagnose(f"active plugin payload is unavailable: {source}")
-                return None
+                message = "active plugin payload is unavailable"
+                if violations is not None:
+                    violations.append(
+                        conformance.Violation(
+                            "plugin-payload-missing",
+                            message,
+                            source=source,
+                            path=str(root),
+                        )
+                    )
+                else:
+                    _diagnose(f"{message}: {source}")
+                failed = True
+                continue
             except ValueError:
-                _diagnose(f"active plugin payload escapes installed root: {source}")
-                return None
+                message = "active plugin payload escapes installed root"
+                if violations is not None:
+                    violations.append(
+                        conformance.Violation(
+                            "plugin-payload-escape",
+                            message,
+                            source=source,
+                            path=str(root),
+                        )
+                    )
+                else:
+                    _diagnose(f"{message}: {source}")
+                failed = True
+                continue
         manifest = _load_json(root / "plugin.json")
         if manifest is None:
             manifest = _load_json(root / ".claude-plugin" / "plugin.json")
         if manifest is None or manifest.get("name") != name:
-            _diagnose(f"active plugin identity is invalid: {source}")
-            return None
+            message = "active plugin manifest identity is invalid"
+            if violations is not None:
+                violations.append(
+                    conformance.Violation(
+                        "plugin-identity-drift",
+                        message,
+                        source=source,
+                        path=str(root),
+                    )
+                )
+            else:
+                _diagnose(f"{message}: {source}")
+            failed = True
+            continue
         active.append(
             ActivePlugin(source, name, marketplace, root)
         )
-    return active
+    return None if failed and violations is None else active
 
 
 def _session_start_hooks(plugin: ActivePlugin, manifest: dict) -> bool | None:
@@ -768,6 +825,34 @@ def _contributors(
     *,
     enforce_admission: bool = True,
 ) -> list[Contributor] | None:
+    if adoption is not None:
+        authority = next(
+            (
+                plugin
+                for plugin in active
+                if plugin.source == adoption.authority_source
+            ),
+            None,
+        )
+        report = conformance.scan_plugins(
+            [
+                conformance.PluginTarget(plugin.source, plugin.root)
+                for plugin in active
+            ],
+            scope="effective-stack",
+            authority_source=adoption.authority_source,
+            wrapper_root=authority.root if authority else None,
+            authority_engine_schema=ENGINE_SCHEMA,
+            authority_engine_version=ENGINE_VERSION,
+            authority_timeout_seconds=RENDEZVOUS_DEADLINE_SECONDS,
+        )
+        if not report.ok:
+            for violation in report.violations:
+                _diagnose(
+                    f"{violation.code}: "
+                    f"{violation.source or '<stack>'}: {violation.message}"
+                )
+            return None
     contributors: list[Contributor] = []
     platform_key = "powershell" if os.name == "nt" else "bash"
     for plugin in active:
@@ -1108,27 +1193,6 @@ def _prove_authority(
             "running context engine does not match the configured authority payload"
         )
         return False
-    engine_manifest = _manifest(authority[0])
-    configured_contract = (
-        engine_manifest.get("sessionContextEngine")
-        if engine_manifest is not None
-        else None
-    )
-    if not isinstance(configured_contract, str):
-        _diagnose("configured context engine has no compatibility contract")
-        return False
-    try:
-        contract_path = (authority[0].root / configured_contract).resolve(strict=True)
-        contract_path.relative_to(authority[0].root)
-    except (OSError, ValueError):
-        _diagnose("configured context engine contract is unavailable")
-        return False
-    if _load_json(contract_path) != {
-        "schema": ENGINE_SCHEMA,
-        "version": ENGINE_VERSION,
-    }:
-        _diagnose("configured context engine is incompatible")
-        return False
     if (
         _contributors(
             [authority[0]],
@@ -1155,7 +1219,103 @@ def _prove_authority(
     return True
 
 
-def _cache_path(session_id: str, canonical_cwd: str) -> Path:
+def _stack_fingerprint(
+    active: list[ActivePlugin],
+    adoption: Adoption,
+    contributors: list[Contributor],
+) -> str | None:
+    """Hash the validated active stack and its context-producing contracts."""
+
+    by_source: dict[str, list[Contributor]] = {}
+    for contributor in contributors:
+        by_source.setdefault(contributor.source, []).append(contributor)
+    digest = hashlib.sha256()
+    header = {
+        "schema": "copilot-extensions.context-injection-cache-generation",
+        "version": 1,
+        "authority": adoption.authority_source,
+        "engineVersion": ENGINE_VERSION,
+        "plugins": [
+            {
+                "source": plugin.source,
+                "root": os.path.normcase(str(plugin.root)),
+            }
+            for plugin in sorted(active, key=lambda item: item.source)
+        ],
+    }
+    digest.update(
+        json.dumps(
+            header,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    for plugin in sorted(active, key=lambda item: item.source):
+        manifest = _manifest(plugin)
+        if manifest is None:
+            return None
+        relative_paths: set[str] = set()
+        for relative in ("plugin.json", ".claude-plugin/plugin.json"):
+            if (plugin.root / relative).is_file():
+                relative_paths.add(relative)
+        configured_hooks = manifest.get("hooks")
+        if isinstance(configured_hooks, str):
+            relative_paths.add(configured_hooks)
+        elif isinstance(configured_hooks, list):
+            relative_paths.update(
+                item for item in configured_hooks if isinstance(item, str)
+            )
+        else:
+            relative_paths.update(
+                relative
+                for relative in ("hooks.json", "hooks/hooks.json")
+                if (plugin.root / relative).is_file()
+            )
+        for key in ("sessionContext", "sessionContextEngine"):
+            configured = manifest.get(key)
+            if isinstance(configured, str) and configured:
+                relative_paths.add(configured)
+        if (plugin.root / "payload-invocation.json").is_file():
+            relative_paths.add("payload-invocation.json")
+        for relative in (
+            "scripts/invoke-context-contributor.sh",
+            "scripts/invoke-context-contributor.ps1",
+            "scripts/emit-command-catalog.sh",
+            "scripts/emit-command-catalog.ps1",
+        ):
+            if (plugin.root / relative).is_file():
+                relative_paths.add(relative)
+        for contributor in by_source.get(plugin.source, []):
+            relative_paths.add(contributor.command[0])
+
+        for relative in sorted(relative_paths):
+            try:
+                path = (plugin.root / relative).resolve(strict=True)
+                path.relative_to(plugin.root)
+                if not path.is_file():
+                    return None
+                content = path.read_bytes()
+            except (OSError, ValueError):
+                return None
+            if len(content) > MAX_STACK_FINGERPRINT_FILE_BYTES:
+                return None
+            digest.update(
+                json.dumps(
+                    [plugin.source, relative, len(content)],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            digest.update(content)
+    return digest.hexdigest()
+
+
+def _cache_path(
+    session_id: str,
+    canonical_cwd: str,
+    stack_fingerprint: str,
+) -> Path:
     configured = os.environ.get("COPILOT_CONTEXT_INJECTION_CACHE_DIR")
     if configured:
         root = Path(configured)
@@ -1170,7 +1330,7 @@ def _cache_path(session_id: str, canonical_cwd: str) -> Path:
         base = Path(runtime) if runtime else Path.home() / ".cache"
         root = base / "copilot-context-injection" / "v1"
     identity = json.dumps(
-        [session_id, canonical_cwd],
+        [session_id, canonical_cwd, stack_fingerprint],
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -1361,7 +1521,124 @@ def _direct_fallback(
     ).encode("utf-8")
 
 
+def _validated_payload_cwd(hook_input: BinaryIO) -> Path | None:
+    try:
+        hook_input.seek(0)
+        payload = json.load(hook_input)
+        raw_cwd = payload.get("cwd") if isinstance(payload, dict) else None
+        if (
+            not isinstance(raw_cwd, str)
+            or not raw_cwd
+            or not os.path.isabs(raw_cwd)
+        ):
+            return None
+        launch_cwd = Path(raw_cwd).resolve(strict=True)
+        return launch_cwd if launch_cwd.is_dir() else None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    finally:
+        hook_input.seek(0)
+
+
+def _validation_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="aggregate_context.py --validate",
+        description=(
+            "Scan a directory marketplace or an effective repository plugin "
+            "stack for sessionStart conformance."
+        ),
+    )
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--marketplace-root", type=Path)
+    target.add_argument("--repository", type=Path)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    authority_source: str | None = None
+    wrapper_root: Path | None = None
+    initial: list[conformance.Violation] = []
+    if args.marketplace_root is not None:
+        targets, discovery = conformance.marketplace_targets(
+            args.marketplace_root
+        )
+        initial.extend(discovery.violations)
+        authority = [
+            item
+            for item in targets
+            if item.source.partition("@")[0] == "context-injection"
+        ]
+        if len(authority) == 1:
+            authority_source = authority[0].source
+            wrapper_root = authority[0].root
+        else:
+            initial.append(
+                conformance.Violation(
+                    "aggregate-authority-missing",
+                    "marketplace must contain exactly one context-injection authority",
+                )
+            )
+        scope = discovery.scope
+    else:
+        repository = _repo_root(args.repository)
+        active = _active_plugins(repository, violations=initial)
+        targets = [
+            conformance.PluginTarget(plugin.source, plugin.root)
+            for plugin in (active or [])
+        ]
+        adoption = _repository_adoption(repository)
+        if adoption is None:
+            initial.append(
+                conformance.Violation(
+                    "repository-adoption-invalid",
+                    "repository has no trusted compatible context-injection adoption",
+                    path=str(repository / ADOPTION_CONFIG),
+                )
+            )
+        else:
+            authority_source = adoption.authority_source
+            authority = [
+                plugin
+                for plugin in (active or [])
+                if plugin.source == authority_source
+            ]
+            if len(authority) == 1:
+                wrapper_root = authority[0].root
+            else:
+                initial.append(
+                    conformance.Violation(
+                        "aggregate-authority-missing",
+                        "configured context authority is not exactly active",
+                        source=authority_source,
+                    )
+                )
+        scope = f"repository:{repository}"
+
+    report = conformance.scan_plugins(
+        targets,
+        scope=scope,
+        authority_source=authority_source,
+        wrapper_root=wrapper_root,
+        authority_engine_schema=ENGINE_SCHEMA,
+        authority_engine_version=ENGINE_VERSION,
+        authority_timeout_seconds=RENDEZVOUS_DEADLINE_SECONDS,
+        initial_violations=initial,
+    )
+    if args.json:
+        print(
+            json.dumps(
+                report.as_dict(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+    else:
+        print(conformance.render_text(report))
+    return 0 if report.ok else 1
+
+
 def main() -> int:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--validate":
+        return _validation_main(sys.argv[2:])
     producer_value: str | None = None
     if len(sys.argv) == 3 and sys.argv[1] == "--producer":
         producer_value = sys.argv[2]
@@ -1380,10 +1657,11 @@ def main() -> int:
         fallback_cwd = Path.cwd().resolve(strict=True)
     except OSError:
         fallback_cwd = Path.cwd()
+    validated_launch_cwd: Path | None = None
 
     def fail(
         message: str | None = None,
-        launch_cwd: Path = fallback_cwd,
+        launch_cwd: Path | None = None,
         *,
         direct: bool = True,
         direct_input: bytes | BinaryIO | None = None,
@@ -1391,8 +1669,14 @@ def main() -> int:
         if message:
             _diagnose(message)
         producer_input = hook_input if direct_input is None else direct_input
+        contributor_cwd = launch_cwd or validated_launch_cwd or fallback_cwd
         output = (
-            _direct_fallback(producer, caller_root, producer_input, launch_cwd)
+            _direct_fallback(
+                producer,
+                caller_root,
+                producer_input,
+                contributor_cwd,
+            )
             if direct and producer is not None and caller_root is not None
             else b"{}"
         )
@@ -1405,29 +1689,33 @@ def main() -> int:
                 complete_input.write(hook_input)
                 shutil.copyfileobj(sys.stdin.buffer, complete_input)
                 complete_input.seek(0)
+                oversized_cwd = _validated_payload_cwd(complete_input)
                 return fail(
                     "hook input exceeds the configured limit",
+                    launch_cwd=oversized_cwd,
+                    direct=oversized_cwd is not None,
                     direct_input=complete_input,
                 )
-        return fail("hook input exceeds the configured limit")
+        return fail("hook input exceeds the configured limit", direct=False)
     try:
         payload = json.loads(hook_input.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return fail("hook input is not valid JSON")
+        return fail("hook input is not valid JSON", direct=False)
     cwd = payload.get("cwd") if isinstance(payload, dict) else None
     session_id = payload.get("sessionId") if isinstance(payload, dict) else None
     if not isinstance(cwd, str) or not cwd:
-        return fail("hook input has no cwd")
+        return fail("hook input has no cwd", direct=False)
     try:
         launch_cwd = Path(cwd).resolve(strict=True)
         if not launch_cwd.is_dir():
             raise OSError
+        validated_launch_cwd = launch_cwd
         repo = _repo_root(launch_cwd)
         engine_root = Path(__file__).resolve().parents[1]
         if caller_root is None:
             raise OSError
-    except OSError:
-        return fail("aggregator payload root is unavailable")
+    except (OSError, ValueError):
+        return fail("aggregator payload root is unavailable", direct=False)
 
     if not isinstance(session_id, str) or not session_id:
         return fail("hook input has no sessionId")
@@ -1451,8 +1739,28 @@ def main() -> int:
         producer[0] if producer else None,
     ):
         return fail("exact repository context authority is not proven")
+    contributors = _contributors(active, adoption)
+    if contributors is None:
+        return fail(
+            "active session-start declarations are not adoption-safe",
+            direct=False,
+        )
+    stack_fingerprint = _stack_fingerprint(
+        active,
+        adoption,
+        contributors,
+    )
+    if stack_fingerprint is None:
+        return fail(
+            "active session-start stack fingerprint is unavailable",
+            direct=False,
+        )
     canonical_cwd = os.path.normcase(str(launch_cwd))
-    cache_path = _cache_path(session_id, canonical_cwd)
+    cache_path = _cache_path(
+        session_id,
+        canonical_cwd,
+        stack_fingerprint,
+    )
     try:
         with _cache_lock(cache_path):
             def emit_shared(output: bytes) -> int:
@@ -1469,11 +1777,6 @@ def main() -> int:
                 _store_cached(cache_path, output)
                 return emit_shared(output)
 
-            contributors = _contributors(active, adoption)
-            if contributors is None:
-                return publish_empty(
-                    "active session-start declarations are not adoption-safe"
-                )
             executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
             started = time.monotonic()
             futures = [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -320,10 +321,26 @@ def render(
         "CATALOG_SPECS_JSON_PS": json.dumps(
             catalog_specs_ps, ensure_ascii=True, separators=(",", ":")
         ),
+        "CATALOG_CONTRACT_JSON": json.dumps(
+            {
+                "plugin": data["plugin"],
+                "commands": catalog_specs,
+                "windowsCatalogShim": data["windowsCatalogShim"],
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
     }
     rendered = template
     for key, value in values.items():
         rendered = rendered.replace(f"@@{key}@@", value)
+    digest_placeholder = "@@CATALOG_FILE_SHA256@@"
+    if digest_placeholder in rendered:
+        unsigned = rendered.replace(digest_placeholder, "")
+        rendered = rendered.replace(
+            digest_placeholder,
+            hashlib.sha256(unsigned.encode("utf-8")).hexdigest(),
+        )
     remaining = sorted(set(re.findall(r"@@[A-Z_]+@@", rendered)))
     if remaining:
         raise ValueError(f"unresolved template fields: {', '.join(remaining)}")

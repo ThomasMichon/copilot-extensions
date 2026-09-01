@@ -70,6 +70,14 @@ def _strip_owner(context: str) -> str:
     return context
 
 
+def _serialize(context: str) -> str:
+    return json.dumps(
+        {"additionalContext": context},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 def _compose(version: str, fragments: dict[str, str]) -> str:
     owner = f"[owner: agent-worktrees@{version}]"
     selected: set[str] = set()
@@ -87,7 +95,7 @@ def _compose(version: str, fragments: dict[str, str]) -> str:
                 ],
             ]
         )
-        if len(candidate.encode("utf-8")) <= MAX_CONTEXT_BYTES:
+        if len(_serialize(candidate).encode("utf-8")) <= MAX_CONTEXT_BYTES:
             selected.add(name)
     context = "\n\n".join(
         [
@@ -99,11 +107,12 @@ def _compose(version: str, fragments: dict[str, str]) -> str:
             ],
         ]
     )
-    return json.dumps(
-        {"additionalContext": context},
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
+    output = _serialize(context)
+    if len(output.encode("utf-8")) > MAX_CONTEXT_BYTES:
+        output = _serialize(owner)
+    if len(output.encode("utf-8")) > MAX_CONTEXT_BYTES:
+        output = "{}"
+    return output
 
 
 def _command(script: Path, *args: str) -> list[str] | None:

@@ -19,6 +19,15 @@ SKILL = PLUGIN / "skills" / "delegating-work" / "SKILL.md"
 README = PLUGIN / "README.md"
 
 
+def _hook_input() -> str:
+    return json.dumps({
+        "sessionId": "delegation-guidance-hook-test",
+        "cwd": str(PLUGIN),
+        "source": "test",
+        "timestamp": 1,
+    })
+
+
 def _powershell() -> str | None:
     if os.name == "nt":
         return shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -150,6 +159,7 @@ def test_hook_commands_use_plugin_root() -> None:
     if powershell:
         result = subprocess.run(
             [powershell, "-NoProfile", "-Command", str(entry["powershell"])],
+            input=_hook_input(),
             check=True,
             capture_output=True,
             text=True,
@@ -160,6 +170,7 @@ def test_hook_commands_use_plugin_root() -> None:
     if os.name != "nt" and shutil.which("bash"):
         result = subprocess.run(
             ["bash", "-c", str(entry["bash"])],
+            input=_hook_input(),
             check=True,
             capture_output=True,
             text=True,
@@ -180,6 +191,7 @@ def test_hook_commands_accept_compatibility_root_aliases() -> None:
         if powershell:
             result = subprocess.run(
                 [powershell, "-NoProfile", "-Command", str(entry["powershell"])],
+                input=_hook_input(),
                 check=True,
                 capture_output=True,
                 text=True,
@@ -190,6 +202,7 @@ def test_hook_commands_accept_compatibility_root_aliases() -> None:
         if os.name != "nt" and shutil.which("bash"):
             result = subprocess.run(
                 ["bash", "-c", str(entry["bash"])],
+                input=_hook_input(),
                 check=True,
                 capture_output=True,
                 text=True,

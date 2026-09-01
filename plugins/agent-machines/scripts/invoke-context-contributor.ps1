@@ -33,6 +33,24 @@ catch {
 }
 
 $env:COPILOT_PLUGIN_ROOT = $resolvedRoot
+$payload = ''
+try {
+    $payload = [Console]::In.ReadToEnd()
+    $hook = $payload | ConvertFrom-Json -ErrorAction Stop
+    $rawCwd = [string]$hook.cwd
+    if (-not $rawCwd -or -not [IO.Path]::IsPathRooted($rawCwd)) {
+        throw 'Hook payload cwd is unavailable'
+    }
+    $launchCwd = (Resolve-Path -LiteralPath $rawCwd -ErrorAction Stop).Path
+    if (-not (Test-Path -LiteralPath $launchCwd -PathType Container)) {
+        throw 'Hook payload cwd is not a directory'
+    }
+}
+catch {
+    [Console]::Out.Write('{}')
+    exit 0
+}
+
 $authority = Join-Path (Split-Path -Parent $resolvedRoot) 'context-injection'
 $engine = Join-Path (Join-Path $authority 'scripts') 'aggregate_context.py'
 $python = Get-Command python -ErrorAction SilentlyContinue
@@ -40,7 +58,7 @@ if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
 if ($python -and (Test-Path -LiteralPath $engine -PathType Leaf)) {
     $output = [IO.Path]::GetTempFileName()
     try {
-        & $python.Source $engine --producer "$SourceId/$ContributorId" > $output
+        $payload | & $python.Source $engine --producer "$SourceId/$ContributorId" > $output
         if ($LASTEXITCODE -eq 0) {
             [Console]::Out.Write((Get-Content -Raw -LiteralPath $output))
         }
@@ -58,7 +76,25 @@ if ($python -and (Test-Path -LiteralPath $engine -PathType Leaf)) {
 }
 
 if (Test-Path -LiteralPath $script -PathType Leaf) {
-    & $script @ContributorArgs
+    $hostExecutable = [Environment]::ProcessPath
+    if (-not $hostExecutable) {
+        try {
+            $hostExecutable = (Get-Process -Id $PID -ErrorAction Stop).Path
+        }
+        catch { }
+    }
+    if ($hostExecutable) {
+        Push-Location -LiteralPath $launchCwd
+        try {
+            $payload | & $hostExecutable -NoProfile -File $script @ContributorArgs
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    else {
+        [Console]::Out.Write('{}')
+    }
 }
 else {
     [Console]::Out.Write('{}')
