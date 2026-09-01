@@ -245,6 +245,33 @@ def test_windows_failed_psmux_creation_reaps_only_the_named_session():
     assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 1
 
 
+def test_launchers_retry_mux_creation_and_preserve_recovery_context():
+    """Transient mux startup failures get bounded automatic recovery, while
+    exhaustion names the already-created worktree instead of silently losing
+    it when the launcher exits."""
+    ps = _LAUNCH_PS1.read_text()
+    sh = _LAUNCH_SCRIPT.read_text()
+
+    assert "$maxCreateAttempts = 3" in ps
+    assert "Start-Sleep -Milliseconds $retryDelayMs" in ps
+    assert "Read-AwMuxRetryChoice $sessName" in ps
+    assert "[Console]::IsInputRedirected" in ps
+    assert "$CopilotArgs -contains '--stdio'" in ps
+    assert "'recoverable=true'" in ps
+    assert "The worktree remains at '$preservedPath'" in ps
+    assert '"attempts=$totalCreateAttempts"' in ps
+    assert "else { 'agent-worktrees' }" in ps
+
+    assert "TMUX_CREATE_MAX_ATTEMPTS=3" in sh
+    assert "TMUX_CREATE_ATTEMPT<=TMUX_CREATE_MAX_ATTEMPTS" in sh
+    assert '[[ "$_copilot_arg" == "--stdio" ]] && TMUX_RETRY_PROMPT=0' in sh
+    assert '"$TMUX_RETRY_PROMPT" == "1" && -t 0 && -t 1' in sh
+    assert "recoverable=true" in sh
+    assert "The worktree remains at '$PRESERVED_PATH'" in sh
+    assert '"attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"' in sh
+    assert 'RECOVERY_PROJECT="${WORKTREE_PROJECT:-agent-worktrees}"' in sh
+
+
 def test_launchers_propagate_attach_failures_without_killing_shared_sessions():
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()

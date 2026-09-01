@@ -24,8 +24,11 @@ Events are intentionally high-level:
   copilot_exited            the Copilot process exited (launcher)
   pane_exited               the wrapped pane command exited (pane wrapper) --
                             the only mark carrying the mux pane's real exit_code
-  mux_attached              a tmux/psmux session was attached/joined (launcher)
-  mux_failed                the requested tmux/psmux launch failed closed
+  mux_attached              a tmux/psmux session was attached/joined (launcher);
+                            fresh creation carries its attempt count
+  mux_failed                the requested tmux/psmux launch failed closed;
+                            creation exhaustion carries attempt count and
+                            recoverable=true when the worktree was preserved
   mux_detached              the attach returned -- user detached or session ended
   changes_pushed            worktree content was pushed to the default branch
   worktree_finalized        finalize completed (content on upstream)

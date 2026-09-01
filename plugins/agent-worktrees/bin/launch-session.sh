@@ -775,20 +775,61 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             PANE_CMD=("${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}")
         fi
 
-        tmux new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
-            "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" \
-            "${PANE_CMD[@]}"
-        TMUX_CREATE_EXIT=$?
+        TMUX_CREATE_MAX_ATTEMPTS=3
+        TMUX_CREATE_TOTAL_ATTEMPTS=0
+        TMUX_CREATE_EXIT=1
+        TMUX_RETRY_CYCLE=1
+        TMUX_RETRY_PROMPT=1
+        for _copilot_arg in "${COPILOT_PASSTHROUGH[@]+"${COPILOT_PASSTHROUGH[@]}"}"; do
+            [[ "$_copilot_arg" == "--stdio" ]] && TMUX_RETRY_PROMPT=0
+        done
+        while [[ "$TMUX_RETRY_CYCLE" == "1" ]]; do
+            TMUX_RETRY_CYCLE=0
+            for ((TMUX_CREATE_ATTEMPT=1;
+                  TMUX_CREATE_ATTEMPT<=TMUX_CREATE_MAX_ATTEMPTS;
+                  TMUX_CREATE_ATTEMPT++)); do
+                TMUX_CREATE_TOTAL_ATTEMPTS=$((TMUX_CREATE_TOTAL_ATTEMPTS + 1))
+                tmux new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
+                    "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" \
+                    "${PANE_CMD[@]}"
+                TMUX_CREATE_EXIT=$?
+                [[ "$TMUX_CREATE_EXIT" -eq 0 ]] && break
+
+                _aw_cleanup_owned_tmux_session "$TMUX_SESS"
+                setup_log WARN \
+                    "tmux: create attempt $TMUX_CREATE_ATTEMPT/$TMUX_CREATE_MAX_ATTEMPTS failed (exit $TMUX_CREATE_EXIT)"
+                if [[ "$TMUX_CREATE_ATTEMPT" -lt "$TMUX_CREATE_MAX_ATTEMPTS" ]]; then
+                    echo "WARNING: tmux startup attempt $TMUX_CREATE_ATTEMPT/$TMUX_CREATE_MAX_ATTEMPTS failed; retrying in 1 second..." >&2
+                    sleep 1
+                fi
+            done
+
+            if [[ "$TMUX_CREATE_EXIT" -ne 0 &&
+                  "$TMUX_RETRY_PROMPT" == "1" && -t 0 && -t 1 ]]; then
+                read -r -p "tmux could not create '$TMUX_SESS'. Retry? [y/N] " TMUX_RETRY_CHOICE
+                case "$TMUX_RETRY_CHOICE" in
+                    y|Y|yes|YES|Yes)
+                        echo "Retrying tmux startup..." >&2
+                        TMUX_RETRY_CYCLE=1
+                        ;;
+                esac
+            fi
+        done
         if [[ "$TMUX_CREATE_EXIT" -ne 0 ]]; then
-            _aw_cleanup_owned_tmux_session "$TMUX_SESS"
             set -e
-            setup_log ERROR "Failed to create tmux session $TMUX_SESS (exit $TMUX_CREATE_EXIT). Use --no-mux to request a direct session explicitly."
-            activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=create_failed "exit_code=$TMUX_CREATE_EXIT"
-            echo "ERROR: Failed to create tmux session '$TMUX_SESS' (exit code $TMUX_CREATE_EXIT). Use --no-mux to request a direct session explicitly." >&2
+            RECOVERY_PROJECT="${WORKTREE_PROJECT:-agent-worktrees}"
+            RECOVERY_COMMAND="$RECOVERY_PROJECT --worktree-id $WORKTREE_ID"
+            PRESERVED_PATH="${STATUS_PATH:-${WORK_DIR:-.}}"
+            setup_log ERROR "Failed to create tmux session $TMUX_SESS after $TMUX_CREATE_TOTAL_ATTEMPTS attempts (exit $TMUX_CREATE_EXIT). Worktree preserved at $PRESERVED_PATH; retry with: $RECOVERY_COMMAND"
+            activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=create_failed \
+                "exit_code=$TMUX_CREATE_EXIT" "attempts=$TMUX_CREATE_TOTAL_ATTEMPTS" \
+                recoverable=true
+            echo "ERROR: Failed to create tmux session '$TMUX_SESS' after $TMUX_CREATE_TOTAL_ATTEMPTS attempts (exit code $TMUX_CREATE_EXIT). The worktree remains at '$PRESERVED_PATH'. Run '$RECOVERY_COMMAND' to retry, or use --no-mux to request a direct session explicitly." >&2
             exit "$TMUX_CREATE_EXIT"
         else
 
-            activity_log mux_attached "$WORKTREE_ID" mux=create
+            activity_log mux_attached "$WORKTREE_ID" mux=create \
+                "attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_spawn_status_updater "$TMUX_SESS"
             if [[ -n "${TMUX:-}" ]]; then
