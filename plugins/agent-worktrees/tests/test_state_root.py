@@ -141,6 +141,92 @@ def test_stateless_bound_but_unregistered(fake_checkouts):
 
 
 # ---------------------------------------------------------------------------
+# Coordination readiness -- versioned claim-producing preflight.
+# ---------------------------------------------------------------------------
+
+def test_coordination_readiness_accepts_self_hosted(monkeypatch):
+    monkeypatch.setattr(sr, "_git_toplevel", lambda cwd: "/work/tree")
+    result = sr.coordination_readiness(_config("dotfiles"))
+    assert result.ready is True
+    assert result.code == "ready"
+    assert result.version == 1
+    assert result.as_dict()["state_root"]["path"] == "/work/tree"
+
+
+def test_coordination_readiness_keeps_self_hosted_unresolved_compatible(
+    monkeypatch,
+):
+    monkeypatch.setattr(sr, "_git_toplevel", lambda cwd: None)
+    result = sr.coordination_readiness(
+        _config("dotfiles", anchor="/does/not/exist")
+    )
+    assert result.ready is True
+    assert result.code == "ready"
+    assert result.state_root.bound is False
+
+
+def test_coordination_readiness_requires_missing_binding(fake_checkouts):
+    result = sr.coordination_readiness(
+        _config(
+            "citadel-harness",
+            stateless=True,
+            knowledge_repo="",
+        )
+    )
+    assert result.ready is False
+    assert result.code == "knowledge_binding_required"
+    assert "Set `knowledge_repo: <name>`" in result.error
+
+
+def test_coordination_readiness_distinguishes_unresolved_binding(fake_checkouts):
+    result = sr.coordination_readiness(
+        _config(
+            "citadel-harness",
+            stateless=True,
+            knowledge_repo="missing-knowledge",
+        )
+    )
+    assert result.ready is False
+    assert result.code == "state_root_resolution_failed"
+    assert result.state_root.repo == "missing-knowledge"
+    assert "repository registration" in result.error
+
+
+def test_coordination_readiness_accepts_bound_knowledge(fake_checkouts):
+    fake_checkouts["citadel-knowledge"] = "/repos/knowledge"
+    result = sr.coordination_readiness(
+        _config(
+            "citadel-harness",
+            stateless=True,
+            knowledge_repo="citadel-knowledge",
+        )
+    )
+    assert result.ready is True
+    assert result.code == "ready"
+    assert result.state_root.source == "knowledge_repo"
+
+
+def test_coordination_readiness_cli_is_json_default(
+    monkeypatch,
+    capfd,
+):
+    from agent_worktrees import __main__ as main
+
+    config = _config(
+        "citadel-harness",
+        stateless=True,
+        knowledge_repo="",
+    )
+    monkeypatch.setattr(main.cfg, "load_config", lambda: config)
+    rc = main.cmd_coordination_readiness_dispatch([])
+    assert rc == 3
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["version"] == 1
+    assert payload["ready"] is False
+    assert payload["code"] == "knowledge_binding_required"
+
+
+# ---------------------------------------------------------------------------
 # Explicit override wins over the binding.
 # ---------------------------------------------------------------------------
 

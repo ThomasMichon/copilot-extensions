@@ -7,7 +7,10 @@ import io
 import json
 from contextlib import redirect_stdout
 
+import pytest
+
 from agent_worktrees import __main__ as m
+from agent_worktrees import state_root
 from agent_worktrees import tracking
 
 
@@ -103,6 +106,14 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
     import types
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine="anomalous-potato"))
+    ready_root = state_root.StateRoot(
+        str(tmp_path), "launch_repo", "test-chamber", False, False, True)
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: state_root.CoordinationReadiness(
+            True, "ready", ready_root),
+    )
     monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg_: wid or "wt-A")
     monkeypatch.setattr(m, "_inbound_claims",
                         lambda machine, wid, cwd: {"available": False,
@@ -133,6 +144,29 @@ def test_claims_empty_ledger_json(monkeypatch, tmp_path, capfd):
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["outbound"] == [] and out["owner_ref"] is None
+    assert out["coordination_readiness"]["ready"] is True
+
+
+def test_claims_inspection_reports_unready_without_mutation(
+    monkeypatch,
+    tmp_path,
+    capfd,
+):
+    _seed(tmp_path, monkeypatch)
+    path = tmp_path / "worktrees" / "wt-A.yaml"
+    before = path.read_bytes()
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: _blocked_readiness(),
+    )
+
+    assert m.cmd_claims(argparse.Namespace(target=[], json=True)) == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["coordination_readiness"]["code"] == (
+        "knowledge_binding_required"
+    )
+    assert path.read_bytes() == before
 
 
 def test_claims_missing_worktree(monkeypatch, tmp_path):
@@ -218,6 +252,53 @@ def _add_args(kind, ref, *, note="", json_=True):
         target=["add", kind, ref], note=note, release_worktree=None, json=json_)
 
 
+def _blocked_readiness():
+    root = state_root.StateRoot(
+        None,
+        "knowledge_repo",
+        "",
+        True,
+        True,
+        False,
+        error="no knowledge_repo is bound",
+    )
+    return state_root.CoordinationReadiness(
+        False,
+        "knowledge_binding_required",
+        root,
+        error=(
+            "Set `knowledge_repo: <name>` in the machine-local project config "
+            "and retry the same operation."
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["worktree", "codespace", "container", "ssh", "workdir", "pr"],
+)
+def test_claims_add_rejects_unready_coordination_without_mutation(
+    kind,
+    monkeypatch,
+    tmp_path,
+    capfd,
+):
+    _seed(tmp_path, monkeypatch)
+    path = tmp_path / "worktrees" / "wt-A.yaml"
+    before = path.read_bytes()
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: _blocked_readiness(),
+    )
+
+    assert m.cmd_claims(_add_args(kind, f"{kind}-resource")) == 3
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["code"] == "knowledge_binding_required"
+    assert payload["coordination_readiness"]["version"] == 1
+    assert path.read_bytes() == before
+
+
 def test_claims_add_journals_active_claim(monkeypatch, tmp_path, capfd):
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(_add_args("codespace", "cs-blue", note="example-web"))
@@ -297,6 +378,18 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
                         lambda name=None: tmp_path / f".{name}")
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine=machine))
+    monkeypatch.setattr(
+        "agent_worktrees.config.load_project_config",
+        lambda name: types.SimpleNamespace(machine=machine),
+    )
+    ready_root = state_root.StateRoot(
+        str(tmp_path), "launch_repo", "example-web", False, False, True)
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: state_root.CoordinationReadiness(
+            True, "ready", ready_root),
+    )
     monkeypatch.setattr(m, "_inbound_claims",
                         lambda machine, wid, cwd: {"available": False,
                                                    "reason": "stubbed"})
@@ -329,6 +422,122 @@ def test_claims_add_owner_ref_cross_machine_defers(monkeypatch, tmp_path, capfd)
     assert not list((tmp_path / ".example-web" / "worktrees").glob("*.yaml")) or \
         all(not tracking.load_record(p).resources
             for p in (tmp_path / ".example-web" / "worktrees").glob("*.yaml"))
+
+
+def test_claims_add_owner_ref_cannot_bypass_coordination_gate(
+    monkeypatch,
+    tmp_path,
+    capfd,
+):
+    owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
+    path = owner_wt_dir / "wt-borrower.yaml"
+    before = path.read_bytes()
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: _blocked_readiness(),
+    )
+
+    rc = m.cmd_claims(_add_ownerref_args(
+        "codespace",
+        "cs-remote",
+        "other-box/example-web/wt-borrower",
+    ))
+    assert rc == 3
+    assert json.loads(capfd.readouterr().out)["code"] == (
+        "knowledge_binding_required"
+    )
+    assert path.read_bytes() == before
+
+
+def test_claims_add_owner_ref_uses_owner_project_readiness(
+    monkeypatch,
+    tmp_path,
+    capfd,
+):
+    owner_wt_dir = _seed_ownerref(tmp_path, monkeypatch)
+    path = owner_wt_dir / "wt-borrower.yaml"
+    before = path.read_bytes()
+    ambient_config = type("Config", (), {
+        "machine": "anomalous-potato",
+        "repo_name": "provider",
+        "readiness": "ready",
+    })()
+    owner_config = type("Config", (), {
+        "machine": "anomalous-potato",
+        "repo_name": "example-web",
+        "readiness": "blocked",
+    })()
+    monkeypatch.setattr(m.cfg, "load_config", lambda: ambient_config)
+    monkeypatch.setattr(
+        m.cfg, "load_project_config", lambda name: owner_config
+    )
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: (
+            _blocked_readiness()
+            if config.readiness == "blocked"
+            else state_root.CoordinationReadiness(
+                True,
+                "ready",
+                state_root.StateRoot(
+                    str(tmp_path),
+                    "launch_repo",
+                    "provider",
+                    False,
+                    False,
+                    True,
+                ),
+            )
+        ),
+    )
+
+    rc = m.cmd_claims(_add_ownerref_args(
+        "codespace",
+        "cs-owner-project",
+        "anomalous-potato/example-web/wt-borrower",
+    ))
+    assert rc == 3
+    assert json.loads(capfd.readouterr().out)["code"] == (
+        "knowledge_binding_required"
+    )
+    assert path.read_bytes() == before
+
+
+def test_claims_add_succeeds_after_binding_is_repaired(
+    monkeypatch,
+    tmp_path,
+    capfd,
+):
+    _seed(tmp_path, monkeypatch)
+    blocked = {"value": True}
+
+    def readiness(config):
+        if blocked["value"]:
+            return _blocked_readiness()
+        root = state_root.StateRoot(
+            str(tmp_path),
+            "knowledge_repo",
+            "knowledge",
+            True,
+            True,
+            True,
+        )
+        return state_root.CoordinationReadiness(True, "ready", root)
+
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        readiness,
+    )
+    args = _add_args("codespace", "existing-resource")
+    assert m.cmd_claims(args) == 3
+    capfd.readouterr()
+    blocked["value"] = False
+    assert m.cmd_claims(args) == 0
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert [claim.ref for claim in rec.resources] == ["existing-resource"]
 
 
 def test_claims_add_owner_ref_rejects_unqualified(monkeypatch, tmp_path):

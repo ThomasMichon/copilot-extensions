@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -74,6 +74,43 @@ class StateRoot:
             "stateless": self.stateless,
             "requires_external": self.requires_external,
             "bound": self.bound,
+            "error": self.error,
+        }
+
+
+COORDINATION_READINESS_VERSION = 1
+COORDINATION_READINESS_CODES = frozenset({
+    "ready",
+    "knowledge_binding_required",
+    "state_root_resolution_failed",
+})
+
+
+@dataclass(frozen=True)
+class CoordinationReadiness:
+    """Versioned readiness for operations that create shared ownership."""
+
+    ready: bool
+    code: str
+    state_root: StateRoot
+    error: str | None = None
+    version: int = field(
+        default=COORDINATION_READINESS_VERSION,
+        init=False,
+    )
+
+    def as_dict(self) -> dict:
+        return {
+            "version": self.version,
+            "ready": self.ready,
+            "code": self.code,
+            "state_root": {
+                "path": self.state_root.path,
+                "source": self.state_root.source,
+                "repo": self.state_root.repo,
+                "requires_external": self.state_root.requires_external,
+                "bound": self.state_root.bound,
+            },
             "error": self.error,
         }
 
@@ -516,6 +553,43 @@ def resolve_state_root(
             f"could not resolve a state root for '{launch_repo}': no git "
             f"worktree at the current directory and no usable anchor."
         ),
+    )
+
+
+def coordination_readiness(
+    config: cfg.Config,
+    *,
+    cwd: str | None = None,
+) -> CoordinationReadiness:
+    """Resolve whether claim-producing coordination may begin."""
+    root = resolve_state_root(config, cwd=cwd)
+    if root.path or not root.requires_external:
+        return CoordinationReadiness(True, "ready", root)
+
+    if root.requires_external and not (config.knowledge_repo or "").strip():
+        error = (
+            "This repository requires a bound knowledge repository before "
+            "creating resource claims. Set `knowledge_repo: <name>` in the "
+            f"machine-local project config for '{config.repo_name}', register "
+            "that repository, and retry the same operation."
+        )
+        return CoordinationReadiness(
+            False,
+            "knowledge_binding_required",
+            root,
+            error=error,
+        )
+
+    error = (
+        "The coordination state root could not be resolved. Repair the bound "
+        "knowledge repository checkout or repository registration, then retry "
+        f"the same operation. {root.error or ''}"
+    ).strip()
+    return CoordinationReadiness(
+        False,
+        "state_root_resolution_failed",
+        root,
+        error=error,
     )
 
 
