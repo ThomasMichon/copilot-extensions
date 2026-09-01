@@ -104,7 +104,9 @@ exclude:                           # capture must never serialize these
 
 **Value-shape guidance:** scalar singletons (`model`, `effortLevel`) are
 `enforce`; maps/lists (`enabledPlugins`, `permissions`) are `ensure-present` so
-several repos compose by union. Do not explicitly disable bootstrap-critical
+several repos compose by union. Within `enabledPlugins`, a declared `false` is
+an authoritative per-plugin tombstone while `true` remains additive and
+preserves an operator opt-out. Do not explicitly disable bootstrap-critical
 plugins (`agent-worktrees`, `agent-machines`); if a package manages
 `extraKnownMarketplaces`, include the bootstrap-critical `copilot-extensions`
 marketplace or the validator errors.

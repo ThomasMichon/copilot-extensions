@@ -209,6 +209,12 @@ resources:
     dc: sleep
 ```
 
+Within an `ensure-present` `enabledPlugins` map, `true` remains an additive
+floor and preserves an existing operator `false`. A declared `false` is a
+per-plugin tombstone: it authoritatively disables that one identity while
+preserving every undeclared operator plugin. Tombstones cannot disable
+bootstrap-critical plugins.
+
 Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
 `ignore`, `exclude`, `prune`, and `prerequisite-check`. Current restore applies
 `enforce` and `ensure-present`; `capture` and `prune` are placeholder CLI verbs

@@ -41,7 +41,7 @@ def test_apply_enforce_writes_scalars(tmp_path):
     contribs = [("enforce", {"model": "opus", "effortLevel": "high"})]
     result = settings.apply(contribs, home=home, dry_run=False)
     assert result.changed
-    data = json.loads((home / "settings.json").read_text())
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
     assert data["model"] == "opus"
     assert data["effortLevel"] == "high"
 
@@ -53,8 +53,67 @@ def test_ensure_present_unions_without_clobber(tmp_path):
     )
     contribs = [("ensure-present", {"enabledPlugins": {"new@m": True}})]
     settings.apply(contribs, home=home, dry_run=False)
-    data = json.loads((home / "settings.json").read_text())
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
     assert data["enabledPlugins"] == {"existing@m": True, "new@m": True}
+
+
+def test_enabled_plugin_false_is_an_authoritative_tombstone(tmp_path):
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {
+                    "legacy@m": True,
+                    "operator-disabled@m": False,
+                    "operator-extra@m": True,
+                    "invalid-null@m": None,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    contribs = [
+        (
+            "ensure-present",
+            {
+                "enabledPlugins": {
+                    "legacy@m": False,
+                    "operator-disabled@m": True,
+                    "new@m": True,
+                    "invalid-null@m": True,
+                }
+            },
+        )
+    ]
+
+    settings.apply(contribs, home=home, dry_run=False)
+
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+    assert data["enabledPlugins"] == {
+        "legacy@m": False,
+        "operator-disabled@m": False,
+        "operator-extra@m": True,
+        "invalid-null@m": True,
+        "new@m": True,
+    }
+
+
+@pytest.mark.parametrize("tombstone_first", [False, True])
+def test_enabled_plugin_tombstone_wins_across_package_order(
+    tmp_path, tombstone_first: bool,
+):
+    home = _settings(tmp_path)
+    contributions = [
+        ("ensure-present", {"enabledPlugins": {"legacy@m": True}}),
+        ("ensure-present", {"enabledPlugins": {"legacy@m": False}}),
+    ]
+    if tombstone_first:
+        contributions.reverse()
+
+    settings.apply(contributions, home=home, dry_run=False)
+
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+    assert data["enabledPlugins"]["legacy@m"] is False
 
 
 def test_dry_run_does_not_write(tmp_path):
