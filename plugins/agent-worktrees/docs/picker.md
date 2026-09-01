@@ -161,6 +161,12 @@ worktree from the up-to-date default branch **on the selected machine tab's
 machine/environment**, then launches into it. (Programmatic equivalent:
 `agent-worktrees create` — no launch.)
 
+If the multiplexer is temporarily unable to create the session, the launcher
+retries three times before offering an interactive retry. Exhaustion preserves
+the new worktree and prints the exact command for reopening that same worktree;
+it does not create another worktree or silently fall back to a non-persistent
+session.
+
 ### Per-worktree actions
 `Enter` on a row opens its sub-menu — resume, plus context actions such as
 **Jump to host** for a bridge/system row (navigates to the owning machine tab and

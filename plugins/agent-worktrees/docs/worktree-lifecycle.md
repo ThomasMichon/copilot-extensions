@@ -153,6 +153,13 @@ A fresh worktree branches from the up-to-date default branch into a
 `<anchor>.worktrees/<id>` sibling folder. Until it has commits or a live
 session it lists as `unused`.
 
+For an interactive muxed launch, worktree creation and session creation are
+separate recoverable steps. The launcher retries mux creation three times and,
+after interactive exhaustion, offers another retry. If launch is cancelled or
+still fails, the worktree remains registered and the error names both its path
+and the command for reopening that same worktree; recovery does not create a
+replacement worktree.
+
 ## 2. Active — work and commit
 
 Commit freely on the worktree branch; commits are cheap and isolated, and the

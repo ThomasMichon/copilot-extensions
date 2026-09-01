@@ -770,13 +770,32 @@ $psmuxCmd = Get-Command psmux -ErrorAction SilentlyContinue
 function Write-AwMuxFailure {
     param(
         [Parameter(Mandatory)][string]$Reason,
-        [int]$ExitCode = 1
+        [int]$ExitCode = 1,
+        [string[]]$Fields = @()
     )
-    Write-ActivityLog -Event 'mux_failed' -WorktreeId $plan.worktree_id -Fields @(
+    Write-ActivityLog -Event 'mux_failed' -WorktreeId $plan.worktree_id -Fields (@(
         'mux=psmux',
         "reason=$Reason",
         "exit_code=$ExitCode"
-    )
+    ) + $Fields)
+}
+
+function Test-AwCanPromptForMuxRetry {
+    if (-not $script:ShowLaunchStatus) { return $false }
+    if ($CopilotArgs -contains '--stdio') { return $false }
+    try { return -not [Console]::IsInputRedirected } catch { return $false }
+}
+
+function Read-AwMuxRetryChoice {
+    param([Parameter(Mandatory)][string]$Session)
+    if (-not (Test-AwCanPromptForMuxRetry)) { return $false }
+    try {
+        $choice = Read-Host "PSMux could not create '$Session'. Retry? [y/N]"
+        return $choice -match '^(?i:y|yes)$'
+    } catch {
+        Write-SetupLog "psmux: retry prompt failed: $($_.Exception.Message)" 'WARN'
+        return $false
+    }
 }
 
 function Stop-AwOwnedPsmuxSession {
@@ -1175,28 +1194,75 @@ if (-not $noMux) {
     $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
+    $maxCreateAttempts = 3
+    $retryDelayMs = 1000
+    $totalCreateAttempts = 0
     $newSessionExit = 1
     $newSessionError = ''
-    try {
-        & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd
-        $newSessionExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
-    } catch {
-        $newSessionError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
-    } finally {
-        $env:PSMUX_SESSION = $savedPsmuxSession
-        $env:TMUX = $savedTmux
-        $env:TMUX_PANE = $savedTmuxPane
+    $retryCycle = $true
+    while ($retryCycle) {
+        $retryCycle = $false
+        for ($attempt = 1; $attempt -le $maxCreateAttempts; $attempt++) {
+            $totalCreateAttempts++
+            $newSessionExit = 1
+            $newSessionError = ''
+            try {
+                & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd
+                $newSessionExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+            } catch {
+                $newSessionError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+            }
+            if ($newSessionExit -eq 0) { break }
+
+            Stop-AwOwnedPsmuxSession $sessName
+            $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
+            Write-SetupLog (
+                "psmux: create attempt $attempt/$maxCreateAttempts failed " +
+                "(exit $newSessionExit)$detail"
+            ) 'WARN'
+            if ($attempt -lt $maxCreateAttempts) {
+                Write-SetupStatus (
+                    "PSMux startup attempt $attempt/$maxCreateAttempts failed; " +
+                    "retrying in $retryDelayMs ms..."
+                ) 'WARN'
+                Start-Sleep -Milliseconds $retryDelayMs
+            }
+        }
+
+        if ($newSessionExit -ne 0 -and (Read-AwMuxRetryChoice $sessName)) {
+            Write-SetupStatus 'Retrying PSMux startup...' 'WARN'
+            $retryCycle = $true
+        }
     }
+    $env:PSMUX_SESSION = $savedPsmuxSession
+    $env:TMUX = $savedTmux
+    $env:TMUX_PANE = $savedTmuxPane
     if ($newSessionExit -ne 0) {
-        Stop-AwOwnedPsmuxSession $sessName
         $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
-        $message = "Failed to create psmux session '$sessName' (exit code $newSessionExit)$detail. Use --no-mux to request a direct session explicitly."
+        $recoveryProject = if ($script:LaunchProject) { $script:LaunchProject } else { 'agent-worktrees' }
+        $recoveryCommand = "$recoveryProject --worktree-id $($plan.worktree_id)"
+        $preservedPath = if ($plan.PSObject.Properties['status_path']) {
+            [string]$plan.status_path
+        } else {
+            [string]$plan.work_dir
+        }
+        $message = (
+            "Failed to create psmux session '$sessName' after $totalCreateAttempts attempts " +
+            "(exit code $newSessionExit)$detail. The worktree remains at '$preservedPath'. " +
+            "Run '$recoveryCommand' to retry, or use --no-mux to request a direct session explicitly."
+        )
         Write-SetupLog $message 'ERROR'
-        Write-AwMuxFailure -Reason 'create_failed' -ExitCode $newSessionExit
+        Write-AwMuxFailure -Reason 'create_failed' -ExitCode $newSessionExit -Fields @(
+            "attempts=$totalCreateAttempts",
+            'recoverable=true'
+        )
         Write-Error $message -ErrorAction Continue
         exit $newSessionExit
     } else {
-        Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @('mux=create')
+        Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @(
+            'mux=create',
+            "attempts=$totalCreateAttempts"
+        )
         # Session created: stamp per-session options + start its status-bar
         # updater (one per session, before any nested-create early-exit so the
         # bar populates either way).
