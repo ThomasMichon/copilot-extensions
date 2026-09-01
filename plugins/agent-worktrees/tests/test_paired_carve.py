@@ -71,10 +71,17 @@ class TestCarvePairedKnowledge:
             lambda c: _state_root(path=str(k_anchor), repo="citadel-knowledge"),
         )
         entry = repos_mod.RepoEntry(
-            name="citadel-knowledge", repo_class="worktree", remote="origin",
+            name="citadel-knowledge",
+            repo_class="worktree",
+            remote="https://example.com/citadel-knowledge.git",
             default_branch="main",
         )
         monkeypatch.setattr(repos_mod, "find_repo", lambda n: entry)
+        monkeypatch.setattr(
+            m.git_ops,
+            "resolve_remote_name",
+            lambda value, *, cwd: "origin",
+        )
         # Stub the git side-effects.
         carved = {}
 
