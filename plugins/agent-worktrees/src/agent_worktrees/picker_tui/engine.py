@@ -1619,10 +1619,7 @@ class PickerScreen(Widget):
                         self.data = bootstrap_rows
                         self.refresh()
 
-                try:
-                    self.app.call_from_thread(apply_bootstrap)
-                except Exception:
-                    apply_bootstrap()
+                self._apply_from_worker(apply_bootstrap)
 
         # Pivot activation can take seconds on a cold filesystem. It is
         # independent of the worktree roster, so never serialize rows behind it.
@@ -1657,10 +1654,7 @@ class PickerScreen(Widget):
             self._busy_label = None
             self.refresh()
 
-        try:
-            self.app.call_from_thread(apply)
-        except Exception:
-            apply()
+        self._apply_from_worker(apply)
 
     def _setup_live_pivots(self):
         """Scan contributed pivots without delaying local or fleet rows."""
@@ -1675,10 +1669,15 @@ class PickerScreen(Widget):
                     pass
             self.refresh()
 
+        self._apply_from_worker(apply)
+
+    def _apply_from_worker(self, callback):
+        """Apply on Textual's thread; inline only for direct main-thread tests."""
         try:
-            self.app.call_from_thread(apply)
+            self.app.call_from_thread(callback)
         except Exception:
-            apply()
+            if threading.current_thread() is threading.main_thread():
+                callback()
 
     def _apply_live_source(self, snapshot, loader):
         """Install a prefetched live roster/loader. UI-thread only."""

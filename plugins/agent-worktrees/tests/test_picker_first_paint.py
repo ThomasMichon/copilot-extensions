@@ -159,6 +159,35 @@ def test_setup_live_async_keeps_bootstrap_rows_on_roster_failure(monkeypatch):
     assert screen._busy_label == "Load failed"
 
 
+def test_failed_worker_handoff_never_mutates_ui_off_thread(monkeypatch):
+    pytest.importorskip("textual")
+    from agent_worktrees.picker_tui import engine as eng
+
+    class App:
+        @staticmethod
+        def call_from_thread(_callback):
+            raise RuntimeError("app stopped")
+
+    class Screen(eng.PickerScreen):
+        @property
+        def app(self):
+            return App()
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = Screen(Src(), live=True)
+    called = []
+
+    worker = eng.threading.Thread(
+        target=lambda: screen._apply_from_worker(lambda: called.append(True))
+    )
+    worker.start()
+    worker.join()
+
+    assert called == []
+
+
 def test_full_loader_does_not_blank_bootstrap_rows_while_loading():
     pytest.importorskip("textual")
     from agent_worktrees.picker_tui import engine as eng
