@@ -80,7 +80,9 @@ read compatibility for legacy version `1`. Required keys are:
 Optional keys include `gate`, `aliases`, `manage`, `per-machine` /
 `per_machine`, `bootstrap-floor` / `bootstrap_floor`, `exclude`, `modules`, and
 `resources`. `per-machine.<machine>` is deep-merged onto `manage`; a `null` leaf
-unsets a key.
+unsets a key. Machine overlay keys resolve case-insensitively, matching package
+gate semantics; keys are normalized once at load time for constant-time lookup,
+and case-duplicate or surrounding-whitespace keys are rejected as ambiguous.
 
 Schema version 2 is the fail-closed capability boundary for
 `enabledPlugins.<plugin>: false` tombstones. A v1 package cannot rely on that

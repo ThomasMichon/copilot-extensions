@@ -102,6 +102,11 @@ exclude:                           # capture must never serialize these
   - "mcp-oauth-config/**"
 ```
 
+Machine gates and `per-machine` overlay keys are case-insensitive. Do not
+declare two overlay keys that normalize to the same case-insensitive identity,
+are empty, or carry surrounding whitespace; validation rejects the ambiguous
+package.
+
 **Value-shape guidance:** scalar singletons (`model`, `effortLevel`) are
 `enforce`; maps/lists (`enabledPlugins`, `permissions`) are `ensure-present` so
 several repos compose by union. Within `enabledPlugins`, a declared `false` is
