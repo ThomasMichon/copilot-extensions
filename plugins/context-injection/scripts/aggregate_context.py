@@ -89,9 +89,14 @@ def _emit_empty(message: str | None = None) -> int:
     return 0
 
 
-def _spill_context(session_id: str, context: str) -> str | None:
+def _spill_context(
+    session_id: str,
+    canonical_cwd: str,
+    context: str,
+) -> str | None:
     if not SESSION_IDENTIFIER.fullmatch(session_id):
         return None
+    cwd_digest = hashlib.sha256(canonical_cwd.encode("utf-8")).hexdigest()[:24]
     try:
         state_root = (
             Path.home() / ".copilot" / "session-state"
@@ -102,7 +107,7 @@ def _spill_context(session_id: str, context: str) -> str | None:
         files.mkdir(parents=True, exist_ok=True)
         if files.is_symlink():
             return None
-        target = files / "startup-context.md"
+        target = files / f"startup-context-{cwd_digest}.md"
         content = (
             "# Aggregated startup context\n\n"
             f"{context}\n"
@@ -112,7 +117,7 @@ def _spill_context(session_id: str, context: str) -> str | None:
             encoding="utf-8",
             newline="\n",
             dir=files,
-            prefix=".startup-context.",
+            prefix=f".startup-context.{cwd_digest}.",
             suffix=".tmp",
             delete=False,
         ) as handle:
@@ -1543,7 +1548,7 @@ def main() -> int:
                 )
             delivered_context = context
             if len(context.encode("utf-8")) > MAX_INLINE_CONTEXT_BYTES:
-                spilled = _spill_context(session_id, context)
+                spilled = _spill_context(session_id, canonical_cwd, context)
                 if spilled is not None:
                     delivered_context = spilled
             output = json.dumps(

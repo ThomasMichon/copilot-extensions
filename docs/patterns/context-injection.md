@@ -116,11 +116,14 @@ makes every contribution attributable.
 
 When the aggregate exceeds the engine's inline budget, write the complete
 attributable context atomically under the exact session's
-`~/.copilot/session-state/<sessionId>/files/` directory. Return one compact,
-byte-identical critical kernel from every participating hook that instructs the
-agent to load that absolute file before acting. Validate the session identifier,
-contain the write beneath the session-state root, reject symlink escapes, and
-use private file permissions on POSIX.
+`~/.copilot/session-state/<sessionId>/files/` directory. Key the filename by a
+96-bit SHA-256 prefix of the canonical CWD so two repository contexts in one
+resumed session cannot replace each other's spill, without disclosing either
+path or exceeding common Windows path limits.
+Return one compact, byte-identical critical kernel from every participating
+hook that instructs the agent to load that absolute file before acting. Validate
+the session identifier, contain the write beneath the session-state root,
+reject symlink escapes, and use private file permissions on POSIX.
 
 ### Discover configuration without executing it
 

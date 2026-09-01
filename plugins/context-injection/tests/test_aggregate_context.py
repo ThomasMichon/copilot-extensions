@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
+import hashlib
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -25,6 +26,15 @@ assert SPEC and SPEC.loader
 AGGREGATE_CONTEXT = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = AGGREGATE_CONTEXT
 SPEC.loader.exec_module(AGGREGATE_CONTEXT)
+
+
+def _copy_plugin(target: Path, *, dirs_exist_ok: bool = False) -> Path:
+    return shutil.copytree(
+        PLUGIN,
+        target,
+        dirs_exist_ok=dirs_exist_ok,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+    )
 
 
 def test_hook_timeout_meets_rendezvous_deadline() -> None:
@@ -306,8 +316,14 @@ def test_oversized_context_spills_to_session_state(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     context = "X" * (AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES + 1)
+    canonical_cwd = str(tmp_path / "private-repository")
+    cwd_digest = hashlib.sha256(canonical_cwd.encode("utf-8")).hexdigest()[:24]
 
-    pointer = AGGREGATE_CONTEXT._spill_context("session-1", context)
+    pointer = AGGREGATE_CONTEXT._spill_context(
+        "session-1",
+        canonical_cwd,
+        context,
+    )
 
     assert pointer is not None
     target = (
@@ -316,12 +332,63 @@ def test_oversized_context_spills_to_session_state(
         / "session-state"
         / "session-1"
         / "files"
-        / "startup-context.md"
+        / f"startup-context-{cwd_digest}.md"
     )
     assert str(target) in pointer
+    assert "private-repository" not in target.name
+    assert canonical_cwd not in pointer
     assert "Before acting, read the complete startup context" in pointer
     assert context in target.read_text(encoding="utf-8")
     assert len(pointer.encode("utf-8")) < 512
+
+
+def test_spilled_context_isolated_by_session_and_canonical_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    first_cwd = "C:/private/first-repository"
+    second_cwd = "C:/private/second-repository"
+
+    first = AGGREGATE_CONTEXT._spill_context("session-1", first_cwd, "FIRST")
+    repeated = AGGREGATE_CONTEXT._spill_context("session-1", first_cwd, "FIRST")
+    second = AGGREGATE_CONTEXT._spill_context("session-1", second_cwd, "SECOND")
+
+    assert first is not None
+    assert repeated == first
+    assert second is not None
+    assert second != first
+    files = tmp_path / ".copilot" / "session-state" / "session-1" / "files"
+    first_target = files / (
+        "startup-context-"
+        f"{hashlib.sha256(first_cwd.encode('utf-8')).hexdigest()[:24]}.md"
+    )
+    second_target = files / (
+        "startup-context-"
+        f"{hashlib.sha256(second_cwd.encode('utf-8')).hexdigest()[:24]}.md"
+    )
+    assert "FIRST" in first_target.read_text(encoding="utf-8")
+    assert "SECOND" in second_target.read_text(encoding="utf-8")
+
+
+def test_spill_failure_returns_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("unwritable")
+
+    monkeypatch.setattr(
+        AGGREGATE_CONTEXT.tempfile,
+        "NamedTemporaryFile",
+        fail_write,
+    )
+
+    assert AGGREGATE_CONTEXT._spill_context("session-1", "/repo", "X") is None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows startup allowance")
@@ -356,7 +423,7 @@ def _run(
         shutil.copytree(source, installed / name, dirs_exist_ok=True)
 
     engine = installed / "context-injection"
-    shutil.copytree(PLUGIN, engine, dirs_exist_ok=True)
+    _copy_plugin(engine, dirs_exist_ok=True)
     authority_declaration_path = engine / "session-context.json"
     authority_declaration = json.loads(
         authority_declaration_path.read_text(encoding="utf-8")
@@ -527,7 +594,7 @@ def test_aggregates_complete_active_stack_in_stable_order(tmp_path: Path) -> Non
     first = _plugin(home, "mkt", "a-policy", context="POLICY")
     second = _plugin(home, "mkt", "b-catalog", context="CATALOG")
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -554,7 +621,7 @@ def test_stands_down_when_active_hook_plugin_has_no_declaration(tmp_path: Path) 
     manifest.pop("sessionContext")
     (legacy / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -571,7 +638,7 @@ def test_repository_authority_does_not_depend_on_lexical_plugin_order(
     sources = tmp_path / "sources"
     later = _plugin(sources, "mkt", "zzz-later", context="LATER")
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -587,7 +654,7 @@ def test_rejects_incomplete_declaration(tmp_path: Path) -> None:
         sources, "mkt", "a-incomplete", context="NO", complete=False
     )
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -614,7 +681,7 @@ def test_checks_every_declared_hook_file(tmp_path: Path) -> None:
     manifest.pop("sessionContext")
     (plugin / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -633,7 +700,7 @@ def test_rejects_declared_context_over_budget(tmp_path: Path) -> None:
     declaration["contributors"][0]["maxBytes"] = 64 * 1024
     declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -650,7 +717,7 @@ def test_untrusted_repository_settings_do_not_activate_plugins(
     sources = tmp_path / "sources"
     repo_only = _plugin(sources, "mkt", "a-repo-only", context="REPO")
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
     result = _run(
         tmp_path,
         [("context-injection", aggregator)],
@@ -711,7 +778,7 @@ def test_direct_marketplace_authority_resolves_exact_payloads(
 ) -> None:
     first = _plugin(tmp_path / "sources-a", "mkt", "a-policy", context="POLICY")
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -954,7 +1021,7 @@ def test_contributors_run_from_session_cwd(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
     subdir = tmp_path / "repo" / "nested"
     subdir.mkdir(parents=True)
 
@@ -982,7 +1049,7 @@ def test_one_failed_contributor_rejects_partial_aggregate(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -1012,7 +1079,7 @@ def test_malformed_authority_override_fails_closed_with_diagnostic(
     tmp_path: Path,
 ) -> None:
     authority_plugin = tmp_path / "authority"
-    shutil.copytree(PLUGIN, authority_plugin)
+    _copy_plugin(authority_plugin)
 
     result = _run(
         tmp_path,
@@ -1028,7 +1095,7 @@ def test_authority_override_cannot_replace_canonical_plugin_name(
     tmp_path: Path,
 ) -> None:
     authority_plugin = tmp_path / "authority"
-    shutil.copytree(PLUGIN, authority_plugin)
+    _copy_plugin(authority_plugin)
 
     result = _run(
         tmp_path,
@@ -1050,7 +1117,7 @@ def test_producer_suppresses_direct_output_only_for_proven_authority(
         context="POLICY",
     )
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -1082,7 +1149,7 @@ def test_producer_wrapper_uses_adopted_authority(tmp_path: Path) -> None:
         context="POLICY",
     )
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     producer = _run(
         tmp_path,
@@ -1109,7 +1176,7 @@ def test_authority_and_producer_order_yield_one_identical_aggregate(
         context="POLICY",
     )
     authority = tmp_path / "authority"
-    shutil.copytree(PLUGIN, authority)
+    _copy_plugin(authority)
     plugins = [
         ("a-policy", policy),
         ("context-injection", authority),
@@ -1167,7 +1234,7 @@ def test_producer_restores_direct_output_without_exact_compatible_authority(
         context="POLICY",
     )
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
@@ -1201,7 +1268,7 @@ def test_second_declared_authority_restores_producer_direct_output(
     declaration["contributors"] = []
     declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
     authority = tmp_path / "authority"
-    shutil.copytree(PLUGIN, authority)
+    _copy_plugin(authority)
 
     result = _run(
         tmp_path,
@@ -1474,7 +1541,7 @@ def test_rendezvous_identity_is_exact_session_and_canonical_cwd_pair(
         context="FIRST",
     )
     aggregator = tmp_path / "aggregator"
-    shutil.copytree(PLUGIN, aggregator)
+    _copy_plugin(aggregator)
     first = _run(
         tmp_path,
         [("a-policy", policy), ("context-injection", aggregator)],
@@ -1651,7 +1718,7 @@ def test_bash_wrapper_discards_partial_output_on_aggregator_failure(
     tmp_path: Path,
 ) -> None:
     plugin = tmp_path / "context-injection"
-    shutil.copytree(PLUGIN, plugin)
+    _copy_plugin(plugin)
     aggregate = plugin / "scripts" / "aggregate_context.py"
     aggregate.write_text(
         "import sys\nprint('{\"partial\":true}', end='')\nsys.exit(1)\n",
@@ -1681,7 +1748,7 @@ def test_powershell_wrapper_discards_partial_output_on_aggregator_failure(
     tmp_path: Path,
 ) -> None:
     plugin = tmp_path / "context-injection"
-    shutil.copytree(PLUGIN, plugin)
+    _copy_plugin(plugin)
     aggregate = plugin / "scripts" / "aggregate_context.py"
     aggregate.write_text(
         "import sys\nprint('{\"partial\":true}', end='')\nsys.exit(1)\n",
