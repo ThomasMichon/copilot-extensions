@@ -578,7 +578,10 @@ in memory to the same existing emitter/evaluator/supervised-lane units; the
 declaration remains the only source of truth.
 
 ```bash
+agent-dispatch reviewer-loop setup .agent-dispatch/registrar/reviewer-loop.json
 agent-dispatch reviewer-loop inspect .agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop status .agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop doctor .agent-dispatch/registrar/reviewer-loop.json
 agent-dispatch reviewer-loop disable .agent-dispatch/registrar/reviewer-loop.json \
   --reason "maintenance"
 agent-dispatch reviewer-loop enable .agent-dispatch/registrar/reviewer-loop.json
@@ -586,11 +589,27 @@ agent-dispatch reviewer-loop side-load \
   .agent-dispatch/registrar/reviewer-loop.json owner/repo#123
 ```
 
-`inspect` shows the three effective declared registration ids and their local
-override state. `disable` and `enable` atomically apply or clear the existing
-machine-local supervisor overrides for the whole loop. `side-load` invokes the
-declared emitter's on-demand command directly, preserving its producer-owned
-provenance, evaluator association, and target-stable dedup.
+`setup` validates that the declaration lives under the repository's
+`.agent-dispatch/registrar/` directory and idempotently adds the repository to
+the existing registrar pointer index. It never copies or rewrites the
+declaration. `inspect` shows the three effective declared registration ids and
+their local override state.
+
+`status` joins the declaration with its pointer, local supervisor scope,
+effective registrations, the supervisor's atomic per-cycle child-process
+snapshot, associated actionable tasks, pool filters, and failed spawn
+reservations. `doctor` emits the same JSON and exits nonzero when it finds a
+missing pointer, a declared-but-unserved unit, an unavailable coordinator, a
+local override, a task excluded by the worker filter, a task awaiting input, a
+spawn-dead-lettered task, or a truncated task scan.
+Dead-lettered task entries include the existing atomic
+`reservations rearm <task> --permit --reason <reason>` action; doctor does not
+mutate task state.
+
+`disable` and `enable` atomically apply or clear the existing machine-local
+supervisor overrides for the whole loop. `side-load` invokes the declared
+emitter's on-demand command directly, preserving its producer-owned provenance,
+evaluator association, and target-stable dedup.
 Disabling prevents a new side-load from starting; like disabling a periodic
 emitter, it does not cancel a command that was already in flight.
 An explicitly conflicting direct registration remains a separate supervised
