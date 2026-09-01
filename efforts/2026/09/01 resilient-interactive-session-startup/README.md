@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase worktrees
 - **Created:** 2026-08-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/picker` launch handoff and programmatic parity; `visions/plugins/agent-worktrees` standalone ground-layer authority
 - **Umbrella issue:** #1534
 - **Sub-issues:** #1548
@@ -133,17 +133,18 @@ the immediate work a foundation rather than throwaway launcher-only UX.
 ### Phase 5 - Release and follow through
 - [x] Update mux, Picker, lifecycle, and activity-event documentation to describe the recovery contract.
 - [x] Bump the agent-worktrees plugin and marketplace versions with each implementation PR.
-- [ ] Deploy through the unified update flow and confirm behavior under induced PSMux contention.
+- [x] Deploy through the unified update flow.
+- [x] Deferred to `#1548`: Confirm behavior under induced PSMux contention through a deterministic launch seam.
 - [x] Split any deferred architectural work into linked issues rather than leaving unchecked design TODOs in the effort.
 
 ## Validation Plan
 
-- [ ] A transient PSMux failure succeeds automatically within the configured attempt bound and creates only one worktree/session pair.
-- [ ] Partial PSMux processes owned by a failed attempt are removed before retry; unrelated or concurrently-won sessions are never killed.
-- [ ] Exhausted retries keep the interactive launch surface alive and present explicit retry/cancel and recovery information.
-- [ ] Non-interactive launch never waits for input and returns a stable structured recoverable-failure result.
-- [ ] Cancelling or exhausting launch preserves one discoverable worktree with accurate state and no falsely-live mux/session record.
-- [ ] Retrying a preserved worktree starts or joins its mux without creating a second worktree.
+- [x] Deferred to `#1548`: A transient PSMux failure succeeds automatically within the configured attempt bound and creates only one worktree/session pair.
+- [x] Deferred to `#1548`: Partial PSMux processes owned by a failed attempt are removed before retry; unrelated or concurrently-won sessions are never killed.
+- [x] Deferred to `#1548`: Exhausted retries keep the interactive launch surface alive and present explicit retry/cancel and recovery information.
+- [x] Deferred to `#1548`: Non-interactive launch never waits for input and returns a stable structured recoverable-failure result.
+- [x] Deferred to `#1548`: Cancelling or exhausting launch preserves one discoverable worktree with accurate state and no falsely-live mux/session record.
+- [x] Deferred to `#1548`: Retrying a preserved worktree starts or joins its mux without creating a second worktree.
 - [x] `create --json` remains mux-free and unchanged for programmatic callers.
 - [x] Direct `resolve --new` remains functional when the optional Picker/Manager is absent.
 - [x] Deferred to `#1548`: Picker tests prove it remains visible until readiness, cuts over only on success, and returns to a usable fleet view on failure.
@@ -175,3 +176,10 @@ that contract for the Picker-owned UX in Phases 3 and 4.
 - The full agent-worktrees run encountered a transient timeout in an unrelated
   anchor-hygiene git subprocess; the timed-out test passed when rerun alone, and
   the mux-focused test set passed.
+
+### 2026-09-01 - Immediate effort completed
+- Merged #1559, closing #1534.
+- Deployed agent-worktrees `1.5.3-dev696`; the active launcher contains the
+  bounded retry, interactive recovery, and preserved-worktree diagnostics.
+- Archived this immediate reliability effort. The deterministic failure harness,
+  structured launch transaction, and Picker-owned cutover continue in #1548.
