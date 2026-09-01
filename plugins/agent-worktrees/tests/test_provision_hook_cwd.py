@@ -51,6 +51,18 @@ def test_detached_provision_worker_runs_from_home():
     sh = (_PLUGIN / "scripts" / "provision-check.sh").read_text("utf-8")
     assert "-WorkingDirectory $HOME" in ps1
     assert 'cd "$HOME" || exit 0' in sh
+    assert "'--repo', $RepoArg, '--status', $StatusArg, '--apply'" in ps1
+    assert "$RepoArg = " in ps1
+    assert "$StatusArg = " in ps1
+    assert '--repo "$repo_dir" --status "$status" --apply' in sh
+
+
+def test_provision_hook_surfaces_previous_failure():
+    ps1 = (_PLUGIN / "scripts" / "provision-check.ps1").read_text("utf-8")
+    sh = (_PLUGIN / "scripts" / "provision-check.sh").read_text("utf-8")
+    assert "Previous background provisioning failed" in ps1
+    assert "Previous background provisioning failed" in sh
+    assert "catch { }" not in ps1
 
 
 def test_powershell_diagnostics_are_optional():
