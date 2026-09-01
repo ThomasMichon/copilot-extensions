@@ -47,9 +47,9 @@ _THREAD_LOCKS_GUARD = threading.Lock()
 _THREAD_LOCKS: dict[str, threading.Lock] = {}
 
 
-def logical_override_id(logical_id: str) -> str:
+def logical_override_id(owner: str, logical_id: str) -> str:
     """Override token that disables every registration for one logical unit."""
-    return f"{LOGICAL_OVERRIDE_PREFIX}{logical_id}"
+    return f"{LOGICAL_OVERRIDE_PREFIX}{owner}:{logical_id}"
 
 
 def _thread_lock(path: Path) -> threading.Lock:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 
+from agent_dispatch.registrar import load_declaration
 from agent_dispatch.supervisor_daemon import (
     SupervisorDaemon,
     UnsupportedKind,
@@ -384,7 +385,6 @@ def test_override_outranks_declaration_and_survives_resync():
 def test_logical_override_winds_down_every_registration_for_unit():
     client = FakeClient(
         [
-            _reg("current", logical_id="review-workers"),
             _reg(
                 "legacy",
                 logical_id="review-workers",
@@ -393,13 +393,57 @@ def test_logical_override_winds_down_every_registration_for_unit():
         ]
     )
     launcher = FakeLauncher()
-    overrides = {"logical:review-workers": {"disabled": True}}
-    daemon = _daemon(client, launcher, overrides_source=lambda: overrides)
+    declaration = load_declaration(
+        {
+            "name": "review-workers",
+            "repos": TEST_REPO,
+            "owner": "repo:example",
+        }
+    )
+    overrides = {"logical:repo:example:review-workers": {"disabled": True}}
+    daemon = _daemon(
+        client,
+        launcher,
+        declared_source=lambda: [declaration],
+        overrides_source=lambda: overrides,
+    )
 
     summary = daemon.reconcile_once()
 
     assert summary.running == []
     assert daemon._units == {}
+
+
+def test_logical_override_is_scoped_to_declaration_owner():
+    client = FakeClient([])
+    launcher = FakeLauncher()
+    declared = [
+        load_declaration(
+            {
+                "name": "review-workers",
+                "repos": TEST_REPO,
+                "owner": "repo:a",
+            }
+        ),
+        load_declaration(
+            {
+                "name": "review-workers",
+                "repos": TEST_REPO,
+                "owner": "repo:b",
+            }
+        ),
+    ]
+    overrides = {"logical:repo:a:review-workers": {"disabled": True}}
+    daemon = _daemon(
+        client,
+        launcher,
+        declared_source=lambda: declared,
+        overrides_source=lambda: overrides,
+    )
+
+    summary = daemon.reconcile_once()
+
+    assert summary.running == ["declared:repo:b:review-workers"]
 
 
 def test_override_disabled_false_is_inert():

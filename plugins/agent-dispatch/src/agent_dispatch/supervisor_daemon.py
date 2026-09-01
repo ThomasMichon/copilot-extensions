@@ -164,6 +164,20 @@ def registration_override_logical_ids(reg: dict) -> set[str]:
     return registration_logical_ids(reg) - {str(reg.get("id") or "")}
 
 
+def registration_override_ids(reg: dict) -> set[str]:
+    """Concrete and logical override tokens that apply to one registration."""
+    from .overrides import logical_override_id
+
+    owner = str(reg.get("owner") or "local")
+    return {
+        str(reg.get("id") or ""),
+        *(
+            logical_override_id(owner, logical_id)
+            for logical_id in registration_override_logical_ids(reg)
+        ),
+    } - {""}
+
+
 @dataclass
 class DesiredRegistrationSet:
     """One reconciled desired set plus source-migration diagnostics."""
@@ -541,7 +555,8 @@ class SupervisorDaemon:
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
-        merged = merge_registration_sources(regs, self._declared())
+        declared = self._declared()
+        merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
         if diagnostics != self._last_merge_diagnostics:
             for rid in merged.deduplicated:
@@ -563,14 +578,25 @@ class SupervisorDaemon:
             replacement = merged.replacements.get(rid)
             if replacement:
                 desired.pop(replacement, None)
-        from .overrides import logical_override_id
-
-        for rid, registration in list(desired.items()):
-            if any(
-                logical_override_id(logical_id) in overridden
-                for logical_id in registration_override_logical_ids(registration)
-            ):
-                desired.pop(rid, None)
+        for declared_registration in declared:
+            logical_overrides = (
+                registration_override_ids(declared_registration)
+                - {declared_registration["id"]}
+            )
+            if not logical_overrides & overridden:
+                continue
+            logical_ids = registration_logical_ids(declared_registration)
+            declared_owner = declared_registration.get("owner")
+            for rid, registration in list(desired.items()):
+                registration_owner = registration.get("owner")
+                if (
+                    registration_owner
+                    and declared_owner
+                    and registration_owner != declared_owner
+                ):
+                    continue
+                if logical_ids & registration_logical_ids(registration):
+                    desired.pop(rid, None)
         self._deduplicated = merged.deduplicated
         self._conflicts = merged.conflicts
         return desired

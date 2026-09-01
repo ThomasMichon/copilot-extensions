@@ -591,6 +591,8 @@ override state. `disable` and `enable` atomically apply or clear the existing
 machine-local supervisor overrides for the whole loop. `side-load` invokes the
 declared emitter's on-demand command directly, preserving its producer-owned
 provenance, evaluator association, and target-stable dedup.
+Disabling prevents a new side-load from starting; like disabling a periodic
+emitter, it does not cancel a command that was already in flight.
 
 
 ### Reactive webhook producer (`agent-dispatch webhook`)

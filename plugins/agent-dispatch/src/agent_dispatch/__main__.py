@@ -2284,13 +2284,12 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
     from .config import overrides_path
     from .overrides import (
         load_overrides,
-        logical_override_id,
         mutate_overrides,
     )
     from .producers import emitter
     from .supervisor_daemon import (
         registration_logical_ids,
-        registration_override_logical_ids,
+        registration_override_ids,
     )
 
     try:
@@ -2299,10 +2298,8 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
         overrides = load_overrides(overrides_path())
         command = args.reviewer_loop_command
         logical_aliases = {
-            registration["id"]: {
-                logical_override_id(logical_id)
-                for logical_id in registration_override_logical_ids(registration)
-            }
+            registration["id"]: registration_override_ids(registration)
+            - {registration["id"]}
             for registration in registrations
         }
         if command == "disable":
@@ -2398,26 +2395,24 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
             if registration["kind"] == RegistrationKind.EMITTER
         )
         source_override_ids = {source["id"], *aliases[source["id"]]}
-        def run_when_enabled(current: dict[str, dict]) -> dict:
-            if any(
-                (current.get(override_id) or {}).get("disabled")
-                for override_id in source_override_ids
-            ):
-                raise ValueError(
-                    f"reviewer loop is disabled by override on {source['id']!r}"
-                )
-            with _client(args) as side_load_client:
-                return emitter.run_side_load(
+        current = load_overrides(overrides_path())
+        if any(
+            (current.get(override_id) or {}).get("disabled")
+            for override_id in source_override_ids
+        ):
+            raise ValueError(
+                f"reviewer loop is disabled by override on {source['id']!r}"
+            )
+        with _client(args) as side_load_client:
+            return _emit(
+                emitter.run_side_load(
                     side_load_client,
                     source,
                     args.change_ref,
                     current_machine=machine,
                     current_env=env,
                 )
-
-        return _emit(
-            mutate_overrides(overrides_path(), run_when_enabled)
-        )
+            )
     except (DispatchError, OSError, ValueError, emitter.EmitterError) as exc:
         print(f"agent-dispatch reviewer-loop: {exc}", file=sys.stderr)
         return 2
@@ -2760,7 +2755,10 @@ def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     from .config import overrides_path, run_dir
     from .overrides import load_overrides, overridden_off_ids
     from .single_instance import is_locked, lock_path_for
-    from .supervisor_daemon import supervisor_lease_scope
+    from .supervisor_daemon import (
+        registration_override_ids,
+        supervisor_lease_scope,
+    )
 
     machine, env = _registration_scope(args)
     scope = supervisor_lease_scope(machine, env)
@@ -2772,10 +2770,11 @@ def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     # Annotate each registration with its override state so the overridden-off set
     # is legible right beside what is declared/registered (vision: legibility).
     for reg in regs:
-        rid = reg.get("id")
-        if rid in off:
+        matching = sorted(registration_override_ids(reg) & off)
+        if matching:
             reg["overridden_off"] = True
-            rec = overrides.get(rid) or {}
+            reg["override_ids"] = matching
+            rec = overrides.get(matching[0]) or {}
             reg["override_reason"] = rec.get("reason")
     return _emit(
         {
