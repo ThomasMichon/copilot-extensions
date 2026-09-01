@@ -41,6 +41,27 @@ def test_gate_match_is_case_insensitive(tmp_path):
     assert not pkg.applies_to("box-2")
 
 
+def test_gate_and_overlay_share_casefold_semantics(tmp_path):
+    data = base_package(
+        gate=["Straße"],
+        **{
+            "per-machine": {
+                "Straße": {
+                    "manage": {
+                        "copilot.settings": {"values": {"effortLevel": "low"}}
+                    }
+                }
+            }
+        },
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+    package = load_package(path)
+
+    assert package.applies_to("STRASSE")
+    resolved = resolve_for_machine(package, "STRASSE")
+    assert resolved.manage["copilot.settings"]["values"]["effortLevel"] == "low"
+
+
 @pytest.mark.parametrize("schema_version", [99, True, 1.0, "2"])
 def test_bad_schema_version_rejected(tmp_path, schema_version):
     path = write_package(

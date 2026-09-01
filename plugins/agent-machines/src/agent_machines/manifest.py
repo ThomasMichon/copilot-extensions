@@ -147,7 +147,7 @@ class RequirementPackage:
         """
         if not self.gate or "*" in self.gate:
             return True
-        return machine.lower() in {g.lower() for g in self.gate}
+        return machine.casefold() in {g.casefold() for g in self.gate}
 
     def repo_root(self) -> Path | None:
         """Derive the repo root from a canonical or legacy package path."""
