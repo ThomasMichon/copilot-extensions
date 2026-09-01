@@ -140,7 +140,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
     )
 
 
-def _logical_ids(reg: dict) -> set[str]:
+def registration_logical_ids(reg: dict) -> set[str]:
     """Stable names that can identify one unit across legacy/direct sources."""
 
     result = {
@@ -157,6 +157,25 @@ def _logical_ids(reg: dict) -> set[str]:
         if schedules[0].get("id") not in (None, ""):
             result.add(str(schedules[0]["id"]))
     return result
+
+
+def registration_override_logical_ids(reg: dict) -> set[str]:
+    """Logical names suitable for an override token, excluding the concrete id."""
+    return registration_logical_ids(reg) - {str(reg.get("id") or "")}
+
+
+def registration_override_ids(reg: dict) -> set[str]:
+    """Concrete and logical override tokens that apply to one registration."""
+    from .overrides import logical_override_id
+
+    owner = str(reg.get("owner") or "local")
+    return {
+        str(reg.get("id") or ""),
+        *(
+            logical_override_id(owner, logical_id)
+            for logical_id in registration_override_logical_ids(reg)
+        ),
+    } - {""}
 
 
 @dataclass
@@ -187,7 +206,7 @@ def merge_registration_sources(
     )
     for declared_reg in declared_regs:
         declared_fp = _runtime_equivalence_fingerprint(declared_reg)
-        declared_ids = _logical_ids(declared_reg)
+        declared_ids = registration_logical_ids(declared_reg)
         for direct_reg in direct_regs:
             direct_id = direct_reg["id"]
             if direct_id not in result.registrations:
@@ -197,7 +216,7 @@ def merge_registration_sources(
                 result.deduplicated.append(direct_id)
                 result.replacements[direct_id] = declared_reg["id"]
                 continue
-            shared = sorted(declared_ids & _logical_ids(direct_reg))
+            shared = sorted(declared_ids & registration_logical_ids(direct_reg))
             if shared:
                 result.conflicts.append(
                     f"{direct_id} <> {declared_reg['id']} "
@@ -536,7 +555,8 @@ class SupervisorDaemon:
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
-        merged = merge_registration_sources(regs, self._declared())
+        declared = self._declared()
+        merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
         if diagnostics != self._last_merge_diagnostics:
             for rid in merged.deduplicated:
@@ -552,11 +572,15 @@ class SupervisorDaemon:
                 )
             self._last_merge_diagnostics = diagnostics
         desired = merged.registrations
-        for rid in self._overridden_off():
+        overridden = self._overridden_off()
+        for rid in overridden:
             desired.pop(rid, None)
             replacement = merged.replacements.get(rid)
             if replacement:
                 desired.pop(replacement, None)
+        for rid, registration in list(desired.items()):
+            if registration_override_ids(registration) & overridden:
+                desired.pop(rid, None)
         self._deduplicated = merged.deduplicated
         self._conflicts = merged.conflicts
         return desired

@@ -32,10 +32,12 @@ from .config import (
     client_url,
     failover_machine,
     has_live_local_coordinator,
-    producer_capability as producer_capability_value,
     shared_control_token,
     shared_token,
     shared_url,
+)
+from .config import (
+    producer_capability as producer_capability_value,
 )
 from .registrations import RegistrationKind
 
@@ -2237,6 +2239,186 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
     raise SystemExit(f"unknown emitter command: {args.emitter_command!r}")
 
 
+def _reviewer_loop_registrations(args: argparse.Namespace) -> list[dict]:
+    from .registrar_discovery import (
+        load_pointers,
+        read_declaration_file_set,
+    )
+    from .registrar_reconcile import declaration_to_registration
+
+    path = Path(args.declaration).expanduser().resolve()
+    declarations = read_declaration_file_set(path)
+    expected = {"emitter", "evaluator", "supervised-lane"}
+    if len(declarations) != 3 or {declaration.kind for declaration in declarations} != expected:
+        raise ValueError(
+            f"{path}: expected one reviewer-loop declaration expanding to "
+            "emitter, evaluator, and supervised-lane units"
+        )
+    owner = getattr(args, "owner", None)
+    declared_owners = {declaration.owner for declaration in declarations}
+    if owner is None and len(declared_owners) == 1:
+        owner = next(iter(declared_owners))
+    if owner is None:
+        matching = [
+            pointer.effective_owner()
+            for pointer in load_pointers()
+            if pointer.resolved_location().resolve() == path.parent
+        ]
+        if len(matching) == 1:
+            owner = matching[0]
+    if owner is None:
+        raise ValueError(
+            f"{path}: declaration owner is ambiguous; register its containing "
+            "directory or pass --owner"
+        )
+    if owner:
+        declarations = tuple(declaration.with_owner(owner) for declaration in declarations)
+    machine, env = _registration_scope(args)
+    return [
+        declaration_to_registration(declaration, machine=machine, env=env)
+        for declaration in declarations
+    ]
+
+
+def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
+    from .config import overrides_path
+    from .overrides import (
+        load_overrides,
+        mutate_overrides,
+    )
+    from .producers import emitter
+    from .supervisor_daemon import (
+        merge_registration_sources,
+        registration_override_ids,
+    )
+
+    try:
+        registrations = _reviewer_loop_registrations(args)
+        machine, env = _registration_scope(args)
+        command = args.reviewer_loop_command
+        logical_aliases = {
+            registration["id"]: registration_override_ids(registration)
+            - {registration["id"]}
+            for registration in registrations
+        }
+        if command == "disable":
+            now = time.time()
+
+            def disable(current: dict[str, dict]) -> list[str]:
+                changed = []
+                for registration in registrations:
+                    for override_id in {
+                        registration["id"],
+                        *logical_aliases[registration["id"]],
+                    }:
+                        current[override_id] = {
+                            "disabled": True,
+                            "reason": args.reason,
+                            "at": now,
+                        }
+                        changed.append(override_id)
+                return changed
+
+            changed = mutate_overrides(overrides_path(), disable)
+            return _emit(
+                {
+                    "enabled": False,
+                    "changed": changed,
+                    "units": [registration["id"] for registration in registrations],
+                }
+            )
+
+        with _client(args) as client:
+            direct = client.list_registrations(
+                machine=machine,
+                env=env,
+                include_paused=True,
+            )
+        replacements = merge_registration_sources(direct, registrations).replacements
+        aliases = {
+            registration["id"]: {
+                direct_id
+                for direct_id, declared_id in replacements.items()
+                if declared_id == registration["id"]
+            }
+            | logical_aliases[registration["id"]]
+            for registration in registrations
+        }
+        if command == "inspect":
+            overrides = load_overrides(overrides_path())
+            return _emit(
+                {
+                    "declaration": str(Path(args.declaration).expanduser().resolve()),
+                    "units": [
+                        {
+                            **registration,
+                            "override_ids": sorted(
+                                {registration["id"], *aliases[registration["id"]]}
+                            ),
+                            "overridden_off": any(
+                                (overrides.get(override_id) or {}).get("disabled")
+                                for override_id in {
+                                    registration["id"],
+                                    *aliases[registration["id"]],
+                                }
+                            ),
+                        }
+                        for registration in registrations
+                    ],
+                }
+            )
+        if command == "enable":
+            def mutate(current: dict[str, dict]) -> list[str]:
+                changed = []
+                for registration in registrations:
+                    registration_id = registration["id"]
+                    override_ids = {
+                        registration_id,
+                        *aliases[registration_id],
+                    }
+                    for override_id in override_ids:
+                        if override_id in current:
+                            del current[override_id]
+                            changed.append(override_id)
+                return changed
+
+            changed = mutate_overrides(overrides_path(), mutate)
+            return _emit(
+                {
+                    "enabled": True,
+                    "changed": changed,
+                    "units": [registration["id"] for registration in registrations],
+                }
+            )
+        source = next(
+            registration
+            for registration in registrations
+            if registration["kind"] == RegistrationKind.EMITTER
+        )
+        source_override_ids = {source["id"], *aliases[source["id"]]}
+        current = load_overrides(overrides_path())
+        if any(
+            (current.get(override_id) or {}).get("disabled")
+            for override_id in source_override_ids
+        ):
+            raise ValueError(
+                f"reviewer loop is disabled by override on {source['id']!r}"
+            )
+        with _client(args) as side_load_client:
+            return _emit(
+                emitter.run_side_load(
+                    side_load_client,
+                    source,
+                    args.change_ref,
+                    current_machine=machine,
+                    current_env=env,
+                )
+            )
+    except (DispatchError, OSError, ValueError, emitter.EmitterError) as exc:
+        print(f"agent-dispatch reviewer-loop: {exc}", file=sys.stderr)
+        return 2
+
+
 def _cmd_webhook(args: argparse.Namespace) -> int:
     from .producers import webhook
 
@@ -2574,7 +2756,10 @@ def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     from .config import overrides_path, run_dir
     from .overrides import load_overrides, overridden_off_ids
     from .single_instance import is_locked, lock_path_for
-    from .supervisor_daemon import supervisor_lease_scope
+    from .supervisor_daemon import (
+        registration_override_ids,
+        supervisor_lease_scope,
+    )
 
     machine, env = _registration_scope(args)
     scope = supervisor_lease_scope(machine, env)
@@ -2586,10 +2771,11 @@ def _cmd_supervise_daemon_status(args: argparse.Namespace) -> int:
     # Annotate each registration with its override state so the overridden-off set
     # is legible right beside what is declared/registered (vision: legibility).
     for reg in regs:
-        rid = reg.get("id")
-        if rid in off:
+        matching = sorted(registration_override_ids(reg) & off)
+        if matching:
             reg["overridden_off"] = True
-            rec = overrides.get(rid) or {}
+            reg["override_ids"] = matching
+            rec = overrides.get(matching[0]) or {}
             reg["override_reason"] = rec.get("reason")
     return _emit(
         {
@@ -4328,6 +4514,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="registration environment (default: AGENT_DISPATCH_ENV or 'default')",
     )
     ep.set_defaults(func=_cmd_emitter)
+
+    p = sub.add_parser(
+        "reviewer-loop",
+        help="inspect and operate one repository-owned reviewer-loop declaration",
+    )
+    loop_sub = p.add_subparsers(dest="reviewer_loop_command", required=True)
+    for command, help_text in (
+        ("inspect", "expand the declaration and show its effective supervised units"),
+        ("enable", "clear local overrides for every unit in the reviewer loop"),
+    ):
+        lp = loop_sub.add_parser(command, help=help_text)
+        lp.add_argument("declaration", help="path to the reviewer-loop JSON/YAML file")
+        lp.add_argument("--owner", help="declaration owner override")
+        lp.set_defaults(func=_cmd_reviewer_loop)
+    lp = loop_sub.add_parser(
+        "disable",
+        help="locally override every unit in the reviewer loop off",
+    )
+    lp.add_argument("declaration", help="path to the reviewer-loop JSON/YAML file")
+    lp.add_argument("--reason", help="why the loop is disabled")
+    lp.add_argument("--owner", help="declaration owner override")
+    lp.set_defaults(func=_cmd_reviewer_loop)
+    lp = loop_sub.add_parser(
+        "side-load",
+        help="send one change through the declaration's emitter-owned path",
+    )
+    lp.add_argument("declaration", help="path to the reviewer-loop JSON/YAML file")
+    lp.add_argument("change_ref", help="target change reference")
+    lp.add_argument("--owner", help="declaration owner override")
+    lp.set_defaults(func=_cmd_reviewer_loop)
 
     p = sub.add_parser(
         "webhook",
