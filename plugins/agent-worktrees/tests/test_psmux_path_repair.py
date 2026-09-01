@@ -130,6 +130,7 @@ def test_installer_and_launcher_use_exact_version_helper():
     ) in installer
     assert "Find-AwPsmuxPackageBinary" in launcher
     assert "-DesiredVersion '3.3.8'" in launcher
+    assert "$desiredVersion = '3.3.8'" in installer
 
 
 def test_path_repair_does_not_mutate_live_sessions():
