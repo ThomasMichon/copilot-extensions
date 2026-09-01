@@ -217,6 +217,22 @@ bootstrap-critical plugins. Packages that rely on tombstones must declare
 `schema_version: 2`; older exact-v1 runtimes reject them before restore. Current
 runtimes continue to read legacy v1 packages that do not use tombstones.
 
+For a migration that must remain executable by older schema-v1 runtimes, use
+the backward-compatible false-only group. Existing runtimes already apply
+`copilot.settings.*` enforce groups through the same deep merge, while current
+validators enforce this exact shape:
+
+```yaml
+copilot.settings.plugin-tombstones:
+  disposition: enforce
+  values:
+    enabledPlugins:
+      retired-plugin@example-marketplace: false
+```
+
+This group may contain only non-bootstrap plugin identities set to `false`.
+Undeclared operator plugins remain untouched.
+
 Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
 `ignore`, `exclude`, `prune`, and `prerequisite-check`. Current restore applies
 `enforce` and `ensure-present`; `capture` and `prune` are placeholder CLI verbs

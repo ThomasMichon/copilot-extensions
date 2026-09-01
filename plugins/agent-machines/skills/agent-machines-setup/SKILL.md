@@ -112,6 +112,11 @@ plugins (`agent-worktrees`, `agent-machines`); if a package manages
 `extraKnownMarketplaces`, include the bootstrap-critical `copilot-extensions`
 marketplace or the validator errors.
 
+When a migration must run correctly on existing schema-v1 runtimes, use the
+supported false-only `copilot.settings.plugin-tombstones` enforce group instead.
+It may contain only `enabledPlugins.<plugin>: false` entries and preserves every
+undeclared operator plugin.
+
 Run `<catalog argv[0]> validate` after authoring to catch conflicts.
 
 ## Diagnose and migrate package layout
