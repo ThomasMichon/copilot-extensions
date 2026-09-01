@@ -134,6 +134,11 @@ Non-negotiables:
   `@sub-agent` / MCP a README mentions is either a required companion that is
   shown in `enabledPlugins`, or an explicitly-documented optional companion with
   graceful degradation.
+- **MCP-owning agents need a troubleshooting skill.** If the plugin packages an
+  agent with `mcp-servers`, ship a discoverable troubleshooting/diagnostic skill
+  for setup, authentication, bridge/catalog, and upstream failure modes. Keep
+  the plugin README's dependency/prerequisite section explicit enough that an
+  operator can satisfy those requirements before invoking the agent.
 - **No dead references** — every file/skill/plugin you link must exist.
 - **Bump the manifest + marketplace catalog version together** on any change (README
   included).
