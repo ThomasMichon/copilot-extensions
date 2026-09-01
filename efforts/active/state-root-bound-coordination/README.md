@@ -9,8 +9,9 @@
   resource accountability, and claimed-resource-not-reclaimed
 - **Umbrella issue:** [#1513](https://github.com/ThomasMichon/copilot-extensions/issues/1513)
 - **Sub-issues:** [#1517](https://github.com/ThomasMichon/copilot-extensions/issues/1517)
-  - lease acquisition; [#1518](https://github.com/ThomasMichon/copilot-extensions/issues/1518)
-  - provider preflight
+  (lease acquisition);
+  [#1518](https://github.com/ThomasMichon/copilot-extensions/issues/1518)
+  (provider preflight)
 - **Authorship:** AI-assisted; reviewed and directed by the repository owner.
 
 ## Guiding Intent
