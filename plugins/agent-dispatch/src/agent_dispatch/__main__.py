@@ -3226,6 +3226,7 @@ def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
         "labels": list(decl.labels),
         "repos": decl.repos,
         "concurrency": decl.concurrency,
+        "max_active_processes": decl.concurrency,
         "body": {"type": decl.body.type, "agent": decl.body.agent},
         "filters": {
             "permit": {dim: sorted(vals) for dim, vals in ef.permit.items()},
@@ -4196,8 +4197,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="only spawn queued tasks carrying this label (repeatable; opt-in gate)",
     )
     p.add_argument(
-        "--max-concurrent", type=int, default=1,
-        help="cap on in-flight spawns (default: 1)",
+        "--max-concurrent", "--max-active-processes",
+        dest="max_concurrent", type=int, default=1,
+        help="pool-local cap on live/launching worker processes (default: 1)",
     )
     p.add_argument(
         "--max-attempts", type=int, default=3,
@@ -4334,8 +4336,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="supervise every lane (no repo scope)")
     rp.add_argument("--label", action="append",
                     help="only spawn queued tasks carrying this label (repeatable)")
-    rp.add_argument("--max-concurrent", type=int, default=1,
-                    help="cap on in-flight spawns (default: 1)")
+    rp.add_argument(
+        "--max-concurrent", "--max-active-processes",
+        dest="max_concurrent", type=int, default=1,
+        help="pool-local cap on live/launching worker processes (default: 1)",
+    )
     rp.add_argument("--max-attempts", type=int, default=3,
                     help="dead-letter a task after this many failed spawn attempts "
                          "(default: 3; 0 = retry forever)")

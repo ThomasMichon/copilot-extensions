@@ -841,7 +841,7 @@ never double-spawned.
 ```bash
 agent-dispatch supervise --once                       # one cycle (this repo's lane)
 agent-dispatch supervise --label autopilot            # loop; only spawn opted-in tasks
-agent-dispatch supervise --all-repos --max-concurrent 3
+agent-dispatch supervise --all-repos --max-active-processes 3
 agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
 agent-dispatch supervise --pool host-a,host-b --origin origin --headless --label sweep
 agent-dispatch supervise --no-reactive --interval 30            # fixed polling only
@@ -849,6 +849,15 @@ agent-dispatch supervise --evaluator eval.json --evaluator-ref repository-review
 agent-dispatch reservations list --state spawned      # what's in flight
 agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
 ```
+
+`--max-active-processes` (legacy alias `--max-concurrent`) is a **pool-local**
+cap on live or launching worker processes, not on durable tasks. Queued tasks
+are unlimited. Suspended tasks and tasks blocked on a card are cold: their
+headless bridge process is stopped while the task, owner, progress, card, and
+spawn handle remain durable. Submitting a steer releases the cold reservation
+and queues a fresh embodiment that consumes the saved guidance. Because the cap
+is evaluated only over tasks matching this supervisor's repo/label filter,
+unrelated pools do not consume one another's process capacity.
 
 Each cycle **reconciles** (settles reservations of terminal tasks), optionally runs
 the **evaluator pass**, then **polls** (reserve → embody → record, up to

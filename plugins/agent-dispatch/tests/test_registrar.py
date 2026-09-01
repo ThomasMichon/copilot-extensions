@@ -111,6 +111,25 @@ def test_concurrency_must_be_positive():
         load_declaration({"name": "x", "concurrency": 0})
 
 
+def test_max_active_processes_is_clear_concurrency_alias():
+    declaration = load_declaration(
+        {"name": "reviewers", "max_active_processes": 4}
+    )
+    assert declaration.concurrency == 4
+    assert "--max-concurrent" in declaration.to_supervise_args()
+
+
+def test_concurrency_aliases_must_agree():
+    with pytest.raises(RegistrarError, match="must agree"):
+        load_declaration(
+            {
+                "name": "reviewers",
+                "concurrency": 2,
+                "max_active_processes": 4,
+            }
+        )
+
+
 def test_name_charset_enforced():
     with pytest.raises(RegistrarError, match="name"):
         load_declaration({"name": "bad name!"})

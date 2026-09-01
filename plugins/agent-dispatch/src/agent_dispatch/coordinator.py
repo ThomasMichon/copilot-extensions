@@ -1293,6 +1293,12 @@ def create_app(
         bus.publish({"type": "spawn.failed", "reservation": result})
         return result
 
+    @app.post("/spawn-reservations/{key}/cold")
+    def record_cold(key: str) -> dict:
+        result = _reservation_guard(lambda: queue.record_cold(key))
+        bus.publish({"type": "spawn.cold", "reservation": result})
+        return result
+
     @app.post("/spawn-reservations/{key}/settle")
     def settle_spawn(key: str, body: ReservationDetailBody) -> dict:
         result = _reservation_guard(lambda: queue.settle_spawn(key, detail=body.detail))
@@ -1317,14 +1323,26 @@ def create_app(
 
     @app.get("/spawn-reservations")
     def list_reservations(
-        task_id: str | None = None, state: str | None = None, limit: int = 200
+        task_id: str | None = None,
+        state: str | None = None,
+        repo: str | None = None,
+        label: str | None = None,
+        resume_requested: bool | None = None,
+        limit: int = 200,
     ) -> list[dict]:
         states = (
             [s.strip() for s in state.split(",") if s.strip()] if state else None
         )
         return [
             _reservation_dict(r)
-            for r in queue.list_reservations(task_id=task_id, state=states, limit=limit)
+            for r in queue.list_reservations(
+                task_id=task_id,
+                state=states,
+                repo=repo,
+                label=label,
+                resume_requested=resume_requested,
+                limit=limit,
+            )
         ]
 
     @app.get("/spawn-reservations/{key}")

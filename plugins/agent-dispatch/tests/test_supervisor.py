@@ -52,9 +52,25 @@ class QueueBackedClient:
             raise DispatchError(404, "no such task")
         return asdict(t)
 
-    def list_reservations(self, *, task_id=None, state=None, limit=200):
+    def list_reservations(
+        self,
+        *,
+        task_id=None,
+        state=None,
+        repo=None,
+        label=None,
+        resume_requested=None,
+        limit=200,
+    ):
         states = state.split(",") if isinstance(state, str) else state
-        rows = self._q.list_reservations(task_id=task_id, state=states, limit=limit)
+        rows = self._q.list_reservations(
+            task_id=task_id,
+            state=states,
+            repo=repo,
+            label=label,
+            resume_requested=resume_requested,
+            limit=limit,
+        )
         return [asdict(r) for r in rows]
 
     def reserve_spawn(self, task_id, *, reserved_by=None):
@@ -66,6 +82,9 @@ class QueueBackedClient:
 
     def fail_spawn(self, key, *, detail=None):
         return asdict(self._q.fail_spawn(key, detail=detail))
+
+    def record_cold(self, key):
+        return asdict(self._q.record_cold(key))
 
     def settle_spawn(self, key, *, detail=None):
         return asdict(self._q.settle_spawn(key, detail=detail))
@@ -82,6 +101,13 @@ class QueueBackedClient:
 
     def yield_task(self, task_id, worker_id, *, note=None, exclude=None):
         return asdict(self._q.yield_task(task_id, worker_id, note=note, exclude=exclude))
+
+    def release(self, task_id, worker_id, *, reason=None):
+        return asdict(
+            self._q.release_suspended(
+                task_id, worker_id, reason=reason
+            )
+        )
 
     def progress_log(self, task_id):
         return self._q.progress_log(task_id)
@@ -146,6 +172,195 @@ def test_suspended_reservation_does_not_consume_supervisor_capacity(q, client):
     assert q.get(first.id).attempts == 1
 
 
+def test_other_pool_reservation_does_not_consume_process_capacity(q, client):
+    other = q.create("other pool", repo="github.com/example/other")
+    reservation, _ = q.reserve_spawn(other.id)
+    q.record_spawn(reservation.key, session_handle="local-body:other-session")
+    runnable = q.create("this pool")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=1
+    )
+
+    assert sup.poll_once() == [runnable.id]
+
+
+def test_suspended_local_headless_body_is_cooled(q, client):
+    task = q.create("dormant review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:bridge-session-1"
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    q.suspend(task.id, "headless-owner", reason="waiting for author")
+    stopped = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+    )
+
+    assert sup.cool_dormant_bodies() == 1
+    assert stopped == ["bridge-session-1"]
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+    assert sup.cool_dormant_bodies() == 0
+
+
+def test_cli_suspensions_do_not_consume_headless_cooling_budget(q, client):
+    for index in range(12):
+        task = q.create(f"cli dormant {index}", labels=["review"])
+        reservation, _ = q.reserve_spawn(task.id)
+        q.record_spawn(
+            reservation.key,
+            session_handle=f"cli-session-{index}",
+            worktree=f"wt-{index}",
+        )
+        q.claim_one(f"machine/wt-{index}", task_id=task.id)
+        q.start(task.id, f"machine/wt-{index}")
+        q.suspend(task.id, f"machine/wt-{index}", reason="waiting")
+    headless = q.create("headless dormant", labels=["review"])
+    reservation, _ = q.reserve_spawn(headless.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:headless-session"
+    )
+    q.claim_one("headless-owner", task_id=headless.id)
+    q.start(headless.id, "headless-owner")
+    q.suspend(headless.id, "headless-owner", reason="waiting")
+    stopped = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+    )
+
+    assert sup.cool_dormant_bodies() == 1
+    assert stopped == ["headless-session"]
+
+
+def test_blocking_card_cools_body_and_frees_process_capacity(q, client):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.set_card(
+        blocked.id,
+        "headless-owner",
+        card={"request_input": [{"name": "decision", "type": "text"}]},
+    )
+    runnable = q.create("next review", labels=["review"])
+    stopped = []
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        labels=["review"],
+        max_concurrent=1,
+        local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+    )
+
+    assert sup.poll_once() == [runnable.id]
+    assert stopped == ["blocked-session"]
+    assert q.get(blocked.id).status == Status.SUSPENDED
+    assert q.get(blocked.id).awaiting_steer is True
+
+
+def test_steer_waits_for_cold_stop_before_reembodiment(q, client):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.set_card(
+        blocked.id,
+        "headless-owner",
+        card={"request_input": [{"name": "decision", "type": "text"}]},
+    )
+    steered = q.submit_steer(
+        blocked.id,
+        fields={"decision": "continue"},
+        sender="operator",
+    )
+    assert steered.status == Status.SUSPENDED
+    assert steered.resume_requested is True
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        labels=["review"],
+        local_cold_fn=lambda _session_id: True,
+    )
+
+    assert sup.poll_once() == [blocked.id]
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+    assert q.get(blocked.id).resume_requested is False
+
+
+def test_failed_cold_stop_keeps_live_process_capacity(q, client):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.set_card(
+        blocked.id,
+        "headless-owner",
+        card={"request_input": [{"name": "decision", "type": "text"}]},
+    )
+    runnable = q.create("next review", labels=["review"])
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        labels=["review"],
+        max_concurrent=1,
+        local_cold_fn=lambda _session_id: False,
+        local_body_verdict_fn=lambda _session_id: "live",
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.get(runnable.id).status == Status.QUEUED
+
+
+def test_cold_stop_exception_does_not_abort_cycle(q, client):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="waiting")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_cold_fn=lambda _session_id: (_ for _ in ()).throw(
+            TimeoutError("stop timed out")
+        ),
+        local_body_verdict_fn=lambda _session_id: "live",
+    )
+
+    assert sup.poll_once() == []
+
+
 def test_supervisor_settles_suspended_task_completed_by_resolver(q, client):
     task = q.create("wait for condition")
     reservation, _ = q.reserve_spawn(task.id)
@@ -160,6 +375,30 @@ def test_supervisor_settles_suspended_task_completed_by_resolver(q, client):
     )
     sup = Supervisor(
         client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=1
+    )
+
+    assert sup.reconcile() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+
+
+def test_supervisor_settles_terminal_cold_reservation(q, client):
+    task = q.create("wait for condition", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:session-1"
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    q.suspend(task.id, "headless-owner", reason="condition pending")
+    q.record_cold(reservation.key)
+    q.complete(
+        task.id, "headless-owner", result_ref="condition:satisfied"
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
     )
 
     assert sup.reconcile() == 1
@@ -1530,10 +1769,9 @@ def test_productive_gone_local_body_does_not_burn_spawn_failure_budget(q, client
     assert spawn.calls == [t.id, t.id]
 
 
-def test_queued_awaiting_steer_spawns_only_after_operator_submit(q, client):
-    """A productive one-turn reviewer parks without respawn while its card is
-    blocked. Confirm clears awaiting_steer, making the queued task eligible for
-    the next supervisor cycle."""
+def test_interactive_awaiting_steer_stays_suspended_until_submit(q, client):
+    """A blocking card parks an interactive task without spawning a replacement;
+    the operator answer resumes its existing owner."""
     from agent_dispatch import steering
 
     t = q.create("review")
@@ -1556,15 +1794,16 @@ def test_queued_awaiting_steer_spawns_only_after_operator_submit(q, client):
         nudge=False,
     )
 
-    assert q.get(t.id).status == Status.QUEUED
+    assert q.get(t.id).status == Status.SUSPENDED
     assert q.get(t.id).awaiting_steer is True
     assert sup.poll_once() == []
     assert spawn.calls == []
 
     q.submit_steer(t.id, fields={"feedback": ""}, sender="operator")
     assert q.get(t.id).awaiting_steer is False
-    assert sup.poll_once() == [t.id]
-    assert spawn.calls == [t.id]
+    assert q.get(t.id).status == Status.STARTED
+    assert sup.poll_once() == []
+    assert spawn.calls == []
 
 
 @pytest.mark.parametrize("verdict", ["live", "unknown"])

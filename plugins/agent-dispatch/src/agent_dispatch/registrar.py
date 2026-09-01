@@ -36,6 +36,7 @@ _KNOWN_KEYS = frozenset(
         "labels",
         "repos",
         "concurrency",
+        "max_active_processes",
         "interval",
         "max_attempts",
         "label_max_attempts",
@@ -511,12 +512,33 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
             description=data.get("description"),
         )
 
+    legacy_concurrency = data.get("concurrency")
+    process_cap = data.get(
+        "max_active_processes",
+        legacy_concurrency if legacy_concurrency is not None else 1,
+    )
+    if (
+        legacy_concurrency is not None
+        and data.get("max_active_processes") is not None
+        and legacy_concurrency != data.get("max_active_processes")
+    ):
+        raise RegistrarError(
+            "concurrency and max_active_processes must agree when both are set"
+        )
     decl = ProfileDeclaration(
         name=name,
         kind=kind,
         labels=_as_str_tuple(data.get("labels"), key="labels"),
         repos=repos,
-        concurrency=_as_int(data.get("concurrency", 1), key="concurrency", minimum=1),
+        concurrency=_as_int(
+            process_cap,
+            key=(
+                "max_active_processes"
+                if data.get("max_active_processes") is not None
+                else "concurrency"
+            ),
+            minimum=1,
+        ),
         interval=_as_float(data.get("interval", 30.0), key="interval", minimum=1.0),
         max_attempts=_as_int(data.get("max_attempts", 3), key="max_attempts", minimum=0),
         label_max_attempts=_load_label_max_attempts(data.get("label_max_attempts")),
