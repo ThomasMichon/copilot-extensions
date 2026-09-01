@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 
@@ -11,6 +12,7 @@ from agent_dispatch.__main__ import (
     _resolve_bind_host_resilient,
     _resolve_client_target,
     build_parser,
+    main,
 )
 
 
@@ -257,6 +259,275 @@ def test_resolve_target_prefers_local_when_live(monkeypatch):
 
 
 # -- supervise override (operator kill-switch) -------------------------------
+
+
+def _write_reviewer_loop(path):
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {
+                    "command": ["reviews", "discover"],
+                    "interval_seconds": 60,
+                    "task_output": "json",
+                    "side_load": {
+                        "command": ["reviews", "side-load", "{change_ref}"]
+                    },
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}},
+                "pool": {
+                    "max_active_processes": 2,
+                    "body": {"type": "headless", "agent": "reviewer"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+class _LoopClient:
+    def __init__(self, registrations=None):
+        self.registrations = registrations or []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def list_registrations(self, **_scope):
+        return self.registrations
+
+
+def test_reviewer_loop_inspect_expands_declared_units(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient())
+
+    assert main(
+        ["reviewer-loop", "inspect", str(declaration), "--owner", "repo:repo"]
+    ) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert [unit["logical_id"] for unit in output["units"]] == [
+        "example-review-source",
+        "example-review-evaluator",
+        "example-review-workers",
+    ]
+    assert {unit["owner"] for unit in output["units"]} == {"repo:repo"}
+    assert not any(unit["overridden_off"] for unit in output["units"])
+
+
+def test_reviewer_loop_requires_unambiguous_owner(tmp_path, capsys):
+    declaration = tmp_path / "unregistered" / "review.json"
+    _write_reviewer_loop(declaration)
+
+    assert main(["reviewer-loop", "inspect", str(declaration)]) == 2
+
+    assert "owner is ambiguous" in capsys.readouterr().err
+
+
+def test_reviewer_loop_disable_and_enable_are_loop_wide(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    overrides = tmp_path / "overrides.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient())
+    common = [str(declaration), "--owner", "repo:repo"]
+
+    assert main(
+        ["reviewer-loop", "disable", *common, "--reason", "maintenance"]
+    ) == 0
+    disabled = json.loads(capsys.readouterr().out)
+    persisted = json.loads(overrides.read_text(encoding="utf-8"))
+    assert set(disabled["changed"]) == set(persisted)
+    assert set(disabled["units"]) < set(persisted)
+    assert all(record["reason"] == "maintenance" for record in persisted.values())
+
+    assert main(["reviewer-loop", "enable", *common]) == 0
+    enabled = json.loads(capsys.readouterr().out)
+    assert set(enabled["changed"]) == set(disabled["changed"])
+    assert json.loads(overrides.read_text(encoding="utf-8")) == {}
+
+
+def test_reviewer_loop_disable_does_not_require_coordinator(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    overrides = tmp_path / "overrides.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+    monkeypatch.setattr(
+        m,
+        "_client",
+        lambda _args: pytest.fail("disable must not connect to the coordinator"),
+    )
+
+    assert main(
+        [
+            "reviewer-loop",
+            "disable",
+            str(declaration),
+            "--owner",
+            "repo:repo",
+        ]
+    ) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["enabled"] is False
+    assert any(item.startswith("logical:") for item in output["changed"])
+
+
+def test_reviewer_loop_side_load_uses_declared_emitter(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    observed = {}
+
+    def fake_side_load(client, registration, change_ref, **scope):
+        observed.update(
+            client=client,
+            registration=registration,
+            change_ref=change_ref,
+            scope=scope,
+        )
+        return {"created": [{"id": "task-1"}]}
+
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient())
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.producers.emitter.run_side_load", fake_side_load
+    )
+
+    assert main(
+        [
+            "reviewer-loop",
+            "side-load",
+            str(declaration),
+            "pr/42",
+            "--owner",
+            "repo:repo",
+        ]
+    ) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"created": [{"id": "task-1"}]}
+    assert observed["registration"]["logical_id"] == "example-review-source"
+    assert observed["registration"]["kind"] == "emitter"
+    assert observed["change_ref"] == "pr/42"
+    assert observed["scope"] == {
+        "current_machine": "host-a",
+        "current_env": "default",
+    }
+
+
+def test_reviewer_loop_side_load_refuses_disabled_source(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    overrides = tmp_path / "overrides.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient())
+    assert main(
+        [
+            "reviewer-loop",
+            "disable",
+            str(declaration),
+            "--owner",
+            "repo:repo",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    assert main(
+        [
+            "reviewer-loop",
+            "side-load",
+            str(declaration),
+            "pr/42",
+            "--owner",
+            "repo:repo",
+        ]
+    ) == 2
+
+    assert "disabled by override" in capsys.readouterr().err
+
+
+def test_reviewer_loop_honors_equivalent_legacy_override(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+    from agent_dispatch.overrides import save_overrides
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    overrides = tmp_path / "overrides.json"
+    _write_reviewer_loop(declaration)
+    source = next(
+        item
+        for item in read_declaration_file_set(declaration)
+        if item.kind == "emitter"
+    ).with_owner("repo:repo")
+    legacy = declaration_to_registration(source, machine="host-a")
+    legacy["id"] = "legacy-review-source"
+    legacy["source"] = "direct"
+    legacy["spec"]["timeout_seconds"] = 999
+    save_overrides(overrides, {legacy["id"]: {"disabled": True}})
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient([legacy]))
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+
+    assert main(
+        ["reviewer-loop", "inspect", str(declaration), "--owner", "repo:repo"]
+    ) == 0
+    inspected = json.loads(capsys.readouterr().out)
+    source_unit = next(
+        unit for unit in inspected["units"] if unit["kind"] == "emitter"
+    )
+    assert source_unit["overridden_off"] is True
+    assert legacy["id"] in source_unit["override_ids"]
+
+    assert main(
+        [
+            "reviewer-loop",
+            "side-load",
+            str(declaration),
+            "pr/42",
+            "--owner",
+            "repo:repo",
+        ]
+    ) == 2
+    assert "disabled by override" in capsys.readouterr().err
+
+    assert main(
+        ["reviewer-loop", "enable", str(declaration), "--owner", "repo:repo"]
+    ) == 0
+    capsys.readouterr()
+    assert json.loads(overrides.read_text(encoding="utf-8")) == {}
 
 
 def test_override_parser_shapes_namespace():

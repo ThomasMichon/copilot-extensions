@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 from agent_dispatch import overrides as ov
 
 
@@ -60,3 +63,37 @@ def test_save_is_atomic_leaves_no_temp(tmp_path):
     # the temp file used for the atomic replace is cleaned up
     leftovers = [q.name for q in tmp_path.iterdir() if q.name.startswith(".overrides-")]
     assert leftovers == []
+
+
+def test_mutations_are_serialized_without_losing_unrelated_entries(tmp_path):
+    path = tmp_path / "overrides.json"
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+
+    def first(overrides):
+        overrides["first"] = {"disabled": True}
+        first_entered.set()
+        assert release_first.wait(2)
+
+    def second(overrides):
+        second_entered.set()
+        overrides["second"] = {"disabled": True}
+
+    thread_one = threading.Thread(target=lambda: ov.mutate_overrides(path, first))
+    thread_two = threading.Thread(target=lambda: ov.mutate_overrides(path, second))
+    thread_one.start()
+    assert first_entered.wait(2)
+    thread_two.start()
+    time.sleep(0.1)
+    assert not second_entered.is_set()
+    release_first.set()
+    thread_one.join(2)
+    thread_two.join(2)
+
+    assert not thread_one.is_alive()
+    assert not thread_two.is_alive()
+    assert ov.load_overrides(path) == {
+        "first": {"disabled": True},
+        "second": {"disabled": True},
+    }

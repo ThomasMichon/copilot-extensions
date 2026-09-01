@@ -570,6 +570,28 @@ one producer election.
 surface used by the supervised child. Normal deployments declare the emitter
 rather than wiring cron, a Scheduled Task, or another external timer.
 
+### Repository reviewer loops (`agent-dispatch reviewer-loop`)
+
+A repository can compose its review source, lifecycle evaluator, and bounded
+worker pool in one `kind: reviewer-loop` declaration. The registrar expands it
+in memory to the same existing emitter/evaluator/supervised-lane units; the
+declaration remains the only source of truth.
+
+```bash
+agent-dispatch reviewer-loop inspect .agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop disable .agent-dispatch/registrar/reviewer-loop.json \
+  --reason "maintenance"
+agent-dispatch reviewer-loop enable .agent-dispatch/registrar/reviewer-loop.json
+agent-dispatch reviewer-loop side-load \
+  .agent-dispatch/registrar/reviewer-loop.json owner/repo#123
+```
+
+`inspect` shows the three effective declared registration ids and their local
+override state. `disable` and `enable` atomically apply or clear the existing
+machine-local supervisor overrides for the whole loop. `side-load` invokes the
+declared emitter's on-demand command directly, preserving its producer-owned
+provenance, evaluator association, and target-stable dedup.
+
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 

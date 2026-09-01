@@ -27,7 +27,6 @@ from agent_dispatch.supervisor_daemon import (
 )
 from tests._helpers import TEST_REPO
 
-
 # -- fakes -------------------------------------------------------------------
 
 
@@ -380,6 +379,27 @@ def test_override_outranks_declaration_and_survives_resync():
     summary = d.reconcile_once()
     assert summary.running == ["a"]
     assert "a" in d._units
+
+
+def test_logical_override_winds_down_every_registration_for_unit():
+    client = FakeClient(
+        [
+            _reg("current", logical_id="review-workers"),
+            _reg(
+                "legacy",
+                logical_id="review-workers",
+                spec={"repo": TEST_REPO, "max_concurrent": 2, "max_attempts": 3},
+            ),
+        ]
+    )
+    launcher = FakeLauncher()
+    overrides = {"logical:review-workers": {"disabled": True}}
+    daemon = _daemon(client, launcher, overrides_source=lambda: overrides)
+
+    summary = daemon.reconcile_once()
+
+    assert summary.running == []
+    assert daemon._units == {}
 
 
 def test_override_disabled_false_is_inert():
