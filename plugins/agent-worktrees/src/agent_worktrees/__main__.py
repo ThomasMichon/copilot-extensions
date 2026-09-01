@@ -877,7 +877,10 @@ def _carve_paired_knowledge(
     is_worktree_class = bool(entry) and repos_mod.normalize_class(
         entry.repo_class
     ) == "worktree"
-    remote = (entry.remote or "origin") if entry else "origin"
+    remote = git_ops.resolve_remote_name(
+        (entry.remote or "origin") if entry else "origin",
+        cwd=knowledge_anchor,
+    )
     default_branch = (entry.default_branch or "main") if entry else "main"
     prepared = _prepare_worktree_source(
         knowledge_anchor,
