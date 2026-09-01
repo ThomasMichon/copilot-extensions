@@ -621,6 +621,33 @@ def fleet_body_verdict(
     return _classify_body_status(proc)
 
 
+def stop_fleet_body(
+    host: str, session_id: str, *, timeout: float | None = 20.0
+) -> bool:
+    """End one remote fleet body so its process is fully reclaimed."""
+    ssh = shutil.which("ssh")
+    if ssh is None:
+        return False
+    remote = f"agent-bridge end {shlex.quote(session_id)}"
+    completed = subprocess.run(  # noqa: S603 -- fixed argv + SSH alias
+        [
+            ssh,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=3",
+            host.strip().lower(),
+            remote,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    return completed.returncode == 0
+
+
 def fleet_body_activity(
     host: str, session_id: str, *, timeout: float | None = None
 ) -> str | None:

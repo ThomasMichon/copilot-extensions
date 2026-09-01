@@ -223,7 +223,8 @@ def test_set_card_with_form_marks_awaiting_steer(q):
     assert task.card["title"] == "Recommend Approve"
     assert task.card["ts"] == 1234.0
     assert task.card["request_input"] == form
-    assert task.status == Status.STARTED  # never a verdict/terminal transition
+    assert task.status == Status.SUSPENDED
+    assert task.lease_expires_at is None
 
 
 def test_set_card_without_form_is_not_awaiting(q):
@@ -369,10 +370,12 @@ def test_submit_steer_reembodies_suspended_headless_owner(q):
         wake_requested=True,
     )
 
-    assert task.status == Status.QUEUED
-    assert task.owner is None
-    assert q.get_reservation(reservation.key).state == "settled"
+    assert task.status == Status.SUSPENDED
+    assert task.owner == "fleet-owner"
+    assert task.resume_requested is True
+    assert q.get_reservation(reservation.key).state == "spawned"
     assert q.list_wakes(t.id) == []
+    q.release_suspended(t.id, "fleet-owner", reason="body stopped")
     q.claim_one("replacement", task_id=t.id)
     q.start(t.id, "replacement")
     steers = q.take_steer(t.id, "replacement", all_pending=True)
@@ -380,6 +383,36 @@ def test_submit_steer_reembodies_suspended_headless_owner(q):
         {"decision": "continue"},
         {"detail": "use option B"},
     ]
+
+
+def test_submit_steer_reembodies_blocked_headless_without_wake_flag(q):
+    t = q.create("review PR 42")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:bridge-session-1",
+    )
+    q.claim_one("headless-owner", task_id=t.id)
+    q.start(t.id, "headless-owner")
+    q.set_card(
+        t.id,
+        "headless-owner",
+        card=steering.build_card(
+            request_input=[{"name": "decision", "type": "text"}]
+        ),
+    )
+
+    task = q.submit_steer(
+        t.id,
+        fields={"decision": "continue"},
+        sender="operator",
+        wake_requested=False,
+    )
+
+    assert task.status == Status.SUSPENDED
+    assert task.owner == "headless-owner"
+    assert task.resume_requested is True
+    assert q.get_reservation(reservation.key).state == "spawned"
 
 
 # -- coordinator HTTP routes -------------------------------------------------

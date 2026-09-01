@@ -422,10 +422,45 @@ def test_resume_with_wake_reembodies_headless_owner(q):
 
     resumed = q.resume(t.id, "headless-owner", wake_requested=True)
 
-    assert resumed.status == Status.QUEUED
-    assert resumed.owner is None
-    assert resumed.owner_session_id is None
-    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+    assert resumed.status == Status.SUSPENDED
+    assert resumed.owner == "headless-owner"
+    assert resumed.resume_requested is True
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+
+
+def test_resume_without_wake_reembodies_cold_headless_owner(q):
+    t = q.create("continue headless work")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:bridge-session-1"
+    )
+    q.claim_one("headless-owner", task_id=t.id)
+    q.start(t.id, "headless-owner")
+    q.suspend(t.id, "headless-owner", reason="waiting")
+
+    resumed = q.resume(t.id, "headless-owner", wake_requested=False)
+
+    assert resumed.status == Status.SUSPENDED
+    assert resumed.owner == "headless-owner"
+    assert resumed.resume_requested is True
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+
+
+def test_resume_worktree_owner_without_session_id_is_not_headless(q):
+    t = q.create("continue worktree work")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(
+        reservation.key, session_handle="session-1", worktree="wt-1"
+    )
+    q.claim_one("machine/wt-1", task_id=t.id)
+    q.start(t.id, "machine/wt-1")
+    q.suspend(t.id, "machine/wt-1", reason="waiting")
+
+    resumed = q.resume(t.id, "machine/wt-1")
+
+    assert resumed.status == Status.STARTED
+    assert resumed.resume_requested is False
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
     assert q.list_wakes(t.id) == []
 
 

@@ -139,6 +139,22 @@ def spawn_worker(
     )
 
 
+def stop_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
+    """End one local headless body so its process is fully reclaimed."""
+    exe = _agent_bridge_launch_prefix()
+    if exe is None:
+        return False
+    completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
+        [*exe, "end", session_id],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    return completed.returncode == 0
+
+
 def send_nudge(
     worktree: str,
     message: str,

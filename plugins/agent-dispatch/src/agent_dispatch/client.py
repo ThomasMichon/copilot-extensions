@@ -502,6 +502,11 @@ class DispatchClient:
             self._http.post(f"/spawn-reservations/{key}/fail", json={"detail": detail})
         )
 
+    def record_cold(self, key: str) -> dict:
+        return self._unwrap(
+            self._http.post(f"/spawn-reservations/{key}/cold")
+        )
+
     def settle_spawn(self, key: str, *, detail: str | None = None) -> dict:
         return self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/settle", json={"detail": detail})
@@ -531,6 +536,9 @@ class DispatchClient:
         *,
         task_id: str | None = None,
         state: str | None = None,
+        repo: str | None = None,
+        label: str | None = None,
+        resume_requested: bool | None = None,
         limit: int = 200,
     ) -> list[dict]:
         params: dict[str, Any] = {"limit": limit}
@@ -538,6 +546,12 @@ class DispatchClient:
             params["task_id"] = task_id
         if state is not None:
             params["state"] = state
+        if repo is not None:
+            params["repo"] = repo
+        if label is not None:
+            params["label"] = label
+        if resume_requested is not None:
+            params["resume_requested"] = resume_requested
         return self._unwrap(self._http.get("/spawn-reservations", params=params))
 
     def get_reservation(self, key: str) -> dict:
