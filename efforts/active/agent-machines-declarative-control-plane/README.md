@@ -60,7 +60,7 @@ fleet, topology, or operating environment.
   contracts with strict validation and forward-compatible extension seams.
 - [ ] Distinguish portable declarations from discovered facts and generated
   projections.
-- [ ] Resolve supplemental package repositories from generic project
+- [x] Resolve supplemental package repositories from generic project
   relationships, preserve source provenance, deduplicate independently adopted
   repositories, and fail clearly when a declared relationship is unresolved
   (#1418).
@@ -77,19 +77,19 @@ fleet, topology, or operating environment.
 
 ### Phase 3 - Reconcile through bounded modules
 
-- [ ] Make `plan`, `validate`, and `restore` default to the adopted project
+- [x] Make `plan`, `validate`, and `restore` default to the adopted project
   containing CWD plus only its required supplemental package repositories.
   Preserve `--repo` as exact single-repository scope and explicit
   `--all-projects` as the full machine union (#1418, #1455).
-- [ ] Resolve CWD through its canonical registered anchor/worktree identity.
+- [x] Resolve CWD through its canonical registered anchor/worktree identity.
   An adopted project contributes its active required supplements one hop only;
   entering a supplemental repository directly resolves that repository alone
   unless it is independently adopted as a project.
-- [ ] Require supplements to be explicitly bound and canonically registered.
+- [x] Require supplements to be explicitly bound and canonically registered.
   A configured but unavailable supplement blocks bare project reconciliation
   with clear `--repo <current>` remediation for intentional physical-repository
   isolation.
-- [ ] Update CLI help, README, architecture, and remediation text to distinguish
+- [x] Update CLI help, README, architecture, and remediation text to distinguish
   bare project scope from exact `--repo` and full `--all-projects` scope.
 - [ ] Add a schema-versioned, conflict-validated settings disposition for exact
   map-key absence, beginning with user-level plugin activation and preserving
@@ -113,23 +113,23 @@ fleet, topology, or operating environment.
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown
   resource types fail before mutation.
-- [ ] Harness-only, harness-plus-supplemental, duplicate-adoption, unresolved
+- [x] Harness-only, harness-plus-supplemental, duplicate-adoption, unresolved
   relationship, and cross-repository conflict fixtures prove #1418.
 - [ ] Repeated projection from the same declarations produces byte-stable
   derived views.
 - [ ] Plan and apply touch only resources named by the selected scope and report
   every skipped or blocked dependency.
-- [ ] CWD-project-plus-supplemental, explicit-single-repo, and all-projects
+- [x] CWD-project-plus-supplemental, explicit-single-repo, and all-projects
   fixtures prove that bootstrap includes required relationship packages without
   executing packages from unrelated projects (#1418, #1455).
-- [ ] Anchor and linked-worktree CWDs resolve the same adopted project scope.
-- [ ] Entering a supplemental repository directly does not pull its requiring
+- [x] Anchor and linked-worktree CWDs resolve the same adopted project scope.
+- [x] Entering a supplemental repository directly does not pull its requiring
   harness back into scope, and supplemental relationships are not traversed
   transitively.
-- [ ] An unavailable or unregistered required supplement blocks bare reconcile
+- [x] An unavailable or unregistered required supplement blocks bare reconcile
   before module execution and names exact `--repo` as the local-only escape
   hatch.
-- [ ] Only an explicit active relationship to a canonical registered repository
+- [x] Only an explicit active relationship to a canonical registered repository
   can add a second repository's modules to bare `restore --apply`.
 - [ ] Interrupted reconciliation resumes safely and a second successful run is
   a no-op.
@@ -173,3 +173,15 @@ behavioral parity is demonstrated.
   bare reconciliation includes only that project's required supplemental
   package repositories. Explicit `--repo` remains the physical-repository escape
   hatch, and `--all-projects` remains the full machine union.
+
+### 2026-08-31 - Relationship-aware reconcile implemented
+
+- Added a shared one-hop supplement resolver used by full discovery and
+  project-local reconciliation, preserving canonical registration, source
+  provenance, deduplication, and fail-loud binding behavior.
+- Bare `plan`, `validate`, and `restore` now include an adopted project's direct
+  required supplement; explicit `--repo` remains exact and `--all-projects`
+  remains the full union.
+- Added linked-worktree, standalone clone, non-transitive relationship,
+  unavailable supplement, and explicit-scope coverage. The full agent-machines
+  suite passes.
