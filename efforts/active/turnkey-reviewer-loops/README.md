@@ -293,3 +293,20 @@ declarative expansion follows only after that composition is proven.
   while mutable commands and capacity settings reconcile in place. The
   self-hosted repository now consumes this declaration instead of three
   hand-composed registrar files.
+
+### 2026-09-01 — First declaration controls
+
+- Added a thin `agent-dispatch reviewer-loop` control surface over the
+  declaration: `inspect` shows its effective source/evaluator/worker units,
+  `disable` and `enable` atomically apply the existing machine-local supervisor
+  overrides to the whole loop, and `side-load` invokes the declaration's
+  emitter-owned on-demand path without creating a parallel registration.
+- Control operations resolve the declaration's actual registrar owner rather
+  than guessing from a checkout path, remain local to the current host and
+  environment, and refuse side-load while the loop is overridden off.
+  Cross-process override mutations are serialized so concurrent emergency
+  disables cannot discard one another.
+- The remaining control-surface work is setup/adoption plus joined
+  status/doctor diagnostics; this slice deliberately reuses the existing
+  declaration, pointer, override, emitter, and task stores rather than adding a
+  reviewer-loop database.
