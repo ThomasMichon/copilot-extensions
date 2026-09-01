@@ -184,6 +184,7 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
                 "evaluator": {"evaluator_spec": {"rules": []}, "interval": 30},
                 "pool": {
                     "max_active_processes": 2,
+                    "additional_labels": ["review-inbox", "external-review"],
                     "body": {"type": "headless", "agent": "reviewer"},
                 },
             }
@@ -205,8 +206,32 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
     assert evaluator.spec["repo"] == "github.com/example/project"
     assert evaluator.spec["evaluator_ref"] == "example-review-lifecycle"
     assert workers.repos == "github.com/example/project"
-    assert workers.labels == ("external-review",)
+    assert workers.labels == ("external-review", "review-inbox")
     assert workers.concurrency == 2
+
+
+def test_reviewer_loop_rejects_invalid_additional_labels(tmp_path):
+    path = tmp_path / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {"command": ["reviews"], "interval_seconds": 60},
+                "evaluator": {"evaluator_spec": {"rules": []}},
+                "pool": {
+                    "max_active_processes": 1,
+                    "additional_labels": ["review-inbox", ""],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RegistrarError, match="additional_labels"):
+        read_declaration_file_set(path)
 
 
 @pytest.mark.parametrize(
