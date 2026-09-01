@@ -536,7 +536,7 @@ def test_stands_down_when_active_hook_plugin_has_no_declaration(tmp_path: Path) 
         [("legacy", legacy), ("context-injection", aggregator)],
     )
 
-    assert json.loads(result.stdout) == {}
+    assert "POLICY" in json.loads(result.stdout)["additionalContext"]
     assert "no complete context declaration" in result.stderr
 
 
