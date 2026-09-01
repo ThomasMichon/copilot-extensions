@@ -87,8 +87,8 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
             status_code=409,
             detail=(
                 "The authoritative worktree head is a represented session; "
-                "represented-session result parity is unavailable in this "
-                "protocol generation"
+                "use the represented result surface or the result CLI's "
+                "automatic target selection"
             ),
         )
     if ownership is None and not candidates:
