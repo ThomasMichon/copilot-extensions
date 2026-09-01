@@ -21,11 +21,14 @@ Checks (all stdlib, no dependencies):
                             anti-self-delegation line; MCP-owning agents also
                             carry an MCP-readiness section, and agent-mcp-backed
                             agents name an equivalent materialized fallback.
-  5. secrets             -- a secret-looking key is assigned a literal value
+  5. MCP plugin recovery -- a plugin that packages an MCP-owning agent also
+                            packages a discoverable MCP troubleshooting skill
+                            and documents dependencies/prerequisites in README.
+  6. secrets             -- a secret-looking key is assigned a literal value
                             (not an env-var / placeholder) in a scanned file.
-  6. raw IPs             -- an ssh/scp/rsync command targets a raw IPv4 literal
+  7. raw IPs             -- an ssh/scp/rsync command targets a raw IPv4 literal
                             instead of a configured alias.
-  7. session context     -- with `--from-settings`, active session-start plugins
+  8. session context     -- with `--from-settings`, active session-start plugins
                             are classified by declared aggregation role; unsafe
                             multi-output stacks and order-dependent aggregate
                             authorities are rejected statically.
@@ -118,6 +121,18 @@ MCP_FALLBACK_DISABLED = re.compile(
     r"(?i)materialized\s+(cli\s+)?fallback\s*:\s*disabled\b.{0,120}"
     r"\b(gate|conditional|authorization)\b",
 )
+MCP_RECOVERY_PURPOSE = re.compile(
+    r"(?i)\b(troubleshoot\w*|diagnos\w*|debug\w*|repair\w*|recover\w*)\b",
+)
+MCP_SETUP_PURPOSE = re.compile(r"(?i)\b(setup|set(?:ting)?[- ]?up)\b")
+EXPLICIT_MCP_REFERENCE = re.compile(r"(?i)\bMCP\b|mcp-servers|agent-mcp")
+BRIDGE_REFERENCE = re.compile(r"(?i)\bbridge\b")
+README_DEPENDENCY_HEADING = re.compile(
+    r"(?im)^(?P<marks>#{1,6})\s+[^\n]*\b("
+    r"dependenc(?:y|ies)|prerequisit(?:e|es)|requirements?|requires?|"
+    r"companion(?:\s+plugins?)?"
+    r")\b[^\n]*$",
+)
 
 
 def has_mcp_fallback(text: str) -> bool:
@@ -140,6 +155,96 @@ def has_mcp_fallback(text: str) -> bool:
             continue
         return True
     return False
+
+
+def has_mcp_troubleshooting_skill(plugin_root: Path) -> bool:
+    """Whether a plugin ships a discoverable skill for its MCP failure path."""
+    for skill_file in sorted(plugin_root.glob("skills/*/SKILL.md")):
+        text = skill_file.read_text(encoding="utf-8", errors="replace")
+        fm = split_frontmatter(text)
+        if fm is None:
+            continue
+        frontmatter, _ = fm
+        identity = " ".join(filter(None, (
+            get_field(frontmatter, "name"),
+            get_field_block(frontmatter, "description"),
+        )))
+        explicit_mcp = EXPLICIT_MCP_REFERENCE.search(identity)
+        recovery = MCP_RECOVERY_PURPOSE.search(identity)
+        setup = MCP_SETUP_PURPOSE.search(identity)
+        if (
+            (recovery and (explicit_mcp or BRIDGE_REFERENCE.search(identity)))
+            or (setup and explicit_mcp)
+        ):
+            return True
+    return False
+
+
+def strip_markdown_fences(text: str) -> str:
+    """Remove balanced or trailing fenced blocks before heading inspection."""
+    kept: list[str] = []
+    in_fence = False
+    fence_char = ""
+    fence_length = 0
+    fence_indent = ""
+    for line in text.splitlines(keepends=True):
+        marker = re.match(r"^(\s*)(`{3,}|~{3,})", line)
+        if not in_fence:
+            if marker:
+                in_fence = True
+                fence_indent = marker.group(1)
+                fence_char = marker.group(2)[0]
+                fence_length = len(marker.group(2))
+                continue
+            kept.append(line)
+            continue
+        closing = re.match(
+            rf"^{re.escape(fence_indent)}{re.escape(fence_char)}"
+            rf"{{{fence_length},}}\s*$",
+            line,
+        )
+        if closing:
+            in_fence = False
+    return "".join(kept)
+
+
+def readme_documents_dependencies(plugin_root: Path) -> bool:
+    """Whether the plugin README has an explicit dependency/prerequisite section."""
+    readme = plugin_root / "README.md"
+    if not readme.is_file():
+        return False
+    text = strip_markdown_fences(
+        readme.read_text(encoding="utf-8", errors="replace")
+    )
+    for heading in README_DEPENDENCY_HEADING.finditer(text):
+        section_start = heading.end()
+        level = len(heading.group("marks"))
+        next_heading = re.search(
+            rf"(?m)^#{{1,{level}}}\s+",
+            text[section_start:],
+        )
+        section_end = (
+            section_start + next_heading.start()
+            if next_heading
+            else len(text)
+        )
+        if text[section_start:section_end].strip():
+            return True
+    return False
+
+
+def plugin_root_for_agent(
+    root: Path,
+    agent_file: Path,
+    source: PluginSource | None,
+) -> Path | None:
+    """Return the package root for a plugin-owned agent, else None."""
+    if source is not None:
+        return source.payload_root
+    candidate = agent_file.parent.parent
+    if candidate.parent.resolve() == (root.resolve() / "plugins"):
+        return candidate
+    return None
 
 
 def frontmatter_tool_names(frontmatter: str) -> set[str] | None:
@@ -1408,6 +1513,7 @@ def scan_agents(
     # take precedence if the same payload is also discovered as installed.
     agent_files: dict[Path, PluginSource | None] = {}
     owned_plugin_agents: set[tuple[str, str]] = set()
+    checked_mcp_plugins: set[Path] = set()
     for af in (
         set(root.glob(".github/agents/*.agent.md"))
         | set(root.glob(".claude/agents/*.agent.md"))
@@ -1476,6 +1582,26 @@ def scan_agents(
         has_mcp = bool(re.search(
             r"(?im)^\s*mcp-servers\s*:", frontmatter
         ))
+        plugin_root = plugin_root_for_agent(root, af, source)
+        if has_mcp and plugin_root is not None:
+            plugin_key = plugin_root.resolve()
+            if plugin_key not in checked_mcp_plugins:
+                checked_mcp_plugins.add(plugin_key)
+                if not has_mcp_troubleshooting_skill(plugin_root):
+                    add(
+                        "mcp-troubleshooting-skill",
+                        "plugin packages an MCP-owning agent but has no "
+                        "discoverable troubleshooting skill whose name or "
+                        "description identifies setup/diagnosis/repair and "
+                        "names the MCP or bridge failure path",
+                    )
+                if not readme_documents_dependencies(plugin_root):
+                    add(
+                        "plugin-readme-dependencies",
+                        "plugin packages an MCP-owning agent but its README.md "
+                        "has no explicit Dependencies, Prerequisites, or "
+                        "Requirements section",
+                    )
         readiness_match = re.search(
             r"(?ims)^##\s+MCP\s+Readiness\b(.*?)(?=^##\s|\Z)",
             body,

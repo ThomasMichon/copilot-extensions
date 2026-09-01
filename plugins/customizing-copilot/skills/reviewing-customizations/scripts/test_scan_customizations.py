@@ -945,6 +945,319 @@ def test_external_plugin_agent_mcp_checks_are_advisory(tmp_path: Path):
     assert all(f.severity == scan.WARNING for f in findings.values())
 
 
+def _mcp_plugin(
+    plugin: Path,
+    *,
+    troubleshooting_skill: bool,
+    dependency_section: bool,
+) -> None:
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "name: service\n"
+        "description: Service agent.\n"
+        "tools: ['read']\n"
+        "mcp-servers:\n"
+        "  service:\n"
+        "    command: service-mcp\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health and preserve the exact error.\n",
+        encoding="utf-8",
+    )
+    readme = "# Service plugin\n"
+    if dependency_section:
+        readme += "\n## Dependencies & prerequisites\n\n- `service-mcp`\n"
+    (plugin / "README.md").write_text(readme, encoding="utf-8")
+    if troubleshooting_skill:
+        _skill(
+            plugin / "skills",
+            "troubleshooting-service-mcp",
+            triggers=["service mcp failed"],
+            desc=(
+                "Diagnose and repair Service MCP bridge startup, "
+                "authentication, and catalog failures."
+            ),
+        )
+
+
+def test_controlled_mcp_plugin_requires_recovery_skill_and_dependencies(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = repo / ".ai" / "service"
+    _mcp_plugin(
+        plugin,
+        troubleshooting_skill=False,
+        dependency_section=False,
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/service",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    findings = {
+        finding.check: finding
+        for finding in report.findings
+        if finding.check in {
+            "mcp-troubleshooting-skill",
+            "plugin-readme-dependencies",
+        }
+    }
+    assert set(findings) == {
+        "mcp-troubleshooting-skill",
+        "plugin-readme-dependencies",
+    }
+    assert all(finding.severity == scan.BLOCKING for finding in findings.values())
+
+
+def test_controlled_mcp_plugin_with_recovery_contract_passes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = repo / ".ai" / "service"
+    _mcp_plugin(
+        plugin,
+        troubleshooting_skill=True,
+        dependency_section=True,
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/service",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    assert not any(
+        finding.check in {
+            "mcp-troubleshooting-skill",
+            "plugin-readme-dependencies",
+        }
+        for finding in report.findings
+    )
+
+
+def test_external_mcp_plugin_recovery_findings_are_advisory(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = tmp_path / "installed" / "mkt" / "service"
+    _mcp_plugin(
+        plugin,
+        troubleshooting_skill=False,
+        dependency_section=False,
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="mkt/service",
+        controlled=False,
+        source="https://github.com/example/service",
+        version="1.2.3",
+    )
+
+    report = scan.run(repo, [source])
+
+    findings = {
+        finding.check: finding
+        for finding in report.findings
+        if finding.check in {
+            "mcp-troubleshooting-skill",
+            "plugin-readme-dependencies",
+        }
+    }
+    assert set(findings) == {
+        "mcp-troubleshooting-skill",
+        "plugin-readme-dependencies",
+    }
+    assert all(finding.severity == scan.WARNING for finding in findings.values())
+    assert all(
+        "cannot edit its installed payload" in finding.message
+        for finding in findings.values()
+    )
+
+
+def test_loose_project_mcp_agent_has_no_plugin_recovery_requirement(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "name: service\n"
+        "description: Service agent.\n"
+        "tools: ['read']\n"
+        "mcp-servers:\n"
+        "  service: {}\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health and preserve the exact error.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        finding.check in {
+            "mcp-troubleshooting-skill",
+            "plugin-readme-dependencies",
+        }
+        for finding in report.findings
+    )
+
+
+def test_suite_mcp_plugin_layout_gets_recovery_checks(tmp_path: Path):
+    repo = tmp_path / "repo"
+    plugin = repo / "plugins" / "service"
+    _mcp_plugin(
+        plugin,
+        troubleshooting_skill=False,
+        dependency_section=False,
+    )
+
+    report = scan.run(Path(str(repo)))
+
+    checks = [
+        finding.check
+        for finding in report.findings
+        if finding.check in {
+            "mcp-troubleshooting-skill",
+            "plugin-readme-dependencies",
+        }
+    ]
+    assert sorted(checks) == [
+        "mcp-troubleshooting-skill",
+        "plugin-readme-dependencies",
+    ]
+
+
+def test_mcp_recovery_check_is_deduplicated_per_plugin(tmp_path: Path):
+    repo = tmp_path / "repo"
+    plugin = repo / ".ai" / "service"
+    _mcp_plugin(
+        plugin,
+        troubleshooting_skill=False,
+        dependency_section=True,
+    )
+    second = plugin / "agents" / "second.agent.md"
+    second.write_text(
+        (plugin / "agents" / "service.agent.md").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/service",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    findings = [
+        finding
+        for finding in report.findings
+        if finding.check == "mcp-troubleshooting-skill"
+    ]
+    assert len(findings) == 1
+
+
+def test_non_troubleshooting_mcp_skill_does_not_satisfy_recovery(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    plugin = repo / ".ai" / "service"
+    _mcp_plugin(
+        plugin,
+        troubleshooting_skill=False,
+        dependency_section=True,
+    )
+    _skill(
+        plugin / "skills",
+        "using-service",
+        triggers=["use service"],
+        desc="Use the Service MCP bridge for normal data reads.",
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="repo-plugins/service",
+        controlled=True,
+    )
+
+    report = scan.run(repo, [source])
+
+    assert any(
+        finding.check == "mcp-troubleshooting-skill"
+        for finding in report.findings
+    )
+
+
+def test_readme_dependency_heading_requires_real_content(tmp_path: Path):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "README.md").write_text(
+        "# Plugin\n\n"
+        "```markdown\n## Dependencies\n- fake\n```\n\n"
+        "## Dependencies\n\n"
+        "## Usage\n\nNothing here.\n",
+        encoding="utf-8",
+    )
+
+    assert not scan.readme_documents_dependencies(plugin)
+
+
+def test_readme_dependency_heading_counts_nested_subsections(tmp_path: Path):
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "README.md").write_text(
+        "# Plugin\n\n"
+        "## Dependencies\n\n"
+        "### Required plugins\n\n"
+        "- `agent-mcp`\n\n"
+        "## Usage\n",
+        encoding="utf-8",
+    )
+
+    assert scan.readme_documents_dependencies(plugin)
+
+
+def test_generic_setup_bridge_skill_does_not_satisfy_mcp_recovery(
+    tmp_path: Path,
+):
+    plugin = tmp_path / "plugin"
+    _skill(
+        plugin / "skills",
+        "setting-up-service",
+        triggers=["set up service"],
+        desc="Set up the generic service bridge for normal use.",
+    )
+
+    assert not scan.has_mcp_troubleshooting_skill(plugin)
+
+
+def test_non_mcp_plugin_agent_has_no_recovery_requirement(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / "plugins" / "service" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\nname: service\ndescription: Service agent.\ntools: ['read']\n"
+        "---\n\n# Service\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        finding.check in {
+            "mcp-troubleshooting-skill",
+            "plugin-readme-dependencies",
+        }
+        for finding in report.findings
+    )
+
+
 def test_controlled_plugin_text_files_get_secret_checks(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

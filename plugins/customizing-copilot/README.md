@@ -79,6 +79,9 @@ Provides:
   enforced locally; enabled external plugin agents produce actionable advisory
   findings without editing installed payloads, while editable suite source
   supersedes duplicate installed copies.
+- MCP plugin recovery validation: plugin-packaged MCP agents must ship a
+  discoverable troubleshooting skill and document dependencies/prerequisites in
+  the plugin README; external plugin gaps remain advisory.
 - A shared runtime-context reference for relocatable hook, MCP, extension, and
   LSP entry points.
 - Guidance for both loose repo customizations and plugin-packaged

@@ -201,6 +201,13 @@ fallback behavior:
    `--no-serve` and verify identity/capability before acting. If both surfaces
    fail, report both errors and stop. This fallback does not bypass an auth
    failure, authorization boundary, confirmation gate, or upstream outage.
+3. **Plugin-owned troubleshooting path.** When the agent is packaged in a
+   plugin, that plugin must ship a discoverable troubleshooting/diagnostic skill
+   for the MCP or bridge failure path. Keep detailed setup, authentication,
+   catalog, and recovery procedures there rather than bloating the agent body.
+   The plugin `README.md` must also contain an explicit Dependencies,
+   Prerequisites, or Requirements section naming required companion plugins,
+   runtimes/CLIs, authentication, and any operator setup.
 Start from this compact body template, then substitute the real fleet, probe,
 and identity:
 
@@ -260,6 +267,10 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
       its materialized fleet, uses the same bridge config/identity/top-level
       `tools:` filter, probes a read-only stub with `--no-serve`, and stops only
       after both surfaces fail. Raw product/API bypasses are not accepted.
+- [ ] **Plugin recovery is discoverable.** A plugin-packaged MCP agent has a
+      troubleshooting/diagnostic skill that covers its MCP or bridge failure
+      modes, and the plugin README explicitly documents dependencies and
+      prerequisites.
 - [ ] **No frontmatter-only identity.** Auth/identity-affecting env lives in the
       bridge config or overlay, not only in `mcp-servers.env`.
 - [ ] **Fleet provenance matches.** `manifest.json.bridge` resolves to the same
