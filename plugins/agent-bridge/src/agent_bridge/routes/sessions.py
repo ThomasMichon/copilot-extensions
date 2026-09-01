@@ -122,11 +122,13 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
                 ),
             )
         return session
-    if ownership:
-        session = mgr.get_session(ownership.get("session_id") or "")
-        if session is not None:
-            return session
-    return candidates[0] if candidates else None
+    raise HTTPException(
+            status_code=409,
+            detail=(
+                "The authoritative owned session head could not be resolved "
+                "without guessing"
+            ),
+    )
 
 
 def _tool_progress_sse(active: dict, now: float) -> str:

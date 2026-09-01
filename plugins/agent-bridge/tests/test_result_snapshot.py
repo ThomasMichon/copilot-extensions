@@ -244,6 +244,42 @@ def test_worktree_handle_prefers_ground_layer_head_over_reservation(
     assert response.json()["identity"]["snapshot_session_id"] == "sess-2"
 
 
+def test_ambiguous_worktree_without_ground_head_fails_explicitly(
+    client, app, monkeypatch
+) -> None:
+    mgr, _predecessor = _seed_session(app)
+    successor = Session(
+        "sess-2",
+        "bright-river",
+        SpawnTarget(type="local", cwd="/wt", worktree_id="wt-1"),
+        "test-agent",
+    )
+    successor.status = SessionStatus.IDLE
+    successor.event_log = EventLog(
+        db=mgr.db, session_id="sess-2", worktree_id="wt-1"
+    )
+    mgr._sessions["sess-2"] = successor
+    mgr.db.create_session(
+        "sess-2", "bright-river", "test-agent", "/wt", "local", "idle", time.time()
+    )
+    monkeypatch.setattr(
+        session_routes,
+        "resolve_head",
+        lambda _worktree_id: HeadInfo(
+            active=False,
+            occupied=False,
+            head_session=None,
+            state=None,
+            tracked=False,
+        ),
+    )
+
+    response = client.get("/api/v1/sessions/wt-1/result")
+
+    assert response.status_code == 409
+    assert "without guessing" in response.json()["detail"]
+
+
 def test_worktree_handle_does_not_fall_back_past_unknown_authoritative_head(
     client, app, monkeypatch
 ) -> None:
