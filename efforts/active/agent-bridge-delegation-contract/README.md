@@ -140,7 +140,7 @@ new writer or default is enabled.
 
 ### 2026-08-31 — Kickoff
 
-- Claimed #1449 with dispatch task `2cef4ca9d550495095961fde1d512753`.
+- Claimed #1449 through the repository's issue-claim protocol.
 - Selected a documentation-only contract baseline as the first achievable
   stretch.
 - No runtime behavior changes are in scope.
