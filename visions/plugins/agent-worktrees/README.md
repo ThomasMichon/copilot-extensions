@@ -6,7 +6,7 @@
   session is live, and owns the transports that produce that truth.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-08-26
+- **Last revised:** 2026-09-01
 - **Reality docs:** the agent-worktrees plugin `docs/` (worktree lifecycle +
   tracking) · the Worktree-Picker performance/IO effort (dotfiles#948) as the
   most recent reality on the state store
@@ -64,6 +64,14 @@ prose and never an event stream. The worktree's *current* disposition is simply 
 worktree can say what it was doing — and hand that to a successor — **from its own
 record alone**.
 
+### Opt-in launch profile assignment
+An operator may explicitly arm a named assignment policy over user-owned Copilot
+profiles. Eligible **new session generations** then receive a durable,
+replayable profile assignment before launch; ordinary resume retains the bound
+session's assignment, while a handoff successor is a new generation and draws
+again. The policy is default-off, local-first, and profile-generic: model,
+effort, context, and backend details remain ordinary profile arguments rather
+than hard-coded experiment concepts.
 
 ### The aggregate is derived — single-writer slots, one reducer
 The worktree's **aggregate** status and current-session (head) are **not a shared
@@ -222,6 +230,21 @@ the **tail** of it rather than a separate cell. A worktree therefore always carr
 an agent-digestible account of what it has recently been doing, across the sessions
 that worked it.
 
+### profile assignment is explicit and replayable
+Manual profile selection remains the default. When an operator arms a profile
+assignment policy, selection happens before eligible new-session argv is built
+and is persisted as lifecycle identity rather than inferred later from mutable
+configuration. Retry and resume never redraw the same generation; concurrent
+draws are atomic; missing or invalid profiles fail closed. Each installation can
+stand alone without a coordinator, while machine-readable assignment metadata
+allows optional downstream analysis.
+
+Only user-owned configuration may arm assignment. Repository configuration may
+provide a default-off template or narrow an already armed user pool; it never
+activates assignment or introduces a profile the user did not define. Explicit
+profile launches, recovery/emergency launches, and system sessions are always
+outside assignment.
+
 ## Behaviors
 
 ### source remotes are not coordination stores
@@ -339,6 +362,9 @@ accidentally serve its state or actions.
   references) — it is **not** a transcript, an event stream, or an audit log, and
   must stay bounded. Rich session history and replay are the session-sync / record
   domain, not this store.
+- **No implicit randomization.** Profile assignment never changes a launch unless
+  an operator explicitly arms a policy. It is not a scheduler, model benchmark,
+  analytics engine, or requirement for a shared assignment service.
 - **Not the presentation host.** agent-worktrees owns and contributes Worktrees
   semantics, but does not render or host the interactive surface, carry a TUI
   framework, own human terminal/multiplexer choreography, or require the
