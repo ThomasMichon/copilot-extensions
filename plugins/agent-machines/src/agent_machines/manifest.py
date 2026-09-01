@@ -147,7 +147,7 @@ class RequirementPackage:
         """
         if not self.gate or "*" in self.gate:
             return True
-        return machine.lower() in {g.lower() for g in self.gate}
+        return machine.casefold() in {g.casefold() for g in self.gate}
 
     def repo_root(self) -> Path | None:
         """Derive the repo root from a canonical or legacy package path."""
@@ -340,13 +340,54 @@ def load_package(
                     f"of process names"
                 )
 
+    if "per-machine" in raw and "per_machine" in raw:
+        raise ManifestError(
+            f"{path}: declare only one of 'per-machine' or 'per_machine'"
+        )
+    raw_per_machine = (
+        raw["per-machine"]
+        if "per-machine" in raw
+        else raw.get("per_machine", {})
+    )
+    per_machine = {} if raw_per_machine is None else raw_per_machine
+    if not isinstance(per_machine, dict):
+        raise ManifestError(
+            f"{path}: 'per-machine'/'per_machine' must be a mapping"
+        )
+    normalized_per_machine: dict[str, Any] = {}
+    original_machine_keys: dict[str, str] = {}
+    for machine_key, overlay in per_machine.items():
+        if not isinstance(overlay, dict):
+            raise ManifestError(
+                f"{path}: per-machine.{machine_key} must be a mapping"
+            )
+        if (
+            not isinstance(machine_key, str)
+            or not machine_key.strip()
+            or machine_key != machine_key.strip()
+        ):
+            raise ManifestError(
+                f"{path}: per-machine keys must be non-empty strings "
+                "without surrounding whitespace"
+            )
+        folded = machine_key.casefold()
+        previous = original_machine_keys.get(folded)
+        if previous is not None:
+            raise ManifestError(
+                f"{path}: per-machine keys {previous!r} and {machine_key!r} "
+                "normalize to the same case-insensitive identity"
+            )
+        original_machine_keys[folded] = machine_key
+        normalized_per_machine[folded] = overlay
+    per_machine = normalized_per_machine
+
     return RequirementPackage(
         name=name,
         schema_version=schema,
         manage=manage,
         gate=[str(g) for g in gate],
         aliases=raw.get("aliases") or {},
-        per_machine=raw.get("per-machine") or raw.get("per_machine") or {},
+        per_machine=per_machine,
         bootstrap_floor=raw.get("bootstrap-floor") or raw.get("bootstrap_floor") or {},
         exclude=list(raw.get("exclude") or []),
         modules=modules,
@@ -382,7 +423,7 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
     unchanged. This is the *layer-within-repo* step that must precede any
     cross-repo union.
     """
-    overlay = pkg.per_machine.get(machine) or {}
+    overlay = pkg.per_machine.get(machine.casefold()) or {}
     manage_overlay = overlay.get("manage", overlay) if isinstance(overlay, dict) else {}
     if not isinstance(manage_overlay, dict):
         manage_overlay = {}

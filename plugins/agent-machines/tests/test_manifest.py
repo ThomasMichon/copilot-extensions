@@ -41,6 +41,27 @@ def test_gate_match_is_case_insensitive(tmp_path):
     assert not pkg.applies_to("box-2")
 
 
+def test_gate_and_overlay_share_casefold_semantics(tmp_path):
+    data = base_package(
+        gate=["Straße"],
+        **{
+            "per-machine": {
+                "Straße": {
+                    "manage": {
+                        "copilot.settings": {"values": {"effortLevel": "low"}}
+                    }
+                }
+            }
+        },
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+    package = load_package(path)
+
+    assert package.applies_to("STRASSE")
+    resolved = resolve_for_machine(package, "STRASSE")
+    assert resolved.manage["copilot.settings"]["values"]["effortLevel"] == "low"
+
+
 @pytest.mark.parametrize("schema_version", [99, True, 1.0, "2"])
 def test_bad_schema_version_rejected(tmp_path, schema_version):
     path = write_package(
@@ -122,7 +143,7 @@ def test_per_machine_layer_overrides_and_unsets(tmp_path):
         gate=["box-1", "box-2"],
         **{
             "per-machine": {
-                "box-2": {
+                "Box-2": {
                     "manage": {
                         "copilot.settings": {"values": {"model": None, "effortLevel": "low"}}
                     }
@@ -136,7 +157,79 @@ def test_per_machine_layer_overrides_and_unsets(tmp_path):
     base = resolve_for_machine(pkg, "box-1")
     assert base.manage["copilot.settings"]["values"]["model"] == "opus"
 
-    layered = resolve_for_machine(pkg, "box-2")
-    values = layered.manage["copilot.settings"]["values"]
-    assert "model" not in values  # null unset
-    assert values["effortLevel"] == "low"  # overridden
+    for machine in ("box-2", "BOX-2"):
+        layered = resolve_for_machine(pkg, machine)
+        values = layered.manage["copilot.settings"]["values"]
+        assert "model" not in values  # null unset
+        assert values["effortLevel"] == "low"  # overridden
+
+
+def test_per_machine_case_duplicates_rejected(tmp_path):
+    data = base_package(
+        **{
+            "per-machine": {
+                "box-2": {"manage": {}},
+                "BOX-2": {"manage": {}},
+            }
+        },
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="same case-insensitive identity"):
+        load_package(path)
+
+
+@pytest.mark.parametrize("machine_key", ["", "   ", " box-2", "box-2 "])
+def test_per_machine_invalid_whitespace_rejected(tmp_path, machine_key):
+    data = base_package(
+        **{"per-machine": {machine_key: {"manage": {}}}},
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="without surrounding whitespace"):
+        load_package(path)
+
+
+def test_per_machine_dual_spellings_rejected(tmp_path):
+    data = base_package(
+        **{
+            "per-machine": {},
+            "per_machine": {"box-2": {"manage": {}}},
+        },
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="declare only one"):
+        load_package(path)
+
+
+def test_per_machine_explicit_null_is_empty(tmp_path):
+    data = base_package(**{"per-machine": None})
+    path = write_package(tmp_path, "d.yaml", data)
+
+    package = load_package(path)
+
+    assert package.per_machine == {}
+
+
+@pytest.mark.parametrize("spelling", ["per-machine", "per_machine"])
+def test_per_machine_non_mapping_container_rejected(tmp_path, spelling):
+    data = base_package(**{spelling: "invalid"})
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(
+        ManifestError,
+        match="'per-machine'/'per_machine' must be a mapping",
+    ):
+        load_package(path)
+
+
+@pytest.mark.parametrize("overlay", ["invalid", [], 1, False])
+def test_per_machine_non_mapping_overlay_rejected(tmp_path, overlay):
+    data = base_package(
+        **{"per-machine": {"box-2": overlay}},
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="must be a mapping"):
+        load_package(path)
