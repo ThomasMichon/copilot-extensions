@@ -83,8 +83,10 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(_args: argparse.Namespace) -> int:
+    from collections import defaultdict
+
     from . import __version__
-    from .config import BRIDGES_DIR, discover_plugin_bridges
+    from .config import BRIDGES_DIR, discover_plugin_bridge_candidates
     print(f"agent-mcp {__version__}")
     print("prerequisites:")
     for tool in ("python", "az", "gh", "git"):
@@ -103,12 +105,28 @@ def _cmd_status(_args: argparse.Namespace) -> int:
             print("  (no bridge config files)")
     else:
         print("  (directory does not exist yet)")
-    plugin_bridges = discover_plugin_bridges()
+    plugin_bridges: dict[str, list[Path]] = defaultdict(list)
+    for name, path in discover_plugin_bridge_candidates():
+        plugin_bridges[name].append(path)
+    ambiguous = False
     if plugin_bridges:
         print("plugin-shipped bridges:")
-        for name, path in sorted(plugin_bridges.items()):
-            print(f"  - {name} ({path})")
-    return 0
+        for name, paths in sorted(plugin_bridges.items()):
+            duplicate = len(paths) > 1
+            ambiguous = ambiguous or duplicate
+            marker = " [AMBIGUOUS]" if duplicate else ""
+            print(f"  - {name}{marker}")
+            for path in paths:
+                provider = f"{path.parents[1].name}@{path.parents[2].name}"
+                print(f"      {provider}: {path}")
+            if duplicate:
+                stale = ", ".join(
+                    f"`copilot plugin uninstall "
+                    f"{path.parents[1].name}@{path.parents[2].name}`"
+                    for path in paths
+                )
+                print(f"      cleanup candidates: {stale}")
+    return 1 if ambiguous else 0
 
 
 def _cmd_installer_readiness(_args: argparse.Namespace) -> int:

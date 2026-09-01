@@ -176,6 +176,7 @@ def has_anti_self_delegation(text: str, agent_name: str) -> bool:
     ))
 
 CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".psd1", ".env", ".ini", ".conf"}
+MCP_BRIDGE_SUFFIXES = {".json", ".yaml", ".yml"}
 # Heavy / irrelevant trees to skip when walking a large monorepo.
 PRUNE_DIRS = {
     ".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__",
@@ -580,6 +581,72 @@ class Report:
     @property
     def blocking(self) -> int:
         return sum(1 for f in self.findings if f.severity == BLOCKING)
+
+
+def _mcp_bridge_name(path: Path) -> str:
+    name = path.name
+    lowered = name.casefold()
+    for suffix in (".yaml", ".yml", ".json"):
+        if lowered.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if name.casefold().endswith(".mcp"):
+        name = name[:-4]
+    return name.casefold() if os.name == "nt" else name
+
+
+def scan_installed_mcp_bridge_collisions(
+    installed_root: Path,
+    enabled_plugins: dict[str, bool],
+    report: Report,
+) -> None:
+    """Report bridge names whose installed providers make runtime lookup ambiguous."""
+    candidates: dict[str, list[tuple[str, Path]]] = {}
+    if not installed_root.is_dir():
+        return
+    for marketplace in sorted(installed_root.iterdir()):
+        if not marketplace.is_dir():
+            continue
+        for plugin in sorted(marketplace.iterdir()):
+            if not plugin.is_dir():
+                continue
+            identity = f"{plugin.name}@{marketplace.name}"
+            for subdir in ("agents", "mcp"):
+                root = plugin / subdir
+                if not root.is_dir():
+                    continue
+                for path in sorted(root.iterdir()):
+                    if path.is_file() and path.suffix.casefold() in MCP_BRIDGE_SUFFIXES:
+                        candidates.setdefault(_mcp_bridge_name(path), []).append(
+                            (identity, path)
+                        )
+    for name, providers in sorted(candidates.items()):
+        if len(providers) < 2:
+            continue
+        states = ", ".join(
+            f"{identity} ({'enabled' if enabled_plugins.get(identity) else 'disabled'})"
+            for identity, _path in providers
+        )
+        disabled = [
+            identity for identity, _path in providers
+            if not enabled_plugins.get(identity)
+        ]
+        remediation = (
+            " Remove stale disabled payloads with "
+            + ", ".join(
+                f"`copilot plugin uninstall {identity}`" for identity in disabled
+            )
+            + "."
+            if disabled
+            else " Disable or rename one provider; all installed providers are enabled."
+        )
+        report.add(
+            WARNING,
+            "mcp-bridge-collision",
+            providers[0][1],
+            f"bridge `{name}` has multiple installed providers: {states}."
+            f"{remediation} Do not delete installed-plugin directories manually.",
+        )
 
 
 @dataclass(frozen=True)
@@ -2011,7 +2078,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     sources: list[PluginSource] = []
+    enabled_settings: dict[str, bool] = {}
     if args.from_settings:
+        enabled_settings, _marketplaces = _merged_settings(
+            root, require_trust=True,
+        )
         sources += assemble_enabled_plugins(root, require_trust=True)
 
     plugin_dirs = list(args.include_plugins)
@@ -2026,6 +2097,12 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
 
     report = run(root, sources)
+    if args.from_settings:
+        scan_installed_mcp_bridge_collisions(
+            Path.home() / ".copilot" / "installed-plugins",
+            enabled_settings,
+            report,
+        )
     session_context = (
         scan_session_context(root, sources, report)
         if args.from_settings
