@@ -50,7 +50,7 @@ The canonical domain plans are:
 - [`plugin-process-hygiene`](../plugin-process-hygiene/README.md)
 - [`restricted-venue-targets`](../restricted-venue-targets/README.md)
 - [`review-automation-reliability`](../review-automation-reliability/README.md)
-- [`session-context-aggregation`](../session-context-aggregation/README.md)
+- [`session-context-aggregation`](../../2026/08/31%20session-context-aggregation/README.md)
 - [`test-portfolio-rationalization`](../test-portfolio-rationalization/README.md)
 - [`venue-parity`](../venue-parity/README.md)
 - [`windows-launch-hardening`](../windows-launch-hardening/README.md)
