@@ -99,6 +99,16 @@ class CoordinationReadiness:
         init=False,
     )
 
+    def __post_init__(self) -> None:
+        if self.code not in COORDINATION_READINESS_CODES:
+            raise ValueError(f"unsupported coordination readiness code: {self.code}")
+        if self.ready != (self.code == "ready"):
+            raise ValueError(
+                "coordination readiness must use code 'ready' exactly when ready"
+            )
+        if not self.ready and not self.error:
+            raise ValueError("unready coordination readiness requires an error")
+
     def as_dict(self) -> dict:
         return {
             "version": self.version,

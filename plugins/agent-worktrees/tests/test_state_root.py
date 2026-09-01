@@ -206,6 +206,33 @@ def test_coordination_readiness_accepts_bound_knowledge(fake_checkouts):
     assert result.state_root.source == "knowledge_repo"
 
 
+@pytest.mark.parametrize(
+    ("ready", "code", "error"),
+    [
+        (True, "unknown", None),
+        (True, "state_root_resolution_failed", "broken"),
+        (False, "ready", "broken"),
+        (False, "knowledge_binding_required", None),
+    ],
+)
+def test_coordination_readiness_rejects_invalid_contract(
+    ready,
+    code,
+    error,
+):
+    root = sr.StateRoot(
+        None,
+        "knowledge_repo",
+        "",
+        True,
+        True,
+        False,
+        error="unresolved",
+    )
+    with pytest.raises(ValueError):
+        sr.CoordinationReadiness(ready, code, root, error=error)
+
+
 def test_coordination_readiness_cli_is_json_default(
     monkeypatch,
     capfd,
