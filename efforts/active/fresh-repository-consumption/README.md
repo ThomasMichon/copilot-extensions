@@ -2,8 +2,8 @@
 
 - **Slug:** `fresh-repository-consumption`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/cpc-tmich-oixui-win-20260831-231240-0450` for the
-  reviewed plan; fresh serial implementation worktrees after merge
+- **Branch(es):** one reviewed plan worktree followed by fresh serial
+  implementation worktrees
 - **Created:** 2026-08-31
 - **Status:** Draft
 - **Vision:** installer `plugin-updating-and-alignment`; agent-worktrees
