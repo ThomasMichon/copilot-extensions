@@ -16,7 +16,6 @@ that pattern to this repository.
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266 |
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
 | [agent-bridge Delegation Contract](active/agent-bridge-delegation-contract/README.md) | Done; pending archive | #1449 |
-| [agent-bridge Delegated Result Snapshots](active/agent-bridge-delegated-result-snapshots/README.md) | Active | #1452 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 |
