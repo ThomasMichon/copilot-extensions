@@ -778,91 +778,101 @@ def stage_5() -> None:
     install = Path(str(cell_a["install"]))
     plugin_root = Path(str(cell_a["plugin_root"]))
     original_policy = POLICY.read_bytes()
-
-    POLICY.write_text("{\n", encoding="utf-8")
-    expect_blocked("malformed policy", payload, install)
-    POLICY.write_bytes(original_policy)
-
     maintenance = plugin_root / "maintenance"
-    maintenance.write_text("maintenance\n", encoding="utf-8")
-    expect_blocked("maintenance", payload, install)
-    maintenance.unlink()
+    foreign_activation: Path | None = None
+    try:
+        POLICY.write_text("{\n", encoding="utf-8")
+        expect_blocked("malformed policy", payload, install)
+        POLICY.write_bytes(original_policy)
 
-    requested_payload = copy_payload("payload-requested")
-    requested_stamp = stamp(
-        requested_payload,
-        "requested",
-        source_descriptor("requested"),
-        expected_namespace_generation=0,
-        expected_install_generation=0,
-    )
-    requested_install = Path(str(requested_stamp["installReceipt"]))
-    expect_blocked("requested-only", requested_payload, requested_install)
-    requested_validated = validate_install(
-        requested_install,
-        str(requested_stamp["marketplaceId"]),
-        requested_payload,
-    )
+        maintenance.write_text("maintenance\n", encoding="utf-8")
+        expect_blocked("maintenance", payload, install)
+        maintenance.unlink()
 
-    foreign_activation = Path(str(requested_validated["pluginRoot"])) / "installation-activation.json"
-    write_json(
-        foreign_activation,
-        {
-            "schema": "copilot-extensions.installation-activation",
-            "version": 1,
-            "marketplaceId": requested_stamp["marketplaceId"],
-            "pluginId": "agent-machines",
-            "mode": "namespaced",
-            "state": "active",
-            "environment": {
-                "platform": "posix" if os.name == "nt" else "windows",
-                "homeRealPath": str(PROFILE),
-                "wslDistro": None,
-            },
-            "context": str(requested_install),
-            "namespaceGeneration": requested_stamp["namespaceGeneration"],
-            "installGeneration": requested_stamp["generation"],
-            "generation": 1,
-            "legacy": {
-                "disposition": "absent",
-                "probe": {
-                    "declared": True,
-                    "result": "absent",
-                    "checkedAt": "2026-01-01T00:00:00Z",
+        requested_payload = copy_payload("payload-requested")
+        requested_stamp = stamp(
+            requested_payload,
+            "requested",
+            source_descriptor("requested"),
+            expected_namespace_generation=0,
+            expected_install_generation=0,
+        )
+        requested_install = Path(str(requested_stamp["installReceipt"]))
+        expect_blocked("requested-only", requested_payload, requested_install)
+        requested_validated = validate_install(
+            requested_install,
+            str(requested_stamp["marketplaceId"]),
+            requested_payload,
+        )
+
+        foreign_activation = (
+            Path(str(requested_validated["pluginRoot"]))
+            / "installation-activation.json"
+        )
+        write_json(
+            foreign_activation,
+            {
+                "schema": "copilot-extensions.installation-activation",
+                "version": 1,
+                "marketplaceId": requested_stamp["marketplaceId"],
+                "pluginId": "agent-machines",
+                "mode": "namespaced",
+                "state": "active",
+                "environment": {
+                    "platform": "posix" if os.name == "nt" else "windows",
+                    "homeRealPath": str(PROFILE),
+                    "wslDistro": None,
                 },
-            },
-            "createdAt": "2026-01-01T00:00:00Z",
-            "updatedAt": "2026-01-01T00:00:00Z",
-        },
-    )
-    expect_blocked("foreign activation", requested_payload, requested_install)
-    foreign_activation.unlink()
-
-    LEGACY.mkdir()
-    write_json(
-        LEGACY / ".installation-ownership.json",
-        {
-            "schema": "copilot-extensions.legacy-installation-ownership",
-            "version": 1,
-            "marketplaceId": requested_stamp["marketplaceId"],
-            "pluginId": "agent-machines",
-            "activation": {
-                "path": str(
-                    Path(str(requested_validated["pluginRoot"]))
-                    / "missing-activation.json"
-                ),
+                "context": str(requested_install),
+                "namespaceGeneration": requested_stamp["namespaceGeneration"],
+                "installGeneration": requested_stamp["generation"],
                 "generation": 1,
+                "legacy": {
+                    "disposition": "absent",
+                    "probe": {
+                        "declared": True,
+                        "result": "absent",
+                        "checkedAt": "2026-01-01T00:00:00Z",
+                    },
+                },
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z",
             },
-            "environment": {
-                "platform": "windows" if os.name == "nt" else "posix",
-                "homeRealPath": str(PROFILE),
-                "wslDistro": os.environ.get("WSL_DISTRO_NAME") or None,
+        )
+        expect_blocked("foreign activation", requested_payload, requested_install)
+        foreign_activation.unlink()
+
+        LEGACY.mkdir()
+        write_json(
+            LEGACY / ".installation-ownership.json",
+            {
+                "schema": "copilot-extensions.legacy-installation-ownership",
+                "version": 1,
+                "marketplaceId": requested_stamp["marketplaceId"],
+                "pluginId": "agent-machines",
+                "activation": {
+                    "path": str(
+                        Path(str(requested_validated["pluginRoot"]))
+                        / "missing-activation.json"
+                    ),
+                    "generation": 1,
+                },
+                "environment": {
+                    "platform": "windows" if os.name == "nt" else "posix",
+                    "homeRealPath": str(PROFILE),
+                    "wslDistro": os.environ.get("WSL_DISTRO_NAME") or None,
+                },
+                "transferredAt": "2026-01-01T00:00:00Z",
             },
-            "transferredAt": "2026-01-01T00:00:00Z",
-        },
-    )
-    expect_blocked("orphaned transfer", requested_payload, requested_install)
-    shutil.rmtree(LEGACY)
+        )
+        expect_blocked("orphaned transfer", requested_payload, requested_install)
+    finally:
+        POLICY.write_bytes(original_policy)
+        maintenance.unlink(missing_ok=True)
+        if foreign_activation is not None:
+            foreign_activation.unlink(missing_ok=True)
+        if LEGACY.exists():
+            shutil.rmtree(LEGACY)
 
     assert_no_legacy_runtime()
     print("blocked-states=pass")
