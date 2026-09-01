@@ -150,6 +150,12 @@ There is exactly **one** owner of worktree + session truth. Any view — local
 picker, remote fleet listing, a coordinating agent — is a read of, or a derivation
 over, that single owner; nothing maintains a competing copy.
 
+### explicit private lease store
+Ref-backed resource leases use a deliberately configured private state store.
+The selected owner is inspectable and stable across callers; absent that owner,
+remote lease operations fail with remediation instead of publishing hidden refs
+to the current source repository.
+
 ### concurrency-safe store
 Concurrent touches of the same state (a foreground action while background
 derivation writes) are **serialized and atomic** at the store, so no consumer
@@ -217,6 +223,13 @@ an agent-digestible account of what it has recently been doing, across the sessi
 that worked it.
 
 ## Behaviors
+
+### source remotes are not coordination stores
+The repository being worked on is never silently selected as the remote backend
+for ref-backed claims or leases. A bound private state repository or explicit
+store configuration is required; if neither exists, the operation fails closed.
+Local worktree and obligation tracking remains available, and issue-tracker
+claim comments remain a separate global coordination mechanism.
 
 ### graceful degradation
 Tracking is **fully correct with zero higher layers**, **zero resident service**,
@@ -314,6 +327,9 @@ accidentally serve its state or actions.
   handing off *between* agents is agent-bridge's / ACP's domain, not the ground
   layer's. The ground layer *produces* the truth those higher layers coordinate
   over.
+- **Source remotes do not hold private coordination refs by default.** A public
+  or shared source repository is not an implicit lease store. Remote ref-backed
+  coordination requires a separately selected private state owner.
 - **No continuous full-scan sweeps of unbounded session data.** Deriving state by
   repeatedly reading the entire session-state tree or a whole event log is out of
   bounds; growing datasets are read incrementally by cursor/watermark, and single
@@ -376,6 +392,14 @@ accidentally serve its state or actions.
   over independent single-writer slots** (git · pr · claim · mux · copilot-lock ·
   session/handoff), each with its own freshness stamp; no contributor writes the
   aggregate, so parallel writers cannot race on one "true state" cell. Mined from an
+
+### Private coordination state has an explicit owner
+Cross-machine coordination state such as ref-backed resource leases belongs to
+an **explicitly selected private state owner**, not whichever source repository
+happens to be active. A bound knowledge repository may own that state; an
+operator may deliberately configure another private store. The source remote is
+never an implicit fallback. This keeps source distribution and personal or
+machine-scoped coordination state as separate trust domains. Mined from an
   operator design conversation prompted by a failed handoff-cutover that orphaned a
   worktree's head (successor died on the CLI resume-hang before registering) — which
   also clarified that succession *completeness* is a **liveness-aware reconciliation**
