@@ -66,6 +66,7 @@ def test_enabled_plugin_false_is_an_authoritative_tombstone(tmp_path):
                     "legacy@m": True,
                     "operator-disabled@m": False,
                     "operator-extra@m": True,
+                    "invalid-null@m": None,
                 }
             }
         ),
@@ -79,6 +80,7 @@ def test_enabled_plugin_false_is_an_authoritative_tombstone(tmp_path):
                     "legacy@m": False,
                     "operator-disabled@m": True,
                     "new@m": True,
+                    "invalid-null@m": True,
                 }
             },
         )
@@ -91,6 +93,7 @@ def test_enabled_plugin_false_is_an_authoritative_tombstone(tmp_path):
         "legacy@m": False,
         "operator-disabled@m": False,
         "operator-extra@m": True,
+        "invalid-null@m": True,
         "new@m": True,
     }
 

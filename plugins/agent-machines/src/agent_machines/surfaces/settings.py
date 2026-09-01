@@ -45,7 +45,7 @@ def _merge_settings_floor(key: str, live: Any, manifest: Any) -> Any:
     for plugin, enabled in manifest.items():
         if enabled is False:
             out[plugin] = False
-        elif plugin not in out:
+        elif plugin not in out or out[plugin] is None:
             out[plugin] = enabled
     return out
 
