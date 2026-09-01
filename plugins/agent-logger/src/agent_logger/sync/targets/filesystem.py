@@ -48,16 +48,32 @@ _SESSION_INDEX_NAMES = frozenset(
 _MAX_TRANSACTION_MANIFEST_BYTES = 16 * 1024 * 1024
 
 
+def _windows_extended_path(path: Path) -> str:
+    """Return a Win32 extended path so temporary names may cross MAX_PATH."""
+    raw = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or raw.startswith("\\\\?\\"):
+        return raw
+    if raw.startswith("\\\\"):
+        return f"\\\\?\\UNC\\{raw[2:]}"
+    return f"\\\\?\\{raw}"
+
+
 def _unlink_replace_target(path: Path) -> None:
     """Remove a destination before replacement, clearing read-only if needed."""
+    io_path = _windows_extended_path(path)
     try:
-        path.unlink(missing_ok=True)
+        os.unlink(io_path)
+    except FileNotFoundError:
+        return
     except PermissionError:
-        if path.exists():
-            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
-            path.unlink()
-        else:
-            raise
+        try:
+            os.chmod(io_path, stat.S_IWRITE | stat.S_IREAD)
+        except FileNotFoundError:
+            return
+        try:
+            os.unlink(io_path)
+        except FileNotFoundError:
+            return
 
 
 def _fsync_directory(path: Path) -> None:
@@ -91,8 +107,8 @@ def _durable_replace(source: Path, destination: Path) -> None:
         ]
         move_file.restype = wintypes.BOOL
         if not move_file(
-            str(source),
-            str(destination),
+            _windows_extended_path(source),
+            _windows_extended_path(destination),
             movefile_replace_existing | movefile_write_through,
         ):
             raise ctypes.WinError(ctypes.get_last_error())
@@ -222,20 +238,21 @@ def _fsync_tree(root: Path) -> None:
 def _copy_replace(src: Path, dst: Path) -> None:
     """Copy one regular source without following links."""
     temporary = dst.with_name(f".{dst.name}.{uuid.uuid4().hex}.tmp")
+    temporary_io = _windows_extended_path(temporary)
     try:
         with open_regular_no_follow(src) as source:
-            with temporary.open("xb") as target:
+            with open(temporary_io, "xb") as target:
                 shutil.copyfileobj(source, target, length=1024 * 1024)
                 target.flush()
                 os.fsync(target.fileno())
         try:
-            shutil.copystat(src, temporary, follow_symlinks=False)
+            shutil.copystat(src, temporary_io, follow_symlinks=False)
         except OSError:
             pass
         _unlink_replace_target(dst)
         _durable_replace(temporary, dst)
     finally:
-        temporary.unlink(missing_ok=True)
+        _unlink_replace_target(temporary)
 
 
 def _needs_copy(src: Path, dst: Path) -> bool:
