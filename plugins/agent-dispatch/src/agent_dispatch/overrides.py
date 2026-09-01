@@ -31,13 +31,32 @@ the ``supervise override`` CLI reads/writes via :func:`set_override` /
 
 from __future__ import annotations
 
+import _thread
 import contextlib
 import json
 import os
 import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Callable, TypeVar
+
+T = TypeVar("T")
+LOGICAL_OVERRIDE_PREFIX = "logical:"
+_THREAD_LOCKS_GUARD = threading.Lock()
+_THREAD_LOCKS: dict[str, _thread.LockType] = {}
+
+
+def logical_override_id(owner: str, logical_id: str) -> str:
+    """Override token that disables every registration for one logical unit."""
+    return f"{LOGICAL_OVERRIDE_PREFIX}{owner}:{logical_id}"
+
+
+def _thread_lock(path: Path) -> _thread.LockType:
+    key = str(path.resolve())
+    with _THREAD_LOCKS_GUARD:
+        return _THREAD_LOCKS.setdefault(key, threading.Lock())
 
 
 def load_overrides(path: str | os.PathLike[str] | Path) -> dict[str, dict]:
@@ -88,6 +107,32 @@ def save_overrides(
             os.unlink(tmp)
 
 
+def mutate_overrides(
+    path: str | os.PathLike[str] | Path,
+    mutator: Callable[[dict[str, dict]], T],
+    *,
+    timeout: float = 5.0,
+) -> T:
+    """Serialize one complete override read-modify-write transaction."""
+    from .single_instance import SingleInstance
+
+    target = Path(path)
+    with _thread_lock(target):
+        lock = SingleInstance(target.with_name(f"{target.name}.lock"))
+        deadline = time.monotonic() + timeout
+        while not lock.acquire():
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timed out acquiring override lock for {target}")
+            time.sleep(0.05)
+        try:
+            overrides = load_overrides(target)
+            result = mutator(overrides)
+            save_overrides(target, overrides)
+            return result
+        finally:
+            lock.release()
+
+
 def set_override(
     path: str | os.PathLike[str] | Path,
     unit_id: str,
@@ -102,15 +147,16 @@ def set_override(
     unit down and keep it down. The record carries an optional ``reason`` and the
     wall-clock ``at`` it was set (for legibility). Persisted immediately.
     """
-    overrides = load_overrides(path)
-    record = {
-        "disabled": bool(disabled),
-        "reason": reason,
-        "at": time.time() if now is None else now,
-    }
-    overrides[unit_id] = record
-    save_overrides(path, overrides)
-    return record
+    def mutate(overrides: dict[str, dict]) -> dict:
+        record = {
+            "disabled": bool(disabled),
+            "reason": reason,
+            "at": time.time() if now is None else now,
+        }
+        overrides[unit_id] = record
+        return record
+
+    return mutate_overrides(path, mutate)
 
 
 def clear_override(path: str | os.PathLike[str] | Path, unit_id: str) -> bool:
@@ -119,12 +165,13 @@ def clear_override(path: str | os.PathLike[str] | Path, unit_id: str) -> bool:
     Returns ``True`` if an override was present and removed, ``False`` if there was
     nothing to clear.
     """
-    overrides = load_overrides(path)
-    if unit_id not in overrides:
-        return False
-    del overrides[unit_id]
-    save_overrides(path, overrides)
-    return True
+    def mutate(overrides: dict[str, dict]) -> bool:
+        if unit_id not in overrides:
+            return False
+        del overrides[unit_id]
+        return True
+
+    return mutate_overrides(path, mutate)
 
 
 def overridden_off_ids(overrides: Mapping[str, dict]) -> set[str]:
