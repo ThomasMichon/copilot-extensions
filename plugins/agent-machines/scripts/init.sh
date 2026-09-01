@@ -17,11 +17,335 @@ _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
 
+_source_kind() {
+    case "$(printf '%s' "${COPILOT_PLUGIN_STAGED_FROM:-$1}" | tr '\\' '/')" in
+        */.copilot/installed-plugins/*) printf 'marketplace' ;;
+        *) printf 'local' ;;
+    esac
+}
+
+_git_info() {
+    local path="$1" commit branch dirty
+    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    dirty="false"
+    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
+    echo "$commit $branch $dirty"
+}
+
+_json_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\t'/\\t}"
+    printf '%s' "$value"
+}
+
+_cell_manifest_json_get() {
+    local file="$1"
+    shift
+    local separator=$'\034' path="" component
+    for component in "$@"; do
+        [[ -z "$path" ]] || path+="$separator"
+        path+="$component"
+    done
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v "query_path=$path" "$file"
+}
+
+_cell_manifest_json_type() {
+    local file="$1"
+    shift
+    local separator=$'\034' path="" component
+    for component in "$@"; do
+        [[ -z "$path" ]] || path+="$separator"
+        path+="$component"
+    done
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$path" "$file"
+}
+
+_load_cell_manifest_source() {
+    local manifest_path="$1" marketplace_id="$2" context="$3"
+    [[ -f "$manifest_path" && ! -L "$manifest_path" ]] || return 1
+    [[ "$(_cell_manifest_json_type "$manifest_path" schema_version 2>/dev/null)" == number &&
+       "$(_cell_manifest_json_get "$manifest_path" schema_version 2>/dev/null)" == 4 &&
+       "$(_cell_manifest_json_get "$manifest_path" service 2>/dev/null)" == agent-machines &&
+       "$(_cell_manifest_json_get "$manifest_path" installation marketplaceId 2>/dev/null)" == "$marketplace_id" &&
+       "$(_cell_manifest_json_get "$manifest_path" installation pluginId 2>/dev/null)" == agent-machines &&
+       "$(_cell_manifest_json_get "$manifest_path" installation context 2>/dev/null)" == "$context" ]] || return 1
+    CELL_MANIFEST_SOURCE_KIND="$(_cell_manifest_json_get "$manifest_path" source kind 2>/dev/null)" || return 1
+    CELL_MANIFEST_SOURCE_PATH="$(_cell_manifest_json_get "$manifest_path" source path 2>/dev/null)" || return 1
+    CELL_MANIFEST_SOURCE_VERSION="$(_cell_manifest_json_get "$manifest_path" source version 2>/dev/null)" || return 1
+    CELL_MANIFEST_SOURCE_COMMIT="$(_cell_manifest_json_get "$manifest_path" source commit 2>/dev/null || true)"
+    CELL_MANIFEST_SOURCE_BRANCH="$(_cell_manifest_json_get "$manifest_path" source branch 2>/dev/null || true)"
+    CELL_MANIFEST_SOURCE_DIRTY="$(_cell_manifest_json_get "$manifest_path" source dirty 2>/dev/null)" || return 1
+    CELL_MANIFEST_RUNTIME_VERSION="$(_cell_manifest_json_get "$manifest_path" runtime version 2>/dev/null)" || return 1
+    CELL_MANIFEST_RUNTIME_PATH="$(_cell_manifest_json_get "$manifest_path" runtime path 2>/dev/null)" || return 1
+    CELL_MANIFEST_RUNTIME_INTERPRETER="$(_cell_manifest_json_get "$manifest_path" runtime interpreter 2>/dev/null)" || return 1
+    local plugin_root expected_runtime expected_interpreter
+    plugin_root="$(dirname -- "$manifest_path")"
+    expected_runtime="$plugin_root/versions/$CELL_MANIFEST_RUNTIME_VERSION"
+    expected_interpreter="$expected_runtime/bin/python"
+    [[ -n "$CELL_MANIFEST_SOURCE_KIND" &&
+       -n "$CELL_MANIFEST_SOURCE_PATH" &&
+       -n "$CELL_MANIFEST_SOURCE_VERSION" &&
+       "$(_cell_manifest_json_get "$manifest_path" source repo 2>/dev/null)" == copilot-extensions &&
+       "$(_cell_manifest_json_get "$manifest_path" source plugin 2>/dev/null)" == agent-machines &&
+       ( "$(_cell_manifest_json_type "$manifest_path" source commit 2>/dev/null)" == string ||
+         "$(_cell_manifest_json_type "$manifest_path" source commit 2>/dev/null)" == null ) &&
+       ( "$(_cell_manifest_json_type "$manifest_path" source branch 2>/dev/null)" == string ||
+         "$(_cell_manifest_json_type "$manifest_path" source branch 2>/dev/null)" == null ) &&
+       "$(_cell_manifest_json_type "$manifest_path" source dirty 2>/dev/null)" == boolean &&
+       ( "$CELL_MANIFEST_SOURCE_DIRTY" == true ||
+         "$CELL_MANIFEST_SOURCE_DIRTY" == false ) &&
+       "$(_cell_manifest_json_get "$manifest_path" runtime kind 2>/dev/null)" == python &&
+       -n "$CELL_MANIFEST_RUNTIME_VERSION" &&
+       "$CELL_MANIFEST_RUNTIME_PATH" == "$expected_runtime" &&
+       "$CELL_MANIFEST_RUNTIME_INTERPRETER" == "$expected_interpreter" &&
+       -n "$(_cell_manifest_json_get "$manifest_path" runtime selectedBy kind 2>/dev/null)" &&
+       -n "$(_cell_manifest_json_get "$manifest_path" runtime selectedBy path 2>/dev/null)" &&
+       "$(_cell_manifest_json_get "$manifest_path" runtime selectedBy version 2>/dev/null)" == "$CELL_MANIFEST_RUNTIME_VERSION" ]]
+}
+
+_validate_cell_manifest_for_runtime_selection() {
+    local manifest_path="$1" marketplace_id="$2" context="$3"
+    local expected_current="${4:-}" expect_absent="${5:-0}"
+    if [[ ! -e "$manifest_path" && ! -L "$manifest_path" ]]; then
+        if [[ "$expect_absent" == 1 ]]; then
+            return 0
+        fi
+        _fail "Cell deploy manifest is missing for an existing runtime selection"
+        return 1
+    fi
+    if ! _load_cell_manifest_source "$manifest_path" "$marketplace_id" "$context"; then
+        _fail "Existing cell deploy manifest is invalid; refusing runtime cutover"
+        return 1
+    fi
+    local current_marker
+    current_marker="$(dirname -- "$manifest_path")/current-version"
+    if [[ "$expect_absent" == 1 ||
+          ! -f "$current_marker" || -L "$current_marker" ||
+          "$(cat "$current_marker" 2>/dev/null)" != "$CELL_MANIFEST_RUNTIME_VERSION" ]]; then
+        _fail "Existing cell deploy manifest does not match the current runtime selection"
+        return 1
+    fi
+}
+
+_write_cell_manifest() {
+    local plugin_root="$1" source_plugin_dir="$2" source_version="$3"
+    local runtime_slot="$4" runtime_version="$5" context="$6"
+    local marketplace_id="$7" preserve_source="${8:-0}"
+    local selected_source_path="$source_plugin_dir"
+    local selected_source_version="$source_version"
+    local manifest_path="$plugin_root/deploy-manifest.json"
+    local tmp="$manifest_path.tmp.$$" source_kind commit="null" branch="null"
+    local dirty="false" repo_root _c _b _d deployed_by selected_kind
+    selected_kind="$(_source_kind "$source_plugin_dir")"
+    source_kind="$selected_kind"
+    if [[ "$preserve_source" == 1 && -e "$manifest_path" ]]; then
+        _load_cell_manifest_source \
+            "$manifest_path" "$marketplace_id" "$context" || {
+            _fail "Existing cell deploy manifest is invalid; refusing replacement"
+            return 1
+        }
+        source_kind="$CELL_MANIFEST_SOURCE_KIND"
+        source_plugin_dir="$CELL_MANIFEST_SOURCE_PATH"
+        source_version="$CELL_MANIFEST_SOURCE_VERSION"
+        dirty="$CELL_MANIFEST_SOURCE_DIRTY"
+        if [[ -n "$CELL_MANIFEST_SOURCE_COMMIT" ]]; then
+            commit="\"$(_json_escape "$CELL_MANIFEST_SOURCE_COMMIT")\""
+        fi
+        if [[ -n "$CELL_MANIFEST_SOURCE_BRANCH" ]]; then
+            branch="\"$(_json_escape "$CELL_MANIFEST_SOURCE_BRANCH")\""
+        fi
+    elif [[ "$source_kind" == "local" ]]; then
+        repo_root="$(cd "$source_plugin_dir/../.." 2>/dev/null && pwd || true)"
+        if [[ -n "$repo_root" ]]; then
+            read -r _c _b _d <<< "$(_git_info "$repo_root")"
+            commit="\"$(_json_escape "$_c")\""
+            branch="\"$(_json_escape "$_b")\""
+            dirty="$_d"
+        fi
+    fi
+    deployed_by="$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')"
+    cat > "$tmp" << EOF
+{
+  "schema_version": 4,
+  "service": "agent-machines",
+  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+  "deployed_by": "$(_json_escape "$deployed_by")",
+  "source": {
+    "kind": "$source_kind",
+    "path": "$(_json_escape "$source_plugin_dir")",
+    "repo": "copilot-extensions",
+    "plugin": "agent-machines",
+    "version": "$(_json_escape "$source_version")",
+    "commit": $commit,
+    "branch": $branch,
+    "dirty": $dirty
+  },
+  "runtime": {
+    "kind": "python",
+    "version": "$(_json_escape "$runtime_version")",
+    "path": "$(_json_escape "$runtime_slot")",
+    "interpreter": "$(_json_escape "$runtime_slot/bin/python")",
+    "selectedBy": {
+      "kind": "$selected_kind",
+      "path": "$(_json_escape "$selected_source_path")",
+      "version": "$(_json_escape "$selected_source_version")"
+    }
+  },
+  "installation": {
+    "marketplaceId": "$(_json_escape "$marketplace_id")",
+    "pluginId": "agent-machines",
+    "context": "$(_json_escape "$context")"
+  }
+}
+EOF
+    mv -f "$tmp" "$manifest_path"
+}
+
+_cell_snapshot_owner_text() {
+    printf '%s\n' \
+        'copilot-extensions.agent-machines.snapshot-publish:v1' \
+        "marketplaceId=$EXPECTED_MARKETPLACE_ID" \
+        'pluginId=agent-machines' \
+        "snapshotId=$SRC_VERSION"
+}
+
+_cell_snapshot_is_owned() {
+    local root="$1"
+    local marker="$root/.agent-machines-snapshot-publish-owner"
+    [[ -d "$root" && ! -L "$root" &&
+       -f "$marker" && ! -L "$marker" &&
+       "$(cat "$marker" 2>/dev/null)" == "$(_cell_snapshot_owner_text)" ]]
+}
+
+_remove_owned_cell_snapshot() {
+    local root="$1"
+    _cell_snapshot_is_owned "$root" || return 1
+    rm -rf -- "$root"
+}
+
+_ensure_cell_snapshot() {
+    local snapshot_root="$1"
+    local owner_marker=".agent-machines-snapshot-publish-owner"
+    local stage="" attempt provenance="$snapshot_root/snapshot-provenance.json"
+    if [[ -e "$snapshot_root" || -L "$snapshot_root" ]]; then
+        if [[ ! -e "$provenance" && ! -L "$provenance" ]] &&
+           _cell_snapshot_is_owned "$snapshot_root"; then
+            _remove_owned_cell_snapshot "$snapshot_root" || {
+                _fail "Cannot recover the owned incomplete cell snapshot"
+                return 1
+            }
+        else
+            if ! bash "$SLOT_RUNNER" snapshot-validate \
+                    --context "$CONTEXT" \
+                    --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+                    --expected-plugin-id agent-machines \
+                    --snapshot-id "$SRC_VERSION" \
+                    --durable-home "$DURABLE_HOME" >/dev/null; then
+                _fail "Existing cell snapshot provenance validation failed"
+                return 1
+            fi
+            if _cell_snapshot_is_owned "$snapshot_root"; then
+                rm -f -- "$snapshot_root/$owner_marker"
+            fi
+            return 0
+        fi
+    fi
+
+    mkdir -p "$SNAPSHOTS_ROOT" || {
+        _fail "Cannot create the cell snapshots root"
+        return 1
+    }
+    [[ ! -e "$PLUGIN_DIR/$owner_marker" && ! -L "$PLUGIN_DIR/$owner_marker" ]] || {
+        _fail "Payload uses the reserved cell snapshot publication marker"
+        return 1
+    }
+    for attempt in 1 2 3 4 5; do
+        stage="$SNAPSHOTS_ROOT/.agent-machines-snapshot-$SRC_VERSION-$$-$RANDOM-$attempt"
+        mkdir "$stage" 2>/dev/null && break
+        stage=""
+    done
+    [[ -n "$stage" ]] || {
+        _fail "Cannot reserve an owned cell snapshot staging directory"
+        return 1
+    }
+    _cell_snapshot_owner_text >"$stage/$owner_marker"
+    if ! cp -a "$PLUGIN_DIR"/. "$stage"/; then
+        _remove_owned_cell_snapshot "$stage" || true
+        _fail "Cannot copy the payload into the cell snapshot staging directory"
+        return 1
+    fi
+    if [[ -e "$snapshot_root" || -L "$snapshot_root" ]]; then
+        _remove_owned_cell_snapshot "$stage" || true
+        if ! bash "$SLOT_RUNNER" snapshot-validate \
+                --context "$CONTEXT" \
+                --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+                --expected-plugin-id agent-machines \
+                --snapshot-id "$SRC_VERSION" \
+                --durable-home "$DURABLE_HOME" >/dev/null; then
+            _fail "Concurrent cell snapshot publication is invalid"
+            return 1
+        fi
+        return 0
+    fi
+    if ! mv "$stage" "$snapshot_root"; then
+        _remove_owned_cell_snapshot "$stage" || true
+        _fail "Cannot atomically publish the staged cell snapshot"
+        return 1
+    fi
+    stage=""
+
+    # Test-only interruption seam: production never sets this variable.
+    if [[ -n "${AGENT_MACHINES_CELL_SNAPSHOT_FAIL_BEFORE_STAMP:-}" ]]; then
+        _remove_owned_cell_snapshot "$snapshot_root" || true
+        _fail "Injected failure before cell snapshot provenance publication"
+        return 1
+    fi
+    if ! bash "$SLOT_RUNNER" snapshot-stamp \
+            --context "$CONTEXT" \
+            --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+            --expected-plugin-id agent-machines \
+            --expected-namespace-generation "$CELL_NAMESPACE_GENERATION" \
+            --expected-install-generation "$CELL_INSTALL_GENERATION" \
+            --snapshot-id "$SRC_VERSION" \
+            --durable-home "$DURABLE_HOME" >/dev/null; then
+        if [[ ! -e "$provenance" && ! -L "$provenance" ]]; then
+            _remove_owned_cell_snapshot "$snapshot_root" || true
+        fi
+        _fail "Cell snapshot provenance publication failed"
+        return 1
+    fi
+    if ! bash "$SLOT_RUNNER" snapshot-validate \
+            --context "$CONTEXT" \
+            --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+            --expected-plugin-id agent-machines \
+            --snapshot-id "$SRC_VERSION" \
+            --durable-home "$DURABLE_HOME" >/dev/null; then
+        _fail "Published cell snapshot provenance validation failed"
+        return 1
+    fi
+    _cell_snapshot_is_owned "$snapshot_root" || {
+        _fail "Cell snapshot publication ownership marker changed"
+        return 1
+    }
+    rm -f -- "$snapshot_root/$owner_marker"
+}
+
 FORCE=0
 INSTALL_DIR=""
+CELL_MODE=0
 CONTEXT=""
 EXPECTED_MARKETPLACE_ID=""
 DURABLE_HOME=""
+ORIGIN_PAYLOAD_ROOT=""
+EXPECTED_NAMESPACE_GENERATION=""
+EXPECTED_INSTALL_GENERATION=""
+EXPECTED_CURRENT_VERSION=""
+EXPECT_CURRENT_ABSENT=0
 ORIGINAL_ARGS=("$@")
 # Honor an inherited action: the install-contract:v4 self-stage below re-execs
 # this script with an already-shifted (empty) "$@", so a positional action would
@@ -34,7 +358,12 @@ while [[ $# -gt 0 ]]; do
         --context) CONTEXT="${2:-}"; shift 2 ;;
         --expected-marketplace-id) EXPECTED_MARKETPLACE_ID="${2:-}"; shift 2 ;;
         --durable-home) DURABLE_HOME="${2:-}"; shift 2 ;;
-        stamp|provision|init|slot-provision|slot-validate|slot-complete|slot-completion-validate) ACTION="$1"; shift ;;
+        --origin-payload-root) ORIGIN_PAYLOAD_ROOT="${2:-}"; shift 2 ;;
+        --expected-namespace-generation) EXPECTED_NAMESPACE_GENERATION="${2:-}"; shift 2 ;;
+        --expected-install-generation) EXPECTED_INSTALL_GENERATION="${2:-}"; shift 2 ;;
+        --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
+        --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
+        stamp|provision|init|cell-provision|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
@@ -48,7 +377,9 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [[ "$ACTION" != "slot-provision" &&
       "$ACTION" != "slot-validate" &&
       "$ACTION" != "slot-complete" &&
-      "$ACTION" != "slot-completion-validate" ]]; then
+      "$ACTION" != "slot-completion-validate" &&
+      "$ACTION" != "slot-cutover" &&
+      "$ACTION" != "cell-provision" ]]; then
     LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
     if [[ ! -f "$LEGACY_PROBE" ]]; then
         _fail 'Legacy mutation probe is unavailable'
@@ -75,7 +406,9 @@ __cell_slot_direct=0
 if [[ "$ACTION" == "slot-provision" ||
       "$ACTION" == "slot-validate" ||
       "$ACTION" == "slot-complete" ||
-      "$ACTION" == "slot-completion-validate" ]]; then
+      "$ACTION" == "slot-completion-validate" ||
+      "$ACTION" == "slot-cutover" ||
+      "$ACTION" == "cell-provision" ]]; then
     cd "$HOME"
     if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
         export COPILOT_PLUGIN_INSTALL_STAGED=cell-slot-action
@@ -252,6 +585,94 @@ VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
 
+if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
+      -z "${AGENT_MACHINES_CELL_PROVISION_LOCK_HELD:-}" ]]; then
+    [[ -n "$CONTEXT" ]] || {
+        _fail "$ACTION requires --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] || {
+        _fail "$ACTION requires --expected-marketplace-id"
+        exit 2
+    }
+    LOCK_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
+    LOCK_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
+    [[ -f "$LOCK_RUNNER" && -f "$LOCK_QUERY" ]] || {
+        _fail 'Installation-context runner is unavailable'
+        exit 1
+    }
+    LOCK_DURABLE_HOME="$DURABLE_HOME"
+    if [[ -z "$LOCK_DURABLE_HOME" ]]; then
+        LOCK_DURABLE_HOME="$CONTEXT"
+        for _part in 1 2 3 4 5; do
+            LOCK_DURABLE_HOME="$(dirname -- "$LOCK_DURABLE_HOME")"
+        done
+    fi
+    LOCK_VALIDATED="$(bash "$LOCK_RUNNER" validate \
+        --context "$CONTEXT" \
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+        --expected-plugin-id agent-machines \
+        --durable-home "$LOCK_DURABLE_HOME")" || {
+        _fail "$ACTION context receipt validation failed before provisioning lock"
+        exit 1
+    }
+    LOCK_PLUGIN_ROOT="$(
+        LC_ALL=C awk -f "$LOCK_QUERY" -v mode=get -v query_path=pluginRoot \
+            <<<"$LOCK_VALIDATED"
+    )"
+    [[ -n "$LOCK_PLUGIN_ROOT" && -d "$LOCK_PLUGIN_ROOT" ]] || {
+        _fail "$ACTION context receipt did not resolve a plugin root"
+        exit 1
+    }
+    LOCK_LINK=""
+    unlock_cell_provision() {
+        if [[ -n "$LOCK_LINK" ]]; then
+            local owner
+            owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$LOCK_LINK"
+            LOCK_LINK=""
+        else
+            flock -u 9 2>/dev/null || true
+            exec 9>&-
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 &&
+       [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 9>"$LOCK_PLUGIN_ROOT/.payload-provision.lock"
+        flock 9
+    else
+        LOCK_LINK="$LOCK_PLUGIN_ROOT/.payload-provision.lock.pid"
+        until ln -s "$$" "$LOCK_LINK" 2>/dev/null; do
+            owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
+                rm -f "$LOCK_LINK"
+            fi
+        done
+    fi
+    trap unlock_cell_provision EXIT INT TERM
+    set +e
+    AGENT_MACHINES_CELL_PROVISION_LOCK_HELD=1 \
+        bash "$SCRIPT_DIR/init.sh" "${ORIGINAL_ARGS[@]}"
+    LOCKED_STATUS=$?
+    set -e
+    unlock_cell_provision
+    trap - EXIT INT TERM
+    exit "$LOCKED_STATUS"
+fi
+
+# Test-only witness: the parent lock wrapper remains alive while this child
+# represents the complete cell transaction. Concurrent tests assert that these
+# start/end pairs never overlap. Production never sets this variable.
+if [[ "$ACTION" == "cell-provision" &&
+      -n "${AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE:-}" ]]; then
+    printf 'start %s\n' "$$" >>"$AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE"
+    sleep "${AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE_SLEEP:-1}"
+    printf 'end %s\n' "$$" >>"$AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE"
+    exit 0
+fi
+
 if [[ "$ACTION" == "slot-provision" ||
       "$ACTION" == "slot-validate" ||
       "$ACTION" == "slot-complete" ||
@@ -283,6 +704,247 @@ if [[ "$ACTION" == "slot-provision" ||
         SLOT_ARGS+=(--durable-home "$DURABLE_HOME")
     fi
     exec bash "$SLOT_RUNNER" "${SLOT_ARGS[@]}"
+fi
+
+if [[ "$ACTION" == "slot-cutover" ]]; then
+    [[ -n "$CONTEXT" ]] || {
+        _fail "slot-cutover requires --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] || {
+        _fail "slot-cutover requires --expected-marketplace-id"
+        exit 2
+    }
+    [[ -n "$EXPECTED_NAMESPACE_GENERATION" &&
+       -n "$EXPECTED_INSTALL_GENERATION" ]] || {
+        _fail "slot-cutover requires expected namespace and install generations"
+        exit 2
+    }
+    if [[ "$EXPECT_CURRENT_ABSENT" -eq 1 && -n "$EXPECTED_CURRENT_VERSION" ]] ||
+       [[ "$EXPECT_CURRENT_ABSENT" -eq 0 && -z "$EXPECTED_CURRENT_VERSION" ]]; then
+        _fail "slot-cutover requires exactly one current-version expectation"
+        exit 2
+    fi
+    SLOT_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
+    [[ -f "$SLOT_RUNNER" ]] || {
+        _fail "Installation-context runner is unavailable"
+        exit 1
+    }
+    SLOT_ARGS=(
+        slot-cutover
+        --context "$CONTEXT"
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
+        --expected-plugin-id agent-machines
+        --expected-payload-root "$PLUGIN_DIR"
+        --expected-payload-version "$SRC_VERSION"
+        --snapshot-id "$SRC_VERSION"
+        --runtime-version "$SRC_VERSION"
+        --expected-namespace-generation "$EXPECTED_NAMESPACE_GENERATION"
+        --expected-install-generation "$EXPECTED_INSTALL_GENERATION"
+    )
+    if [[ "$EXPECT_CURRENT_ABSENT" -eq 1 ]]; then
+        SLOT_ARGS+=(--expect-current-absent)
+    else
+        SLOT_ARGS+=(--expected-current-version "$EXPECTED_CURRENT_VERSION")
+    fi
+    if [[ -n "$DURABLE_HOME" ]]; then
+        SLOT_ARGS+=(--durable-home "$DURABLE_HOME")
+    fi
+    CUTOVER_DURABLE_HOME="$DURABLE_HOME"
+    if [[ -z "$CUTOVER_DURABLE_HOME" ]]; then
+        CUTOVER_DURABLE_HOME="$CONTEXT"
+        for _part in 1 2 3 4 5; do
+            CUTOVER_DURABLE_HOME="$(dirname -- "$CUTOVER_DURABLE_HOME")"
+        done
+    fi
+    JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
+    VALIDATED_JSON="$(bash "$SLOT_RUNNER" validate \
+        --context "$CONTEXT" \
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+        --expected-plugin-id agent-machines \
+        --durable-home "$CUTOVER_DURABLE_HOME")" || {
+        _fail 'slot-cutover could not validate manifest paths'
+        exit 1
+    }
+    PLUGIN_ROOT="$(
+        LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v query_path=pluginRoot \
+            <<<"$VALIDATED_JSON"
+    )"
+    VERSIONS_ROOT="$(
+        LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v query_path=versionsRoot \
+            <<<"$VALIDATED_JSON"
+    )"
+    [[ -n "$PLUGIN_ROOT" && -n "$VERSIONS_ROOT" ]] || {
+        _fail 'slot-cutover could not resolve manifest paths'
+        exit 1
+    }
+    _validate_cell_manifest_for_runtime_selection \
+        "$PLUGIN_ROOT/deploy-manifest.json" \
+        "$EXPECTED_MARKETPLACE_ID" "$CONTEXT" \
+        "$EXPECTED_CURRENT_VERSION" "$EXPECT_CURRENT_ABSENT" || exit 1
+    set +e
+    CUTOVER_JSON="$(bash "$SLOT_RUNNER" "${SLOT_ARGS[@]}")"
+    CUTOVER_STATUS=$?
+    set -e
+    [[ -n "$CUTOVER_JSON" ]] && printf '%s\n' "$CUTOVER_JSON"
+    if [[ "$CUTOVER_STATUS" -ne 0 ]]; then
+        exit "$CUTOVER_STATUS"
+    fi
+    CUTOVER_RESULT="$(
+        LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v query_path=status \
+            <<<"$CUTOVER_JSON" 2>/dev/null || true
+    )"
+    if [[ "$CUTOVER_RESULT" == ready ]]; then
+        _write_cell_manifest \
+            "$PLUGIN_ROOT" "$PLUGIN_DIR" "$SRC_VERSION" \
+            "$VERSIONS_ROOT/$SRC_VERSION" "$SRC_VERSION" "$CONTEXT" \
+            "$EXPECTED_MARKETPLACE_ID" 1
+    elif [[ "$CUTOVER_RESULT" != revalidation-required ]]; then
+        _fail 'slot-cutover returned an invalid result'
+        exit 1
+    fi
+    exit 0
+fi
+
+if [[ "$ACTION" == "cell-provision" ]]; then
+    [[ -n "$CONTEXT" ]] || {
+        _fail "cell-provision requires --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] || {
+        _fail "cell-provision requires --expected-marketplace-id"
+        exit 2
+    }
+    ORIGIN_PAYLOAD_ROOT="${ORIGIN_PAYLOAD_ROOT:-$PLUGIN_DIR}"
+    [[ "$ORIGIN_PAYLOAD_ROOT" == /* && -d "$ORIGIN_PAYLOAD_ROOT" ]] || {
+        _fail "cell-provision origin payload root is unavailable"
+        exit 2
+    }
+    ORIGIN_PAYLOAD_ROOT="$(cd -P -- "$ORIGIN_PAYLOAD_ROOT" && pwd)"
+    if [[ -z "$DURABLE_HOME" ]]; then
+        DURABLE_HOME="$CONTEXT"
+        for _part in 1 2 3 4 5; do
+            DURABLE_HOME="$(dirname -- "$DURABLE_HOME")"
+        done
+    fi
+    SLOT_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
+    JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
+    SEP=$'\034'
+    _json_path() {
+        local result="" component
+        for component in "$@"; do
+            [[ -z "$result" ]] || result+="$SEP"
+            result+="$component"
+        done
+        printf '%s' "$result"
+    }
+    _json_get() {
+        LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v "query_path=$2" <<<"$1"
+    }
+    STATUS_JSON="$(bash "$SLOT_RUNNER" status \
+        --context "$CONTEXT" \
+        --payload-root "$ORIGIN_PAYLOAD_ROOT" \
+        --plugin-id agent-machines \
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+        --expected-plugin-id agent-machines \
+        --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
+        --durable-home "$DURABLE_HOME" \
+        --legacy-root "$HOME/.agent-machines")" || { # marketplace-isolation: allow legacy compatibility root
+        _fail "cell-provision could not validate installation activation"
+        exit 1
+    }
+    STATUS="$(_json_get "$STATUS_JSON" "$(_json_path status)" 2>/dev/null || true)"
+    REASON="$(_json_get "$STATUS_JSON" "$(_json_path reason)" 2>/dev/null || true)"
+    ACTUAL_MODE="$(_json_get "$STATUS_JSON" "$(_json_path actualMode)" 2>/dev/null || true)"
+    if [[ "$STATUS" != ready ||
+          "$REASON" != namespaced-active ||
+          "$ACTUAL_MODE" != namespaced ]]; then
+        _fail "cell-provision requires an active validated namespaced installation (status=$STATUS reason=$REASON)"
+        exit 3
+    fi
+    VALIDATED_JSON="$(bash "$SLOT_RUNNER" validate \
+        --context "$CONTEXT" \
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+        --expected-plugin-id agent-machines \
+        --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
+        --durable-home "$DURABLE_HOME")" || {
+        _fail "cell-provision context receipt validation failed"
+        exit 1
+    }
+    PLUGIN_ROOT="$(_json_get "$VALIDATED_JSON" "$(_json_path pluginRoot)")"
+    SNAPSHOTS_ROOT="$(_json_get "$VALIDATED_JSON" "$(_json_path snapshotsRoot)")"
+    VERSIONS_ROOT="$(_json_get "$VALIDATED_JSON" "$(_json_path versionsRoot)")"
+    CELL_NAMESPACE_GENERATION="$(_json_get "$VALIDATED_JSON" "$(_json_path namespaceGeneration)")"
+    CELL_INSTALL_GENERATION="$(_json_get "$VALIDATED_JSON" "$(_json_path generation)")"
+    [[ -n "$PLUGIN_ROOT" && -n "$SNAPSHOTS_ROOT" && -n "$VERSIONS_ROOT" &&
+       -n "$CELL_NAMESPACE_GENERATION" && -n "$CELL_INSTALL_GENERATION" ]] || {
+        _fail "cell-provision context receipt is incomplete"
+        exit 1
+    }
+    CURRENT_MARKER="$(dirname -- "$VERSIONS_ROOT")/current-version"
+    if [[ -f "$CURRENT_MARKER" && ! -L "$CURRENT_MARKER" &&
+          "$(cat "$CURRENT_MARKER")" == "$SRC_VERSION" ]]; then
+        set +e
+        CURRENT_CUTOVER_JSON="$(bash "$SLOT_RUNNER" slot-cutover \
+            --context "$CONTEXT" \
+            --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+            --expected-plugin-id agent-machines \
+            --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
+            --expected-payload-version "$SRC_VERSION" \
+            --snapshot-id "$SRC_VERSION" \
+            --runtime-version "$SRC_VERSION" \
+            --expected-namespace-generation "$CELL_NAMESPACE_GENERATION" \
+            --expected-install-generation "$CELL_INSTALL_GENERATION" \
+            --expected-current-version "$SRC_VERSION" \
+            --durable-home "$DURABLE_HOME")"
+        CURRENT_CUTOVER_STATUS=$?
+        set -e
+        CURRENT_CUTOVER_RESULT="$(
+            _json_get "$CURRENT_CUTOVER_JSON" "$(_json_path status)" \
+                2>/dev/null || true
+        )"
+        if [[ "$CURRENT_CUTOVER_STATUS" -ne 0 ||
+              "$CURRENT_CUTOVER_RESULT" != ready ]]; then
+            _fail "selected cell runtime $SRC_VERSION failed immutable cutover validation"
+            exit 1
+        fi
+        _write_cell_manifest \
+            "$PLUGIN_ROOT" "$ORIGIN_PAYLOAD_ROOT" "$SRC_VERSION" \
+            "$VERSIONS_ROOT/$SRC_VERSION" "$SRC_VERSION" "$CONTEXT" \
+            "$EXPECTED_MARKETPLACE_ID"
+        _ok "Runtime version $SRC_VERSION is already selected in installation cell"
+        exit 0
+    fi
+    SNAPSHOT_ROOT="$SNAPSHOTS_ROOT/$SRC_VERSION"
+    if [[ "$PLUGIN_DIR" != "$SNAPSHOT_ROOT" ]]; then
+        _ensure_cell_snapshot "$SNAPSHOT_ROOT" || exit 1
+        SNAPSHOT_INSTALLER="$SNAPSHOT_ROOT/scripts/init.sh"
+        [[ -f "$SNAPSHOT_INSTALLER" ]] || {
+            _fail "cell snapshot installer is unavailable"
+            exit 1
+        }
+        export COPILOT_PLUGIN_STAGED_FROM="$ORIGIN_PAYLOAD_ROOT"
+        exec bash "$SNAPSHOT_INSTALLER" cell-provision \
+            --context "$CONTEXT" \
+            --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+            --durable-home "$DURABLE_HOME" \
+            --origin-payload-root "$ORIGIN_PAYLOAD_ROOT"
+    fi
+    CELL_MODE=1
+    INSTALL_DIR="$PLUGIN_ROOT"
+    VENV_DIR="$VERSIONS_ROOT/$SRC_VERSION"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    LINK_DIR="$VENV_DIR"
+    export COPILOT_PLUGIN_STAGED_FROM="$ORIGIN_PAYLOAD_ROOT"
+    bash "$SLOT_RUNNER" slot-provision \
+        --context "$CONTEXT" \
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+        --expected-plugin-id agent-machines \
+        --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
+        --expected-payload-version "$SRC_VERSION" \
+        --snapshot-id "$SRC_VERSION" \
+        --runtime-version "$SRC_VERSION" \
+        --durable-home "$DURABLE_HOME" >/dev/null
 fi
 
 _bootstrap_python() {
@@ -560,7 +1222,7 @@ _versioned_slot_clean() {
     # over a corpse. The current/active slot is never tossed (the link-name is
     # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
     # legacy mode.
-    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    [[ "$VERSIONED_RUNTIME" == 1 && "$CELL_MODE" == 0 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
     py="$(_bootstrap_python)" || return 0
@@ -749,18 +1411,23 @@ HAVE_UV=0
 if _ensure_uv; then HAVE_UV=1; fi
 
 # -- 1. Directories ----------------------------------------------------
-mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+mkdir -p "$INSTALL_DIR"
+if [[ "$CELL_MODE" == 0 ]]; then
+    mkdir -p "$LOCAL_BIN"
+fi
 _ok "Directories: $INSTALL_DIR"
 
 # -- 1b. Deploy the session-start hook (version-gated runtime reconcile) --
 # hooks.json runs ~/.agent-machines/bin/bootstrap-check.sh at session start; it
 # re-runs this installer only when the deployed version drifts from the payload.
-BIN_HOOK_DIR="$INSTALL_DIR/bin"
-mkdir -p "$BIN_HOOK_DIR"
-for h in bootstrap-check.ps1 bootstrap-check.sh; do
-    [ -f "$SCRIPT_DIR/$h" ] && cp -f "$SCRIPT_DIR/$h" "$BIN_HOOK_DIR/$h"
-done
-_ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
+if [[ "$CELL_MODE" == 0 ]]; then
+    BIN_HOOK_DIR="$INSTALL_DIR/bin"
+    mkdir -p "$BIN_HOOK_DIR"
+    for h in bootstrap-check.ps1 bootstrap-check.sh; do
+        [ -f "$SCRIPT_DIR/$h" ] && cp -f "$SCRIPT_DIR/$h" "$BIN_HOOK_DIR/$h"
+    done
+    _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
+fi
 
 # -- 2. Venv -----------------------------------------------------------
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
@@ -786,12 +1453,38 @@ fi
 
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
-    if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+    if [[ "$CELL_MODE" == 1 ]]; then
+        if uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
+            PACKAGE_INSTALL_STATUS=0
+        else
+            PACKAGE_INSTALL_STATUS=$?
+        fi
+    else
+        if uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+            PACKAGE_INSTALL_STATUS=0
+        else
+            PACKAGE_INSTALL_STATUS=$?
+        fi
+    fi
+    if [[ "$PACKAGE_INSTALL_STATUS" -ne 0 ]]; then
         _fail 'Failed to install agent-machines package into venv'
         exit 1
     fi
 else
-    if ! "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null; then
+    if [[ "$CELL_MODE" == 1 ]]; then
+        if "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR"; then
+            PACKAGE_INSTALL_STATUS=0
+        else
+            PACKAGE_INSTALL_STATUS=$?
+        fi
+    else
+        if "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null; then
+            PACKAGE_INSTALL_STATUS=0
+        else
+            PACKAGE_INSTALL_STATUS=$?
+        fi
+    fi
+    if [[ "$PACKAGE_INSTALL_STATUS" -ne 0 ]]; then
         _fail 'Failed to install agent-machines package into venv'
         exit 1
     fi
@@ -801,8 +1494,6 @@ _ok 'Package installed: agent-machines'
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"
-    # Capture the currently-active version so gc can retain it as previous-good.
-    PREV_VERSION="$("$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' current 2>/dev/null || echo "")"
     # Health-gate: never swap the stable .venv link onto a slot whose package
     # does not import -- a broken build must not become the live runtime.
     if ! "$VENV_PYTHON" -c 'import agent_machines' 2>/dev/null; then
@@ -810,66 +1501,87 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
         exit 1
     fi
     _versioned_mark_complete
-    # Point the stable .venv link at this version's freshly-built slot, moving a
-    # legacy real .venv aside on the first migration. Run via the slot's own
-    # python (stdlib-only helper); a CLI plugin has no daemon holding the link.
-    if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
-            activate "$SRC_VERSION" --replace-nonlink --no-link >/dev/null 2>&1; then
-        _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
-        exit 1
-    fi
-    _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
-    # GC superseded version slots, keeping the current + previous-good and any
-    # slot with a live process (--protect-pids), so old versions do not pile up.
-    if [[ -n "$PREV_VERSION" ]]; then
-        "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids --keep "$PREV_VERSION" 2>&1 | sed 's/^/  ...    gc: /' || true
+    if [[ "$CELL_MODE" == 1 ]]; then
+        bash "$SLOT_RUNNER" slot-complete \
+            --context "$CONTEXT" \
+            --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID" \
+            --expected-plugin-id agent-machines \
+            --expected-payload-root "$ORIGIN_PAYLOAD_ROOT" \
+            --expected-payload-version "$SRC_VERSION" \
+            --snapshot-id "$SRC_VERSION" \
+            --runtime-version "$SRC_VERSION" \
+            --durable-home "$DURABLE_HOME" >/dev/null
+        CURRENT_MARKER="$INSTALL_DIR/current-version"
+        CUTOVER_ARGS=(
+            slot-cutover
+            --context "$CONTEXT"
+            --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
+            --expected-plugin-id agent-machines
+            --expected-payload-root "$ORIGIN_PAYLOAD_ROOT"
+            --expected-payload-version "$SRC_VERSION"
+            --snapshot-id "$SRC_VERSION"
+            --runtime-version "$SRC_VERSION"
+            --expected-namespace-generation "$CELL_NAMESPACE_GENERATION"
+            --expected-install-generation "$CELL_INSTALL_GENERATION"
+            --durable-home "$DURABLE_HOME"
+        )
+        if [[ -f "$CURRENT_MARKER" && ! -L "$CURRENT_MARKER" ]]; then
+            CUTOVER_ARGS+=(--expected-current-version "$(cat "$CURRENT_MARKER")")
+        else
+            CUTOVER_ARGS+=(--expect-current-absent)
+        fi
+        bash "$SLOT_RUNNER" "${CUTOVER_ARGS[@]}" >/dev/null
+        _ok "Runtime version $SRC_VERSION selected in installation cell"
     else
-        "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids 2>&1 | sed 's/^/  ...    gc: /' || true
+        # Capture the currently-active version so gc can retain it as previous-good.
+        PREV_VERSION="$("$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' current 2>/dev/null || echo "")"
+        # Point the stable .venv link at this version's freshly-built slot, moving a
+        # legacy real .venv aside on the first migration. Run via the slot's own
+        # python (stdlib-only helper); a CLI plugin has no daemon holding the link.
+        if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
+                activate "$SRC_VERSION" --replace-nonlink --no-link >/dev/null 2>&1; then
+            _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
+            exit 1
+        fi
+        _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
+        # GC superseded version slots, keeping the current + previous-good and any
+        # slot with a live process (--protect-pids), so old versions do not pile up.
+        if [[ -n "$PREV_VERSION" ]]; then
+            "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids --keep "$PREV_VERSION" 2>&1 | sed 's/^/  ...    gc: /' || true
+        else
+            "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' gc --protect-pids 2>&1 | sed 's/^/  ...    gc: /' || true
+        fi
     fi
 fi
 # === end install-contract:v3 versioned-venv activate ===
 
 # -- 4. Binstub --------------------------------------------------------
-deploy_binstub
+if [[ "$CELL_MODE" == 0 ]]; then
+    deploy_binstub
+fi
 
 # -- 5. Deploy manifest ------------------------------------------------
 
-# === install-contract:v4 source-kind -- keep byte-identical across plugins ===
-# A runtime footprint's source is inferred from where the installer runs.
-# Vendored under the Copilot CLI installed-plugins dir => marketplace;
-# anything else (a git checkout) => local. #935: when the installer self-staged
-# out of the marketplace payload, its live path is a throwaway stage dir, so
-# infer the kind from the ORIGINAL payload path the self-stage prologue recorded
-# in COPILOT_PLUGIN_STAGED_FROM (else the current path).
-_source_kind() {
-    case "$(printf '%s' "${COPILOT_PLUGIN_STAGED_FROM:-$1}" | tr '\\' '/')" in
-        */.copilot/installed-plugins/*) printf 'marketplace' ;;
-        *) printf 'local' ;;
-    esac
-}
-# === end install-contract:v4 source-kind ===
-_git_info() {
-    local path="$1" commit branch dirty
-    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-    dirty="false"
-    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
-    echo "$commit $branch $dirty"
-}
-
-# Unified schema_version 3 manifest (install-contract): records the source
-# footprint (marketplace vs local) so deploys are auditable like the siblings.
-MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
-KIND="$(_source_kind "$PLUGIN_DIR")"
-VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-COMMIT="null"; BRANCH="null"; DIRTY="false"
-if [[ "$KIND" == "local" ]]; then
-    REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-    read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
-    COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
+SOURCE_PLUGIN_DIR="$PLUGIN_DIR"
+if [[ "$CELL_MODE" == 1 ]]; then
+    SOURCE_PLUGIN_DIR="$ORIGIN_PAYLOAD_ROOT"
 fi
-TMP="$MANIFEST_PATH.tmp"
-cat > "$TMP" << EOF
+VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+if [[ "$CELL_MODE" == 1 ]]; then
+    _write_cell_manifest \
+        "$INSTALL_DIR" "$SOURCE_PLUGIN_DIR" "$VER" "$VENV_DIR" "$SRC_VERSION" \
+        "$CONTEXT" "$EXPECTED_MARKETPLACE_ID"
+    _ok "Deploy manifest written (source: $(_source_kind "$SOURCE_PLUGIN_DIR"))"
+else
+    KIND="$(_source_kind "$SOURCE_PLUGIN_DIR")"
+    COMMIT="null"; BRANCH="null"; DIRTY="false"
+    if [[ "$KIND" == "local" ]]; then
+        REPO_ROOT="$(cd "$SOURCE_PLUGIN_DIR/../.." && pwd)"
+        read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+        COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
+    fi
+    TMP="$INSTALL_DIR/deploy-manifest.json.tmp"
+    cat > "$TMP" << EOF
 {
   "schema_version": 3,
   "service": "agent-machines",
@@ -877,7 +1589,7 @@ cat > "$TMP" << EOF
   "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
   "source": {
     "kind": "$KIND",
-    "path": "$PLUGIN_DIR",
+    "path": "$SOURCE_PLUGIN_DIR",
     "repo": "copilot-extensions",
     "plugin": "agent-machines",
     "version": "$VER",
@@ -889,8 +1601,9 @@ cat > "$TMP" << EOF
   "runtime": "python"
 }
 EOF
-mv -f "$TMP" "$MANIFEST_PATH"
-_ok "Deploy manifest written (source: $KIND)"
+    mv -f "$TMP" "$INSTALL_DIR/deploy-manifest.json"
+    _ok "Deploy manifest written (source: $KIND)"
+fi
 
 # -- 6. Verify ---------------------------------------------------------
 echo ''
@@ -901,10 +1614,12 @@ else
     exit 1
 fi
 
-case ":$PATH:" in
-    *":$LOCAL_BIN:"*) _ok "PATH: $LOCAL_BIN is on PATH" ;;
-    *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
-esac
+if [[ "$CELL_MODE" == 0 ]]; then
+    case ":$PATH:" in
+        *":$LOCAL_BIN:"*) _ok "PATH: $LOCAL_BIN is on PATH" ;;
+        *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+    esac
+fi
 
 echo ''
 echo '=== agent-machines init complete ==='

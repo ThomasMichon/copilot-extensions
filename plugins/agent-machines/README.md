@@ -11,9 +11,11 @@ actions) and per-machine data stay in the consuming repo.
 
 ## What works today
 
-- **Runtime is standalone.** The CLI installs under `~/.agent-machines` and can
-  run without `agent-worktrees`; without the sibling registries, discovery simply
-  returns no packages.
+- **Runtime is standalone.** With absent or false installation-mode policy, the
+  CLI installs under `~/.agent-machines` exactly as before and can run without
+  `agent-worktrees`; without the sibling registries, discovery simply returns no
+  packages. An explicitly activated, validated installation cell instead uses
+  its own immutable runtime slots through the payload-local command.
 - **Discovery is relationship-aware and registry-based.** Adopted projects come
   from `~/.agent-worktrees/projects.yaml`; paths are resolved through
   `~/.agent-worktrees/repos.yaml`. When a project declares `stateless` or
@@ -65,22 +67,38 @@ scripts/init.sh stamp       # Linux / WSL / macOS: install binstub only
 scripts/init.sh             # Linux / WSL / macOS: build/update the runtime now
 ```
 
-The installer also exposes an explicit, non-activating adapter for a
-pre-stamped installation-context snapshot:
+The installer also exposes explicit fixed-identity installation-context
+adapters:
 
 ```powershell
 scripts\init.ps1 -Action slot-provision -Context C:\path\to\install.json -ExpectedMarketplaceId <marketplace-id>
 scripts\init.ps1 -Action slot-validate -Context C:\path\to\install.json -ExpectedMarketplaceId <marketplace-id>
+scripts\init.ps1 -Action slot-cutover -Context C:\path\to\install.json -ExpectedMarketplaceId <marketplace-id> -ExpectedNamespaceGeneration <n> -ExpectedInstallGeneration <n> -ExpectedCurrentVersion <version>
 ```
 
 ```bash
 scripts/init.sh slot-provision --context /path/to/install.json --expected-marketplace-id <marketplace-id>
 scripts/init.sh slot-validate --context /path/to/install.json --expected-marketplace-id <marketplace-id>
+scripts/init.sh slot-cutover --context /path/to/install.json --expected-marketplace-id <marketplace-id> --expected-namespace-generation <n> --expected-install-generation <n> --expected-current-version <version>
 ```
 
-These actions only reserve or validate the current plugin version's empty,
-owned cell-local slot. They do not build it, switch the normal legacy install
-path, migrate legacy state, or write current/LKG/activation state.
+`cell-provision` is reserved for the payload-local dispatcher and bootstrap
+reconciler after the shared resolver proves an already-active Agent Machines
+cell. It snapshots the owning payload, reserves the fixed-identity slot, builds
+and health-checks the runtime, publishes immutable build completion, and
+compare-and-swaps the cell-local current/LKG markers while holding one
+cell-root provisioning lock across the complete transaction. It never creates
+an activation or migrates legacy state. `slot-cutover` provides the same
+ownership-checked marker transaction for an explicitly selected completed
+historical slot, enabling rollback without changing another cell; after a
+successful cutover it atomically republishes schema-4 `deploy-manifest.json`.
+The manifest keeps the latest reconciled payload provenance in `source` and the
+active slot in `runtime` (`version`, slot/interpreter paths, and selecting
+payload). Historical rollback changes only `runtime`, so session-start bootstrap
+does not reverse it; a later different payload provenance still causes a forward
+reconcile. Cell snapshot copy is staged in an owned sibling and atomically
+published before provenance stamping. Retry cleans only a marker-proven
+unfinished publication and never removes a pre-existing snapshot.
 
 Verify:
 

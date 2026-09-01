@@ -13,7 +13,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 SCHEMA = "copilot-extensions.payload-invocation"
-VERSION = 1
+LEGACY_VERSION = 1
+VERSION = 2
 
 _PLUGIN = re.compile(r"^agent-[a-z0-9-]+$")
 _COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -26,6 +27,28 @@ _INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
 _DISPATCHER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
 _WINDOWS_CATALOG_SHIMS = {"powershell", "cmd"}
 _PROVISION_MODES = {"snapshot", "direct"}
+_INSTALLATION_CONTEXT_MODES = {"legacy", "required"}
+
+
+def _eligible_core_runtime_plugins() -> set[str]:
+    marketplace_path = REPO / ".github" / "plugin" / "marketplace.json"
+    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    eligible: set[str] = set()
+    for entry in marketplace.get("plugins", []):
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        source = entry.get("source")
+        if (
+            not isinstance(name, str)
+            or not _PLUGIN.fullmatch(name)
+            or not isinstance(source, str)
+        ):
+            continue
+        plugin_root = REPO / source
+        if (plugin_root / "pyproject.toml").is_file():
+            eligible.add(name)
+    return eligible
 
 
 def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
@@ -47,16 +70,36 @@ def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
 
 def load_manifest(path: Path) -> dict[str, object]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema") != SCHEMA or data.get("version") != VERSION:
-        raise ValueError(f"{path}: expected {SCHEMA} version {VERSION}")
-    shared_checks = {
-        "runtimeRoot": _RUNTIME_ROOT,
-        "noSelfProvisionEnv": _ENV,
-    }
+    manifest_version = data.get("version")
+    if data.get("schema") != SCHEMA or manifest_version not in {
+        LEGACY_VERSION,
+        VERSION,
+    }:
+        raise ValueError(
+            f"{path}: expected {SCHEMA} version {LEGACY_VERSION} or {VERSION}"
+        )
+    runtime_root_field = (
+        "runtimeRoot" if manifest_version == LEGACY_VERSION else "legacyRuntimeRoot"
+    )
+    shared_checks = {runtime_root_field: _RUNTIME_ROOT, "noSelfProvisionEnv": _ENV}
     for field, pattern in shared_checks.items():
         value = data.get(field)
         if not isinstance(value, str) or not pattern.fullmatch(value):
             raise ValueError(f"{path}: invalid {field}: {value!r}")
+    if manifest_version == LEGACY_VERSION:
+        if "legacyRuntimeRoot" in data or "installationContext" in data:
+            raise ValueError(
+                f"{path}: version 1 cannot declare installation-context fields"
+            )
+        installation_context = "legacy"
+    else:
+        if "runtimeRoot" in data:
+            raise ValueError(f"{path}: version 2 uses legacyRuntimeRoot")
+        installation_context = data.get("installationContext")
+        if installation_context not in _INSTALLATION_CONTEXT_MODES:
+            raise ValueError(
+                f"{path}: invalid installationContext: {installation_context!r}"
+            )
 
     raw_commands = data.get("commands")
     if raw_commands is None:
@@ -138,6 +181,23 @@ def load_manifest(path: Path) -> dict[str, object]:
         raise ValueError(
             f"{path}: payloadDispatcher must declare both posix and windows"
         )
+    if installation_context == "required":
+        if plugin not in _eligible_core_runtime_plugins():
+            raise ValueError(
+                f"{path}: installationContext required is limited to "
+                "runtime-bearing core suite plugin identities"
+            )
+        if not payload_root_env:
+            raise ValueError(
+                f"{path}: installationContext required needs payloadRootEnv"
+            )
+        if not all(normalized_dispatcher.values()):
+            raise ValueError(
+                f"{path}: installationContext required needs payloadDispatcher "
+                "for both platforms"
+            )
+    data["runtimeRoot"] = data[runtime_root_field]
+    data["installationContext"] = installation_context
     data["outputDir"] = output_dir
     data["installer"] = installer
     data["windowsCatalogShim"] = windows_catalog_shim
@@ -270,7 +330,11 @@ def render(
                 if data["payloadRootEnv"]
                 else ""
             )
-            + f'exec "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'
+            + (
+                f'exec bash "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'
+                if data["installationContext"] == "required"
+                else f'exec "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'
+            )
             if data["payloadDispatcher"]["posix"]
             else ""
         ),

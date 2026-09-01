@@ -26,64 +26,96 @@ legacy_mutation_allowed() {
   bash "$probe" --payload-root "$PluginDir" --legacy-root "$HOME/.agent-machines"
 }
 ContextSelected=0
+ContextActive=0
+ContextPath=""
+ContextMarketplaceId=""
 InstallDir="$HOME/.agent-machines"
-if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+ProfileHome=""
+uid="$(id -u 2>/dev/null || true)"
+if [ -n "$uid" ] && command -v getent >/dev/null 2>&1; then
+  ProfileHome="$(getent passwd "$uid" 2>/dev/null | cut -d: -f6)"
+fi
+if [ -z "$ProfileHome" ] && [ -n "$uid" ] && [ -r /etc/passwd ]; then
+  ProfileHome="$(awk -F: -v uid="$uid" '$3 == uid { print $6; exit }' /etc/passwd)"
+fi
+PolicyPath="$ProfileHome/.copilot-extensions/installation-mode.json"
   resolver="$ScriptDir/installation-context/installation-context.sh"
   query="$ScriptDir/installation-context/json-query.awk"
   if [ ! -f "$resolver" ] || [ ! -f "$query" ]; then
     echo "[agent-machines] installation context is selected but its validator is unavailable; skipping reconcile." >&2
     exit 0
   fi
-  durableHome="$COPILOT_EXTENSIONS_CONTEXT"
-  for _part in 1 2 3 4 5; do durableHome="$(dirname -- "$durableHome")"; done
-  validated="$(mktemp)" || exit 0
-  if ! bash "$resolver" validate \
-      --context "$COPILOT_EXTENSIONS_CONTEXT" \
-      --durable-home "$durableHome" >"$validated"; then
-    rm -f -- "$validated"
-    echo "[agent-machines] installation context is invalid; skipping reconcile without legacy fallback." >&2
+  statusArgs=(
+    status
+    --payload-root "$PluginDir"
+    --plugin-id agent-machines
+    --legacy-root "$HOME/.agent-machines" # marketplace-isolation: allow legacy compatibility root
+  )
+  if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+    statusArgs+=(--context "$COPILOT_EXTENSIONS_CONTEXT")
+    contextDurableHome="$COPILOT_EXTENSIONS_CONTEXT"
+    for _part in 1 2 3 4 5; do
+      contextDurableHome="$(dirname -- "$contextDurableHome")"
+    done
+    statusArgs+=(--durable-home "$contextDurableHome")
+  fi
+  if ! resolved="$(bash "$resolver" "${statusArgs[@]}" 2>/dev/null)"; then
+    echo "[agent-machines] installation status is invalid; skipping reconcile without legacy fallback." >&2
     exit 0
   fi
-  encoded="$(LC_ALL=C awk -f "$query" -v mode=hex -v query_path=pluginId "$validated" 2>/dev/null || true)"
-  rm -f -- "$validated"
-  contextPlugin=""
-  while [ -n "$encoded" ]; do
-    [ "${#encoded}" -ge 2 ] || { contextPlugin=""; break; }
-    printf -v byte '%b' "\\x${encoded:0:2}"
-    contextPlugin+="$byte"
-    encoded="${encoded:2}"
-  done
-  if [ -z "$contextPlugin" ]; then
-    echo "[agent-machines] installation context is invalid; skipping reconcile without legacy fallback." >&2
-    exit 0
+  jsonValue() {
+    LC_ALL=C awk -f "$query" -v mode=get -v query_path="$1" <<<"$resolved" 2>/dev/null
+  }
+  sep=$'\034'
+  jsonPath() {
+    local value="" part
+    for part in "$@"; do
+      [ -z "$value" ] || value+="$sep"
+      value+="$part"
+    done
+    printf '%s' "$value"
+  }
+  status="$(jsonValue status || true)"
+  reason="$(jsonValue reason || true)"
+  actualMode="$(jsonValue actualMode || true)"
+  desiredMode="$(jsonValue desiredMode || true)"
+  simplePolicyLegacy=0
+  if [ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ] &&
+     [ "$status" = provenance-blocked ] &&
+     [ "$(jsonValue "$(jsonPath policy state)" || true)" = valid ] &&
+     [ "$(jsonValue "$(jsonPath policy enabled)" || true)" = false ]; then
+    marketplacesPath="$(jsonPath installationMode marketplaces)"
+    marketplacesType="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path="$marketplacesPath" "$PolicyPath" 2>/dev/null || true)"
+    if [ -z "$marketplacesType" ] ||
+       { [ "$marketplacesType" = object ] &&
+         [ "$(LC_ALL=C awk -f "$query" -v mode=len -v query_path="$marketplacesPath" "$PolicyPath" 2>/dev/null || true)" = 0 ]; }; then
+      simplePolicyLegacy=1
+    fi
   fi
-  if [ "$contextPlugin" = agent-machines ]; then
-    resolved="$(mktemp)" || exit 0
-    if ! bash "$resolver" resolve \
-        --context "$COPILOT_EXTENSIONS_CONTEXT" \
-        --plugin-id agent-machines \
-        --payload-root "$PluginDir" \
-        --durable-home "$durableHome" >"$resolved"; then
-      rm -f -- "$resolved"
-      echo "[agent-machines] installation context is invalid; skipping reconcile without legacy fallback." >&2
+  if { [ "$status" = ready ] && [ "$actualMode" = legacy ] && [ "$desiredMode" = legacy ]; } ||
+     [ "$simplePolicyLegacy" = 1 ]; then
+    if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+      echo "[agent-machines] requested installation context is not active; skipping reconcile without legacy fallback." >&2
       exit 0
     fi
-    encoded="$(LC_ALL=C awk -f "$query" -v mode=hex -v query_path=pluginRoot "$resolved" 2>/dev/null || true)"
-    rm -f -- "$resolved"
-    InstallDir=""
-    while [ -n "$encoded" ]; do
-      [ "${#encoded}" -ge 2 ] || { InstallDir=""; break; }
-      printf -v byte '%b' "\\x${encoded:0:2}"
-      InstallDir+="$byte"
-      encoded="${encoded:2}"
-    done
-    if [ -z "$InstallDir" ]; then
-      echo "[agent-machines] installation context returned no plugin root; skipping reconcile without legacy fallback." >&2
+  elif { [ "$status" = ready ] && [ "$reason" = namespaced-active ]; } ||
+       [ "$status" = deactivation-required ]; then
+    [ "$actualMode" = namespaced ] || exit 0
+    InstallDir="$(jsonValue runtimeRoot || true)"
+    ContextPath="$(jsonValue context || true)"
+    ContextMarketplaceId="$(jsonValue marketplaceId || true)"
+    if [ -z "$InstallDir" ] || [ -z "$ContextPath" ] || [ -z "$ContextMarketplaceId" ]; then
+      echo "[agent-machines] active installation context is incomplete; skipping reconcile." >&2
       exit 0
     fi
     ContextSelected=1
+    if [ "$status" = ready ] && [ "$reason" = namespaced-active ]; then
+      ContextActive=1
+    fi
+  else
+    echo "[agent-machines] installation governance blocks reconcile without legacy fallback: status=$status reason=$reason." >&2
+    exit 0
   fi
-fi
 Manifest="$InstallDir/deploy-manifest.json"
 Binstub="$HOME/.local/bin/agent-machines"
 
@@ -94,7 +126,15 @@ Binstub="$HOME/.local/bin/agent-machines"
 # declares a 'stamp' action; else a safe no-op.
 if [ ! -f "$Manifest" ]; then
   if [ "$ContextSelected" = 1 ]; then
-    echo "[agent-machines] selected context has no deploy manifest; namespaced install remains non-operative." >&2
+    if [ "$ContextActive" = 1 ]; then
+      init="$PluginDir/scripts/init.sh"
+      if [ -f "$init" ]; then
+        echo "[agent-machines] active cell has no runtime; reconciling in background..."
+        nohup bash "$init" cell-provision \
+          --context "$ContextPath" \
+          --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1 &
+      fi
+    fi
     exit 0
   fi
   _init="$ScriptDir/init.sh"
@@ -108,12 +148,89 @@ fi
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || exit 0
 
-deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
 if [ "$ContextSelected" = 1 ]; then
-  pluginDir="$PluginDir"
-else
-  pluginDir="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"]["path"])' "$Manifest" 2>/dev/null)"
+  manifestValues="$("$py" -c '
+import json, sys
+def strict(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate key")
+        value[key] = item
+    return value
+with open(sys.argv[1], "r", encoding="utf-8") as stream:
+    manifest = json.load(stream, object_pairs_hook=strict)
+source = manifest.get("source")
+runtime = manifest.get("runtime")
+installation = manifest.get("installation")
+selected = runtime.get("selectedBy") if isinstance(runtime, dict) else None
+valid = (
+    type(manifest.get("schema_version")) is int
+    and manifest["schema_version"] == 4
+    and manifest.get("service") == "agent-machines"
+    and isinstance(source, dict)
+    and source.get("repo") == "copilot-extensions"
+    and source.get("plugin") == "agent-machines"
+    and all(isinstance(source.get(key), str) and source[key]
+            for key in ("kind", "path", "version"))
+    and type(source.get("dirty")) is bool
+    and isinstance(runtime, dict)
+    and runtime.get("kind") == "python"
+    and all(isinstance(runtime.get(key), str) and runtime[key]
+            for key in ("version", "path", "interpreter"))
+    and isinstance(selected, dict)
+    and all(isinstance(selected.get(key), str) and selected[key]
+            for key in ("kind", "path", "version"))
+    and isinstance(installation, dict)
+    and installation.get("marketplaceId") == sys.argv[2]
+    and installation.get("pluginId") == "agent-machines"
+    and installation.get("context") == sys.argv[3]
+)
+if not valid:
+    raise ValueError("invalid manifest")
+print("\x1c".join((
+    source["version"], source["path"], runtime["version"],
+    runtime["path"], runtime["interpreter"], selected["version"],
+)))
+' "$Manifest" "$ContextMarketplaceId" "$ContextPath" 2>/dev/null)" || {
+    echo "[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback." >&2
+    exit 0
+  }
+  IFS=$'\034' read -r deployed sourcePath activeVersion runtimePath runtimeInterpreter selectedByVersion <<<"$manifestValues"
+  CurrentMarker="$InstallDir/current-version"
+  expectedRuntimePath="$InstallDir/versions/$activeVersion"
+  expectedInterpreter="$expectedRuntimePath/bin/python"
+  if [ -z "$deployed" ] || [ -z "$sourcePath" ] ||
+     [ -z "$activeVersion" ] || [ "$runtimePath" != "$expectedRuntimePath" ] ||
+     [ "$runtimeInterpreter" != "$expectedInterpreter" ] ||
+     [ "$selectedByVersion" != "$activeVersion" ] ||
+     [ ! -f "$CurrentMarker" ] || [ -L "$CurrentMarker" ] ||
+     [ "$(cat "$CurrentMarker" 2>/dev/null)" != "$activeVersion" ] ||
+     [ ! -x "$runtimeInterpreter" ]; then
+    echo "[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback." >&2
+    exit 0
+  fi
+  current="$deployed"
+  pyproj="$PluginDir/pyproject.toml"
+  if [ -f "$pyproj" ]; then
+    v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
+    [ -n "$v" ] && current="$v"
+  fi
+  if { [ "$deployed" = "$current" ] && [ "$sourcePath" = "$PluginDir" ]; } ||
+     [ "$ContextActive" != 1 ]; then
+    exit 0
+  fi
+  init="$PluginDir/scripts/init.sh"
+  [ -f "$init" ] || exit 0
+  echo "[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background..."
+  nohup bash "$init" cell-provision \
+    --context "$ContextPath" \
+    --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1 &
+  exit 0
 fi
+
+deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
+pluginDir="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"]["path"])' "$Manifest" 2>/dev/null)"
 [ -n "$pluginDir" ] && [ -d "$pluginDir" ] || exit 0
 
 current="$deployed"
@@ -121,11 +238,6 @@ pyproj="$pluginDir/pyproject.toml"
 if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
-fi
-if [ "$ContextSelected" = 1 ]; then
-  if [ "$deployed" = "$current" ]; then exit 0; fi
-  echo "[agent-machines] selected context runtime $deployed -> $current; context-aware install is not active yet." >&2
-  exit 0
 fi
 
 # Up to date and binstub present -> fast no-op.

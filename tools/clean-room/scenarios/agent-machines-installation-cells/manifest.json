@@ -1,0 +1,37 @@
+{
+  "name": "agent-machines-installation-cells",
+  "description": "Tier-P F1 dual-cell scenario: two independent marketplace identities carrying Agent Machines install and run in isolated cells, one updates and rolls back without changing the other, blocked governance states never fall back to legacy, and unrelated or payload-only identities cannot adopt required installation context.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "platforms": ["linux", "windows"],
+  "prereqs": {
+    "present": ["python", "uv"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "none",
+    "gh": "none",
+    "ado": "none"
+  },
+  "inputs": {
+    "CR_PARTNER_PATH": "mounted copilot-extensions source tree",
+    "CR_UV_INDEX": "optional package index used when the clean-room host cannot reach the public Python registry"
+  },
+  "expected_artifacts": [
+    "$HOME/cr-report.json (phases + jams; ok iff failed==0)",
+    "scenario result state beneath the runner-owned results directory"
+  ],
+  "stages": [
+    {"n": 0, "title": "source and clean fixture boundary"},
+    {"n": 1, "title": "operative eligibility and full cell-provision locking hold"},
+    {"n": 2, "title": "two active Agent Machines cells install and run independently"},
+    {"n": 3, "title": "one cell updates without changing its peer"},
+    {"n": 4, "title": "historical owned slot rolls back without changing its peer"},
+    {"n": 5, "title": "requested-only malformed foreign maintenance and orphaned states fail closed"}
+  ],
+  "notes": [
+    "All namespaced receipts, runtimes, policies, and scenario output live in the disposable clean-room account or the runner-owned results directory.",
+    "The mounted source remains read-only and no persistent host installation is selected."
+  ]
+}

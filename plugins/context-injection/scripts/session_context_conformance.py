@@ -583,11 +583,25 @@ def _runtime_catalog_contract(
     value, error = _load_object(path)
     if value is None:
         return None, error
+    version = value.get("version")
     if (
         value.get("schema") != "copilot-extensions.payload-invocation"
-        or value.get("version") != 1
+        or version not in {1, 2}
     ):
         return None, "payload invocation schema or version is incompatible"
+    if version == 1:
+        if (
+            not isinstance(value.get("runtimeRoot"), str)
+            or "legacyRuntimeRoot" in value
+            or "installationContext" in value
+        ):
+            return None, "payload invocation version 1 runtime contract is invalid"
+    elif (
+        not isinstance(value.get("legacyRuntimeRoot"), str)
+        or "runtimeRoot" in value
+        or value.get("installationContext") not in {"legacy", "required"}
+    ):
+        return None, "payload invocation version 2 runtime contract is invalid"
     raw = value.get("commands")
     if raw is None and isinstance(value.get("command"), str):
         raw = [value]

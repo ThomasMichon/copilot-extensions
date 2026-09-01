@@ -809,6 +809,10 @@ def _run_exemplar_slot_action(
     *,
     include_context: bool = True,
     environment_overrides: dict[str, str] | None = None,
+    expected_namespace_generation: int = 1,
+    expected_install_generation: int = 2,
+    expected_current_version: str | None = None,
+    expect_current_absent: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     _, _prefix, style = exemplar
     command_prefix, installed_plugin, home = _installed_exemplar(exemplar, tmp_path)
@@ -839,6 +843,24 @@ def _run_exemplar_slot_action(
             str(layout["durable"]),
         ]
     )
+    if action == "slot-cutover":
+        command.extend(
+            [
+                _flag(style, "expected-namespace-generation"),
+                str(expected_namespace_generation),
+                _flag(style, "expected-install-generation"),
+                str(expected_install_generation),
+            ]
+        )
+        if expected_current_version is not None:
+            command.extend(
+                [
+                    _flag(style, "expected-current-version"),
+                    expected_current_version,
+                ]
+            )
+        elif expect_current_absent:
+            command.append(_flag(style, "expect-current-absent"))
     return subprocess.run(
         command,
         capture_output=True,
@@ -871,10 +893,74 @@ def _installed_exemplar(
                 ".ruff_cache",
                 "__pycache__",
                 "*.pyc",
+                "*.egg-info",
+                ".venv",
+                "build",
+                "dist",
             ),
         )
     installed_script = installed_plugin / source_script.relative_to(source_plugin)
     return (*prefix[:-1], str(installed_script)), installed_plugin, home
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_cell_provision_serializes_complete_transaction(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1]
+        for line in (installed_plugin / "pyproject.toml").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id="agent-machines",
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    witness = tmp_path / "cell-provision-lock-events.txt"
+    environment = {
+        "AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE": str(witness),
+        "AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE_SLEEP": "1",
+        "AGENT_MACHINES_CELL_PROVISION_LOCK_SMOKE_MILLISECONDS": "1000",
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda _: _run_exemplar_slot_action(
+                    exemplar,
+                    "cell-provision",
+                    layout,
+                    tmp_path,
+                    environment_overrides=environment,
+                ),
+                range(2),
+            )
+        )
+
+    assert all(result.returncode == 0 for result in results), [
+        result.stderr for result in results
+    ]
+    events = witness.read_text(encoding="utf-8").splitlines()
+    assert len(events) == 4
+    first_start = events[0].split()
+    first_end = events[1].split()
+    second_start = events[2].split()
+    second_end = events[3].split()
+    assert first_start[0] == "start"
+    assert first_end == ["end", first_start[1]]
+    assert second_start[0] == "start"
+    assert second_end == ["end", second_start[1]]
 
 
 def _function_source(
@@ -886,6 +972,278 @@ def _function_source(
     begin = source.index(start)
     end = source.index(following, begin)
     return source[begin:end].rstrip() + "\n"
+
+
+def _run_agent_machines_snapshot_harness(
+    exemplar: tuple[str, tuple[str, ...], str],
+    installed_plugin: Path,
+    layout: dict[str, Path | str],
+    tmp_path: Path,
+    *,
+    fail_before_stamp: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    _, _, style = exemplar
+    version = next(
+        line.split('"')[1]
+        for line in (installed_plugin / "pyproject.toml").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.startswith("version = ")
+    )
+    source_script = installed_plugin / "scripts" / (
+        "init.ps1" if style == "powershell" else "init.sh"
+    )
+    harness_root = tmp_path / f"snapshot-harness-{style}"
+    harness_root.mkdir(exist_ok=True)
+    environment = os.environ.copy()
+    environment.update({
+        "HOME": str(tmp_path / "home"),
+        "USERPROFILE": str(tmp_path / "home"),
+        "SNAPSHOT_ROOT_TEST": str(layout["snapshot_root"]),
+    })
+    if fail_before_stamp:
+        environment["AGENT_MACHINES_CELL_SNAPSHOT_FAIL_BEFORE_STAMP"] = "1"
+    else:
+        environment.pop(
+            "AGENT_MACHINES_CELL_SNAPSHOT_FAIL_BEFORE_STAMP",
+            None,
+        )
+    if style == "powershell":
+        fake_runner = harness_root / "fake-context.ps1"
+        fake_runner.write_text(
+            """param(
+    [Parameter(Position=0)][string]$Action,
+    [string]$Context,
+    [string]$ExpectedMarketplaceId,
+    [string]$ExpectedPluginId,
+    [string]$ExpectedNamespaceGeneration,
+    [string]$ExpectedInstallGeneration,
+    [string]$SnapshotId,
+    [string]$DurableHome
+)
+$provenance = Join-Path $env:SNAPSHOT_ROOT_TEST 'snapshot-provenance.json'
+if ($Action -ceq 'snapshot-stamp') {
+    [IO.File]::WriteAllText($provenance, "{}`n")
+    exit 0
+}
+if ($Action -ceq 'snapshot-validate' -and (Test-Path -LiteralPath $provenance -PathType Leaf)) {
+    exit 0
+}
+exit 1
+""",
+            encoding="utf-8",
+        )
+        def ps(value: object) -> str:
+            return str(value).replace("'", "''")
+
+        harness = harness_root / "run.ps1"
+        harness.write_text(
+            "\n".join(
+                (
+                    "Set-StrictMode -Version 2.0",
+                    "$ErrorActionPreference = 'Stop'",
+                    f"$PluginDir = '{ps(installed_plugin)}'",
+                    f"$snapshotsRoot = '{ps(layout['snapshots'])}'",
+                    f"$SrcVersion = '{ps(version)}'",
+                    f"$ExpectedMarketplaceId = '{ps(layout['marketplace_id'])}'",
+                    f"$Context = '{ps(layout['install'])}'",
+                    "$cellNamespaceGeneration = '1'",
+                    "$cellInstallGeneration = '2'",
+                    f"$DurableHome = '{ps(layout['durable'])}'",
+                    f"$slotRunner = '{ps(fake_runner)}'",
+                    "$probeHost = (Get-Process -Id $PID).Path",
+                    _function_source(
+                        source_script,
+                        "function Get-CellSnapshotOwnerText {",
+                        "\n# -- Paths",
+                    ).rstrip(),
+                    "try {",
+                    f"    Ensure-CellSnapshot -SnapshotRoot '{ps(layout['snapshot_root'])}'",
+                    "    exit 0",
+                    "} catch {",
+                    "    Write-Error $_",
+                    "    exit 1",
+                    "}",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        command = [
+            str(POWERSHELL),
+            "-NoProfile",
+            "-File",
+            str(harness),
+        ]
+    else:
+        fake_runner = harness_root / "fake-context.sh"
+        fake_runner.write_text(
+            """#!/usr/bin/env bash
+case "$1" in
+  snapshot-stamp)
+    printf '{}\n' >"$SNAPSHOT_ROOT_TEST/snapshot-provenance.json"
+    ;;
+  snapshot-validate)
+    test -f "$SNAPSHOT_ROOT_TEST/snapshot-provenance.json"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+""",
+            encoding="utf-8",
+        )
+        fake_runner.chmod(0o755)
+        harness = harness_root / "run.sh"
+        harness.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env bash",
+                    "set -u",
+                    f"PLUGIN_DIR={shlex.quote(str(installed_plugin))}",
+                    f"SNAPSHOTS_ROOT={shlex.quote(str(layout['snapshots']))}",
+                    f"SRC_VERSION={shlex.quote(version)}",
+                    f"EXPECTED_MARKETPLACE_ID={shlex.quote(str(layout['marketplace_id']))}",
+                    f"CONTEXT={shlex.quote(str(layout['install']))}",
+                    "CELL_NAMESPACE_GENERATION=1",
+                    "CELL_INSTALL_GENERATION=2",
+                    f"DURABLE_HOME={shlex.quote(str(layout['durable']))}",
+                    f"SLOT_RUNNER={shlex.quote(str(fake_runner))}",
+                    "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                    _function_source(
+                        source_script,
+                        "_cell_snapshot_owner_text() {",
+                        "\nFORCE=0",
+                    ).rstrip(),
+                    f"_ensure_cell_snapshot {shlex.quote(str(layout['snapshot_root']))}",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        harness.chmod(0o755)
+        command = [str(BASH), str(harness)]
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_snapshot_publication_failure_is_retryable(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1]
+        for line in (installed_plugin / "pyproject.toml").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id="agent-machines",
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    snapshot_root = Path(layout["snapshot_root"])
+    shutil.rmtree(snapshot_root)
+
+    failed = _run_agent_machines_snapshot_harness(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+        fail_before_stamp=True,
+    )
+
+    assert failed.returncode != 0
+    assert not snapshot_root.exists()
+    assert not list(Path(layout["snapshots"]).glob(".agent-machines-snapshot-*"))
+
+    snapshot_root.mkdir(parents=True)
+    (snapshot_root / "interrupted.txt").write_text("partial\n", encoding="utf-8")
+    (snapshot_root / ".agent-machines-snapshot-publish-owner").write_text(
+        "\n".join(
+            (
+                "copilot-extensions.agent-machines.snapshot-publish:v1",
+                f"marketplaceId={layout['marketplace_id']}",
+                "pluginId=agent-machines",
+                f"snapshotId={version}",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    retried = _run_agent_machines_snapshot_harness(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+    )
+
+    assert retried.returncode == 0, retried.stderr
+    assert (snapshot_root / "snapshot-provenance.json").is_file()
+    assert (snapshot_root / "plugin.json").is_file()
+    assert not (snapshot_root / "interrupted.txt").exists()
+    assert not (
+        snapshot_root / ".agent-machines-snapshot-publish-owner"
+    ).exists()
+    assert not list(Path(layout["snapshots"]).glob(".agent-machines-snapshot-*"))
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_snapshot_publication_preserves_unowned_final_state(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    version = next(
+        line.split('"')[1]
+        for line in (installed_plugin / "pyproject.toml").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.startswith("version = ")
+    )
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id="agent-machines",
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    snapshot_root = Path(layout["snapshot_root"])
+    sentinel = snapshot_root / "payload-content.txt"
+    before = sentinel.read_bytes()
+
+    result = _run_agent_machines_snapshot_harness(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert sentinel.read_bytes() == before
+    assert not (
+        snapshot_root / ".agent-machines-snapshot-publish-owner"
+    ).exists()
 
 
 def _activation_tail_source(script: Path, plugin_id: str, style: str) -> str:
@@ -1302,7 +1660,6 @@ def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
     assert not (plugin_root / "current-version").exists()
     assert not (plugin_root / "last-known-good").exists()
     assert not (plugin_root / "installation-activation.json").exists()
-
     validated = _run_exemplar_slot_action(
         exemplar,
         "slot-validate",
@@ -1367,6 +1724,163 @@ def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
     assert not (plugin_root / "current-version").exists()
     assert not (plugin_root / "last-known-good").exists()
     assert not (plugin_root / "installation-activation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(item for item in EXEMPLAR_INSTALLERS if item[0] == "agent-machines"),
+    ids=lambda exemplar: exemplar[2],
+)
+def test_agent_machines_fixed_identity_cutover_adapter(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    plugin_id, _, style = exemplar
+    source_plugin = LIB.parents[1] / "plugins" / plugin_id
+    version = next(
+        line.split('"')[1]
+        for line in (source_plugin / "pyproject.toml").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.startswith("version = ")
+    )
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    for egg_info in installed_plugin.rglob("*.egg-info"):
+        shutil.rmtree(egg_info)
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    snapshot_root = Path(layout["snapshot_root"])
+    (snapshot_root / "payload-content.txt").unlink()
+    shutil.copytree(installed_plugin, snapshot_root, dirs_exist_ok=True)
+    stamp_runner = next(runner for runner in ALL_RUNNERS if runner[2] == style)
+    _run(stamp_runner, "snapshot-stamp", layout, snapshot_id=version)
+    provisioned = _run_exemplar_slot_action(
+        exemplar,
+        "slot-provision",
+        layout,
+        tmp_path,
+    )
+    assert provisioned.returncode == 0, provisioned.stderr
+    produced = _run_exemplar_mark_complete(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+        runtime_version=version,
+    )
+    assert produced.returncode == 0, produced.stderr
+    completed = _run_exemplar_slot_action(
+        exemplar,
+        "slot-complete",
+        layout,
+        tmp_path,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    cutover = _run_exemplar_slot_action(
+        exemplar,
+        "slot-cutover",
+        layout,
+        tmp_path,
+        expect_current_absent=True,
+    )
+
+    assert cutover.returncode == 0, cutover.stderr
+    result = json.loads(cutover.stdout)
+    assert result["action"] == "slot-cutover"
+    assert result["activated"] is False
+    plugin_root = Path(layout["plugin_root"])
+    assert (
+        (plugin_root / "current-version").read_text(encoding="utf-8").strip()
+        == version
+    )
+    assert (
+        (plugin_root / "last-known-good").read_text(encoding="utf-8").strip()
+        == version
+    )
+    assert not (plugin_root / "installation-activation.json").exists()
+    manifest_path = plugin_root / "deploy-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 4
+    assert manifest["source"]["version"] == version
+    assert Path(manifest["source"]["path"]).resolve() == installed_plugin.resolve()
+    assert manifest["runtime"]["version"] == version
+    assert Path(manifest["runtime"]["path"]).resolve() == (
+        plugin_root / "versions" / version
+    ).resolve()
+    assert Path(manifest["runtime"]["selectedBy"]["path"]).resolve() == (
+        installed_plugin.resolve()
+    )
+
+    for marker_name in ("current-version", "last-known-good"):
+        (plugin_root / marker_name).write_text("2.0.0\n", encoding="utf-8")
+    stale_manifest = json.loads(json.dumps(manifest))
+    payload_v2 = tmp_path / "payload-v2"
+    stale_manifest["source"] = {
+        **manifest["source"],
+        "version": "2.0.0",
+        "path": str(payload_v2),
+    }
+    stale_manifest["runtime"] = {
+        **manifest["runtime"],
+        "version": "2.0.0",
+        "path": str(plugin_root / "versions" / "2.0.0"),
+        "interpreter": str(
+            plugin_root
+            / "versions"
+            / "2.0.0"
+            / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        ),
+        "selectedBy": {
+            **manifest["runtime"]["selectedBy"],
+            "version": "2.0.0",
+            "path": str(payload_v2),
+        },
+    }
+    _write_json(manifest_path, stale_manifest)
+
+    rollback = _run_exemplar_slot_action(
+        exemplar,
+        "slot-cutover",
+        layout,
+        tmp_path,
+        expected_current_version="2.0.0",
+    )
+
+    assert rollback.returncode == 0, rollback.stderr
+    rollback_result = json.loads(rollback.stdout)
+    assert rollback_result["currentVersion"] == version
+    rolled_back_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert rolled_back_manifest["source"]["version"] == "2.0.0"
+    assert (
+        Path(rolled_back_manifest["source"]["path"]).resolve()
+        == payload_v2.resolve()
+    )
+    assert rolled_back_manifest["runtime"]["version"] == version
+    assert Path(rolled_back_manifest["runtime"]["path"]).resolve() == (
+        plugin_root / "versions" / version
+    ).resolve()
+    assert Path(
+        rolled_back_manifest["runtime"]["selectedBy"]["path"]
+    ).resolve() == installed_plugin.resolve()
+
+    manifest_before_failed_cas = manifest_path.read_bytes()
+    failed_cas = _run_exemplar_slot_action(
+        exemplar,
+        "slot-cutover",
+        layout,
+        tmp_path,
+        expected_current_version="9.9.9",
+    )
+
+    assert failed_cas.returncode == 0, failed_cas.stderr
+    assert json.loads(failed_cas.stdout)["status"] == "revalidation-required"
+    assert manifest_path.read_bytes() == manifest_before_failed_cas
 
 
 @pytest.mark.parametrize(

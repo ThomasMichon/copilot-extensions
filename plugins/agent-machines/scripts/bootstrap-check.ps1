@@ -37,47 +37,120 @@ function Test-LegacyMutationAllowed {
     return $LASTEXITCODE -eq 0
 }
 $contextSelected = $false
+$contextActive = $false
+$contextPath = ''
+$contextMarketplaceId = ''
 $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
-if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+$policyPath = Join-Path $env:USERPROFILE '.copilot-extensions\installation-mode.json'
+$policyPresent = (
+    (Test-Path -LiteralPath $policyPath) -or
+    $null -ne (
+        Get-Item -LiteralPath $policyPath -Force -ErrorAction SilentlyContinue
+    )
+)
     $resolver = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
     if (-not (Test-Path $resolver)) {
         Write-Host '[agent-machines] installation context is selected but its validator is unavailable; skipping reconcile.' -ForegroundColor DarkGray
         exit 0
     }
-    $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
-    1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
     $hostExe = (Get-Process -Id $PID).Path
-    $validatedJson = & $hostExe -NoProfile -ExecutionPolicy Bypass -File $resolver validate `
-        -Context $env:COPILOT_EXTENSIONS_CONTEXT -DurableHome $durableHome
+    $statusArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $resolver,
+        'status',
+        '-PayloadRoot', $PluginDir,
+        '-PluginId', 'agent-machines',
+        '-LegacyRoot', (Join-Path $env:USERPROFILE '.agent-machines') # marketplace-isolation: allow legacy compatibility root
+    )
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        $statusArgs += @('-Context', $env:COPILOT_EXTENSIONS_CONTEXT)
+        $contextDurableHome = $env:COPILOT_EXTENSIONS_CONTEXT
+        1..5 | ForEach-Object {
+            $contextDurableHome = Split-Path -Parent $contextDurableHome
+        }
+        $statusArgs += @('-DurableHome', $contextDurableHome)
+    }
+    $statusJson = @(& $hostExe @statusArgs)
     if ($LASTEXITCODE -ne 0) {
-        Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+        Write-Host '[agent-machines] installation status is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
         exit 0
     }
-    try { $contextPlugin = ($validatedJson | ConvertFrom-Json).pluginId } catch {
-        Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+    try { $status = ($statusJson -join "`n") | ConvertFrom-Json } catch {
+        Write-Host '[agent-machines] installation status is malformed; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
         exit 0
     }
-    if (-not $contextPlugin) {
-        Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
-        exit 0
+    $simplePolicyLegacy = $false
+    if (
+        -not $env:COPILOT_EXTENSIONS_CONTEXT -and
+        [string]$status.status -ceq 'provenance-blocked' -and
+        [string]$status.policy.state -ceq 'valid' -and
+        $status.policy.enabled -is [bool] -and
+        -not $status.policy.enabled
+    ) {
+        try {
+            $policyDocument = Get-Content -LiteralPath $policyPath -Raw |
+                ConvertFrom-Json
+            $installationMode = @(
+                $policyDocument.PSObject.Properties |
+                    Where-Object { $_.Name -ceq 'installationMode' }
+            )
+            $marketplaces = @()
+            if ($installationMode.Count -eq 1) {
+                $marketplaces = @(
+                    $installationMode[0].Value.PSObject.Properties |
+                        Where-Object { $_.Name -ceq 'marketplaces' }
+                )
+            }
+            $simplePolicyLegacy = (
+                $marketplaces.Count -eq 0 -or
+                $marketplaces[0].Value.PSObject.Properties.Count -eq 0
+            )
+        } catch {
+            $simplePolicyLegacy = $false
+        }
     }
-    if ($contextPlugin -ceq 'agent-machines') {
-        $contextJson = & $hostExe -NoProfile -ExecutionPolicy Bypass -File $resolver resolve `
-            -Context $env:COPILOT_EXTENSIONS_CONTEXT -PluginId agent-machines `
-            -PayloadRoot $PluginDir -DurableHome $durableHome
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+    if (
+        (
+            [string]$status.status -ceq 'ready' -and
+            [string]$status.actualMode -ceq 'legacy' -and
+            [string]$status.desiredMode -ceq 'legacy'
+        ) -or
+        $simplePolicyLegacy
+    ) {
+        if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+            Write-Host '[agent-machines] requested installation context is not active; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
             exit 0
         }
-        $resolvedContext = $contextJson | ConvertFrom-Json
-        if (-not $resolvedContext.pluginRoot) {
-            Write-Host '[agent-machines] installation context returned no plugin root; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+    }
+    elseif (
+        (
+            [string]$status.status -ceq 'ready' -and
+            [string]$status.reason -ceq 'namespaced-active'
+        ) -or
+        [string]$status.status -ceq 'deactivation-required'
+    ) {
+        if ([string]$status.actualMode -cne 'namespaced') {
             exit 0
         }
-        $InstallDir = $resolvedContext.pluginRoot
+        $InstallDir = [string]$status.runtimeRoot
+        $contextPath = [string]$status.context
+        $contextMarketplaceId = [string]$status.marketplaceId
+        if (-not $InstallDir -or -not $contextPath -or -not $contextMarketplaceId) {
+            Write-Host '[agent-machines] active installation context is incomplete; skipping reconcile.' -ForegroundColor DarkGray
+            exit 0
+        }
         $contextSelected = $true
+        $contextActive = (
+            [string]$status.status -ceq 'ready' -and
+            [string]$status.reason -ceq 'namespaced-active'
+        )
     }
-}
+    else {
+        Write-Host (
+            '[agent-machines] installation governance blocks reconcile without legacy fallback: ' +
+            "status=$($status.status) reason=$($status.reason)."
+        ) -ForegroundColor DarkGray
+        exit 0
+    }
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 $Binstub    = Join-Path $env:USERPROFILE '.local\bin\agent-machines.cmd'
 
@@ -88,7 +161,20 @@ $Binstub    = Join-Path $env:USERPROFILE '.local\bin\agent-machines.cmd'
 # 'stamp' action; else a safe no-op.
 if (-not (Test-Path $Manifest)) {
     if ($contextSelected) {
-        Write-Host '[agent-machines] selected context has no deploy manifest; namespaced install remains non-operative.' -ForegroundColor DarkGray
+        if ($contextActive) {
+            $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
+            if (Test-Path $payloadInit) {
+                $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+                $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+                $command = "& `"$payloadInit`" -Action cell-provision -Context `"$contextPath`" -ExpectedMarketplaceId `"$contextMarketplaceId`""
+                $enc = [Convert]::ToBase64String(
+                    [Text.Encoding]::Unicode.GetBytes($command)
+                )
+                Start-Process -FilePath 'conhost.exe' `
+                    -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
+                    -WindowStyle Hidden | Out-Null
+            }
+        }
         exit 0
     }
     $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
@@ -103,7 +189,118 @@ if (-not (Test-Path $Manifest)) {
 
 try {
     $m = Get-Content $Manifest -Raw | ConvertFrom-Json
-    $pluginDir = if ($contextSelected) { $PluginDir } else { $m.source.path }
+    if ($contextSelected) {
+        $manifestContext = $contextPath -replace '\\', '/'
+        $sourcePathText = [string]$m.source.path
+        $deployed = [string]$m.source.version
+        $activeVersion = [string]$m.runtime.version
+        $runtimePathText = [string]$m.runtime.path
+        $runtimeInterpreterText = [string]$m.runtime.interpreter
+        $selectedByVersion = [string]$m.runtime.selectedBy.version
+        $validManifest = (
+            (
+                $m.schema_version -is [int] -or
+                $m.schema_version -is [long]
+            ) -and
+            [long]$m.schema_version -eq 4 -and
+            [string]$m.service -ceq 'agent-machines' -and
+            [string]$m.source.repo -ceq 'copilot-extensions' -and
+            [string]$m.source.plugin -ceq 'agent-machines' -and
+            -not [string]::IsNullOrWhiteSpace([string]$m.source.kind) -and
+            -not [string]::IsNullOrWhiteSpace($sourcePathText) -and
+            -not [string]::IsNullOrWhiteSpace($deployed) -and
+            $m.source.dirty -is [bool] -and
+            [string]$m.runtime.kind -ceq 'python' -and
+            -not [string]::IsNullOrWhiteSpace($activeVersion) -and
+            -not [string]::IsNullOrWhiteSpace($runtimePathText) -and
+            -not [string]::IsNullOrWhiteSpace($runtimeInterpreterText) -and
+            -not [string]::IsNullOrWhiteSpace([string]$m.runtime.selectedBy.kind) -and
+            -not [string]::IsNullOrWhiteSpace([string]$m.runtime.selectedBy.path) -and
+            $selectedByVersion -ceq $activeVersion -and
+            [string]$m.installation.marketplaceId -ceq $contextMarketplaceId -and
+            [string]$m.installation.pluginId -ceq 'agent-machines' -and
+            [string]$m.installation.context -ceq $manifestContext
+        )
+        if (-not $validManifest) {
+            Write-Host '[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+            exit 0
+        }
+        try {
+            if ($env:OS -eq 'Windows_NT') {
+                $sourcePathText = $sourcePathText -replace '/', '\'
+                $runtimePathText = $runtimePathText -replace '/', '\'
+                $runtimeInterpreterText = $runtimeInterpreterText -replace '/', '\'
+            }
+            $sourcePath = [IO.Path]::GetFullPath($sourcePathText)
+            $runtimePath = [IO.Path]::GetFullPath($runtimePathText)
+            $runtimeInterpreter = [IO.Path]::GetFullPath($runtimeInterpreterText)
+        } catch {
+            Write-Host '[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+            exit 0
+        }
+        $expectedRuntimePath = Join-Path (Join-Path $InstallDir 'versions') $activeVersion
+        $expectedInterpreter = if ($env:OS -eq 'Windows_NT') {
+            Join-Path $expectedRuntimePath 'Scripts\python.exe'
+        } else {
+            Join-Path $expectedRuntimePath 'bin/python'
+        }
+        $pathComparer = if ($env:OS -eq 'Windows_NT') {
+            [StringComparer]::OrdinalIgnoreCase
+        } else {
+            [StringComparer]::Ordinal
+        }
+        $currentMarker = Join-Path $InstallDir 'current-version'
+        $markerValid = (
+            (Test-Path -LiteralPath $currentMarker -PathType Leaf) -and
+            -not ((Get-Item -LiteralPath $currentMarker -Force).Attributes -band
+                [IO.FileAttributes]::ReparsePoint) -and
+            ([IO.File]::ReadAllText($currentMarker)).Trim() -ceq $activeVersion
+        )
+        if (
+            -not $markerValid -or
+            -not $pathComparer.Equals(
+                $runtimePath,
+                [IO.Path]::GetFullPath($expectedRuntimePath)
+            ) -or
+            -not $pathComparer.Equals(
+                $runtimeInterpreter,
+                [IO.Path]::GetFullPath($expectedInterpreter)
+            ) -or
+            -not (Test-Path -LiteralPath $runtimeInterpreter -PathType Leaf)
+        ) {
+            Write-Host '[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+            exit 0
+        }
+        $current = $deployed
+        $pyproj = Join-Path $PluginDir 'pyproject.toml'
+        if (Test-Path $pyproj) {
+            $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' |
+                Select-Object -First 1
+            if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+        }
+        $samePayloadPath = $pathComparer.Equals(
+            $sourcePath,
+            [IO.Path]::GetFullPath($PluginDir)
+        )
+        if (($deployed -ceq $current -and $samePayloadPath) -or -not $contextActive) {
+            exit 0
+        }
+        $init = Join-Path $PluginDir 'scripts\init.ps1'
+        if (-not (Test-Path $init)) { exit 0 }
+        Write-Host "[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background..." -ForegroundColor DarkGray
+        $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+        $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+        $command = "& `"$init`" -Action cell-provision -Context `"$contextPath`" -ExpectedMarketplaceId `"$contextMarketplaceId`""
+        $enc = [Convert]::ToBase64String(
+            [Text.Encoding]::Unicode.GetBytes($command)
+        )
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
+            -WindowStyle Hidden | Out-Null
+        exit 0
+    }
+
+    $pluginDir = $m.source.path
     if (-not $pluginDir) { exit 0 }
     $pluginDir = $pluginDir -replace '/', '\'
     if (-not (Test-Path $pluginDir)) { exit 0 }
@@ -114,11 +311,6 @@ try {
     if (Test-Path $pyproj) {
         $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
-    }
-    if ($contextSelected) {
-        if ($deployed -eq $current) { exit 0 }
-        Write-Host "[agent-machines] selected context runtime $deployed -> $current; context-aware install is not active yet." -ForegroundColor DarkGray
-        exit 0
     }
 
     # Up to date and binstub present -> fast no-op (the common case).

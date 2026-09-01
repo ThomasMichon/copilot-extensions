@@ -98,6 +98,7 @@ def _broken_runtime_plugin(root: Path) -> Path:
             "version": 1,
             "command": "agent-example",
             "purpose": "Operate the example runtime",
+            "runtimeRoot": ".agent-example",
         },
     )
     (scripts / "invoke-context-contributor.sh").write_text(
@@ -542,6 +543,54 @@ def test_runtime_catalog_identity_must_match_scanned_plugin(
     assert "runtime-command-catalog-identity-drift" in {
         item.code for item in report.violations
     }
+
+
+def test_runtime_catalog_accepts_installation_context_v2(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "payload-invocation.json"
+    _write_json(
+        manifest,
+        {
+            "schema": "copilot-extensions.payload-invocation",
+            "version": 2,
+            "command": "agent-example",
+            "module": "agent_example",
+            "purpose": "Operate the example runtime",
+            "legacyRuntimeRoot": ".agent-example",
+            "installationContext": "required",
+            "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
+        },
+    )
+
+    contract, error = CONFORMANCE._runtime_catalog_contract(manifest)
+
+    assert error is None
+    assert contract is not None
+    assert contract["plugin"] == "agent-example"
+
+
+def test_runtime_catalog_rejects_mixed_installation_context_versions(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "payload-invocation.json"
+    _write_json(
+        manifest,
+        {
+            "schema": "copilot-extensions.payload-invocation",
+            "version": 2,
+            "command": "agent-example",
+            "purpose": "Operate the example runtime",
+            "runtimeRoot": ".agent-example",
+            "legacyRuntimeRoot": ".agent-example",
+            "installationContext": "required",
+        },
+    )
+
+    contract, error = CONFORMANCE._runtime_catalog_contract(manifest)
+
+    assert contract is None
+    assert error == "payload invocation version 2 runtime contract is invalid"
 
 
 def test_runtime_catalog_rejects_incomplete_generated_contract(

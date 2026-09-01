@@ -69,6 +69,34 @@ def _multi_manifest(tmp_path: Path) -> Path:
     return path
 
 
+def _required_context_manifest(tmp_path: Path) -> Path:
+    path = _manifest(tmp_path)
+    scripts = path.parent / "scripts"
+    (scripts / "invoke-payload-runtime.sh").write_text(
+        "#!/usr/bin/env bash\n", encoding="utf-8"
+    )
+    (scripts / "invoke-payload-runtime.ps1").write_text(
+        "# generated fixture\n", encoding="utf-8"
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(
+        {
+            "version": 2,
+            "command": "agent-machines",
+            "module": "agent_machines",
+            "legacyRuntimeRoot": data.pop("runtimeRoot"),
+            "installationContext": "required",
+            "payloadRootEnv": "AGENT_MACHINES_PAYLOAD_ROOT",
+            "payloadDispatcher": {
+                "posix": "scripts/invoke-payload-runtime.sh",
+                "windows": "scripts/invoke-payload-runtime.ps1",
+            },
+        }
+    )
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -154,6 +182,559 @@ def test_payload_dispatcher_requires_platform_parity(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must declare both"):
         generator.load_manifest(manifest)
+
+
+def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) -> None:
+    manifest = _required_context_manifest(tmp_path)
+
+    data = generator.load_manifest(manifest)
+    generated = generator.expected_files(manifest)
+
+    assert data["installationContext"] == "required"
+    assert data["runtimeRoot"] == ".agent-example"
+    posix = generated[manifest.parent / "bin" / "agent-machines"]
+    powershell = generated[manifest.parent / "bin" / "agent-machines.ps1"]
+    assert (
+        'exec bash "$_payload_root/scripts/invoke-payload-runtime.sh" "$@"'
+        in posix
+    )
+    assert "$env:AGENT_MACHINES_PAYLOAD_ROOT = $_payloadRoot" in powershell
+    assert "Resolve-PayloadRuntime" not in powershell
+
+
+@pytest.mark.parametrize("plugin", ["agent-unrelated", "context-handoff"])
+def test_required_installation_context_rejects_ineligible_plugin(
+    tmp_path: Path,
+    plugin: str,
+) -> None:
+    manifest = _required_context_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["command"] = plugin
+    data["plugin"] = plugin
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="runtime-bearing core suite plugin identities|invalid plugin",
+    ):
+        generator.load_manifest(manifest)
+
+
+def test_v1_rejects_installation_context_fields_without_changing_defaults(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(tmp_path)
+    baseline = generator.expected_files(manifest)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["installationContext"] = "required"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="version 1 cannot declare"):
+        generator.load_manifest(manifest)
+
+    data.pop("installationContext")
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert generator.expected_files(manifest) == baseline
+
+
+def _copied_agent_machines_payload(tmp_path: Path) -> Path:
+    payload = tmp_path / "agent-machines"
+    shutil.copytree(
+        REPO / "plugins" / "agent-machines",
+        payload,
+        ignore=shutil.ignore_patterns(
+            ".pytest_cache",
+            ".ruff_cache",
+            "__pycache__",
+            "*.pyc",
+            "*.egg-info",
+        ),
+    )
+    return payload
+
+
+def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
+    marketplace = tmp_path / "marketplace"
+    payload = marketplace / "plugins" / "agent-machines"
+    shutil.copytree(
+        REPO / "plugins" / "agent-machines",
+        payload,
+        ignore=shutil.ignore_patterns(
+            ".pytest_cache",
+            ".ruff_cache",
+            "__pycache__",
+            "*.pyc",
+            "*.egg-info",
+        ),
+    )
+    write_json = {
+        "name": "example",
+        "owner": {"name": "Example"},
+        "metadata": {"version": "1.0.0"},
+        "plugins": [
+            {
+                "name": "agent-machines",
+                "description": "Synthetic directory marketplace fixture",
+                "version": json.loads(
+                    (payload / "plugin.json").read_text(encoding="utf-8")
+                )["version"],
+                "source": "plugins/agent-machines",
+            }
+        ],
+    }
+    catalog = marketplace / ".github" / "plugin" / "marketplace.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps(write_json), encoding="utf-8")
+    return payload
+
+
+def _stamp_agent_machines_context(
+    tmp_path: Path,
+    payload: Path,
+    pwsh: str,
+    *,
+    explicit_source: bool = True,
+    durable_home: Path | None = None,
+) -> Path:
+    version = json.loads(
+        (payload / "plugin.json").read_text(encoding="utf-8")
+    )["version"]
+    arguments = [
+        pwsh,
+        "-NoProfile",
+        "-File",
+        str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
+        "stamp",
+    ]
+    if explicit_source:
+        arguments.extend(
+            [
+                "-SourceJson",
+                '{"source":"github","repo":"example-org/example-marketplace"}',
+                "-MarketplaceKey",
+                "example",
+            ]
+        )
+    arguments.extend(
+        [
+            "-PluginId",
+            "agent-machines",
+            "-PayloadRoot",
+            str(payload),
+            "-PayloadVersion",
+            version,
+            "-PayloadOrigin",
+            "explicit",
+            "-ExpectedNamespaceGeneration",
+            "0",
+            "-ExpectedInstallGeneration",
+            "0",
+            "-DurableHome",
+            str(durable_home or tmp_path / "durable"),
+        ]
+    )
+    result = subprocess.run(
+        arguments,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return Path(json.loads(result.stdout)["installReceipt"])
+
+
+def _activate_agent_machines_context(
+    tmp_path: Path,
+    home: Path,
+    context: Path,
+    pwsh: str,
+    *,
+    durable_home: Path | None = None,
+) -> Path:
+    install = json.loads(context.read_text(encoding="utf-8"))
+    namespace = json.loads(
+        Path(install["namespaceReceipt"]).read_text(encoding="utf-8")
+    )
+    policy = home / ".copilot-extensions" / "installation-mode.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.installation-mode",
+                "version": 1,
+                "installationMode": {"enabled": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update({"HOME": str(home), "USERPROFILE": str(home)})
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
+            "activation-cas",
+            "-Context",
+            str(context),
+            "-ExpectedMarketplaceId",
+            install["marketplaceId"],
+            "-ExpectedPluginId",
+            "agent-machines",
+            "-ExpectedNamespaceGeneration",
+            str(namespace["generation"]),
+            "-ExpectedInstallGeneration",
+            str(install["generation"]),
+            "-ExpectedActivationGeneration",
+            "0",
+            "-ActivationMode",
+            "namespaced",
+            "-ActivationState",
+            "active",
+            "-LegacyDisposition",
+            "absent",
+            "-LegacyProbeJson",
+            '{"declared":true,"result":"absent","checkedAt":"2026-01-01T00:00:00Z"}',
+            "-LegacyRoot",
+            str(home / ".agent-machines"),
+            "-DurableHome",
+            str(durable_home or tmp_path / "durable"),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    json.loads(result.stdout)
+    return context.parent
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+@pytest.mark.parametrize("policy_state", ["absent", "explicit-false"])
+def test_agent_machines_required_context_preserves_absent_policy_legacy_use(
+    tmp_path: Path,
+    policy_state: str,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_machines_payload(tmp_path)
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = $env:TEST_PYTHON\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    if policy_state == "explicit-false":
+        policy = home / ".copilot-extensions" / "installation-mode.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text(
+            json.dumps(
+                {
+                    "schema": "copilot-extensions.installation-mode",
+                    "version": 1,
+                    "installationMode": {"enabled": False},
+                }
+            ),
+            encoding="utf-8",
+        )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(payload),
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(payload / "src"),
+                    str(payload / "libs" / "plugin-resolve" / "src"),
+                    str(payload / "libs" / "agent-procutil" / "src"),
+                ]
+            ),
+            "TEST_PYTHON": sys.executable,
+        }
+    )
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "agent-machines.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads((payload / "plugin.json").read_text())["version"] in result.stdout
+    assert not (home / ".agent-machines").exists()
+    if policy_state == "absent":
+        assert not (home / ".copilot-extensions").exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_agent_machines_requested_context_never_falls_back_to_legacy(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_machines_payload(tmp_path)
+    context = _stamp_agent_machines_context(tmp_path, payload, pwsh)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(payload),
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "AGENT_MACHINES_NO_SELFPROVISION": "1",
+        }
+    )
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "agent-machines.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 126
+    assert "requested installation context is not active" in result.stderr
+    assert not (home / ".agent-machines").exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_agent_machines_active_context_selects_only_its_cell_root(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_machines_payload(tmp_path)
+    context = _stamp_agent_machines_context(tmp_path, payload, pwsh)
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin_root = _activate_agent_machines_context(tmp_path, home, context, pwsh)
+    root_record = tmp_path / "selected-root.txt"
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "[IO.File]::WriteAllText($env:TEST_ROOT_RECORD, $env:AGENT_RT_ROOT)\n"
+        "$AgentRtPy = $env:TEST_PYTHON\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(payload),
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(payload / "src"),
+                    str(payload / "libs" / "plugin-resolve" / "src"),
+                    str(payload / "libs" / "agent-procutil" / "src"),
+                ]
+            ),
+            "TEST_PYTHON": sys.executable,
+            "TEST_ROOT_RECORD": str(root_record),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "agent-machines.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert root_record.read_text(encoding="utf-8") == str(plugin_root)
+    assert not (home / ".agent-machines").exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_agent_machines_blocked_context_states_never_run_legacy(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_machines_payload(tmp_path)
+    context = _stamp_agent_machines_context(tmp_path, payload, pwsh)
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin_root = _activate_agent_machines_context(tmp_path, home, context, pwsh)
+    root_record = tmp_path / "selected-root.txt"
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "[IO.File]::WriteAllText($env:TEST_ROOT_RECORD, $env:AGENT_RT_ROOT)\n"
+        "$AgentRtPy = $env:TEST_PYTHON\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(payload),
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(payload / "src"),
+                    str(payload / "libs" / "plugin-resolve" / "src"),
+                    str(payload / "libs" / "agent-procutil" / "src"),
+                ]
+            ),
+            "TEST_PYTHON": sys.executable,
+            "TEST_ROOT_RECORD": str(root_record),
+        }
+    )
+
+    def invoke_blocked(label: str) -> None:
+        root_record.unlink(missing_ok=True)
+        result = subprocess.run(
+            [
+                pwsh,
+                "-NoProfile",
+                "-File",
+                str(payload / "bin" / "agent-machines.ps1"),
+                "--version",
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 126, f"{label}: {result.stderr}"
+        assert "blocks invocation" in result.stderr
+        assert not root_record.exists(), label
+
+    policy = home / ".copilot-extensions" / "installation-mode.json"
+    original_policy = policy.read_bytes()
+    policy.write_text("{\n", encoding="utf-8")
+    invoke_blocked("malformed policy")
+    policy.write_bytes(original_policy)
+
+    maintenance = plugin_root / "maintenance"
+    maintenance.write_text("maintenance\n", encoding="utf-8")
+    invoke_blocked("maintenance")
+    maintenance.unlink()
+
+    activation = plugin_root / "installation-activation.json"
+    original_activation = json.loads(activation.read_text(encoding="utf-8"))
+    foreign_activation = dict(original_activation)
+    foreign_activation["environment"] = dict(original_activation["environment"])
+    foreign_activation["environment"]["platform"] = "posix"
+    activation.write_text(json.dumps(foreign_activation), encoding="utf-8")
+    invoke_blocked("foreign activation")
+    activation.unlink()
+
+    legacy = home / ".agent-machines"
+    legacy.mkdir()
+    (legacy / ".installation-ownership.json").write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.legacy-installation-ownership",
+                "version": 1,
+                "marketplaceId": original_activation["marketplaceId"],
+                "pluginId": "agent-machines",
+                "activation": {
+                    "path": str(plugin_root / "missing-activation.json"),
+                    "generation": 1,
+                },
+                "environment": original_activation["environment"],
+                "transferredAt": "2026-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    invoke_blocked("orphaned transfer")
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_agent_machines_removed_policy_keeps_active_cell_authoritative(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _directory_marketplace_agent_machines_payload(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    durable_home = home / ".copilot-extensions"
+    context = _stamp_agent_machines_context(
+        tmp_path,
+        payload,
+        pwsh,
+        explicit_source=False,
+        durable_home=durable_home,
+    )
+    plugin_root = _activate_agent_machines_context(
+        tmp_path,
+        home,
+        context,
+        pwsh,
+        durable_home=durable_home,
+    )
+    (home / ".copilot-extensions" / "installation-mode.json").unlink()
+    root_record = tmp_path / "selected-root.txt"
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "[IO.File]::WriteAllText($env:TEST_ROOT_RECORD, $env:AGENT_RT_ROOT)\n"
+        "$AgentRtPy = $env:TEST_PYTHON\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(payload),
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(payload / "src"),
+                    str(payload / "libs" / "plugin-resolve" / "src"),
+                    str(payload / "libs" / "agent-procutil" / "src"),
+                ]
+            ),
+            "TEST_PYTHON": sys.executable,
+            "TEST_ROOT_RECORD": str(root_record),
+        }
+    )
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "agent-machines.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert root_record.read_text(encoding="utf-8") == str(plugin_root)
+    assert not (home / ".agent-machines").exists()
 
 
 def test_generates_multiple_commands_and_one_catalog(tmp_path: Path) -> None:
