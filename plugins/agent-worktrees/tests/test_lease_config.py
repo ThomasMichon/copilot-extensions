@@ -122,29 +122,16 @@ def test_knowledge_repo_no_origin_remote_raises(
         _resolve_store_target()
 
 
-def test_no_knowledge_repo_uses_current_project(
+def test_no_knowledge_repo_refuses_current_project_remote(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(ORIGIN_ENV, raising=False)
     monkeypatch.setattr(cfg, "load_config", lambda: _fake_config(knowledge_repo=""))
-    monkeypatch.setattr(
-        git_ops,
-        "_remote_url",
-        lambda remote, *, cwd: "https://github.com/owner/self.git",
-    )
 
-    url, remote, anchor = _resolve_store_target()
-    assert url == "https://github.com/owner/self.git"
-    assert remote == "origin"
-    assert anchor == "/anchors/self"
+    def fail_remote_url(remote: str, *, cwd: str) -> str | None:
+        raise AssertionError("must not inspect the current project's source remote")
 
+    monkeypatch.setattr(git_ops, "_remote_url", fail_remote_url)
 
-def test_unresolvable_default_repo_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(ORIGIN_ENV, raising=False)
-    monkeypatch.setattr(cfg, "load_config", lambda: _fake_config(knowledge_repo=""))
-    monkeypatch.setattr(git_ops, "_remote_url", lambda remote, *, cwd: None)
-
-    with pytest.raises(ConfigError):
+    with pytest.raises(ConfigError, match="Refusing to use.*source remote"):
         _resolve_store_target()

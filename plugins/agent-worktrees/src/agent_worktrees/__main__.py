@@ -13078,10 +13078,10 @@ _GET_KEYS: dict[str, str] = {
                      "holder identity for resource leases; empty if not in a worktree",
     "repo-remote":   "Canonical remote URL of this repo (registry remote; falls "
                      "back to git origin) -- the device-independent repo key",
-    "lease-origin":  "Resolved Git-ref lease store origin URL -- the "
-                     "**harness identity** shared by every agent of this harness "
-                     "(the in-CodeSpace cross-harness fence key); empty if "
-                     "unresolvable",
+    "lease-origin":  "Resolved explicit/private Git-ref lease store origin URL "
+                     "-- the **harness identity** shared by every agent of this "
+                     "harness (the in-CodeSpace cross-harness fence key); empty "
+                     "if no store is configured",
     "pr-enabled":    "Whether PR mode is enabled (true/false)",
     "pr-required":   "Whether PRs are required, blocking direct-to-master (true/false)",
     "pr-provider":   "PR provider (gitea|github|azure-devops) when PR mode is on",
@@ -13117,7 +13117,8 @@ def _resolve_lease_origin() -> str:
 
     This is the pushable store repo URL that ``lease_config`` derives (the
     ``AGENT_WORKTREES_LEASE_ORIGIN`` override, else the bound control-plane /
-    knowledge repo's origin, else the current project's default-repo remote).
+    knowledge repo's origin; the current project's source remote is never an
+    implicit fallback).
     Because every agent of one harness resolves the **same** origin, it is the
     natural cross-harness identity for the in-CodeSpace lockfile fence
     (git-ref-resource-leases Phase 4): a marker written by a *different* harness
