@@ -402,3 +402,17 @@ Full key reference: [config-reference.md](config-reference.md).
   non-interactive verbs.
 - [Architecture § Picker Pivot Registry](architecture.md#picker-pivot-registry-cross-plugin)
   — how cross-plugin pivots and actions work.
+### Frame-health diagnostics
+
+Set `AGENT_WORKTREES_PICKER_FRAME_HEALTH=1` before launching a project Picker
+to record event-loop gaps of 500 ms or more in
+`~/.agent-worktrees/logs/picker-frame-health.jsonl`. The timer callback only
+enqueues bounded records; a daemon writer owns filesystem I/O. Override the
+destination by setting the variable to a path, or the threshold with
+`AGENT_WORKTREES_PICKER_FRAME_GAP_SECONDS`.
+
+Subscribe while reproducing:
+
+```powershell
+Get-Content "$HOME\.agent-worktrees\logs\picker-frame-health.jsonl" -Wait
+```
