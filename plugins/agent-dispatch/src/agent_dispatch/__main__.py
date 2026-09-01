@@ -2239,12 +2239,13 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
     raise SystemExit(f"unknown emitter command: {args.emitter_command!r}")
 
 
-def _reviewer_loop_registrations(args: argparse.Namespace) -> list[dict]:
+def _reviewer_loop_declarations(
+    args: argparse.Namespace,
+) -> tuple[Path, tuple[ProfileDeclaration, ...], str]:
     from .registrar_discovery import (
         load_pointers,
         read_declaration_file_set,
     )
-    from .registrar_reconcile import declaration_to_registration
 
     path = Path(args.declaration).expanduser().resolve()
     declarations = read_declaration_file_set(path)
@@ -2266,18 +2267,313 @@ def _reviewer_loop_registrations(args: argparse.Namespace) -> list[dict]:
         ]
         if len(matching) == 1:
             owner = matching[0]
+    if (
+        owner is None
+        and path.parent.name == "registrar"
+        and path.parent.parent.name == ".agent-dispatch"
+    ):
+        owner = f"repo:{path.parent.parent.parent.name}"
     if owner is None:
         raise ValueError(
             f"{path}: declaration owner is ambiguous; register its containing "
             "directory or pass --owner"
         )
-    if owner:
-        declarations = tuple(declaration.with_owner(owner) for declaration in declarations)
+    declarations = tuple(declaration.with_owner(owner) for declaration in declarations)
+    return path, declarations, owner
+
+
+def _reviewer_loop_registrations(args: argparse.Namespace) -> list[dict]:
+    from .registrar_reconcile import declaration_to_registration
+
+    _path, declarations, _owner = _reviewer_loop_declarations(args)
     machine, env = _registration_scope(args)
     return [
         declaration_to_registration(declaration, machine=machine, env=env)
         for declaration in declarations
     ]
+
+
+def _reviewer_loop_setup(args: argparse.Namespace) -> int:
+    from . import registrar_discovery as rd
+
+    path = Path(args.declaration).expanduser().resolve()
+    if (
+        path.parent.name != "registrar"
+        or path.parent.parent.name != ".agent-dispatch"
+    ):
+        raise ValueError(
+            f"{path}: setup requires a declaration under "
+            "<repo>/.agent-dispatch/registrar/"
+        )
+    repo_root = path.parent.parent.parent
+    _path, declarations, owner = _reviewer_loop_declarations(args)
+    name = args.name or repo_root.name
+    existing = next((item for item in rd.load_pointers() if item.name == name), None)
+    if (
+        existing is not None
+        and existing.resolved_location().resolve() != path.parent
+    ):
+        raise ValueError(
+            f"registrar pointer {name!r} already targets "
+            f"{existing.resolved_location()}; pass a unique --name"
+        )
+    pointer = rd.add_pointer(
+        name,
+        repo_root,
+        kind="repo",
+        owner=args.owner or (
+            owner if any(declaration.owner for declaration in declarations) else None
+        ),
+    )
+    return _emit(
+        {
+            "declaration": str(path),
+            "repo_root": str(repo_root),
+            "pointer": pointer.to_dict(),
+            "changed": existing != pointer,
+        }
+    )
+
+
+def _reviewer_loop_status(
+    args: argparse.Namespace,
+    registrations: list[dict],
+    logical_aliases: dict[str, set[str]],
+) -> tuple[dict, bool]:
+    from . import registrar_discovery as rd
+    from .config import overrides_path, run_dir
+    from .overrides import load_overrides
+    from .single_instance import is_locked, lock_path_for
+    from .supervisor_daemon import supervisor_lease_scope
+
+    path, declarations, owner = _reviewer_loop_declarations(args)
+    machine, env = _registration_scope(args)
+    scope = supervisor_lease_scope(machine, env)
+    pool = next(
+        declaration
+        for declaration in declarations
+        if declaration.kind == RegistrationKind.SUPERVISED_LANE
+    )
+    from .identity import canonicalize_remote
+
+    pool_repo = None if pool.repos == "all" else canonicalize_remote(pool.repos)
+    path_pointers = [
+        pointer
+        for pointer in rd.load_pointers()
+        if pointer.resolved_location().resolve() == path.parent
+    ]
+    pointers = [
+        pointer.to_dict()
+        for pointer in path_pointers
+        if pointer.effective_owner() == owner
+    ]
+    overrides = load_overrides(overrides_path())
+    coordinator_error = None
+    direct: list[dict] = []
+    tasks: list[dict] = []
+    task_scan_truncated = False
+    failed_counts: dict[str, int] = {}
+    try:
+        with _client(args, ensure=False) as client:
+            direct = client.list_registrations(
+                machine=machine,
+                env=env,
+                include_paused=True,
+            )
+            evaluator_ref = next(
+                registration["spec"]["evaluator_ref"]
+                for registration in registrations
+                if registration["kind"] == RegistrationKind.EMITTER
+            )
+            tasks = client.list(
+                repo=pool_repo,
+                evaluator_ref=evaluator_ref,
+                status="queued,claimed,started,suspended",
+                limit=args.limit + 1,
+            )
+            task_scan_truncated = len(tasks) > args.limit
+            tasks = tasks[: args.limit]
+            for task in tasks:
+                if task.get("status") != "queued" or task.get("owner"):
+                    continue
+                failed_counts[task["id"]] = len(
+                    client.list_reservations(
+                        task_id=task["id"],
+                        state="failed",
+                        limit=10000,
+                    )
+                )
+    except (DispatchError, httpx.TransportError) as exc:
+        coordinator_error = str(exc)
+
+    from .supervisor_daemon import merge_registration_sources
+
+    replacements = merge_registration_sources(direct, registrations).replacements
+    aliases = {
+        registration["id"]: {
+            direct_id
+            for direct_id, declared_id in replacements.items()
+            if declared_id == registration["id"]
+        }
+        | logical_aliases[registration["id"]]
+        for registration in registrations
+    }
+    from .registrar_reconcile import runs_on_machine
+
+    running = is_locked(lock_path_for(run_dir(), scope))
+    runtime_status, runtime_status_error = _read_supervisor_runtime_status(scope)
+    runtime_fresh = bool(
+        runtime_status
+        and isinstance(runtime_status.get("updated_at"), (int, float))
+        and runtime_status["updated_at"] >= time.time() - 120
+    )
+    runtime_running = set(runtime_status.get("running") or []) if runtime_fresh else set()
+    runtime_backing_off = (
+        set(runtime_status.get("backing_off") or []) if runtime_fresh else set()
+    )
+    runtime_dead = set(runtime_status.get("dead") or []) if runtime_fresh else set()
+    direct_ids = {registration["id"] for registration in direct}
+    units = []
+    for registration, declaration in zip(registrations, declarations, strict=True):
+        ids = {registration["id"], *aliases[registration["id"]]}
+        served_ids = sorted(ids & direct_ids)
+        override_ids = sorted(
+            override_id
+            for override_id in ids
+            if (overrides.get(override_id) or {}).get("disabled")
+        )
+        active_by_filter = runs_on_machine(declaration, machine)
+        runtime_state = (
+            "running"
+            if registration["id"] in runtime_running
+            else "backing-off"
+            if registration["id"] in runtime_backing_off
+            else "dead"
+            if registration["id"] in runtime_dead
+            else "not-running"
+        )
+        served = running and runtime_state == "running"
+        units.append(
+            {
+                **registration,
+                "active_by_filter": active_by_filter,
+                "served": served,
+                "runtime_state": runtime_state,
+                "served_ids": served_ids,
+                "overridden_off": bool(override_ids),
+                "override_ids": override_ids,
+            }
+        )
+
+    task_items = []
+    for task in tasks:
+        label_caps = [
+            pool.label_max_attempts[label]
+            for label in (task.get("labels") or [])
+            if label in pool.label_max_attempts
+        ]
+        max_attempts = max(label_caps) if label_caps else pool.max_attempts
+        failures = failed_counts.get(task["id"], 0)
+        dead_lettered = bool(
+            task.get("status") == "queued"
+            and not task.get("owner")
+            and max_attempts
+            and failures >= max_attempts
+        )
+        blocked = bool(task.get("awaiting_steer"))
+        matches_repo = pool_repo is None or task.get("repo") == pool_repo
+        matches_labels = not pool.labels or bool(
+            set(pool.labels) & set(task.get("labels") or [])
+        )
+        inactive_by_filter = not (matches_repo and matches_labels)
+        item = {
+            "id": task["id"],
+            "status": task.get("status"),
+            "owner": task.get("owner"),
+            "awaiting_steer": blocked,
+            "inactive_by_filter": inactive_by_filter,
+            "failed_spawns": failures,
+            "max_attempts": max_attempts,
+            "dead_lettered": dead_lettered,
+        }
+        if dead_lettered and failures >= 3:
+            item["rearm"] = (
+                f"agent-dispatch reservations rearm {task['id']} --permit "
+                "--reason <reason>"
+            )
+        elif dead_lettered:
+            item["recovery"] = (
+                "the atomic rearm command requires at least 3 failed spawns; "
+                "raise this loop's attempt bound or resolve the task explicitly"
+            )
+        task_items.append(item)
+
+    diagnoses = []
+    actions = []
+    if not pointers:
+        diagnoses.append("missing-pointer")
+        actions.append(
+            f"agent-dispatch reviewer-loop setup {path}"
+        )
+    if any(
+        unit["active_by_filter"] and not unit["served"]
+        for unit in units
+    ):
+        diagnoses.append("declared-but-unserved")
+    if coordinator_error:
+        diagnoses.append("coordinator-unavailable")
+    if any(unit["overridden_off"] for unit in units):
+        diagnoses.append("overridden-off")
+        actions.append(f"agent-dispatch reviewer-loop enable {path}")
+    if any(not unit["active_by_filter"] for unit in units) or any(
+        item["inactive_by_filter"] for item in task_items
+    ):
+        diagnoses.append("inactive-by-filter")
+    if any(item["awaiting_steer"] for item in task_items):
+        diagnoses.append("blocked")
+    dead_lettered = [item for item in task_items if item["dead_lettered"]]
+    if dead_lettered:
+        diagnoses.append("dead-lettered")
+        actions.extend(item["rearm"] for item in dead_lettered if "rearm" in item)
+    if task_scan_truncated:
+        diagnoses.append("task-scan-truncated")
+    healthy = not diagnoses
+    if healthy:
+        diagnoses.append("healthy")
+
+    payload = {
+        "declaration": str(path),
+        "owner": owner,
+        "pointer": {
+            "registered": bool(pointers),
+            "matches": pointers,
+            "owner_mismatches": [
+                pointer.to_dict()
+                for pointer in path_pointers
+                if pointer.effective_owner() != owner
+            ],
+        },
+        "service": {
+            "scope": scope,
+            "machine": machine,
+            "env": env,
+            "running": running,
+            "coordinator_error": coordinator_error,
+            "runtime_status": runtime_status,
+            "runtime_status_error": runtime_status_error,
+            "runtime_status_fresh": runtime_fresh,
+        },
+        "units": units,
+        "tasks": {
+            "count": len(task_items),
+            "truncated": task_scan_truncated,
+            "items": task_items,
+        },
+        "diagnoses": diagnoses,
+        "healthy": healthy,
+        "actions": actions,
+    }
+    return payload, healthy
 
 
 def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
@@ -2293,6 +2589,8 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
     )
 
     try:
+        if args.reviewer_loop_command == "setup":
+            return _reviewer_loop_setup(args)
         registrations = _reviewer_loop_registrations(args)
         machine, env = _registration_scope(args)
         command = args.reviewer_loop_command
@@ -2301,6 +2599,14 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
             - {registration["id"]}
             for registration in registrations
         }
+        if command in {"status", "doctor"}:
+            payload, healthy = _reviewer_loop_status(
+                args,
+                registrations,
+                logical_aliases,
+            )
+            _emit(payload)
+            return 0 if command == "status" or healthy else 1
         if command == "disable":
             now = time.time()
 
@@ -2472,6 +2778,40 @@ def _registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
         or "default"
     )
     return machine, env
+
+
+def _supervisor_runtime_status_path(scope: str) -> Path:
+    from .config import run_dir
+    from .single_instance import lock_path_for
+
+    return lock_path_for(run_dir(), scope).with_suffix(".status.json")
+
+
+def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
+    path = _supervisor_runtime_status_path(scope)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "updated_at": time.time(),
+        "running": summary.running,
+        "backing_off": summary.backing_off,
+        "dead": getattr(summary, "dead", []),
+    }
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _read_supervisor_runtime_status(scope: str) -> tuple[dict | None, str | None]:
+    path = _supervisor_runtime_status_path(scope)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, None
+    except (OSError, ValueError) as exc:
+        return None, str(exc)
+    if not isinstance(payload, dict):
+        return None, f"{path}: expected a JSON object"
+    return payload, None
 
 
 def _build_registration_spec(args: argparse.Namespace) -> dict:
@@ -2679,7 +3019,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
     from . import procutil
-    from .supervisor_daemon import SupervisorDaemon
+    from .supervisor_daemon import SupervisorDaemon, supervisor_lease_scope
 
     procutil.relocate_off_payload()
 
@@ -2730,6 +3070,10 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         )
 
         def _on_cycle(summary) -> None:
+            _write_supervisor_runtime_status(
+                supervisor_lease_scope(machine, env),
+                summary,
+            )
             changed = (
                 summary.started or summary.stopped or summary.restarted
                 or summary.revived
@@ -4520,13 +4864,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="inspect and operate one repository-owned reviewer-loop declaration",
     )
     loop_sub = p.add_subparsers(dest="reviewer_loop_command", required=True)
+    lp = loop_sub.add_parser(
+        "setup",
+        help="register the declaration's repository with the existing registrar",
+    )
+    lp.add_argument("declaration", help="path to the reviewer-loop JSON/YAML file")
+    lp.add_argument("--name", help="pointer name (default: repository directory name)")
+    lp.add_argument("--owner", help="declaration owner override")
+    lp.set_defaults(func=_cmd_reviewer_loop)
     for command, help_text in (
         ("inspect", "expand the declaration and show its effective supervised units"),
+        ("status", "join declaration, service, task, and recovery status"),
+        ("doctor", "diagnose inactive or unhealthy reviewer-loop state"),
         ("enable", "clear local overrides for every unit in the reviewer loop"),
     ):
         lp = loop_sub.add_parser(command, help=help_text)
         lp.add_argument("declaration", help="path to the reviewer-loop JSON/YAML file")
         lp.add_argument("--owner", help="declaration owner override")
+        if command in {"status", "doctor"}:
+            lp.add_argument(
+                "--limit",
+                type=int,
+                default=200,
+                help="maximum associated tasks and failed reservations to inspect",
+            )
         lp.set_defaults(func=_cmd_reviewer_loop)
     lp = loop_sub.add_parser(
         "disable",

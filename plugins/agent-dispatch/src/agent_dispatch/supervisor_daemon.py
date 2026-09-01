@@ -420,6 +420,8 @@ class ReconcileSummary:
     #: Units tracked but not currently running -- a crashed unit awaiting its
     #: restart backoff (distinct from ``running`` so status output isn't misleading).
     backing_off: list[str] = field(default_factory=list)
+    #: Units retained after exhausting their restart budget.
+    dead: list[str] = field(default_factory=list)
 
 
 class SupervisorDaemon:
@@ -721,6 +723,7 @@ class SupervisorDaemon:
         summary.backing_off = sorted(
             rid for rid, u in self._units.items() if not u.dead and not _alive(u)
         )
+        summary.dead = sorted(rid for rid, u in self._units.items() if u.dead)
         return summary
 
     # -- serve loop ----------------------------------------------------------

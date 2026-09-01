@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import time
 
 import pytest
 
@@ -290,8 +291,11 @@ def _write_reviewer_loop(path):
 
 
 class _LoopClient:
-    def __init__(self, registrations=None):
+    def __init__(self, registrations=None, tasks=None, reservations=None):
         self.registrations = registrations or []
+        self.tasks = tasks or []
+        self.reservations = reservations or []
+        self.list_calls = []
 
     def __enter__(self):
         return self
@@ -301,6 +305,66 @@ class _LoopClient:
 
     def list_registrations(self, **_scope):
         return self.registrations
+
+    def list(self, **_scope):
+        self.list_calls.append(_scope)
+        return self.tasks
+
+    def list_reservations(self, **_scope):
+        task_id = _scope.get("task_id")
+        matches = [
+            reservation
+            for reservation in self.reservations
+            if task_id is None or reservation.get("task_id") == task_id
+        ]
+        return matches[: _scope.get("limit", 200)]
+
+
+def test_reviewer_loop_setup_registers_repo_pointer_idempotently(
+    tmp_path, monkeypatch, capsys
+):
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    registrar_dir = tmp_path / "state"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(registrar_dir))
+
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first["changed"] is True
+    assert first["pointer"] == {
+        "name": "repo",
+        "location": str(tmp_path / "repo"),
+        "kind": "repo",
+        "owner": "repo:repo",
+    }
+
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert second["changed"] is False
+
+
+def test_reviewer_loop_setup_rejects_non_repo_declaration(tmp_path, capsys):
+    declaration = tmp_path / "plain" / "review.json"
+    _write_reviewer_loop(declaration)
+
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 2
+
+    assert "requires a declaration under" in capsys.readouterr().err
+
+
+def test_reviewer_loop_setup_refuses_pointer_name_collision(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch.registrar_discovery import add_pointer
+
+    declaration = tmp_path / "one" / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    add_pointer("repo", tmp_path / "two" / "repo", kind="repo")
+
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 2
+
+    assert "already targets" in capsys.readouterr().err
 
 
 def test_reviewer_loop_inspect_expands_declared_units(
@@ -324,6 +388,295 @@ def test_reviewer_loop_inspect_expands_declared_units(
     ]
     assert {unit["owner"] for unit in output["units"]} == {"repo:repo"}
     assert not any(unit["overridden_off"] for unit in output["units"])
+
+
+def test_reviewer_loop_status_reports_joined_healthy_state(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr(m, "_client", lambda _args, **_kwargs: _LoopClient())
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _path: True)
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    status_path = m._supervisor_runtime_status_path(
+        supervisor_lease_scope("host-a", "default")
+    )
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(
+        json.dumps(
+            {
+                "updated_at": time.time(),
+                "running": [
+                    "declared:repo:repo:example-review-source",
+                    "declared:repo:repo:example-review-evaluator",
+                    "declared:repo:repo:example-review-workers",
+                ],
+                "backing_off": [],
+                "dead": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["reviewer-loop", "status", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["healthy"] is True
+    assert output["diagnoses"] == ["healthy"]
+    assert output["pointer"]["registered"] is True
+    assert all(unit["served"] for unit in output["units"])
+
+
+def test_reviewer_loop_status_requires_pointer_owner_match(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(m, "_client", lambda _args, **_kwargs: _LoopClient())
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _path: True)
+
+    assert main(
+        ["reviewer-loop", "status", str(declaration), "--owner", "repo:other"]
+    ) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["pointer"]["registered"] is False
+    assert output["pointer"]["owner_mismatches"]
+    assert "missing-pointer" in output["diagnoses"]
+    assert "declared-but-unserved" in output["diagnoses"]
+
+
+def test_reviewer_loop_status_rejects_fresh_snapshot_after_daemon_exit(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(m, "_client", lambda _args, **_kwargs: _LoopClient())
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _path: False)
+    status_path = m._supervisor_runtime_status_path(
+        supervisor_lease_scope("host-a", "default")
+    )
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(
+        json.dumps(
+            {
+                "updated_at": time.time(),
+                "running": [
+                    "declared:repo:repo:example-review-source",
+                    "declared:repo:repo:example-review-evaluator",
+                    "declared:repo:repo:example-review-workers",
+                ],
+                "backing_off": [],
+                "dead": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["reviewer-loop", "doctor", str(declaration)]) == 1
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["service"]["running"] is False
+    assert all(unit["served"] is False for unit in output["units"])
+    assert "declared-but-unserved" in output["diagnoses"]
+
+
+def test_reviewer_loop_status_canonicalizes_repository_filter(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    payload = json.loads(declaration.read_text(encoding="utf-8"))
+    payload["repo"] = "https://github.com/example/project.git"
+    declaration.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _path: True)
+    client = _LoopClient(
+        tasks=[
+            {
+                "id": "task-1",
+                "status": "suspended",
+                "repo": "github.com/example/project",
+                "labels": ["external-review"],
+                "evaluator_ref": "example-review-lifecycle",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        m,
+        "_client",
+        lambda _args, **_kwargs: client,
+    )
+
+    assert main(["reviewer-loop", "status", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["tasks"]["items"][0]["inactive_by_filter"] is False
+    assert client.list_calls[0]["repo"] == "github.com/example/project"
+
+
+def test_reviewer_loop_status_reports_transport_failure_as_json(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    assert main(["reviewer-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+
+    class UnavailableClient(_LoopClient):
+        def list_registrations(self, **_scope):
+            raise httpx.ConnectError("coordinator unavailable")
+
+    import httpx
+
+    monkeypatch.setattr(
+        m,
+        "_client",
+        lambda _args, **_kwargs: UnavailableClient(),
+    )
+
+    assert main(["reviewer-loop", "status", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert "coordinator unavailable" in output["service"]["coordinator_error"]
+    assert "coordinator-unavailable" in output["diagnoses"]
+    assert "declared-but-unserved" in output["diagnoses"]
+
+
+def test_reviewer_loop_doctor_reports_missing_unserved_and_recovery(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    overrides = tmp_path / "overrides.json"
+    _write_reviewer_loop(declaration)
+    payload = json.loads(declaration.read_text(encoding="utf-8"))
+    payload["pool"]["filters"] = {"permit": {"machine": ["other-host"]}}
+    declaration.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _path: False)
+    from agent_dispatch.overrides import save_overrides
+
+    save_overrides(overrides, {"logical:repo:repo:example-review-source": {"disabled": True}})
+    task = {
+        "id": "task-1",
+        "status": "queued",
+        "owner": None,
+        "labels": ["wrong-label"],
+        "repo": "github.com/example/project",
+        "awaiting_steer": True,
+        "evaluator_ref": "example-review-lifecycle",
+    }
+    reservations = [
+        {
+            "task_id": f"unrelated-{index}",
+            "state": "failed",
+            "key": f"unrelated-failed-{index}",
+        }
+        for index in range(250)
+    ] + [
+        {"task_id": "task-1", "state": "failed", "key": f"failed-{index}"}
+        for index in range(3)
+    ]
+    monkeypatch.setattr(
+        m,
+        "_client",
+        lambda _args, **_kwargs: _LoopClient(
+            tasks=[task],
+            reservations=reservations,
+        ),
+    )
+
+    assert main(["reviewer-loop", "doctor", str(declaration)]) == 1
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["healthy"] is False
+    assert set(output["diagnoses"]) == {
+        "missing-pointer",
+        "declared-but-unserved",
+        "overridden-off",
+        "inactive-by-filter",
+        "blocked",
+        "dead-lettered",
+    }
+    workers = next(unit for unit in output["units"] if unit["kind"] == "supervised-lane")
+    assert workers["active_by_filter"] is False
+    assert output["tasks"]["items"][0]["dead_lettered"] is True
+    assert "reservations rearm task-1 --permit" in output["actions"][-1]
+
+
+def test_reviewer_loop_doctor_does_not_suggest_impossible_rearm(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    payload = json.loads(declaration.read_text(encoding="utf-8"))
+    payload["pool"]["max_attempts"] = 1
+    declaration.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _path: False)
+    monkeypatch.setattr(
+        m,
+        "_client",
+        lambda _args, **_kwargs: _LoopClient(
+            tasks=[
+                {
+                    "id": "task-1",
+                    "status": "queued",
+                    "owner": None,
+                    "repo": "github.com/example/project",
+                    "labels": ["external-review"],
+                    "evaluator_ref": "example-review-lifecycle",
+                }
+            ],
+            reservations=[
+                {"task_id": "task-1", "state": "failed", "key": "failed-1"}
+            ],
+        ),
+    )
+
+    assert main(["reviewer-loop", "doctor", str(declaration)]) == 1
+
+    output = json.loads(capsys.readouterr().out)
+    item = output["tasks"]["items"][0]
+    assert item["dead_lettered"] is True
+    assert "rearm" not in item
+    assert "requires at least 3 failed spawns" in item["recovery"]
 
 
 def test_reviewer_loop_requires_unambiguous_owner(tmp_path, capsys):
