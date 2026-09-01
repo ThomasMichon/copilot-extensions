@@ -41,11 +41,11 @@ agent-plugin-resolve = { path = "libs/plugin-resolve" }
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=2.0,<3",
+    "mcp>=2.1.1,<3",
 ]
 dev = [
     "pytest>=8.0",
-    "mcp>=2.0,<3",
+    "mcp>=2.1.1,<3",
     "httpx2",
 ]
 
