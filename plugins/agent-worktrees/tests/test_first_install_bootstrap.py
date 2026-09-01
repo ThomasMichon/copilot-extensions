@@ -109,6 +109,20 @@ def test_lean_provision_deploys_runtime_resolvers() -> None:
     assert "Move-Item $tmp $dst -Force" in ps1_deploy
 
 
+def test_installers_preserve_activation_during_inventory_bootstrap() -> None:
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "-m agent_worktrees.activation_preservation" in sh
+    assert "-m agent_worktrees.activation_preservation" in ps1
+    assert 'resolve_executable_command_path copilot' in sh
+    assert "--copilot-command-json" in ps1
+    assert '"$(command -v copilot)"' not in sh
+    assert "(Get-Command copilot).Source" not in ps1
+    assert "copilot plugin install agent-worktrees@copilot-extensions" not in sh
+    assert "copilot plugin install agent-worktrees@copilot-extensions" not in ps1
+
+
 def test_generated_project_binstubs_use_shared_three_tier_resolvers() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")

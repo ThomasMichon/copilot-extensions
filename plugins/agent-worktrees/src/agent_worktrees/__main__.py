@@ -12325,20 +12325,37 @@ def _update_one_plugin_payload(
     Returns one of ``"OK"``, ``"OK (installed)"``, or an error description.
     """
     from . import reconcile
+    from .activation_preservation import (
+        PluginStateError,
+        run_install_preserving_activation,
+    )
 
     ref = f"{name}@{marketplace}"
     installed = reconcile.core_installed_payload_dir(name) is not None
     verb = "update" if installed else "install"
+    copilot = _resolve_copilot() or "copilot"
+
+    def _run(selected_verb: str):
+        argv = [copilot, "plugin", selected_verb, ref]
+        kwargs = {
+            "capture_output": True,
+            "text": True,
+            "timeout": 120,
+            "cwd": cwd,
+        }
+        if selected_verb == "install":
+            return run_install_preserving_activation(argv, ref, **kwargs)
+        return subprocess.run(argv, **kwargs)
+
     try:
-        r = subprocess.run(
-            [_resolve_copilot() or "copilot", "plugin", verb, ref],
-            capture_output=True, text=True, timeout=120,
-            cwd=cwd,
-        )
+        r = _run(verb)
     except OSError:
         output.warn("'copilot' CLI not found or not executable -- "
                     "skipping plugin payload update")
         return "copilot CLI not found or not executable"
+    except PluginStateError as exc:
+        output.warn(f"Plugin state for {name} could not be preserved: {exc}")
+        return f"plugin state error: {exc}"
     except subprocess.TimeoutExpired:
         output.warn(f"Plugin {verb} for {name} timed out -- continuing")
         return "timed out"
@@ -12357,12 +12374,12 @@ def _update_one_plugin_payload(
 
     output.info(f"Plugin install for {name} returned non-zero -- retrying")
     try:
-        r2 = subprocess.run(
-            [_resolve_copilot() or "copilot", "plugin", "install", ref],
-            capture_output=True, text=True, timeout=120,
-            cwd=cwd,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        r2 = _run("install")
+    except (
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+        PluginStateError,
+    ) as exc:
         output.warn(f"Plugin install retry for {name} failed: {exc}")
         return "install retry failed"
     if r2.returncode == 0:
@@ -12374,12 +12391,16 @@ def _update_one_plugin_payload(
 
 
 def _update_registered_plugins() -> bool:
-    """Update every enabled copilot-extensions plugin's payload.
+    """Update every installed or enabled copilot-extensions plugin payload.
 
     ``update`` must refresh EVERY enabled plugin's payload -- including
     payload-only plugins (``runtimeScope: none``) such as ``context-handoff``,
-    which the module/runtime steps never touch. The enabled set is the **union**
-    of two sources:
+    which the module/runtime steps never touch. The target set is the **union**
+    of three sources:
+
+    * **installed inventory** -- every source-qualified entry in
+      ``<copilot-home>/config.json`` for this marketplace, regardless of
+      activation;
 
     * **repo-scoped** -- the plugins enabled in each managed repo's
       ``.github/copilot/settings.json`` (``reconcile.read_enabled_plugins``); and
@@ -12387,7 +12408,7 @@ def _update_registered_plugins() -> bool:
       (``reconcile.read_user_enabled_plugins``), the set ``copilot plugin list``
       reflects.
 
-    Both are needed: a plugin enabled **only** user-global (not present in any
+    All are needed: a plugin enabled **only** user-global (not present in any
     managed repo's settings) was previously skipped and left stale (#653). The
     user-global read is independent of any project config, so a generic install
     with no managed repo still refreshes its user-global plugins.
@@ -12396,7 +12417,7 @@ def _update_registered_plugins() -> bool:
     (or ``install`` when missing) for each. Payloads only -- runtimes are handled
     afterward by ``_update_modules`` and the anchor reconcile. Best-effort and
     idempotent: a single plugin's failure warns and continues; an already-current
-    plugin is a no-op; nothing enabled is a silent no-op.
+    plugin is a no-op; an empty target set is a silent no-op.
     """
     from . import reconcile
 
@@ -12432,7 +12453,7 @@ def _update_registered_plugins() -> bool:
 
 
 def _registered_plugin_contexts() -> dict[str, Path | None]:
-    """Enabled plugins and the preferred context for marketplace operations."""
+    """Installed-or-enabled plugins and preferred marketplace contexts."""
     from . import reconcile
 
     contexts: dict[str, Path | None] = {}
@@ -12472,7 +12493,15 @@ def _registered_plugin_contexts() -> dict[str, Path | None]:
         except Exception as exc:
             output.warn(f"Could not read enabled plugins from {anchor}: {exc}")
 
-    # 2. User-global enabled plugins (#653) -- enabled but absent from any managed
+    # 2. Installed inventory is the update authority. Activation controls where
+    #    a plugin runs, not whether its available payload stays current.
+    try:
+        for name in reconcile.read_installed_plugins():
+            contexts.setdefault(name, None)
+    except Exception as exc:
+        output.warn(f"Could not read installed plugin inventory: {exc}")
+
+    # 3. User-global enabled plugins (#653) -- enabled but absent from any managed
     #    repo's settings would otherwise be silently skipped and left stale.
     try:
         for name in reconcile.read_user_enabled_plugins():

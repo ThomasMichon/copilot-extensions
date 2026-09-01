@@ -24,6 +24,7 @@ from . import layout as _layout
 from . import reconcile as _reconcile
 from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
+from .surfaces._common import SurfaceStateError
 
 
 def _collect_all_packages(machine: str) -> list[RequirementPackage]:
@@ -181,6 +182,9 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     for surface in plan.surfaces:
         owners = ", ".join(surface.contributing_packages)
         print(f"  surface {surface.key}  [{surface.disposition}]  <- {owners}")
+    for removal in plan.removals:
+        owners = ", ".join(removal["contributors"])
+        print(f"    - enabledPlugins.{removal['item']}  <- {owners}")
     for mod in plan.modules:
         print(f"  module  {mod['name']}  <- {mod['source_repo']}")
     for res in plan.resources:
@@ -230,7 +234,16 @@ def _cmd_restore(args: argparse.Namespace) -> int:
                 print(f"  {f.code}: {f.message}", file=sys.stderr)
         return 1
 
-    result = _reconcile.restore(packages, machine, dry_run=dry_run, only=args.only)
+    try:
+        result = _reconcile.restore(
+            packages,
+            machine,
+            dry_run=dry_run,
+            only=args.only,
+        )
+    except SurfaceStateError as exc:
+        print(f"restore refused: {exc}", file=sys.stderr)
+        return 1
     if args.json:
         payload = _reconcile.restore_result_to_dict(result)
         payload["scope"] = scope
@@ -249,7 +262,10 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             backup = f"  (backup {s.backup_path})" if s.backup_path else ""
             print(f"  surface {s.surface} [{s.file}]: {verb}{backup}")
             for ch in s.changes:  # what changes and why
-                if "added" in ch:
+                if ch.get("op") == "remove":
+                    for item in ch["items"]:
+                        print(f"      - {ch['key']}.{item}")
+                elif "added" in ch:
                     for item in ch["added"]:
                         print(f"      + {ch.get('key', ch.get('location'))}: {_fmt_val(item)}")
                 else:

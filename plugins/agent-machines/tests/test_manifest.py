@@ -78,8 +78,89 @@ def test_legacy_schema_version_remains_readable(tmp_path):
 
     package = load_package(path)
 
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
     assert package.schema_version == 1
+
+
+def test_schema_v2_remains_readable(tmp_path):
+    path = write_package(tmp_path, "d.yaml", base_package(schema_version=2))
+    assert load_package(path).schema_version == 2
+
+
+def test_schema_v3_ensure_absent_loads(tmp_path):
+    data = base_package(schema_version=3)
+    data["manage"] = {
+        "copilot.settings.plugin-activation": {
+            "disposition": "ensure-absent",
+            "keys": {"enabledPlugins": ["optional@example-marketplace"]},
+        }
+    }
+    package = load_package(write_package(tmp_path, "d.yaml", data))
+    assert package.manage["copilot.settings.plugin-activation"]["keys"] == {
+        "enabledPlugins": ["optional@example-marketplace"]
+    }
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {
+            "disposition": "ensure-absent",
+            "keys": {"enabledPlugins": ["unqualified"]},
+        },
+        {
+            "disposition": "ensure-absent",
+            "keys": {"enabledPlugins": ["optional@m", "optional@m"]},
+        },
+        {
+            "disposition": "ensure-absent",
+            "keys": {"enabledPlugins": []},
+        },
+        {
+            "disposition": "ensure-absent",
+            "keys": {"enabledPlugins": ["optional@m"]},
+            "values": {},
+        },
+    ],
+)
+def test_invalid_ensure_absent_shape_rejected(tmp_path, spec):
+    data = base_package(schema_version=3)
+    data["manage"] = {"copilot.settings.plugin-activation": spec}
+    with pytest.raises(ManifestError):
+        load_package(write_package(tmp_path, "d.yaml", data))
+
+
+def test_ensure_absent_requires_schema_v3(tmp_path):
+    data = base_package(schema_version=2)
+    data["manage"] = {
+        "copilot.settings.plugin-activation": {
+            "disposition": "ensure-absent",
+            "keys": {"enabledPlugins": ["optional@m"]},
+        }
+    }
+    with pytest.raises(ManifestError, match="schema_version 3"):
+        load_package(write_package(tmp_path, "d.yaml", data))
+
+
+def test_per_machine_ensure_absent_is_validated_after_layering(tmp_path):
+    data = base_package(
+        schema_version=2,
+        **{
+            "per-machine": {
+                "box-1": {
+                    "manage": {
+                        "copilot.settings.plugin-activation": {
+                            "disposition": "ensure-absent",
+                            "keys": {"enabledPlugins": ["optional@m"]},
+                        }
+                    }
+                }
+            }
+        },
+    )
+    package = load_package(write_package(tmp_path, "d.yaml", data))
+    with pytest.raises(ManifestError, match="schema_version 3"):
+        resolve_for_machine(package, "box-1")
 
 
 def test_bad_disposition_rejected(tmp_path):

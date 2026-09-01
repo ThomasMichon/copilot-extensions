@@ -1,7 +1,16 @@
 # agent-plugin-activation
 
-Resolves the machine-wide effective plugin set used by attributed drop-in
-registries:
+Provides the canonical strict state operations for Copilot plugin inventory and
+activation:
+
+- source-qualified installed inventory inspection;
+- user-global and repository activation inspection;
+- exact, dry-run-first removal of user activation without uninstalling inventory;
+- activation snapshots and restoration around inventory bootstrap; and
+- duplicate-key, malformed-shape, and wrong-type rejection before mutation.
+
+It also resolves the machine-wide effective plugin set used by attributed
+drop-in registries:
 
 - user-global `~/.copilot/settings.json` plus its local override;
 - every project adopted in `~/.agent-worktrees/projects.yaml`, joined to the

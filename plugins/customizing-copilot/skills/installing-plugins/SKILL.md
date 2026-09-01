@@ -46,7 +46,23 @@ narrowest scope that works — almost always the repo:
 3. **Only a truly machine-universal plugin, on a box with no single control repo
    → global.**
 
-> **Do NOT reach for `copilot plugin install` to enable a repo-scoped plugin.**
+### Keep inventory separate from activation
+
+Copilot stores availability and activation in separate places:
+
+| State | Authority | Meaning |
+|---|---|---|
+| Installed inventory | `~/.copilot/config.json` `installedPlugins[]` | The payload is available locally. An inventory record, cache directory, or marketplace registration does **not** mean the plugin is active. |
+| User-global activation | `~/.copilot/settings.json` `enabledPlugins` | A source-qualified key set to `true` loads the plugin for the user across repositories. Absent and `false` are both not user-enabled and must remain distinct during updates. |
+| Repository activation | `<repo>/.github/copilot/settings.json` `enabledPlugins` | A source-qualified key set to `true` loads the plugin only for that repository when repository settings are trusted. |
+| Repository trust | `~/.copilot/config.json` `trustedFolders` | Controls whether repository settings participate; it does not install or activate a plugin by itself. |
+
+Marketplace refresh and payload update should refresh available inventory
+without broadening activation. Preserve the existing user value exactly:
+absent stays absent, `false` stays `false`, and `true` stays `true`. Do not infer
+activation from an installed payload directory.
+
+> **Do NOT reach for `copilot plugin install` merely to enable a repo-scoped plugin.**
 > `copilot plugin install <name>@<market>` is the **global/user-level** path: it
 > writes the enablement into the **user** `~/.copilot/settings.json` and vendors
 > the payload for *every* repo/session on the machine — so the plugin (and any
@@ -82,6 +98,11 @@ across machines.
    repo. A plugin's `extensions/` directory is only scanned when it is enabled,
    and a newly enabled plugin may only take effect after **restarting the active
    session** (plugins are scanned at startup).
+
+   In current runtimes, interactive first-load trust is resolved before
+   repository plugin loading, so accepting trust activates repo-only hooks in
+   that first session. ACP sessions cannot present an interactive trust prompt;
+   their repository settings still require persisted trust.
 
    Current Copilot CLI plugin loading does **not** require experimental mode.
    Some adjacent features (for example MCP registry search) may be experimental,
@@ -205,6 +226,36 @@ agent-bridge, whose own-plugin staging resolves a repo's `.ai` `directory`
 marketplace by anchor-relative path). Loose `.github/skills/` trees only load for
 the launch repo and don't compose across those cases.
 
+## Inspect or narrow activation safely
+
+This skill ships a cross-platform Python helper at
+`<skill-directory>/scripts/plugin-activation.py`. It reads both Copilot state
+files strictly, preserves the managed leading comment in `config.json`, and
+never edits installed payloads.
+
+```bash
+python <skill-directory>/scripts/plugin-activation.py inspect \
+  some-plugin@my-marketplace --repo /path/to/repo
+
+# Preview only (default)
+python <skill-directory>/scripts/plugin-activation.py remove-user-activation \
+  some-plugin@my-marketplace
+
+# Apply after reviewing the exact changes
+python <skill-directory>/scripts/plugin-activation.py remove-user-activation \
+  some-plugin@my-marketplace --apply
+```
+
+`inspect` reports installed inventory, the legacy inventory `enabled` value,
+user activation, repository activation, trust, and whether the plugin is
+installed-but-not-user-enabled. `remove-user-activation` deletes only that
+source-qualified key from user `enabledPlugins` and sets the matching
+inventory record's legacy `enabled` field to `false`. It preserves inventory,
+payload cache, marketplace registration, repository settings, trust, and every
+unrelated JSON field. Missing optional files/keys are valid absence for
+inspection; malformed JSON, duplicate identities, wrong container types, and
+mutation without matching inventory are explicit errors.
+
 ## Alternative: global install (last resort — pollutes every session)
 
 Install into the user profile **only** when the plugin is genuinely
@@ -223,10 +274,9 @@ Manage with `copilot plugin list`, `copilot plugin update <name>@<market>`, and
 
 > **Fixing an accidental global enablement.** If you ran `copilot plugin install`
 > for something that should have been repo-scoped: add the declarative line to the
-> repo's `.github/copilot/settings.json`, then remove the stray
-> `"<name>@<market>": true` from the **user** `~/.copilot/settings.json`
-> `enabledPlugins` (the vendored payload under `~/.copilot/installed-plugins/` can
-> stay — it's a harmless cache the repo-scoped enablement reuses).
+> repo's `.github/copilot/settings.json`, then use the helper above to remove
+> user-global activation without uninstalling inventory. The vendored payload
+> remains available for the repository-scoped enablement.
 
 ## Payload vs runtime
 

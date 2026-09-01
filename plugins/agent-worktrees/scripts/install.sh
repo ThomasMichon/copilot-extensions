@@ -1406,6 +1406,21 @@ deploy_terminal_scripts() {
     done
 }
 
+resolve_executable_command_path() {
+    # Resolve only an executable file from PATH. Bash's `command -v` may return
+    # an alias or function, neither of which a Python subprocess can execute.
+    local command_name="$1"
+    local resolved
+    resolved="$(type -P -- "$command_name" 2>/dev/null || true)"
+    if [[ -z "$resolved" || ! -f "$resolved" || ! -x "$resolved" ]]; then
+        return 1
+    fi
+    if [[ "$resolved" != /* ]]; then
+        resolved="$(cd "$(dirname "$resolved")" && pwd -P)/$(basename "$resolved")"
+    fi
+    printf '%s\n' "$resolved"
+}
+
 deploy_copilot_plugin() {
     # Install agent-worktrees from the copilot-extensions marketplace.
     # Ensures the marketplace is registered, installs or updates the plugin,
@@ -1415,7 +1430,12 @@ deploy_copilot_plugin() {
     # invoked by cmd_update after it already ran 'copilot plugin update'),
     # skip the update call to avoid replacing files under our own feet.
 
-    if ! command -v copilot >/dev/null 2>&1; then
+    local copilot_path
+    if ! copilot_path="$(resolve_executable_command_path copilot)"; then
+        if command -v copilot >/dev/null 2>&1; then
+            err "Copilot CLI resolves only to a non-executable shell command; an executable PATH command is required" >&2
+            return 1
+        fi
         warn "Copilot CLI not found - skipping plugin install"
         return
     fi
@@ -1428,9 +1448,9 @@ deploy_copilot_plugin() {
     esac
 
     # 1. Register marketplace if not present
-    if ! copilot plugin marketplace list 2>/dev/null | grep -q 'copilot-extensions'; then
+    if ! "$copilot_path" plugin marketplace list 2>/dev/null | grep -q 'copilot-extensions'; then
         local add_out
-        add_out=$(copilot plugin marketplace add ThomasMichon/copilot-extensions 2>&1) || {
+        add_out=$("$copilot_path" plugin marketplace add ThomasMichon/copilot-extensions 2>&1) || {
             warn "Failed to register marketplace: $add_out"
             return
         }
@@ -1439,7 +1459,7 @@ deploy_copilot_plugin() {
 
     # 2. Parse current plugin state
     local plugin_list has_marketplace=false has_direct=false
-    plugin_list=$(copilot plugin list 2>/dev/null)
+    plugin_list=$("$copilot_path" plugin list 2>/dev/null)
     if echo "$plugin_list" | grep -q 'agent-worktrees@copilot-extensions'; then
         has_marketplace=true
     fi
@@ -1452,12 +1472,14 @@ deploy_copilot_plugin() {
     if $running_from_installed; then
         ok "Copilot plugin updated (marketplace)"
     elif $has_marketplace; then
-        out=$(copilot plugin update agent-worktrees@copilot-extensions 2>&1) || {
+        out=$("$copilot_path" plugin update agent-worktrees@copilot-extensions 2>&1) || {
             warn "Plugin update failed: $out"
         }
         ok "Copilot plugin updated (marketplace)"
     else
-        out=$(copilot plugin install agent-worktrees@copilot-extensions 2>&1) || {
+        out=$("$VENV_PYTHON" -m agent_worktrees.activation_preservation \
+            agent-worktrees@copilot-extensions \
+            --copilot "$copilot_path" 2>&1) || {
             warn "Plugin install failed: $out"
             return
         }
@@ -1466,8 +1488,8 @@ deploy_copilot_plugin() {
 
     # 4. Remove stale _direct install if marketplace is now present
     if $has_direct; then
-        if copilot plugin list 2>/dev/null | grep -q 'agent-worktrees@copilot-extensions'; then
-            copilot plugin uninstall agent-worktrees >/dev/null 2>&1 || true
+        if "$copilot_path" plugin list 2>/dev/null | grep -q 'agent-worktrees@copilot-extensions'; then
+            "$copilot_path" plugin uninstall agent-worktrees >/dev/null 2>&1 || true
             changed "Removed stale _direct plugin install"
         fi
     fi

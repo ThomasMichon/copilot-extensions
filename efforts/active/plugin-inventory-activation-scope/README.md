@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** isolated issue worktree
 - **Created:** 2026-08-31
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** plugin-services `install-adopt-boundary`
 - **Umbrella issue:** #1507
 
@@ -62,39 +62,39 @@ conflict detection and bootstrap protection.
 
 ### Phase 1 - Establish the state contract
 
-- [ ] Document the authorities for installed inventory, user-global activation,
+- [x] Document the authorities for installed inventory, user-global activation,
   repository activation, trust, and update effects.
-- [ ] Add a small `customizing-copilot`-owned, cross-platform inspection and
+- [x] Add a small `customizing-copilot`-owned, cross-platform inspection and
   dry-run-first mutation helper that treats missing optional state as absence,
   rejects malformed state before mutation, and preserves unrelated JSON and
   inventory.
 
 ### Phase 2 - Preserve scope during unified update
 
-- [ ] Make source-qualified installed inventory, rather than activation alone,
+- [x] Make source-qualified installed inventory, rather than activation alone,
   an update authority while retaining repository and user activation as
   bootstrap inputs.
-- [ ] Trace every payload/runtime refresh path and preserve the pre-update user
+- [x] Trace every payload/runtime refresh path and preserve the pre-update user
   activation state across any operation that bootstraps inventory.
-- [ ] Prove installed-but-absent, installed-but-false, installed-but-inactive,
+- [x] Prove installed-but-absent, installed-but-false, installed-but-inactive,
   and active repository/user cases refresh without changing absent, false, or
   true user activation while payload and runtime bootstrap still occur.
 
 ### Phase 3 - Add declarative activation removal
 
-- [ ] Add the reviewed schema-versioned disposition for exact map-key absence
+- [x] Add the reviewed schema-versioned disposition for exact map-key absence
   in user `enabledPlugins`, distinct from capture `exclude` and out-of-band
   `prune`, as the bounded agent-machines declarative-control slice.
-- [ ] Validate cross-package conflicts, exact source-qualified identities, and
+- [x] Validate cross-package conflicts, exact source-qualified identities, and
   fixed plus declared bootstrap floors before planning or applying.
-- [ ] Report exact removals, default to dry-run, back up before apply, preserve
+- [x] Report exact removals, default to dry-run, back up before apply, preserve
   unrelated settings and inventory, and make repeated apply a no-op.
-- [ ] Document a synthetic adopter package without embedding any operator or
+- [x] Document a synthetic adopter package without embedding any operator or
   organization-specific plugin list.
 
 ### Phase 4 - Validate and publish
 
-- [ ] Run focused plugin suites, changed-Python ruff checks, version and install
+- [x] Run focused plugin suites, changed-Python ruff checks, version and install
   contract gates, and a practical clean-room scenario or equivalent hermetic
   subprocess coverage.
 - [ ] Bump every touched plugin version consistently, publish through the
@@ -102,18 +102,18 @@ conflict detection and bootstrap protection.
 
 ## Validation Plan
 
-- [ ] Helper tests cover inspection, valid absent files/keys, malformed-file and
+- [x] Helper tests cover inspection, valid absent files/keys, malformed-file and
   wrong-shape errors, dry-run/apply, preservation of unrelated JSON and
   inventory, and idempotency.
-- [ ] Unified-update tests cover absent, false, and true user activation,
+- [x] Unified-update tests cover absent, false, and true user activation,
   installed-but-inactive inventory, successful and failed inventory bootstrap,
   and unchanged payload/runtime refresh guarantees on Windows and POSIX paths.
-- [ ] Restore tests cover schema validation, exact planned removals,
+- [x] Restore tests cover schema validation, exact planned removals,
   dry-run/apply/backup/idempotency, malformed live state, cross-package
   conflicts, and fixed plus declared bootstrap protection.
-- [ ] Documentation and examples consistently distinguish inventory,
+- [x] Documentation and examples consistently distinguish inventory,
   user-global activation, repository activation, and trust.
-- [ ] Version consistency, install contract, and relevant clean-room or
+- [x] Version consistency, install contract, and relevant clean-room or
   hermetic behavior checks pass before publication.
 
 ## Proposal
@@ -135,3 +135,19 @@ unmanaged state.
   `install-adopt-boundary`; no standing-intent revision is required.
 - Traced independent customization, unified-update, and agent-machines restore
   surfaces to produce this proposal.
+
+### 2026-09-01 - Implementation complete
+
+- Centralized strict inventory and activation parsing, inspection, exact
+  removal, snapshots, and restoration in the shared plugin-activation library,
+  then synchronized every vendored consumer.
+- Unified update now refreshes installed inventory independently from user or
+  repository activation and restores the exact pre-bootstrap user activation
+  state.
+- Added the schema-v3 `ensure-absent` contract, conflict and bootstrap-floor
+  validation, exact dry-run/apply reporting, backup-before-write behavior, and
+  synthetic guidance.
+- Completed focused runtime, helper, shared-library, lint, version, and
+  install-contract validation. Repository-only runtime behavior depends on the
+  public trust fix in github/copilot-agent-runtime#18252; ACP plugin-directory
+  parity remains tracked by github/copilot-agent-runtime#18250.

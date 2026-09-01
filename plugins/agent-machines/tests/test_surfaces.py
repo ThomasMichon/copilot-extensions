@@ -7,7 +7,11 @@ import pytest
 
 from agent_machines.manifest import load_package
 from agent_machines.surfaces import apply_surfaces, collect_contributions, settings
-from agent_machines.surfaces._common import merge_enforce, merge_floor
+from agent_machines.surfaces._common import (
+    SurfaceStateError,
+    merge_enforce,
+    merge_floor,
+)
 
 from ._helpers import base_package, write_package
 
@@ -129,6 +133,109 @@ def test_idempotent_second_apply_no_change(tmp_path):
     settings.apply(contribs, home=home, dry_run=False)
     result2 = settings.apply(contribs, home=home, dry_run=False)
     assert not result2.changed
+
+
+def test_ensure_absent_dry_run_apply_backup_and_idempotency(tmp_path):
+    home = _settings(tmp_path)
+    path = home / "settings.json"
+    original = {
+        "enabledPlugins": {
+            "remove@m": True,
+            "false@m": False,
+            "keep@m": True,
+        },
+        "unrelated": {"keep": True},
+    }
+    path.write_text(json.dumps(original), encoding="utf-8")
+    contributions = [
+        (
+            "ensure-absent",
+            {"enabledPlugins": ["remove@m", "false@m", "missing@m"]},
+            "example/activation",
+        )
+    ]
+
+    preview = settings.apply(contributions, home=home, dry_run=True)
+    assert preview.changed
+    assert json.loads(path.read_text(encoding="utf-8")) == original
+    assert preview.changes == [
+        {
+            "op": "remove",
+            "key": "enabledPlugins",
+            "items": ["false@m"],
+            "contributors": ["example/activation"],
+        },
+        {
+            "op": "remove",
+            "key": "enabledPlugins",
+            "items": ["remove@m"],
+            "contributors": ["example/activation"],
+        },
+    ]
+
+    applied = settings.apply(contributions, home=home, dry_run=False)
+    assert applied.backup_path is not None
+    assert Path(applied.backup_path).exists()
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "enabledPlugins": {"keep@m": True},
+        "unrelated": {"keep": True},
+    }
+    second = settings.apply(contributions, home=home, dry_run=False)
+    assert not second.changed
+    assert second.backup_path is None
+
+
+@pytest.mark.parametrize("content", ["{bad", "[]", '{"enabledPlugins": []}'])
+def test_ensure_absent_fails_closed_on_malformed_settings(tmp_path, content):
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text(content, encoding="utf-8")
+    with pytest.raises(SurfaceStateError):
+        settings.apply(
+            [("ensure-absent", {"enabledPlugins": ["optional@m"]})],
+            home=home,
+            dry_run=True,
+        )
+
+
+def test_ensure_absent_rejects_duplicate_json_keys(tmp_path):
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text(
+        '{"unrelated":1,"unrelated":2,"enabledPlugins":{"optional@m":true}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(SurfaceStateError, match="duplicate JSON key"):
+        settings.apply(
+            [("ensure-absent", {"enabledPlugins": ["optional@m"]})],
+            home=home,
+            dry_run=True,
+        )
+
+
+def test_ensure_absent_reports_other_plugin_changes(tmp_path):
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {"remove@m": True}}),
+        encoding="utf-8",
+    )
+    result = settings.apply(
+        [
+            ("ensure-present", {"enabledPlugins": {"add@m": True}}),
+            ("ensure-absent", {"enabledPlugins": ["remove@m"]}, "example/remove"),
+        ],
+        home=home,
+        dry_run=True,
+    )
+    assert {
+        "key": "enabledPlugins.add@m",
+        "before": None,
+        "after": True,
+    } in result.changes
+    assert {
+        "op": "remove",
+        "key": "enabledPlugins",
+        "items": ["remove@m"],
+        "contributors": ["example/remove"],
+    } in result.changes
 
 
 def test_backup_created_on_change(tmp_path):

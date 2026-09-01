@@ -294,6 +294,61 @@ def check_bootstrap_floor(packages: list[RequirementPackage]) -> list[Finding]:
     return findings
 
 
+def check_plugin_activation_removals(
+    packages: list[RequirementPackage],
+) -> list[Finding]:
+    """Validate composable desired-absence declarations."""
+    findings: list[Finding] = []
+    removals: dict[str, set[str]] = {}
+    declarations: dict[str, set[str]] = {}
+    protected = set(BOOTSTRAP_CRITICAL_PLUGINS)
+
+    for pkg in packages:
+        protected.update(
+            str(name).split("@", 1)[0]
+            for name in pkg.bootstrap_floor.get("plugins") or []
+        )
+        for key, spec in pkg.manage.items():
+            disposition = spec.get("disposition")
+            if disposition == "ensure-absent":
+                for identity in spec.get("keys", {}).get("enabledPlugins", []):
+                    removals.setdefault(str(identity), set()).add(pkg.name)
+                continue
+            if (
+                key == "copilot.settings"
+                or key.startswith("copilot.settings.")
+            ) and disposition in {"enforce", "ensure-present"}:
+                values = spec.get("values", spec.get("value"))
+                enabled = values.get("enabledPlugins") if isinstance(values, dict) else None
+                if isinstance(enabled, dict):
+                    for identity in enabled:
+                        declarations.setdefault(str(identity), set()).add(pkg.name)
+
+    for identity, owners in sorted(removals.items()):
+        base = identity.split("@", 1)[0]
+        if base in protected:
+            findings.append(
+                Finding(
+                    "error",
+                    "bootstrap-floor",
+                    f"packages {', '.join(sorted(owners))} remove bootstrap-protected "
+                    f"plugin '{identity}'",
+                )
+            )
+        conflicting = declarations.get(identity)
+        if conflicting:
+            findings.append(
+                Finding(
+                    "error",
+                    "plugin-activation-conflict",
+                    f"plugin '{identity}' is declared both ensure-absent by "
+                    f"{', '.join(sorted(owners))} and value-managed by "
+                    f"{', '.join(sorted(conflicting))}",
+                )
+            )
+    return findings
+
+
 def check_plugin_tombstone_schema(
     packages: list[RequirementPackage],
 ) -> list[Finding]:
@@ -357,6 +412,7 @@ def validate(
     findings.extend(check_scalar_conflicts(packages))
     findings.extend(check_plugin_tombstone_group(packages))
     findings.extend(check_plugin_tombstone_schema(packages))
+    findings.extend(check_plugin_activation_removals(packages))
     findings.extend(check_bootstrap_floor(packages))
     findings.extend(check_resource_conflicts(packages, machine, plat))
     return findings
