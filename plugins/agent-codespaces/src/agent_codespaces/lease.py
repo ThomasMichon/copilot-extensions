@@ -485,7 +485,7 @@ def claim(
     active: set[str] | None = None,
     holder_ref: str | None = None,
     coordinate: bool = True,
-    preflight_result=None,
+    preflight_result: coordination.PreflightResult | None = None,
 ) -> Lease:
     """Acquire an **exclusive** claim on ``codespace`` for worktree ``owner``.
 

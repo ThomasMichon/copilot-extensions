@@ -76,7 +76,7 @@ def test_preflight_ready_for_owner_project(monkeypatch):
     result = coord.preflight("machine/project/worktree#session")
     assert result.ready
     assert seen["args"] == [
-        "coordination-readiness", "--project", "project"
+        "--project", "project", "coordination-readiness"
     ]
 
 

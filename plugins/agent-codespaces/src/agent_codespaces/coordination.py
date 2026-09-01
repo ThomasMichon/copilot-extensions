@@ -207,7 +207,7 @@ def preflight(holder_ref: str) -> PreflightResult:
     if not project:
         return PreflightResult("absent", detail="owner project is unavailable")
     proc = _run(
-        ["coordination-readiness", "--project", project],
+        ["--project", project, "coordination-readiness"],
         timeout=10,
     )
     if proc is None:
