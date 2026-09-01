@@ -2130,6 +2130,53 @@ def test_from_settings_ignores_untrusted_repository_settings(
     assert "do-not-report-this-command" not in output
 
 
+def test_from_settings_reports_disabled_installed_mcp_bridge_collision(
+    tmp_path: Path, capsys, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    installed = home / ".copilot" / "installed-plugins"
+    _installed_plugin(installed, "market-a", "plugin-a")
+    _installed_plugin(installed, "market-b", "plugin-b")
+    for marketplace, plugin in (("market-a", "plugin-a"), ("market-b", "plugin-b")):
+        agents = installed / marketplace / plugin / "agents"
+        agents.mkdir(exist_ok=True)
+        (agents / "demo.mcp.yaml").write_text(
+            "server:\n  url: https://example.com\n",
+            encoding="utf-8",
+        )
+    _settings(
+        repo,
+        {
+            "plugin-a@market-a": True,
+            "plugin-b@market-b": False,
+        },
+        {},
+    )
+    copilot = home / ".copilot"
+    copilot.mkdir(parents=True, exist_ok=True)
+    (copilot / "config.json").write_text(
+        json.dumps({"trustedFolders": [str(repo)]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(scan.Path, "home", lambda: home)
+
+    assert scan.main([str(repo), "--json", "--from-settings"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    findings = [
+        finding for finding in payload["findings"]
+        if finding["check"] == "mcp-bridge-collision"
+    ]
+    assert len(findings) == 1
+    message = findings[0]["message"]
+    assert "plugin-a@market-a (enabled)" in message
+    assert "plugin-b@market-b (disabled)" in message
+    assert "copilot plugin uninstall plugin-b@market-b" in message
+    assert "delete installed-plugin directories manually" in message
+
+
 def test_custom_instruction_tilde_uses_selected_home(
     tmp_path: Path, monkeypatch,
 ):
