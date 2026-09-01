@@ -209,6 +209,39 @@ def test_suspended_local_headless_body_is_cooled(q, client):
     assert sup.cool_dormant_bodies() == 0
 
 
+def test_cli_suspensions_do_not_consume_headless_cooling_budget(q, client):
+    for index in range(12):
+        task = q.create(f"cli dormant {index}", labels=["review"])
+        reservation, _ = q.reserve_spawn(task.id)
+        q.record_spawn(
+            reservation.key,
+            session_handle=f"cli-session-{index}",
+            worktree=f"wt-{index}",
+        )
+        q.claim_one(f"machine/wt-{index}", task_id=task.id)
+        q.start(task.id, f"machine/wt-{index}")
+        q.suspend(task.id, f"machine/wt-{index}", reason="waiting")
+    headless = q.create("headless dormant", labels=["review"])
+    reservation, _ = q.reserve_spawn(headless.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:headless-session"
+    )
+    q.claim_one("headless-owner", task_id=headless.id)
+    q.start(headless.id, "headless-owner")
+    q.suspend(headless.id, "headless-owner", reason="waiting")
+    stopped = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+    )
+
+    assert sup.cool_dormant_bodies() == 1
+    assert stopped == ["headless-session"]
+
+
 def test_blocking_card_cools_body_and_frees_process_capacity(q, client):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)

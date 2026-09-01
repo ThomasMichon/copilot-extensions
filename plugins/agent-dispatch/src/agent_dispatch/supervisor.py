@@ -772,25 +772,24 @@ class Supervisor:
                 continue
             if task.get("status") != Status.SUSPENDED:
                 continue
+            fleet = _parse_fleet_body_handle(res.get("session_handle"))
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            if fleet is None and local_sid is None:
+                continue
             attempted += 1
             stopped = False
             try:
-                fleet = _parse_fleet_body_handle(res.get("session_handle"))
                 if fleet is not None:
                     stopped = (
                         self.fleet_verdict_fn(*fleet) == _tracking().GONE
                         or self.fleet_cold_fn(*fleet)
                     )
-                else:
-                    local_sid = _parse_local_body_handle(
-                        res.get("session_handle")
+                elif local_sid is not None:
+                    stopped = (
+                        self.local_body_verdict_fn(local_sid)
+                        == _tracking().GONE
+                        or self.local_cold_fn(local_sid)
                     )
-                    if local_sid is not None:
-                        stopped = (
-                            self.local_body_verdict_fn(local_sid)
-                            == _tracking().GONE
-                            or self.local_cold_fn(local_sid)
-                        )
             except Exception:
                 log.exception("failed to cool dormant reservation %s", key)
             if stopped:
