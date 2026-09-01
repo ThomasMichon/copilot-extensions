@@ -65,8 +65,11 @@ It reports (BLOCKING vs WARNING) on: **skill frontmatter** (`name` +
 **anti-recursion** (a Task-capable agent without an agent-specific
 anti-self-delegation line), **MCP readiness** (an MCP-owning agent without a
 `## MCP Readiness` section), **agent-mcp fallback** (an agent-mcp-backed agent
-without an equivalent materialized CLI fallback), **inline secrets** in config
-files, **raw IPs** in ssh/scp/rsync commands, and, with `--from-settings`,
+without an equivalent materialized CLI fallback), **MCP plugin recovery** (a
+plugin-packaged MCP agent without a discoverable troubleshooting skill, or
+without an explicit dependency/prerequisite section in the plugin README),
+**inline secrets** in config files, **raw IPs** in ssh/scp/rsync commands, and,
+with `--from-settings`,
 **session-start context composition**, including missing or ambiguous aggregate
 ownership.
 `--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
@@ -122,7 +125,9 @@ python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --from-settings
 - An **external marketplace** plugin is *advisory*: its skills join the
   collision map (so a `LOCAL ↔ PLUGIN` clash is visible), and its Task-capable
   agents receive anti-self-delegation / MCP-readiness / agent-mcp-fallback
-  checks. Findings are warnings tagged with plugin origin, installed version,
+  checks. Plugins that package MCP-owning agents are also checked for one
+  discoverable MCP troubleshooting skill and a README dependency/prerequisite
+  section. Findings are warnings tagged with plugin origin, installed version,
   source, and the upstream contribution path because the consumer cannot edit
   the installed payload.
 - When an editable `plugins/*` suite skill or agent matches an installed copy
@@ -222,6 +227,8 @@ equivalent independent reviewer. Ask it for **bugs and design flaws, not style**
 - hook or plugin designs without explicit context ownership and composition;
 - Task-capable sub-agents missing the agent-specific **anti-recursion** guard,
   and MCP-owning agents missing readiness / equivalent fallback behavior;
+- plugin-packaged MCP agents with no discoverable troubleshooting skill, or a
+  plugin README that leaves runtime/plugin/authentication dependencies implicit;
 - **footguns** — destructive commands without confirmation, hardcoded paths,
   raw IPs in SSH, secrets in config;
 - instructions that tell the agent to *do* something no surface can express
