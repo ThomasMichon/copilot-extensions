@@ -35,6 +35,7 @@ import contextlib
 import json
 import os
 import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -42,11 +43,19 @@ from typing import Callable, TypeVar
 
 T = TypeVar("T")
 LOGICAL_OVERRIDE_PREFIX = "logical:"
+_THREAD_LOCKS_GUARD = threading.Lock()
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
 
 
 def logical_override_id(logical_id: str) -> str:
     """Override token that disables every registration for one logical unit."""
     return f"{LOGICAL_OVERRIDE_PREFIX}{logical_id}"
+
+
+def _thread_lock(path: Path) -> threading.Lock:
+    key = str(path.resolve())
+    with _THREAD_LOCKS_GUARD:
+        return _THREAD_LOCKS.setdefault(key, threading.Lock())
 
 
 def load_overrides(path: str | os.PathLike[str] | Path) -> dict[str, dict]:
@@ -107,19 +116,20 @@ def mutate_overrides(
     from .single_instance import SingleInstance
 
     target = Path(path)
-    lock = SingleInstance(target.with_name(f"{target.name}.lock"))
-    deadline = time.monotonic() + timeout
-    while not lock.acquire():
-        if time.monotonic() >= deadline:
-            raise TimeoutError(f"timed out acquiring override lock for {target}")
-        time.sleep(0.05)
-    try:
-        overrides = load_overrides(target)
-        result = mutator(overrides)
-        save_overrides(target, overrides)
-        return result
-    finally:
-        lock.release()
+    with _thread_lock(target):
+        lock = SingleInstance(target.with_name(f"{target.name}.lock"))
+        deadline = time.monotonic() + timeout
+        while not lock.acquire():
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timed out acquiring override lock for {target}")
+            time.sleep(0.05)
+        try:
+            overrides = load_overrides(target)
+            result = mutator(overrides)
+            save_overrides(target, overrides)
+            return result
+        finally:
+            lock.release()
 
 
 def set_override(
