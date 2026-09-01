@@ -12,11 +12,10 @@ description: >
   - 'clean up / organize / backfill worktrees'
   - 'backfill worktree status' / 'backfill sessions'
   - 'recover worktrees' / 'orphaned worktree session'
-  - 'close out a worktree' / 'release worktree claims'
-  - "what did this worktree touch / its footprint"
   - 'why is a worktree showing 0 turns' / 'picker shows wrong session'
+  - 'copilot -p stole the worktree head' / 'subprocess became head session'
+  - 'head points to a pre-handoff session'
   - 'worktree shows active but only offers Resume'
-  - 'reclaim an orphaned Copilot' / "can't resume — active process lock"
   For pruning worktree *directories* use `gc`/`cleanup`; for orphaned mux tabs
   use `reap-sessions`. Covers record + session-state health and liveness-safe
   cleanup.
@@ -71,7 +70,9 @@ health. It is **per-project** (run it through each project's binstub, e.g.
 Run it per project (`dotfiles`, `test-chamber`, …) — the command scopes to the
 current project's tracking store; the Copilot session-state/store it cleans is
 shared across projects, so the guards (current + registered session ids) protect
-live work regardless of which project you invoke it from.
+live work regardless of which project you invoke it from. For a machine-wide
+sweep, enumerate every adopted project first; a clean report from the project
+you happen to be standing in says nothing about sibling project registries.
 
 ## Cross-machine transcript investigation from a four-character suffix
 
@@ -169,6 +170,48 @@ declaring it. `session_turns` in the record is only a **picker render-cache** �
 self-heals to the real count on the next populate, so a stale `session_turns: 0`
 on a *correctly-registered* worktree is cosmetic, not lost work.
 
+**F. Foreign-cwd subprocess registered as this worktree's session → remove the
+registration, not the transcript.** A nested command such as `copilot -p ...`
+can start while its parent process is associated with a worktree. On affected
+versions, the nested session's `sessionStart` contribution can be registered on
+the parent's worktree even though the nested session's own cwd is elsewhere.
+If it is then asserted as head, the picker follows a one-shot probe or fixture
+instead of the real agent.
+
+Diagnose this from structured fields, not names or turn counts:
+
+1. Run `<project> worktrees list --json --fresh --all` and retain each row's
+   worktree `id` + `path`.
+2. Run `<project> worktrees list-sessions --worktree <full-id> --json`.
+3. Compare **every registered session's `cwd`** with the worktree `path`
+   (normalized, case-insensitive on Windows). A mismatch is a foreign
+   registration. A one-turn probe whose cwd correctly equals the worktree is
+   not this class.
+4. Preserve the session-state directory and transcript. The defect is the
+   worktree registration, not the session's existence.
+
+Do **not** merely rewrite the head cache. The resident reconciliation loop may
+still hold the old protected head in memory and briefly reassert it after the
+first repair. Remove every foreign registration from the worktree through the
+version's supported repair surface, allow one complete reconciliation pass,
+then assert the real head and verify again after a fresh population pass.
+
+Until [#1553](https://github.com/ThomasMichon/copilot-extensions/issues/1553)
+provides a supported unregister/repair verb, stop after collecting the evidence
+and upgrade or escalate the repair. `deregister-session` only records the end of
+an activation; it does **not** remove a session from the worktree registry.
+Never hand-edit tracking YAML or call package internals to route around the
+Single-Writer Contract.
+
+**G. Head stayed on a pre-handoff session → reconstruct the actual relay.**
+Legacy records may contain a later takeover session (its first user turn names
+the handoff) without the predecessor/successor edge or head transition that
+would promote it. Start from the registered sessions and exact structured
+transcripts, then follow explicit successor links and handoff takeover prompts
+to the final real session. Do not choose by timestamp alone: test probes and
+failed successor shells can be newer than the authoritative agent. A handoff
+whose successor never became usable leaves the predecessor authoritative.
+
 ### Verify which class you're in — cheap structured signals first
 
 Work **cheap → expensive**; most cases resolve without ever touching the
@@ -179,11 +222,29 @@ state root:
    **alignment audit** (report-only item 5) already surfaces these.
 2. **`list-sessions` / `head-session` (registry, O(this worktree)).** Shows the
    registered sessions and which id `resolved_head_session` picks — a synthetic /
-   dead head with real siblings on disk points at class **B/C**.
+   dead head with real siblings on disk points at class **B/C**. Compare the
+   session cwd with the worktree path here as the class **F** check.
 3. **The session-store index, keyed by cwd (one indexed query).** Query the
    Copilot session store's index for sessions whose `cwd` is the worktree path,
    rather than walking the filesystem — this finds a real in-worktree session
    without any directory iteration.
+
+### Verify head repair survives reconciliation
+
+An immediate successful write is not enough when a resident reconciler may have
+captured the old head before the repair:
+
+1. Run `<project> worktrees head-session --worktree-id <id> --json`.
+2. Force the normal read path with
+   `<project> worktrees list --json --fresh --worktree-id <id>`.
+3. Allow a complete resident reconciliation cycle, then repeat both reads.
+4. Re-run `<project> worktrees doctor --json`; `head_cache.found` must be zero.
+5. Re-run the cwd comparison for all inactive/finalized heads. No head session
+   may have a cwd outside its worktree.
+
+If the old head returns, do not keep overwriting the cache. Re-check for a
+foreign registration (class **F**) or an incomplete handoff edge (class **G**)
+and repair that cause.
 
 ### Last resort — content-grep the transcript bodies (expensive; explicitly initiated)
 
