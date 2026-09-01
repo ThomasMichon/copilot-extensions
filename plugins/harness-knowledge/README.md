@@ -15,16 +15,23 @@ This matches the payload-only shape described in `docs/patterns/README.md`.
 
 The front door is the **`binding-knowledge`** skill:
 
-1. Confirm the launch repo requires an external state root with
-   `agent-worktrees state-root --json`.
+1. Inspect the launch repo with `agent-worktrees state-root --json`. A resolved
+   path can still come from fallback discovery, so it does not replace the
+   canonical registration check below.
 2. Choose the knowledge repo: use an existing local checkout, clone a remote, or
    create a new private repo. The flow should fail before configuration if the
    chosen checkout is missing or is not a git repo; the configurator assumes the
    path it is given.
-3. Register the harness and knowledge repos with `agent-worktrees repos add` so
-   the state-root resolver can find them by name.
-4. Run the idempotent configurator:
-   `skills/binding-knowledge/scripts/bind_knowledge.py`.
+3. Run the single idempotent registration-and-binding command:
+   `skills/binding-knowledge/scripts/bind_knowledge.py
+   --agent-worktrees-path "<catalog argv[0]>" --register`, along with the
+   harness/knowledge names and exact checkout paths documented by the skill.
+   Add `--account <writable-login>` when the repository owner is an organization
+   with no usable account mapping.
+4. Require both `registration.status: ready` and `state_root.status: ready`.
+   The registration result distinguishes `canonical_registry`,
+   `fallback_discovery`, `unresolved`, and `unverified`, and reports the
+   effective class, path, remote, default branch, and account.
 5. Inspect the configurator's structured personal-issue routing status. A
    non-GitHub origin requires an explicit repository-owned GitHub route in the
    knowledge repo's `.agent-worktrees/config.yaml`.
