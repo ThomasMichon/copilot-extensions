@@ -221,7 +221,14 @@ if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
     exit 0
 }
 
-$hostExecutable = [Environment]::ProcessPath
+$hostExecutable = $null
+try {
+    $processPathProperty = [Environment].GetProperty('ProcessPath')
+    if ($processPathProperty) {
+        $hostExecutable = $processPathProperty.GetValue($null, $null)
+    }
+}
+catch { }
 if (-not $hostExecutable) {
     try {
         $hostExecutable = (Get-Process -Id $PID -ErrorAction Stop).Path

@@ -25,7 +25,24 @@ payload="$(cat)" || {
     exit 0
 }
 if [[ -z "$python_bin" ]]; then
-    printf '{}'
+    launch_cwd="${COPILOT_PROJECT_DIR:-$PWD}"
+    if [[ "$launch_cwd" != /* || ! -d "$launch_cwd" ]]; then
+        launch_cwd="$PWD"
+    fi
+    if [[ -f "$script" && "$script" == "$root/"* && "$script" == *.sh ]]; then
+        output="$(
+            cd "$launch_cwd" || exit 1
+            printf '%s' "$payload" | bash "$script" "$@" 2> >(cat >&2)
+        )"
+        status=$?
+        if [[ $status -eq 0 && "$output" == \{*\} ]]; then
+            printf '%s' "$output"
+        else
+            printf '{}'
+        fi
+    else
+        printf '{}'
+    fi
     exit 0
 fi
 

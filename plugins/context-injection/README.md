@@ -86,8 +86,9 @@ exactly one JSON object; every other result becomes one `{}` with hook exit zero
 PowerShell uses `ArgumentList` where available and the Windows command-line
 quoting algorithm on Windows PowerShell 5.1 so empty, quoted, and
 backslash-terminated arguments survive unchanged. The wrapper requires Python
-for authority resolution and JSON validation; without it, the safe result is
-`{}`.
+for authority resolution and full JSON validation. Without Python, the POSIX
+compatibility path buffers a successful local contributor and accepts only one
+structurally bounded object result; every other result becomes `{}`.
 
 ## Complete suite-owned stack
 
