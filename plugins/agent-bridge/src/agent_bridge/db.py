@@ -1720,6 +1720,15 @@ class Database:
         )
         return dict(rows[0]) if rows else None
 
+    def get_latest_completed_turn(self, session_id: str) -> dict[str, Any] | None:
+        """Return the newest settled turn with fixed query cost."""
+        rows = self.execute_read(
+            "SELECT * FROM turns WHERE session_id=? AND completed_at IS NOT NULL "
+            "ORDER BY turn_index DESC LIMIT 1",
+            (session_id,),
+        )
+        return dict(rows[0]) if rows else None
+
     # -- Event CRUD ----------------------------------------------------------
 
     def append_event(

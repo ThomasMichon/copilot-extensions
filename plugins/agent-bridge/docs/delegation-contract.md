@@ -40,6 +40,7 @@ delegated-agent facade.
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
 | Observe a live turn | attached `send`, `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
 | Read accumulated events | `read`, `read --since`, `--tail`, `--range`, or `--event` | `GET .../events` or `GET .../events/range` | Event records; random access does not move the caller cursor |
+| Read a bounded accumulated result | `result`, optionally from an opaque `--position` or with explicit `--expand` | `GET .../result` and `GET .../result/detail` | Current state, latest completed result, collapsed incremental work, and a cursor-neutral opaque next position |
 | Inspect the downstream transcript without launching ACP | `peek` | Target-execution helper, not a public session route | Bounded Copilot `events.jsonl` snapshot and reuse verdict |
 | Inspect current state | `status`, `session-usage`, `sessions` | Session, status, usage, queue, and cursor endpoints | Session/process/usage/progress fields |
 | Interrupt one turn | control API; destructive `send --force` is a separate replacement path | `POST .../interrupt` | Current turn receives ACP `session/cancel`; session remains usable |
@@ -250,7 +251,7 @@ Rules:
 | Target capability | Current foundation | Remaining owner |
 |-------------------|--------------------|-----------------|
 | Stable lifecycle/attention vocabulary | Session statuses, events, queues, cursors, handoff links | [#1449](https://github.com/ThomasMichon/copilot-extensions/issues/1449), completed by this baseline |
-| Bounded accumulated result | Status plus event/range reads | [#1452](https://github.com/ThomasMichon/copilot-extensions/issues/1452) |
+| Bounded accumulated result | `result` composes status, persisted turns, and opaque event-log positions for bridge-owned sessions; represented-session parity remains | [#1452](https://github.com/ThomasMichon/copilot-extensions/issues/1452) |
 | Attention-oriented wait | Turn-settlement stream | [#1450](https://github.com/ThomasMichon/copilot-extensions/issues/1450) |
 | Queue-first steering | Opt-in hosted queue and separate live inbox | [#1451](https://github.com/ThomasMichon/copilot-extensions/issues/1451) |
 | Safe represented-session admission | Freshness, takeover fencing, inbox idempotency | [#1453](https://github.com/ThomasMichon/copilot-extensions/issues/1453) |

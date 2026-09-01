@@ -223,6 +223,72 @@ class EventLog:
         with self._lock:
             return self._events[-1].id if self._events else 0
 
+    @property
+    def continuity_id(self) -> str | None:
+        """Private event-log continuity identity for opaque read positions.
+
+        The telemetry reducer derives this value from the first event's durable
+        timestamp, so an owned log reproduces it across restart and rotates it
+        when resync rebuilds history. Empty logs have no usable position.
+        Callers must never expose or parse this value directly.
+        """
+        with self._lock:
+            if not self._events:
+                return None
+            return self._telemetry.log_epoch or None
+
+    def snapshot_window(
+        self, *, after: int | None, limit: int, durable: bool = False
+    ) -> tuple[str | None, int, list[SseEvent]]:
+        """Atomically snapshot continuity, head, and a bounded event window.
+
+        ``after=None`` selects the latest tail. An integer selects the ascending
+        prefix after that event. Keeping all three reads under one lock prevents
+        an append or rebuild from mixing a position from one history with events
+        from another.
+        """
+        with self._lock:
+            if not self._events:
+                return (None, 0, [])
+            durable_head = self._events[-1].id
+            if durable and self._db is not None and self._session_id is not None:
+                self._db.flush()
+                durable_head = self._db.get_max_event_id(self._session_id)
+            eligible = [event for event in self._events if event.id <= durable_head]
+            if not eligible:
+                return (None, 0, [])
+            continuity = self._telemetry.log_epoch or None
+            head = eligible[-1].id
+            if limit <= 0:
+                return (continuity, head, [])
+            if after is None:
+                rows = list(eligible[-limit:])
+            else:
+                rows = [e for e in eligible if e.id > after][:limit]
+            return (continuity, head, rows)
+
+    def snapshot_event(
+        self, event_id: int, *, durable: bool = False
+    ) -> tuple[str | None, SseEvent | None]:
+        """Atomically read one event with the continuity that identifies it."""
+        with self._lock:
+            durable_head = self._events[-1].id if self._events else 0
+            if durable and self._db is not None and self._session_id is not None:
+                self._db.flush()
+                durable_head = self._db.get_max_event_id(self._session_id)
+            continuity = (
+                self._telemetry.log_epoch or None if self._events else None
+            )
+            event = next(
+                (
+                    e
+                    for e in self._events
+                    if e.id == event_id and e.id <= durable_head
+                ),
+                None,
+            )
+            return (continuity, event)
+
     def active_tool_call(self) -> dict[str, Any] | None:
         """Return the most recent in-flight tool call, or ``None`` if idle.
 
