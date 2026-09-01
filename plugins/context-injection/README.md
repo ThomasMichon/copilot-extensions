@@ -40,27 +40,27 @@ indentation, unsupported YAML shapes, path escape, and incompatible values all
 stand down before authority proof. The retired `sessionContextAggregation`
 settings key is ignored and cannot select an authority.
 
-Engine contract version 2 adds repository adoption proof, producer-mode direct
-fallback, and pair-key rendezvous identity. Producer hooks may invoke
+Engine contract version 3 adds repository adoption proof, producer-mode direct
+fallback, pair-key rendezvous identity, and byte-identical shared delivery.
+Producer hooks may invoke
 `aggregate_context.py --producer <plugin@marketplace>/<contributor-id>`. A
 missing, malformed, ambiguous, inactive, or incompatible authority restores
 that contributor's direct output. After exact authority proof, producers
-participate in or wait for the shared rendezvous but emit `{}`. Only the
-authority's own session-start invocation, which omits `--producer`, emits the
-cached aggregate. It may run before, after, or concurrently with producers:
-order does not affect the one non-empty result or its bytes. Post-proof failures
-publish one shared cached `{}` and never re-enter producer-local fallback.
+participate in or wait for the shared rendezvous and emit the same cached
+aggregate as the authority's own session-start invocation. It may run before,
+after, or concurrently with producers: order does not affect the selected
+result because every participating hook returns byte-identical bytes.
+Post-proof failures publish one shared cached `{}` and never re-enter
+producer-local fallback.
 Completed results are cached by
 `(sessionId, canonical resolved cwd)`, so only the exact pair can reuse bytes.
 The cache lives in a per-user runtime or cache directory. POSIX roots must be
 owned by the current user with mode `0700`; lock and result files use `0600`,
 and unsafe or symlinked paths are rejected.
 
-This order-independent protocol requires the affected host to preserve an
-earlier non-empty `additionalContext` when another hook returns `{}`. That
-output-composition behavior is verified for the supported host version; it is
-not inferred from hook order. A host that lets an empty result erase an earlier
-non-empty result is incompatible with repository adoption.
+This order-independent protocol does not depend on how the host selects among
+hook results: every authority-aware producer and the authority return the same
+non-empty aggregate after proof.
 
 Set the host-level `timeoutSec` on producer and authority hooks to at least the
 engine's 25-second rendezvous deadline. A value of 30 seconds is recommended so

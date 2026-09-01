@@ -365,7 +365,7 @@ def _run(
         "authority": authority_source,
         "engine": {
             "schema": "copilot-extensions.context-injection-engine",
-            "version": 2,
+            "version": 3,
         },
     }
     engine_config = config["engine"]
@@ -373,7 +373,7 @@ def _run(
     if adoption_case == "incomplete":
         engine_config.pop("schema")
     elif adoption_case == "incompatible":
-        engine_config["version"] = 3
+        engine_config["version"] = 2
     elif adoption_case == "ambiguous":
         config["authority"] = "context-injection@other-context"
     elif adoption_case == "unknown":
@@ -979,7 +979,7 @@ def test_engine_contract_is_versioned() -> None:
     )
     assert contract == {
         "schema": "copilot-extensions.context-injection-engine",
-        "version": 2,
+        "version": 3,
     }
 
 
@@ -1042,8 +1042,8 @@ def test_producer_suppresses_direct_output_only_for_proven_authority(
         producer="a-policy@copilot-extensions/main",
     )
 
-    assert json.loads(result.stdout) == {}
-    assert json.loads(repeated_producer.stdout) == {}
+    assert result.stdout == authority_result.stdout
+    assert repeated_producer.stdout == authority_result.stdout
     context = json.loads(authority_result.stdout)["additionalContext"]
     assert "a-policy@copilot-extensions/main" in context
     assert "POLICY" in context
@@ -1070,8 +1070,8 @@ def test_producer_wrapper_uses_adopted_authority(tmp_path: Path) -> None:
         [("a-policy", policy), ("context-injection", aggregator)],
     )
 
-    assert json.loads(producer.stdout) == {}
-    assert "POLICY" in json.loads(authority.stdout)["additionalContext"]
+    assert producer.stdout == authority.stdout
+    assert "POLICY" in json.loads(producer.stdout)["additionalContext"]
 
 
 def test_authority_and_producer_order_yield_one_identical_aggregate(
@@ -1111,7 +1111,8 @@ def test_authority_and_producer_order_yield_one_identical_aggregate(
             if caller == "authority":
                 aggregate_outputs.append(result.stdout)
 
-        assert sum(json.loads(output) != {} for output in outputs) == 1
+        assert len(set(outputs)) == 1
+        assert json.loads(outputs[0]) != {}
 
     assert aggregate_outputs[0] == aggregate_outputs[1]
 
@@ -1497,7 +1498,7 @@ def test_rendezvous_identity_is_exact_session_and_canonical_cwd_pair(
     assert "SECOND:session-b" in different_session.stdout
 
 
-def test_concurrent_producers_emit_empty_and_authority_emits_stable_bytes(
+def test_concurrent_producers_and_authority_emit_stable_bytes(
     tmp_path: Path,
 ) -> None:
     first_policy = _plugin(
@@ -1598,9 +1599,8 @@ def test_concurrent_producers_emit_empty_and_authority_emits_stable_bytes(
     for process, (_, stderr) in zip(processes, results, strict=True):
         assert process.returncode == 0, stderr
     outputs = [stdout for stdout, _ in results]
-    assert [json.loads(output) for output in outputs[:2]] == [{}, {}]
-    assert sum(json.loads(output) != {} for output in outputs) == 1
-    assert "context-contributor:" in outputs[2]
+    assert len(set(outputs)) == 1
+    assert "context-contributor:" in outputs[0]
 
     authority_environment = os.environ.copy()
     authority_environment["HOME"] = str(tmp_path / "home")
