@@ -86,7 +86,7 @@ def test_enabled_plugin_false_is_an_authoritative_tombstone(tmp_path):
 
     settings.apply(contribs, home=home, dry_run=False)
 
-    data = json.loads((home / "settings.json").read_text())
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
     assert data["enabledPlugins"] == {
         "legacy@m": False,
         "operator-disabled@m": False,
@@ -109,7 +109,7 @@ def test_enabled_plugin_tombstone_wins_across_package_order(
 
     settings.apply(contributions, home=home, dry_run=False)
 
-    data = json.loads((home / "settings.json").read_text())
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
     assert data["enabledPlugins"]["legacy@m"] is False
 
 
