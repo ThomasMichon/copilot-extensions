@@ -31,7 +31,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 2
+  version: 5
 ```
 
 The engine reads this file only after exact persisted folder-trust proof. The
