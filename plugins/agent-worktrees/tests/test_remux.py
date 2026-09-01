@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import types
 
+from agent_worktrees import __main__ as cli
 from agent_worktrees import remux
 
 
@@ -78,6 +79,77 @@ class TestGuards:
         monkeypatch.setattr(remux, "reptyr_path", lambda: None)
         r = remux.remux_bare_copilot(worktree_id="wtA")
         assert r["ok"] is False and "reptyr" in r["reason"]
+
+
+class TestWindowsRestore:
+    def _base(self, monkeypatch):
+        monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(cli.sessions, "has_mux_session", lambda wt: False)
+        monkeypatch.setattr(cli.reclaim, "build_process_table", lambda: {})
+        monkeypatch.setattr(
+            cli.reclaim,
+            "resolve_bound_copilots",
+            lambda **kwargs: [_bound(42, wt="wtA", sid="sessA")],
+        )
+        monkeypatch.setattr(cli.reclaim, "resolve_bridge_bound", lambda *a, **k: [])
+        monkeypatch.setattr(
+            cli.reclaim, "filter_stop_unreachable", lambda found, **kwargs: found
+        )
+        monkeypatch.setattr(cli.reclaim, "descendants_of", lambda pid, table: set())
+
+    def test_preview_does_not_reclaim(self, monkeypatch):
+        self._base(monkeypatch)
+        monkeypatch.setattr(
+            cli,
+            "reclaim_one",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")),
+        )
+        result = cli._perform_remux(
+            worktree_id="wtA",
+            session_id=None,
+            worktree_path="C:\\worktrees\\wtA",
+            force_sudo=None,
+            apply_windows=False,
+        )
+        assert result["ok"] is True
+        assert result["action"] == "preview"
+        assert result["requires_resume"] is True
+        assert result["session_id"] == "sessA"
+
+    def test_apply_reclaims_exact_owner(self, monkeypatch):
+        self._base(monkeypatch)
+        calls = []
+        monkeypatch.setattr(
+            cli,
+            "reclaim_one",
+            lambda wt, **kwargs: (
+                calls.append((wt, kwargs))
+                or {"ok": True, "targets": 1, "reaped": [{"pid": 42}]}
+            ),
+        )
+        result = cli._perform_remux(
+            worktree_id="wtA",
+            session_id=None,
+            worktree_path="C:\\worktrees\\wtA",
+            force_sudo=None,
+            apply_windows=True,
+        )
+        assert result["ok"] is True
+        assert result["action"] == "reclaimed"
+        assert calls == [("wtA", {"bare_only": True, "target_pids": {42}})]
+
+    def test_existing_mux_is_refused(self, monkeypatch):
+        self._base(monkeypatch)
+        monkeypatch.setattr(cli.sessions, "has_mux_session", lambda wt: True)
+        result = cli._perform_remux(
+            worktree_id="wtA",
+            session_id=None,
+            worktree_path="C:\\worktrees\\wtA",
+            force_sudo=None,
+            apply_windows=True,
+        )
+        assert result["ok"] is False
+        assert "already has a live mux" in result["reason"]
 
 
 def _bound(pid, homing="bare", wt="wtA", cwd="/w/wtA", sid="sessA"):

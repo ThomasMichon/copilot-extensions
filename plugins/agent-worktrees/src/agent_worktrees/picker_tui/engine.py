@@ -453,6 +453,9 @@ ACTION_DESC = {
                "(bare orphans a mux Stop cannot reach) AND delete any residual "
                "inuse.<pid>.lock, so it can be re-Opened or Bare-resumed "
                "cleanly.",
+    "Restore": "Recover this unreachable active session in one step: use the "
+               "platform remux primitive, then immediately resume/attach it "
+               "through the normal TMux/PSMux launcher.",
     "Repair": "Reconcile an inconsistent worktree: reap the stray bare "
               "(un-muxed) orphan Copilot while PRESERVING the healthy mux "
               "session, clear stale locks, and re-derive tracked state.",
@@ -4420,9 +4423,10 @@ class PickerScreen(Widget):
         1. **WARNING** (M ∧ stray bare orphan) -> ``Stop`` + ``Repair``.
         2. **healthy mux** (M) -> ``Open`` (only when D -- a leaked mux on a gone
            dir offers ``Stop`` alone) + ``Stop``.
-        3. **bound / residue, no mux** (¬M ∧ (Pa ∨ Lf ∨ stale)) -> ``Reclaim``
-           (kills bound proc(es) AND deletes residual ``inuse.*.lock``). Resume/
-           Bare-resume are suppressed here -- Reclaim first, then resume.
+        3. **bound / residue, no mux** (¬M ∧ (Pa ∨ Lf ∨ stale)) -> ``Restore``
+           when a head session is known, plus ``Reclaim`` as the lower-level
+           fallback. Restore performs the platform remux prep and immediately
+           resumes/attaches through the normal mux launcher.
         4. **resumable** (¬M ∧ ¬bound ∧ H ∧ D) -> ``Resume`` + deprecated
            advanced ``Bare resume``.
         5. **sessionless** (¬M ∧ ¬bound ∧ ¬H ∧ D) -> ``Open`` (cold start).
@@ -4455,7 +4459,16 @@ class PickerScreen(Widget):
             # worktree offers Stop alone to clear it.
             acts = ["Open", "Stop"] if not gone else ["Stop"]
         elif reclaimable:
-            acts = ["Reclaim"]
+            restorable = bool(
+                rec.get("last_session_id")
+                and (
+                    rec.get("session_bare_orphan")
+                    or rec.get("session_lock_live")
+                    or rec.get("session_bound_live")
+                    or rec.get("session_bridge_live")
+                )
+            )
+            acts = ["Restore", "Reclaim"] if restorable else ["Reclaim"]
         elif gone:
             acts = []
         elif not rec.get("sessionless"):
@@ -4686,6 +4699,10 @@ class PickerScreen(Widget):
             # Kill the exact Copilot process holding the session's lock
             # (bare orphans Stop cannot reach); then re-Open / Bare resume.
             self._start_reclaim(rec)
+        elif cur == "Restore":
+            decision = self._resume_decision(rec)
+            decision["action"] = "restore"
+            self._decide(decision)
         elif cur == "Repair":
             # Reconcile the mux+stray-orphan double-binding: reap the bare
             # orphan while preserving the healthy mux, clear stale locks.

@@ -296,6 +296,35 @@ class TestReclaimOne:
                        "reaped": [], "locks_cleared": [],
                        "bridge_locks_cleared": [], "mux_servers_torn_down": []}
 
+    def test_target_pids_reaps_only_preverified_owner(self, monkeypatch):
+        rows = [
+            {"session_id": "s1", "pid": 111, "worktree_id": "wtX", "homing": "bare"},
+            {"session_id": "s2", "pid": 222, "worktree_id": "wtX", "homing": "bare"},
+        ]
+        monkeypatch.setattr(m.reclaim, "build_process_table", lambda: {})
+        monkeypatch.setattr(
+            m.reclaim, "resolve_bound_copilots", lambda **kwargs: list(rows)
+        )
+        monkeypatch.setattr(m.reclaim, "descendants_of", lambda pid, table: set())
+        monkeypatch.setattr(m.reclaim, "clear_lock_residue", lambda **kwargs: [])
+        captured = []
+        monkeypatch.setattr(
+            m.reclaim,
+            "reap_bound_copilots",
+            lambda targets, **kwargs: (
+                captured.extend(item["pid"] for item in targets)
+                or [
+                    {"pid": item["pid"], "killed": True, "children_killed": 0}
+                    for item in targets
+                ]
+            ),
+        )
+
+        result = m.reclaim_one("wtX", target_pids={111})
+
+        assert captured == [111]
+        assert result["targets"] == 1
+
     def test_bridge_bound_unions_and_reaps(self, monkeypatch):
         # #4272: a bare-resumed / bridge-owned session (cwd=home) is invisible to
         # resolve_bound_copilots; its bridge.lock target is unioned in (deduped by
@@ -473,16 +502,15 @@ class TestSessionActionVerbs:
         assert "Reclaim" not in verbs
         assert verbs[0] == "Open"  # live mux -> attach
 
-    def test_bare_orphan_offers_reclaim_not_stop(self):
-        # A bare (un-muxed) bound Copilot -> Reclaim; no mux for Stop to reach.
-        # Resume/Bare-resume are SUPPRESSED (Resume XOR Reclaim): clear the
-        # bound process first, then resume.
+    def test_bare_orphan_offers_restore_and_reclaim_not_stop(self):
+        # A bare bound Copilot with a head session gets the one-step Restore
+        # action plus the lower-level Reclaim fallback.
         verbs = self._verbs(mux_live=False, session_lock_live=True,
                             session_bare_orphan=True, last_session_id="s1")
-        assert "Reclaim" in verbs
+        assert "Restore" in verbs and "Reclaim" in verbs
         assert "Stop" not in verbs
         assert "Resume" not in verbs and self._BARE_RESUME_ACTION not in verbs
-        assert verbs[0] == "Reclaim"
+        assert verbs[0] == "Restore"
 
     def test_bare_orphan_reclaims_even_when_lock_scan_missed_it(self):
         # #662/#1416 blind spot: the cwd-keyed lock-scan never registered the
@@ -490,7 +518,7 @@ class TestSessionActionVerbs:
         # scan found it -> Reclaim must still be offered.
         verbs = self._verbs(mux_live=False, session_lock_live=False,
                             session_bare_orphan=True, last_session_id="s1")
-        assert "Reclaim" in verbs
+        assert "Restore" in verbs and "Reclaim" in verbs
 
     def test_unmuxed_live_lock_offers_reclaim_even_without_bare_flag(self):
         # The strand this fix closes: a live inuse lock binds a Copilot, there is
@@ -499,7 +527,7 @@ class TestSessionActionVerbs:
         # is never ACTIVE-with-no-verb.
         verbs = self._verbs(mux_live=False, session_lock_live=True,
                             session_bare_orphan=False, last_session_id="s1")
-        assert "Reclaim" in verbs
+        assert "Restore" in verbs and "Reclaim" in verbs
         assert "Stop" not in verbs
 
     def test_unmuxed_cached_bound_live_offers_reclaim(self):
@@ -507,7 +535,7 @@ class TestSessionActionVerbs:
         # fresh lock verdict yet), an un-muxed bound worktree offers Reclaim.
         verbs = self._verbs(mux_live=False, session_bound_live=True,
                             session_bare_orphan=False, last_session_id="s1")
-        assert "Reclaim" in verbs
+        assert "Restore" in verbs and "Reclaim" in verbs
 
     def test_unmuxed_bridge_live_offers_reclaim(self):
         # #4272 strand: a live BRIDGE-owned Copilot (bridge.lock, cwd=home) makes
@@ -519,10 +547,10 @@ class TestSessionActionVerbs:
         verbs = self._verbs(mux_live=False, session_bridge_live=True,
                             session_lock_live=False, session_bound_live=False,
                             session_bare_orphan=False, last_session_id="s1")
-        assert "Reclaim" in verbs
+        assert "Restore" in verbs and "Reclaim" in verbs
         assert "Stop" not in verbs
         assert "Resume" not in verbs and self._BARE_RESUME_ACTION not in verbs
-        assert verbs[0] == "Reclaim"
+        assert verbs[0] == "Restore"
 
     def test_muxed_plus_bare_is_warning_stop_and_repair(self):
         # The #662 double-binding (a healthy mux AND a separate stray bare
@@ -542,6 +570,7 @@ class TestSessionActionVerbs:
         verbs = self._verbs(mux_live=False, session_lock_stale=True,
                             last_session_id="s1")
         assert "Reclaim" in verbs
+        assert "Restore" not in verbs
         assert "Resume" not in verbs and "Stop" not in verbs
 
     def test_resumable_offers_resume_and_bare_resume(self):

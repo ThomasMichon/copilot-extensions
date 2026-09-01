@@ -15,6 +15,7 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -660,6 +661,19 @@ def _run_production_picker(project: str) -> int:
                 else str(decision.get("env") or "") or None
             ),
         ))
+    if action == "restore":
+        worktree_id = decision.get("worktree_id")
+        if not worktree_id:
+            print("error: Picker returned a restore decision with no worktree id.")
+            return 1
+        return _restore_production_picker_session(
+            project,
+            str(worktree_id),
+            title=str(decision.get("title") or "") or None,
+            is_local=bool(decision.get("is_local", True)),
+            machine=str(decision.get("machine") or "") or None,
+            environment=str(decision.get("env") or "") or None,
+        )
     if action == "new":
         return _run_launch(picker_app.LaunchRequest(
             project=project,
@@ -679,6 +693,91 @@ def _run_production_picker(project: str) -> int:
         return _cmd_update([])
     print(f"error: Picker returned an unsupported decision: {action!r}")
     return 1
+
+
+def _restore_production_picker_session(
+    project: str,
+    worktree_id: str,
+    *,
+    title: str | None,
+    is_local: bool,
+    machine: str | None,
+    environment: str | None,
+) -> int:
+    """Run platform remux prep, then immediately launch/attach through mux."""
+    from . import engine_client, picker_app
+
+    try:
+        if is_local:
+            # Resolve the interactive launch boundary before terminating the
+            # unreachable owner. A missing binstub must fail without mutation.
+            engine_client.project_binstub_command(project)
+            result = engine_client.run_json(
+                project,
+                [
+                    "remux",
+                    "--worktree-id",
+                    worktree_id,
+                    "--yes",
+                    "--json",
+                ],
+                allow_nonzero=True,
+            )
+        else:
+            from .production_picker.picker_tui import data_ssh, maintenance
+
+            if not machine or not environment:
+                print(
+                    "error: Picker returned a remote restore decision without "
+                    "a machine and environment."
+                )
+                return 1
+            argv = data_ssh.remote_op_argv(
+                machine,
+                environment,
+                "remux",
+                worktree_id,
+            )
+            if argv is None:
+                print("error: the selected source does not support session restore.")
+                return 1
+            result = maintenance._ssh_json(argv)
+    except (engine_client.EngineError, OSError, subprocess.SubprocessError) as error:
+        print(f"error: could not prepare session restore: {error}")
+        return 1
+
+    if not result.get("ok"):
+        print(
+            "error: could not prepare session restore: "
+            f"{result.get('reason') or 'unknown engine error'}"
+        )
+        return 1
+    if result.get("action") != "reclaimed" and not result.get("verified"):
+        print(
+            "error: could not prepare session restore: the live process was "
+            "not confirmed inside the mux pane"
+        )
+        return 1
+
+    request = picker_app.LaunchRequest(
+        project=project,
+        worktree_id=worktree_id,
+        mode="resume",
+        title=title,
+        no_mux=False,
+        machine=None if is_local else machine,
+        environment=None if is_local else environment,
+    )
+    if not is_local:
+        return _run_launch(request)
+
+    try:
+        return engine_client.run_project_passthrough(
+            project, ["--worktree-id", worktree_id]
+        )
+    except engine_client.EngineError as error:
+        print(f"error: could not launch restored session: {error}")
+        return 1
 
 
 def _resolve_for(req) -> "tuple[object | None, int]":

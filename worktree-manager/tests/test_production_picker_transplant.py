@@ -246,6 +246,178 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
     assert requests[0].no_mux is True
 
 
+def test_manager_restores_local_session_then_launches_project_binstub(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "restore",
+            "worktree_id": "demo-1234",
+            "title": "Restore me",
+            "is_local": True,
+        },
+    )
+    from worktree_manager import engine_client
+
+    calls = []
+    monkeypatch.setattr(
+        engine_client, "project_binstub_command", lambda project: Path("demo.cmd")
+    )
+    monkeypatch.setattr(
+        engine_client,
+        "run_json",
+        lambda project, args, **kwargs: (
+            calls.append(("remux", project, args, kwargs))
+            or {"ok": True, "action": "reclaimed", "requires_resume": True}
+        ),
+    )
+    monkeypatch.setattr(
+        engine_client,
+        "run_project_passthrough",
+        lambda project, args: calls.append(("launch", project, args)) or 0,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert calls[0][0:3] == (
+        "remux",
+        "demo",
+        ["remux", "--worktree-id", "demo-1234", "--yes", "--json"],
+    )
+    assert calls[1] == ("launch", "demo", ["--worktree-id", "demo-1234"])
+
+
+def test_manager_does_not_launch_when_restore_prep_fails(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "restore",
+            "worktree_id": "demo-1234",
+            "is_local": True,
+        },
+    )
+    from worktree_manager import engine_client
+
+    monkeypatch.setattr(
+        engine_client, "project_binstub_command", lambda project: Path("demo.cmd")
+    )
+    monkeypatch.setattr(
+        engine_client,
+        "run_json",
+        lambda *args, **kwargs: {"ok": False, "reason": "ambiguous owner"},
+    )
+    monkeypatch.setattr(
+        engine_client,
+        "run_project_passthrough",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("launch must not run")
+        ),
+    )
+
+    assert entrypoint._run_production_picker("demo") == 1
+
+
+def test_manager_does_not_launch_unverified_live_adoption(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "restore",
+            "worktree_id": "demo-1234",
+            "is_local": True,
+        },
+    )
+    from worktree_manager import engine_client
+
+    monkeypatch.setattr(
+        engine_client, "project_binstub_command", lambda project: Path("demo.cmd")
+    )
+    monkeypatch.setattr(
+        engine_client,
+        "run_json",
+        lambda *args, **kwargs: {
+            "ok": True,
+            "action": "adopted",
+            "verified": False,
+        },
+    )
+    monkeypatch.setattr(
+        engine_client,
+        "run_project_passthrough",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("launch must not run")
+        ),
+    )
+
+    assert entrypoint._run_production_picker("demo") == 1
+
+
+def test_manager_restores_remote_session_then_resumes(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "restore",
+            "worktree_id": "demo-1234",
+            "title": "Restore remotely",
+            "is_local": False,
+            "machine": "Example",
+            "env": "WSL",
+        },
+    )
+    from worktree_manager.production_picker.picker_tui import data_ssh, maintenance
+
+    monkeypatch.setattr(
+        data_ssh,
+        "remote_op_argv",
+        lambda *args, **kwargs: ["ssh", "example", "demo remux"],
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "_ssh_json",
+        lambda argv: {"ok": True, "verified": True},
+    )
+    requests = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_launch",
+        lambda request: requests.append(request) or 0,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert requests[0].worktree_id == "demo-1234"
+    assert requests[0].machine == "Example"
+    assert requests[0].environment == "WSL"
+
+
+def test_manager_reports_remote_restore_transport_failure(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "restore",
+            "worktree_id": "demo-1234",
+            "is_local": False,
+            "machine": "Example",
+            "env": "WSL",
+        },
+    )
+    from worktree_manager.production_picker.picker_tui import data_ssh, maintenance
+
+    monkeypatch.setattr(
+        data_ssh,
+        "remote_op_argv",
+        lambda *args, **kwargs: ["ssh", "example", "demo remux"],
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "_ssh_json",
+        lambda argv: (_ for _ in ()).throw(FileNotFoundError("ssh missing")),
+    )
+
+    assert entrypoint._run_production_picker("demo") == 1
+
+
 def test_manager_acts_on_remote_production_picker_decision(monkeypatch):
     monkeypatch.setattr(
         runner,

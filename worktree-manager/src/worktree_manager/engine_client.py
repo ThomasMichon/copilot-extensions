@@ -400,6 +400,54 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
 
 
+def project_binstub_command(project: str) -> Path:
+    """Return the installer-owned project binstub path, or raise."""
+    if os.name == "nt":
+        home = os.environ.get("USERPROFILE")
+        command = Path(home) / ".local" / "bin" / f"{project}.cmd" if home else (
+            Path.home() / ".local" / "bin" / f"{project}.cmd"
+        )
+    else:
+        command = Path.home() / ".local" / "bin" / project
+    if not command.is_file():
+        raise EngineError(f"project binstub is not installed: {command}")
+    return command
+
+
+def run_project_passthrough(
+    project: str,
+    args: list[str],
+    *,
+    timeout: int | None = None,
+) -> int:
+    """Run one installed project binstub with inherited stdio."""
+    command = project_binstub_command(project)
+    argv = [str(command), *args]
+    if os.name == "nt":
+        argv = [
+            os.environ.get("COMSPEC", "cmd.exe"),
+            "/d",
+            "/s",
+            "/c",
+            subprocess.list2cmdline(argv),
+        ]
+    try:
+        return subprocess.run(
+            argv,
+            timeout=timeout,
+            check=False,
+            env={
+                **os.environ,
+                "PYTHONUTF8": "1",
+                "PYTHONSAFEPATH": "1",
+            },
+        ).returncode
+    except subprocess.TimeoutExpired as e:
+        raise EngineError(f"{project} {' '.join(args)} timed out") from e
+    except OSError as e:
+        raise EngineError(f"could not run project binstub {project}: {e}") from e
+
+
 def get_value(project: str, key: str, *, timeout: int = _DEFAULT_TIMEOUT) -> str:
     """Read a pinned scalar value from ``agent-worktrees get <key>``."""
     return _run(project, ["get", key], timeout=timeout).strip()

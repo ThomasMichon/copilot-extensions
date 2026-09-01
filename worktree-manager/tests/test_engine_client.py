@@ -148,6 +148,33 @@ def test_timeout_raises_engine_error(monkeypatch):
     assert "timed out" in str(ei.value)
 
 
+def test_project_passthrough_uses_resolved_installer_binstub(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        ec, "project_binstub_command", lambda project: ec.Path("/fake/demo")
+    )
+    monkeypatch.setattr(
+        ec.subprocess,
+        "run",
+        lambda cmd, **kwargs: (
+            seen.update(cmd=cmd, kwargs=kwargs)
+            or _fake_completed(cmd, returncode=7)
+        ),
+    )
+
+    assert ec.run_project_passthrough("demo", ["--worktree-id", "wt-1"]) == 7
+    expected = [str(ec.Path("/fake/demo")), "--worktree-id", "wt-1"]
+    if ec.os.name == "nt":
+        expected = [
+            ec.os.environ.get("COMSPEC", "cmd.exe"),
+            "/d",
+            "/s",
+            "/c",
+            ec.subprocess.list2cmdline(expected),
+        ]
+    assert seen["cmd"] == expected
+
+
 def test_empty_worktrees_list(monkeypatch):
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps({"version": 1, "worktrees": []})))
