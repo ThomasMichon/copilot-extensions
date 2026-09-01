@@ -339,3 +339,14 @@ ownership.
   logical-message idempotency scope.
 - Transferred wire/durable fixture registration to #1460/#1468 before any new
   writer or default is enabled.
+
+### 2026-09-01 — Phase 1A bounded-result proposal
+
+- Claimed #1452 and carved the focused
+  [`agent-bridge-delegated-result-snapshots`](../agent-bridge-delegated-result-snapshots/README.md)
+  stretch.
+- Selected a reader-only projection over existing status, persisted turns, and
+  event logs, with no new durable writer or competing progress payload.
+- Kept event-log continuity private behind opaque rebuild-safe positions and
+  left richer progress proof plus the general immutable-reference contract with
+  #1045/#1138.
