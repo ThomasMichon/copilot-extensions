@@ -234,7 +234,7 @@ state root:
 An immediate successful write is not enough when a resident reconciler may have
 captured the old head before the repair:
 
-1. Run `head-session --worktree-id <id> --json`.
+1. Run `<project> worktrees head-session --worktree-id <id> --json`.
 2. Force the normal read path with
    `<project> worktrees list --json --fresh --worktree-id <id>`.
 3. Allow a complete resident reconciliation cycle, then repeat both reads.
