@@ -145,7 +145,7 @@ def sanitize_remote(remote: str) -> str:
     try:
         port = parsed.port
     except ValueError:
-        return ""
+        port = None
     if port is not None:
         netloc = f"{netloc}:{port}"
     return urlunsplit(
@@ -451,12 +451,17 @@ def inspect_registration(
     )
     if entry is None and case_collision is not None:
         collision_name = str(case_collision.get("name", "") or "")
+        collision_paths = (
+            case_collision.get("paths")
+            if isinstance(case_collision.get("paths"), dict)
+            else {}
+        )
         return {
             **base,
             "status": "mismatch",
             "path_source": "canonical_registry",
             "resolved_path": str(
-                (case_collision.get("paths") or {}).get(
+                collision_paths.get(
                     _current_platform_key(),
                     "",
                 )

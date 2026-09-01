@@ -354,6 +354,38 @@ def test_case_only_registry_collision_is_not_ready_or_auto_repaired(
     assert "differs only by case" in registration["reason"]
 
 
+def test_case_collision_tolerates_malformed_paths(monkeypatch):
+    monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "")
+
+    def fake_run(_command, args, **_kwargs):
+        return _completed(
+            args,
+            stdout=json.dumps(
+                {
+                    "repos": [
+                        {
+                            "name": "Knowledge",
+                            "class": "worktree",
+                            "paths": "malformed",
+                        }
+                    ]
+                }
+            ),
+        )
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        "C:/knowledge",
+        "agent-worktrees",
+    )
+
+    assert registration["status"] == "mismatch"
+    assert registration["resolved_path"] == ""
+
+
 def test_stale_default_branch_is_repaired_without_persisting_derived_account(
     tmp_path: Path,
     monkeypatch,
@@ -600,6 +632,9 @@ def test_http_remote_userinfo_is_removed():
     assert bk.sanitize_remote(
         "git@github.com:owner/repo.git"
     ) == "git@github.com:owner/repo.git"
+    assert bk.sanitize_remote(
+        "https://user:secret@example.com:not-a-port/owner/repo.git"
+    ) == "https://example.com/owner/repo.git"
 
 
 def test_windows_powershell_catalog_path_uses_host(monkeypatch):
