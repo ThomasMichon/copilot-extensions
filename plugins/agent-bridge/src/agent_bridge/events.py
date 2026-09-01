@@ -252,7 +252,6 @@ class EventLog:
                 return (None, 0, [])
             durable_head = self._events[-1].id
             if durable and self._db is not None and self._session_id is not None:
-                self._db.flush()
                 durable_head = self._db.get_max_event_id(self._session_id)
             visible_count = min(len(self._events), max(0, durable_head))
             if visible_count <= 0:
@@ -277,7 +276,6 @@ class EventLog:
         with self._lock:
             durable_head = self._events[-1].id if self._events else 0
             if durable and self._db is not None and self._session_id is not None:
-                self._db.flush()
                 durable_head = self._db.get_max_event_id(self._session_id)
             visible_count = min(len(self._events), max(0, durable_head))
             continuity = (

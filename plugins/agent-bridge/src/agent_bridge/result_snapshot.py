@@ -357,7 +357,10 @@ def _attention(
         if lowered.startswith(("interrupted", "cancel")):
             return ResultField(
                 availability="unknown_after_restart",
-                reason="the durable turn row does not distinguish explicit cancellation",
+                reason=(
+                    "the durable turn row does not distinguish explicit "
+                    "cancellation from other interruption"
+                ),
             )
     if session.status == SessionStatus.IDLE and session.turn_count > 0:
         return ResultField(availability="available", value="turn_complete")

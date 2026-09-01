@@ -47,7 +47,7 @@ from ..transport import SpawnTarget
 from ..worktree_head import resolve_head
 
 if TYPE_CHECKING:
-    from ..session_manager import SessionManager
+    from ..session_manager import Session, SessionManager
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 
@@ -62,7 +62,7 @@ def _cursor_key(caller_id: str | None) -> str:
     return caller_id if caller_id else _CURSOR_DEFAULT_KEY
 
 
-def _resolve_result_session(mgr: SessionManager, ref: str):  # noqa: ANN202
+def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
     """Resolve an owned session or authoritative worktree handle."""
     session = mgr.get_session(ref)
     if session is not None:
