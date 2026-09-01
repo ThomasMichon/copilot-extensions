@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Fresh Repository Consumption](active/fresh-repository-consumption/README.md) | Draft | #1533 |
 | [MCP Agent Self-Diagnostics](active/mcp-agent-self-diagnostics/README.md) | Draft | #1520 |
 | [Plugin Inventory and Activation Scope](active/plugin-inventory-activation-scope/README.md) | Draft | #1507 |
 | [Source-Remote Lease Isolation](active/source-remote-lease-isolation/README.md) | Draft | #1528 |
@@ -19,7 +20,7 @@ that pattern to this repository.
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
-| [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Draft | See effort |
+| [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 |
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
 | [State-Root-Bound Coordination](active/state-root-bound-coordination/README.md) | Draft | #1513 |
 | [Worktree Finality and Obligations](active/worktree-finality-and-obligations/README.md) | Draft | #1312 |
