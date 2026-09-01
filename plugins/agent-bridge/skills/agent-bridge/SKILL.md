@@ -166,7 +166,8 @@ Provider namespaces from `~/.agent-bridge/providers.d/` work without a topology.
 
 ### Repository edits vs configuration adoption
 
-`agent-bridge config adopt` is a **machine-local projection command**. It reads
+The payload-local `config adopt` operation is a **machine-local projection
+command**. It reads
 repository topology and writes the current user's `~/.agent-bridge/config.yaml`;
 it never edits, publishes, or deploys repository files.
 
@@ -188,10 +189,11 @@ canonicalized to the anchor. A stateless harness may instead inherit
 external paths can become invalid if it names a disposable worktree; `config
 validate` reports the missing file.
 
-Before repairing a profile with `config adopt`, record its existing
-`default_copilot_args` and `default_env` from `config show`: adoption replaces
-the named topology profile rather than merging those spawn defaults. Re-adopt
-against canonical source paths, then restore any recorded defaults.
+Before repairing a profile with `config adopt`, back up its topology-profile
+stanza in `~/.agent-bridge/config.yaml`, including `default_copilot_args` and
+`default_env`: adoption replaces the named profile rather than merging those
+spawn defaults. Re-adopt against canonical source paths, then restore any
+recorded defaults.
 
 
 ## CLI Commands

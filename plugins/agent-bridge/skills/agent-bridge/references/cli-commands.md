@@ -415,9 +415,9 @@ Explicit `--machines-yaml` and `--agents-config` arguments remain exact even
 when `--repo` itself is canonicalized to the anchor. If such a path names a
 temporary worktree, removing that worktree strands the profile; `config
 validate` reports the missing file. Before re-adopting from canonical source
-paths, record the profile's `default_copilot_args` and `default_env` from
-`config show`; adoption replaces the profile and those spawn defaults must be
-restored afterward.
+paths, back up the profile stanza in `~/.agent-bridge/config.yaml`, including
+`default_copilot_args` and `default_env`; adoption replaces the profile and
+those spawn defaults must be restored afterward.
 
 For first-time setup, see the `agent-worktrees:copilot-extensions-setup` skill. For
 detailed topology configuration, see `plugins/agent-bridge/docs/machine-config.md`.

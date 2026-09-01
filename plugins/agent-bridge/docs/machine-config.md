@@ -53,8 +53,9 @@ worktree, removing that worktree strands the profile and `config validate`
 reports the missing file.
 
 `config adopt` replaces the named topology profile. Before using it as repair,
-capture any existing `default_copilot_args` and `default_env` from `config
-show`, then restore those spawn defaults after re-adoption.
+back up the profile stanza in `~/.agent-bridge/config.yaml`, including any
+`default_copilot_args` and `default_env`, then restore those spawn defaults
+after re-adoption.
 
 ### Verify
 

@@ -142,8 +142,9 @@ in-repo auto-discovered topology path is stored. A stateless harness may inherit
 topology from its bound knowledge/state root, while explicit config paths remain
 exact. Any external path into a disposable worktree will fail validation after
 that worktree is removed. Before repairing it with re-adoption, preserve the
-profile's `default_copilot_args` and `default_env` from `config show`; adoption
-replaces the named profile rather than merging those defaults.
+profile stanza from `~/.agent-bridge/config.yaml`, including
+`default_copilot_args` and `default_env`; adoption replaces the named profile
+rather than merging those defaults.
 
 ### Option B: Manual config
 
