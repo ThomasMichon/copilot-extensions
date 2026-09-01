@@ -6,6 +6,7 @@ tracking its lifecycle state.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import tempfile
@@ -42,6 +43,7 @@ WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"
 # records) = "active", so no migration is needed.
 SessionState = Literal["active", "handed-off", "concluded"]
 HandoffState = Literal["pending", "linked", "cancelled"]
+ProfileAssignmentDisposition = Literal["pending", "bound", "abandoned"]
 
 # States that mean "no longer the current session" -- a replayed head pointing
 # at one resolves to no current session until an explicit successor/adoption.
@@ -89,6 +91,23 @@ MANAGED_ORIGINS: tuple[WorktreeOrigin, ...] = ("system", "delegate")
 _MAX_SESSION_ACTIVATIONS = 256
 _MAX_HEAD_TRANSITIONS = 512
 _MAX_HANDOFFS = 256
+_MAX_PROFILE_ASSIGNMENTS = 128
+MAX_PERSISTED_COUNTER = (1 << 63) - 1
+
+
+def _bounded_nonnegative_int(value: object, *, field: str) -> int:
+    """Parse one persisted counter without accepting coercions or infinities."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a numeric integer")
+    if isinstance(value, float) and (
+        not math.isfinite(value) or not value.is_integer()
+    ):
+        raise ValueError(f"{field} must be a finite integer")
+    if value < 0 or value > MAX_PERSISTED_COUNTER:
+        raise ValueError(
+            f"{field} must be between 0 and {MAX_PERSISTED_COUNTER}"
+        )
+    return int(value)
 
 
 @dataclass
@@ -157,6 +176,24 @@ class SessionHandoff:
     opened_at: str
     successor: str | None = None
     linked_at: str | None = None
+
+
+@dataclass
+class ProfileAssignment:
+    """One durable profile assignment for a Copilot launch generation."""
+
+    policy: str
+    assignment_label: str
+    selected_profile: str
+    bag_generation: int
+    bag_position: int
+    assigned_at: str
+    disposition: ProfileAssignmentDisposition = "pending"
+    session_id: str | None = None
+    lane: str = ""
+    abandoned_at: str | None = None
+    bound_at: str | None = None
+    predecessor_session_id: str | None = None
 
 
 @dataclass
@@ -421,6 +458,11 @@ class WorktreeRecord:
     head_transitions: list[HeadTransition] = field(default_factory=list)
     handoff_counter: int = 0
     handoffs: list[SessionHandoff] = field(default_factory=list)
+    # Opt-in balanced profile assignment. The project-level allocator owns the
+    # shuffled bag; this bounded record copy makes launch/session identity
+    # available through the ordinary record and JSON status surfaces.
+    profile_assignment_revision: int = 0
+    profile_assignments: list[ProfileAssignment] = field(default_factory=list)
     # #2178: for a bridge-spawned worktree, the *caller* worktree that requested
     # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
     # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
@@ -1163,6 +1205,72 @@ def load_record(path: Path) -> WorktreeRecord:
                 linked_at=str(linked_at) if linked_at else None,
             ))
 
+    profile_assignments: list[ProfileAssignment] = []
+    raw_assignments = data.get("profile_assignments")
+    if isinstance(raw_assignments, list):
+        for raw in raw_assignments:
+            if not isinstance(raw, dict):
+                continue
+            policy = str(raw.get("policy") or "")
+            selected_profile = str(raw.get("selected_profile") or "")
+            assigned_at = raw.get("assigned_at") or ""
+            if hasattr(assigned_at, "isoformat"):
+                assigned_at = assigned_at.isoformat()
+            if not (policy and selected_profile and assigned_at):
+                continue
+            disposition = raw.get("disposition")
+            if disposition not in ("pending", "bound", "abandoned"):
+                disposition = "pending"
+            abandoned_at = raw.get("abandoned_at")
+            if hasattr(abandoned_at, "isoformat"):
+                abandoned_at = abandoned_at.isoformat()
+            elif abandoned_at in (None, "", "null"):
+                abandoned_at = None
+            try:
+                generation = _bounded_nonnegative_int(
+                    raw.get("bag_generation"),
+                    field="profile_assignments[].bag_generation",
+                )
+                position = _bounded_nonnegative_int(
+                    raw.get("bag_position"),
+                    field="profile_assignments[].bag_position",
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+            profile_assignments.append(ProfileAssignment(
+                policy=policy,
+                assignment_label=str(raw.get("assignment_label") or ""),
+                selected_profile=selected_profile,
+                bag_generation=generation,
+                bag_position=position,
+                assigned_at=str(assigned_at),
+                disposition=disposition,
+                session_id=(
+                    str(raw["session_id"]) if raw.get("session_id") else None
+                ),
+                lane=str(raw.get("lane") or ""),
+                abandoned_at=(
+                    str(abandoned_at) if abandoned_at else None
+                ),
+                bound_at=(
+                    str(raw["bound_at"]) if raw.get("bound_at") else None
+                ),
+                predecessor_session_id=(
+                    str(raw["predecessor_session_id"])
+                    if raw.get("predecessor_session_id")
+                    else None
+                ),
+            ))
+
+    try:
+        profile_assignment_revision = _bounded_nonnegative_int(
+            data.get("profile_assignment_revision", 0),
+            field="profile_assignment_revision",
+        )
+    except (TypeError, ValueError, OverflowError):
+        profile_assignment_revision = 0
+        profile_assignments = []
+
     return WorktreeRecord(
         worktree_id=data["worktree_id"],
         branch=data["branch"],
@@ -1191,6 +1299,8 @@ def load_record(path: Path) -> WorktreeRecord:
         head_transitions=head_transitions,
         handoff_counter=int(data.get("handoff_counter", 0) or 0),
         handoffs=handoffs,
+        profile_assignment_revision=profile_assignment_revision,
+        profile_assignments=profile_assignments[-_MAX_PROFILE_ASSIGNMENTS:],
         caller_worktree=(str(data["caller_worktree"])
                          if data.get("caller_worktree") else None),
         owner_ref=(str(data["owner_ref"])
@@ -1309,6 +1419,14 @@ def _save_record_unlocked(
             record.head_transitions = current.head_transitions
             record.handoff_counter = current.handoff_counter
             record.handoffs = current.handoffs
+        if (
+            current.profile_assignment_revision
+            > record.profile_assignment_revision
+        ):
+            record.profile_assignment_revision = (
+                current.profile_assignment_revision
+            )
+            record.profile_assignments = current.profile_assignments
         current_by_ref = {claim.ref: claim for claim in current.resources}
         reserved = {
             claim.ref: claim for claim in current.resources
@@ -1339,6 +1457,10 @@ def _save_record_unlocked(
         record.head_transitions = record.head_transitions[-_MAX_HEAD_TRANSITIONS:]
     if len(record.handoffs) > _MAX_HANDOFFS:
         record.handoffs = record.handoffs[-_MAX_HANDOFFS:]
+    if len(record.profile_assignments) > _MAX_PROFILE_ASSIGNMENTS:
+        record.profile_assignments = record.profile_assignments[
+            -_MAX_PROFILE_ASSIGNMENTS:
+        ]
 
     title_val = record.title or "null"
     # Quote titles that contain YAML-special characters (colons, etc.)
@@ -1474,6 +1596,48 @@ def _save_record_unlocked(
                     ),
                 }
                 for handoff in record.handoffs
+            ]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    if record.profile_assignment_revision:
+        content += (
+            "profile_assignment_revision: "
+            f"{record.profile_assignment_revision}\n"
+        )
+    if record.profile_assignments:
+        content += yaml.safe_dump(
+            {"profile_assignments": [
+                {
+                    "policy": assignment.policy,
+                    "assignment_label": assignment.assignment_label,
+                    "selected_profile": assignment.selected_profile,
+                    "bag_generation": assignment.bag_generation,
+                    "bag_position": assignment.bag_position,
+                    "assigned_at": assignment.assigned_at,
+                    "disposition": assignment.disposition,
+                    **(
+                        {"session_id": assignment.session_id}
+                        if assignment.session_id else {}
+                    ),
+                    **({"lane": assignment.lane} if assignment.lane else {}),
+                    **(
+                        {"abandoned_at": assignment.abandoned_at}
+                        if assignment.abandoned_at else {}
+                    ),
+                    **(
+                        {"bound_at": assignment.bound_at}
+                        if assignment.bound_at else {}
+                    ),
+                    **(
+                        {
+                            "predecessor_session_id":
+                                assignment.predecessor_session_id
+                        }
+                        if assignment.predecessor_session_id else {}
+                    ),
+                }
+                for assignment in record.profile_assignments
             ]},
             default_flow_style=False,
             sort_keys=False,
