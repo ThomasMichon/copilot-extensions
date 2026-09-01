@@ -343,20 +343,28 @@ def load_package(
     per_machine = raw.get("per-machine") or raw.get("per_machine") or {}
     if not isinstance(per_machine, dict):
         raise ManifestError(f"{path}: 'per-machine' must be a mapping")
-    folded_machine_keys: dict[str, str] = {}
-    for machine_key in per_machine:
-        if not isinstance(machine_key, str) or not machine_key:
+    normalized_per_machine: dict[str, Any] = {}
+    original_machine_keys: dict[str, str] = {}
+    for machine_key, overlay in per_machine.items():
+        if (
+            not isinstance(machine_key, str)
+            or not machine_key.strip()
+            or machine_key != machine_key.strip()
+        ):
             raise ManifestError(
-                f"{path}: per-machine keys must be non-empty strings"
+                f"{path}: per-machine keys must be non-empty strings "
+                "without surrounding whitespace"
             )
         folded = machine_key.casefold()
-        previous = folded_machine_keys.get(folded)
+        previous = original_machine_keys.get(folded)
         if previous is not None:
             raise ManifestError(
                 f"{path}: per-machine keys {previous!r} and {machine_key!r} "
                 "differ only by case"
             )
-        folded_machine_keys[folded] = machine_key
+        original_machine_keys[folded] = machine_key
+        normalized_per_machine[folded] = overlay
+    per_machine = normalized_per_machine
 
     return RequirementPackage(
         name=name,
@@ -400,15 +408,7 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
     unchanged. This is the *layer-within-repo* step that must precede any
     cross-repo union.
     """
-    machine_key = machine.casefold()
-    overlay = next(
-        (
-            value
-            for key, value in pkg.per_machine.items()
-            if key.casefold() == machine_key
-        ),
-        {},
-    ) or {}
+    overlay = pkg.per_machine.get(machine.casefold()) or {}
     manage_overlay = overlay.get("manage", overlay) if isinstance(overlay, dict) else {}
     if not isinstance(manage_overlay, dict):
         manage_overlay = {}

@@ -103,8 +103,8 @@ exclude:                           # capture must never serialize these
 ```
 
 Machine gates and `per-machine` overlay keys are case-insensitive. Do not
-declare two overlay keys that differ only by case; validation rejects the
-ambiguous package.
+declare two overlay keys that differ only by case, are empty, or carry
+surrounding whitespace; validation rejects the ambiguous package.
 
 **Value-shape guidance:** scalar singletons (`model`, `effortLevel`) are
 `enforce`; maps/lists (`enabledPlugins`, `permissions`) are `ensure-present` so

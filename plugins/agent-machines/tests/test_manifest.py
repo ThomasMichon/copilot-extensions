@@ -156,3 +156,14 @@ def test_per_machine_case_duplicates_rejected(tmp_path):
 
     with pytest.raises(ManifestError, match="differ only by case"):
         load_package(path)
+
+
+@pytest.mark.parametrize("machine_key", ["", "   ", " box-2", "box-2 "])
+def test_per_machine_invalid_whitespace_rejected(tmp_path, machine_key):
+    data = base_package(
+        **{"per-machine": {machine_key: {"manage": {}}}},
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="without surrounding whitespace"):
+        load_package(path)
