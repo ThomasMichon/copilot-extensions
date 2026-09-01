@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Herdr Live Handoff](active/herdr-live-handoff/README.md) | Active | #1584 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge Contract Baseline](active/agent-bridge-contract-baseline/README.md) | Draft | #1468 |

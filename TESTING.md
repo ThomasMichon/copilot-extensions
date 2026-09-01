@@ -177,7 +177,7 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   compatibility catalog, plugin-root compatibility aliases, incomplete-payload
   failure-open behavior, oversized-catalog fallback, and cross-platform kernel
   and catalog semantics; Node tests cover thresholds, configuration, successor
-  seeds, storage, and guidance.
+  seeds, storage, Herdr-first live-cutover routing, and guidance.
 - **efforts:** payload-only policy-producer tests covering exact repository
   adoption, authoritative payload cwd, Git/config containment, malformed input,
   symlink/reparse rejection, contaminated Git environments, manifest-derived

@@ -20,7 +20,8 @@ import {
   writeFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync,
   openSync, closeSync, statSync,
 } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, parse, relative, resolve } from "node:path";
+import { homedir } from "node:os";
 import { execSync, execFileSync } from "node:child_process";
 import { leadFrom, buildCutoverSeed } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
@@ -101,8 +102,65 @@ export function safePathSegment(value) {
     .slice(0, 160) || "unknown";
 }
 
-export function currentPaneId() {
-  return process.env.TMUX_PANE || process.env.PSMUX_PANE || null;
+export function isHerdrPane(env = process.env) {
+  return env.HERDR_ENV === "1" && Boolean(env.HERDR_PANE_ID);
+}
+
+export function herdrHandoffDir(
+  cwd, env = process.env, home = homedir(),
+) {
+  if (!isHerdrPane(env)) return null;
+  const absoluteCwd = resolve(cwd || process.cwd());
+  const checkoutPath = relative(parse(absoluteCwd).root, absoluteCwd);
+  return join(
+    home,
+    ".copilot",
+    "context-handoff",
+    "checkouts",
+    checkoutPath || "_root",
+    "handoff",
+  );
+}
+
+export function resolveHandoffCwd(
+  cwd,
+  {
+    execute = runCli,
+    env = process.env,
+    home = homedir(),
+  } = {},
+) {
+  if (!isHerdrPane(env)) {
+    return { cwd: resolve(cwd || process.cwd()), error: null };
+  }
+  try {
+    const output = execute(
+      join(home, ".local", "bin", "herdr"),
+      ["pane", "current", "--current"],
+      { timeout: 5000 },
+    );
+    const paneCwd = JSON.parse(output)?.result?.pane?.cwd;
+    if (typeof paneCwd !== "string" || !paneCwd) {
+      return {
+        cwd: null,
+        error: "Herdr did not report the current pane working directory.",
+      };
+    }
+    return { cwd: resolve(paneCwd), error: null };
+  } catch (error) {
+    const detail = (
+      error?.stderr || error?.stdout || error?.message || String(error)
+    ).toString().trim();
+    return {
+      cwd: null,
+      error: detail || "Unable to resolve the current Herdr pane working directory.",
+    };
+  }
+}
+
+export function currentPaneId(env = process.env) {
+  if (isHerdrPane(env)) return null;
+  return env.TMUX_PANE || env.PSMUX_PANE || null;
 }
 
 export function currentMuxSession(pane = currentPaneId(), execute = runCli) {
@@ -127,10 +185,15 @@ function processAlive(pid) {
   }
 }
 
-export function worktreeInfo(cwd, sid) {
-  const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
+export function worktreeInfo(
+  cwd, sid, get = agentWorktreesGet, env = process.env,
+) {
+  if (isHerdrPane(env)) {
+    return { wtDir: null, worktree: null, stateDir: null };
+  }
+  const wtDir = get("worktree-dir", cwd, sid);
   const worktree = wtDir ? basename(wtDir) : null;
-  const stateDir = agentWorktreesGet("worktree-state-dir", cwd, sid);
+  const stateDir = get("worktree-state-dir", cwd, sid);
   return { wtDir, worktree, stateDir };
 }
 
@@ -179,7 +242,11 @@ export function decodeHandoffPayload(raw) {
   }
 }
 
-export function handoffDirFor(cwd, sid, get = agentWorktreesGet) {
+export function handoffDirFor(
+  cwd, sid, get = agentWorktreesGet, env = process.env, home = homedir(),
+) {
+  const herdrDir = herdrHandoffDir(cwd, env, home);
+  if (herdrDir) return herdrDir;
   const stateDir = get("worktree-state-dir", cwd, sid);
   return stateDir ? join(stateDir, "handoff") : null;
 }
@@ -197,7 +264,7 @@ export function writeJsonAtomic(path, value) {
 // --- file-backed store ----------------------------------------------------
 export function saveFileHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
-  const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
+  const dir = handoffDirFor(cwd, sid);
   if (!dir) {
     const resolution = agentWorktreesGetResult(
       "worktree-state-dir", cwd, sid,
@@ -456,6 +523,7 @@ export function dispatchHandoff(promptText, sid, cwd, title) {
 
 // Mirror the stored handoff into the worktree's own record (best-effort).
 export function noteHandoffInRecord(cwd, sid, ref, title) {
+  if (isHerdrPane()) return;
   try {
     const argv = ["note-handoff"];
     if (ref) argv.push("--task", ref);
@@ -466,18 +534,128 @@ export function noteHandoffInRecord(cwd, sid, ref, title) {
 }
 
 // --- live-cutover trigger -------------------------------------------------
-// The mux choreography itself lives in `agent-worktrees handoff-cutover`; this
-// is the thin trigger. Returns:
-//   { ok: true, old_pane, new_pane }
-//   { ok: false, reason: "no-worktree" | "no-mux" | "error", error }
-export function runHandoffCutover(cwd, seed, sessionId) {
+// Herdr is selected only when the current session carries Herdr's pane identity.
+// It owns pane mechanics only: context-handoff keeps the durable baton, launches
+// one seeded sibling through the installed copilot-pane helper, and deliberately
+// retains the predecessor as the recovery point. Other sessions keep the
+// existing agent-worktrees mux choreography.
+export function parseHerdrLaunchOutput(output) {
+  const values = {};
+  for (const line of String(output || "").split(/\r?\n/)) {
+    const separator = line.indexOf("=");
+    if (separator <= 0) continue;
+    values[line.slice(0, separator)] = line.slice(separator + 1);
+  }
+  return {
+    pane: values.pane_handle || null,
+    sessionId: values.copilot_session_id || null,
+  };
+}
+
+export function runHerdrHandoffCutover(
+  cwd,
+  seed,
+  sessionId,
+  {
+    execute = runCli,
+    env = process.env,
+    home = homedir(),
+    now = Date.now,
+    launcherPath = join(home, ".local", "bin", "copilot-pane"),
+  } = {},
+) {
+  const cwdResult = resolveHandoffCwd(cwd, { execute, env, home });
+  if (!cwdResult.cwd) {
+    return {
+      ok: false,
+      host: "herdr",
+      reason: "error",
+      error: cwdResult.error,
+    };
+  }
+  const launchCwd = cwdResult.cwd;
+  const dir = herdrHandoffDir(launchCwd, env, home);
+  if (!dir) {
+    return {
+      ok: false,
+      host: "herdr",
+      reason: "error",
+      error: "Herdr pane identity is unavailable.",
+    };
+  }
+  const taskFile = join(
+    dir,
+    `launch-${safePathSegment(sessionId)}-${process.pid}-${now()}.txt`,
+  );
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(taskFile, seed, { encoding: "utf-8", mode: 0o600 });
+    const output = execute(
+      launcherPath,
+      [
+        "launch",
+        "--role", "coordinator",
+        "--cwd", launchCwd,
+        "--host", "local",
+        "--task-file", taskFile,
+      ],
+      { cwd: launchCwd, timeout: 180_000 },
+    );
+    const launched = parseHerdrLaunchOutput(output);
+    if (!launched.pane || !launched.sessionId) {
+      return {
+        ok: false,
+        host: "herdr",
+        reason: "error",
+        error: "copilot-pane did not report the successor pane and session.",
+      };
+    }
+    return {
+      ok: true,
+      host: "herdr",
+      old_pane: env.HERDR_PANE_ID,
+      new_pane: launched.pane,
+      new_session: launched.sessionId,
+      predecessor_retained: true,
+    };
+  } catch (error) {
+    const detail = (
+      error?.stderr || error?.stdout || error?.message || String(error)
+    ).toString().trim();
+    return {
+      ok: false,
+      host: "herdr",
+      reason: "error",
+      error: detail || "copilot-pane launch failed.",
+    };
+  } finally {
+    try { unlinkSync(taskFile); } catch { /* consumed or never written */ }
+  }
+}
+
+export function runHandoffCutover(
+  cwd, seed, sessionId, options = {},
+) {
+  const env = options.env || process.env;
+  const execute = options.execute || runCli;
+  if (isHerdrPane(env)) {
+    return runHerdrHandoffCutover(cwd, seed, sessionId, {
+      ...options,
+      env,
+      execute,
+    });
+  }
   const argv = ["handoff-cutover", "--seed", seed];
-  const ownPane = process.env.TMUX_PANE || process.env.PSMUX_PANE || "";
+  const ownPane = env.TMUX_PANE || env.PSMUX_PANE || "";
   if (ownPane) argv.push("--old-pane", ownPane);
   if (sessionId) argv.push("--session-id", sessionId);
   try {
-    const result = JSON.parse(runCli("agent-worktrees", argv, { cwd, timeout: 20000 }));
-    return result?.ok ? result : { ok: false, reason: "error", error: null };
+    const result = JSON.parse(execute(
+      "agent-worktrees", argv, { cwd, timeout: 20000 },
+    ));
+    return result?.ok
+      ? { ...result, host: "mux" }
+      : { ok: false, host: "mux", reason: "error", error: null };
   } catch (e) {
     const status = typeof e?.status === "number" ? e.status : null;
     let error = null;
@@ -487,19 +665,30 @@ export function runHandoffCutover(cwd, seed, sessionId) {
       error = parsed?.error || null;
     } catch { /* stdout was not JSON */ }
     const reason = status === 2 ? "no-worktree" : status === 3 ? "no-mux" : "error";
-    return { ok: false, reason, error };
+    return { ok: false, host: "mux", reason, error };
   }
 }
 
 // --- high-level orchestration (what the CLI + extension both want) ---------
 
-// Store a handoff, preferring an agent-dispatch task (durable/browsable) when a
-// coordinator is reachable, else a one-time worktree-state file. Mirrors the
-// extension's save_handoff_prompt store selection. Returns:
+// Store a handoff. Herdr sessions always use context-handoff's checkout-scoped
+// machine-local state without probing agent-worktrees. Other sessions prefer an
+// agent-dispatch task (durable/browsable) and fall back to a one-time local file.
+// Mirrors the extension's save_handoff_prompt store selection. Returns:
 //   { storage: "agent-dispatch"|"file", id, taskId?, path?, metadata }
 // On failure returns a storage:null result with the resolver/write diagnostic.
 export function storeHandoff({ promptText, sid, cwd, title, preferTask = true }) {
-  if (preferTask && agentDispatchAvailable()) {
+  const cwdResult = resolveHandoffCwd(cwd);
+  if (!cwdResult.cwd) {
+    return {
+      storage: null,
+      id: null,
+      metadata: null,
+      error: cwdResult.error,
+    };
+  }
+  cwd = cwdResult.cwd;
+  if (preferTask && !isHerdrPane() && agentDispatchAvailable()) {
     const task = dispatchHandoff(promptText, sid, cwd, title);
     if (task) {
       noteHandoffInRecord(cwd, sid, task.id, title);
