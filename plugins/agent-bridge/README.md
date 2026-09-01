@@ -106,6 +106,31 @@ one contiguous, gap-free, duplicate-free stream:
 The caller identity keying the cursor comes from `--caller`, else the current
 worktree (`agent-worktrees get worktree-dir`), else a shared per-session default.
 
+### Bounded result snapshots
+
+`result` is the cursor-neutral answer to "what did this delegate produce?":
+
+```bash
+agent-bridge result <session-or-worktree>
+agent-bridge result <session-or-worktree> --json
+agent-bridge result <session-or-worktree> --position <opaque-position>
+agent-bridge result <session-or-worktree> --expand <opaque-detail-ref>
+```
+
+The fixed-size response combines current lifecycle/attention state, bounded
+active-work and pending-input fields, the latest completed turn, and a collapsed
+increment of recent work. Reasoning and verbose tool output stay out of the
+ordinary result path; each projected event and completed turn carries an opaque
+detail reference for explicit expansion. The first increment covers
+bridge-owned sessions; represented interactive-session parity remains explicitly
+reduced-fidelity work under issue #1452.
+
+Positions are bridge-issued and must not be parsed or compared across targets.
+They do not read or advance a delivery cursor. A resync rebuild invalidates an
+older position explicitly instead of reusing its event number for different
+history. Empty logs return no position until the first event establishes a
+durable origin.
+
 ### Phased timeouts
 
 `send` distinguishes phases so a slow codespace cold-start is not mistaken for a

@@ -8,7 +8,7 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
@@ -16,6 +16,7 @@ from ..models import (
     AnswerAskUserRequest,
     CursorAckRequest,
     CursorInfo,
+    DelegatedResultSnapshot,
     PendingPrompt,
     PendingQueueResponse,
     ResyncSessionResponse,
@@ -27,15 +28,26 @@ from ..models import (
     SubmitPromptRequest,
     SubmitPromptResponse,
 )
+from ..result_snapshot import (
+    DEFAULT_MAX_ITEMS,
+    DEFAULT_MAX_TEXT_CHARS,
+    MAX_MAX_ITEMS,
+    MAX_MAX_TEXT_CHARS,
+    ResultHistoryChangedError,
+    ResultTokenError,
+    build_owned_result_snapshot,
+    expand_owned_result_ref,
+)
 from ..session_manager import (
     DaemonDrainingError,
     SessionBusyError,
     SessionConflictError,
 )
 from ..transport import SpawnTarget
+from ..worktree_head import resolve_head
 
 if TYPE_CHECKING:
-    from ..session_manager import SessionManager
+    from ..session_manager import Session, SessionManager
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 
@@ -48,6 +60,75 @@ _CURSOR_DEFAULT_KEY = "__default__"
 def _cursor_key(caller_id: str | None) -> str:
     """Normalize a caller_id into a non-null delivery_cursors key."""
     return caller_id if caller_id else _CURSOR_DEFAULT_KEY
+
+
+def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
+    """Resolve an owned session or authoritative worktree handle."""
+    session = mgr.get_session(ref)
+    if session is not None:
+        return session
+    ownership = mgr.db.get_worktree_ownership(ref)
+    candidates = [
+        item for item in mgr.list_sessions()
+        if item.target.worktree_id == ref
+    ]
+    live_session_id = mgr.db.current_live_session_for_worktree(
+        ref, now=time.time()
+    )
+    if live_session_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The authoritative worktree head is a represented session; "
+                "represented-session result parity is unavailable in this "
+                "protocol generation"
+            ),
+        )
+    if ownership is None and not candidates:
+        return None
+
+    candidate_rows = {
+        item.session_id: mgr.db.get_session(item.session_id) or {}
+        for item in candidates
+    }
+    lineage_heads = [
+        item
+        for item in candidates
+        if not candidate_rows[item.session_id].get("successor_id")
+    ]
+    if len(lineage_heads) == 1:
+        return lineage_heads[0]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple unlinked owned candidates are genuinely ambiguous. Consult the
+    # ground-layer authority only for that exceptional case; ordinary result
+    # reads stay local and cannot inherit the subprocess timeout.
+    head = resolve_head(ref)
+    if head.tracked:
+        if not head.head_session:
+            raise HTTPException(
+                status_code=409,
+                detail="The worktree has no current authoritative session head",
+            )
+        session = mgr.get_session(head.head_session)
+        if session is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The authoritative worktree head is not a bridge-owned "
+                    "session; represented-session result parity is unavailable "
+                    "in this protocol generation"
+                ),
+            )
+        return session
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "The authoritative owned session head could not be resolved "
+            "without guessing"
+        ),
+    )
 
 
 def _tool_progress_sse(active: dict, now: float) -> str:
@@ -655,6 +736,80 @@ async def get_session_status(
             session.updated_at, tz=timezone.utc
         ).isoformat(),
     }
+
+
+@router.get(
+    "/{session_ref}/result",
+    response_model=DelegatedResultSnapshot,
+)
+def get_result_snapshot(
+    session_ref: str,
+    request: Request,
+    position: str | None = Query(default=None, max_length=2048),
+    max_items: int = Query(default=DEFAULT_MAX_ITEMS, ge=1, le=MAX_MAX_ITEMS),
+    max_text_chars: int = Query(
+        default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS
+    ),
+):
+    """Return a bounded, cursor-neutral result snapshot for an owned session."""
+    mgr: SessionManager = request.app.state.session_manager
+    session = _resolve_result_session(mgr, session_ref)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session or worktree {session_ref} not found",
+        )
+    if session.event_log is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Session history is not loaded in the active bridge generation",
+        )
+    try:
+        return build_owned_result_snapshot(
+            db=mgr.db,
+            session=session,
+            requested_ref=session_ref,
+            position=position,
+            max_items=max_items,
+            max_text_chars=max_text_chars,
+        )
+    except ResultTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{session_ref}/result/detail")
+def get_result_detail(
+    session_ref: str,
+    request: Request,
+    ref: str = Query(max_length=2048),
+):
+    """Resolve an opaque result detail reference without moving a cursor."""
+    mgr: SessionManager = request.app.state.session_manager
+    session = _resolve_result_session(mgr, session_ref)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session or worktree {session_ref} not found",
+        )
+    if session.event_log is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Session history is not loaded in the active bridge generation",
+        )
+    try:
+        return expand_owned_result_ref(
+            db=mgr.db,
+            event_log=session.event_log,
+            session_id=session.session_id,
+            token=ref,
+        )
+    except ResultHistoryChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ResultTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        detail = str(exc.args[0]) if exc.args else "Result detail is unavailable"
+        raise HTTPException(status_code=404, detail=detail) from exc
 
 
 @router.post("/{session_id}/turns", response_model=SubmitPromptResponse)

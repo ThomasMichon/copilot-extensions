@@ -299,6 +299,106 @@ class ResyncSessionResponse(BaseModel):
     status: SessionStatus
 
 
+class ResultTruncation(BaseModel):
+    """Deterministic clipping metadata for one bounded value."""
+
+    truncated: bool = False
+    original_chars: int | None = None
+    emitted_chars: int | None = None
+
+
+class ResultField(BaseModel):
+    """One snapshot field with explicit evidence availability."""
+
+    availability: Literal[
+        "available",
+        "partial",
+        "not_yet_observed",
+        "unknown_after_restart",
+        "unsupported_for_target",
+    ]
+    value: Any | None = None
+    reason: str | None = None
+    detail_ref: str | None = None
+    truncation: ResultTruncation | None = None
+
+
+class ResultIdentity(BaseModel):
+    """Existing authorities projected without minting a rival delegate ID."""
+
+    logical_delegate_kind: Literal["worktree", "session"]
+    logical_delegate_id: str
+    requested_ref: str
+    snapshot_session_id: str
+    current_session_id: str
+    predecessor_id: str | None = None
+    successor_id: str | None = None
+
+
+class ResultFidelity(BaseModel):
+    """What evidence the target can supply."""
+
+    level: Literal["full", "reduced"]
+    event_retention: Literal["durable", "process_lifetime"]
+    unavailable: list[str] = Field(default_factory=list)
+
+
+class ResultWorkItem(BaseModel):
+    """One bounded, collapsed event projection."""
+
+    event_id: int
+    kind: str
+    summary: str | None = None
+    status: str | None = None
+    timestamp: float
+    detail_ref: str
+    truncated: bool = False
+
+
+class ResultIncrement(BaseModel):
+    """Cursor-neutral accumulated work and its next opaque position."""
+
+    availability: Literal["available", "not_yet_observed", "discontinuous"]
+    items: list[ResultWorkItem] = Field(default_factory=list)
+    position: str | None = None
+    has_more: bool = False
+    truncated_before: bool = False
+    reason: str | None = None
+
+
+class ResultCurrentState(BaseModel):
+    """Current lifecycle/attention state composed from existing owners."""
+
+    session_status: SessionStatus
+    liveness: str | None = None
+    observer_only: bool = True
+    retained_attention: bool = False
+    context_pct: float | None = None
+    usage_model: str | None = None
+    attention: ResultField
+    active_work: ResultField
+    pending_input: ResultField
+
+
+class ResultLimits(BaseModel):
+    """Bounds applied to caller-controlled snapshot content."""
+
+    max_items: int
+    max_text_chars: int
+    used_text_chars: int
+
+
+class DelegatedResultSnapshot(BaseModel):
+    """Bounded delegated-result projection for one target."""
+
+    identity: ResultIdentity
+    fidelity: ResultFidelity
+    state: ResultCurrentState
+    latest_result: ResultField
+    incremental: ResultIncrement
+    limits: ResultLimits
+
+
 class SessionListResponse(BaseModel):
     sessions: list[SessionInfo]
 

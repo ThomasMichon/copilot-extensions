@@ -3827,6 +3827,106 @@ def _cmd_read(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_result(args: argparse.Namespace) -> None:
+    """Read a bounded delegated-result snapshot or expand one detail reference."""
+    from .client import BridgeClientError
+
+    client = _get_client(ensure=False)
+    try:
+        if args.expand:
+            payload = client.expand_result_ref(args.session_ref, args.expand)
+        else:
+            payload = client.get_result_snapshot(
+                args.session_ref,
+                position=args.position,
+                max_items=args.max_items,
+                max_text_chars=args.max_text_chars,
+            )
+    except BridgeClientError as exc:
+        label = "UNAVAILABLE" if exc.status == 426 else "FAIL"
+        print(f"[{label}] {exc.detail}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.json or args.expand:
+        _json_out(payload)
+        return
+
+    identity = payload.get("identity") or {}
+    state = payload.get("state") or {}
+    fidelity = payload.get("fidelity") or {}
+    latest = payload.get("latest_result") or {}
+    incremental = payload.get("incremental") or {}
+
+    print(
+        f"  {identity.get('logical_delegate_id', args.session_ref)}"
+        f"  [{state.get('session_status', '')}]"
+        f"  fidelity={fidelity.get('level', 'unknown')}"
+    )
+    snapshot_sid = identity.get("snapshot_session_id")
+    current_sid = identity.get("current_session_id")
+    if snapshot_sid:
+        print(f"    Session:   {snapshot_sid}")
+    if current_sid and current_sid != snapshot_sid:
+        print(f"    Successor: {current_sid}")
+    attention = state.get("attention") or {}
+    if attention.get("availability") == "available":
+        print(f"    Attention: {attention.get('value') or 'none'}")
+    else:
+        print(
+            f"    Attention: {attention.get('availability')}"
+            f" ({attention.get('reason') or 'evidence unavailable'})"
+        )
+    active = state.get("active_work") or {}
+    if active.get("value"):
+        print(f"    Active:    {json.dumps(active['value'], ensure_ascii=False)}")
+    pending = state.get("pending_input") or {}
+    if pending.get("availability") != "available":
+        print(
+            f"    Input:     {pending.get('availability')}"
+            f" ({pending.get('reason') or 'evidence unavailable'})"
+        )
+    elif pending.get("value"):
+        print(f"    Input:     {json.dumps(pending['value'], ensure_ascii=False)}")
+
+    print(f"    Latest:    {latest.get('availability', 'unknown')}")
+    latest_value = latest.get("value") or {}
+    if latest_value:
+        stop = latest_value.get("stop_reason")
+        print(
+            f"      turn {latest_value.get('turn_index')}"
+            + (f" ({stop})" if stop else "")
+        )
+        text = latest_value.get("text")
+        if text:
+            for line in str(text).splitlines() or [str(text)]:
+                print(f"      {line}")
+    if latest.get("detail_ref"):
+        print(
+            f"      expand: agent-bridge result {args.session_ref} "
+            f"--expand {latest['detail_ref']}"
+        )
+
+    print("    Work:")
+    for item in incremental.get("items") or []:
+        summary = item.get("summary")
+        status = item.get("status")
+        suffix = f" [{status}]" if status else ""
+        line = f"      {item.get('event_id')}: {item.get('kind')}{suffix}"
+        if summary:
+            line += f" -- {str(summary).replace(chr(10), ' ')}"
+        print(line)
+    if not incremental.get("items"):
+        print(f"      ({incremental.get('availability', 'no items')})")
+    if incremental.get("reason"):
+        print(f"      {incremental['reason']}")
+    if incremental.get("truncated_before"):
+        print("      (older work omitted from the default latest window)")
+    if incremental.get("has_more"):
+        print("      (more work is available from this position)")
+    if incremental.get("position"):
+        print(f"    Position:  {incremental['position']}")
+
+
 def _cmd_stop(args: argparse.Namespace) -> None:
     """Stop a session."""
     client = _get_client()
@@ -4870,6 +4970,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_stream_args(read_p)
     read_p.set_defaults(func=_cmd_read)
+
+    result_p = sub.add_parser(
+        "result",
+        help="Read a bounded delegated-result snapshot without moving a cursor",
+    )
+    result_p.add_argument(
+        "session_ref",
+        help="Session ID, ACP session ID, or authoritative worktree handle",
+    )
+    result_p.add_argument(
+        "--position",
+        help="Opaque position returned by a prior result read (incremental mode)",
+    )
+    result_p.add_argument(
+        "--max-items",
+        type=int,
+        default=None,
+        help="Maximum projected work items (server default: 20, maximum: 100)",
+    )
+    result_p.add_argument(
+        "--max-text-chars",
+        type=int,
+        default=None,
+        help="Maximum caller-content characters (server default: 6000)",
+    )
+    result_p.add_argument(
+        "--expand",
+        metavar="REF",
+        help="Resolve an opaque event or turn detail reference",
+    )
+    result_p.add_argument("--json", action="store_true", help="Emit JSON")
+    result_p.set_defaults(func=_cmd_result)
 
     stop_p = sub.add_parser("stop", help="Stop a session")
     stop_p.add_argument("session_id", help="Session ID")

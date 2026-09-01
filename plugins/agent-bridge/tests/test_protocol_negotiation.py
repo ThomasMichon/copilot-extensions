@@ -22,6 +22,7 @@ from agent_bridge.protocol import (
     HTTP_PROTOCOL_VERSION,
     MACHINE_METADATA_PROTOCOL_VERSION,
     RELAY_INTERRUPT_PROTOCOL_VERSION,
+    RESULT_SNAPSHOT_PROTOCOL_VERSION,
     UNVERSIONED,
 )
 
@@ -29,6 +30,11 @@ from agent_bridge.protocol import (
 def test_machine_metadata_capability_is_advertised() -> None:
     assert MACHINE_METADATA_PROTOCOL_VERSION == 5
     assert MACHINE_METADATA_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
+def test_result_snapshot_capability_is_advertised() -> None:
+    assert RESULT_SNAPSHOT_PROTOCOL_VERSION == 6
+    assert RESULT_SNAPSHOT_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):

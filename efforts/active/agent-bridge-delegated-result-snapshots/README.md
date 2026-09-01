@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** one issue-bound PR worktree to `main`
 - **Created:** 2026-09-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** advances
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   §Features/`bounded-delegated-results` and
@@ -90,49 +90,49 @@ reinterpreting the event ID against rebuilt history.
 
 ### Phase 1 — Freeze the bounded reader contract
 
-- [ ] Define one response shared by bridge-owned and represented sessions:
+- [x] Define one response shared by bridge-owned and represented sessions:
       logical delegate/current-session identity, fidelity, current state,
       latest result, incremental work, position, and truncation.
-- [ ] Reuse the existing event-log continuity and persisted turn index behind
+- [x] Reuse the existing event-log continuity and persisted turn index behind
       opaque bridge-issued tokens; add no competing identity, public epoch
       shape, cursor, transcript, or durable writer.
-- [ ] Define deterministic text, item-count, and total-response bounds plus
+- [x] Define deterministic text, item-count, and total-response bounds plus
       explicit history discontinuity and unavailable-detail states.
-- [ ] Define field-level availability (`available`, `unknown_after_restart`,
+- [x] Define field-level availability (`available`, `unknown_after_restart`,
       `unsupported_for_target`, or `not_yet_observed`) so missing evidence is
       never rendered as an empty success.
-- [ ] Reuse #1449's attention vocabulary without adding wait/subscription
+- [x] Reuse #1449's attention vocabulary without adding wait/subscription
       semantics owned by #1450.
-- [ ] Define succession behavior: a predecessor snapshot names its successor,
+- [x] Define succession behavior: a predecessor snapshot names its successor,
       and a logical-delegate/worktree read resolves the current head when that
       authority is available.
-- [ ] Define additive mixed-version behavior: an older daemon reports the
+- [x] Define additive mixed-version behavior: an older daemon reports the
       result reader unavailable/upgrade-required before any side effect, while
       capability registration remains with #1460/#1468.
 
 ### Phase 2 — Build the bridge-owned projection
 
-- [ ] Add a pure bounded projection helper that suppresses reasoning and verbose
+- [x] Add a pure bounded projection helper that suppresses reasoning and verbose
       tool content by default while preserving agent messages, tool lifecycle,
       requests, failures, and turn settlement.
-- [ ] Compose bridge-owned current state from the existing status/progress
+- [x] Compose bridge-owned current state from the existing status/progress
       fields and latest completed result from persisted turns.
-- [ ] Make incremental reads cursor-neutral: caller A's position never reads or
+- [x] Make incremental reads cursor-neutral: caller A's position never reads or
       advances caller B's delivery cursor.
-- [ ] Add a fixed-cost latest-turn query rather than loading complete turn
+- [x] Add a fixed-cost latest-turn query rather than loading complete turn
       history.
-- [ ] Treat an interrupted or incomplete persisted turn as partial/unavailable,
+- [x] Treat an interrupted or incomplete persisted turn as partial/unavailable,
       never as an empty successful result.
-- [ ] Issue no position before the event log has an origin-derived continuity
+- [x] Issue no position before the event log has an origin-derived continuity
       identity; return an explicit no-history state instead.
 
 ### Phase 3 — Expose the bridge-owned reader
 
-- [ ] Add typed authenticated HTTP responses for owned result snapshots plus
+- [x] Add typed authenticated HTTP responses for owned result snapshots plus
       opaque-token-validated explicit event expansion.
-- [ ] Add matching client methods and a human-readable/`--json` CLI command.
-- [ ] Make persisted-but-not-loaded and terminal session states explicit.
-- [ ] Document bounds, opaque position semantics, expansion, rebuild behavior,
+- [x] Add matching client methods and a human-readable/`--json` CLI command.
+- [x] Make persisted-but-not-loaded and terminal session states explicit.
+- [x] Document bounds, opaque position semantics, expansion, rebuild behavior,
       restart behavior, and mixed-version degradation.
 
 ### Phase 4 — Add represented-session parity
@@ -225,3 +225,16 @@ settlement, #1506 remains the owner of the compact cross-target facade, and
   the telemetry epoch as a public contract.
 - Added field-level availability, restart/interruption, succession, and
   mixed-version requirements after design review.
+
+### 2026-09-01 — Bridge-owned reader implemented
+
+- Added protocol-gated `result` and `result/detail` HTTP/client/CLI surfaces for
+  bridge-owned sessions and authoritative worktree handles.
+- Added opaque position/detail tokens, cursor-neutral latest and incremental
+  windows, fixed-cost latest-turn recovery, deterministic text/item bounds, and
+  explicit restart/rebuild discontinuity.
+- Kept current liveness/progress data derived from the existing status owners;
+  no durable schema or writer was added.
+- Covered latest-result recovery, interrupted turns, pending-input uncertainty,
+  rebuild invalidation, worktree resolution, succession, expansion, truncation,
+  cursor neutrality, CLI rendering, and old-daemon capability gating.

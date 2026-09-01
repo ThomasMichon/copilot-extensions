@@ -690,6 +690,51 @@ class BridgeClient:
             "GET", f"/api/v1/sessions/{session_id}/status", params=params
         ) or {}
 
+    def _require_result_snapshots(self) -> None:
+        from .protocol import RESULT_SNAPSHOT_PROTOCOL_VERSION
+
+        if not self.daemon_supports(RESULT_SNAPSHOT_PROTOCOL_VERSION):
+            version, _minimum = self.daemon_protocol()
+            raise BridgeClientError(
+                426,
+                "bounded result snapshots require agent-bridge HTTP protocol "
+                f"v{RESULT_SNAPSHOT_PROTOCOL_VERSION}; the daemon advertises "
+                f"v{version}. Update the agent-bridge plugin + runtime.",
+            )
+
+    def get_result_snapshot(
+        self,
+        session_ref: str,
+        *,
+        position: str | None = None,
+        max_items: int | None = None,
+        max_text_chars: int | None = None,
+    ) -> dict[str, Any]:
+        """GET /api/v1/sessions/{ref}/result after a protocol capability gate."""
+        self._require_result_snapshots()
+        params: dict[str, Any] = {}
+        if position:
+            params["position"] = position
+        if max_items is not None:
+            params["max_items"] = max_items
+        if max_text_chars is not None:
+            params["max_text_chars"] = max_text_chars
+        return self._request(
+            "GET", f"/api/v1/sessions/{session_ref}/result",
+            params=params or None,
+        ) or {}
+
+    def expand_result_ref(
+        self, session_ref: str, ref: str
+    ) -> dict[str, Any]:
+        """GET /api/v1/sessions/{ref}/result/detail for one opaque reference."""
+        self._require_result_snapshots()
+        return self._request(
+            "GET",
+            f"/api/v1/sessions/{session_ref}/result/detail",
+            params={"ref": ref},
+        ) or {}
+
     def answer_ask_user(
         self,
         session_id: str,
