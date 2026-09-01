@@ -423,7 +423,10 @@ def _activate_agent_machines_context(
     return context.parent
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="canonical Windows profile semantics require native Windows",
+)
 @pytest.mark.parametrize("policy_state", ["absent", "explicit-false"])
 def test_agent_machines_required_context_preserves_absent_policy_legacy_use(
     tmp_path: Path,
@@ -585,7 +588,10 @@ def test_agent_machines_active_context_selects_only_its_cell_root(
     assert not (home / ".agent-machines").exists()
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="canonical Windows profile semantics require native Windows",
+)
 def test_agent_machines_blocked_context_states_never_run_legacy(
     tmp_path: Path,
 ) -> None:
