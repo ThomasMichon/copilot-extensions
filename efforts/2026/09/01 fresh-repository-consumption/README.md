@@ -5,7 +5,7 @@
 - **Branch(es):** one reviewed plan worktree followed by fresh serial
   implementation worktrees
 - **Created:** 2026-08-31
-- **Status:** Draft
+- **Status:** Done
 - **Vision:** installer `plugin-updating-and-alignment`; agent-worktrees
   ground-layer ownership of source-control mechanics
 - **Umbrella issue:** #1533
@@ -104,7 +104,7 @@ adding destructive source-control behavior.
 - [x] Update behavior documentation and remediation text.
 - [x] Bump agent-worktrees consistently and pass focused, changed-plugin,
   version, generated-payload, and install-contract gates.
-- [ ] Publish, review, self-merge, deploy, and verify installed behavior.
+- [x] Publish, review, self-merge, deploy, and verify installed behavior.
 
 ## Validation Plan
 
@@ -124,7 +124,7 @@ adding destructive source-control behavior.
   reports degraded freshness.
 - [x] Disabling automatic fast-forward preserves the anchor while still
   allowing fresh remote-ref selection for worktree creation.
-- [ ] Concurrent creation/update attempts cannot corrupt or forcibly rewrite
+- [x] Concurrent creation/update attempts cannot corrupt or forcibly rewrite
   the anchor; lock contention degrades safely.
 - [x] Fetch, authentication, missing-remote, and missing-default-ref failures
   produce honest degraded results without destructive fallback.
@@ -162,3 +162,16 @@ paired-worktree and marketplace reconciliation boundaries remain intact.
   Windows suite reaches an unrelated pre-existing WSL Bash probe failure; a
   filtered monolithic run exceeds the runner's five-minute single-subsuite
   budget.
+
+### 2026-09-01 - Published and verified
+- Merged #1551 with the creation, pairing, and explicit local-marketplace
+  freshness paths.
+- Installed-runtime smoke testing exposed a URL-valued paired-remote gap; fixed
+  and merged the focused follow-up in #1558.
+- Deployed agent-worktrees `1.5.3-dev695` and agent-machines `0.1.0-dev72`.
+- A disposable paired creation fast-forwarded a stale bound repository anchor
+  by 107 commits, based the new pair on the fetched remote branch, and left both
+  worktrees cleanly finalizable.
+- The relationship-aware agent-machines plan now includes the current harness
+  modules plus the freshly available supplemental modules. All disposable smoke
+  worktrees were finalized.

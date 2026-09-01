@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Fresh Repository Consumption](active/fresh-repository-consumption/README.md) | Draft | #1533 |
+| [MCP Agent Self-Diagnostics](active/mcp-agent-self-diagnostics/README.md) | Draft | #1520 |
 | [Plugin Inventory and Activation Scope](active/plugin-inventory-activation-scope/README.md) | Draft | #1507 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge Contract Baseline](active/agent-bridge-contract-baseline/README.md) | Draft | #1468 |
