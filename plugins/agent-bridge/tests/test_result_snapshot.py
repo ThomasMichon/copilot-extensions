@@ -15,7 +15,7 @@ from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.protocol import RESULT_SNAPSHOT_PROTOCOL_VERSION
-from agent_bridge.result_snapshot import _event_ref
+from agent_bridge.result_snapshot import _event_ref, _turn_ref
 from agent_bridge.routes import sessions as session_routes
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
@@ -159,12 +159,16 @@ def test_default_snapshot_keeps_latest_items(client, app) -> None:
     assert body["incremental"]["has_more"] is False
 
 
-def test_worktree_handle_resolves_authoritative_owned_session(client, app) -> None:
+def test_worktree_handle_resolves_authoritative_owned_session(
+    client, app, monkeypatch
+) -> None:
     mgr, session = _seed_session(app)
     session.event_log.append("agent_message", {"text": "owned"})
     assert mgr.db.reserve_worktree_ownership(
         "wt-1", "sess-1", now=time.time()
     )
+    probe = MagicMock()
+    monkeypatch.setattr(session_routes, "resolve_head", probe)
 
     response = client.get("/api/v1/sessions/wt-1/result")
 
@@ -172,6 +176,7 @@ def test_worktree_handle_resolves_authoritative_owned_session(client, app) -> No
     body = response.json()
     assert body["identity"]["requested_ref"] == "wt-1"
     assert body["identity"]["snapshot_session_id"] == "sess-1"
+    probe.assert_not_called()
 
 
 def test_worktree_handle_falls_back_to_ground_layer_head(
@@ -243,25 +248,37 @@ def test_worktree_handle_does_not_fall_back_past_unknown_authoritative_head(
     client, app, monkeypatch
 ) -> None:
     mgr, predecessor = _seed_session(app)
-    assert mgr.db.reserve_worktree_ownership(
-        "wt-1", predecessor.session_id, now=time.time()
+    predecessor.status = SessionStatus.STOPPED
+    mgr.db.update_session_status(
+        predecessor.session_id, SessionStatus.STOPPED.value, time.time()
     )
-    monkeypatch.setattr(
-        session_routes,
-        "resolve_head",
-        lambda _worktree_id: HeadInfo(
+    assert mgr.db.register_live_session(
+        "represented-head",
+        machine="host",
+        cwd="/wt",
+        worktree_id="wt-1",
+        repo="example/repo",
+        branch="main",
+        pid=123,
+        role=None,
+        now=time.time(),
+    ) == "live"
+    probe = MagicMock(
+        return_value=HeadInfo(
             active=True,
             occupied=True,
             head_session="represented-head",
             state="active",
             tracked=True,
-        ),
+        )
     )
+    monkeypatch.setattr(session_routes, "resolve_head", probe)
 
     response = client.get("/api/v1/sessions/wt-1/result")
 
     assert response.status_code == 409
-    assert "not a bridge-owned session" in response.json()["detail"]
+    assert "represented session" in response.json()["detail"]
+    probe.assert_not_called()
 
 
 def test_predecessor_snapshot_names_successor(client, app) -> None:
@@ -463,6 +480,18 @@ def test_detail_reference_rejects_rebuilt_history(client, app) -> None:
     )
 
     assert response.status_code == 409
+
+
+def test_missing_detail_404_is_not_quoted(client, app) -> None:
+    _seed_session(app)
+
+    response = client.get(
+        "/api/v1/sessions/sess-1/result/detail",
+        params={"ref": _turn_ref("sess-1", 999)},
+    )
+
+    assert response.status_code == 404
+    assert not response.json()["detail"].startswith("'")
 
 
 @pytest.mark.parametrize("ref", ["not-a-result-token", "abr1.%%%%"])

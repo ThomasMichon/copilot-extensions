@@ -74,6 +74,36 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
     ]
     if ownership is None and not candidates:
         return None
+    live_session_id = mgr.db.current_live_session_for_worktree(
+        ref, now=time.time()
+    )
+    if live_session_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The authoritative worktree head is a represented session; "
+                "represented-session result parity is unavailable in this "
+                "protocol generation"
+            ),
+        )
+
+    candidate_rows = {
+        item.session_id: mgr.db.get_session(item.session_id) or {}
+        for item in candidates
+    }
+    lineage_heads = [
+        item
+        for item in candidates
+        if not candidate_rows[item.session_id].get("successor_id")
+    ]
+    if len(lineage_heads) == 1:
+        return lineage_heads[0]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple unlinked owned candidates are genuinely ambiguous. Consult the
+    # ground-layer authority only for that exceptional case; ordinary result
+    # reads stay local and cannot inherit the subprocess timeout.
     head = resolve_head(ref)
     if head.tracked:
         if not head.head_session:
@@ -776,7 +806,8 @@ def get_result_detail(
     except ResultTokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        detail = str(exc.args[0]) if exc.args else "Result detail is unavailable"
+        raise HTTPException(status_code=404, detail=detail) from exc
 
 
 @router.post("/{session_id}/turns", response_model=SubmitPromptResponse)
