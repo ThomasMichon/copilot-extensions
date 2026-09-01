@@ -1660,11 +1660,12 @@ function Ensure-PsmuxSshSafe {
        piped/NoProfile pwsh. (Same reparse-shim wall the WinGet uv.exe install
        hits.)
 
-       Fix: select the REAL binary whose own version is exactly 3.3.8, remove
+       Fix: select the newest REAL binary at or above the 3.3.8 compatibility
+       floor, remove
        every stale marlocarlo.psmux package directory from User and process
        PATH, and put that directory first. This does not mutate the package or
        its server, so it remains safe while existing sessions are live. #>
-    $desiredVersion = '3.3.8'
+    $minimumVersion = '3.3.8'
     $packageRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
     $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (-not (Test-Path -LiteralPath $helper)) {
@@ -1672,10 +1673,10 @@ function Ensure-PsmuxSshSafe {
         return
     }
     . $helper
-    $selected = Find-AwPsmuxPackageBinary `
-        -PackageRoot $packageRoot -DesiredVersion $desiredVersion
+    $selected = Find-AwCompatiblePsmuxPackageBinary `
+        -PackageRoot $packageRoot -MinimumVersion $minimumVersion
     if (-not $selected) {
-        Write-ServiceWarn "psmux: no WinGet package binary reports desired version $desiredVersion; User PATH was not changed"
+        Write-ServiceWarn "psmux: no WinGet package binary meets minimum version $minimumVersion; User PATH was not changed"
         return
     }
 
@@ -1685,7 +1686,7 @@ function Ensure-PsmuxSshSafe {
         -UserPath $userPath -ProcessPath $env:Path -PackageRoot $packageRoot
     if ($repair.UserChanged) {
         [Environment]::SetEnvironmentVariable('Path', $repair.UserPath, 'User')
-        Write-ServiceChanged "psmux: selected $desiredVersion package binary and removed stale package dirs from User PATH (SSH-safe): $($selected.Directory)"
+        Write-ServiceChanged "psmux: selected compatible $($selected.Version) package binary and removed stale package dirs from User PATH (SSH-safe): $($selected.Directory)"
     }
     $env:Path = $repair.ProcessPath
 
@@ -1702,11 +1703,11 @@ function Ensure-PsmuxSshSafe {
     if (-not $resolved -or
         (ConvertTo-AwNormalizedPath $resolved.Source) -ne
             (ConvertTo-AwNormalizedPath $selected.Path) -or
-        $resolvedVersion -ne $desiredVersion) {
-        throw "psmux PATH repair failed current-process verification: resolved '$($resolved.Source)' version '$resolvedVersion', expected '$($selected.Path)' version '$desiredVersion'"
+        $resolvedVersion -ne $selected.Version) {
+        throw "psmux PATH repair failed current-process verification: resolved '$($resolved.Source)' version '$resolvedVersion', expected '$($selected.Path)' version '$($selected.Version)'"
     }
 
-    $env:AW_PSMUX_EXPECTED_VERSION = $desiredVersion
+    $env:AW_PSMUX_EXPECTED_VERSION = $selected.Version
     try {
         $verify = '$cmd = Get-Command psmux -CommandType Application -ErrorAction Stop | Select-Object -First 1; ' +
             '$out = (& $cmd.Source --help 2>&1 | Select-Object -First 1) | Out-String; ' +
@@ -1714,12 +1715,12 @@ function Ensure-PsmuxSshSafe {
             'if ($out -notmatch $pattern) { exit 1 }'
         & pwsh.exe -NoLogo -NoProfile -NonInteractive -Command $verify
         if ($LASTEXITCODE -ne 0) {
-            throw "psmux PATH repair failed NoProfile/SSH-style verification for version $desiredVersion"
+            throw "psmux PATH repair failed NoProfile/SSH-style verification for version $($selected.Version)"
         }
     } finally {
         Remove-Item Env:AW_PSMUX_EXPECTED_VERSION -ErrorAction SilentlyContinue
     }
-    Write-ServiceOk "psmux resolves and runs $desiredVersion in current and NoProfile/SSH-style shells"
+    Write-ServiceOk "psmux resolves and runs compatible version $($selected.Version) in current and NoProfile/SSH-style shells"
 }
 
 function Resolve-AwPsmuxBin {
@@ -1735,9 +1736,9 @@ function Resolve-AwPsmuxBin {
        $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
        if (Test-Path -LiteralPath $helper) {
            . $helper
-           $desired = Find-AwPsmuxPackageBinary `
+           $desired = Find-AwCompatiblePsmuxPackageBinary `
                -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
-               -DesiredVersion '3.3.8'
+               -MinimumVersion '3.3.8'
            if ($desired) { return $desired.Path }
        }
        $src = $Cmd.Source
@@ -1753,55 +1754,21 @@ function Resolve-AwPsmuxBin {
     return $src
 }
 
-function Ensure-PsmuxPin {
-    <# Ensure a winget 'Gating' pin to psmux 3.3.8 exists. This release contains
-       the fixes for the 3.3.6 `attach-session -t` regression (psmux#408) and
-       subsequent Ctrl+C broadcast/teardown defects. Idempotent: a no-op when
-       the 3.3.8 pin is already present. Safe at any installed version -- the
-       gating pin blocks upgrades outside 3.3.8 even when
-       a below-target version (e.g. 3.3.3) is installed, which is why a
-       still-on-3.3.3 box can self-pin instead of waiting for a hand
-       `winget pin add`. #>
-    $packageId = 'marlocarlo.psmux'
-    $desiredVersion = '3.3.8'
-    $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
-    if (-not (Test-Path -LiteralPath $helper)) {
-        Write-ServiceWarn "psmux: pin helper missing at $helper"
-        return
-    }
-    . $helper
-    $pins = ''
-    try {
-        $pins = & winget pin list --id $packageId --exact 2>&1 | Out-String
-    } catch {}
-    if ((Get-AwWingetPinVersion -Output $pins -PackageId $packageId) -eq $desiredVersion) {
-        return
-    }
-    & winget pin add --id $packageId --exact --version $desiredVersion --force 2>&1 | Out-Null
-    $verified = ''
-    try {
-        $verified = & winget pin list --id $packageId --exact 2>&1 | Out-String
-    } catch {}
-    if ((Get-AwWingetPinVersion -Output $verified -PackageId $packageId) -eq $desiredVersion) {
-        Write-ServiceChanged "psmux: added winget gating pin to 3.3.8"
-    } else {
-        Write-ServiceWarn "psmux: could not verify the winget gating pin at $desiredVersion"
-    }
-}
-
 function Ensure-Psmux {
-    <# Install and pin psmux 3.3.8. Any other executable version is replaced
-       only when no live sessions exist, because refreshing the portable package
-       tears down the running psmux server and every attached session. With live
-       sessions, pin and defer to the next clean run. #>
-    $desiredVersion = '3.3.8'
+    <# Ensure the psmux compatibility floor (3.3.8). Missing or older versions
+       are installed/upgraded to the floor; newer versions are accepted. The
+       installer deliberately does not own the machine's winget pin -- an
+       adopting machine-state package may pin an exact validated version.
+       Replacement happens only when no live sessions exist, because refreshing
+       the portable package
+       tears down the running psmux server and every attached session. #>
+    $minimumVersion = '3.3.8'
     if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
-        Write-Host "  Installing psmux $desiredVersion (terminal multiplexer)..."
-        & winget install --id marlocarlo.psmux --version $desiredVersion --exact `
+        Write-Host "  Installing psmux $minimumVersion (terminal multiplexer)..."
+        & winget install --id marlocarlo.psmux --version $minimumVersion --exact `
             --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
-            Ensure-PsmuxPin
-            Write-ServiceOk "psmux $desiredVersion installed (pinned)"
+            Write-ServiceOk "psmux $minimumVersion installed"
         } else {
             Write-ServiceWarn "psmux install failed - sessions will launch without multiplexing"
         }
@@ -1810,7 +1777,9 @@ function Ensure-Psmux {
     }
     $muxBin = Resolve-AwPsmuxBin (Get-Command psmux -ErrorAction SilentlyContinue)
     $psmuxVer = (& $muxBin --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
-    if ($psmuxVer -ne $desiredVersion) {
+    try { $belowMinimum = ([version]$psmuxVer -lt [version]$minimumVersion) }
+    catch { $belowMinimum = $true }
+    if ($belowMinimum) {
         $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
         if (Test-Path -LiteralPath $helper) {
             . $helper
@@ -1819,33 +1788,29 @@ function Ensure-Psmux {
             $sessionState = [pscustomobject]@{ Known = $false; Sessions = @() }
         }
         if (-not $sessionState.Known) {
-            Ensure-PsmuxPin
-            Write-ServiceWarn "psmux $psmuxVer is installed instead of $desiredVersion, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
+            Write-ServiceWarn "psmux $psmuxVer is below minimum $minimumVersion, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
         } elseif ($sessionState.Sessions.Count -gt 0) {
-            Ensure-PsmuxPin
-            Write-ServiceWarn "psmux $psmuxVer is installed instead of $desiredVersion. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them). Close all worktree sessions and re-run 'update' to repair and pin $desiredVersion."
+            Write-ServiceWarn "psmux $psmuxVer is below minimum $minimumVersion. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them). Close all worktree sessions and re-run 'update' to upgrade."
         } else {
-            Write-ServiceChanged "psmux $psmuxVer differs from desired $desiredVersion -- refreshing the portable package"
-            & winget install --id marlocarlo.psmux --version $desiredVersion --exact `
+            Write-ServiceChanged "psmux $psmuxVer is below minimum $minimumVersion -- refreshing the portable package"
+            & winget install --id marlocarlo.psmux --version $minimumVersion --exact `
                 --uninstall-previous --force --accept-source-agreements `
                 --accept-package-agreements 2>&1 | Out-Null
-            Ensure-PsmuxPin
             if (Test-Path -LiteralPath $helper) {
-                $selected = Find-AwPsmuxPackageBinary `
+                $selected = Find-AwCompatiblePsmuxPackageBinary `
                     -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
-                    -DesiredVersion $desiredVersion
+                    -MinimumVersion $minimumVersion
             } else {
                 $selected = $null
             }
             if ($selected) {
-                Write-ServiceOk "psmux pinned to $desiredVersion (regression-free)"
+                Write-ServiceOk "psmux upgraded to compatible version $($selected.Version)"
             } else {
-                Write-ServiceWarn "psmux refresh attempted but no installed binary reports $desiredVersion -- close all sessions and run: winget install --id marlocarlo.psmux --exact --version $desiredVersion --uninstall-previous --force"
+                Write-ServiceWarn "psmux refresh attempted but no installed binary meets minimum $minimumVersion"
             }
         }
     } else {
-        Ensure-PsmuxPin
-        Write-ServiceOk "psmux available ($psmuxVer)"
+        Write-ServiceOk "psmux available ($psmuxVer; minimum $minimumVersion)"
     }
     Ensure-PsmuxSshSafe
 }

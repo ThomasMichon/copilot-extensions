@@ -47,27 +47,6 @@ function Get-AwPsmuxBinaryVersion {
     return $null
 }
 
-function Get-AwWingetPinVersion {
-    param(
-        [AllowEmptyString()][string]$Output,
-        [Parameter(Mandatory)][string]$PackageId
-    )
-    foreach ($line in @($Output -split "`r?`n")) {
-        $tokens = @($line -split '\s+' | Where-Object { $_ })
-        $idIndex = -1
-        for ($i = 0; $i -lt $tokens.Count; $i++) {
-            if ($tokens[$i].Equals($PackageId, [StringComparison]::OrdinalIgnoreCase)) {
-                $idIndex = $i
-                break
-            }
-        }
-        if ($idIndex -ge 0 -and $idIndex + 1 -lt $tokens.Count) {
-            return $tokens[-1]
-        }
-    }
-    return $null
-}
-
 function Get-AwPsmuxSessionState {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -92,34 +71,37 @@ function Get-AwPsmuxSessionState {
     }
 }
 
-function Find-AwPsmuxPackageBinary {
+function Find-AwCompatiblePsmuxPackageBinary {
     param(
         [Parameter(Mandatory)][string]$PackageRoot,
-        [Parameter(Mandatory)][string]$DesiredVersion,
+        [Parameter(Mandatory)][string]$MinimumVersion,
         [scriptblock]$VersionProbe
     )
     if (-not (Test-Path -LiteralPath $PackageRoot)) { return $null }
-    $executables = @(
+    try { $minimum = [version]$MinimumVersion } catch { return $null }
+    $compatible = @(
         Get-ChildItem -LiteralPath $PackageRoot -Directory -Filter 'marlocarlo.psmux_*' `
             -ErrorAction SilentlyContinue |
-            Sort-Object FullName |
             ForEach-Object {
                 Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Filter 'psmux.exe' `
                     -ErrorAction SilentlyContinue
             } |
-            Sort-Object FullName
+            ForEach-Object {
+                $version = Get-AwPsmuxBinaryVersion `
+                    -Path $_.FullName -VersionProbe $VersionProbe
+                try { $parsed = [version]$version } catch { $parsed = $null }
+                if ($parsed -and $parsed -ge $minimum) {
+                    [pscustomobject]@{
+                        Path = $_.FullName
+                        Directory = $_.DirectoryName
+                        Version = $version
+                        ParsedVersion = $parsed
+                    }
+                }
+            } |
+            Sort-Object ParsedVersion, Path -Descending
     )
-    foreach ($exe in $executables) {
-        $version = Get-AwPsmuxBinaryVersion -Path $exe.FullName -VersionProbe $VersionProbe
-        if ($version -eq $DesiredVersion) {
-            return [pscustomobject]@{
-                Path = $exe.FullName
-                Directory = $exe.DirectoryName
-                Version = $version
-            }
-        }
-    }
-    return $null
+    return $compatible | Select-Object -First 1
 }
 
 function Repair-AwPsmuxPath {
