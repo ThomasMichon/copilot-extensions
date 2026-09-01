@@ -650,3 +650,268 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         assert [
             hook["timeoutSec"] for hook in hooks["hooks"]["sessionStart"]
         ] == timeouts
+
+
+def _uid_absent_from_passwd() -> str:
+    """A uid guaranteed not to resolve through the local passwd database.
+
+    A hardcoded value can exist on some hosts, which would silently take the
+    passwd path and never exercise the DirectoryService fallback under test.
+    """
+    used: set[int] = set()
+    try:
+        raw = Path("/etc/passwd").read_text(encoding="utf-8", errors="replace")
+        for line in raw.splitlines():
+            fields = line.split(":")
+            if len(fields) > 2 and fields[2].isdigit():
+                used.add(int(fields[2]))
+    except (OSError, UnicodeError):
+        pass
+    candidate = 4242
+    while candidate in used:
+        candidate += 1
+    return str(candidate)
+
+
+def _resolve_profile_home_harness(tmp_path: Path, script: Path) -> Path:
+    """Extract `resolve_profile_home` so it can be exercised in isolation."""
+    body = []
+    capturing = False
+    for line in script.read_text(encoding="utf-8").splitlines():
+        if line.startswith("resolve_profile_home()"):
+            capturing = True
+        if capturing:
+            body.append(line)
+            if line == "}":
+                break
+    assert body, "resolve_profile_home not found"
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'fail() { printf "FAIL: %s\\n" "$1" >&2; exit 1; }\n'
+        + "\n".join(body)
+        + "\nresolve_profile_home\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    return harness
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX probe")
+def test_resolve_profile_home_falls_back_to_directory_service(tmp_path: Path) -> None:
+    """macOS has no `getent`, and /etc/passwd holds only system accounts.
+
+    Both lookups miss for every ordinary macOS user, so without a
+    DirectoryService fallback the probe fails outright and the installer that
+    calls it can never run there.
+    """
+    harness = _resolve_profile_home_harness(
+        tmp_path, LIB / "legacy-entrypoint-probe.sh"
+    )
+    profile = tmp_path / "Users" / "testuser"
+    profile.mkdir(parents=True)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # A uid deliberately absent from the real /etc/passwd, so the file scan
+    # misses on Linux CI exactly as it does on macOS.
+    (fake_bin / "id").write_text(
+        "#!/bin/sh\ncase \"$1\" in\n"
+        f"  -u) echo {_uid_absent_from_passwd()} ;;\n"
+        "  -un) echo testuser ;;\nesac\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "getent").write_text("#!/bin/sh\nexit 2\n", encoding="utf-8")
+    (fake_bin / "dscl").write_text(
+        f'#!/bin/sh\necho "NFSHomeDirectory: {profile}"\n', encoding="utf-8"
+    )
+    for name in ("id", "getent", "dscl"):
+        (fake_bin / name).chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(harness)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(profile)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX probe")
+def test_resolve_profile_home_prefers_passwd_over_directory_service(
+    tmp_path: Path,
+) -> None:
+    """The passwd database still wins where it has an entry."""
+    harness = _resolve_profile_home_harness(
+        tmp_path, LIB / "legacy-entrypoint-probe.sh"
+    )
+    passwd_home = tmp_path / "from-passwd"
+    passwd_home.mkdir()
+    decoy = tmp_path / "from-dscl"
+    decoy.mkdir()
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # Resolve once: `id -u` and the `getent` entry must agree, so deriving the
+    # uid twice would risk desynchronised stubs.
+    uid = _uid_absent_from_passwd()
+    (fake_bin / "id").write_text(
+        "#!/bin/sh\ncase \"$1\" in\n"
+        f"  -u) echo {uid} ;;\n"
+        "  -un) echo testuser ;;\nesac\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "getent").write_text(
+        f'#!/bin/sh\necho "testuser:x:{uid}:{uid}::{passwd_home}:/bin/sh"\n',
+        encoding="utf-8",
+    )
+    (fake_bin / "dscl").write_text(
+        f'#!/bin/sh\necho "NFSHomeDirectory: {decoy}"\n', encoding="utf-8"
+    )
+    for name in ("id", "getent", "dscl"):
+        (fake_bin / name).chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(harness)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(passwd_home)
+
+
+def _get_profile_home_harness(tmp_path: Path) -> Path:
+    """Extract `Get-ProfileHome` from the ps1 probe for isolated exercise."""
+    src = (LIB / "legacy-entrypoint-probe.ps1").read_text(encoding="utf-8")
+    start = src.index("function Get-ProfileHome")
+    body = src[start:]
+    end = body.index("\n}\n") + 3
+    harness = tmp_path / "harness.ps1"
+    harness.write_text(body[:end] + "\nWrite-Output (Get-ProfileHome)\n", "utf-8")
+    return harness
+
+
+@pytest.mark.skipif(
+    POWERSHELL is None or os.name == "nt",
+    # The branch under test is POSIX-only, and the extensionless `#!/bin/sh`
+    # stubs are not reliably discoverable on Windows (PATHEXT resolution can
+    # prefer a real `id.exe`), which would make this flaky rather than useful.
+    reason="PowerShell is not available, or the host is Windows",
+)
+def test_ps_profile_home_falls_back_to_directory_service(tmp_path: Path) -> None:
+    """The ps1 probe had the same passwd-only gap as the sh probe.
+
+    It runs under pwsh on POSIX (Windows takes the USERPROFILE branch above),
+    so on macOS it hit the same dead end.
+    """
+    harness = _get_profile_home_harness(tmp_path)
+    profile = tmp_path / "Users" / "testuser"
+    profile.mkdir(parents=True)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "id").write_text(
+        "#!/bin/sh\ncase \"$1\" in\n"
+        f"  -u) echo {_uid_absent_from_passwd()} ;;\n"
+        "  -un) echo testuser ;;\nesac\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "getent").write_text("#!/bin/sh\nexit 2\n", encoding="utf-8")
+    (fake_bin / "dscl").write_text(
+        f'#!/bin/sh\necho "NFSHomeDirectory: {profile}"\n', encoding="utf-8"
+    )
+    for name in ("id", "getent", "dscl"):
+        (fake_bin / name).chmod(0o755)
+
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"}
+    env.pop("OS", None)  # force the POSIX branch
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(harness)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(profile)
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not available")
+def test_ps_profile_home_uses_userprofile_on_windows(tmp_path: Path) -> None:
+    """Windows resolves from USERPROFILE and never consults passwd/dscl.
+
+    Pinned so the POSIX fallback above cannot regress the Windows path.
+    """
+    harness = _get_profile_home_harness(tmp_path)
+    profile = tmp_path / "winhome"
+    profile.mkdir()
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    # Both POSIX lookups would fail loudly if they were reached.
+    for name in ("id", "getent", "dscl"):
+        (fake_bin / name).write_text("#!/bin/sh\nexit 9\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
+
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(harness)],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            "OS": "Windows_NT",
+            "USERPROFILE": str(profile),
+        },
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(profile)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX probe")
+def test_resolve_profile_home_reports_clearly_when_every_source_misses(
+    tmp_path: Path,
+) -> None:
+    """A failing `dscl` must not abort the probe silently.
+
+    The script runs under `set -euo pipefail`, so a non-zero exit inside the
+    lookup pipeline would propagate and skip the explicit diagnostic, leaving
+    an installer failure with no explanation.
+    """
+    harness = _resolve_profile_home_harness(
+        tmp_path, LIB / "legacy-entrypoint-probe.sh"
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    uid = _uid_absent_from_passwd()
+    (fake_bin / "id").write_text(
+        "#!/bin/sh\ncase \"$1\" in\n"
+        f"  -u) echo {uid} ;;\n"
+        "  -un) echo nosuchuser ;;\nesac\n",
+        encoding="utf-8",
+    )
+    # Every source misses: no getent entry, no passwd entry, dscl fails.
+    (fake_bin / "getent").write_text("#!/bin/sh\nexit 2\n", encoding="utf-8")
+    (fake_bin / "dscl").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    for name in ("id", "getent", "dscl"):
+        (fake_bin / name).chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(harness)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "cannot determine the current account home" in result.stderr, result.stderr
