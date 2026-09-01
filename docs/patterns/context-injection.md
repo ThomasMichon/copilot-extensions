@@ -47,7 +47,7 @@ reports can attribute the bytes:
 ```
 
 On affected Copilot CLI versions, the repository adopts the exact direct
-`context-injection@copilot-extensions` marketplace authority and engine-v4
+`context-injection@copilot-extensions` marketplace authority and engine-v5
 contract. Before exact authority proof, the wrapper invokes its own contributor
 directly. After proof, it joins the shared
 `(sessionId, canonical resolved cwd)` rendezvous and emits the same cached
@@ -69,7 +69,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 4
+  version: 5
 ```
 
 Read that file only after exact persisted repository-trust proof. Reject

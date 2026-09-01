@@ -22,7 +22,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 2
+  version: 5
 """
 CONTRIBUTOR_SCHEMA = "copilot-extensions.session-context-contributors"
 CANARY_PATTERN = re.compile(r"CRCTX_CANARY_[A-Z]+_[A-Z]+_[0-9a-f]{48}")

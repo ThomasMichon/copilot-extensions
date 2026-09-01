@@ -31,7 +31,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 2
+  version: 5
 ```
 
 The engine reads this file only after exact persisted folder-trust proof. The
@@ -40,8 +40,9 @@ indentation, unsupported YAML shapes, path escape, and incompatible values all
 stand down before authority proof. The retired `sessionContextAggregation`
 settings key is ignored and cannot select an authority.
 
-Engine contract version 4 adds repository adoption proof, producer-mode direct
-fallback, pair-key rendezvous identity, and byte-identical shared delivery.
+Engine contract version 5 is the current compatibility boundary: repository
+adoption proof, producer-mode direct fallback, pair-key rendezvous identity,
+byte-identical shared delivery, and CWD-isolated spill targets.
 Producer hooks may invoke
 `aggregate_context.py --producer <plugin@marketplace>/<contributor-id>`. A
 missing, malformed, ambiguous, inactive, or incompatible authority restores

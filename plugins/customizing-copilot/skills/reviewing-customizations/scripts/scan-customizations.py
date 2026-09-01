@@ -200,7 +200,7 @@ SESSION_CONTEXT_ADOPTION_MAX_BYTES = 4096
 SESSION_CONTEXT_ENGINE_SCHEMA = (
     "copilot-extensions.context-injection-engine"
 )
-SESSION_CONTEXT_ENGINE_VERSION = 4
+SESSION_CONTEXT_ENGINE_VERSION = 5
 ADOPTED_AUTHORITY_SOURCE = "context-injection@copilot-extensions"
 SESSION_CONTEXT_IDENTIFIER = re.compile(
     r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"

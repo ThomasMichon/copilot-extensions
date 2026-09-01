@@ -72,7 +72,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
-      "version": "0.1.0-dev51",
+      "version": "0.1.0-dev52",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -90,7 +90,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable contribution, diagnosis, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev31",
+      "version": "0.1.0-dev32",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -132,7 +132,7 @@
     {
       "name": "context-injection",
       "description": "Deterministic session-start context aggregation for Copilot CLI plugins. Resolves the active plugin stack, runs declared pure context contributors, and emits one final additionalContext value while affected hosts retain only the last hook result.",
-      "version": "0.1.0-dev12",
+      "version": "0.1.0-dev13",
       "source": "plugins/context-injection"
     }
   ]
