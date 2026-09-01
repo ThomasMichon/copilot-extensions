@@ -57,6 +57,62 @@ def test_ensure_present_unions_without_clobber(tmp_path):
     assert data["enabledPlugins"] == {"existing@m": True, "new@m": True}
 
 
+def test_enabled_plugin_false_is_an_authoritative_tombstone(tmp_path):
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {
+                    "legacy@m": True,
+                    "operator-disabled@m": False,
+                    "operator-extra@m": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    contribs = [
+        (
+            "ensure-present",
+            {
+                "enabledPlugins": {
+                    "legacy@m": False,
+                    "operator-disabled@m": True,
+                    "new@m": True,
+                }
+            },
+        )
+    ]
+
+    settings.apply(contribs, home=home, dry_run=False)
+
+    data = json.loads((home / "settings.json").read_text())
+    assert data["enabledPlugins"] == {
+        "legacy@m": False,
+        "operator-disabled@m": False,
+        "operator-extra@m": True,
+        "new@m": True,
+    }
+
+
+@pytest.mark.parametrize("tombstone_first", [False, True])
+def test_enabled_plugin_tombstone_wins_across_package_order(
+    tmp_path, tombstone_first: bool,
+):
+    home = _settings(tmp_path)
+    contributions = [
+        ("ensure-present", {"enabledPlugins": {"legacy@m": True}}),
+        ("ensure-present", {"enabledPlugins": {"legacy@m": False}}),
+    ]
+    if tombstone_first:
+        contributions.reverse()
+
+    settings.apply(contributions, home=home, dry_run=False)
+
+    data = json.loads((home / "settings.json").read_text())
+    assert data["enabledPlugins"]["legacy@m"] is False
+
+
 def test_dry_run_does_not_write(tmp_path):
     home = _settings(tmp_path)
     result = settings.apply([("enforce", {"model": "opus"})], home=home, dry_run=True)
