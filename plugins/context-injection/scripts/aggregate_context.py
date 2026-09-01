@@ -254,7 +254,11 @@ while ($current -gt 0) {
             parentProcessId = [int]$process.ParentProcessId
             commandLine = [string]$process.CommandLine
         }
-        if ([string]$process.CommandLine -match '(^|\s)--acp(\s|$)') {
+        if (
+            [string]$process.Name -ieq 'copilot.exe' -or
+            [string]$process.Name -ieq 'copilot' -or
+            [string]$process.CommandLine -match '(^|\s)--acp(\s|$)'
+        ) {
             break
         }
     }
