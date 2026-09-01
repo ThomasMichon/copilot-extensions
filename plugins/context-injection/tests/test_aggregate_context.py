@@ -299,6 +299,31 @@ def test_windows_ancestry_snapshot_stops_at_copilot_host() -> None:
     assert "[string]$process.Name -ieq 'copilot'" in source
 
 
+def test_oversized_context_spills_to_session_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    context = "X" * (AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES + 1)
+
+    pointer = AGGREGATE_CONTEXT._spill_context("session-1", context)
+
+    assert pointer is not None
+    target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-1"
+        / "files"
+        / "startup-context.md"
+    )
+    assert str(target) in pointer
+    assert "Before acting, read the complete startup context" in pointer
+    assert context in target.read_text(encoding="utf-8")
+    assert len(pointer.encode("utf-8")) < 512
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows startup allowance")
 def test_windows_contributors_receive_process_start_grace() -> None:
     assert AGGREGATE_CONTEXT.PROCESS_START_GRACE_SECONDS == 5
@@ -365,7 +390,7 @@ def _run(
         "authority": authority_source,
         "engine": {
             "schema": "copilot-extensions.context-injection-engine",
-            "version": 3,
+            "version": 4,
         },
     }
     engine_config = config["engine"]
@@ -979,7 +1004,7 @@ def test_engine_contract_is_versioned() -> None:
     )
     assert contract == {
         "schema": "copilot-extensions.context-injection-engine",
-        "version": 3,
+        "version": 4,
     }
 
 

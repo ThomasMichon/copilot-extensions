@@ -51,7 +51,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 3
+  version: 4
 ```
 
 The authority must be that exact enabled marketplace plugin, and its adjacent
@@ -144,6 +144,13 @@ The declaration makes ownership and possible outputs inspectable. It does not
 assign host execution order. The rendezvous and byte-identical shared output
 make that order irrelevant even when a later empty result would otherwise erase
 earlier context.
+
+If repeating the full aggregate from every hook would exceed a host-wide budget,
+the authority may atomically spill the complete attributable context to the
+exact session's `files/` directory and return a byte-identical compact kernel
+with an absolute load-before-action pointer. The pointer is immediate context;
+the full file is deferred context. Session identity and path containment must
+be validated before writing.
 
 ## Review rule
 
