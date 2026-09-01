@@ -40,7 +40,7 @@ indentation, unsupported YAML shapes, path escape, and incompatible values all
 stand down before authority proof. The retired `sessionContextAggregation`
 settings key is ignored and cannot select an authority.
 
-Engine contract version 3 adds repository adoption proof, producer-mode direct
+Engine contract version 4 adds repository adoption proof, producer-mode direct
 fallback, pair-key rendezvous identity, and byte-identical shared delivery.
 Producer hooks may invoke
 `aggregate_context.py --producer <plugin@marketplace>/<contributor-id>`. A
@@ -61,6 +61,12 @@ and unsafe or symlinked paths are rejected.
 This order-independent protocol does not depend on how the host selects among
 hook results: every authority-aware producer and the authority return the same
 non-empty aggregate after proof.
+
+Aggregates above 8 KB are atomically written to
+`~/.copilot/session-state/<sessionId>/files/startup-context.md`. Every hook then
+returns the same compact critical kernel with an absolute instruction to load
+that file before acting. This keeps repeated hook output below host-wide context
+limits without discarding the complete attributable aggregate.
 
 Set the host-level `timeoutSec` on producer and authority hooks to at least the
 engine's 25-second rendezvous deadline. A value of 30 seconds is recommended so

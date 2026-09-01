@@ -47,7 +47,7 @@ reports can attribute the bytes:
 ```
 
 On affected Copilot CLI versions, the repository adopts the exact direct
-`context-injection@copilot-extensions` marketplace authority and engine-v3
+`context-injection@copilot-extensions` marketplace authority and engine-v4
 contract. Before exact authority proof, the wrapper invokes its own contributor
 directly. After proof, it joins the shared
 `(sessionId, canonical resolved cwd)` rendezvous and emits the same cached
@@ -69,7 +69,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 3
+  version: 4
 ```
 
 Read that file only after exact persisted repository-trust proof. Reject
@@ -108,12 +108,19 @@ Detailed mechanics stay in an on-demand skill or a dedicated file named by a
 backtick faux-link so the agent can read it when needed. This preserves the
 skill boundary and avoids Markdown auto-loading from always-on instructions.
 
-Treat injected context as a shared budget, not a per-plugin allowance. The
-documented 10 KB join cap applies to multiple `postToolUse` results, not to
-`sessionStart`; command-hook stdout is bounded at 10 MiB per invocation, and a
-Copilot CLI 1.0.82-1 probe delivered a 20 KB startup context end-to-end. A
-session-start aggregator should still define a smaller intentional product
-budget, minimize each kernel, and make every contribution attributable.
+Treat injected context as a shared budget, not a per-plugin allowance.
+Per-invocation hook stdout limits do not prove that repeated session-start
+results will survive the host's composition budget. The compatibility engine
+therefore keeps inline aggregate context below 8 KB, minimizes each kernel, and
+makes every contribution attributable.
+
+When the aggregate exceeds the engine's inline budget, write the complete
+attributable context atomically under the exact session's
+`~/.copilot/session-state/<sessionId>/files/` directory. Return one compact,
+byte-identical critical kernel from every participating hook that instructs the
+agent to load that absolute file before acting. Validate the session identifier,
+contain the write beneath the session-state root, reject symlink escapes, and
+use private file permissions on POSIX.
 
 ### Discover configuration without executing it
 

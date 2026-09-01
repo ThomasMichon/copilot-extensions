@@ -50,6 +50,9 @@ kernel containing only what must remain active, with detailed mechanics
 available on demand. When the host cannot compose independent hook outputs,
 one attributable authority should compute the kernel and every proven producer
 should return the same bytes, so host result selection cannot discard guidance.
+When repeating the complete aggregate through every hook would exceed a host
+budget, those identical bytes should instead be a compact critical kernel plus
+an exact session-scoped pointer to the full attributable context.
 
 ### portable-operator-policy
 
