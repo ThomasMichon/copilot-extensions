@@ -54,8 +54,8 @@ host_cols = roster.host_cols
 target_envs = roster.target_envs
 # Repo name + default branch for the top bar -- project config, not hardcoded
 # (shared with data_local; both resolve the same active-project config).
-REPO = data_local.REPO
-BRANCH = data_local.BRANCH
+# Bound lazily via ``__getattr__`` so importing this module cannot run
+# ``load_config`` / roster I/O before the Picker chrome paints (#1504).
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
@@ -931,7 +931,18 @@ def _resolve_local() -> tuple[str, str]:
     return data_local.LOCAL
 
 
-LOCAL = _resolve_local()
+_LOCAL: tuple[str, str] | None = None
+
+
+def __getattr__(name: str):
+    global _LOCAL
+    if name in ("REPO", "BRANCH"):
+        return getattr(data_local, name)
+    if name == "LOCAL":
+        if _LOCAL is None:
+            _LOCAL = _resolve_local()
+        return _LOCAL
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def load(machine: str | None = None, env: str | None = None):
@@ -940,7 +951,8 @@ def load(machine: str | None = None, env: str | None = None):
     Provided so this source stays swap-compatible with ``data_local`` for the
     non-live code path; returns just this host's worktrees.
     """
-    return data_local.load(LOCAL[0], LOCAL[1])
+    local = __getattr__("LOCAL")
+    return data_local.load(local[0], local[1])
 
 
 def make_loader(sources=None):
