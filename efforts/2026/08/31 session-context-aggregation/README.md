@@ -508,3 +508,11 @@ See [`design.md`](design.md).
   one session-scoped context pointer when start-time context is unavailable.
   The completed migration remains Done; this is a separately tracked
   resilience enhancement.
+- Refined the proposal so it does not pretend the plugin can observe final
+  delivery. Session state tracks a start/resume generation and dispositions
+  such as computed, returned, and fallback-applied, never "delivered." The full
+  aggregate remains supplementary instruction; the first transformed prompt
+  receives only a small idempotent witness that is a no-op when matching
+  supplementary context is already present and otherwise points at the
+  revalidated session-scoped artifact. A host final-request acknowledgement is
+  the future seam that could make this fallback genuinely conditional.
