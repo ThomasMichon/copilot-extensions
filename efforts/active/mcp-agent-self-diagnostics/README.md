@@ -21,12 +21,12 @@ plugins.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Windows worktree | Plan, scanner implementation, tests, and PR | managed worktree |
+| Implementation host | Plan, scanner implementation, tests, and PR | isolated issue worktree |
 
 ## Coordination
 
 - **Topology:** One worktree and one PR sequence: reviewed plan, then implementation.
-- **Host (owns PRs):** Windows worktree.
+- **Host (owns PRs):** Implementation host.
 - **Delegates:** Independent reviewer for design critique only.
 - **Handoff:** The effort README is the durable checkpoint.
 
@@ -46,7 +46,7 @@ owner, and reusable policy is checked mechanically where possible.
 ## Request
 
 > We should ensure that every plugin which has an agent includes a
-> troubleshooting skill for its MCP, plus the README.MD files for each plugin
+> troubleshooting skill for its MCP, plus the README.md files for each plugin
 > should be explicit about dependencies. Probably worth making that a durable
 > guideline in customizing-copilot, enforceable via reviewing-customizations.
 
