@@ -386,6 +386,7 @@ def test_get_worktree_state_dir_uses_machine_local_anchor_scope(
     assert rc == 0
     assert Path(out) == project_dir / "worktrees" / "@anchor"
     assert not Path(out).is_relative_to(anchor)
+    assert Path(out).is_dir()
 
 
 def test_get_worktree_dir_empty_outside_repo(adopted_repo, active_myproj, monkeypatch, tmp_path, capsys):
@@ -464,6 +465,54 @@ def test_get_worktree_dir_session_unresolvable_stays_empty(
                         lambda sid: None)
     rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir", session_id="ghost"))
     assert capsys.readouterr().out.strip() == "" and rc == 0
+
+
+def test_get_worktree_state_dir_resolves_anchor_from_session_cwd(
+    adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
+):
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    home = tmp_path / "home-anchor-session"
+    home.mkdir()
+    project_dir = tmp_path / "machine-state" / "myproj"
+    monkeypatch.chdir(home)
+    monkeypatch.setattr(cfg, "project_dir", lambda *a, **k: project_dir)
+    monkeypatch.setattr(m, "_activate_session_binding", lambda sid: None)
+    monkeypatch.setattr(
+        m.tracking, "find_worktree_id_by_session", lambda sid: None,
+    )
+    monkeypatch.setattr(
+        m.tracking, "find_worktree_id_by_cwd", lambda cwd: None,
+    )
+    monkeypatch.setattr(m.sessions, "session_cwd", lambda sid: anchor)
+
+    rc = m.cmd_get(types.SimpleNamespace(
+        key="worktree-state-dir", session_id="anchor-session",
+    ))
+    out = capsys.readouterr().out.strip()
+
+    assert rc == 0
+    assert Path(out) == project_dir / "worktrees" / "@anchor"
+    assert Path(out).is_dir()
+
+
+def test_get_worktree_state_dir_rejects_unknown_session(
+    adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
+):
+    home = tmp_path / "home-unknown-session"
+    home.mkdir()
+    monkeypatch.chdir(home)
+    monkeypatch.setattr(m, "_activate_session_binding", lambda sid: None)
+    monkeypatch.setattr(
+        m.tracking, "find_worktree_id_by_session", lambda sid: None,
+    )
+    monkeypatch.setattr(m.sessions, "session_cwd", lambda sid: None)
+
+    rc = m.cmd_get(types.SimpleNamespace(
+        key="worktree-state-dir", session_id="ghost",
+    ))
+
+    assert rc == 1
+    assert "unknown or is not associated" in capsys.readouterr().out
 
 
 def test_get_worktrees_root_is_parent(adopted_repo, active_myproj, monkeypatch, capsys):

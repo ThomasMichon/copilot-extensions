@@ -976,6 +976,18 @@ def _session_meta(session_dir: Path, session_id: str) -> dict | None:
     }
 
 
+def session_cwd(session_id: str) -> Path | None:
+    """Return the recorded CWD for one valid local Copilot session."""
+    meta = _session_meta(_session_state_dir(), session_id)
+    if not meta:
+        return None
+    cwd = str(meta.get("cwd", "")).strip()
+    if not cwd:
+        return None
+    path = Path(cwd).expanduser()
+    return path if path.is_dir() else None
+
+
 def list_worktree_sessions(record) -> list[dict]:
     """Enumerate the Copilot sessions associated with a worktree.
 
