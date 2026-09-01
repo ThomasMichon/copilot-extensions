@@ -93,11 +93,12 @@ class TestEventLog:
         assert [r["data"]["i"] for r in range_rows] == list(range(24, 30))
 
     def test_rebuild_empty_clears_log(self, event_log: EventLog) -> None:
-        event_log.append("x", {})
+        event_log.append("tool_call_start", {"tool_call_id": "t1"})
         count = event_log.rebuild([])
         assert count == 0
         assert event_log.get_events() == []
         assert event_log.latest_id == 0
+        assert event_log.active_tool_call() is None
 
     @pytest.mark.asyncio
     async def test_wait_for_events_immediate(self, event_log: EventLog) -> None:
@@ -216,6 +217,47 @@ class TestEventLogFromDB:
         assert len(events) == 2
         assert events[0].event == "agent_message"
         assert events[1].id == 2
+
+    def test_from_db_restores_active_tool(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        tmp_db.append_event(
+            "s1",
+            1,
+            "tool_call_start",
+            {"tool_call_id": "tc1", "title": "Build"},
+            now,
+        )
+
+        log = EventLog.from_db(tmp_db, "s1")
+
+        assert log.active_tool_call()["tool_call_id"] == "tc1"
+
+    def test_durable_snapshot_reads_db_head_before_event_lock(
+        self, tmp_db: Database, monkeypatch
+    ) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        log = EventLog(db=tmp_db, session_id="s1")
+        log.append("agent_message", {"text": "done"})
+        original = tmp_db.get_max_event_id
+
+        def get_max_event_id(session_id: str) -> int:
+            assert log._lock.acquire(blocking=False)
+            log._lock.release()
+            return original(session_id)
+
+        monkeypatch.setattr(tmp_db, "get_max_event_id", get_max_event_id)
+
+        continuity, head, events = log.snapshot_window(
+            after=None, limit=10, durable=True
+        )
+        detail_continuity, event = log.snapshot_event(1, durable=True)
+
+        assert continuity == detail_continuity
+        assert head == 1
+        assert [item.id for item in events] == [1]
+        assert event is not None and event.id == 1
 
     def test_from_db_flushes_queued_burst(self, tmp_db: Database) -> None:
         now = time.time()

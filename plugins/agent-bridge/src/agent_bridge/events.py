@@ -61,6 +61,7 @@ class EventLog:
         telemetry_source: str = "owned",
     ) -> None:
         self._events: list[SseEvent] = []
+        self._open_tool_calls: dict[str, SseEvent] = {}
         self._lock = Lock()
         self._next_id = 1
         self._waiters: list[asyncio.Event] = []
@@ -93,22 +94,24 @@ class EventLog:
             telemetry_source=telemetry_source,
         )
         rows = db.get_events(session_id, after=0)
-        for row in rows:
-            evt = SseEvent(
-                id=row["event_id"],
-                event=row["event_type"],
-                data=row["data"],
-                timestamp=row["timestamp"],
-            )
-            log._events.append(evt)
-            if evt.id == 1:
-                log._telemetry.set_log_origin(evt.timestamp)
-            log._telemetry.observe(
-                evt.event, evt.data, event_id=evt.id
-            )
+        with log._lock:
+            for row in rows:
+                evt = SseEvent(
+                    id=row["event_id"],
+                    event=row["event_type"],
+                    data=row["data"],
+                    timestamp=row["timestamp"],
+                )
+                log._events.append(evt)
+                log._track_tool_event(evt)
+                if evt.id == 1:
+                    log._telemetry.set_log_origin(evt.timestamp)
+                log._telemetry.observe(
+                    evt.event, evt.data, event_id=evt.id
+                )
 
-        max_id = db.get_max_event_id(session_id)
-        log._next_id = max_id + 1
+            max_id = db.get_max_event_id(session_id)
+            log._next_id = max_id + 1
         return log
 
     def append(self, event_type: str, data: dict[str, Any]) -> SseEvent:
@@ -124,6 +127,7 @@ class EventLog:
             self._next_id += 1
             evt = SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
             self._events.append(evt)
+            self._track_tool_event(evt)
             waiters = list(self._waiters)
             if event_id == 1:
                 self._telemetry.set_log_origin(ts)
@@ -188,6 +192,7 @@ class EventLog:
                 # authoritative rebuilt log instead of silently stalling.
                 self._db.reset_delivery_cursors(self._session_id)
             self._events = []
+            self._open_tool_calls = {}
             self._next_id = 1
             prior_epoch = self._telemetry.begin_rebuild()
             ts = time.time()
@@ -198,9 +203,11 @@ class EventLog:
                     self._db.append_event(
                         self._session_id, event_id, event_type, data, ts,
                     )
-                self._events.append(
-                    SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
+                evt = SseEvent(
+                    id=event_id, event=event_type, data=data, timestamp=ts
                 )
+                self._events.append(evt)
+                self._track_tool_event(evt)
                 if event_id == 1:
                     self._telemetry.set_log_origin(ts)
                 # Rebuild reducer state from authoritative history, but do not
@@ -223,6 +230,81 @@ class EventLog:
         with self._lock:
             return self._events[-1].id if self._events else 0
 
+    @property
+    def continuity_id(self) -> str | None:
+        """Private event-log continuity identity for opaque read positions.
+
+        The telemetry reducer derives this value from the first event's durable
+        timestamp, so an owned log reproduces it across restart and rotates it
+        when resync rebuilds history. Empty logs have no usable position.
+        Callers must never expose or parse this value directly.
+        """
+        with self._lock:
+            if not self._events:
+                return None
+            return self._telemetry.log_epoch or None
+
+    def snapshot_window(
+        self, *, after: int | None, limit: int, durable: bool = False
+    ) -> tuple[str | None, int, list[SseEvent]]:
+        """Atomically snapshot continuity, head, and a bounded event window.
+
+        ``after=None`` selects the latest tail. An integer selects the ascending
+        prefix after that event. Keeping all three reads under one lock prevents
+        an append or rebuild from mixing a position from one history with events
+        from another.
+        """
+        durable_head: int | None = None
+        if durable and self._db is not None and self._session_id is not None:
+            durable_head = self._db.get_max_event_id(self._session_id)
+        with self._lock:
+            if not self._events:
+                return (None, 0, [])
+            head_limit = (
+                durable_head if durable_head is not None else self._events[-1].id
+            )
+            visible_count = min(len(self._events), max(0, head_limit))
+            if visible_count <= 0:
+                return (None, 0, [])
+            continuity = self._telemetry.log_epoch or None
+            head = self._events[visible_count - 1].id
+            if limit <= 0:
+                return (continuity, head, [])
+            if after is None:
+                start = max(0, visible_count - limit)
+                rows = list(self._events[start:visible_count])
+            else:
+                start = max(0, after)
+                end = min(visible_count, start + limit)
+                rows = list(self._events[start:end])
+            return (continuity, head, rows)
+
+    def snapshot_event(
+        self, event_id: int, *, durable: bool = False
+    ) -> tuple[str | None, SseEvent | None]:
+        """Atomically read one event with the continuity that identifies it."""
+        durable_head: int | None = None
+        if durable and self._db is not None and self._session_id is not None:
+            durable_head = self._db.get_max_event_id(self._session_id)
+        with self._lock:
+            head_limit = (
+                durable_head
+                if durable_head is not None
+                else (self._events[-1].id if self._events else 0)
+            )
+            visible_count = min(len(self._events), max(0, head_limit))
+            continuity = (
+                (self._telemetry.log_epoch or None)
+                if visible_count > 0
+                else None
+            )
+            event = None
+            if 1 <= event_id <= visible_count:
+                candidate = self._events[event_id - 1]
+                if candidate.id == event_id:
+                    event = candidate
+            return (continuity, event)
+
     def active_tool_call(self) -> dict[str, Any] | None:
         """Return the most recent in-flight tool call, or ``None`` if idle.
 
@@ -233,26 +315,13 @@ class EventLog:
         tool call instead of a contentless heartbeat -- so a watcher can tell a
         busy agent from a hung one, and knows the last thing it was doing.
 
-        Derived purely from the in-memory log; never persisted and never
-        assigned an event id (so it cannot move a delivery cursor).
+        Derived incrementally from the in-memory log; never persisted separately
+        and never assigned an event id (so it cannot move a delivery cursor).
         """
         with self._lock:
-            events = list(self._events)
-
-        open_calls: dict[str, SseEvent] = {}
-        for e in events:
-            if e.event == "tool_call_start":
-                tid = e.data.get("tool_call_id") or ""
-                open_calls[tid] = e
-            elif e.event == "tool_call_update":
-                status = e.data.get("status")
-                if status and str(status).lower() in _TERMINAL_TOOL_STATUSES:
-                    open_calls.pop(e.data.get("tool_call_id") or "", None)
-
-        if not open_calls:
-            return None
-
-        start = max(open_calls.values(), key=lambda ev: ev.id)
+            if not self._open_tool_calls:
+                return None
+            start = max(self._open_tool_calls.values(), key=lambda ev: ev.id)
         raw = start.data.get("raw_input") or {}
         command = None
         if isinstance(raw, dict):
@@ -267,6 +336,16 @@ class EventLog:
             "started_at": start.timestamp,
             "started_id": start.id,
         }
+
+    def _track_tool_event(self, event: SseEvent) -> None:
+        """Update in-flight tool state while the event-log lock is held."""
+        tool_call_id = event.data.get("tool_call_id") or ""
+        if event.event == "tool_call_start":
+            self._open_tool_calls[tool_call_id] = event
+        elif event.event == "tool_call_update":
+            status = event.data.get("status")
+            if status and str(status).lower() in _TERMINAL_TOOL_STATUSES:
+                self._open_tool_calls.pop(tool_call_id, None)
 
     async def wait_for_events(
         self, after: int, timeout: float = 30.0
