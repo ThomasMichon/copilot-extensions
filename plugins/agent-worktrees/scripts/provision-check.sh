@@ -26,9 +26,37 @@ _awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
 [ -f "$_awresolve" ] && . "$_awresolve"
 PYTHON="${AW_PY:-}"
 if [[ ! -x "$PYTHON" ]]; then exit 0; fi
+repo_dir="$PWD"
+log_dir="$HOME/.agent-worktrees/logs"
+status="$log_dir/provision-status.json"
+
+if [[ -f "$status" ]]; then
+    previous="$(PYTHONPATH="" "$PYTHON" - "$status" "$repo_dir" <<'PY'
+import json
+import os
+import sys
+
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    sys.exit(0)
+if data.get("ok") is not False:
+    sys.exit(0)
+if os.path.realpath(str(data.get("repo", ""))) != os.path.realpath(sys.argv[2]):
+    sys.exit(0)
+failed = ", ".join(
+    str(item.get("service", "?")) for item in data.get("failed", [])
+)
+print(failed or data.get("reason", "unknown failure"))
+PY
+)" || previous=""
+    if [[ -n "$previous" ]]; then
+        echo "[agent-worktrees] Previous background provisioning failed: $previous. Inspect $log_dir/provision-*.log* and rerun reconcile-plugins." >&2
+    fi
+fi
 
 # Read-only preview: does anything need provisioning? (No throttle side effects.)
-peek="$(PYTHONPATH="" "$PYTHON" -m agent_worktrees reconcile-plugins --peek 2>/dev/null)" || exit 0
+peek="$(PYTHONPATH="" "$PYTHON" -m agent_worktrees reconcile-plugins --repo "$repo_dir" --peek 2>/dev/null)" || exit 0
 [[ -n "$peek" ]] || exit 0
 
 diagnostics="$(printf '%s' "$peek" | PYTHONPATH="" "$PYTHON" -c \
@@ -58,12 +86,12 @@ _log INFO "provisioning in background: $services"
 # session. Fully detach so the child outlives this hook. Move out of the plugin
 # payload first for parity with Windows, where an inherited payload cwd prevents
 # an in-place marketplace refresh.
-log_dir="$HOME/.agent-worktrees/logs"
 mkdir -p "$log_dir" 2>/dev/null || true
 stamp="$(date -u '+%Y%m%d-%H%M%S')"
 (
     cd "$HOME" || exit 0
-    PYTHONPATH="" nohup "$PYTHON" -m agent_worktrees reconcile-plugins --apply \
+    PYTHONPATH="" nohup "$PYTHON" -m agent_worktrees reconcile-plugins \
+        --repo "$repo_dir" --status "$status" --apply \
         >> "$log_dir/provision-$stamp.log" 2>&1 &
 ) >/dev/null 2>&1
 

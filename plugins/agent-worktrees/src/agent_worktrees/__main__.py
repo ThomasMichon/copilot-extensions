@@ -16930,6 +16930,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Machine name (auto-detected from hostname if omitted)")
     sp.add_argument("--repo", default=None,
                     help="Repo path to reconcile (defaults to the resolved anchor)")
+    sp.add_argument("--status", default=None,
+                    help="Write detached provisioning status JSON to this path")
     sp.add_argument("--apply", action="store_true",
                     help="Execute the plan in-process (2-pass) instead of printing "
                          "it. Used by the provision-check sessionStart shim.")
@@ -18762,15 +18764,34 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     preview the provision-check shim uses to decide whether to spawn the apply
     worker, with no throttle side effects).
 
-    Never fails the launch: any error degrades to ``{"action": "continue"}``.
+    Preview never fails the launch. Detached ``--apply`` writes durable status
+    and exits non-zero when provisioning steps fail.
     """
     from . import reconcile
+
+    status_arg = getattr(args, "status", None)
+
+    def _write_status(payload: dict[str, object]) -> None:
+        if not status_arg:
+            return
+        status_path = Path(status_arg).expanduser()
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "version": 1,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            **payload,
+        }
+        temp = status_path.with_name(f".{status_path.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        os.replace(temp, status_path)
 
     repo_override = getattr(args, "repo", None)
     repo_dir = repo_override or _find_repo_dir()
     if not repo_dir:
+        if getattr(args, "apply", False):
+            _write_status({"ok": False, "reason": "no-repo", "failed": []})
         print(json.dumps({"action": "continue", "reason": "no-repo"}))
-        return 0
+        return 1 if getattr(args, "apply", False) else 0
 
     machine = getattr(args, "machine", None)
     with_payload = getattr(args, "with_payload_refresh", False)
@@ -18788,9 +18809,24 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
             )
         except Exception as e:  # never raise from a background provision
             print(f"provision: error: {e}", file=sys.stderr)
-            return 0
+            _write_status({
+                "ok": False,
+                "repo": str(Path(repo_dir).resolve()),
+                "reason": str(e),
+                "failed": [],
+            })
+            return 1
+        failed = [
+            item for item in summary.get("executed", [])
+            if not item.get("ok", False)
+        ]
+        _write_status({
+            "ok": not failed,
+            "repo": str(Path(repo_dir).resolve()),
+            "failed": failed,
+        })
         print(json.dumps(summary))
-        return 0
+        return 1 if failed else 0
 
     try:
         plan = reconcile.build_plan(

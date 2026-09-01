@@ -19,15 +19,46 @@ $ErrorActionPreference = 'SilentlyContinue'
 if ($env:WORKTREE_NO_RECONCILE -eq '1' -or $env:WORKTREE_NO_PROVISION -eq '1') { exit 0 }
 
 $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+$RepoDir = (Get-Location).Path
+$status = Join-Path $InstallDir 'logs\provision-status.json'
 $_r = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
 $VenvPython = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
 if (-not $VenvPython) { exit 0 }
 
 $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
 
+if (Test-Path -LiteralPath $status -PathType Leaf) {
+    try {
+        $previous = Get-Content -LiteralPath $status -Raw | ConvertFrom-Json
+        if (
+            $previous.ok -eq $false -and
+            $previous.repo -and
+            [IO.Path]::GetFullPath([string] $previous.repo) -eq
+                [IO.Path]::GetFullPath($RepoDir)
+        ) {
+            $failed = @($previous.failed | ForEach-Object { $_.service }) -join ', '
+            if (-not $failed) { $failed = [string] $previous.reason }
+            $message = (
+                "[agent-worktrees] Previous background provisioning failed: {0}. " +
+                "Inspect {1}\provision-*.log* and rerun reconcile-plugins."
+            ) -f (
+                $failed, (Split-Path -Parent $status)
+            )
+            Write-Warning $message
+        }
+    } catch {
+        Write-Warning "[agent-worktrees] Could not read provisioning status: $status"
+    }
+}
+
 # Read-only preview: does anything need provisioning? (No throttle side effects.)
 $peek = ''
-try { $peek = & $VenvPython -m agent_worktrees reconcile-plugins --peek 2>$null } catch { exit 0 }
+try {
+    $peek = & $VenvPython -m agent_worktrees reconcile-plugins --repo $RepoDir --peek 2>$null
+} catch {
+    Write-Warning "[agent-worktrees] Runtime provisioning preview failed: $_"
+    exit 0
+}
 if (-not $peek) { exit 0 }
 
 try { $plan = $peek | ConvertFrom-Json } catch { exit 0 }
@@ -54,14 +85,21 @@ $logDir = Join-Path $InstallDir 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
 $log = Join-Path $logDir "provision-$stamp.log"
+$RepoArg = '"' + ($RepoDir -replace '"', '\"') + '"'
+$StatusArg = '"' + ($status -replace '"', '\"') + '"'
 
 try {
     Start-Process -FilePath $VenvPython `
-        -ArgumentList @('-m', 'agent_worktrees', 'reconcile-plugins', '--apply') `
+        -ArgumentList @(
+            '-m', 'agent_worktrees', 'reconcile-plugins',
+            '--repo', $RepoArg, '--status', $StatusArg, '--apply'
+        ) `
         -WorkingDirectory $HOME `
         -WindowStyle Hidden `
         -RedirectStandardOutput $log `
         -RedirectStandardError "$log.err" | Out-Null
-} catch { }
+} catch {
+    Write-Warning "[agent-worktrees] Could not start background provisioning: $_"
+}
 
 exit 0
