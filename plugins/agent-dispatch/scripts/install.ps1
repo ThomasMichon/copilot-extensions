@@ -1418,6 +1418,7 @@ function Install-CoordinatorTask {
 # AGENT_DISPATCH_PORT=$DefaultPort  # unset = OS-assigned dynamic port (Stage C), advertised via the rendezvous file; uncomment to pin
 # AGENT_DISPATCH_DB=%USERPROFILE%\.agent-dispatch\tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                                       # set to require bearer auth
+# AGENT_DISPATCH_CONTROL_TOKEN=                               # required to manage producer scopes
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
         Write-Ok "Service env: $envFile (defaults; edit to pin the bind host / add a token)"

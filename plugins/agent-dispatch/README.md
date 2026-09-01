@@ -164,7 +164,8 @@ Get-ScheduledTask -TaskName agent-dispatch | Get-ScheduledTaskInfo   # manage it
 # edit %USERPROFILE%\.agent-dispatch\service.env, then: Start-ScheduledTask -TaskName agent-dispatch
 ```
 
-Both read an editable `service.env` (host/port/db/token) beside the runtime. A
+Both read an editable `service.env` (host/port/db/client token/control token)
+beside the runtime. A
 client-only machine installs with `--no-service` (`-NoService`) and points
 `AGENT_DISPATCH_URL` at the coordinator host.
 
@@ -337,6 +338,140 @@ The coordinator core only owns the queue -- it runs **no** scheduler and **no**
 PR/alert logic. Anything that *creates* tasks is a **producer**: any client that
 can POST. Two ship in-box (both driven by a declarative JSON spec, both talking
 to the coordinator through the ordinary client):
+
+### Producer creation fences
+
+A coordinator can make creation authority for one producer scope durable and
+monotonic. Its canonical identity is one exact **repo lane + task source**
+(`repo`, `source`). An optional `required_label` binds the protected pool in
+both directions: every task in that repo/source must carry the label and its
+fence, and every task in that repo carrying the label must use that exact
+managed source and fence. A caller cannot evade the fence by asserting an
+alternate source or omitting the source. One required label cannot be owned by
+multiple scopes anywhere on one coordinator: label ownership is
+coordinator-global, and every task carrying it must match the owning repo and
+source.
+
+The boundary is deliberately **label-bound plus source-scoped**, not control of
+arbitrary tasks in the repo. An unlabeled task under another source remains an
+ordinary task and is not eligible for a supervisor pool filtered to the
+protected label; it must not be treated as authorized work from that managed
+producer.
+
+Managed scopes are permanent. There is no unmanage/delete operation that can
+reopen an old generation; retiring the production domain requires a new source
+identity. Generation `0` means the scope has never been managed. The first
+handoff activates generation `1`; every later compare-and-swap names current
+generation `N`, retires it permanently, and activates `N+1`. A previous
+`producer_id` may be selected again at a higher generation, but `producer_id` is
+audit metadata, not authority.
+
+Scope transitions require the coordinator's separate
+`AGENT_DISPATCH_CONTROL_TOKEN` (or
+`AGENT_DISPATCH_SHARED_CONTROL_TOKEN` for `--shared`). The ordinary client bearer
+does not authorize them. The control token is intentionally a **superset queue
+credential**: it can authenticate ordinary queue operations and additionally
+authorize scope transitions, so it is not a least-privilege producer
+credential. Keep it out of process arguments; prefer the control-token
+environment setting, or the shared token-command setting where configured. A
+tokenless local coordinator still refuses to manage scopes until a control
+token is explicitly configured. Each successful new transition mints a
+high-entropy `producer_capability`, stores only its SHA-256 hash, and returns
+the plaintext capability exactly once in that transition response. Status,
+history, events, telemetry, and tasks never expose the capability or its hash.
+A transition first proves the required-label scope is quiescent: every
+nonterminal task already carrying that label must have matching accepted fence
+metadata. Otherwise it returns structured `scope_not_quiescent` diagnostics
+with bounded task ids and status counts, without minting a capability or
+changing generations.
+
+```bash
+# Read-only inspection (returns managed=false for a new scope):
+agent-dispatch producer-fence status --repo example.com/acme/widget \
+  --source scheduled
+
+# AGENT_DISPATCH_CONTROL_TOKEN must be configured for both server and client.
+# The response contains the generation-1 producer_capability exactly once.
+agent-dispatch producer-fence handoff \
+  --repo example.com/acme/widget --source scheduled \
+  --required-label nightly \
+  --producer-id scheduler-a --expected-generation 0
+
+# Hand authority to generation 2; this returns a new one-time capability.
+agent-dispatch producer-fence handoff \
+  --repo example.com/acme/widget --source scheduled \
+  --producer-id scheduler-b --expected-generation 1
+
+# The selected producer supplies its returned capability and a request id.
+# Prefer AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND; the raw env value is fallback.
+agent-dispatch create "Run the nightly sweep" \
+  --repo example.com/acme/widget \
+  --source scheduled --label nightly \
+  --producer-id scheduler-b --producer-generation 2 \
+  --producer-request-id occurrence-2026-08-31 \
+  --dedup-key scheduled:nightly:2026-08-31
+```
+
+Every managed create must supply `producer_scope={repo,source}`, `producer_id`,
+`producer_generation`, `producer_capability`, and a separate
+`producer_request_id`. The capability is checked against the named generation
+before either a new create or an accepted-request replay; a valid retired
+generation capability may retrieve only its exact accepted request, while a
+missing or invalid capability cannot retrieve it. `producer_id` only has to
+match the generation's selected metadata. Validation, the committed-request
+ledger, ordinary dedup, and task insert serialize under the same SQLite write
+transaction as handoff, so a concurrent create is either committed before
+retirement or rejected afterward. At claim time the coordinator defensively
+rechecks protected-label rows against their persisted scope, generation, and
+request ledger, so legacy or directly injected malformed rows stay
+unclaimable and produce a bounded, one-shot `producer.claim_rejected` event per
+mismatch fingerprint. A new managed request that collides with any existing
+dedup row other than its own accepted request replay is rejected as
+`unfenced_dedup_conflict` before its request id is recorded. Oversized payloads
+commit inline first, then spill via portable
+atomic replacement outside the write lock; a failed insert creates no blob,
+and a crash or compaction failure leaves readable inline content rather than a
+broken reference. Cross-machine managed creates carry the capability inside
+the SSH stdin envelope, never in either process's command arguments.
+
+The request ledger, not `dedup_key`, owns transport idempotency. Its key is exact
+`(repo, source, generation, producer_request_id)`. An accepted retry with the
+same canonical request hash returns the same task after completion or generation
+retirement; a hash mismatch is rejected. A late request that never committed has
+no ledger row and a retired capability cannot create it. A **new request id**
+does not adopt an existing dedup row; it is rejected unless ordinary terminal
+release has already made the key available for a genuinely new task.
+
+The canonical request hash includes: title, repo, prompt, proposed/queued status,
+normalized requires/excludes/affinity/labels, payload ref or inline content,
+target machine/worktree/repo, source, origin ref, evaluator ref, dedup key,
+producer scope/id/generation, goal, and done criteria. It excludes
+`producer_request_id` (the ledger key), the secret capability, `not_before`,
+`claim_as`, and the current time. Thus a retry may recompute scheduling/claim
+knobs without becoming a different semantic request. Non-finite values and
+invalid JSON are explicit HTTP 400 errors.
+
+If a successful handoff response is lost, retrying the same expected generation
+and selected producer under control authority returns `replayed=true` and no
+capability. Status never recovers it. The safe operator recovery is another
+transition to generation `N+2` (the same producer may be selected again), which
+mints a new one-time capability.
+
+REST exposes `GET /producer-scopes/status` and control-authenticated
+`POST /producer-scopes/handoff`. Both MCP surfaces expose
+`dispatch_producer_scope_status` and `dispatch_producer_scope_handoff`.
+Transitions publish `producer_scope.transitioned`; rejected transitions and
+creates publish `producer_scope.transition_rejected` and
+`task.create_rejected`. HTTP, MCP, and CLI return the same structured rejection
+code/reason/scope/generation metadata. Events and telemetry are bounded and
+content-free: never task titles, prompts, payloads, dedup keys, capabilities, or
+control credentials.
+
+This closes the agent-dispatch vision's durable task/outcome and
+observable-lifecycle intent while keeping producer quiescence as a generic queue
+primitive. Domain policy about when to hand authority over remains in the
+producer/orchestration layer, consistent with the fabric's
+primitives-below-orchestration invariant.
 
 ### Scheduler / timer producer (`agent-dispatch schedule`)
 
@@ -736,6 +871,7 @@ agent-dispatch inbox --board              # lifecycle groups + independent ACTIV
 agent-dispatch claim                     # lease my assigned/eligible task (identity auto-resolved)
 agent-dispatch claim  <task-id>          # claim THAT specific task (positional = task id, like the verbs below)
 agent-dispatch claim  <task-id> --worker <owner>   # ...as an explicit owner (rarely needed; default: CWD identity)
+agent-dispatch claim  <task-id> --all-repos        # explicit administrative cross-lane claim
 agent-dispatch start  <id>  <owner>
 agent-dispatch suspend <id> <owner> --reason "waiting for an external result"
 agent-dispatch resume <id> <owner>                 # same owner; durable async wake
@@ -802,6 +938,9 @@ git uses), so an agent in its worktree just runs `agent-dispatch worktree-status
 task's `owner`, and **claim honors targeting**: an agent only leases tasks that
 are untargeted or targeted at its own machine/worktree. Pass `--machine` /
 `--worktree` to override the resolution (or where `agent-worktrees` is absent).
+The resolved repo lane is mandatory at every normal CLI, REST, and MCP claim
+surface. A caller outside a repo must pass `--repo`; only an intentional
+cross-lane supervisor or administrator passes explicit `--all-repos`.
 
 The coordinator publishes `task.created` / `.proposed` / `.approved` / `.claimed`
 / `.started` / `.suspended` / `.resumed` / `.released` / `.yielded` /
@@ -932,7 +1071,7 @@ See the design doc's "Headless-fleet body" section.
 
 For agents that prefer **tools over a CLI**, `agent-dispatch mcp` runs a local
 **stdio MCP server** — the per-agent interaction layer. It resolves the caller's
-`machine`/`worktree` identity from the working directory (like the CLI) and
+`machine`/`worktree` identity and repo lane from the working directory (like the CLI) and
 proxies each tool call to the coordinator, so `dispatch_claim` /
 `dispatch_worktree_status` are auto-scoped to the agent's worktree with no
 per-agent credential wiring. Requires the `mcp` extra
@@ -952,6 +1091,7 @@ Point a Copilot sub-agent (or any MCP client) at it:
 ```
 
 It exposes the queue plus producer operations as tools: `dispatch_create` / `dispatch_approve` /
+`dispatch_producer_scope_status` / `dispatch_producer_scope_handoff` /
 `dispatch_find` / `dispatch_sweep` / `dispatch_recipe_list` /
 `dispatch_recipe_render` / `dispatch_recipe_kick` /
 `dispatch_emitter_side_load` / `dispatch_list` /
@@ -973,9 +1113,10 @@ There are **two** ways to reach the tools — pick by where the client runs:
 | Surface | Command / endpoint | Identity | Use when |
 |---------|--------------------|----------|----------|
 | **Local stdio shim** | `agent-dispatch mcp` | resolved from the caller's **CWD** (like the CLI) | the agent has `agent-dispatch` installed locally in its worktree |
-| **Coordinator-hosted HTTP** | mounted at **`/mcp`** on the discovered coordinator endpoint | `X-Agent-Machine` / `X-Agent-Worktree` **request headers** (or explicit tool args) | a remote MCP client (e.g. an `agent-mcp` bridge on another host) that can't resolve local identity |
+| **Coordinator-hosted HTTP** | mounted at **`/mcp`** on the discovered coordinator endpoint | `X-Agent-Machine` / `X-Agent-Worktree` / `X-Agent-Repo` **request headers** (or explicit tool args) | a remote MCP client (e.g. an `agent-mcp` bridge on another host) that can't resolve local identity |
 
-Both expose the same 20 `dispatch_*` tools and publish the same `task.*` events;
+Both expose the same `dispatch_*` tools and publish the same task and producer
+fence events;
 they only differ in how identity is supplied. The coordinator mounts `/mcp`
 automatically when the `mcp` extra is installed (pass `enable_mcp=False` to
 `create_app` to suppress it); if a bearer token is configured it also guards the
@@ -985,12 +1126,22 @@ agent.
 
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`
 (server bind pin; omitted means OS-assigned port), `AGENT_DISPATCH_DB`,
-`AGENT_DISPATCH_TOKEN` (bearer auth), `AGENT_DISPATCH_GC_INTERVAL` (liveness
-garbage-collection cadence in seconds; `0` disables), `AGENT_DISPATCH_RUN_DIR` /
-`AGENT_DISPATCH_ENDPOINT` (local endpoint discovery), `AGENT_DISPATCH_URL` (client
-override), `AGENT_DISPATCH_SHARED_URL` / `AGENT_DISPATCH_SHARED_TOKEN` (opt-in
+`AGENT_DISPATCH_TOKEN` (ordinary bearer auth),
+`AGENT_DISPATCH_CONTROL_TOKEN` (superset queue credential with
+managed-producer transition authority),
+`AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND` (preferred on-demand capability
+fetch) / `AGENT_DISPATCH_PRODUCER_CAPABILITY` (raw fallback; applied only with
+the rest of the fence tuple),
+`AGENT_DISPATCH_GC_INTERVAL` (liveness garbage-collection cadence
+in seconds; `0` disables), `AGENT_DISPATCH_RUN_DIR` /
+`AGENT_DISPATCH_ENDPOINT` (local endpoint discovery), `AGENT_DISPATCH_URL`
+(client override), `AGENT_DISPATCH_SHARED_URL` /
+`AGENT_DISPATCH_SHARED_TOKEN` / `AGENT_DISPATCH_SHARED_CONTROL_TOKEN` (opt-in
 shared coordinator), and `AGENT_DISPATCH_NO_AUTOSTART` (disable lazy local
 coordinator start).
+
+Bearer scheme matching is case-insensitive. Prefer environment or token-command
+configuration over token flags where process arguments may be observable.
 
 ## Troubleshooting
 

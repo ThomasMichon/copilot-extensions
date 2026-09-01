@@ -21,10 +21,10 @@ import json
 from collections.abc import Callable
 from typing import Annotated, Any
 
-from pydantic import PlainValidator, WithJsonSchema
+from pydantic import PlainValidator, StrictInt, WithJsonSchema
 
-from .client import DispatchClient
-from .config import client_token, client_url
+from .client import DispatchClient, DispatchError
+from .config import client_control_token, client_token, client_url
 from .identity import resolve_identity, resolve_repo, resolve_repo_selector
 from .queue import StructuredResult, worker_id_for
 
@@ -47,7 +47,11 @@ McpStructuredResult = Annotated[
 
 
 def _default_client() -> DispatchClient:
-    return DispatchClient(client_url(), token=client_token())
+    return DispatchClient(
+        client_url(),
+        token=client_token(),
+        control_token=client_control_token(),
+    )
 
 
 class DispatchTools:
@@ -100,8 +104,15 @@ class DispatchTools:
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
+        source: str | None = None,
+        origin_ref: str | None = None,
         evaluator_ref: str | None = None,
         dedup_key: str | None = None,
+        producer_scope: dict[str, str] | None = None,
+        producer_id: str | None = None,
+        producer_generation: StrictInt | None = None,
+        producer_capability: str | None = None,
+        producer_request_id: str | None = None,
         goal: str | None = None,
         done_criteria: str | None = None,
         not_before: float = 0.0,
@@ -130,26 +141,89 @@ class DispatchTools:
                 "could not resolve the repo (lane); pass repo=<local name|remote URL>"
             )
         with self._client_factory() as c:
-            return c.create(
-                title,
-                repo=lane,
-                prompt=prompt,
-                proposed=proposed,
-                payload_inline=payload,
-                payload_ref=payload_ref,
-                requires=requires or [],
-                excludes=excludes or [],
-                affinity=affinity or {},
-                labels=labels or [],
-                target_machine=target_machine,
-                target_worktree=target_worktree,
-                target_repo=target_repo,
-                evaluator_ref=evaluator_ref,
-                dedup_key=dedup_key,
-                goal=goal,
-                done_criteria=done_criteria,
-                not_before=not_before,
-            )
+            try:
+                return c.create(
+                    title,
+                    repo=lane,
+                    prompt=prompt,
+                    proposed=proposed,
+                    payload_inline=payload,
+                    payload_ref=payload_ref,
+                    requires=requires or [],
+                    excludes=excludes or [],
+                    affinity=affinity or {},
+                    labels=labels or [],
+                    target_machine=target_machine,
+                    target_worktree=target_worktree,
+                    target_repo=target_repo,
+                    source=source,
+                    origin_ref=origin_ref,
+                    evaluator_ref=evaluator_ref,
+                    dedup_key=dedup_key,
+                    producer_scope=producer_scope,
+                    producer_id=producer_id,
+                    producer_generation=producer_generation,
+                    producer_capability=producer_capability,
+                    producer_request_id=producer_request_id,
+                    goal=goal,
+                    done_criteria=done_criteria,
+                    not_before=not_before,
+                )
+            except DispatchError as exc:
+                return {"error": exc.as_dict()}
+
+    def producer_scope_status(
+        self, source: str, repo: str | None = None
+    ) -> dict:
+        """Inspect the current generation and bounded history for one scope."""
+        lane = self._scope_repo(repo)
+        if not lane:
+            return {
+                "error": {
+                    "code": "producer_request_invalid",
+                    "operation": "status",
+                    "reason": "missing_scope_repo",
+                    "message": "could not resolve the repo lane",
+                    "retryable": False,
+                }
+            }
+        with self._client_factory() as c:
+            try:
+                return c.producer_scope_status(lane, source)
+            except DispatchError as exc:
+                return {"error": exc.as_dict()}
+
+    def producer_scope_handoff(
+        self,
+        source: str,
+        producer_id: str,
+        expected_generation: StrictInt,
+        repo: str | None = None,
+        required_label: str | None = None,
+    ) -> dict:
+        """Retire N and activate N+1 using coordinator control authority."""
+        lane = self._scope_repo(repo)
+        if not lane:
+            return {
+                "error": {
+                    "code": "producer_request_invalid",
+                    "operation": "transition",
+                    "reason": "missing_scope_repo",
+                    "message": "could not resolve the repo lane",
+                    "retryable": False,
+                }
+            }
+        with self._client_factory() as c:
+            try:
+                return c.handoff_producer_scope(
+                    lane,
+                    source,
+                    producer_id=producer_id,
+                    expected_generation=expected_generation,
+                    required_label=required_label,
+                )
+            except DispatchError as exc:
+                return {"error": exc.as_dict()}
 
     def approve(self, task_id: str) -> dict:
         """Move a ``proposed`` task to ``queued`` (makes it claimable)."""
@@ -369,6 +443,7 @@ class DispatchTools:
         machine: str | None = None,
         worktree: str | None = None,
         repo: str | None = None,
+        all_repos: bool = False,
     ) -> dict | None:
         """Atomically lease one eligible task (identity + lane auto-resolved from CWD).
 
@@ -378,11 +453,27 @@ class DispatchTools:
         """
         machine, worktree = self._resolve(machine, worktree)
         worker_id = worker_id_for(machine, worktree) if machine and worktree else None
+        lane = None if all_repos else self._scope_repo(repo)
+        if all_repos and repo:
+            return {
+                "error": {
+                    "code": "claim_scope_invalid",
+                    "message": "claim accepts repo or all_repos=true, not both",
+                }
+            }
+        if not all_repos and not lane:
+            return {
+                "error": {
+                    "code": "claim_scope_required",
+                    "message": "claim requires repo context or explicit all_repos=true",
+                }
+            }
         with self._client_factory() as c:
             return c.claim(
                 worker_id=worker_id,
                 capabilities=capabilities or [],
-                repo=self._scope_repo(repo),
+                repo=lane,
+                all_repos=all_repos,
                 machine=machine,
                 worktree=worktree,
                 task_id=task_id,
@@ -509,6 +600,8 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     # Register each DispatchTools method as an MCP tool. Explicit wrappers keep
     # the tool schemas (names, params, docstrings) stable and discoverable.
     mcp.tool(name="dispatch_create")(t.create)
+    mcp.tool(name="dispatch_producer_scope_status")(t.producer_scope_status)
+    mcp.tool(name="dispatch_producer_scope_handoff")(t.producer_scope_handoff)
     mcp.tool(name="dispatch_approve")(t.approve)
     mcp.tool(name="dispatch_find")(t.find)
     mcp.tool(name="dispatch_sweep")(t.sweep)

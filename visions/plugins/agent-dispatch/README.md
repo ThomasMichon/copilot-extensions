@@ -124,6 +124,17 @@ The coordinator only owns the queue; anything that *creates* a task is a
    journaler, an audit/backlog-filing agent, any calendar job), deterministically
    enough that re-firing the same occurrence does not duplicate it.
 
+Where production authority must move between implementations without overlap,
+the coordinator fences one permanent repo-lane + source domain through monotonic
+generations. The control plane, not a caller-asserted producer name, selects the
+next producer and grants it an opaque generation capability. Accepted producer
+requests have their own durable idempotency identity, distinct from the task
+subject's ordinary deduplication key, so retries remain safe across completion
+and handoff without reopening retired authority. A protected label has one
+coordinator-global owning repo+source scope; authority cannot transition while
+nonterminal pre-fence or mismatched work still carries that label, and rejected
+claim candidates remain observably audited rather than silently skipped.
+
 ### The lifecycle
 A task moves through a small set of states: **proposed → queued → claimed**
 (held for evaluation) → **started** (under active work) → **completed**, with an
@@ -193,6 +204,20 @@ Continuation storage, fire-and-forget delegation, reactive production, and
 scheduled production are all **first-class** ways to put work on the queue (see
 *Producers*). One queue, one lifecycle, one claim primitive serves all four; a
 deployment adds producers without changing the store.
+
+### fenced-producer-cutover
+A production domain can be placed under permanent, coordinator-authenticated
+generation control. Scope identity follows the task's repo lane and source; an
+optional protected label binds back to that exact scope, so neither an alternate
+nor omitted caller-asserted source can place work in its pool. Unlabeled work
+outside the source remains ordinary queue work rather than implicitly authorized
+production. Label ownership is unique across the coordinator, and handoff
+refuses until every nonterminal task carrying the label has accepted provenance
+for its owning scope. A handoff retires the old generation monotonically and grants the
+selected successor a non-discoverable creation capability; request-level
+idempotency distinguishes transport retry from ordinary work deduplication, and
+replay still proves the named generation capability. Lost one-time authority is
+recovered by a new generation, never by revealing or reopening an old one.
 
 ### dedup-before-create
 Before a task is created, the layer supports **finding existing equivalent work**

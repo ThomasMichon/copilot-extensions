@@ -62,7 +62,8 @@ def build_app(cfg: Config | None = None):
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(Path(cfg.db_path).expanduser())
     return create_app(
-        queue, token=cfg.token, sweep_interval=cfg.sweep_interval,
+        queue, token=cfg.token, control_token=cfg.control_token,
+        sweep_interval=cfg.sweep_interval,
         orphan_grace=cfg.orphan_grace, wake_interval=0.25,
         wake_is_active=_owns_active_route,
     )

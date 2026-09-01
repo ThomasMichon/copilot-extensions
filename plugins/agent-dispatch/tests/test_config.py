@@ -10,9 +10,12 @@ from agent_dispatch import config as config_mod
 from agent_dispatch import rendezvous
 from agent_dispatch.config import (
     DEFAULT_SWEEP_INTERVAL,
+    client_control_token,
     client_url,
     failover_machine,
     load_config,
+    producer_capability,
+    shared_control_token,
     shared_token,
 )
 
@@ -54,6 +57,11 @@ def _isolate_discovery(monkeypatch, tmp_path):
     # Shared-coordinator token resolution: clear both inputs so tests are hermetic.
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_CONTROL_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_SHARED_CONTROL_TOKEN", raising=False)
+    monkeypatch.delenv(
+        "AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND", raising=False
+    )
 
 
 def test_sweep_interval_default(monkeypatch):
@@ -69,6 +77,17 @@ def test_sweep_interval_from_env(monkeypatch):
 def test_sweep_interval_zero_disables(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_SWEEP_INTERVAL", "0")
     assert load_config().sweep_interval == 0.0
+
+
+def test_control_tokens_are_separate_from_ordinary_client_tokens(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "ordinary")
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN", "control")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_CONTROL_TOKEN", "shared-control")
+
+    assert load_config().token == "ordinary"
+    assert load_config().control_token == "control"
+    assert client_control_token() == "control"
+    assert shared_control_token() == "shared-control"
 
 
 # -- client_url resolution (coordinator inversion) --------------------------
@@ -177,6 +196,19 @@ def test_shared_token_command_empty_output_returns_none(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", "true")
     assert shared_token() is None
+
+
+def test_producer_capability_prefers_command_and_falls_back_to_env(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_PRODUCER_CAPABILITY", "ambient")
+    monkeypatch.setenv(
+        "AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND",
+        "fetch capability",
+    )
+    monkeypatch.setattr(config_mod, "_run_token_command", lambda _command: "fetched")
+    assert producer_capability() == "fetched"
+
+    monkeypatch.setattr(config_mod, "_run_token_command", lambda _command: None)
+    assert producer_capability() == "ambient"
 
 
 def test_config_module_importable():

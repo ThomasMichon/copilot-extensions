@@ -16,10 +16,20 @@ import httpx
 class DispatchError(RuntimeError):
     """A non-2xx response from the coordinator (carries status + detail)."""
 
-    def __init__(self, status_code: int, detail: str):
-        super().__init__(f"HTTP {status_code}: {detail}")
+    def __init__(self, status_code: int, detail: object):
+        rendered = json.dumps(detail, sort_keys=True) if isinstance(detail, dict) else str(detail)
+        super().__init__(f"HTTP {status_code}: {rendered}")
         self.status_code = status_code
         self.detail = detail
+
+    def as_dict(self) -> dict[str, object]:
+        if isinstance(self.detail, dict):
+            return self.detail
+        return {
+            "code": "dispatch_http_error",
+            "message": str(self.detail),
+            "status": self.status_code,
+        }
 
 
 class DispatchUpgradeRequired(DispatchError):
@@ -37,6 +47,7 @@ class DispatchClient:
         base_url: str,
         *,
         token: str | None = None,
+        control_token: str | None = None,
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
         tunnel: Any = None,
@@ -45,6 +56,7 @@ class DispatchClient:
         self._http = httpx.Client(
             base_url=base_url.rstrip("/"), headers=headers, timeout=timeout, transport=transport
         )
+        self._control_token = control_token
         # An optional owned resource (e.g. an SSH failover port-forward) closed
         # together with the HTTP client, so the transport lives exactly as long
         # as the client that rides it.
@@ -73,6 +85,11 @@ class DispatchClient:
                 pass
             raise DispatchError(resp.status_code, detail)
         return resp.json()
+
+    def _control_headers(self) -> dict[str, str]:
+        if not self._control_token:
+            return {}
+        return {"Authorization": f"Bearer {self._control_token}"}
 
     # -- reads ---------------------------------------------------------------
 
@@ -124,6 +141,39 @@ class DispatchClient:
     def propose(self, title: str, **kwargs: Any) -> dict:
         return self.create(title, proposed=True, **kwargs)
 
+    def producer_scope_status(self, repo: str, source: str) -> dict:
+        return self._unwrap(
+            self._http.get(
+                "/producer-scopes/status",
+                params={"repo": repo, "source": source},
+            )
+        )
+
+    def handoff_producer_scope(
+        self,
+        repo: str,
+        source: str,
+        *,
+        producer_id: str,
+        expected_generation: int,
+        required_label: str | None = None,
+    ) -> dict:
+        body: dict[str, object] = {
+            "repo": repo,
+            "source": source,
+            "producer_id": producer_id,
+            "expected_generation": expected_generation,
+        }
+        if required_label is not None:
+            body["required_label"] = required_label
+        return self._unwrap(
+            self._http.post(
+                "/producer-scopes/handoff",
+                json=body,
+                headers=self._control_headers(),
+            )
+        )
+
     def approve(self, task_id: str) -> dict:
         return self._unwrap(self._http.post(f"/tasks/{task_id}/approve"))
 
@@ -133,6 +183,7 @@ class DispatchClient:
         capabilities: Sequence[str] = (),
         *,
         repo: str | None = None,
+        all_repos: bool = False,
         machine: str | None = None,
         worktree: str | None = None,
         task_id: str | None = None,
@@ -142,6 +193,7 @@ class DispatchClient:
         body = {
             "worker_id": worker_id,
             "repo": repo,
+            "all_repos": all_repos,
             "machine": machine,
             "worktree": worktree,
             "capabilities": list(capabilities),

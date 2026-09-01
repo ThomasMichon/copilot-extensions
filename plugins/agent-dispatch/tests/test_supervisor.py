@@ -154,6 +154,29 @@ def test_poll_spawns_eligible_task_once(q, client):
     assert spawn.calls == [t.id]
 
 
+def test_protected_label_pool_does_not_claim_unlabeled_task(q, client):
+    q.handoff_producer_scope(
+        TEST_REPO,
+        "scheduled",
+        producer_id="scheduler-a",
+        expected_generation=0,
+        required_label="board",
+    )
+    ordinary = q.create("ordinary", source="manual")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        labels=["board"],
+        max_concurrent=5,
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.get(ordinary.id).status == Status.QUEUED
+
+
 def test_suspended_reservation_does_not_consume_supervisor_capacity(q, client):
     first = q.create("dormant")
     spawn = _ok_spawn()
@@ -678,6 +701,71 @@ def test_cli_supervise_once(monkeypatch, q, client):
     assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
 
 
+def test_cli_supervise_all_repos_marks_spawn_claim_as_administrative(
+    monkeypatch, q, client
+):
+    import types
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch import supervisor as sup_mod
+
+    q.create("work")
+    spawn = _ok_spawn()
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
+    monkeypatch.setattr(m, "client_url", lambda: "http://coord")
+    monkeypatch.setattr(
+        m,
+        "_scope_repo",
+        lambda _args: (_ for _ in ()).throw(AssertionError("must not resolve repo")),
+    )
+    monkeypatch.setattr(
+        sup_mod,
+        "make_embody_spawn",
+        lambda **kwargs: seen.append(("cli", kwargs)) or spawn,
+    )
+    monkeypatch.setattr(
+        sup_mod,
+        "make_headless_spawn",
+        lambda **kwargs: seen.append(("headless", kwargs)) or spawn,
+    )
+    args = types.SimpleNamespace(
+        all_repos=True,
+        repo=None,
+        url=None,
+        token=None,
+        label=None,
+        max_concurrent=5,
+        verify_timeout=0,
+        once=True,
+        interval=30.0,
+        no_heartbeat=False,
+        max_attempts=3,
+        embody_backend=None,
+        cli_label=None,
+        headless_label=None,
+        headless_agent="task-worker",
+    )
+
+    assert m._cmd_supervise(args) == 0
+    assert {kind for kind, _kwargs in seen} == {"cli", "headless"}
+    assert all(kwargs["all_repos"] is True for _kind, kwargs in seen)
+
+
+def test_cli_supervise_refuses_unresolved_repo_without_all_repos(
+    monkeypatch, capsys
+):
+    import types
+
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: None)
+    args = types.SimpleNamespace(all_repos=False)
+
+    assert m._cmd_supervise(args) == 2
+    assert "could not resolve the calling repo" in capsys.readouterr().err
+
+
 def test_make_embody_spawn_records_handle_on_success(monkeypatch):
     """The CLI embody backend returns success + a parsed session/worktree handle
     when embody exits 0 (regression: it previously fell through to None, breaking
@@ -688,7 +776,15 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
     from agent_dispatch.supervisor import make_embody_spawn
 
     def fake_spawn_embodied_worker(
-        task_id, *, worker_id, driver, project=None, route="", verify_timeout=0
+        task_id,
+        *,
+        worker_id,
+        driver,
+        project=None,
+        route="",
+        repo=None,
+        all_repos=False,
+        verify_timeout=0,
     ):
         return subprocess.CompletedProcess(
             args=[], returncode=0,
@@ -793,7 +889,9 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     monkeypatch.setattr(bridge, "spawn_worker", fake_spawn_worker)
     monkeypatch.setattr(
         embody, "autopilot_worker_prompt",
-        lambda task_id, *, worker_id, route="", repo=None: f"SEED::{task_id}",
+        lambda task_id, *, worker_id, route="", repo=None, all_repos=False: (
+            f"SEED::{task_id}"
+        ),
     )
 
     spawn = make_headless_spawn(agent="review-worker")
@@ -1000,11 +1098,12 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     class FakeFleet:
         def __init__(
             self, pool, *, origin, headless=False, agent="task-worker",
-            verify_timeout=0,
+            all_repos=False, verify_timeout=0,
         ):
             self.pool = list(pool)
             captured.update(
-                pool=pool, origin=origin, headless=headless, agent=agent
+                pool=pool, origin=origin, headless=headless, agent=agent,
+                all_repos=all_repos,
             )
 
         def __call__(self, task):
@@ -1031,6 +1130,7 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
     assert m._cmd_supervise(args) == 0
     assert captured["headless"] is True
     assert captured["agent"] == "review-worker"
+    assert captured["all_repos"] is False
     assert captured["pool"] == ["anomalous-potato-wsl"]
     assert captured["origin"] == "mantis-counter"
 

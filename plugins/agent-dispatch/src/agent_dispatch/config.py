@@ -6,6 +6,8 @@ lone dev box or against a designated coordinator host on a shared network:
 - ``AGENT_DISPATCH_HOST`` / ``AGENT_DISPATCH_PORT`` -- where the coordinator binds.
 - ``AGENT_DISPATCH_DB`` -- the SQLite queue file (server side).
 - ``AGENT_DISPATCH_TOKEN`` -- optional bearer token (server validates, client sends).
+- ``AGENT_DISPATCH_CONTROL_TOKEN`` -- separate coordinator control bearer
+  required to activate or transition managed producer scopes.
 - ``AGENT_DISPATCH_GC_INTERVAL`` -- seconds between automatic **liveness
   garbage-collection** passes (server side; ``0`` disables). A GC pass requeues a
   held task only when its owner worktree is *confirmed gone* -- not on elapsed
@@ -21,6 +23,11 @@ lone dev box or against a designated coordinator host on a shared network:
 - ``AGENT_DISPATCH_SHARED_TOKEN`` -- bearer token for the shared coordinator
   (independent of the local ``AGENT_DISPATCH_TOKEN``; per-client, as the shared
   endpoint is exposed only through the secured mesh).
+- ``AGENT_DISPATCH_SHARED_CONTROL_TOKEN`` -- control bearer for managed producer
+  transitions on the shared coordinator.
+- ``AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND`` -- preferred on-demand command
+  that prints the current producer capability; the raw
+  ``AGENT_DISPATCH_PRODUCER_CAPABILITY`` remains a fallback.
 - ``AGENT_DISPATCH_NO_AUTOSTART`` -- set to any value to disable the CLI's
   lazy on-demand coordinator start (a client command that finds no live local
   coordinator otherwise starts one detached, then proceeds).
@@ -136,6 +143,7 @@ class Config:
     port: int = DEFAULT_PORT
     db_path: str = str(DEFAULT_DB)
     token: str | None = None
+    control_token: str | None = None
     sweep_interval: float = DEFAULT_SWEEP_INTERVAL
     orphan_grace: float = DEFAULT_ORPHAN_GRACE
 
@@ -151,6 +159,7 @@ def load_config() -> Config:
         port=int(os.environ.get("AGENT_DISPATCH_PORT", str(DEFAULT_PORT))),
         db_path=os.environ.get("AGENT_DISPATCH_DB", str(DEFAULT_DB)),
         token=os.environ.get("AGENT_DISPATCH_TOKEN") or None,
+        control_token=os.environ.get("AGENT_DISPATCH_CONTROL_TOKEN") or None,
         sweep_interval=float(
             os.environ.get("AGENT_DISPATCH_GC_INTERVAL")
             or os.environ.get("AGENT_DISPATCH_SWEEP_INTERVAL")
@@ -352,6 +361,11 @@ def client_token() -> str | None:
     return os.environ.get("AGENT_DISPATCH_TOKEN") or None
 
 
+def client_control_token() -> str | None:
+    """The separate control bearer for managed producer transitions."""
+    return os.environ.get("AGENT_DISPATCH_CONTROL_TOKEN") or None
+
+
 def failover_machine() -> str | None:
     """The peer machine (its SSH alias) to fail dispatch over to when this
     environment's local coordinator is down (``AGENT_DISPATCH_FAILOVER_MACHINE``).
@@ -400,6 +414,32 @@ def shared_token() -> str | None:
     if command:
         return _run_token_command(command)
     return None
+
+
+def shared_control_token() -> str | None:
+    """The control bearer for managed transitions on the shared coordinator."""
+    direct = os.environ.get("AGENT_DISPATCH_SHARED_CONTROL_TOKEN")
+    if direct:
+        return direct
+    command = os.environ.get("AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND")
+    if command:
+        return _run_token_command(command)
+    return None
+
+
+def producer_capability() -> str | None:
+    """Resolve the current managed-producer capability on demand.
+
+    Command indirection is preferred so the capability need not persist in the
+    environment. The raw environment value remains a compatibility fallback,
+    including when the configured fetch command fails or returns no value.
+    """
+    command = os.environ.get("AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND")
+    if command:
+        fetched = _run_token_command(command)
+        if fetched:
+            return fetched
+    return os.environ.get("AGENT_DISPATCH_PRODUCER_CAPABILITY") or None
 
 
 def _run_token_command(command: str) -> str | None:

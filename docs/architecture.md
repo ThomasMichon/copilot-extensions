@@ -378,6 +378,34 @@ queued, label-gated tasks into autonomous bodies. The primary supervisor reads
 `agent-dispatch-supervisor-<name>` units/tasks using the same env schema, while
 the primary `agent-dispatch-supervisor` remains unchanged.
 
+Producer creation can be fenced by a coordinator-owned, durable generation over
+one permanent canonical repo-lane + source scope. An optional immutable required
+label binds a protected pool back to that source: carrying the label through an
+alternate or omitted source is rejected, while omitting the label leaves
+otherwise unrelated sources outside the protected pool. Duplicate label
+ownership anywhere on one coordinator is rejected: a managed label has exactly
+one owning repo+source scope. Handoff first refuses nonterminal pre-fence or
+mismatched label rows with bounded `scope_not_quiescent` diagnostics, and claim
+revalidates persisted generation and accepted-request provenance before
+protected work can run. Rejected claim candidates emit a one-shot,
+fingerprinted `producer.claim_rejected` event instead of disappearing silently.
+Compare-and-swap handoffs require a coordinator-only control bearer, retire
+generation N permanently, activate N+1, mint a one-time high-entropy creation
+capability, and retain only its hash. The control bearer is also accepted as a
+superset queue credential. Managed creates prove their named generation's
+capability and carry a separate request id recorded in a durable ledger; exact
+retries return the accepted task after terminal completion or generation
+retirement, while new request ids retain ordinary repo-scoped `dedup_key`
+terminal release; a managed dedup collision against an ordinary or differently
+fenced row is rejected before request-ledger insertion. Producer identity is
+metadata rather than authority. Normal claim surfaces require an explicit or
+resolved repo lane; coordinator-wide supervisors opt into a distinct
+`all_repos=true` administrative mode. CLI,
+REST, stdio MCP, and
+coordinator-hosted MCP expose the same status/handoff primitive and structured
+rejections; bounded content-free events make transitions and rejected creates
+observable without exposing task content, capabilities, or control credentials.
+
 Its eight-state lifecycle includes explicit owner-preserving **suspended** work:
 `started → suspended` parks a dormant, non-claimable task without losing its
 owner/session or durable context; `resume` wakes that same owner, while `release`

@@ -22,17 +22,36 @@ needed; the remaining args are shell-quoted argv.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
 import subprocess
 from pathlib import Path
 
+from .config import producer_capability
 from .procutil import no_window_kwargs
 
 
 class RemoteDispatchUnavailable(RuntimeError):
     """Raised when the cross-machine dispatch transport (ssh) is unavailable."""
+
+
+def _producer_capability(args: argparse.Namespace) -> str | None:
+    explicit = getattr(args, "producer_capability", None)
+    if explicit is not None:
+        return explicit
+    if not all(
+        getattr(args, field, None) is not None
+        for field in (
+            "source",
+            "producer_id",
+            "producer_generation",
+            "producer_request_id",
+        )
+    ):
+        return None
+    return producer_capability()
 
 
 def local_machine() -> str | None:
@@ -133,7 +152,11 @@ def is_cross_machine(args: argparse.Namespace) -> bool:
 
 
 def build_remote_create_argv(
-    args: argparse.Namespace, *, repo: str, has_payload: bool
+    args: argparse.Namespace,
+    *,
+    repo: str,
+    has_payload: bool,
+    capability_present: bool | None = None,
 ) -> list[str]:
     """Build the ``agent-dispatch create ... --spawn --spawn-backend embody`` argv
     to run **on the target**.
@@ -170,6 +193,12 @@ def build_remote_create_argv(
         argv += ["--evaluator-ref", args.evaluator_ref]
     if getattr(args, "dedup_key", None):
         argv += ["--dedup-key", args.dedup_key]
+    if getattr(args, "producer_id", None):
+        argv += ["--producer-id", args.producer_id]
+    if getattr(args, "producer_generation", None) is not None:
+        argv += ["--producer-generation", str(args.producer_generation)]
+    if getattr(args, "producer_request_id", None):
+        argv += ["--producer-request-id", args.producer_request_id]
     if getattr(args, "goal", None):
         argv += ["--goal", args.goal]
     if getattr(args, "done_criteria", None):
@@ -177,7 +206,11 @@ def build_remote_create_argv(
     verify_timeout = getattr(args, "verify_timeout", 0) or 0
     if verify_timeout:
         argv += ["--verify-timeout", str(verify_timeout)]
-    if has_payload:
+    if capability_present is None:
+        capability_present = _producer_capability(args) is not None
+    if capability_present:
+        argv += ["--remote-create-envelope", "-"]
+    elif has_payload:
         argv += ["--payload-file", "-"]
     return argv
 
@@ -199,17 +232,31 @@ def dispatch_to_remote(
     exe = shutil.which("ssh")
     if exe is None:
         raise RemoteDispatchUnavailable("ssh not found on PATH")
+    capability = _producer_capability(args)
     remote_argv = build_remote_create_argv(
-        args, repo=repo, has_payload=payload is not None
+        args,
+        repo=repo,
+        has_payload=payload is not None,
+        capability_present=capability is not None,
     )
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
+    stdin = payload
+    if capability is not None:
+        stdin = json.dumps(
+            {
+                "payload": payload,
+                "producer_capability": capability,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     # `machine` is the SSH alias (never a raw IP). BatchMode so a missing
     # key fails fast instead of hanging on a password prompt. Lowercased so a
     # display-cased name still matches its lowercase `Host` block.
     cmd = [exe, "-o", "BatchMode=yes", _ssh_alias(machine), remote_cmd]
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         cmd,
-        input=payload,
+        input=stdin,
         check=False,
         capture_output=True,
         text=True,

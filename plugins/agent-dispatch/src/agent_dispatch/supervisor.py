@@ -361,7 +361,11 @@ def _tracking():
 
 
 def make_embody_spawn(
-    *, driver: str = "agent-dispatch", verify_timeout: int = 0, route: str = ""
+    *,
+    driver: str = "agent-dispatch",
+    verify_timeout: int = 0,
+    route: str = "",
+    all_repos: bool = False,
 ) -> SpawnFn:
     """Build a :data:`SpawnFn` that embodies a worker via ``agent-worktrees``.
 
@@ -390,6 +394,8 @@ def make_embody_spawn(
                 driver=driver,
                 project=embody.project_for_task(task),
                 route=route,
+                repo=None if all_repos else task.get("repo"),
+                all_repos=all_repos,
                 verify_timeout=verify_timeout,
             )
         except embody.EmbodyUnavailable as exc:
@@ -402,7 +408,10 @@ def make_embody_spawn(
 
 
 def make_headless_spawn(
-    *, agent: str = "task-worker", route: str = "",
+    *,
+    agent: str = "task-worker",
+    route: str = "",
+    all_repos: bool = False,
 ) -> SpawnFn:
     """Build a :data:`SpawnFn` that embodies a worker as a **headless
     agent-bridge ACP** session -- no mux, no CLI-start-prompt.
@@ -443,7 +452,8 @@ def make_headless_spawn(
             task["id"],
             worker_id=worker_id,
             route=route,
-            repo=task.get("repo"),
+            repo=None if all_repos else task.get("repo"),
+            all_repos=all_repos,
         )
         try:
             result = bridge.spawn_worker(

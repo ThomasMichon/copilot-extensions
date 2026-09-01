@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
@@ -24,7 +25,14 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    StrictInt,
+)
 from pydantic_core import PydanticCustomError
 
 from . import __version__, telemetry
@@ -32,6 +40,8 @@ from .config import DEFAULT_ORPHAN_GRACE
 from .events import EventBus, sse_format
 from .queue import (
     CompletionOutcome,
+    ProducerFenceError,
+    ProducerScopeValidationError,
     ResultTooLargeError,
     ResultValidationError,
     SpawnReservation,
@@ -275,7 +285,16 @@ async def _orphan_reap_loop(
             bus.publish({"type": "task.reaped", "reaped": reaped})
 
 
+class ProducerScopeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repo: str
+    source: str
+
+
 class CreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     repo: str | None = None
     prompt: str = ""
@@ -293,15 +312,33 @@ class CreateBody(BaseModel):
     origin_ref: str | None = None
     evaluator_ref: str | None = None
     dedup_key: str | None = None
+    producer_scope: ProducerScopeBody | None = None
+    producer_id: str | None = None
+    producer_generation: StrictInt | None = None
+    producer_capability: str | None = None
+    producer_request_id: str | None = None
     goal: str | None = None
     done_criteria: str | None = None
-    not_before: float = 0.0
+    not_before: FiniteFloat = 0.0
     claim_as: str | None = None
 
 
+class ProducerScopeHandoffBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repo: str
+    source: str
+    producer_id: str
+    expected_generation: StrictInt
+    required_label: str | None = None
+
+
 class ClaimBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker_id: str | None = None
     repo: str | None = None
+    all_repos: bool = False
     machine: str | None = None
     worktree: str | None = None
     capabilities: list[str] = Field(default_factory=list)
@@ -497,14 +534,62 @@ def _reservation_dict(res: SpawnReservation) -> dict:
     return asdict(res)
 
 
-def _make_auth(token: str | None):
+def _make_auth(token: str | None, control_token: str | None):
     bearer = HTTPBearer(auto_error=False)
+    accepted = tuple(value for value in (token, control_token) if value)
 
     def check(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:  # noqa: B008
         if token is None:
             return
-        if creds is None or creds.credentials != token:
+        if creds is None or not any(
+            secrets.compare_digest(creds.credentials, value) for value in accepted
+        ):
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+
+    return check
+
+
+def _make_control_auth(
+    control_token: str | None,
+    on_reject: Callable[[str, dict[str, object]], None],
+):
+    bearer = HTTPBearer(auto_error=False)
+
+    def check(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:  # noqa: B008
+        if control_token is None:
+            detail = {
+                "code": "producer_control_unavailable",
+                "operation": "transition",
+                "reason": "control_authority_not_configured",
+                "message": "managed producer transitions require a configured control token",
+                "retryable": False,
+            }
+            on_reject(
+                "producer_scope.transition_rejected",
+                {key: value for key, value in detail.items() if key != "message"},
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=detail,
+            )
+        if creds is None or not secrets.compare_digest(
+            creds.credentials, control_token
+        ):
+            detail = {
+                "code": "producer_control_forbidden",
+                "operation": "transition",
+                "reason": "invalid_control_authority",
+                "message": "invalid or missing producer control bearer",
+                "retryable": False,
+            }
+            on_reject(
+                "producer_scope.transition_rejected",
+                {key: value for key, value in detail.items() if key != "message"},
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=detail,
+            )
 
     return check
 
@@ -513,6 +598,7 @@ def create_app(
     queue: TaskQueue,
     *,
     token: str | None = None,
+    control_token: str | None = None,
     sweep_interval: float = 0.0,
     orphan_grace: float = DEFAULT_ORPHAN_GRACE,
     enable_mcp: bool = True,
@@ -532,6 +618,14 @@ def create_app(
     coordinator-hosted MCP endpoint is mounted at ``/mcp`` (identity via
     ``X-Agent-Machine``/``X-Agent-Worktree`` headers or explicit tool args).
     """
+    if (
+        token is not None
+        and control_token is not None
+        and secrets.compare_digest(token, control_token)
+    ):
+        raise ValueError(
+            "AGENT_DISPATCH_CONTROL_TOKEN must differ from AGENT_DISPATCH_TOKEN"
+        )
     bus = EventBus()
     directory = FleetDirectory()
 
@@ -541,7 +635,9 @@ def create_app(
         try:
             from .mcp_http import bearer_guard_middleware, build_coordinator_mcp
 
-            coordinator_mcp = build_coordinator_mcp(queue, bus)
+            coordinator_mcp = build_coordinator_mcp(
+                queue, bus, control_token=control_token
+            )
             # mcp 2.0: transport options moved off the constructor onto the app
             # factory. streamable_http_path="/" so mounting at "/mcp" yields the
             # endpoint at "/mcp" (not "/mcp/mcp").
@@ -549,7 +645,9 @@ def create_app(
                 stateless_http=True, streamable_http_path="/"
             )
             if token:
-                mcp_app.add_middleware(bearer_guard_middleware(token))
+                mcp_app.add_middleware(
+                    bearer_guard_middleware(token, control_token)
+                )
         except ImportError:
             log.warning("mcp extra not installed; coordinator /mcp endpoint disabled")
             coordinator_mcp = None
@@ -715,7 +813,7 @@ def create_app(
     app = FastAPI(
         title="agent-dispatch",
         version=__version__,
-        dependencies=[Depends(_make_auth(token))],
+        dependencies=[Depends(_make_auth(token, control_token))],
         lifespan=lifespan,
     )
     app.state.bus = bus
@@ -736,7 +834,8 @@ def create_app(
         if any(error.get("type") == "result_too_large" for error in result_errors):
             status = 413
         elif result_errors or any(
-            error.get("type") == "json_invalid" for error in errors
+            error.get("type") in {"json_invalid", "finite_number"}
+            for error in errors
         ):
             status = 400
         else:
@@ -764,6 +863,15 @@ def create_app(
         bus.publish({"type": event_type, "task": event_task})
         # Generic telemetry seam (no-op unless a consumer registered a sink).
         telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+
+    def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
+        bus.publish({"type": event_type, "producer_fence": detail})
+        telemetry.emit(telemetry.producer_fence_event(event_type, detail))
+
+    def _producer_rejection(exc: ProducerFenceError) -> None:
+        _emit_producer_event(
+            "task.create_rejected", exc.event(operation="create")
+        )
 
     def _guard(op, event_type: str | None = None) -> dict:
         """Run a queue mutation (TaskError -> 409 / missing -> 404), then emit."""
@@ -888,12 +996,85 @@ def create_app(
     def satellite_list() -> list[dict]:
         return directory.discover_peers(role=ROLE_SATELLITE)
 
+    @app.get("/producer-scopes/status")
+    def producer_scope_status(repo: str, source: str) -> dict:
+        try:
+            return asdict(queue.producer_scope_status(repo, source))
+        except ProducerScopeValidationError as exc:
+            raise HTTPException(
+                status_code=400, detail=exc.detail(operation="status")
+            ) from exc
+
+    @app.post(
+        "/producer-scopes/handoff",
+        dependencies=[
+            Depends(_make_control_auth(control_token, _emit_producer_event))
+        ],
+    )
+    def producer_scope_handoff(body: ProducerScopeHandoffBody) -> dict:
+        try:
+            transition = queue.handoff_producer_scope(
+                body.repo,
+                body.source,
+                producer_id=body.producer_id,
+                expected_generation=body.expected_generation,
+                required_label=body.required_label,
+            )
+        except ProducerScopeValidationError as exc:
+            detail = exc.detail(operation="transition")
+            _emit_producer_event(
+                "producer_scope.transition_rejected",
+                {key: value for key, value in detail.items() if key != "message"},
+            )
+            raise HTTPException(status_code=400, detail=detail) from exc
+        except ProducerFenceError as exc:
+            detail = exc.detail(operation="transition")
+            _emit_producer_event(
+                "producer_scope.transition_rejected",
+                exc.event(operation="transition"),
+            )
+            raise HTTPException(status_code=409, detail=detail) from exc
+        result = transition.as_dict()
+        state = transition.state
+        detail: dict[str, object] = {
+            "repo": state.scope["repo"],
+            "source": state.scope["source"],
+            "from_generation": body.expected_generation,
+            "to_generation": state.current_generation,
+            "active_producer": state.active_producer,
+            "replayed": transition.replayed,
+        }
+        if state.required_label is not None:
+            detail["required_label"] = state.required_label
+        _emit_producer_event("producer_scope.transitioned", detail)
+        return result
+
     @app.post("/tasks")
     def create(body: CreateBody) -> dict:
         data = body.model_dump()
         proposed = data.pop("proposed")
-        task = _task_dict(queue.propose(**data) if proposed else queue.create(**data))
-        _emit("task.proposed" if proposed else "task.created", task)
+        try:
+            outcome = (
+                queue.propose_outcome(**data)
+                if proposed
+                else queue.create_outcome(**data)
+            )
+            task = _task_dict(outcome.task)
+        except ProducerScopeValidationError as exc:
+            detail = exc.detail(operation="create")
+            _emit_producer_event(
+                "task.create_rejected",
+                {key: value for key, value in detail.items() if key != "message"},
+            )
+            raise HTTPException(status_code=400, detail=detail) from exc
+        except ProducerFenceError as exc:
+            _producer_rejection(exc)
+            status = 403 if exc.reason == "invalid_capability" else 409
+            raise HTTPException(
+                status_code=status, detail=exc.detail(operation="create")
+            ) from exc
+        if outcome.event_type is not None:
+            _emit(outcome.event_type, task)
         return task
 
     @app.get("/tasks")
@@ -994,17 +1175,36 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail="claim requires worker_id, or both machine and worktree"
             )
+        if body.all_repos and body.repo:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "claim_scope_invalid",
+                    "message": "claim accepts repo or all_repos=true, not both",
+                },
+            )
+        if not body.all_repos and not body.repo:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "claim_scope_required",
+                    "message": "claim requires repo or explicit all_repos=true",
+                },
+            )
         with gate.track_claim():
-            task = queue.claim_one(
+            outcome = queue.claim_outcome(
                 owner,
                 body.capabilities,
-                repo=body.repo,
+                repo=None if body.all_repos else body.repo,
                 machine=body.machine,
                 worktree=body.worktree,
                 task_id=body.task_id,
                 lease_seconds=body.lease_seconds,
                 evaluation=body.evaluation,
             )
+        for rejection in outcome.producer_rejections:
+            _emit_producer_event("producer.claim_rejected", rejection)
+        task = outcome.task
         if task is None:
             return None
         result = _task_dict(task)

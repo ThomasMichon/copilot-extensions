@@ -27,10 +27,13 @@ from . import config as _config
 from .client import DispatchClient, DispatchError
 from .config import (
     Config,
+    client_control_token,
     client_token,
     client_url,
     failover_machine,
     has_live_local_coordinator,
+    producer_capability as producer_capability_value,
+    shared_control_token,
     shared_token,
     shared_url,
 )
@@ -206,9 +209,25 @@ def _client(args: argparse.Namespace, *, ensure: bool = True) -> DispatchClient:
                 file=sys.stderr,
             )
             raise SystemExit(2) from exc
-        return DispatchClient(tunnel.base_url, token=None, tunnel=tunnel)
+        return DispatchClient(
+            tunnel.base_url,
+            token=None,
+            control_token=(
+                getattr(args, "control_token", None) or client_control_token()
+            ),
+            tunnel=tunnel,
+        )
     url, token = _resolve_client_target(args)
-    return DispatchClient(url, token=token)
+    use_shared_control = bool(getattr(args, "shared", False)) or (
+        not getattr(args, "url", None)
+        and shared_url() is not None
+        and url == shared_url()
+    )
+    if use_shared_control:
+        control = getattr(args, "control_token", None) or shared_control_token()
+    else:
+        control = getattr(args, "control_token", None) or client_control_token()
+    return DispatchClient(url, token=token, control_token=control)
 
 
 _AUTOSTART_ENV_OPT_OUT = "AGENT_DISPATCH_NO_AUTOSTART"
@@ -388,6 +407,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         port=args.port or base.port,
         db_path=args.db or base.db_path,
         token=args.token or base.token,
+        control_token=getattr(args, "control_token", None) or base.control_token,
     )
     serve(cfg, passive=bool(getattr(args, "passive", False)))
     return 0
@@ -706,8 +726,66 @@ def _cmd_create(args: argparse.Namespace) -> int:
     if remote_dispatch.is_cross_machine(args):
         return _dispatch_cross_machine(args, repo)
     payload_inline = args.payload_inline
-    if args.payload_file:
+    if args.remote_create_envelope:
+        if args.payload_file or args.payload_inline is not None:
+            print(
+                "agent-dispatch create: --remote-create-envelope cannot be "
+                "combined with --payload-file/--payload-inline",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            envelope = json.loads(
+                _read_payload_file(args.remote_create_envelope)
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"agent-dispatch create: invalid remote create envelope: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        if (
+            not isinstance(envelope, dict)
+            or set(envelope) != {"payload", "producer_capability"}
+            or (
+                envelope["payload"] is not None
+                and not isinstance(envelope["payload"], str)
+            )
+            or not isinstance(envelope["producer_capability"], str)
+            or not envelope["producer_capability"]
+        ):
+            print(
+                "agent-dispatch create: remote create envelope must contain "
+                "exactly payload (string or null) and producer_capability "
+                "(non-empty string)",
+                file=sys.stderr,
+            )
+            return 2
+        payload_inline = envelope["payload"]
+        args.producer_capability = envelope["producer_capability"]
+    elif args.payload_file:
         payload_inline = _read_payload_file(args.payload_file)
+    producer_capability = args.producer_capability
+    producer_tuple_without_capability = all(
+        value is not None
+        for value in (
+            args.source,
+            args.producer_id,
+            args.producer_generation,
+            args.producer_request_id,
+        )
+    )
+    if producer_capability is None and producer_tuple_without_capability:
+        producer_capability = producer_capability_value()
+    producer_fence_requested = any(
+        value is not None
+        for value in (
+            args.producer_id,
+            args.producer_generation,
+            producer_capability,
+            args.producer_request_id,
+        )
+    )
     claim_as = None
     if getattr(args, "claim", False):
         claim_as = _owner_from_identity(args)
@@ -738,6 +816,15 @@ def _cmd_create(args: argparse.Namespace) -> int:
             origin_ref=args.origin_ref,
             evaluator_ref=args.evaluator_ref,
             dedup_key=args.dedup_key,
+            producer_scope=(
+                {"repo": repo, "source": args.source}
+                if producer_fence_requested
+                else None
+            ),
+            producer_id=args.producer_id,
+            producer_generation=args.producer_generation,
+            producer_capability=producer_capability,
+            producer_request_id=args.producer_request_id,
             goal=args.goal,
             done_criteria=args.done_criteria,
             not_before=args.not_before,
@@ -751,6 +838,32 @@ def _cmd_create(args: argparse.Namespace) -> int:
     if args.spawn and not args.proposed:
         _spawn_worker_for(args, task)
     return _emit(_enrich(task))
+
+
+def _cmd_producer_fence(args: argparse.Namespace) -> int:
+    """Inspect or atomically hand create authority to a producer generation."""
+    repo = _scope_repo(args)
+    if not repo:
+        print(
+            "agent-dispatch producer-fence: could not resolve the repo lane; "
+            "run inside a repo or pass --repo",
+            file=sys.stderr,
+        )
+        return 2
+    with _client(args) as c:
+        if args.producer_fence_command == "status":
+            return _emit(c.producer_scope_status(repo, args.source))
+        if args.producer_fence_command == "handoff":
+            return _emit(
+                c.handoff_producer_scope(
+                    repo,
+                    args.source,
+                    producer_id=args.producer_id,
+                    expected_generation=args.expected_generation,
+                    required_label=args.required_label,
+                )
+            )
+    return 2
 
 
 def _cmd_propose(args: argparse.Namespace) -> int:
@@ -1069,8 +1182,9 @@ def _cmd_claim(args: argparse.Namespace) -> int:
         )
         return 2
     machine, worktree = _identity(args)
-    repo = _scope_repo(args)
-    if not repo:
+    all_repos = bool(getattr(args, "all_repos", False))
+    repo = None if all_repos else _scope_repo(args)
+    if not all_repos and not repo:
         print(_REPO_UNRESOLVED, file=sys.stderr)
         return 2
     with _client(args) as c:
@@ -1078,6 +1192,7 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             worker_id=args.worker_id,
             capabilities=args.capability or [],
             repo=repo,
+            all_repos=all_repos,
             machine=machine,
             worktree=worktree,
             task_id=task_id,
@@ -2564,7 +2679,11 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         make_redrive_sender,
     )
 
-    repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
+    all_repos = bool(getattr(args, "all_repos", False))
+    repo = None if all_repos else _scope_repo(args)
+    if not all_repos and not repo:
+        print(_REPO_UNRESOLVED, file=sys.stderr)
+        return 2
     pool = [h for h in (getattr(args, "pool", "") or "").split(",") if h.strip()]
     # Embody backend default is HEADLESS: a dispatched/supervised task is a
     # self-contained, autonomous body that needs no human attach, and headless
@@ -2601,6 +2720,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             origin=origin,
             headless=fleet_headless,
             agent=getattr(args, "headless_agent", None) or "task-worker",
+            all_repos=all_repos,
             verify_timeout=getattr(args, "verify_timeout", 0) or 0,
         )
         spawn_fn = fleet
@@ -2636,9 +2756,12 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         headless_spawn = make_headless_spawn(
             agent=getattr(args, "headless_agent", None) or "task-worker",
             route=route,
+            all_repos=all_repos,
         )
         embody_spawn = make_embody_spawn(
-            verify_timeout=getattr(args, "verify_timeout", 0) or 0, route=route
+            verify_timeout=getattr(args, "verify_timeout", 0) or 0,
+            route=route,
+            all_repos=all_repos,
         )
         if backend == "cli":
             # CLI-default lane: headless is the per-label opt-in.
@@ -3410,6 +3533,10 @@ def _create_args_parent() -> argparse.ArgumentParser:
              "automatically); '-' reads from stdin",
     )
     cp.add_argument(
+        "--remote-create-envelope",
+        help=argparse.SUPPRESS,
+    )
+    cp.add_argument(
         "--target-machine",
         help="route the task to this machine. With `--spawn --spawn-backend "
              "embody` for another machine, dispatch runs there over the SSH "
@@ -3421,6 +3548,24 @@ def _create_args_parent() -> argparse.ArgumentParser:
     cp.add_argument("--origin-ref")
     cp.add_argument("--evaluator-ref")
     cp.add_argument("--dedup-key")
+    cp.add_argument(
+        "--producer-id",
+        help="selected producer metadata for --producer-generation",
+    )
+    cp.add_argument(
+        "--producer-generation",
+        type=int,
+        help="current create-authority generation for the producer scope",
+    )
+    cp.add_argument(
+        "--producer-capability",
+        help="opaque current-generation capability "
+        "(default: AGENT_DISPATCH_PRODUCER_CAPABILITY)",
+    )
+    cp.add_argument(
+        "--producer-request-id",
+        help="mandatory idempotency identity for a managed producer create",
+    )
     cp.add_argument(
         "--goal",
         help="durable objective the worker loops toward across turns/embodiments "
@@ -3470,6 +3615,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--url", help="coordinator base URL (default: AGENT_DISPATCH_URL or config)"
     )
     parser.add_argument("--token", help="bearer token (default: AGENT_DISPATCH_TOKEN)")
+    parser.add_argument(
+        "--control-token",
+        help="separate managed-producer control bearer "
+        "(default: AGENT_DISPATCH_CONTROL_TOKEN)",
+    )
     parser.add_argument(
         "--shared", action="store_true",
         help="target the SHARED/elected coordinator (AGENT_DISPATCH_SHARED_URL; "
@@ -3601,10 +3751,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--task", help="alias for the positional task id (back-compat)",
     )
-    p.add_argument(
+    claim_scope = p.add_mutually_exclusive_group()
+    claim_scope.add_argument(
         "--repo",
         help="lane to claim from (local name or remote URL). Default: the calling "
              "repo. A worker only claims tasks in its own repo's lane.",
+    )
+    claim_scope.add_argument(
+        "--all-repos",
+        action="store_true",
+        help="administrative mode: claim across every repo lane explicitly",
     )
     p.add_argument("--lease-seconds", type=int)
     p.add_argument(
@@ -4188,8 +4344,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="embody spawn supervisor: turn queued (label-gated) tasks into host "
              "embody autopilots, exactly once each, via atomic spawn reservations",
     )
-    p.add_argument("--repo", help="lane to supervise (default: the calling repo)")
-    p.add_argument(
+    supervise_scope = p.add_mutually_exclusive_group()
+    supervise_scope.add_argument(
+        "--repo", help="lane to supervise (default: the calling repo)"
+    )
+    supervise_scope.add_argument(
         "--all-repos", action="store_true", help="supervise every lane (no repo scope)"
     )
     p.add_argument(
@@ -4484,6 +4643,37 @@ def build_parser() -> argparse.ArgumentParser:
     rp.set_defaults(func=_cmd_reservations)
 
     p = sub.add_parser(
+        "producer-fence",
+        help="inspect or atomically hand off generation-managed task creation",
+    )
+    fence_sub = p.add_subparsers(dest="producer_fence_command", required=True)
+    fp = fence_sub.add_parser(
+        "status", help="inspect one exact repo+source producer scope"
+    )
+    fp.add_argument(
+        "--repo",
+        help="canonical repo lane (default: the calling repo)",
+    )
+    fp.add_argument("--source", required=True)
+    fp.set_defaults(func=_cmd_producer_fence)
+    fp = fence_sub.add_parser(
+        "handoff",
+        help="retire generation N and activate N+1 for one selected producer",
+    )
+    fp.add_argument(
+        "--repo",
+        help="canonical repo lane (default: the calling repo)",
+    )
+    fp.add_argument("--source", required=True)
+    fp.add_argument("--producer-id", required=True)
+    fp.add_argument("--expected-generation", required=True, type=int)
+    fp.add_argument(
+        "--required-label",
+        help="immutable label requirement set on initial scope activation",
+    )
+    fp.set_defaults(func=_cmd_producer_fence)
+
+    p = sub.add_parser(
         "federation",
         help="federation runtime: register presence + drive the fenced-epoch "
              "coordinator lease over the rendezvous directory (hosted backend)",
@@ -4721,7 +4911,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except DispatchError as exc:
-        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        detail = exc.as_dict()
+        if detail.get("code", "").startswith("producer_"):
+            json.dump({"error": detail}, sys.stderr, sort_keys=True)
+            sys.stderr.write("\n")
+        else:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
         return 1
     except (ConnectionError, OSError) as exc:
         print(f"agent-dispatch: cannot reach coordinator: {exc}", file=sys.stderr)

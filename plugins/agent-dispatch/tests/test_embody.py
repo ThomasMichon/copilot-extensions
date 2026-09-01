@@ -66,6 +66,19 @@ def test_autopilot_prompt_pins_cross_repo_task_lane():
     assert "agent-dispatch list --repo github.com/o/n" in prompt
 
 
+def test_autopilot_prompt_carries_explicit_all_repos_claim_mode():
+    prompt = embody.autopilot_worker_prompt(
+        "abc123",
+        worker_id="w9",
+        all_repos=True,
+    )
+    assert (
+        "agent-dispatch claim --task abc123 --evaluation --all-repos"
+        in prompt
+    )
+    assert "agent-dispatch list --all-repos" in prompt
+
+
 def test_autopilot_prompt_carries_goal_loop_contract():
     prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9")
     # The seed reads the durable goal + done-criteria + prior progress log and

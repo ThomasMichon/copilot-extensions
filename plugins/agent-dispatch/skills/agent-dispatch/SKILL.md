@@ -200,6 +200,9 @@ so you pass nothing:
   `find`, and `sweep` are lane-scoped by default; `inbox` is the intentional
   machine-scoped, cross-lane picker view, and `supervise --all-repos` is an
   explicit service opt-in.
+- **Claim fails closed without a lane.** Normal CLI, REST, and MCP claims require
+  an explicit or CWD/header-resolved repo. Only an intentional coordinator-wide
+  supervisor or administrator sets explicit `all_repos=true` / `--all-repos`.
 - **Hybrid keys.** The wire/DB stores a device-independent **canonical remote**
   (so one shared coordinator keys every machine the same); the CLI lets you
   *type* and *reads back* the local repo **name** (resolved through the
@@ -435,6 +438,68 @@ genuinely atomic work.
 
 The coordinator only owns the queue; anything that *creates* tasks is a
 **producer**. Two ship in-box, each driven by a declarative JSON spec:
+
+**Quiesce and hand creation authority over with producer fences.** A managed
+scope is permanently one canonical repo lane + exact task `--source`. An
+optional immutable `--required-label` binds the protected pool back to that
+same source: a task carrying the label cannot evade the fence through an
+alternate or omitted source, and a task using the source cannot omit the
+label. Label ownership is coordinator-global: no other repo+source scope may
+own the same label, and tasks carrying it in another repo are rejected.
+Unlabeled work under another source remains ordinary queue work, is not
+eligible for the protected label pool, and is not authorized work from that
+managed producer. The coordinator requires a separate
+`AGENT_DISPATCH_CONTROL_TOKEN` for every transition; ordinary client auth and a
+caller-asserted producer id do not grant authority. The control token is a
+superset queue credential, so prefer its environment setting (or the shared
+token-command setting) over `--control-token`, which can expose it in process
+listings. A successful transition returns a one-time high-entropy capability
+whose hash alone is stored:
+
+```bash
+<agent-dispatch catalog argv[0]> producer-fence status \
+  --repo example.com/acme/widget --source scheduled
+<agent-dispatch catalog argv[0]> producer-fence handoff \
+  --repo example.com/acme/widget --source scheduled \
+  --required-label nightly \
+  --producer-id scheduler-a --expected-generation 0
+<agent-dispatch catalog argv[0]> create "Run nightly work" \
+  --repo example.com/acme/widget \
+  --source scheduled --label nightly \
+  --producer-id scheduler-a --producer-generation 1 \
+  --producer-request-id scheduled:nightly:<occurrence> \
+  --dedup-key scheduled:nightly:<occurrence>
+```
+
+`expected-generation=0` activates generation 1 on an unmanaged scope. Every
+later handoff retires N permanently and activates N+1 for exactly one producer.
+Managed scopes cannot be unmanaged or reopened; use a new source identity to
+retire a production domain. Every managed create supplies the returned
+capability (prefer `AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND`; the raw
+`AGENT_DISPATCH_PRODUCER_CAPABILITY` is fallback) plus a distinct
+`producer_request_id`. Capability lookup is used only when the rest of
+the producer fence tuple is present, so ordinary creates are unaffected by an
+ambient capability. An accepted exact request retry first proves the named
+generation's capability, then returns the same task after completion or
+retirement; invalid or missing capability cannot retrieve it. A new request id
+may use a dedup key only after ordinary terminal release has made that key
+available; it never adopts another request's row. Claim defensively
+revalidates protected-label task provenance, leaving legacy or malformed
+injected rows unclaimable. `not_before` and `claim_as` are excluded from the
+canonical request hash. A lost handoff response may be retried under control
+authority for an idempotent `replayed=true` result, but no capability is
+revealed again; recover by transitioning to N+2. Structured HTTP/MCP/CLI
+rejections and bounded transition/create events contain no task content or
+secrets.
+
+Before activation or handoff, the coordinator proves the required-label scope
+is quiescent. Any nonterminal task carrying the label without matching accepted
+fence metadata returns `scope_not_quiescent` with bounded ids and status counts;
+no capability is issued and no generation changes. A new managed request that
+collides with any task other than its own accepted replay is rejected as
+`unfenced_dedup_conflict` before request-ledger insertion. Claim-time fence
+mismatches remain unclaimable and emit a bounded, fingerprinted
+`producer.claim_rejected` event once per observed mismatch.
 
 - **`agent-dispatch schedule tick <spec>`** <!-- marketplace-isolation: allow scheduler-management -->
   (and
@@ -833,16 +898,19 @@ queued for any worker to claim. agent-dispatch stays fully usable standalone.
 
 `<agent-dispatch catalog argv[0]> mcp` runs a local **stdio MCP server** exposing the same
 operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_sweep`,
+`dispatch_producer_scope_status`, `dispatch_producer_scope_handoff`,
 `dispatch_claim`, `dispatch_start`, `dispatch_complete`, `dispatch_payload`,
 `dispatch_result`,
 `dispatch_worktree_status`, ...). It resolves your `machine`/`worktree` identity
 from the working directory just like the CLI, so `dispatch_claim` /
-`dispatch_worktree_status` are auto-scoped with no arguments. Point a sub-agent's
+`dispatch_worktree_status` are auto-scoped with no arguments when the CWD
+resolves both identity and repo. Point a sub-agent's
 `.mcp.json` at
 `{"command": "agent-dispatch", "args": ["mcp"]}` <!-- marketplace-isolation: allow mcp-server-startup -->
 (needs the `mcp` extra). The coordinator also hosts the **same tools over HTTP at `/mcp`** for
-remote clients that supply identity via `X-Agent-Machine`/`X-Agent-Worktree`
-headers. The CLI and MCP tools are interchangeable — use whichever fits.
+remote clients that supply identity and lane via
+`X-Agent-Machine`/`X-Agent-Worktree`/`X-Agent-Repo` headers. The CLI and MCP
+tools are interchangeable — use whichever fits.
 `dispatch_complete` accepts an optional JSON object/array `result` argument and
 returns it in the completed task record; `dispatch_result` retrieves it later.
 
@@ -851,16 +919,24 @@ returns it in the completed task record; `dispatch_result` retrieves it later.
 | Env var | Role |
 |---------|------|
 | `AGENT_DISPATCH_URL` | coordinator base URL the CLI talks to (point at a remote host) |
-| `AGENT_DISPATCH_TOKEN` | bearer token (client sends, server validates) |
+| `AGENT_DISPATCH_TOKEN` | ordinary bearer token (client sends, server validates) |
+| `AGENT_DISPATCH_CONTROL_TOKEN` | superset queue bearer required to activate/transition managed producer scopes; prefer env over argv |
+| `AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND` | preferred command that prints the current producer capability on demand |
+| `AGENT_DISPATCH_PRODUCER_CAPABILITY` | raw fallback capability for one selected producer generation's managed creates; applied only with the rest of the fence tuple |
 | `AGENT_DISPATCH_SHARED_URL` | shared/elected coordinator endpoint for cross-machine dispatch (the hosted coordinator); used only with `--shared` |
 | `AGENT_DISPATCH_SHARED_TOKEN` | bearer for the shared coordinator (independent of `AGENT_DISPATCH_TOKEN`) |
+| `AGENT_DISPATCH_SHARED_CONTROL_TOKEN` | managed-producer control bearer for the shared coordinator |
+| `AGENT_DISPATCH_SHARED_TOKEN_COMMAND` / `AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND` | command-backed shared credentials that avoid argv exposure |
 | `AGENT_DISPATCH_HOST` / `AGENT_DISPATCH_PORT` | where the coordinator binds (server side) |
 | `AGENT_DISPATCH_DB` | SQLite queue file (server side) |
 | `AGENT_DISPATCH_GC_INTERVAL` | liveness garbage-collection cadence in seconds (server side; `0` disables). `AGENT_DISPATCH_SWEEP_INTERVAL` is a deprecated alias. |
 
 All CLI output is JSON on stdout, so verbs compose with `jq` and other tooling.
-Global flags `--url` / `--token` override the env per-invocation; `--shared`
+Global flags `--url` / `--token` / `--control-token` override the env per
+invocation; `--shared`
 routes the command at the shared/elected coordinator instead of the local one.
+Bearer scheme matching is case-insensitive. Prefer env or token-command
+configuration to token flags where process arguments may be observable.
 
 ## Gotchas
 

@@ -322,6 +322,345 @@ def test_parser_create_goal_flags_default_none():
     assert args.done_criteria is None
 
 
+def test_parser_create_producer_fence_flags():
+    args = build_parser().parse_args(
+        [
+            "create",
+            "bounded",
+            "--source",
+            "scheduled",
+            "--label",
+            "nightly",
+            "--producer-id",
+            "scheduler-a",
+            "--producer-generation",
+            "4",
+            "--producer-capability",
+            "opaque-capability",
+            "--producer-request-id",
+            "request-4",
+        ]
+    )
+    assert args.producer_id == "scheduler-a"
+    assert args.producer_generation == 4
+    assert args.producer_capability == "opaque-capability"
+    assert args.producer_request_id == "request-4"
+
+
+def test_producer_fence_status_and_handoff_cli(monkeypatch, capsys):
+    import json
+
+    calls = []
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def producer_scope_status(self, repo, source):
+            calls.append(("status", repo, source))
+            return {"managed": False, "scope": {"repo": repo, "source": source}}
+
+        def handoff_producer_scope(self, repo, source, **kwargs):
+            calls.append(("handoff", repo, source, kwargs))
+            return {
+                "managed": True,
+                "scope": {"repo": repo, "source": source},
+                "current_generation": kwargs["expected_generation"] + 1,
+                "active_producer": kwargs["producer_id"],
+            }
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo",
+        lambda _args: "example.com/acme/widget",
+    )
+
+    status = _args(["producer-fence", "status", "--source", "scheduled"])
+    assert status.func(status) == 0
+    assert json.loads(capsys.readouterr().out)["managed"] is False
+
+    handoff = _args(
+        [
+            "producer-fence",
+            "handoff",
+            "--source",
+            "scheduled",
+            "--required-label",
+            "nightly",
+            "--producer-id",
+            "scheduler-b",
+            "--expected-generation",
+            "1",
+        ]
+    )
+    assert handoff.func(handoff) == 0
+    assert json.loads(capsys.readouterr().out)["current_generation"] == 2
+    assert calls[-1][-1] == {
+        "producer_id": "scheduler-b",
+        "expected_generation": 1,
+        "required_label": "nightly",
+    }
+
+
+def test_create_cli_sends_producer_fence(monkeypatch, capsys):
+    import json
+
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def create(self, title, **kwargs):
+            seen.update(title=title, **kwargs)
+            return {"id": "task-1", "status": "queued", "owner": None}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo", lambda _args: "example.com/acme/widget"
+    )
+    args = _args(
+        [
+            "create",
+            "bounded",
+            "--source",
+            "scheduled",
+            "--label",
+            "nightly",
+            "--producer-id",
+            "scheduler-a",
+            "--producer-generation",
+            "1",
+            "--producer-capability",
+            "opaque-capability",
+            "--producer-request-id",
+            "request-1",
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "task-1"
+    assert seen["producer_scope"] == {
+        "repo": "example.com/acme/widget",
+        "source": "scheduled",
+    }
+    assert seen["producer_id"] == "scheduler-a"
+    assert seen["producer_generation"] == 1
+    assert seen["producer_capability"] == "opaque-capability"
+    assert seen["producer_request_id"] == "request-1"
+
+
+def test_create_cli_ignores_capability_env_for_unmanaged_create(
+    monkeypatch, capsys
+):
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def create(self, title, **kwargs):
+            seen.update(title=title, **kwargs)
+            return {"id": "task-1", "status": "queued", "owner": None}
+
+    monkeypatch.setenv(
+        "AGENT_DISPATCH_PRODUCER_CAPABILITY", "ambient-capability"
+    )
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo",
+        lambda _args: "example.com/acme/widget",
+    )
+
+    args = _args(["create", "ordinary"])
+    assert args.func(args) == 0
+    assert seen["producer_scope"] is None
+    assert seen["producer_capability"] is None
+    capsys.readouterr()
+
+
+def test_create_cli_uses_capability_env_for_complete_fence_tuple(
+    monkeypatch, capsys
+):
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def create(self, title, **kwargs):
+            seen.update(title=title, **kwargs)
+            return {"id": "task-1", "status": "queued", "owner": None}
+
+    monkeypatch.setenv(
+        "AGENT_DISPATCH_PRODUCER_CAPABILITY", "ambient-capability"
+    )
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo",
+        lambda _args: "example.com/acme/widget",
+    )
+
+    args = _args(
+        [
+            "create",
+            "bounded",
+            "--source",
+            "scheduled",
+            "--producer-id",
+            "scheduler-a",
+            "--producer-generation",
+            "1",
+            "--producer-request-id",
+            "request-1",
+        ]
+    )
+    assert args.func(args) == 0
+    assert seen["producer_scope"] == {
+        "repo": "example.com/acme/widget",
+        "source": "scheduled",
+    }
+    assert seen["producer_capability"] == "ambient-capability"
+    capsys.readouterr()
+
+
+def test_create_cli_prefers_capability_command_resolver(monkeypatch, capsys):
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def create(self, title, **kwargs):
+            seen.update(title=title, **kwargs)
+            return {"id": "task-1", "status": "queued", "owner": None}
+
+    monkeypatch.setattr(
+        "agent_dispatch.__main__.producer_capability_value",
+        lambda: "fetched-capability",
+    )
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo",
+        lambda _args: "example.com/acme/widget",
+    )
+
+    args = _args(
+        [
+            "create",
+            "bounded",
+            "--source",
+            "scheduled",
+            "--producer-id",
+            "scheduler-a",
+            "--producer-generation",
+            "1",
+            "--producer-request-id",
+            "request-1",
+        ]
+    )
+    assert args.func(args) == 0
+    assert seen["producer_capability"] == "fetched-capability"
+    capsys.readouterr()
+
+
+def test_cli_emits_structured_producer_rejection(monkeypatch, capsys):
+    import json
+
+    from agent_dispatch import __main__ as m
+    from agent_dispatch.client import DispatchError
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def producer_scope_status(self, _repo, _source):
+            raise DispatchError(
+                409,
+                {
+                    "code": "producer_fence_rejected",
+                    "operation": "status",
+                    "reason": "generation_mismatch",
+                    "message": "stale",
+                    "retryable": False,
+                },
+            )
+
+    monkeypatch.setattr(m, "_client", lambda _args: FakeClient())
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: "example.com/acme/widget")
+
+    assert m.main(["producer-fence", "status", "--source", "scheduled"]) == 1
+    error = json.loads(capsys.readouterr().err)
+    assert error["error"]["reason"] == "generation_mismatch"
+
+
+def test_create_cli_reads_remote_capability_envelope(monkeypatch, capsys):
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def create(self, title, **kwargs):
+            seen.update(title=title, **kwargs)
+            return {"id": "task-1", "status": "queued", "owner": None}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo",
+        lambda _args: "example.com/acme/widget",
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._read_payload_file",
+        lambda _path: (
+            '{"payload":"the brief",'
+            '"producer_capability":"opaque-capability"}'
+        ),
+    )
+    args = _args(
+        [
+            "create",
+            "bounded",
+            "--source",
+            "scheduled",
+            "--producer-id",
+            "scheduler-a",
+            "--producer-generation",
+            "1",
+            "--producer-request-id",
+            "request-1",
+            "--remote-create-envelope",
+            "-",
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert seen["payload_inline"] == "the brief"
+    assert seen["producer_capability"] == "opaque-capability"
+    capsys.readouterr()
+
+
 def test_parser_claim_flags():
     # The bare positional is now the TASK id (consistent with start/complete/yield);
     # the owner/worker id moved to the explicit --worker/--as flag.
@@ -332,6 +671,7 @@ def test_parser_claim_flags():
     assert args.worker_id is None
     assert args.capability == ["review"]
     assert args.lease_seconds == 60
+    assert args.all_repos is False
 
 
 def test_parser_claim_worker_flag():
@@ -1319,6 +1659,39 @@ def test_claim_positional_is_the_task(monkeypatch, capsys):
     assert args.func(args) == 0
     assert seen["task_id"] == "abc123"
     assert seen["worker_id"] is None  # owner resolves from CWD, not the positional
+    assert seen["repo"] == "repo"
+    assert seen["all_repos"] is False
+
+
+def test_claim_all_repos_uses_explicit_administrative_mode(monkeypatch, capsys):
+    from agent_dispatch import __main__, identity
+
+    seen = {}
+
+    class _C:
+        def claim(self, **kwargs):
+            seen.update(kwargs)
+            return {"id": "abc123", "status": "claimed"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(
+        __main__,
+        "_scope_repo",
+        lambda args: (_ for _ in ()).throw(AssertionError("must not resolve repo")),
+    )
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+
+    args = build_parser().parse_args(["claim", "abc123", "--all-repos"])
+    assert args.func(args) == 0
+    assert seen["repo"] is None
+    assert seen["all_repos"] is True
+    capsys.readouterr()
 
 
 def test_claim_conflicting_task_ids_errors(monkeypatch, capsys):

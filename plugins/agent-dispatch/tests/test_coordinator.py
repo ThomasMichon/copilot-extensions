@@ -17,6 +17,7 @@ from agent_dispatch.client import (
 )
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status
+from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
@@ -80,7 +81,7 @@ def test_client_suspend_resume_release_routes(client, monkeypatch):
         bridge, "resume_steered_owner", lambda *_args, **_kwargs: False
     )
     task = client.create("wait")
-    owner = client.claim(worker_id="worker-1")["owner"]
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
     client.start(task["id"], owner)
     parked = client.suspend(
         task["id"], owner, reason="waiting for an external result"
@@ -111,7 +112,7 @@ def test_client_resume_can_atomically_adopt_successor_session(
         bridge, "resume_steered_owner", lambda *_args, **_kwargs: False
     )
     task = client.create("continue after handoff")
-    owner = client.claim(worker_id="worker-1")["owner"]
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
     started = client.start(task["id"], owner)
     parked = client.suspend(task["id"], owner, reason="handoff")
 
@@ -138,7 +139,7 @@ def test_client_completes_suspended_task_without_wake(client, monkeypatch):
 
     monkeypatch.setattr(bridge, "resume_steered_owner", unexpected_wake)
     task = client.create("wait for condition")
-    owner = client.claim(worker_id="worker-1")["owner"]
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
     client.start(task["id"], owner)
     client.suspend(task["id"], owner, reason="condition pending")
 
@@ -175,7 +176,9 @@ def test_get_missing_is_404(api):
 
 def test_full_lifecycle_over_http(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    claimed = api.post("/claim", json={"worker_id": "w1"}).json()
+    claimed = api.post(
+        "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
+    ).json()
     assert claimed["id"] == tid and claimed["status"] == Status.CLAIMED
     started = api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"}).json()
     assert started["status"] == Status.STARTED
@@ -194,6 +197,7 @@ def test_structured_result_is_full_on_show_bounded_in_bulk_and_retrievable(api):
         "/claim",
         json={
             "worker_id": owner,
+            "repo": TEST_REPO,
             "machine": "m1",
             "worktree": "wt-1",
         },
@@ -243,7 +247,7 @@ def test_structured_result_is_full_on_show_bounded_in_bulk_and_retrievable(api):
 
 def test_invalid_http_result_leaves_task_started(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    api.post("/claim", json={"worker_id": "w1"})
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
 
     response = api.post(
@@ -261,7 +265,7 @@ def test_invalid_http_result_leaves_task_started(api):
 
 def test_oversized_http_result_leaves_task_started(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    api.post("/claim", json={"worker_id": "w1"})
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
 
     response = api.post(
@@ -290,7 +294,7 @@ def test_oversized_http_result_leaves_task_started(api):
 )
 def test_invalid_result_json_shapes_are_400_and_non_terminal(api, content):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    api.post("/claim", json={"worker_id": "w1"})
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
 
     response = api.post(
@@ -305,7 +309,7 @@ def test_invalid_result_json_shapes_are_400_and_non_terminal(api, content):
 
 def test_result_validation_response_omits_rejected_input(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    api.post("/claim", json={"worker_id": "w1"})
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
     sensitive = "do-not-echo-this-value"
 
@@ -333,7 +337,7 @@ def test_non_result_validation_on_complete_remains_422(api):
 
 def test_result_size_validation_response_is_413_and_sanitized(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    api.post("/claim", json={"worker_id": "w1"})
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
     sensitive = "sensitive-prefix-" + ("x" * (64 * 1024))
 
@@ -384,7 +388,7 @@ def test_progress_over_http(api):
     import json
 
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    api.post("/claim", json={"worker_id": "w1"})
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
     r = api.post(
         f"/tasks/{tid}/progress",
@@ -437,7 +441,7 @@ def test_goal_and_progress_log_over_http(api):
     assert r.json()["goal"] == "reach the goal"
     assert r.json()["done_criteria"] == "it is done"
 
-    api.post("/claim", json={"worker_id": "w1"})
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
     api.post(
         f"/tasks/{tid}/progress",
@@ -461,7 +465,9 @@ def test_progress_log_missing_task_is_404(api):
 
 
 def test_claim_empty_returns_null(api):
-    assert api.post("/claim", json={"worker_id": "w1"}).json() is None
+    assert api.post(
+        "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
+    ).json() is None
 
 
 def test_illegal_transition_is_409(api):
@@ -480,15 +486,28 @@ def test_abandon_requires_permission_over_http(api):
 
 def test_proposed_not_claimable_then_approved(api):
     tid = api.post("/tasks", json={"title": "draft", "proposed": True}).json()["id"]
-    assert api.post("/claim", json={"worker_id": "w1"}).json() is None
+    assert api.post(
+        "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
+    ).json() is None
     api.post(f"/tasks/{tid}/approve")
-    assert api.post("/claim", json={"worker_id": "w1"}).json()["id"] == tid
+    assert api.post(
+        "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
+    ).json()["id"] == tid
 
 
 def test_capability_gate_over_http(api):
     api.post("/tasks", json={"title": "log", "requires": ["logger"]})
-    assert api.post("/claim", json={"worker_id": "w1"}).json() is None
-    got = api.post("/claim", json={"worker_id": "w1", "capabilities": ["logger"]}).json()
+    assert api.post(
+        "/claim", json={"worker_id": "w1", "repo": TEST_REPO}
+    ).json() is None
+    got = api.post(
+        "/claim",
+        json={
+            "worker_id": "w1",
+            "repo": TEST_REPO,
+            "capabilities": ["logger"],
+        },
+    ).json()
     assert got is not None
 
 
@@ -549,6 +568,28 @@ def test_claim_is_repo_scoped(api):
     assert again is None  # nothing else in this lane; the widget task is invisible
 
 
+def test_claim_requires_repo_or_explicit_all_repos(api):
+    task = api.post("/tasks", json={"title": "scoped"}).json()
+
+    missing = api.post("/claim", json={"worker_id": "w"})
+    assert missing.status_code == 422
+    assert missing.json()["detail"]["code"] == "claim_scope_required"
+
+    conflicting = api.post(
+        "/claim",
+        json={"worker_id": "w", "repo": TEST_REPO, "all_repos": True},
+    )
+    assert conflicting.status_code == 422
+    assert conflicting.json()["detail"]["code"] == "claim_scope_invalid"
+
+    claimed = api.post(
+        "/claim",
+        json={"worker_id": "admin", "all_repos": True},
+    )
+    assert claimed.status_code == 200
+    assert claimed.json()["id"] == task["id"]
+
+
 # -- auth --------------------------------------------------------------------
 
 
@@ -567,8 +608,8 @@ def test_bearer_auth_enforced(tmp_path):
 def test_client_round_trip(client):
     t = client.create("via client", requires=["review"])
     assert t["status"] == Status.QUEUED
-    assert client.claim("w1") is None  # lacks capability
-    claimed = client.claim("w1", ["review"])
+    assert client.claim("w1", repo=TEST_REPO) is None  # lacks capability
+    claimed = client.claim("w1", ["review"], repo=TEST_REPO)
     assert claimed["id"] == t["id"]
     client.start(t["id"], "w1")
     done = client.complete(t["id"], "w1", result_ref="pr/9")
@@ -586,7 +627,7 @@ def test_client_error_maps_to_dispatch_error(client):
 def test_client_recover(client, monkeypatch):
     monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
     t = client.create("leased")
-    client.claim("m/wt")  # owner is a machine/worktree so liveness resolves
+    client.claim("m/wt", repo=TEST_REPO)  # owner is a machine/worktree so liveness resolves
     assert client.recover()["recovered"] == 1
     assert client.get(t["id"])["status"] == Status.QUEUED
 
@@ -622,7 +663,7 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     assert mutator.health()["subscribers"] >= 1
 
     tid = mutator.create("streamed")["id"]
-    mutator.claim("w1")
+    mutator.claim("w1", repo=TEST_REPO)
     mutator.start(tid, "w1")
     mutator.complete(tid, "w1")
     mutator.complete(tid, "w1", result={"summary": "done"})
@@ -656,16 +697,30 @@ def test_health_reports_zero_subscribers_initially(api):
 def test_claim_by_id_over_http(api):
     api.post("/tasks", json={"title": "a"})
     tid_b = api.post("/tasks", json={"title": "b"}).json()["id"]
-    got = api.post("/claim", json={"worker_id": "w1", "task_id": tid_b}).json()
+    got = api.post(
+        "/claim",
+        json={"worker_id": "w1", "repo": TEST_REPO, "task_id": tid_b},
+    ).json()
     assert got["id"] == tid_b
     # a different specific-id claim for an already-claimed task returns null
-    assert api.post("/claim", json={"worker_id": "w2", "task_id": tid_b}).json() is None
+    assert api.post(
+        "/claim",
+        json={"worker_id": "w2", "repo": TEST_REPO, "task_id": tid_b},
+    ).json() is None
 
 
 def test_mine_over_http(api):
     api.post("/tasks", json={"title": "for-me", "target_worktree": "wt-1"})
     tid = api.post("/tasks", json={"title": "to-own"}).json()["id"]
-    api.post("/claim", json={"machine": "m1", "worktree": "wt-1", "task_id": tid})
+    api.post(
+        "/claim",
+        json={
+            "machine": "m1",
+            "worktree": "wt-1",
+            "repo": TEST_REPO,
+            "task_id": tid,
+        },
+    )
     r = api.get("/tasks/mine", params={"machine": "m1", "worktree": "wt-1"}).json()
     assert any(t["title"] == "for-me" for t in r["assigned"])
     assert any(t["id"] == tid and t["owner"] == "m1/wt-1" for t in r["owned"])
@@ -673,7 +728,15 @@ def test_mine_over_http(api):
 
 def test_claim_composes_owner_from_machine_worktree(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
-    got = api.post("/claim", json={"machine": "m1", "worktree": "wt-1", "task_id": tid}).json()
+    got = api.post(
+        "/claim",
+        json={
+            "machine": "m1",
+            "worktree": "wt-1",
+            "repo": TEST_REPO,
+            "task_id": tid,
+        },
+    ).json()
     assert got["owner"] == "m1/wt-1"
 
 
@@ -748,7 +811,7 @@ def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]
-        assert c.claim(worker_id="m/wt")["id"] == tid
+        assert c.claim(worker_id="m/wt", repo=TEST_REPO)["id"] == tid
         assert c.get(tid)["status"] == Status.CLAIMED
         deadline = time.time() + 5
         while time.time() < deadline:
@@ -773,7 +836,7 @@ def test_gc_disabled_by_default(tmp_path, monkeypatch):
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]
-        c.claim(worker_id="m/wt")
+        c.claim(worker_id="m/wt", repo=TEST_REPO)
         time.sleep(0.5)  # no GC loop running, so nothing requeues on its own
         assert c.get(tid)["status"] == Status.CLAIMED
         assert c.recover()["recovered"] == 1  # manual recover still works
