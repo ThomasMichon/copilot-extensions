@@ -32,10 +32,12 @@ from .config import (
     client_url,
     failover_machine,
     has_live_local_coordinator,
-    producer_capability as producer_capability_value,
     shared_control_token,
     shared_token,
     shared_url,
+)
+from .config import (
+    producer_capability as producer_capability_value,
 )
 from .registrations import RegistrationKind
 
@@ -2345,6 +2347,7 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
                 if logical_ids & registration_logical_ids(direct_registration)
             } | logical_aliases[registration["id"]]
         if command == "inspect":
+            overrides = load_overrides(overrides_path())
             return _emit(
                 {
                     "declaration": str(Path(args.declaration).expanduser().resolve()),
@@ -2395,23 +2398,26 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
             if registration["kind"] == RegistrationKind.EMITTER
         )
         source_override_ids = {source["id"], *aliases[source["id"]]}
-        if any(
-            (overrides.get(override_id) or {}).get("disabled")
-            for override_id in source_override_ids
-        ):
-            raise ValueError(
-                f"reviewer loop is disabled by override on {source['id']!r}"
-            )
-        with _client(args) as side_load_client:
-            return _emit(
-                emitter.run_side_load(
+        def run_when_enabled(current: dict[str, dict]) -> dict:
+            if any(
+                (current.get(override_id) or {}).get("disabled")
+                for override_id in source_override_ids
+            ):
+                raise ValueError(
+                    f"reviewer loop is disabled by override on {source['id']!r}"
+                )
+            with _client(args) as side_load_client:
+                return emitter.run_side_load(
                     side_load_client,
                     source,
                     args.change_ref,
                     current_machine=machine,
                     current_env=env,
                 )
-            )
+
+        return _emit(
+            mutate_overrides(overrides_path(), run_when_enabled)
+        )
     except (DispatchError, OSError, ValueError, emitter.EmitterError) as exc:
         print(f"agent-dispatch reviewer-loop: {exc}", file=sys.stderr)
         return 2
