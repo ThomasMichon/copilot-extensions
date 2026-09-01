@@ -186,7 +186,7 @@ def load_package(
         raise ManifestError(f"{path}: top-level document must be a mapping")
 
     schema = _require(raw, "schema_version", path)
-    if schema not in SUPPORTED_SCHEMA_VERSIONS:
+    if type(schema) is not int or schema not in SUPPORTED_SCHEMA_VERSIONS:
         raise ManifestError(
             f"{path}: unsupported schema_version {schema!r} "
             f"(this engine supports {SUPPORTED_SCHEMA_VERSIONS})"

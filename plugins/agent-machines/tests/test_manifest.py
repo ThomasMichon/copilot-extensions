@@ -41,8 +41,13 @@ def test_gate_match_is_case_insensitive(tmp_path):
     assert not pkg.applies_to("box-2")
 
 
-def test_bad_schema_version_rejected(tmp_path):
-    path = write_package(tmp_path, "d.yaml", base_package(schema_version=99))
+@pytest.mark.parametrize("schema_version", [99, True, 1.0, "2"])
+def test_bad_schema_version_rejected(tmp_path, schema_version):
+    path = write_package(
+        tmp_path,
+        "d.yaml",
+        base_package(schema_version=schema_version),
+    )
     with pytest.raises(ManifestError):
         load_package(path)
 
