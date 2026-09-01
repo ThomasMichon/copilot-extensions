@@ -226,6 +226,24 @@ def test_bootstrap_floor_disable_in_grouped_settings_is_error(tmp_path):
     assert any(f.code == "bootstrap-floor" for f in findings)
 
 
+def test_enabled_plugin_tombstone_requires_schema2(tmp_path):
+    data = base_package(schema_version=1)
+    data["manage"]["copilot.settings.plugins"] = {
+        "disposition": "ensure-present",
+        "values": {"enabledPlugins": {"legacy@example": False}},
+    }
+    package = _pkg(tmp_path, "legacy", data)
+
+    findings = validate([package])
+
+    assert any(
+        finding.code == "schema-capability"
+        and finding.level == "error"
+        and "schema_version 2 is required" in finding.message
+        for finding in findings
+    )
+
+
 def test_bootstrap_floor_marketplace_union(tmp_path):
     data = base_package("a/x", gate=["*"])
     data["manage"]["copilot.settings"]["values"]["extraKnownMarketplaces"] = {

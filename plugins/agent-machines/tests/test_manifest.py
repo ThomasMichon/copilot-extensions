@@ -6,6 +6,7 @@ import pytest
 
 from agent_machines.manifest import (
     ManifestError,
+    SCHEMA_VERSION,
     load_package,
     resolve_for_machine,
 )
@@ -44,6 +45,15 @@ def test_bad_schema_version_rejected(tmp_path):
     path = write_package(tmp_path, "d.yaml", base_package(schema_version=99))
     with pytest.raises(ManifestError):
         load_package(path)
+
+
+def test_legacy_schema_version_remains_readable(tmp_path):
+    path = write_package(tmp_path, "d.yaml", base_package(schema_version=1))
+
+    package = load_package(path)
+
+    assert SCHEMA_VERSION == 2
+    assert package.schema_version == 1
 
 
 def test_bad_disposition_rejected(tmp_path):

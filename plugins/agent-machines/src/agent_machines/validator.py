@@ -234,6 +234,38 @@ def check_bootstrap_floor(packages: list[RequirementPackage]) -> list[Finding]:
     return findings
 
 
+def check_plugin_tombstone_schema(
+    packages: list[RequirementPackage],
+) -> list[Finding]:
+    """Require schema v2 before a package relies on enabled-plugin tombstones."""
+    findings: list[Finding] = []
+    for pkg in packages:
+        if pkg.schema_version >= 2:
+            continue
+        for values in _managed_values_under(pkg, "copilot.settings"):
+            if not isinstance(values, dict):
+                continue
+            enabled_plugins = values.get("enabledPlugins")
+            if not isinstance(enabled_plugins, dict):
+                continue
+            tombstones = sorted(
+                str(name)
+                for name, enabled in enabled_plugins.items()
+                if enabled is False
+            )
+            if tombstones:
+                findings.append(
+                    Finding(
+                        "error",
+                        "schema-capability",
+                        f"package '{pkg.name}' uses enabled-plugin tombstones "
+                        f"under schema_version {pkg.schema_version}; "
+                        f"schema_version 2 is required: {', '.join(tombstones)}",
+                    )
+                )
+    return findings
+
+
 def check_resource_conflicts(
     packages: list[RequirementPackage], machine: str = "", plat: str | None = None
 ) -> list[Finding]:
@@ -257,6 +289,7 @@ def validate(
     """Run every manifest-only validation rule over the resolved package union."""
     findings: list[Finding] = []
     findings.extend(check_scalar_conflicts(packages))
+    findings.extend(check_plugin_tombstone_schema(packages))
     findings.extend(check_bootstrap_floor(packages))
     findings.extend(check_resource_conflicts(packages, machine, plat))
     return findings

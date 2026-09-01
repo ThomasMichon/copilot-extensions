@@ -80,7 +80,7 @@ across folders. The legacy `.github/machine-state/` path is consulted only when
 Minimal shape:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 package: <owner>/<name>            # e.g. myrepo/copilot-defaults
 gate: [this-machine, other-machine]  # omit or ["*"] for all machines
 aliases:
@@ -106,7 +106,8 @@ exclude:                           # capture must never serialize these
 `enforce`; maps/lists (`enabledPlugins`, `permissions`) are `ensure-present` so
 several repos compose by union. Within `enabledPlugins`, a declared `false` is
 an authoritative per-plugin tombstone while `true` remains additive and
-preserves an operator opt-out. Do not explicitly disable bootstrap-critical
+preserves an operator opt-out. Tombstones require `schema_version: 2`, so older
+exact-v1 runtimes reject the package before applying it. Do not explicitly disable bootstrap-critical
 plugins (`agent-worktrees`, `agent-machines`); if a package manages
 `extraKnownMarketplaces`, include the bootstrap-critical `copilot-extensions`
 marketplace or the validator errors.

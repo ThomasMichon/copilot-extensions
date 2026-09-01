@@ -152,7 +152,7 @@ is a separate explicit edit.
 A package under `.agent-machines/all/` has this shape:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 package: myrepo/copilot-defaults
 gate: [my-box]                         # omit or ["*"] for all machines
 manage:
@@ -213,7 +213,9 @@ Within an `ensure-present` `enabledPlugins` map, `true` remains an additive
 floor and preserves an existing operator `false`. A declared `false` is a
 per-plugin tombstone: it authoritatively disables that one identity while
 preserving every undeclared operator plugin. Tombstones cannot disable
-bootstrap-critical plugins.
+bootstrap-critical plugins. Packages that rely on tombstones must declare
+`schema_version: 2`; older exact-v1 runtimes reject them before restore. Current
+runtimes continue to read legacy v1 packages that do not use tombstones.
 
 Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
 `ignore`, `exclude`, `prune`, and `prerequisite-check`. Current restore applies
