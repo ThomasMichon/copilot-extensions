@@ -73,6 +73,12 @@ RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
 #: deterministically.
 TurnStateFn = Callable[[str, "str | None"], "str | None"]
 
+#: Stop a local headless bridge session while preserving it for later resume.
+LocalColdFn = Callable[[str], bool]
+
+#: Stop a remote fleet bridge session while preserving it for later resume.
+FleetColdFn = Callable[[str, str], bool]
+
 _TERMINAL = frozenset({Status.COMPLETED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 
@@ -335,6 +341,18 @@ def _default_local_body_verdict(bridge_session_id: str) -> str:
     return embody.local_body_verdict(bridge_session_id)
 
 
+def _default_local_cold(bridge_session_id: str) -> bool:
+    from . import bridge
+
+    return bridge.stop_worker(bridge_session_id)
+
+
+def _default_fleet_cold(host: str, bridge_session_id: str) -> bool:
+    from . import embody
+
+    return embody.stop_fleet_body(host, bridge_session_id)
+
+
 def _tracking():
     """Lazy accessor for the ``tracking`` module (its verdict constants)."""
     from . import tracking
@@ -518,6 +536,8 @@ class Supervisor:
         fleet_verdict_fn: FleetVerdictFn | None = None,
         fleet_activity_fn: FleetActivityFn | None = None,
         local_body_verdict_fn: LocalBodyVerdictFn | None = None,
+        local_cold_fn: LocalColdFn | None = None,
+        fleet_cold_fn: FleetColdFn | None = None,
         nudge_fn: NudgeFn | None = None,
         redrive_fn: RedriveFn | None = None,
         turn_state_fn: TurnStateFn | None = None,
@@ -575,6 +595,10 @@ class Supervisor:
         self.local_body_verdict_fn = (
             local_body_verdict_fn or _default_local_body_verdict
         )
+        self.local_cold_fn = local_cold_fn or _default_local_cold
+        self.fleet_cold_fn = fleet_cold_fn or _default_fleet_cold
+        self._cooled_reservations: set[str] = set()
+        self._cold_retry_after: dict[str, float] = {}
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
         #: Re-drive sender used when a spawned CLI body is alive but still has
@@ -638,15 +662,24 @@ class Supervisor:
                 continue  # deferred: not due yet
             if t.get("awaiting_steer"):
                 continue  # blocked on the operator; Confirm clears this to wake
-            if self.labels is not None and not (self.labels & set(t.get("labels") or [])):
+            if not self._matches_pool(t):
                 continue  # not opted in
             out.append(t)
         out.sort(key=lambda t: t.get("created_at") or 0)
         return out
 
+    def _matches_pool(self, task: dict) -> bool:
+        if self.repo is not None and task.get("repo") != self.repo:
+            return False
+        if self.labels is not None and not (
+            self.labels & set(task.get("labels") or [])
+        ):
+            return False
+        return True
+
     def _active_reservations(self) -> list[dict]:
-        reservations = self.client.list_reservations(
-            state=f"{SpawnState.RESERVING},{SpawnState.SPAWNED}", limit=500
+        reservations = self._pool_reservations(
+            state=f"{SpawnState.RESERVING},{SpawnState.SPAWNED}"
         )
         active: list[dict] = []
         for reservation in reservations:
@@ -655,9 +688,162 @@ class Supervisor:
             except DispatchError:
                 active.append(reservation)
                 continue
-            if task.get("status") != Status.SUSPENDED:
+            if (
+                self._matches_pool(task)
+                and self._reservation_has_live_process(reservation, task)
+            ):
                 active.append(reservation)
         return active
+
+    def _pool_reservations(
+        self,
+        *,
+        state: str,
+        resume_requested: bool | None = None,
+    ) -> list[dict]:
+        """List reservations filtered server-side to this pool before limit."""
+        if not self.labels:
+            return self.client.list_reservations(
+                state=state,
+                repo=self.repo,
+                resume_requested=resume_requested,
+                limit=10000,
+            )
+        by_key: dict[str, dict] = {}
+        for label in self.labels:
+            for reservation in self.client.list_reservations(
+                state=state,
+                repo=self.repo,
+                label=label,
+                resume_requested=resume_requested,
+                limit=10000,
+            ):
+                key = str(reservation.get("key") or "")
+                if key:
+                    by_key[key] = reservation
+        return list(by_key.values())
+
+    def _reservation_has_live_process(
+        self, reservation: dict, task: dict
+    ) -> bool:
+        if task.get("status") != Status.SUSPENDED:
+            return True
+        key = str(reservation.get("key") or "")
+        if key in self._cooled_reservations:
+            return False
+        fleet = _parse_fleet_body_handle(reservation.get("session_handle"))
+        if fleet is not None:
+            try:
+                return self.fleet_verdict_fn(*fleet) != _tracking().GONE
+            except Exception:
+                return True
+        local_sid = _parse_local_body_handle(reservation.get("session_handle"))
+        if local_sid is not None:
+            try:
+                return self.local_body_verdict_fn(local_sid) != _tracking().GONE
+            except Exception:
+                return True
+        # CLI suspension hands its process to the hibernation layer.
+        return False
+
+    def cool_dormant_bodies(self) -> int:
+        """Stop headless processes for suspended/blocked tasks.
+
+        The durable spawned reservation remains as the cold-session handle.
+        Steering a suspended headless task settles that reservation and queues a
+        fresh embodiment, so dormant tasks consume no live-process capacity.
+        """
+        cooled = 0
+        attempted = 0
+        now = time.time()
+        for res in self._pool_reservations(state=SpawnState.SPAWNED):
+            if attempted >= 10:
+                break
+            key = str(res.get("key") or "")
+            if not key or key in self._cooled_reservations:
+                continue
+            if now < self._cold_retry_after.get(key, 0.0):
+                continue
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if not self._matches_pool(task):
+                continue
+            if task.get("status") != Status.SUSPENDED:
+                continue
+            attempted += 1
+            stopped = False
+            try:
+                fleet = _parse_fleet_body_handle(res.get("session_handle"))
+                if fleet is not None:
+                    stopped = (
+                        self.fleet_verdict_fn(*fleet) == _tracking().GONE
+                        or self.fleet_cold_fn(*fleet)
+                    )
+                else:
+                    local_sid = _parse_local_body_handle(
+                        res.get("session_handle")
+                    )
+                    if local_sid is not None:
+                        stopped = (
+                            self.local_body_verdict_fn(local_sid)
+                            == _tracking().GONE
+                            or self.local_cold_fn(local_sid)
+                        )
+            except Exception:
+                log.exception("failed to cool dormant reservation %s", key)
+            if stopped:
+                try:
+                    self.client.record_cold(key)
+                except DispatchError:
+                    log.exception(
+                        "failed to record cold reservation %s", key
+                    )
+                    self._cold_retry_after[key] = now + 60.0
+                    continue
+                self._cooled_reservations.add(key)
+                self._cold_retry_after.pop(key, None)
+                cooled += 1
+                log.info(
+                    "cooled dormant worker for task %s (%s)",
+                    task.get("id"),
+                    key,
+                )
+            else:
+                self._cold_retry_after[key] = now + 60.0
+        return cooled
+
+    def release_resumed_cold_tasks(self) -> int:
+        """Release cold reservations only after a durable resume request."""
+        released = 0
+        for res in self._pool_reservations(
+            state=SpawnState.COLD, resume_requested=True
+        ):
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            owner = task.get("owner")
+            if task.get("status") != Status.SUSPENDED or not owner:
+                continue
+            try:
+                self.client.release(
+                    task["id"],
+                    owner,
+                    reason="cold body stopped; released for re-embodiment",
+                )
+                released += 1
+                log.info(
+                    "released resumed cold task %s for re-embodiment",
+                    task.get("id"),
+                )
+            except DispatchError:
+                log.exception(
+                    "failed to release resumed cold task %s",
+                    task.get("id"),
+                )
+        return released
 
     # -- phases --------------------------------------------------------------
 
@@ -705,7 +891,9 @@ class Supervisor:
         detail rather than silently accepted. Returns the number settled.
         """
         settled = 0
-        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+        for res in self._pool_reservations(
+            state=f"{SpawnState.SPAWNED},{SpawnState.COLD}"
+        ):
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -1386,6 +1574,8 @@ class Supervisor:
         """
         now = time.time() if now is None else now
         self.reconcile()
+        self.cool_dormant_bodies()
+        self.release_resumed_cold_tasks()
         if self.evaluator is not None:
             self.advance_via_evaluator()
         if self.heartbeat or self.publish_activity:

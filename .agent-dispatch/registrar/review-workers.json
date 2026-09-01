@@ -4,12 +4,12 @@
     "self-hosted-review"
   ],
   "repos": "github.com/ThomasMichon/copilot-extensions",
-  "concurrency": 3,
+  "max_active_processes": 4,
   "interval": 30,
   "max_attempts": 3,
   "body": {
     "type": "headless",
     "agent": "cloud1"
   },
-  "description": "One self-hosted reviewer slot above the shared two-review global reservation cap"
+  "description": "Up to four live reviewer processes; queued and dormant tasks are unlimited"
 }

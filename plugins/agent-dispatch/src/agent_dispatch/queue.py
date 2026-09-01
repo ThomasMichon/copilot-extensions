@@ -229,6 +229,10 @@ class SpawnState:
     RESERVING = "reserving"
     #: Embody launched; the session/worktree handle is recorded.
     SPAWNED = "spawned"
+    #: The headless body was stopped intentionally while its task is suspended.
+    #: The reservation remains the durable prior-body handle and prevents a
+    #: replacement until an explicit resume request releases it.
+    COLD = "cold"
     #: The reserved (task, attempt) reached a terminal outcome and needs no
     #: further spawning.
     SETTLED = "settled"
@@ -240,7 +244,7 @@ class SpawnState:
 
     #: States in which a reservation still "owns" the task's spawn -- no new
     #: attempt may be reserved while one of these is outstanding.
-    ACTIVE = frozenset({RESERVING, SPAWNED})
+    ACTIVE = frozenset({RESERVING, SPAWNED, COLD})
     #: States a reservation may be released from (a new attempt is allowed).
     RELEASABLE = frozenset({SETTLED, FAILED, REARMED})
 
@@ -337,6 +341,10 @@ class Task:
     #: answered). The submitted answers live in the ``task_steer`` table.
     card: dict | None = None
     awaiting_steer: bool = False
+    #: A cold headless task has received a steer/resume request. The supervisor
+    #: releases it for re-embodiment only after the prior body is confirmed
+    #: stopped, preventing overlapping workers.
+    resume_requested: bool = False
     #: Latest durable wake outbox operation for this task. ``wake_status`` is
     #: pending/delivering/delivered/failed/stale; ``wake_operation_id`` is the
     #: deterministic idempotency key used across retries and restarts.
@@ -395,6 +403,7 @@ class Task:
             activity_updated_at=row["activity_updated_at"],
             card=json.loads(row["card"]) if row["card"] else None,
             awaiting_steer=bool(row["awaiting_steer"]),
+            resume_requested=bool(row["resume_requested"]),
             wake_seq=row["wake_seq"],
             wake_status=row["wake_status"],
             wake_operation_id=row["wake_operation_id"],
@@ -593,6 +602,7 @@ _COLUMNS: dict[str, str] = {
     # in the append-only ``task_steer`` table.
     "card": "TEXT",
     "awaiting_steer": "INTEGER NOT NULL DEFAULT 0",
+    "resume_requested": "INTEGER NOT NULL DEFAULT 0",
     "wake_seq": "INTEGER NOT NULL DEFAULT 0",
     "wake_status": "TEXT",
     "wake_operation_id": "TEXT",
@@ -989,14 +999,16 @@ class TaskQueue:
         return WakeOperation._from_row(row)
 
     @staticmethod
-    def _has_spawned_reservation(
+    def _has_headless_reservation(
         conn: sqlite3.Connection, task_id: str
     ) -> bool:
         row = conn.execute(
             "SELECT 1 FROM spawn_reservations"
-            " WHERE task_id = ? AND state = ?"
+            " WHERE task_id = ? AND state IN (?, ?) AND"
+            " (session_handle LIKE 'local-body:%' OR"
+            " session_handle LIKE 'fleet-body:%')"
             " ORDER BY attempt DESC LIMIT 1",
-            (task_id, SpawnState.SPAWNED),
+            (task_id, SpawnState.SPAWNED, SpawnState.COLD),
         ).fetchone()
         return row is not None
 
@@ -1649,6 +1661,29 @@ class TaskQueue:
         meaningful = _clip(reason, PROGRESS_SUMMARY_MAX)
         if meaningful is None:
             raise TaskError("suspend requires a non-empty reason")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = self._fetch(conn, task_id)
+            if current is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if (
+                current.status == Status.SUSPENDED
+                and current.owner == worker_id
+            ):
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=self._now(now),
+                    from_status=Status.SUSPENDED,
+                    to_status=Status.SUSPENDED,
+                    worker=worker_id,
+                    note=f"suspend: {meaningful}",
+                )
+                result = self._fetch(conn, task_id)
+                conn.execute("COMMIT")
+                return result  # type: ignore[return-value]
+            conn.execute("COMMIT")
         return self._transition(
             task_id,
             allowed={Status.STARTED},
@@ -1685,6 +1720,8 @@ class TaskQueue:
             "lease_expires_at": ts + self.lease_seconds,
             "last_seen_at": ts,
             "last_liveness": None,
+            "awaiting_steer": 0,
+            "resume_requested": 0,
         }
         if adopt_owner_session_id is not None:
             extra["owner_session_id"] = adopt_owner_session_id
@@ -1732,6 +1769,7 @@ class TaskQueue:
                 "lease_expires_at": None,
                 "claimed_at": None,
                 "last_liveness": None,
+                "resume_requested": 0,
             },
             release_spawn=True,
         )
@@ -1761,6 +1799,28 @@ class TaskQueue:
         only ever grow, the candidate set shrinks monotonically: the task either
         finds a taker or becomes unclaimable (surfaced for the operator).
         """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = self._fetch(conn, task_id)
+            if (
+                current is not None
+                and current.status == Status.SUSPENDED
+                and current.awaiting_steer
+                and current.owner == worker_id
+            ):
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=self._now(now),
+                    from_status=Status.SUSPENDED,
+                    to_status=Status.SUSPENDED,
+                    worker=worker_id,
+                    note=note or "yield after blocking card: already suspended",
+                )
+                result = self._fetch(conn, task_id)
+                conn.execute("COMMIT")
+                return result  # type: ignore[return-value]
+            conn.execute("COMMIT")
         extra: dict[str, object] = {
             "owner": None,
             "owner_session_id": None,
@@ -1992,12 +2052,10 @@ class TaskQueue:
 
         Stores the latest-only ``card`` object (title/status/link/body/
         request_input). When the card carries a non-empty ``request_input`` form
-        the task is marked **awaiting_steer** -- blocked on an operator answer --
-        so a surface can surface it as "needs you". Posting a card without a
-        ``request_input`` (a pure status/notification card) leaves
-        ``awaiting_steer`` unset. Refreshes the lease (the worker is alive) and
-        audits the post. The task stays in its held state throughout -- a card is
-        **never** a verdict or a terminal transition.
+        the task is atomically marked **awaiting_steer** and suspended -- blocked
+        work is dormant, so its worker process can be stopped while the durable
+        task/card/owner remain. Posting a card without a ``request_input`` (a
+        pure status/notification card) leaves the held state unchanged.
         """
         ts = self._now(now)
         card = {**card, "ts": ts}
@@ -2017,10 +2075,23 @@ class TaskQueue:
                 raise TaskError(
                     f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
                 )
+            to_status = Status.SUSPENDED if awaiting else task.status
+            lease_expires_at = None if awaiting else ts + self.lease_seconds
             conn.execute(
-                "UPDATE tasks SET card = ?, awaiting_steer = ?, lease_expires_at = ?,"
+                "UPDATE tasks SET card = ?, awaiting_steer = ?, status = ?,"
+                " lease_expires_at = ?, last_liveness = NULL,"
+                " activity = NULL, activity_updated_at = ?,"
                 " last_seen_at = ?, updated_at = ? WHERE id = ?",
-                (payload, awaiting, ts + self.lease_seconds, ts, ts, task_id),
+                (
+                    payload,
+                    awaiting,
+                    to_status,
+                    lease_expires_at,
+                    ts,
+                    ts,
+                    ts,
+                    task_id,
+                ),
             )
             note = "card posted (awaiting steer)" if awaiting else "card posted"
             self._audit(
@@ -2028,7 +2099,7 @@ class TaskQueue:
                 task_id,
                 ts=ts,
                 from_status=task.status,
-                to_status=task.status,
+                to_status=to_status,
                 worker=worker_id,
                 note=note,
             )
@@ -2079,39 +2150,23 @@ class TaskQueue:
                 (task_id, ts, payload, sender),
             )
             resumed = task.status == Status.SUSPENDED
-            reembody = bool(
+            cold_headless = bool(
                 resumed
-                and wake_requested
                 and task.owner_session_id is None
-                and self._has_spawned_reservation(conn, task_id)
+                and self._has_headless_reservation(conn, task_id)
             )
-            if reembody:
+            if cold_headless:
                 conn.execute(
-                    "UPDATE tasks SET status = ?, awaiting_steer = 0,"
-                    " owner = NULL, owner_session_id = NULL,"
-                    " lease_expires_at = NULL, claimed_at = NULL,"
-                    " last_liveness = NULL, wake_status = NULL,"
-                    " wake_operation_id = NULL, updated_at = ?"
+                    "UPDATE tasks SET awaiting_steer = 0, resume_requested = 1,"
+                    " updated_at = ?"
                     " WHERE id = ? AND status = ?",
-                    (Status.QUEUED, ts, task_id, Status.SUSPENDED),
-                )
-                conn.execute(
-                    "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
-                    " detail = COALESCE(detail, ?)"
-                    " WHERE task_id = ? AND state IN (?, ?)",
-                    (
-                        SpawnState.SETTLED,
-                        ts,
-                        "headless task released for steer re-embodiment",
-                        task_id,
-                        SpawnState.RESERVING,
-                        SpawnState.SPAWNED,
-                    ),
+                    (ts, task_id, Status.SUSPENDED),
                 )
             elif resumed:
                 conn.execute(
                     "UPDATE tasks SET status = ?, awaiting_steer = 0,"
-                    " lease_expires_at = ?, last_seen_at = ?, last_liveness = NULL,"
+                    " resume_requested = 0, lease_expires_at = ?,"
+                    " last_seen_at = ?, last_liveness = NULL,"
                     " updated_at = ? WHERE id = ? AND status = ?",
                     (
                         Status.STARTED,
@@ -2133,21 +2188,21 @@ class TaskQueue:
                 ts=ts,
                 from_status=task.status,
                 to_status=(
-                    Status.QUEUED
-                    if reembody
+                    Status.SUSPENDED
+                    if cold_headless
                     else Status.STARTED if resumed else task.status
                 ),
                 worker=sender,
                 note=(
                     f"steer submitted{f' by {sender}' if sender else ''}"
-                    f"{'; released for re-embodiment' if reembody else ''}"
-                    f"{'; resumed' if resumed and not reembody else ''}"
+                    f"{'; resume requested for cold body' if cold_headless else ''}"
+                    f"{'; resumed' if resumed and not cold_headless else ''}"
                 ),
             )
             result = self._fetch(conn, task_id)
             if (
                 wake_requested
-                and not reembody
+                and not cold_headless
                 and result is not None
                 and result.owner
                 and result.owner_session_id is not None
@@ -2912,22 +2967,17 @@ class TaskQueue:
                 )
             if (
                 reembody_headless_on_wake
-                and wake_requested
                 and task.owner_session_id is None
-                and self._has_spawned_reservation(conn, task_id)
+                and self._has_headless_reservation(conn, task_id)
             ):
-                to = Status.QUEUED
-                note = "resume: released headless owner for re-embodiment"
+                to = Status.SUSPENDED
+                note = "resume requested for cold headless owner"
                 extra = {
-                    "owner": None,
-                    "owner_session_id": None,
                     "lease_expires_at": None,
-                    "claimed_at": None,
                     "last_liveness": None,
-                    "wake_status": None,
-                    "wake_operation_id": None,
+                    "awaiting_steer": 0,
+                    "resume_requested": 1,
                 }
-                release_spawn = True
                 wake_requested = False
             sets = ["status = ?", "updated_at = ?"]
             params: list[object] = [to, ts]
@@ -2952,7 +3002,7 @@ class TaskQueue:
                 conn.execute(
                     "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
                     " detail = COALESCE(detail, ?) WHERE task_id = ?"
-                    " AND state IN (?, ?)",
+                    " AND state IN (?, ?, ?)",
                     (
                         SpawnState.SETTLED,
                         ts,
@@ -2960,6 +3010,7 @@ class TaskQueue:
                         task_id,
                         SpawnState.RESERVING,
                         SpawnState.SPAWNED,
+                        SpawnState.COLD,
                     ),
                 )
             self._audit(
@@ -3329,6 +3380,17 @@ class TaskQueue:
             now=now,
         )
 
+    def record_cold(
+        self, key: str, *, now: float | None = None
+    ) -> SpawnReservation:
+        """Mark a spawned headless body intentionally stopped and dormant."""
+        return self._update_reservation(
+            key,
+            to_state=SpawnState.COLD,
+            allowed_from=frozenset({SpawnState.SPAWNED, SpawnState.COLD}),
+            now=now,
+        )
+
     def fail_spawn(
         self, key: str, *, detail: str | None = None, now: float | None = None
     ) -> SpawnReservation:
@@ -3377,6 +3439,9 @@ class TaskQueue:
         *,
         task_id: str | None = None,
         state: str | Sequence[str] | None = None,
+        repo: str | None = None,
+        label: str | None = None,
+        resume_requested: bool | None = None,
         limit: int = 200,
     ) -> list[SpawnReservation]:
         """List spawn reservations, newest first, optionally filtered by task or
@@ -3384,12 +3449,24 @@ class TaskQueue:
         clauses: list[str] = []
         params: list[object] = []
         if task_id is not None:
-            clauses.append("task_id = ?")
+            clauses.append("r.task_id = ?")
             params.append(task_id)
         if state is not None:
             states = [state] if isinstance(state, str) else list(state)
-            clauses.append(f"state IN ({','.join('?' * len(states))})")
+            clauses.append(f"r.state IN ({','.join('?' * len(states))})")
             params.extend(states)
+        join_tasks = repo is not None or label is not None or resume_requested is not None
+        if repo is not None:
+            clauses.append("t.repo = ?")
+            params.append(repo)
+        if label is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM json_each(t.labels) WHERE value = ?)"
+            )
+            params.append(label)
+        if resume_requested is not None:
+            clauses.append("t.resume_requested = ?")
+            params.append(1 if resume_requested else 0)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._connect() as conn:
@@ -3397,8 +3474,9 @@ class TaskQueue:
                 # ``where`` is built only from constant column names + bound '?'
                 # placeholders; every value goes through ``params`` (never
                 # interpolated), so this is not an injection vector.
-                f"SELECT * FROM spawn_reservations {where} "  # noqa: S608
-                "ORDER BY reserved_at DESC LIMIT ?",
+                "SELECT r.* FROM spawn_reservations r "
+                f"{'JOIN tasks t ON t.id = r.task_id ' if join_tasks else ''}"
+                f"{where} ORDER BY r.reserved_at DESC LIMIT ?",  # noqa: S608
                 params,
             ).fetchall()
         return [SpawnReservation._from_row(r) for r in rows]
