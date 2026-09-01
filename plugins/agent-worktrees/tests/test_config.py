@@ -784,6 +784,54 @@ class TestLayeredConfig:
         with pytest.raises(ValueError, match="No repo could be resolved"):
             cfg.load_config(missing)
 
+    def test_load_project_config_uses_named_project_without_machine_file(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        anchor = tmp_path / "owner"
+        anchor.mkdir()
+        (anchor / cfg.INREPO_CONFIG_FILENAME).write_text(
+            "stateless: true\nrequires_external_state_root: true\n",
+            encoding="utf-8",
+        )
+        from agent_worktrees import repos as repos_mod
+
+        registry = repos_mod.ReposRegistry(
+            repos={
+                "owner": repos_mod.RepoEntry(
+                    name="owner",
+                    repo_class="worktree",
+                    paths={
+                        "windows": str(anchor),
+                        "wsl": str(anchor),
+                        "linux": str(anchor),
+                    },
+                )
+            }
+        )
+        monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+        monkeypatch.setattr(
+            cfg,
+            "project_dir",
+            lambda name=None: tmp_path / f".{name or cfg.project_name()}",
+        )
+        global_config = tmp_path / "global.yaml"
+        global_config.write_text(
+            "repo_name: provider\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            cfg, "global_config_path", lambda: global_config
+        )
+        cfg.set_active_project("provider")
+
+        conf = cfg.load_project_config("owner")
+
+        assert conf.repo_name == "owner"
+        assert conf.default_repo.stateless is True
+        assert cfg.active_project() == "provider"
+
     def test_foreign_repo_machine_local_only(self, tmp_path: Path):
         # A foreign repo with no in-repo config loads purely from machine-local.
         anchor = tmp_path / "work-product"
