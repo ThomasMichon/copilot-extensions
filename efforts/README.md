@@ -25,6 +25,7 @@ that pattern to this repository.
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
 | [Session Context Aggregation](active/session-context-aggregation/README.md) | Draft | #1325 |
 | [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Draft | #1303 |
+| [Terminal Worktree Reclamation](active/terminal-worktree-reclamation/README.md) | Draft | #1488 |
 | [Turn-key Reviewer Loops](active/turnkey-reviewer-loops/README.md) | Draft | #1403 |
 | [Venue Parity](active/venue-parity/README.md) | Active | #954 |
 | [Windows Launch Hardening](active/windows-launch-hardening/README.md) | Active | #786 |
