@@ -54,7 +54,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover",
-      "version": "0.1.0-dev54",
+      "version": "0.1.0-dev55",
       "source": "plugins/context-handoff"
     },
     {
@@ -126,7 +126,7 @@
     {
       "name": "delegation-guidance",
       "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
-      "version": "0.1.0-dev5",
+      "version": "0.1.0-dev6",
       "source": "plugins/delegation-guidance"
     },
     {
