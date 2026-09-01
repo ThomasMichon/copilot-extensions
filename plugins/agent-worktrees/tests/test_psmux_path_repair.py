@@ -17,32 +17,36 @@ _PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 
 @pytest.mark.skipif(_PWSH is None, reason="PowerShell is not available")
-def test_selects_exact_version_and_removes_all_stale_package_paths(tmp_path):
+def test_selects_newest_compatible_version_and_removes_stale_paths(tmp_path):
     package_root = tmp_path / "Microsoft" / "WinGet" / "Packages"
     old_dir = package_root / "marlocarlo.psmux_old"
     desired_dir = package_root / "marlocarlo.psmux_current"
+    newer_dir = package_root / "marlocarlo.psmux_newer"
     old_dir.mkdir(parents=True)
     desired_dir.mkdir()
+    newer_dir.mkdir()
     (old_dir / "psmux.exe").touch()
     (desired_dir / "psmux.exe").touch()
+    (newer_dir / "psmux.exe").touch()
     keep = tmp_path / "keep"
     keep.mkdir()
 
     script = tmp_path / "probe.ps1"
     script.write_text(
         """
-param($Helper, $Root, $Old, $Desired, $Keep)
+param($Helper, $Root, $Old, $Desired, $Newer, $Keep)
 . $Helper
 $probe = {
     param($Path)
     if ($Path -like '*_old*') { return '3.3.3' }
+    if ($Path -like '*_newer*') { return '3.3.9' }
     return '3.3.8'
 }
-$selected = Find-AwPsmuxPackageBinary -PackageRoot $Root `
-    -DesiredVersion '3.3.8' -VersionProbe $probe
+$selected = Find-AwCompatiblePsmuxPackageBinary -PackageRoot $Root `
+    -MinimumVersion '3.3.8' -VersionProbe $probe
 $repair = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
-    -UserPath "$Old;$Keep;$Desired" `
-    -ProcessPath "$Keep;$Old;$Desired" -PackageRoot $Root
+    -UserPath "$Old;$Keep;$Desired;$Newer" `
+    -ProcessPath "$Keep;$Old;$Desired;$Newer" -PackageRoot $Root
 [pscustomobject]@{
     selected = $selected.Path
     userPath = $repair.UserPath
@@ -62,6 +66,7 @@ $repair = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
             str(package_root),
             str(old_dir),
             str(desired_dir),
+            str(newer_dir),
             str(keep),
         ],
         capture_output=True,
@@ -69,17 +74,18 @@ $repair = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
         check=True,
     )
     result = json.loads(proc.stdout)
-    assert Path(result["selected"]) == desired_dir / "psmux.exe"
+    assert Path(result["selected"]) == newer_dir / "psmux.exe"
     for repaired in (result["userPath"], result["processPath"]):
         parts = repaired.split(";")
-        assert Path(parts[0]) == desired_dir
+        assert Path(parts[0]) == newer_dir
         assert str(old_dir) not in parts
-        assert parts.count(str(desired_dir)) == 1
+        assert str(desired_dir) not in parts
+        assert parts.count(str(newer_dir)) == 1
         assert str(keep) in parts
 
 
 @pytest.mark.skipif(_PWSH is None, reason="PowerShell is not available")
-def test_failed_session_probe_is_unknown_and_pin_parser_uses_last_column(tmp_path):
+def test_failed_session_probe_is_unknown(tmp_path):
     script = tmp_path / "probe.ps1"
     script.write_text(
         """
@@ -88,15 +94,9 @@ param($Helper)
 $failed = Get-AwPsmuxSessionState -Path 'unused.exe' -SessionProbe {
     [pscustomobject]@{ ReturnCode = 1; Output = @() }
 }
-$pins = @'
-Name  Id                        Version Source Pin type Pinned version
-other prefix.marlocarlo.psmux  3.3.5  winget Gating   9.9.9
-psmux marlocarlo.psmux         3.3.5  winget Gating   3.3.7
-'@
 [pscustomobject]@{
     known = $failed.Known
     count = $failed.Sessions.Count
-    pin = Get-AwWingetPinVersion -Output $pins -PackageId 'marlocarlo.psmux'
 } | ConvertTo-Json -Compress
 """,
         encoding="utf-8",
@@ -108,16 +108,16 @@ psmux marlocarlo.psmux         3.3.5  winget Gating   3.3.7
         check=True,
     )
     result = json.loads(proc.stdout)
-    assert result == {"known": False, "count": 0, "pin": "3.3.7"}
+    assert result == {"known": False, "count": 0}
 
 
-def test_installer_and_launcher_use_exact_version_helper():
+def test_installer_and_launcher_use_compatible_version_helper():
     helper = _HELPER.read_text(encoding="utf-8")
     installer = _INSTALLER.read_text(encoding="utf-8")
     launcher = _LAUNCHER.read_text(encoding="utf-8")
     assert "marlocarlo.psmux_*" in helper
     assert "Get-AwPsmuxBinaryVersion" in helper
-    assert "Find-AwPsmuxPackageBinary" in installer
+    assert "Find-AwCompatiblePsmuxPackageBinary" in installer
     assert "Repair-AwPsmuxPath" in installer
     assert "NoProfile/SSH-style verification" in installer
     assert (
@@ -128,9 +128,10 @@ def test_installer_and_launcher_use_exact_version_helper():
         "Get-Command psmux -CommandType Application -ErrorAction Stop | "
         "Select-Object -First 1"
     ) in installer
-    assert "Find-AwPsmuxPackageBinary" in launcher
-    assert "-DesiredVersion '3.3.8'" in launcher
-    assert "$desiredVersion = '3.3.8'" in installer
+    assert "Find-AwCompatiblePsmuxPackageBinary" in launcher
+    assert "-MinimumVersion '3.3.8'" in launcher
+    assert "$minimumVersion = '3.3.8'" in installer
+    assert "winget pin add" not in installer
 
 
 def test_path_repair_does_not_mutate_live_sessions():
