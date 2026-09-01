@@ -96,8 +96,8 @@ reachable when their ownership is explicit.
 
 The capability remains explicitly opt-in and default-off. During this effort,
 all namespaced install, activation, runtime use, lifecycle, migration, and
-coexistence testing occurs in disposable clean rooms; no persistent machine is
-an activation or dogfood venue. The implementation applies only to
+coexistence testing occurs in disposable clean-room environments; no persistent
+machine is an activation or dogfood venue. The implementation applies only to
 runtime-bearing core plugin identities from the `copilot-extensions` suite and
 must not namespace unrelated downstream, internal, or third-party plugins merely
 because they provide tools or services.
@@ -207,9 +207,9 @@ because they provide tools or services.
       bypass legacy mutation, and reserve or validate only the payload version's
       empty owned slot.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
-  simultaneous marketplace cells in disposable clean rooms before broad
-  rollout. Do not activate or use either exemplar namespaced on a persistent
-  machine.
+  simultaneous marketplace cells in disposable clean-room environments before
+  broad rollout. Do not activate or use either exemplar namespaced on a
+  persistent machine.
 
 ### Phase 4 — Runtime and state rollout
 

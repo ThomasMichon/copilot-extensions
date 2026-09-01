@@ -109,9 +109,9 @@ quiesced and does not provision.
 The contract permits a future active machine to be taken out of rotation,
 reached remotely, updated surgically, validated, and returned to service without
 a concurrent bootstrap restoring the old runtime. That path is implemented and
-validated only in disposable clean rooms during this effort; it is not exercised
-on persistent machines. Windows and WSL remain separate environments because
-their policy and maintenance homes are independent.
+validated only in disposable clean-room environments during this effort; it is
+not exercised on persistent machines. Windows and WSL remain separate
+environments because their policy and maintenance homes are independent.
 
 ## Normative rollout gates
 
@@ -153,9 +153,9 @@ pinned actual root rather than being stranded.
 ## Rollout
 
 Every rollout step that creates or operates a namespaced cell runs in a
-disposable clean room. Persistent machines remain legacy-only throughout the
-effort, and no rollout step enrolls plugins outside the runtime-bearing
-`copilot-extensions` core identity set.
+disposable clean-room environment. Persistent machines remain legacy-only
+throughout the effort, and no rollout step enrolls plugins outside the
+runtime-bearing `copilot-extensions` core identity set.
 
 1. Land this specification and the normative install-contract additions with no
    operative callers.

@@ -278,10 +278,10 @@ still control the machine-global daemon.
 
 ## Cross-platform gate
 
-Every operative phase must prove Windows and POSIX behavior in disposable clean
-rooms before its contract becomes mandatory. A persistent workstation, server,
-or ordinary plugin installation is not a namespaced test venue during this
-effort. Particular attention is required for:
+Every operative phase must prove Windows and POSIX behavior in disposable
+clean-room environments before its contract becomes mandatory. A persistent
+workstation, server, or ordinary plugin installation is not a namespaced test
+venue during this effort. Particular attention is required for:
 
 - Windows payload replacement while a payload-local PowerShell/CMD shim is
   running;
