@@ -1175,7 +1175,10 @@ class PickerScreen(Widget):
         # _open_cfgmenu. (The overlay left the manual registry entirely.)
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
         self._last_pivot_poll = 0.0   # registered-pivot repoll gate (#staleness)
-        self._load_pivots()
+        self._roster_ready = True     # False only during live chrome-first paint
+        # Built-ins only here: scanning the pivot registry is I/O and must not
+        # run before the first frame (#1504). ``setup()`` / live async fill scan.
+        self._load_pivots(scan=False)
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
         self.sel = ("N", 0)           # (zone, index) -> default New Worktree
         self.top = 0                  # scroll offset into body vrows
@@ -1332,27 +1335,36 @@ class PickerScreen(Widget):
         self.profiles_view._prof_loaded = value
 
     # ---- pivot registry (built-ins + cross-plugin registered pivots) ----
-    def _load_pivots(self):
+    def _load_pivots(self, *, scan: bool = True):
         """(Re)scan the manifest registry and rebuild the ordered pivot list.
 
         Defensive: any discovery failure degrades to the built-ins alone, so a
         bad manifest can never keep the picker from opening. Clamps ``htab`` in
         case a rescan shrank the list.
-        """
-        try:
-            from . import pivots as pivots_mod
 
-            report = pivots_mod.scan_pivot_registry()
-            pivots_mod.warn_pivot_findings(report)
-            registered = report.pivots
-            descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
-            wt_actions = report.worktree_actions
-            config_sections = report.config_sections
-        except Exception:
+        ``scan=False`` installs built-ins only (no plugin-dir I/O) so first
+        paint is not blocked on the registry (#1504).
+        """
+        if not scan:
             registered, descriptors, wt_actions = [], [
                 {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
             ], []
             config_sections = []
+        else:
+            try:
+                from . import pivots as pivots_mod
+
+                report = pivots_mod.scan_pivot_registry()
+                pivots_mod.warn_pivot_findings(report)
+                registered = report.pivots
+                descriptors = pivots_mod.order_pivots(BUILTIN_PIVOTS, registered)
+                wt_actions = report.worktree_actions
+                config_sections = report.config_sections
+            except Exception:
+                registered, descriptors, wt_actions = [], [
+                    {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
+                ], []
+                config_sections = []
         self.registered_pivots = registered
         self.pivots = descriptors
         # Cross-plugin worktree-row actions (a layer augmenting the Worktrees
@@ -1366,6 +1378,38 @@ class PickerScreen(Widget):
         # Tag each pivot with its placement (left cycle / config menu / hidden
         # anchor) so nav machinery can partition them without disturbing the
         # ``order_pivots`` weave that registered ``after`` hints rely on (#1426).
+        for d in self.pivots:
+            d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
+        self.htabs = [d["label"] for d in descriptors]
+        if self.htab >= len(self.pivots):
+            self.htab = 0
+
+    @staticmethod
+    def _scan_pivot_payload():
+        """Filesystem pivot scan with no widget mutation (safe off the UI thread)."""
+        try:
+            from . import pivots as pivots_mod
+
+            report = pivots_mod.scan_pivot_registry()
+            pivots_mod.warn_pivot_findings(report)
+            return (
+                report.pivots,
+                pivots_mod.order_pivots(BUILTIN_PIVOTS, report.pivots),
+                report.worktree_actions,
+                report.config_sections,
+            )
+        except Exception:
+            return None
+
+    def _install_pivot_payload(self, payload):
+        if payload is None:
+            self._load_pivots(scan=False)
+            return
+        registered, descriptors, wt_actions, config_sections = payload
+        self.registered_pivots = registered
+        self.pivots = descriptors
+        self.wt_actions = wt_actions
+        self.config_sections = config_sections
         for d in self.pivots:
             d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
         self.htabs = [d["label"] for d in descriptors]
@@ -1475,7 +1519,19 @@ class PickerScreen(Widget):
         return rt
 
     def on_mount(self):
+        if self.live:
+            # Chrome first (#1504): paint built-in tabs + empty lists, then
+            # run the roster/pivot/worktree fill off the UI thread.
+            self._setup_skeleton()
+            self._finish_mount()
+            threading.Thread(
+                target=self._setup_live_async, name="picker-setup", daemon=True,
+            ).start()
+            return
         self.setup()
+        self._finish_mount()
+
+    def _finish_mount(self):
         self.sel = self.default_sel()
         # NF: focus the region widget that owns the default sel (deferred until
         # the children are mounted). ``_nf_mounted`` stays False until then so the
@@ -1490,6 +1546,174 @@ class PickerScreen(Widget):
         self._poll_update_state()
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
+
+    def _setup_skeleton(self):
+        """First-paint chrome with no config, roster, git, or pivot-registry I/O.
+
+        Hostname-only local tab; ``setup()`` replaces it with the real roster.
+        """
+        self._roster_ready = False
+        self._load_pivots(scan=False)
+        self.data = []
+        self.loader = None
+        self.debug = "loading"
+        self._busy_label = "Loading…"
+        self._last_poll = time.monotonic()
+        self._last_pivot_poll = time.monotonic()
+        try:
+            from . import data_local
+
+            machine, env = data_local.LOCAL
+            label = f"{machine} {env}"
+        except Exception:
+            machine, env, label = None, None, "local"
+        self.source_tabs = [
+            {
+                "label": "All",
+                "machine": None,
+                "env": None,
+                "ready": True,
+                "source_kind": "all",
+                "source_id": None,
+                "capabilities": {},
+            },
+            {
+                "label": label,
+                "machine": machine,
+                "env": env,
+                "ready": True,
+                "source_kind": "machine-ssh",
+                "source_id": None,
+                "capabilities": {},
+            },
+        ]
+        self.machines = [
+            (tab["label"], tab.get("machine"), tab.get("env"), bool(tab.get("ready")))
+            for tab in self.source_tabs
+        ]
+        self.machine_idx = 1 if len(self.machines) > 1 else 0
+        self.maint_sel = ListSelection()
+        self.host_cols = list(_DEFAULT_HOST_COLS)
+        self.targets = target_rows(_DEFAULT_TARGET_ENVS)
+        self.grid = {}
+        self.applied = {}
+        self._prof_unavailable = set()
+
+    def _setup_live_async(self):
+        """I/O off-thread; apply widget state on the UI thread (#1504)."""
+        err = None
+        snapshot = None
+        loader = None
+        pivot_payload = None
+        try:
+            pivot_payload = self._scan_pivot_payload()
+            snapshot_fn = getattr(self.src, "source_snapshot", None)
+            snapshot = snapshot_fn() if callable(snapshot_fn) else None
+            loader = (
+                self.src.make_loader(snapshot)
+                if snapshot is not None
+                else self.src.make_loader()
+            )
+            loader.start()
+        except Exception as exc:
+            err = exc
+
+        def apply():
+            if err is not None:
+                self.debug = f"setup-failed: {err}"
+                self._busy_label = "Load failed"
+                self.refresh()
+                return
+            self._apply_live_prefetched(snapshot, loader, pivot_payload)
+            self._busy_label = None
+            self.refresh()
+
+        try:
+            self.app.call_from_thread(apply)
+        except Exception:
+            apply()
+
+    def _apply_live_prefetched(self, snapshot, loader, pivot_payload):
+        """Install prefetched live-mode state. UI-thread only."""
+        self._install_pivot_payload(pivot_payload)
+        for _rt in getattr(self, "_pivot_runtimes", {}).values():
+            try:
+                _rt.invalidate()
+            except Exception:
+                pass
+        source_tabs = getattr(self.src, "source_tabs", None)
+        if callable(source_tabs):
+            tabs = list(
+                source_tabs(snapshot) if snapshot is not None else source_tabs()
+            )
+        else:
+            machine_tabs = (
+                self.src.machines(snapshot)
+                if snapshot is not None
+                else self.src.machines()
+            )
+            tabs = [
+                {
+                    "label": label,
+                    "machine": machine,
+                    "env": env,
+                    "ready": ready,
+                    "source_kind": "machine-ssh",
+                    "source_id": None,
+                    "capabilities": {},
+                }
+                for label, machine, env, ready in machine_tabs
+            ]
+        self.source_tabs = [{
+            "label": "All",
+            "machine": None,
+            "env": None,
+            "ready": True,
+            "source_kind": "all",
+            "source_id": None,
+            "capabilities": {},
+        }, *tabs]
+        self.machines = [
+            (
+                tab["label"],
+                tab.get("machine"),
+                tab.get("env"),
+                bool(tab.get("ready")),
+            )
+            for tab in self.source_tabs
+        ]
+        self.loader = loader
+        self.data = loader.records() if loader is not None else []
+        self._roster_ready = True
+        self.machine_idx = self.local_index()
+        self.maint_sel = ListSelection()
+        self._last_poll = time.monotonic()
+        self._last_pivot_poll = time.monotonic()
+        hc = getattr(self.src, "host_cols", None)
+        self.host_cols = (hc() if callable(hc) else None) or list(_DEFAULT_HOST_COLS)
+        te = getattr(self.src, "target_envs", None)
+        target_env_list = (te() if callable(te) else None) or _DEFAULT_TARGET_ENVS
+        self.targets = target_rows(target_env_list)
+        self.grid = {}
+        for ti, t in enumerate(self.targets):
+            for hi in range(len(self.host_cols)):
+                self.grid[(ti, hi)] = self.cell_locked(ti, hi)
+        self.applied = dict(self.grid)
+        self._prof_unavailable = set()
+        self._prof_load = getattr(self.src, "load_profile_column", None)
+        self._prof_apply = getattr(self.src, "apply_profile_column", None)
+        self._prof_loaded = False
+        if callable(self._prof_load):
+            self.profiles_view.start_load()
+        self._pr_reconciled = False
+        rec_fn = getattr(self.src, "reconcile_prs", None)
+        if callable(rec_fn):
+            self._start_pr_reconcile(rec_fn)
+        self._bound_live_reconciled = False
+        blr_fn = getattr(self.src, "reconcile_bound_live", None)
+        if callable(blr_fn):
+            self._start_bound_live_reconcile(blr_fn)
+        self._reconcile_wt_sel()
 
     def on_unmount(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Kill any
@@ -1681,7 +1905,7 @@ class PickerScreen(Widget):
     def setup(self):
         # Re-scan the pivot registry so a refresh ('r') picks up a newly
         # installed (or removed) contributed pivot without a picker restart.
-        self._load_pivots()
+        self._load_pivots(scan=True)
         # A manual reload ('r') must also refresh the registered Tasks pivot, not
         # just the worktree lists (the pivot runtime is separate + has no TTL):
         # clear each pivot runtime's cache so the next frame's ensure() refetches,
@@ -1767,7 +1991,7 @@ class PickerScreen(Widget):
             self.load_delay = {}
             d = 1.4
             for i, (label, m, e, ok) in enumerate(self.machines):
-                if label == "All" or (m, e) == self.src.LOCAL or not ok:
+                if label == "All" or (m, e) == self._src_local() or not ok:
                     self.load_delay[i] = 0.0
                 else:
                     self.load_delay[i] = d
@@ -1814,6 +2038,7 @@ class PickerScreen(Widget):
         # Reconcile the persisted Worktrees selection against the freshly loaded
         # records (#2258 P3-7): keep survivors, drop rows that vanished, re-seat
         # a now-invalid range anchor. A no-op while records are still streaming.
+        self._roster_ready = True
         self._reconcile_wt_sel()
 
     def _start_pr_reconcile(self, rec_fn):
@@ -1868,7 +2093,7 @@ class PickerScreen(Widget):
         Mirrors the post-maintenance reload (#1421): in live mode the local
         source re-threads and the render tick picks up the fresh records; in the
         non-live path the data is reloaded in-place."""
-        m, e = self.src.LOCAL
+        m, e = self._src_local()
         if self.live and self.loader is not None:
             self.loader.reload(m, e)
         elif not self.live:
@@ -1919,11 +2144,14 @@ class PickerScreen(Widget):
         if not ok:
             return "disabled"
         if self.live:
+            loader = self.loader
+            if loader is None:
+                return "loading"
             source_id = self.source_tabs[i].get("source_id")
-            if source_id and hasattr(self.loader, "state_for_source"):
-                return self.loader.state_for_source(source_id)
-            return self.loader.state(m, e)
-        if (m, e) == self.src.LOCAL:
+            if source_id and hasattr(loader, "state_for_source"):
+                return loader.state_for_source(source_id)
+            return loader.state(m, e)
+        if (m, e) == self._src_local():
             return "ready"
         return "ready" if (time.monotonic() - self.t0) >= self.load_delay[i] else "loading"
 
@@ -1949,9 +2177,32 @@ class PickerScreen(Widget):
     def spin(self):
         return SPINNER[self.frame % len(SPINNER)]
 
+    def _src_local(self):
+        """Local ``(machine, env)`` without blocking first paint on roster I/O."""
+        if not getattr(self, "_roster_ready", True):
+            try:
+                from . import data_local
+
+                return data_local.LOCAL
+            except Exception:
+                return (None, None)
+        return self.src.LOCAL
+
+    def _src_repo_branch(self):
+        if not getattr(self, "_roster_ready", True):
+            return "", ""
+        return (
+            getattr(self.src, "REPO", "") or "",
+            getattr(self.src, "BRANCH", "") or "",
+        )
+
     def local_index(self):
+        # Do not touch ``src.LOCAL`` until the roster is ready: on the SSH
+        # source that resolves machines.yaml via ``load_config`` (#1504).
+        if not getattr(self, "_roster_ready", True) or not self.machines:
+            return 1 if len(self.machines) > 1 else 0
         for i, (label, m, e, ok) in enumerate(self.machines):
-            if (m, e) == self.src.LOCAL:
+            if (m, e) == self._src_local():
                 return i
         return 1 if len(self.machines) > 1 else 0
 
@@ -2150,7 +2401,7 @@ class PickerScreen(Widget):
         """Where '+ New Worktree' lands: the active machine, or LOCAL when on
         'All'."""
         if self.is_all():
-            return self.src.LOCAL
+            return self._src_local()
         m, e, _ = self.cur_machine()
         return (m, e)
 
@@ -2691,7 +2942,7 @@ class PickerScreen(Widget):
         so adding a button never needs a hardcoded index."""
         bset = self.button_set()
         tm, te = self.create_target()
-        host_tag = "  (this host)" if (tm, te) == self.src.LOCAL else ""
+        host_tag = "  (this host)" if (tm, te) == self._src_local() else ""
         labels = {"N": " + New worktree… ", "K": " ✕ Clean ", "SY": " ⟳ Sync "}
 
         t = Text("  ")
@@ -3381,15 +3632,14 @@ class PickerScreen(Widget):
         # Right-side segments, dropped in this order as width shrinks:
         # version, branch, env, repo. Always kept: "Worktree Manager" + machine.
         ver = f" · v{VERSION}"
-        m, e = self.src.LOCAL
+        m, e = self._src_local()
         host = f"{m.lower()}"
         # Repo name + default branch are project config, surfaced by the data
         # source (data_local/data_ssh expose REPO/BRANCH from the resolved
         # config); never hardcoded. Empty when a source omits them (e.g. a
         # fixture source) so the segment is dropped rather than showing a
         # fabricated name.
-        repo = getattr(self.src, "REPO", "") or ""
-        branch = getattr(self.src, "BRANCH", "") or ""
+        repo, branch = self._src_repo_branch()
         present = {"update_text": True, "version": True, "repo": bool(repo),
                    "env": True, "branch": bool(branch)}
         upd_focused = self.sel[0] == "UPD"
@@ -3942,7 +4192,7 @@ class PickerScreen(Widget):
         tm, te = dlg["target"]
         self._decide({
             "action": "new", "machine": tm, "env": te,
-            "is_local": (tm, te) == self.src.LOCAL,
+            "is_local": (tm, te) == self._src_local(),
             "options": {
                 "anchor": "Anchor repo" in on,
                 "bare": "Bare" in on,
@@ -4236,7 +4486,7 @@ class PickerScreen(Widget):
             "machine": m,
             "env": e,
             "title": rec.get("title"),
-            "is_local": (m, e) == self.src.LOCAL,
+            "is_local": (m, e) == self._src_local(),
         }
         opts = {}
         if no_mux:
@@ -4725,7 +4975,7 @@ class PickerScreen(Widget):
             "id4": rec.get("id4"),
             "machine": str(rec.get("machine") or raw.get("machine") or ""),
             "env": str(rec.get("env") or ""),
-            "repo": getattr(self.src, "REPO", "") or "",
+            "repo": self._src_repo_branch()[0],
             "title": rec.get("title", ""),
             "state": rec.get("state", ""),
         })
@@ -5076,7 +5326,7 @@ class PickerScreen(Widget):
         global -- there is no per-worktree context)."""
         return {
             "machine": self._pivot_machine_id() or "",
-            "repo": getattr(self.src, "REPO", "") or "",
+            "repo": self._src_repo_branch()[0],
         }
 
     def _run_config_section(self, section) -> None:
