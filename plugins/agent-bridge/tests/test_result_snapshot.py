@@ -416,6 +416,7 @@ def test_detail_reference_expands_turn_and_event(client, app) -> None:
 
     assert turn.status_code == 200
     assert turn.json()["turn"]["response_text"] == "done"
+    assert "thought_text" not in turn.json()["turn"]
     assert event.status_code == 200
     assert event.json()["event"]["event"] == "agent_message"
 
@@ -457,6 +458,18 @@ def test_detail_reference_rejects_malformed_input_as_bad_request(
     )
 
     assert response.status_code == 400
+
+
+def test_unknown_session_ref_does_not_probe_ground_layer(
+    client, app, monkeypatch
+) -> None:
+    probe = MagicMock()
+    monkeypatch.setattr(session_routes, "resolve_head", probe)
+
+    response = client.get("/api/v1/sessions/typo/result")
+
+    assert response.status_code == 404
+    probe.assert_not_called()
 
 
 def test_client_gates_snapshot_against_older_daemon(monkeypatch) -> None:

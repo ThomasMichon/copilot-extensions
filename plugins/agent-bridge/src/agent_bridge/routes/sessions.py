@@ -67,6 +67,13 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
     session = mgr.get_session(ref)
     if session is not None:
         return session
+    ownership = mgr.db.get_worktree_ownership(ref)
+    candidates = [
+        item for item in mgr.list_sessions()
+        if item.target.worktree_id == ref
+    ]
+    if ownership is None and not candidates:
+        return None
     head = resolve_head(ref)
     if head.tracked:
         if not head.head_session:
@@ -85,10 +92,11 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
                 ),
             )
         return session
-    ownership = mgr.db.get_worktree_ownership(ref)
     if ownership:
-        return mgr.get_session(ownership.get("session_id") or "")
-    return None
+            session = mgr.get_session(ownership.get("session_id") or "")
+            if session is not None:
+                return session
+    return candidates[0] if candidates else None
 
 
 def _tool_progress_sse(active: dict, now: float) -> str:

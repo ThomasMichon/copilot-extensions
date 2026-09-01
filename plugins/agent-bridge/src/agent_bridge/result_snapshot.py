@@ -641,7 +641,6 @@ def expand_owned_result_ref(
             "turn_index": row["turn_index"],
             "prompt": row.get("prompt") or "",
             "response_text": row.get("response_text") or "",
-            "thought_text": row.get("thought_text") or "",
             "stop_reason": row.get("stop_reason"),
             "tool_calls": tool_calls if isinstance(tool_calls, list) else [],
             "started_at": _iso_timestamp(row.get("started_at")),
