@@ -2,10 +2,10 @@
 
 Atomic, cross-machine, same-harness advisory leases on scarce shared resources
 (CodeSpaces, cross-repo worktrees, containers, bridges), backed by
-compare-and-swap on hidden refs in the harness's own repo (see
-``lease_store.py`` / ``lease_config.py``). The verb surface mirrors the upstream
-``agent-leases`` CLI (ThomasMichon/copilot-extensions#180) so the loosely-coupled
-resource plugins can shell into it:
+compare-and-swap on hidden refs in an explicitly selected private state repo
+(see ``lease_store.py`` / ``lease_config.py``). The verb surface mirrors the
+upstream ``agent-leases`` CLI (ThomasMichon/copilot-extensions#180) so the
+loosely-coupled resource plugins can shell into it:
 
     agent-worktrees lease acquire <kind> <key> --holder <ref> [--ttl N]
     agent-worktrees lease renew   <kind> <key> --token <oid> [--ttl N]
@@ -120,7 +120,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--origin",
-        help="override the store origin URL (default: the project's remote URL)",
+        help="explicit private lease-store origin URL",
     )
     parser.add_argument("--pretty", action="store_true", help="pretty-print JSON")
     subs = parser.add_subparsers(dest="command", required=True)
@@ -128,7 +128,7 @@ def _parser() -> argparse.ArgumentParser:
     def common(command: argparse.ArgumentParser) -> None:
         command.add_argument(
             "--origin", default=argparse.SUPPRESS,
-            help="override the store origin URL",
+            help="explicit private lease-store origin URL",
         )
         command.add_argument(
             "--pretty", action="store_true", default=argparse.SUPPRESS,
