@@ -31,6 +31,7 @@ if [[ -z "$python_bin" ]]; then
     fi
     if [[ -f "$script" && "$script" == "$root/"* && "$script" == *.sh ]]; then
         output="$(
+            set +o pipefail
             cd "$launch_cwd" || exit 1
             printf '%s' "$payload" | bash "$script" "$@" 2> >(cat >&2)
         )"

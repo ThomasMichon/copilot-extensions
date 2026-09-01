@@ -929,7 +929,13 @@ def test_posix_wrapper_direct_fallback_without_python(
     result = subprocess.run(
         [str(commands / "bash"), str(policy / "scripts" / "invoke-context-contributor.sh"),
          "a-policy@copilot-extensions", "main", "scripts/emit.sh"],
-        input=json.dumps({"cwd": str(project), "sessionId": "standalone"}),
+        input=json.dumps(
+            {
+                "cwd": str(project),
+                "sessionId": "standalone",
+                "initialPrompt": "x" * (1024 * 1024),
+            }
+        ),
         text=True,
         capture_output=True,
         cwd=tmp_path,
@@ -940,6 +946,36 @@ def test_posix_wrapper_direct_fallback_without_python(
     assert json.loads(result.stdout) == {
         "additionalContext": f"CWD:{project}"
     }
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows no-Python fallback")
+def test_windows_wrapper_direct_fallback_without_python(
+    tmp_path: Path,
+) -> None:
+    policy = _plugin(
+        tmp_path / "standalone",
+        "copilot-extensions",
+        "a-policy",
+        context="DIRECT",
+    )
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    payload = json.dumps({"cwd": str(tmp_path), "sessionId": "standalone"})
+
+    for shell in filter(
+        None,
+        (shutil.which("pwsh"), shutil.which("powershell.exe")),
+    ):
+        result = _run_native_producer_wrapper(
+            policy,
+            "a-policy@copilot-extensions",
+            "main",
+            payload,
+            extra_env={"PATH": str(commands)},
+            powershell=shell,
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {"additionalContext": "DIRECT"}
 
 
 def test_windows_ancestry_reader_passes_parent_pid_in_environment(

@@ -177,14 +177,10 @@ catch {
 
 $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
-if (-not $python) {
-    Write-EmptyResult
-    exit 0
-}
 
 $resolver = Join-Path (Join-Path $resolvedRoot 'scripts') 'resolve_context_authority.py'
 $authority = ''
-if (Test-Path -LiteralPath $resolver -PathType Leaf) {
+if ($python -and (Test-Path -LiteralPath $resolver -PathType Leaf)) {
     $resolved = Invoke-BufferedProcess `
         -FileName $python.Source `
         -Arguments @($resolver) `
