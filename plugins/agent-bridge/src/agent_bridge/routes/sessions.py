@@ -702,7 +702,7 @@ async def get_session_status(
     "/{session_ref}/result",
     response_model=DelegatedResultSnapshot,
 )
-async def get_result_snapshot(
+def get_result_snapshot(
     session_ref: str,
     request: Request,
     position: str | None = Query(default=None, max_length=2048),
@@ -738,7 +738,7 @@ async def get_result_snapshot(
 
 
 @router.get("/{session_ref}/result/detail")
-async def get_result_detail(
+def get_result_detail(
     session_ref: str,
     request: Request,
     ref: str = Query(max_length=2048),
