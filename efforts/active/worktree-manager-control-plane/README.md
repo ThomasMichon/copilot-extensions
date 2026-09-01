@@ -139,7 +139,7 @@ realized in `main`; unchecked items are the remaining delta.
       actions, multi-machine at-a-glance, session/PR status columns. Closes picker
       §`front-door-entry`, §`decision-support-before-cost`, §`programmatic-parity`,
       §`render-derive-not-own`, §`live-not-snapshot`.
-- [ ] Add an engine-owned **manual mux restoration** operation for a worktree
+- [x] Add an engine-owned **manual mux restoration** operation for a worktree
       whose bound Copilot process remains live but unreachable after its terminal
       or mux wrapper disappears. The engine must refuse an existing live mux or
       ambiguous owner, reuse the guarded reclaim path, and resume the same
@@ -248,3 +248,10 @@ its issues; the public artifacts stay self-contained and general-purpose.
   mux-restoration operation, surfaced by both Picker implementations. The design
   explicitly restarts/resumes persisted session state instead of attempting to
   reparent an arbitrary live Windows console process into a new ConPTY.
+- **2026-08-31** — Implemented the #1478 slice. `agent-worktrees remux` now
+  keeps the live `reptyr` adoption path on Linux/WSL and adds a guarded Windows
+  reclaim-before-resume path that refuses an existing mux or ambiguous owner.
+  Both Picker implementations expose **Restore** when an unreachable bound
+  process has a known head session; the standalone Manager prepares recovery
+  through the JSON engine boundary, then launches through the installed project
+  binstub so the normal mux wrapper is restored.
