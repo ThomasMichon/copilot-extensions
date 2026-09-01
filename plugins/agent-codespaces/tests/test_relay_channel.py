@@ -26,12 +26,18 @@ class _FakeProcess:
         self.stderr = _FakeStderr(stderr)
         self.stdout = SimpleNamespace()
         self.killed = False
+        self.communicated = False
         self._waiter: asyncio.Future[int] = asyncio.get_running_loop().create_future()
         if returncode is not None:
             self._waiter.set_result(returncode)
 
     async def wait(self) -> int:
         return await self._waiter
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        self.communicated = True
+        await self.wait()
+        return b"", b""
 
     def kill(self) -> None:
         self.killed = True
@@ -98,6 +104,18 @@ async def test_argv_shape_reverse_only(monkeypatch) -> None:
     assert "ControlPath" not in joined
     assert "ControlPersist" not in joined
     assert "UserKnownHostsFile=known_hosts" in argv
+    assert calls[0][1]["stdout"] is asyncio.subprocess.DEVNULL
+    assert proc.communicated is True
+
+
+@pytest.mark.asyncio
+async def test_stop_closes_transport_for_already_exited_process() -> None:
+    proc = _FakeProcess(returncode=0)
+
+    await SupervisedRelayForward._kill(proc)
+
+    assert proc.killed is False
+    assert proc.communicated is True
 
 
 @pytest.mark.asyncio
