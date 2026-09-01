@@ -244,9 +244,10 @@ form of the bar's teal `CONVO` block). Centralized in
 `git_ops.refine_state_with_session` so the bar and the picker can never drift
 apart. Without `--classify`, records carry no `state` key.
 
-When balanced profile assignment is configured, the ordinary `list --json`
-record includes only `current_profile_assignment`: the bound assignment for the
-worktree's asserted head session, or `null`. Pass
+When a worktree record carries profile-assignment history, the ordinary
+`list --json` row includes `current_profile_assignment`: the bound assignment
+for the worktree's asserted head session, or `null`. A never-assigned row omits
+the key. Pass
 `--profile-assignment-history` on an explicit diagnostic/detail read to also
 include the bounded `profile_assignments` history and
 `latest_profile_assignment` (which may be pending, bound, or abandoned).

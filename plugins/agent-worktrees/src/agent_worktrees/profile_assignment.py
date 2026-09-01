@@ -85,7 +85,7 @@ def validate_policy(
     policy: cfg.ProfileAssignmentPolicy | None,
     profiles: list[cfg.CopilotProfile],
 ) -> None:
-    """Raise when an armed policy cannot safely select from the current profiles."""
+    """Reject user-owned policy errors or an unsafe armed profile pool."""
     if policy is None:
         return
     if policy.error:
