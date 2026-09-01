@@ -93,9 +93,9 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
             )
         return session
     if ownership:
-            session = mgr.get_session(ownership.get("session_id") or "")
-            if session is not None:
-                return session
+        session = mgr.get_session(ownership.get("session_id") or "")
+        if session is not None:
+            return session
     return candidates[0] if candidates else None
 
 

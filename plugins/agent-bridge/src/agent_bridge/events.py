@@ -61,6 +61,7 @@ class EventLog:
         telemetry_source: str = "owned",
     ) -> None:
         self._events: list[SseEvent] = []
+        self._open_tool_calls: dict[str, SseEvent] = {}
         self._lock = Lock()
         self._next_id = 1
         self._waiters: list[asyncio.Event] = []
@@ -101,6 +102,7 @@ class EventLog:
                 timestamp=row["timestamp"],
             )
             log._events.append(evt)
+            log._track_tool_event(evt)
             if evt.id == 1:
                 log._telemetry.set_log_origin(evt.timestamp)
             log._telemetry.observe(
@@ -124,6 +126,7 @@ class EventLog:
             self._next_id += 1
             evt = SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
             self._events.append(evt)
+            self._track_tool_event(evt)
             waiters = list(self._waiters)
             if event_id == 1:
                 self._telemetry.set_log_origin(ts)
@@ -188,6 +191,7 @@ class EventLog:
                 # authoritative rebuilt log instead of silently stalling.
                 self._db.reset_delivery_cursors(self._session_id)
             self._events = []
+            self._open_tool_calls = {}
             self._next_id = 1
             prior_epoch = self._telemetry.begin_rebuild()
             ts = time.time()
@@ -198,9 +202,11 @@ class EventLog:
                     self._db.append_event(
                         self._session_id, event_id, event_type, data, ts,
                     )
-                self._events.append(
-                    SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
+                evt = SseEvent(
+                    id=event_id, event=event_type, data=data, timestamp=ts
                 )
+                self._events.append(evt)
+                self._track_tool_event(evt)
                 if event_id == 1:
                     self._telemetry.set_log_origin(ts)
                 # Rebuild reducer state from authoritative history, but do not
@@ -300,26 +306,13 @@ class EventLog:
         tool call instead of a contentless heartbeat -- so a watcher can tell a
         busy agent from a hung one, and knows the last thing it was doing.
 
-        Derived purely from the in-memory log; never persisted and never
-        assigned an event id (so it cannot move a delivery cursor).
+        Derived incrementally from the in-memory log; never persisted separately
+        and never assigned an event id (so it cannot move a delivery cursor).
         """
         with self._lock:
-            events = list(self._events)
-
-        open_calls: dict[str, SseEvent] = {}
-        for e in events:
-            if e.event == "tool_call_start":
-                tid = e.data.get("tool_call_id") or ""
-                open_calls[tid] = e
-            elif e.event == "tool_call_update":
-                status = e.data.get("status")
-                if status and str(status).lower() in _TERMINAL_TOOL_STATUSES:
-                    open_calls.pop(e.data.get("tool_call_id") or "", None)
-
-        if not open_calls:
-            return None
-
-        start = max(open_calls.values(), key=lambda ev: ev.id)
+            if not self._open_tool_calls:
+                return None
+            start = max(self._open_tool_calls.values(), key=lambda ev: ev.id)
         raw = start.data.get("raw_input") or {}
         command = None
         if isinstance(raw, dict):
@@ -334,6 +327,16 @@ class EventLog:
             "started_at": start.timestamp,
             "started_id": start.id,
         }
+
+    def _track_tool_event(self, event: SseEvent) -> None:
+        """Update in-flight tool state while the event-log lock is held."""
+        tool_call_id = event.data.get("tool_call_id") or ""
+        if event.event == "tool_call_start":
+            self._open_tool_calls[tool_call_id] = event
+        elif event.event == "tool_call_update":
+            status = event.data.get("status")
+            if status and str(status).lower() in _TERMINAL_TOOL_STATUSES:
+                self._open_tool_calls.pop(tool_call_id, None)
 
     async def wait_for_events(
         self, after: int, timeout: float = 30.0

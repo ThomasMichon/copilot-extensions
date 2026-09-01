@@ -15,6 +15,7 @@ from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.protocol import RESULT_SNAPSHOT_PROTOCOL_VERSION
+from agent_bridge.result_snapshot import _event_ref
 from agent_bridge.routes import sessions as session_routes
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
@@ -419,6 +420,24 @@ def test_detail_reference_expands_turn_and_event(client, app) -> None:
     assert "thought_text" not in turn.json()["turn"]
     assert event.status_code == 200
     assert event.json()["event"]["event"] == "agent_message"
+
+
+def test_detail_reference_does_not_expand_unprojected_thought(client, app) -> None:
+    _mgr, session = _seed_session(app)
+    event = session.event_log.append("agent_thought", {"text": "private reasoning"})
+    ref = _event_ref(
+        "owned",
+        session.session_id,
+        session.event_log.continuity_id or "",
+        event.id,
+    )
+
+    response = client.get(
+        "/api/v1/sessions/sess-1/result/detail",
+        params={"ref": ref},
+    )
+
+    assert response.status_code == 404
 
 
 def test_result_position_is_flushed_to_durable_storage(client, app) -> None:

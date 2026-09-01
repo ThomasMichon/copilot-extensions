@@ -610,7 +610,7 @@ def expand_owned_result_ref(
             raise ResultHistoryChangedError(
                 "result detail belongs to replaced history"
             )
-        if event is None:
+        if event is None or _event_parts(event.event, event.data) is None:
             raise KeyError("event detail is no longer available")
         return {
             "kind": "event",

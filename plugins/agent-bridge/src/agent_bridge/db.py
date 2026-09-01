@@ -1723,7 +1723,8 @@ class Database:
     def get_latest_completed_turn(self, session_id: str) -> dict[str, Any] | None:
         """Return the newest settled turn with fixed query cost."""
         rows = self.execute_read(
-            "SELECT * FROM turns WHERE session_id=? AND completed_at IS NOT NULL "
+            "SELECT turn_index, response_text, stop_reason, started_at, completed_at "
+            "FROM turns WHERE session_id=? AND completed_at IS NOT NULL "
             "ORDER BY turn_index DESC LIMIT 1",
             (session_id,),
         )
