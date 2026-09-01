@@ -64,71 +64,71 @@ adding destructive source-control behavior.
 ## Plan
 
 ### Phase 1 - Define the freshness contract
-- [ ] Compose the existing fetch, remote-default resolution, and
+- [x] Compose the existing fetch, remote-default resolution, and
   `fast_forward_worktree` safety implementation behind a reusable
   repository-preparation result; do not create a second fast-forward policy.
-- [ ] Report fetch, remote-base resolution, safe anchor advancement, opt-out,
+- [x] Report fetch, remote-base resolution, safe anchor advancement, opt-out,
   lock contention, and other degraded conditions structurally.
-- [ ] Preserve dirty, detached, non-default, ahead, and divergent anchors
+- [x] Preserve dirty, detached, non-default, ahead, and divergent anchors
   byte-for-byte.
-- [ ] Keep remote-ref selection independent from whether the anchor can advance.
-- [ ] Honor the existing `auto_fast_forward` / `--no-fast-forward` policy for
+- [x] Keep remote-ref selection independent from whether the anchor can advance.
+- [x] Honor the existing `auto_fast_forward` policy for
   anchor movement; fetching a fresh creation base remains independent.
 
 ### Phase 2 - Apply freshness to worktree creation
-- [ ] Use the shared preparation path for ordinary worktree creation.
-- [ ] Apply the same path independently to paired worktree-class repositories.
-- [ ] Keep fetch failure non-fatal: create from the last-known remote, local
+- [x] Use the shared preparation path for ordinary worktree creation.
+- [x] Apply the same path independently to paired repositories, including
+  anchor-class knowledge repositories.
+- [x] Keep fetch failure non-fatal: create from the last-known remote, local
   default, or `HEAD` fallback while reporting that freshness was degraded.
-- [ ] Preserve current pair semantics: a paired-repository preparation or carve
+- [x] Preserve current pair semantics: a paired-repository preparation or carve
   failure leaves the primary worktree usable and explicitly unpaired rather
   than rolling it back.
-- [ ] Treat concurrent Git lock contention as a reported, non-fatal inability
+- [x] Treat concurrent Git lock contention as a reported, non-fatal inability
   to advance the anchor; never race with a reset or forced ref update.
 
 ### Phase 3 - Apply freshness to local marketplace binding
-- [ ] Resolve a directory override back to its canonical registered repository
+- [x] Resolve a directory override back to its canonical registered repository
   before attempting refresh.
-- [ ] Refresh each relevant repository at most once per reconciliation
+- [x] Refresh each relevant repository at most once per reconciliation
   transaction.
-- [ ] Reuse a creation transaction's completed fetch when binding its local
-  marketplaces; otherwise retain the existing bounded fetch timeout and provide
-  the existing no-fast-forward opt-out for anchor movement.
-- [ ] Keep fetch failure non-fatal for binding: materialize the safe existing
+- [x] Keep the bounded session-start hook refresh-free; explicit create, adopt,
+  and manual reconciliation use the bounded fetch timeout.
+- [x] Keep fetch failure non-fatal for binding: materialize the safe existing
   checkout with an explicit degraded diagnostic rather than silently claiming
   freshness.
-- [ ] Preserve user-owned overrides and every existing path/manifest safety
+- [x] Preserve user-owned overrides and every existing path/manifest safety
   boundary.
 
 ### Phase 4 - Publish
-- [ ] Update behavior documentation and remediation text.
-- [ ] Bump agent-worktrees consistently and pass focused, changed-plugin,
+- [x] Update behavior documentation and remediation text.
+- [x] Bump agent-worktrees consistently and pass focused, changed-plugin,
   version, generated-payload, and install-contract gates.
 - [ ] Publish, review, self-merge, deploy, and verify installed behavior.
 
 ## Validation Plan
 
-- [ ] A stale clean default-branch anchor fast-forwards after a successful
+- [x] A stale clean default-branch anchor fast-forwards after a successful
   fetch.
-- [ ] Dirty, detached, non-default, ahead, and divergent anchors remain
+- [x] Dirty, detached, non-default, ahead, and divergent anchors remain
   unchanged.
-- [ ] New worktrees use the fetched remote default-branch ref even when the
+- [x] New worktrees use the fetched remote default-branch ref even when the
   anchor cannot advance.
-- [ ] Offline creation succeeds from the last-known safe fallback and reports
+- [x] Offline creation succeeds from the last-known safe fallback and reports
   degraded freshness.
-- [ ] Ordinary and paired worktree creation share the same behavior.
-- [ ] A paired-repository failure leaves the primary worktree intact and
+- [x] Ordinary and paired worktree creation share the same behavior.
+- [x] A paired-repository failure leaves the primary worktree intact and
   explicitly unpaired.
-- [ ] A registered local marketplace source is refreshed once before binding.
-- [ ] Offline local binding proceeds from the existing safe checkout and
+- [x] A registered local marketplace source is refreshed once before binding.
+- [x] Offline local binding proceeds from the existing safe checkout and
   reports degraded freshness.
-- [ ] Disabling automatic fast-forward preserves the anchor while still
+- [x] Disabling automatic fast-forward preserves the anchor while still
   allowing fresh remote-ref selection for worktree creation.
 - [ ] Concurrent creation/update attempts cannot corrupt or forcibly rewrite
   the anchor; lock contention degrades safely.
-- [ ] Fetch, authentication, missing-remote, and missing-default-ref failures
+- [x] Fetch, authentication, missing-remote, and missing-default-ref failures
   produce honest degraded results without destructive fallback.
-- [ ] Existing marketplace ownership, ignore, path-containment, manifest-name,
+- [x] Existing marketplace ownership, ignore, path-containment, manifest-name,
   and user-conflict tests remain green.
 
 ## Proposal
@@ -148,3 +148,17 @@ paired-worktree and marketplace reconciliation boundaries remain intact.
 - Reconciled the change as a reliability extension of installer
   `plugin-updating-and-alignment` and agent-worktrees' ownership of
   source-control mechanics.
+
+### 2026-08-31 - Freshness paths implemented
+- Added one bounded source-preparation primitive that fetches, selects the best
+  start ref, and reuses the existing safe fast-forward implementation.
+- Ordinary and paired creation now opportunistically advance eligible anchors
+  while always preferring the fetched remote ref for new worktrees.
+- Explicit create, adopt, and manual marketplace reconciliation refresh
+  registered local sources. The bounded session-start hook remains
+  network-free.
+- Focused creation, pairing, marketplace, anchor-sync, offline, launch-preflight,
+  lint, version, generated-payload, and install-contract checks pass. The broad
+  Windows suite reaches an unrelated pre-existing WSL Bash probe failure; a
+  filtered monolithic run exceeds the runner's five-minute single-subsuite
+  budget.

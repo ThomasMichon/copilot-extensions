@@ -47,6 +47,23 @@ full verb catalog, see [cli-reference.md](cli-reference.md).
 deployment; **deployed** means a running system reflects it (a separate install
 step for runtime plugins). Don't call a merged change "deployed."
 
+### Creation starts from freshly resolved repository state
+
+Before creating an ordinary or paired worktree, agent-worktrees fetches the
+configured remote and chooses the fetched remote default branch as the start
+point when available. A clean anchor checked out on its default branch is also
+fast-forwarded opportunistically. Dirty, detached, non-default, ahead, and
+diverged anchors are never rewritten; creation still uses the fetched remote
+ref, or a last-known local fallback when the fetch is unavailable.
+
+Registered repositories used as local marketplace sources receive the same
+safe refresh before a directory override is materialized during explicit creation,
+adoption, or reconciliation. The bounded session-start hook remains
+refresh-free. Fetch failure is non-fatal and is reported as degraded freshness
+rather than as a successful refresh. The existing `auto_fast_forward` policy
+disables opportunistic anchor movement during creation without preventing
+remote-ref-based worktree creation.
+
 ## Worktree states
 
 The tracking state (seen in `list` / the picker) and its status-bar block:

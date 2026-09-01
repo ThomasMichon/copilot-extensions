@@ -19,6 +19,7 @@ from typing import Any
 from plugin_resolve import marketplace_manifest_path
 from plugin_resolve.conventions import SETTINGS_RELS
 
+from . import git_ops
 from . import repos as repos_mod
 from .knowledge_plugins import (
     KnowledgePluginError,
@@ -129,7 +130,13 @@ def _read_marketplaces(
     return marketplaces
 
 
-def _registered_marketplace_path(name: str) -> tuple[Path | None, str | None]:
+def _registered_marketplace_path(
+    name: str,
+    *,
+    refresh_repositories: bool,
+    fast_forward_repositories: bool,
+    refresh_results: dict[str, dict[str, Any]],
+) -> tuple[Path | None, str | None]:
     """Resolve one exact registry entry to a contained, exact-name ``.ai`` root."""
     entry = repos_mod.find_repo(name)
     if entry is None:
@@ -143,6 +150,36 @@ def _registered_marketplace_path(name: str) -> tuple[Path | None, str | None]:
         return None, "checkout-missing"
     if not checkout.is_dir():
         return None, "checkout-missing"
+
+    checkout_key = str(checkout)
+    if refresh_repositories and checkout_key not in refresh_results:
+        remote = git_ops.resolve_remote_name(
+            getattr(entry, "remote", ""),
+            cwd=checkout,
+        )
+        default_branch = getattr(entry, "default_branch", "") or "main"
+        try:
+            prepared = git_ops.prepare_worktree_base(
+                checkout,
+                remote=remote,
+                default_branch=default_branch,
+                fast_forward_anchor=fast_forward_repositories,
+            )
+        except Exception as exc:
+            refresh_results[checkout_key] = {
+                "fetched": False,
+                "fetch_failed": True,
+                "anchor": "refresh-error",
+                "start_point": None,
+                "error": str(exc)[:160],
+            }
+        else:
+            refresh_results[checkout_key] = {
+                "fetched": prepared.fetched,
+                "fetch_failed": prepared.fetch_error is not None,
+                "anchor": prepared.anchor.reason,
+                "start_point": prepared.start_point,
+            }
 
     try:
         marketplace = (checkout / ".ai").resolve(strict=True)
@@ -312,7 +349,11 @@ def _ensure_output_is_local(repo: Path, *, ensure_ignored: bool) -> None:
 
 
 def reconcile(
-    repo_path: str | Path, *, ensure_ignored: bool = False
+    repo_path: str | Path,
+    *,
+    ensure_ignored: bool = False,
+    refresh_repositories: bool = False,
+    fast_forward_repositories: bool = False,
 ) -> dict[str, Any]:
     """Reconcile source-only local marketplace overrides for one checkout."""
     repo = Path(repo_path).resolve()
@@ -345,6 +386,7 @@ def reconcile(
 
         desired: dict[str, dict] = {}
         skipped: dict[str, str] = {}
+        refresh_results: dict[str, dict[str, Any]] = {}
         for name, definition in sorted(declared.items()):
             source = definition.get("source")
             source_kind = (
@@ -355,7 +397,12 @@ def reconcile(
             )
             if source_kind not in _REMOTE_SOURCE_KINDS:
                 continue
-            local_path, reason = _registered_marketplace_path(name)
+            local_path, reason = _registered_marketplace_path(
+                name,
+                refresh_repositories=refresh_repositories,
+                fast_forward_repositories=fast_forward_repositories,
+                refresh_results=refresh_results,
+            )
             if local_path is None:
                 skipped[name] = reason or "unavailable"
                 continue
@@ -397,5 +444,6 @@ def reconcile(
             "marketplaces": sorted(managed),
             "conflicts": sorted(conflicts),
             "skipped": skipped,
+            "repository_refresh": refresh_results,
             "file_removed": not output_path.exists(),
         }
