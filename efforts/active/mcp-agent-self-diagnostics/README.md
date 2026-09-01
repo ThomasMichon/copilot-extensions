@@ -2,7 +2,7 @@
 
 - **Slug:** `mcp-agent-self-diagnostics`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/tmichon-book2-win-20260831-220141-4435`
+- **Branch(es):** managed worktree → generated PR branch
 - **Created:** 2026-08-31
 - **Status:** Draft
 - **Vision:** Harness Guidance §Features `authoritative-ownership`; §Behaviors `guidance-follows-ownership`, `task-detail-on-demand`
@@ -21,7 +21,7 @@ plugins.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Windows worktree | Plan, scanner implementation, tests, and PR | `worktree/tmichon-book2-win-20260831-220141-4435` |
+| Windows worktree | Plan, scanner implementation, tests, and PR | managed worktree |
 
 ## Coordination
 
@@ -48,7 +48,7 @@ owner, and reusable policy is checked mechanically where possible.
 > We should ensure that every plugin which has an agent includes a
 > troubleshooting skill for its MCP, plus the README.MD files for each plugin
 > should be explicit about dependencies. Probably worth making that a durable
-> guideline in custimizing-copilot, enforceable via reviewing-customizations.
+> guideline in customizing-copilot, enforceable via reviewing-customizations.
 
 ## Plan
 
