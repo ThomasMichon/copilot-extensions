@@ -2,7 +2,7 @@
 
 Applies every ``copilot.settings*`` contribution from the resolved package union
 into the global settings file by disposition: ``ensure-present`` map/list floors
-first, then ``enforce`` scalars (authoritative). An ``enabledPlugins`` floor has
+first, then ``enforce`` values (authoritative). An ``enabledPlugins`` floor has
 one deliberate tombstone rule: ``false`` authoritatively disables that plugin,
 while ``true`` remains additive and preserves an existing operator ``false``.
 The values of a managed key are the settings.json top-level keys (``model``,

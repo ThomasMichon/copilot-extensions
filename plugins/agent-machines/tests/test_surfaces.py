@@ -41,7 +41,7 @@ def test_apply_enforce_writes_scalars(tmp_path):
     contribs = [("enforce", {"model": "opus", "effortLevel": "high"})]
     result = settings.apply(contribs, home=home, dry_run=False)
     assert result.changed
-    data = json.loads((home / "settings.json").read_text())
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
     assert data["model"] == "opus"
     assert data["effortLevel"] == "high"
 
@@ -53,7 +53,7 @@ def test_ensure_present_unions_without_clobber(tmp_path):
     )
     contribs = [("ensure-present", {"enabledPlugins": {"new@m": True}})]
     settings.apply(contribs, home=home, dry_run=False)
-    data = json.loads((home / "settings.json").read_text())
+    data = json.loads((home / "settings.json").read_text(encoding="utf-8"))
     assert data["enabledPlugins"] == {"existing@m": True, "new@m": True}
 
 
