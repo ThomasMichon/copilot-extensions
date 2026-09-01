@@ -6,7 +6,7 @@
   version-control remote or minting an account per agent.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-08-24
+- **Last revised:** 2026-08-31
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -217,6 +217,41 @@ A worker reports **progress toward the goal** at meaningful transitions and a
 the live transcript (the coordination layer's *summary-status-is-first-class*,
 seen from the delegation side). A caller or operator surveys the fleet's progress
 at a glance without reading each session.
+
+### terminal-worktree-reclamation
+When the delegation layer causes a worker worktree to be allocated, that
+allocation remains an **owned obligation of the creating host and supervisor**
+until the task reaches a terminal state, the supervisor-owned session has been
+driven to exit, and the task carries an explicit landed or abandoned resolution.
+The durable ownership key is the creating machine-and-environment; a particular
+supervisor process identity is audit provenance, not a lease that expires on
+restart. Only a successor supervisor for that same host scope may evaluate the
+allocation for reclamation; absence from another host is never evidence that it
+is gone.
+
+The terminal task's inbound claim is released first. The supervisor then asks
+the ground layer to atomically re-check liveness, claims, follow-up state, and
+upstream safety at the removal boundary and reclaim that exact worktree through
+its safety-checked lifecycle. Unknown liveness, a concurrently resumed
+worktree, missing ground-layer capability, unmerged or uncommitted content, and
+failed cleanup remain visible and retryable; they are never interpreted as
+permission to delete. In particular, a supervisor never performs a destructive
+abandonment unwind on a dirty workspace after the knowledgeable worker is gone.
+Before that handoff, dispatch also proves that no other nonterminal task
+allocation still targets the same worktree, or projects the complete inbound
+claim set into the ground-layer atomic check. One terminal task can never make a
+shared worktree look unclaimed.
+
+The producing service still owns its domain state — reservations, artifacts,
+external records, and the decision that the task is legitimately terminal.
+The delegation layer owns only the allocation provenance and lifecycle it
+created: embodiment session, durable host scope, worktree identity, whether the
+spawn created that worktree or targeted a pre-existing one, and terminal
+reclamation. A missing/legacy origin is unknown and therefore not reclaimable.
+Prune eligibility and resource-accountability state remain owned by the ground
+layer; dispatch derives and drives that authority rather than creating a second
+cleanup ledger. A producer does not need to reimplement worktree liveness and
+cleanup safety merely because it emitted the task.
 
 ### worktree-focus-before-collision
 When substantial operator-led or task-less work begins, or changes direction,
@@ -570,6 +605,27 @@ resolution of the goal and resolution of its worktree happen together — and a
 worker that gives up part-way is expected to drive its own worktree to that clean
 state before it lets go.
 
+### allocator-reclaims-what-it-creates
+The component that allocates an embodiment owns its lifecycle through
+reclamation. A terminal task does not merely release queue capacity while its
+worker workspace accumulates indefinitely: the supervisor retains the exact
+allocation identity and creating-host provenance, retires the session it
+started, releases the task's inbound claim, and delegates atomic
+resolution/removal to the ground layer that owns worktrees. It never evaluates a
+foreign-host allocation locally, never races a resumed workspace, and never
+turns an `abandoned` task into authority to discard dirty work. Headless bodies
+with no worktree require no reclamation; externally supplied or origin-unknown
+worktrees remain with their external owner. A worktree shared by another live
+task remains claimed. Missing or version-skewed ground-layer capabilities hold
+the obligation visibly rather than degrading to unsafe local logic.
+
+This is the delegation-layer face of the parent fabric's resource-claim
+direction and *claimed-resource-not-reclaimed* guarantees: dispatch records the
+allocation fact it alone knows, while the ground layer remains the single owner
+of prune eligibility and safe removal. This ownership boundary keeps producer
+domains focused on their own records while giving every
+agent-dispatch-created workspace one generic, observable cleanup path.
+
 ### no-overlapping-live-workers
 Two live workers never hold **overlapping** work. When a goal is re-carved so a new
 task covers scope a previous worker held — most commonly after an abandon
@@ -655,7 +711,9 @@ does **not** quietly undo it.
 - **Not the embodiment owner.** *How* a claimed task becomes a running worker —
   a durable CLI session versus a headless helper — is decided by the ground and
   coordination layers (*lifetime-decides-embodiment* in the parent). This layer
-  owns the **queue and its scheduling**, not the body a worker runs in.
+  does not choose or implement the body type, but when its supervisor requests
+  an allocation it owns the resulting allocation's provenance and terminal
+  hand-back.
 - **Not a priority engine.** The coordinator does not own scheduling policy,
   weighting, or fair-share arbitration; it hands out atomic claims over a queue.
   Prioritization is a producer/consumer concern layered on top.
@@ -682,6 +740,14 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-08-31** — Added *terminal-worktree-reclamation* and
+  *allocator-reclaims-what-it-creates*: terminal task settlement must not leave
+  supervisor-created worktrees registered indefinitely. The producer decides
+  when domain work is terminal; agent-dispatch retains and reclaims the
+  embodiment allocation it created through the ground layer's safe lifecycle.
+  Implementation is tracked by
+  [`terminal-worktree-reclamation`](../../../efforts/active/terminal-worktree-reclamation/README.md)
+  and [#1488](https://github.com/ThomasMichon/copilot-extensions/issues/1488).
 - **2026-08-24** — Tightened *declarative-discovered-registrar* and
   *discover-and-live-reconcile* for plugin-owned declarations. A plugin may drop a
   pointer to declarations in its own footprint from a session-start hook, but the
