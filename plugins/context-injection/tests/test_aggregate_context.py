@@ -200,13 +200,15 @@ def _run_native_producer_wrapper(
     hook_input: str,
     *,
     extra_env: dict[str, str] | None = None,
+    contributor_args: list[str] | None = None,
+    powershell: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.update(extra_env or {})
     environment["COPILOT_PLUGIN_ROOT"] = str(plugin)
     if os.name == "nt":
-        powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        assert powershell is not None
+        powershell = powershell or shutil.which("pwsh") or shutil.which("powershell.exe")
+        assert powershell
         command = [
             powershell,
             "-NoProfile",
@@ -215,6 +217,7 @@ def _run_native_producer_wrapper(
             source,
             contributor_id,
             "scripts/emit.ps1",
+            *(contributor_args or []),
         ]
     else:
         command = [
@@ -223,6 +226,7 @@ def _run_native_producer_wrapper(
             source,
             contributor_id,
             "scripts/emit.sh",
+            *(contributor_args or []),
         ]
     return subprocess.run(
         command,
@@ -232,6 +236,198 @@ def _run_native_producer_wrapper(
         env=environment,
         check=True,
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Bash wrapper coverage runs on POSIX")
+def test_bash_producer_wrapper_large_payload_early_exit_emits_one_empty(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-policy",
+        context="unused",
+    )
+    (plugin / "scripts" / "emit.sh").write_text(
+        "#!/usr/bin/env bash\nexit 7\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    result = _run_native_producer_wrapper(
+        plugin,
+        "a-policy@copilot-extensions",
+        "main",
+        json.dumps(
+            {
+                "cwd": str(tmp_path),
+                "sessionId": "large-payload",
+                "initialPrompt": "x" * (1024 * 1024),
+            }
+        ),
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Bash wrapper coverage runs on POSIX")
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("printf 'partial'", "{}"),
+        ("printf '{\"additionalContext\":\"valid\"}'; exit 7", "{}"),
+        ("printf ''", "{}"),
+    ],
+)
+def test_bash_producer_wrapper_rejects_failed_or_invalid_output(
+    tmp_path: Path,
+    body: str,
+    expected: str,
+) -> None:
+    plugin = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-policy",
+        context="unused",
+    )
+    (plugin / "scripts" / "emit.sh").write_text(
+        f"#!/usr/bin/env bash\n{body}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    result = _run_native_producer_wrapper(
+        plugin,
+        "a-policy@copilot-extensions",
+        "main",
+        json.dumps({"cwd": str(tmp_path), "sessionId": "invalid-output"}),
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == expected
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell coverage")
+def test_powershell_hosts_preserve_non_ascii_hook_payload(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-policy",
+        context="unused",
+    )
+    (plugin / "scripts" / "emit.ps1").write_text(
+        "$utf8 = [Text.UTF8Encoding]::new($false)\n"
+        "[Console]::InputEncoding = $utf8\n"
+        "[Console]::OutputEncoding = $utf8\n"
+        "$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json\n"
+        "@{ additionalContext = $payload.cwd } | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "caf\u00e9-\u6d4b\u8bd5"
+    cwd.mkdir()
+    payload = json.dumps(
+        {"cwd": str(cwd), "initialPrompt": "na\u00efve", "sessionId": "utf8"},
+        ensure_ascii=False,
+    )
+
+    for shell in filter(
+        None,
+        (shutil.which("pwsh"), shutil.which("powershell.exe")),
+    ):
+        result = _run_native_producer_wrapper(
+            plugin,
+            "a-policy@copilot-extensions",
+            "main",
+            payload,
+            powershell=shell,
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {"additionalContext": str(cwd)}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell coverage")
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [""],
+        ["", "plain", "with space\\", 'embedded"quote', 'space and quote"\\'],
+    ],
+)
+def test_powershell_hosts_preserve_contributor_arguments(
+    tmp_path: Path,
+    arguments: list[str],
+) -> None:
+    plugin = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-policy",
+        context="unused",
+    )
+    (plugin / "scripts" / "emit.ps1").write_text(
+        "$utf8 = [Text.UTF8Encoding]::new($false)\n"
+        "[Console]::OutputEncoding = $utf8\n"
+        "$value = ConvertTo-Json -InputObject ([object[]]$args) -Compress\n"
+        "@{ additionalContext = $value } | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    payload = json.dumps({"cwd": str(tmp_path), "sessionId": "arguments"})
+
+    for shell in filter(
+        None,
+        (shutil.which("pwsh"), shutil.which("powershell.exe")),
+    ):
+        result = _run_native_producer_wrapper(
+            plugin,
+            "a-policy@copilot-extensions",
+            "main",
+            payload,
+            contributor_args=arguments,
+            powershell=shell,
+        )
+        assert result.returncode == 0
+        assert json.loads(json.loads(result.stdout)["additionalContext"]) == arguments
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell coverage")
+@pytest.mark.parametrize(
+    "body",
+    [
+        "[Console]::Out.Write('partial')",
+        "[Console]::Out.Write('{\"additionalContext\":\"valid\"}'); exit 7",
+        "exit 0",
+    ],
+)
+def test_powershell_producer_wrapper_rejects_failed_or_invalid_output(
+    tmp_path: Path,
+    body: str,
+) -> None:
+    plugin = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-policy",
+        context="unused",
+    )
+    (plugin / "scripts" / "emit.ps1").write_text(
+        body + "\n",
+        encoding="utf-8",
+    )
+
+    for shell in filter(
+        None,
+        (shutil.which("pwsh"), shutil.which("powershell.exe")),
+    ):
+        result = _run_native_producer_wrapper(
+            plugin,
+            "a-policy@copilot-extensions",
+            "main",
+            json.dumps({"cwd": str(tmp_path), "sessionId": "invalid-output"}),
+            powershell=shell,
+        )
+        assert result.returncode == 0
+        assert result.stdout == "{}"
 
 
 def _cross_marketplace_stack(
@@ -733,7 +929,13 @@ def test_posix_wrapper_direct_fallback_without_python(
     result = subprocess.run(
         [str(commands / "bash"), str(policy / "scripts" / "invoke-context-contributor.sh"),
          "a-policy@copilot-extensions", "main", "scripts/emit.sh"],
-        input=json.dumps({"cwd": str(project), "sessionId": "standalone"}),
+        input=json.dumps(
+            {
+                "cwd": str(project),
+                "sessionId": "standalone",
+                "initialPrompt": "x" * (1024 * 1024),
+            }
+        ),
         text=True,
         capture_output=True,
         cwd=tmp_path,
@@ -744,6 +946,42 @@ def test_posix_wrapper_direct_fallback_without_python(
     assert json.loads(result.stdout) == {
         "additionalContext": f"CWD:{project}"
     }
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows no-Python fallback")
+def test_windows_wrapper_direct_fallback_without_python(
+    tmp_path: Path,
+) -> None:
+    policy = _plugin(
+        tmp_path / "standalone",
+        "copilot-extensions",
+        "a-policy",
+        context="DIRECT",
+    )
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    payload = json.dumps(
+        {
+            "cwd": str(tmp_path),
+            "sessionId": "standalone",
+            "initialPrompt": "x" * (1024 * 1024),
+        }
+    )
+
+    for shell in filter(
+        None,
+        (shutil.which("pwsh"), shutil.which("powershell.exe")),
+    ):
+        result = _run_native_producer_wrapper(
+            policy,
+            "a-policy@copilot-extensions",
+            "main",
+            payload,
+            extra_env={"PATH": str(commands)},
+            powershell=shell,
+        )
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == {"additionalContext": "DIRECT"}
 
 
 def test_windows_ancestry_reader_passes_parent_pid_in_environment(

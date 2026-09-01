@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-plugin_version="0.1.0-dev7"
+plugin_version="0.1.0-dev8"
 max_payload_bytes=65536
 max_config_bytes=65536
 max_config_lines=200

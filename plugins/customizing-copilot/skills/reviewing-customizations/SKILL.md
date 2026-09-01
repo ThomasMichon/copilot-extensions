@@ -161,14 +161,14 @@ every enabled session-start plugin must be complete-declared; unclassified hooks
 incomplete side-effect-only declarations, and contributors without
 authority-aware direct behavior are BLOCKING. An external plugin whose payload
 cannot be inspected remains a warning because the scanner cannot establish
-whether it emits context. Producer hooks rendezvous but emit `{}` after proof;
-only the authority emits the cached aggregate. The authority may run before,
-after, or concurrently with producers. Their host-level `timeoutSec` must be at
+whether it emits context. After proof, every producer and the authority emits
+the same cached aggregate bytes. The authority may run before, after, or
+concurrently with producers. Their host-level `timeoutSec` must be at
 least the engine's 25-second rendezvous deadline, with 30 seconds recommended
 for wrapper overhead.
 
 For this marketplace's owned stack, the repository guard is stricter: every
-declared contributor must have exactly one 30-second engine-v2 wrapper hook,
+declared contributor must have exactly one 30-second engine-v5 wrapper hook,
 the Bash and PowerShell wrapper copies must remain byte-identical to the
 authority copy, and no legacy direct hook may still invoke the contributor.
 Mixed plugins must prove their direct state mutations use context-free modes;
