@@ -87,7 +87,7 @@ The accepted dispositions are:
 | Disposition | Current behavior |
 | --- | --- |
 | `enforce` | Applied by the settings surface as an authoritative merge for declared keys. |
-| `ensure-present` | Applied as a union floor for settings, permissions, and trusted folders. |
+| `ensure-present` | Applied as a union floor for settings, permissions, and trusted folders. In `enabledPlugins`, a declared `false` is an authoritative per-plugin tombstone; `true` remains additive. |
 | `capture-only` | Accepted by the schema; no capture implementation in this plugin yet. |
 | `ignore` | Default for undeclared/unhandled keys; restore is allowlist-based. |
 | `exclude` | Accepted as capture guard data; no capture implementation yet. |
@@ -117,7 +117,7 @@ The implemented surfaces live in `src\agent_machines\surfaces\`:
 
 | Logical key | File | Behavior |
 | --- | --- | --- |
-| `copilot.settings` | `~/.copilot/settings.json` | `ensure-present` floors first, then `enforce`; only declared keys are touched. |
+| `copilot.settings` | `~/.copilot/settings.json` | `ensure-present` floors first, then `enforce`; only declared keys are touched. `enabledPlugins.<plugin>: false` tombstones one plugin without replacing the map. |
 | `copilot.permissions` | `~/.copilot/permissions-config.json` | Adds declared `tool_approvals` to existing concrete locations resolved from location classes. |
 | `copilot.trustedFolders` | `~/.copilot/config.json` | Adds concrete trusted folders while preserving other config keys. |
 

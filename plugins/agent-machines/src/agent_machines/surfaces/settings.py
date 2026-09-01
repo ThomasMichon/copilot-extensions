@@ -2,10 +2,12 @@
 
 Applies every ``copilot.settings*`` contribution from the resolved package union
 into the global settings file by disposition: ``ensure-present`` map/list floors
-first (union, never clobbering session-accreted state), then ``enforce`` scalars
-(authoritative). The values of a managed key are the settings.json top-level keys
-(``model``, ``effortLevel``, ``enabledPlugins``, ...). Idempotent, backed up
-before write, dry-run-safe.
+first, then ``enforce`` values (authoritative). An ``enabledPlugins`` floor has
+one deliberate tombstone rule: ``false`` authoritatively disables that plugin,
+while ``true`` remains additive and preserves an existing operator ``false``.
+The values of a managed key are the settings.json top-level keys (``model``,
+``effortLevel``, ``enabledPlugins``, ...). Idempotent, backed up before write,
+dry-run-safe.
 
 Invariant (do not regress): this surface enforces **only the declared managed
 keys** and merges them into the live file -- it **never rewrites or replaces the
@@ -35,6 +37,19 @@ SURFACE = "copilot.settings"
 SETTINGS_FILE = "settings.json"
 
 
+def _merge_settings_floor(key: str, live: Any, manifest: Any) -> Any:
+    """Apply the enabled-plugin tombstone without changing other floor semantics."""
+    if key != "enabledPlugins" or not isinstance(live, dict) or not isinstance(manifest, dict):
+        return merge_floor(live, manifest)
+    out = dict(live)
+    for plugin, enabled in manifest.items():
+        if enabled is False:
+            out[plugin] = False
+        elif plugin not in out or out[plugin] is None:
+            out[plugin] = enabled
+    return out
+
+
 def apply(
     contributions: list[tuple[str, dict[str, Any]]],
     home: Path | None = None,
@@ -56,7 +71,7 @@ def apply(
                 if disposition == "enforce":
                     new[key] = merge_enforce(new.get(key), val)
                 else:
-                    new[key] = merge_floor(new.get(key), val)
+                    new[key] = _merge_settings_floor(key, new.get(key), val)
                 applied.append(key)
 
     changed = new != live
