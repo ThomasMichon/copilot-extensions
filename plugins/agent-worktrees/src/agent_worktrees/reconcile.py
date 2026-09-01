@@ -1312,11 +1312,21 @@ def apply_plan(
                 rc = run(argv)
             except Exception as exc:  # never raise from a background provision
                 _log(f"provision: step FAILED for {service}: {exc}")
-                executed.append({"service": service, "argv": argv, "ok": False})
+                executed.append({
+                    "service": service,
+                    "argv": argv,
+                    "ok": False,
+                    "error": str(exc),
+                })
                 continue
             ok = rc == 0
             if not ok:
                 _log(f"provision: step for {service} exited {rc}")
-            executed.append({"service": service, "argv": argv, "ok": ok})
+            executed.append({
+                "service": service,
+                "argv": argv,
+                "ok": ok,
+                "returncode": rc,
+            })
 
     return {"action": final_action, "passes": passes, "executed": executed}

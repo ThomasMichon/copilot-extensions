@@ -1292,6 +1292,7 @@ def test_apply_plan_default_is_runtime_only(env):
         runner=lambda _argv: 7,
     )
     assert summary["executed"][0]["ok"] is False
+    assert summary["executed"][0]["returncode"] == 7
 
 
 
