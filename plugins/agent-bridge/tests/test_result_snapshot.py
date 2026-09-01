@@ -445,12 +445,15 @@ def test_detail_reference_rejects_rebuilt_history(client, app) -> None:
     assert response.status_code == 409
 
 
-def test_detail_reference_rejects_malformed_input_as_bad_request(client, app) -> None:
+@pytest.mark.parametrize("ref", ["not-a-result-token", "abr1.%%%%"])
+def test_detail_reference_rejects_malformed_input_as_bad_request(
+    client, app, ref
+) -> None:
     _seed_session(app)
 
     response = client.get(
         "/api/v1/sessions/sess-1/result/detail",
-        params={"ref": "not-a-result-token"},
+        params={"ref": ref},
     )
 
     assert response.status_code == 400

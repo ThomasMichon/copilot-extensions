@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import time
 from dataclasses import dataclass
@@ -115,7 +116,13 @@ def _decode_token(
             encoded + padding, altchars=b"-_", validate=True
         )
         value = json.loads(raw.decode("utf-8"))
-    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (
+        binascii.Error,
+        ValueError,
+        TypeError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
         raise ResultTokenError("invalid result token") from exc
     if not isinstance(value, dict) or value.get("v") != 1:
         raise ResultTokenError("unsupported result token version")
