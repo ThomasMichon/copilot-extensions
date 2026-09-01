@@ -493,7 +493,6 @@ def test_reviewer_loop_honors_equivalent_legacy_override(
     legacy = declaration_to_registration(source, machine="host-a")
     legacy["id"] = "legacy-review-source"
     legacy["source"] = "direct"
-    legacy["spec"]["timeout_seconds"] = 999
     save_overrides(overrides, {legacy["id"]: {"disabled": True}})
     monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
     monkeypatch.setattr(m, "_client", lambda _args: _LoopClient([legacy]))
@@ -528,6 +527,52 @@ def test_reviewer_loop_honors_equivalent_legacy_override(
     ) == 0
     capsys.readouterr()
     assert json.loads(overrides.read_text(encoding="utf-8")) == {}
+
+
+def test_reviewer_loop_does_not_adopt_conflicting_direct_registration(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+    from agent_dispatch.overrides import save_overrides
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    overrides = tmp_path / "overrides.json"
+    _write_reviewer_loop(declaration)
+    source = next(
+        item
+        for item in read_declaration_file_set(declaration)
+        if item.kind == "emitter"
+    ).with_owner("repo:repo")
+    conflicting = declaration_to_registration(source, machine="host-a")
+    conflicting["id"] = "conflicting-review-source"
+    conflicting["source"] = "direct"
+    conflicting["spec"]["timeout_seconds"] = 999
+    save_overrides(overrides, {conflicting["id"]: {"disabled": True}})
+    monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient([conflicting]))
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+
+    assert main(
+        ["reviewer-loop", "inspect", str(declaration), "--owner", "repo:repo"]
+    ) == 0
+    inspected = json.loads(capsys.readouterr().out)
+    source_unit = next(
+        unit for unit in inspected["units"] if unit["kind"] == "emitter"
+    )
+    assert source_unit["overridden_off"] is False
+    assert conflicting["id"] not in source_unit["override_ids"]
+
+    assert main(
+        ["reviewer-loop", "enable", str(declaration), "--owner", "repo:repo"]
+    ) == 0
+    capsys.readouterr()
+    assert json.loads(overrides.read_text(encoding="utf-8")) == {
+        conflicting["id"]: {"disabled": True}
+    }
 
 
 def test_override_parser_shapes_namespace():

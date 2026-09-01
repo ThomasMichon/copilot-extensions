@@ -2288,7 +2288,7 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
     )
     from .producers import emitter
     from .supervisor_daemon import (
-        registration_logical_ids,
+        merge_registration_sources,
         registration_override_ids,
     )
 
@@ -2335,14 +2335,16 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
                 env=env,
                 include_paused=True,
             )
-        aliases = {}
-        for registration in registrations:
-            logical_ids = registration_logical_ids(registration)
-            aliases[registration["id"]] = {
-                direct_registration["id"]
-                for direct_registration in direct
-                if logical_ids & registration_logical_ids(direct_registration)
-            } | logical_aliases[registration["id"]]
+        replacements = merge_registration_sources(direct, registrations).replacements
+        aliases = {
+            registration["id"]: {
+                direct_id
+                for direct_id, declared_id in replacements.items()
+                if declared_id == registration["id"]
+            }
+            | logical_aliases[registration["id"]]
+            for registration in registrations
+        }
         if command == "inspect":
             overrides = load_overrides(overrides_path())
             return _emit(
