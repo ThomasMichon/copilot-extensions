@@ -32,4 +32,8 @@ case "$PWD/" in
 esac
 
 export AGENT_MACHINES_PAYLOAD_ROOT="$_payload_root"
+if ! command -v bash >/dev/null 2>&1; then
+    printf '[agent-machines] required payload dispatcher needs bash.\n' >&2
+    exit 126
+fi
 exec bash "$_payload_root/scripts/invoke-payload-runtime.sh" "$@"

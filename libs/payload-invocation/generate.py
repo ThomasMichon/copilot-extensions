@@ -333,6 +333,11 @@ def render(
                 else ""
             )
             + (
+                "if ! command -v bash >/dev/null 2>&1; then\n"
+                f"    printf '[{selected['command']}] required payload "
+                "dispatcher needs bash.\\n' >&2\n"
+                "    exit 126\n"
+                "fi\n"
                 f'exec bash "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'
                 if data["installationContext"] == "required"
                 else f'exec "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'

@@ -28,7 +28,7 @@
     {"n": 2, "title": "two active Agent Machines cells install and run independently"},
     {"n": 3, "title": "one cell updates without changing its peer"},
     {"n": 4, "title": "historical owned slot rolls back without changing its peer"},
-    {"n": 5, "title": "requested-only malformed foreign maintenance and orphaned states fail closed"}
+    {"n": 5, "title": "blocked governance states fail closed without legacy fallback"}
   ],
   "notes": [
     "All namespaced receipts, runtimes, policies, and scenario output live in the disposable clean-room account or the runner-owned results directory.",

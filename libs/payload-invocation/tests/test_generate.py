@@ -194,10 +194,9 @@ def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) ->
     assert data["runtimeRoot"] == ".agent-example"
     posix = generated[manifest.parent / "bin" / "agent-machines"]
     powershell = generated[manifest.parent / "bin" / "agent-machines.ps1"]
-    assert (
-        'exec bash "$_payload_root/scripts/invoke-payload-runtime.sh" "$@"'
-        in posix
-    )
+    assert "if ! command -v bash >/dev/null 2>&1; then" in posix
+    assert "[agent-machines] required payload dispatcher needs bash." in posix
+    assert 'exec bash "$_payload_root/scripts/invoke-payload-runtime.sh" "$@"' in posix
     assert "$env:AGENT_MACHINES_PAYLOAD_ROOT = $_payloadRoot" in powershell
     assert "Resolve-PayloadRuntime" not in powershell
 
