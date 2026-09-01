@@ -39,6 +39,17 @@ def _string(data: Mapping, key: str) -> str:
     return value
 
 
+def _strings(data: dict, key: str) -> tuple[str, ...]:
+    value = data.pop(key, ())
+    if not isinstance(value, (list, tuple)) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise RegistrarError(
+            f"reviewer-loop {key}: expected a list of non-empty strings"
+        )
+    return tuple(dict.fromkeys(value))
+
+
 def _reject_reserved(section: str, data: Mapping, reserved: set[str]) -> None:
     present = sorted(reserved & set(data))
     if present:
@@ -80,6 +91,7 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
     emitter = _mapping(data, "emitter")
     evaluator = _mapping(data, "evaluator")
     pool = _mapping(data, "pool")
+    additional_labels = _strings(pool, "additional_labels")
     _reject_reserved("emitter", emitter, {"id", "evaluator_ref"})
     _reject_reserved("evaluator", evaluator, {"repo", "evaluator_ref"})
     _reject_reserved(
@@ -113,7 +125,7 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
         },
         {
             "name": f"{name}-workers",
-            "labels": [task_label],
+            "labels": list(dict.fromkeys((task_label, *additional_labels))),
             "repos": repo,
             **pool,
             **common,
