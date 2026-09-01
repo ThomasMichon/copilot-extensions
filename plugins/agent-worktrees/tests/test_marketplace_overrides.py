@@ -53,6 +53,16 @@ def safe_output(monkeypatch):
     monkeypatch.setattr(
         mo, "_ensure_output_is_local", lambda _repo, *, ensure_ignored: None
     )
+    monkeypatch.setattr(
+        mo.git_ops,
+        "prepare_worktree_base",
+        lambda *a, **k: SimpleNamespace(
+            start_point="origin/main",
+            fetched=True,
+            fetch_error=None,
+            anchor=SimpleNamespace(reason="up-to-date"),
+        ),
+    )
 
 
 def test_anchor_override_preserves_enabled_plugins_and_unrelated_settings(
@@ -90,7 +100,11 @@ def test_anchor_override_preserves_enabled_plugins_and_unrelated_settings(
         ),
     )
 
-    summary = mo.reconcile(repo)
+    summary = mo.reconcile(
+        repo,
+        refresh_repositories=True,
+        fast_forward_repositories=True,
+    )
     overlay = _overlay(repo)
 
     assert summary["marketplaces"] == ["shared-marketplace"]
@@ -105,6 +119,95 @@ def test_anchor_override_preserves_enabled_plugins_and_unrelated_settings(
         "operator@other": False,
     }
     assert overlay["theme"] == "dark"
+
+
+def test_registered_marketplace_refreshes_once_before_binding(
+    tmp_path: Path, monkeypatch, safe_output
+):
+    repo = tmp_path / "consumer"
+    marketplace_checkout = tmp_path / "marketplace"
+    repo.mkdir()
+    _write_marketplace(marketplace_checkout, "shared-marketplace")
+    _write_repo_settings(
+        repo,
+        {
+            "extraKnownMarketplaces": {
+                "shared-marketplace": _remote_definition(),
+                "shared-marketplace-copy": _remote_definition(),
+            }
+        },
+    )
+    entry = SimpleNamespace(
+        local_path=lambda: str(marketplace_checkout),
+        remote="https://example.com/shared-marketplace.git",
+        default_branch="main",
+    )
+    monkeypatch.setattr(mo.repos_mod, "find_repo", lambda _name: entry)
+    monkeypatch.setattr(
+        mo.git_ops,
+        "resolve_remote_name",
+        lambda value, *, cwd: "origin",
+    )
+    calls = []
+    monkeypatch.setattr(
+        mo.git_ops,
+        "prepare_worktree_base",
+        lambda *a, **k: (
+            calls.append((a, k))
+            or SimpleNamespace(
+                start_point="origin/main",
+                fetched=True,
+                fetch_error=None,
+                anchor=SimpleNamespace(reason="updated"),
+            )
+        ),
+    )
+
+    summary = mo.reconcile(
+        repo,
+        refresh_repositories=True,
+        fast_forward_repositories=True,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][1]["remote"] == "origin"
+    assert summary["repository_refresh"][str(marketplace_checkout.resolve())] == {
+        "fetched": True,
+        "fetch_failed": False,
+        "anchor": "updated",
+        "start_point": "origin/main",
+    }
+
+
+def test_registered_marketplace_refresh_can_be_disabled(
+    tmp_path: Path, monkeypatch, safe_output
+):
+    repo = tmp_path / "consumer"
+    marketplace_checkout = tmp_path / "marketplace"
+    repo.mkdir()
+    _write_marketplace(marketplace_checkout, "shared-marketplace")
+    _write_repo_settings(
+        repo,
+        {
+            "extraKnownMarketplaces": {
+                "shared-marketplace": _remote_definition()
+            }
+        },
+    )
+    monkeypatch.setattr(
+        mo.repos_mod,
+        "find_repo",
+        lambda _name: _entry(marketplace_checkout),
+    )
+    monkeypatch.setattr(
+        mo.git_ops,
+        "prepare_worktree_base",
+        lambda *a, **k: pytest.fail("refresh must remain disabled"),
+    )
+
+    summary = mo.reconcile(repo, refresh_repositories=False)
+
+    assert summary["repository_refresh"] == {}
 
 
 def test_anchor_and_linked_worktree_receive_independent_overlays(
@@ -286,9 +389,13 @@ def test_session_start_emits_restart_only_when_changed(
             },
         ]
     )
-    monkeypatch.setattr(
-        mo, "reconcile", lambda _repo, *, ensure_ignored=False: next(results)
-    )
+    calls = []
+
+    def reconcile(_repo, **kwargs):
+        calls.append(kwargs)
+        return next(results)
+
+    monkeypatch.setattr(mo, "reconcile", reconcile)
     args = SimpleNamespace(
         cwd=str(repo),
         stdin=False,
@@ -301,6 +408,18 @@ def test_session_start_emits_restart_only_when_changed(
     assert "Restart Copilot CLI" in capsys.readouterr().out
     assert main.cmd_reconcile_marketplaces(args) == 0
     assert capsys.readouterr().out.strip() == "{}"
+    assert calls == [
+        {
+            "ensure_ignored": False,
+            "refresh_repositories": False,
+            "fast_forward_repositories": False,
+        },
+        {
+            "ensure_ignored": False,
+            "refresh_repositories": False,
+            "fast_forward_repositories": False,
+        },
+    ]
 
 
 def test_checkout_root_decodes_filesystem_bytes(tmp_path: Path, monkeypatch):

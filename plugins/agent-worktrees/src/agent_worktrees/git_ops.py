@@ -281,6 +281,16 @@ class FastForwardResult:
     ahead: int = 0
 
 
+@dataclass
+class WorktreeBaseResult:
+    """Fresh-base resolution for worktree creation or local source binding."""
+
+    start_point: str
+    fetched: bool
+    fetch_error: str | None
+    anchor: FastForwardResult
+
+
 def _rev_count(rangespec: str, *, cwd: str | Path) -> int:
     """Return ``git rev-list --count <rangespec>`` as an int (0 on failure)."""
     result = git("rev-list", "--count", rangespec, cwd=cwd, check=False)
@@ -796,6 +806,25 @@ def _remote_url(remote: str, *, cwd: str | Path) -> str | None:
     return result.stdout.strip() or None
 
 
+def resolve_remote_name(remote_or_url: str, *, cwd: str | Path) -> str:
+    """Resolve a configured remote name from either its name or registry URL."""
+    result = git("remote", cwd=cwd, check=False)
+    if result.returncode != 0:
+        return remote_or_url or "origin"
+    names = [name.strip() for name in result.stdout.splitlines() if name.strip()]
+    if remote_or_url in names:
+        return remote_or_url
+    expected = remote_or_url.rstrip("/")
+    if expected:
+        for name in names:
+            actual = (_remote_url(name, cwd=cwd) or "").rstrip("/")
+            if actual == expected:
+                return name
+    if "origin" in names:
+        return "origin"
+    return names[0] if names else (remote_or_url or "origin")
+
+
 def _parse_github_owner(url: str) -> str | None:
     """Extract the owner from a github.com remote URL (https or ssh form)."""
     url = url.strip()
@@ -1075,6 +1104,57 @@ def resolve_start_point(
     if ref_exists(default_branch, cwd=cwd):
         return default_branch
     return "HEAD"
+
+
+def prepare_worktree_base(
+    anchor: str | Path,
+    *,
+    remote: str,
+    default_branch: str,
+    fast_forward_anchor: bool = True,
+) -> WorktreeBaseResult:
+    """Fetch a repository, safely refresh its anchor, and select a fresh base.
+
+    Fetch failure is non-fatal: callers still receive the best last-known
+    remote/local/HEAD start point. Anchor advancement reuses
+    :func:`fast_forward_worktree` and is attempted only when the anchor is
+    checked out on its configured default branch.
+    """
+    anchor_path = Path(anchor)
+    fetched = False
+    fetch_error: str | None = None
+    if has_remote(remote, cwd=anchor_path):
+        try:
+            fetch(remote, cwd=anchor_path)
+            fetched = True
+        except Exception as exc:
+            fetch_error = str(exc)
+
+    start_point = resolve_start_point(
+        remote,
+        default_branch,
+        cwd=anchor_path,
+    )
+    branch = current_branch(anchor_path)
+    if not fast_forward_anchor:
+        anchor_result = FastForwardResult(False, "disabled")
+    elif branch is None:
+        anchor_result = FastForwardResult(False, "detached")
+    elif branch != default_branch:
+        anchor_result = FastForwardResult(False, "non-default-branch")
+    else:
+        anchor_result = fast_forward_worktree(
+            anchor_path,
+            remote=remote,
+            default_branch=default_branch,
+            do_fetch=False,
+        )
+    return WorktreeBaseResult(
+        start_point=start_point,
+        fetched=fetched,
+        fetch_error=fetch_error,
+        anchor=anchor_result,
+    )
 
 
 def create_worktree(

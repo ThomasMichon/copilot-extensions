@@ -82,10 +82,21 @@ class TestCarvePairedKnowledge:
             carved["anchor"] = anchor
             carved["wt_path"] = wt_path
             carved["branch"] = branch
+            carved["start_point"] = start_point
 
-        monkeypatch.setattr(m.git_ops, "git", lambda *a, **k: None)
         monkeypatch.setattr(
-            m.git_ops, "resolve_start_point", lambda r, b, cwd=None: f"{r}/{b}"
+            m.git_ops,
+            "prepare_worktree_base",
+            lambda *a, **k: types.SimpleNamespace(
+                start_point="origin/main",
+                fetched=True,
+                fetch_error=None,
+                anchor=types.SimpleNamespace(
+                    updated=True,
+                    reason="updated",
+                    behind=2,
+                ),
+            ),
         )
         monkeypatch.setattr(m.git_ops, "create_worktree", _create_worktree)
 
@@ -102,6 +113,7 @@ class TestCarvePairedKnowledge:
         assert stamp["pair_ref"] == "test/citadel-knowledge/test-win-20260806-ab-k"
         # A knowledge worktree was carved.
         assert carved["branch"] == "worktree/test-win-20260806-ab-k"
+        assert carved["start_point"] == "origin/main"
         # Knowledge tracking record written, cross-stamped back to harness.
         krec = tk.load_record_by_id("test-win-20260806-ab-k")
         assert krec is not None
@@ -126,6 +138,24 @@ class TestCarvePairedKnowledge:
             m.git_ops, "create_worktree",
             lambda *a, **k: called.__setitem__("carve", True),
         )
+        refreshed = {"called": False}
+        monkeypatch.setattr(
+            m.git_ops,
+            "prepare_worktree_base",
+            lambda *a, **k: (
+                refreshed.__setitem__("called", True)
+                or types.SimpleNamespace(
+                    start_point="HEAD",
+                    fetched=False,
+                    fetch_error="offline",
+                    anchor=types.SimpleNamespace(
+                        updated=False,
+                        reason="no-upstream",
+                        behind=0,
+                    ),
+                )
+            ),
+        )
         stamp = m._carve_paired_knowledge(
             _config(), harness_id="h", timestamp="ts", suffix="ab",
             plat="windows", plat_short="win",
@@ -136,6 +166,7 @@ class TestCarvePairedKnowledge:
         assert stamp["pair_ref"] == "test/kb/kb-singleton"
         # No second worktree carved for a non-worktree-class knowledge repo.
         assert called["carve"] is False
+        assert refreshed["called"] is True
         # No knowledge tracking record either.
         assert list(tmp_path.glob("*.yaml")) == []
 

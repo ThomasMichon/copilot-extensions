@@ -15,6 +15,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import git_ops
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -136,6 +137,92 @@ def test_no_config_is_non_fatal(monkeypatch):
     monkeypatch.setattr(cfg, "load_config", _boom)
     # Must not raise.
     m._fast_forward_project_anchors()
+
+
+def test_prepare_worktree_base_fetches_and_fast_forwards(anchor_repo):
+    seed, anchor = anchor_repo
+    _advance_origin(seed)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor,
+        remote="origin",
+        default_branch="master",
+    )
+
+    assert prepared.fetched is True
+    assert prepared.fetch_error is None
+    assert prepared.start_point == "origin/master"
+    assert prepared.anchor.updated is True
+    assert (anchor / "next.txt").exists()
+
+
+def test_prepare_worktree_base_uses_fresh_remote_without_touching_dirty_anchor(
+    anchor_repo,
+):
+    seed, anchor = anchor_repo
+    _advance_origin(seed)
+    (anchor / "base.txt").write_text("dirty")
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor,
+        remote="origin",
+        default_branch="master",
+    )
+
+    assert prepared.start_point == "origin/master"
+    assert prepared.anchor.reason == "dirty"
+    assert not (anchor / "next.txt").exists()
+    assert (anchor / "base.txt").read_text() == "dirty"
+
+
+def test_prepare_worktree_base_honors_fast_forward_opt_out(anchor_repo):
+    seed, anchor = anchor_repo
+    _advance_origin(seed)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor,
+        remote="origin",
+        default_branch="master",
+        fast_forward_anchor=False,
+    )
+
+    assert prepared.start_point == "origin/master"
+    assert prepared.anchor.reason == "disabled"
+    assert not (anchor / "next.txt").exists()
+
+
+def test_prepare_worktree_base_uses_last_known_remote_ref_offline(anchor_repo):
+    seed, anchor = anchor_repo
+    _advance_origin(seed)
+    _git("fetch", "origin", cwd=anchor)
+    missing = anchor.parent / "missing-origin.git"
+    _git("remote", "set-url", "origin", str(missing), cwd=anchor)
+
+    prepared = git_ops.prepare_worktree_base(
+        anchor,
+        remote="origin",
+        default_branch="master",
+        fast_forward_anchor=False,
+    )
+
+    assert prepared.fetched is False
+    assert prepared.fetch_error
+    assert prepared.start_point == "origin/master"
+    assert prepared.anchor.reason == "disabled"
+    assert not (anchor / "next.txt").exists()
+
+
+def test_resolve_remote_name_matches_registry_url(anchor_repo):
+    _seed, anchor = anchor_repo
+    remote_url = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=str(anchor),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert git_ops.resolve_remote_name(remote_url, cwd=anchor) == "origin"
 
 
 # ── stale-anchor self-heal (catch-22 break) ─────────────────────────────────

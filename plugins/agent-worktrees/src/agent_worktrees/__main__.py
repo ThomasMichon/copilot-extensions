@@ -877,6 +877,15 @@ def _carve_paired_knowledge(
     is_worktree_class = bool(entry) and repos_mod.normalize_class(
         entry.repo_class
     ) == "worktree"
+    remote = (entry.remote or "origin") if entry else "origin"
+    default_branch = (entry.default_branch or "main") if entry else "main"
+    prepared = _prepare_worktree_source(
+        knowledge_anchor,
+        remote=remote,
+        default_branch=default_branch,
+        fast_forward_anchor=getattr(config, "auto_fast_forward", True),
+        label=f"paired knowledge repo '{knowledge_name}'",
+    )
 
     if not is_worktree_class:
         # Non-worktree-class knowledge -> operate on the anchor (no 2nd carve).
@@ -902,25 +911,17 @@ def _carve_paired_knowledge(
     knowledge_branch = f"worktree/{knowledge_id}"
     knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
-    remote = (entry.remote or "origin") if entry else "origin"
-    default_branch = (entry.default_branch or "main") if entry else "main"
 
     Path(knowledge_wt_root).mkdir(parents=True, exist_ok=True)
-    print(
-        f"Fetching latest from {remote} for paired knowledge repo "
-        f"'{knowledge_name}'...",
-        file=sys.stderr,
-    )
-    git_ops.git("fetch", remote, "--quiet", cwd=knowledge_anchor, check=False)
-    start_point = git_ops.resolve_start_point(
-        remote, default_branch, cwd=knowledge_anchor
-    )
     print(
         f"Creating paired knowledge worktree on branch {knowledge_branch}...",
         file=sys.stderr,
     )
     git_ops.create_worktree(
-        knowledge_anchor, knowledge_wt_path, knowledge_branch, start_point
+        knowledge_anchor,
+        knowledge_wt_path,
+        knowledge_branch,
+        prepared.start_point,
     )
 
     knowledge_ref = tracking.format_claim_ref(
@@ -1018,6 +1019,56 @@ def _journal_owner_reciprocal_claim(
         return False
 
 
+def _prepare_worktree_source(
+    anchor: str | Path,
+    *,
+    remote: str,
+    default_branch: str,
+    fast_forward_anchor: bool,
+    label: str,
+) -> git_ops.WorktreeBaseResult:
+    """Prepare one source checkout and report degraded freshness honestly."""
+    print(f"Fetching latest from {remote} for {label}...", file=sys.stderr)
+    prepared = git_ops.prepare_worktree_base(
+        anchor,
+        remote=remote,
+        default_branch=default_branch,
+        fast_forward_anchor=fast_forward_anchor,
+    )
+    if prepared.fetch_error:
+        print(
+            f"Note: fetch failed for {label}; using last-known "
+            f"'{prepared.start_point}' ({prepared.fetch_error}).",
+            file=sys.stderr,
+        )
+    if prepared.anchor.updated:
+        print(
+            f"Fast-forwarded {label} anchor by "
+            f"{prepared.anchor.behind} commit(s).",
+            file=sys.stderr,
+        )
+    elif prepared.anchor.reason in {
+        "dirty",
+        "ahead",
+        "diverged",
+        "detached",
+        "non-default-branch",
+        "ff-failed",
+    }:
+        print(
+            f"Note: {label} anchor is {prepared.anchor.reason}; "
+            "left untouched.",
+            file=sys.stderr,
+        )
+    if prepared.start_point != f"{remote}/{default_branch}":
+        print(
+            f"Note: '{remote}/{default_branch}' not found for {label}; "
+            f"branching from '{prepared.start_point}' instead.",
+            file=sys.stderr,
+        )
+    return prepared
+
+
 def _create_worktree_core(
     config: cfg.Config,
     *,
@@ -1079,21 +1130,13 @@ def _create_worktree_core(
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
 
-    # Fetch (best-effort) and pick a start point that actually resolves --
-    # a repo with no remote or no fetched default branch falls back to the
-    # local default branch or HEAD instead of failing on <remote>/<branch>.
-    print(f"Fetching latest from {repo.remote}...", file=sys.stderr)
-    git_ops.git("fetch", repo.remote, "--quiet", cwd=repo.anchor, check=False)
-
-    start_point = git_ops.resolve_start_point(
-        repo.remote, repo.default_branch, cwd=repo.anchor
+    prepared = _prepare_worktree_source(
+        repo.anchor,
+        remote=repo.remote,
+        default_branch=repo.default_branch,
+        fast_forward_anchor=config.auto_fast_forward,
+        label="repository",
     )
-    if start_point != f"{repo.remote}/{repo.default_branch}":
-        print(
-            f"Note: '{repo.remote}/{repo.default_branch}' not found; "
-            f"branching from '{start_point}' instead.",
-            file=sys.stderr,
-        )
 
     # Creator ownership is established before the resource exists, and its
     # ledger lock stays held until the child tracking record is durable. Thus
@@ -1126,7 +1169,12 @@ def _create_worktree_core(
             raise RuntimeError(
                 f"owner {owner_ref} cannot accept a new worktree obligation")
         print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-        git_ops.create_worktree(repo.anchor, worktree_path, branch, start_point)
+        git_ops.create_worktree(
+            repo.anchor,
+            worktree_path,
+            branch,
+            prepared.start_point,
+        )
 
         # Write tracking YAML
         tracking_path = cfg.tracking_dir()
@@ -1203,7 +1251,12 @@ def _create_worktree_core(
     # Copilot discovers repository settings before sessionStart. Seed the
     # worktree-local source overlay now so programmatic create callers and
     # direct launch commands see registered local marketplaces immediately.
-    _reconcile_marketplaces_for_checkout(worktree_path, ensure_ignored=True)
+    _reconcile_marketplaces_for_checkout(
+        worktree_path,
+        ensure_ignored=True,
+        refresh_repositories=True,
+        fast_forward_repositories=config.auto_fast_forward,
+    )
 
     result = {"worktree": _worktree_to_dict(record)}
     if not launches_copilot:
@@ -8220,13 +8273,18 @@ def _reconcile_marketplaces_for_checkout(
     *,
     ensure_ignored: bool = False,
     warn_only: bool = True,
+    refresh_repositories: bool = False,
+    fast_forward_repositories: bool = False,
 ) -> dict | None:
     """Pre-seed local marketplace overrides without orphaning lifecycle work."""
     from . import marketplace_overrides
 
     try:
         return marketplace_overrides.reconcile(
-            checkout, ensure_ignored=ensure_ignored
+            checkout,
+            ensure_ignored=ensure_ignored,
+            refresh_repositories=refresh_repositories,
+            fast_forward_repositories=fast_forward_repositories,
         )
     except marketplace_overrides.MarketplaceOverrideError as exc:
         if warn_only:
@@ -11879,7 +11937,12 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Adoption owns repository-local machine wiring. Seed source overrides after
     # the repo registry entry exists, so exact-name marketplace checkouts can be
     # resolved without guessing from the source root.
-    _reconcile_marketplaces_for_checkout(repo_dir, ensure_ignored=True)
+    _reconcile_marketplaces_for_checkout(
+        repo_dir,
+        ensure_ignored=True,
+        refresh_repositories=True,
+        fast_forward_repositories=True,
+    )
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
@@ -15095,7 +15158,10 @@ def cmd_reconcile_marketplaces(args: argparse.Namespace) -> int:
 
         try:
             summary = marketplace_overrides.reconcile(
-                repo, ensure_ignored=args.ensure_ignored
+                repo,
+                ensure_ignored=args.ensure_ignored,
+                refresh_repositories=not args.session_start,
+                fast_forward_repositories=not args.session_start,
             )
         except marketplace_overrides.MarketplaceOverrideError as exc:
             if args.session_start:
