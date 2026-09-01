@@ -102,6 +102,7 @@ def _forbid_create_mutations(monkeypatch) -> None:
         pytest.fail("launch preflight failure reached a create mutation")
 
     monkeypatch.setattr(m.git_ops, "git", forbidden)
+    monkeypatch.setattr(m.git_ops, "prepare_worktree_base", forbidden)
     monkeypatch.setattr(m.git_ops, "create_worktree", forbidden)
     monkeypatch.setattr(m.tracking, "create_new_record", forbidden)
     monkeypatch.setattr(m.permissions, "clone_permissions", forbidden)
@@ -116,6 +117,20 @@ def _stub_successful_create(monkeypatch, tmp_path) -> None:
         lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
     )
     monkeypatch.setattr(m.git_ops, "resolve_start_point", lambda *_a, **_k: "HEAD")
+    monkeypatch.setattr(
+        m.git_ops,
+        "prepare_worktree_base",
+        lambda *_a, **_k: SimpleNamespace(
+            start_point="HEAD",
+            fetched=False,
+            fetch_error=None,
+            anchor=SimpleNamespace(
+                updated=False,
+                reason="no-upstream",
+                behind=0,
+            ),
+        ),
+    )
     monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
     monkeypatch.setattr(
