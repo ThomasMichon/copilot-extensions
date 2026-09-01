@@ -158,6 +158,6 @@ new writer or default is enabled.
 ### 2026-08-31 — Published
 
 - Opened [#1531](https://github.com/ThomasMichon/copilot-extensions/pull/1531)
-  with the contract baseline and agent-bridge `0.4.0-dev402` documentation
+  with the contract baseline and agent-bridge `0.4.0-dev403` documentation
   release.
 - Marked this focused effort Done; archive follows after merge/finalization.
