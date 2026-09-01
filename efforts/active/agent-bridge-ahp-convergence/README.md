@@ -16,7 +16,9 @@
   [#1460](https://github.com/ThomasMichon/copilot-extensions/issues/1460)
   (version-skew-safe contract foundation) ·
   [#1138](https://github.com/ThomasMichon/copilot-extensions/issues/1138)
-  (immutable event identity)
+  (immutable event identity) ·
+  [#1454](https://github.com/ThomasMichon/copilot-extensions/issues/1454)
+  (delegation attention/result projection)
 
 ## Guiding Intent
 
@@ -147,6 +149,9 @@ rather than binding to private implementation details.
       lifecycle authority.
 - [ ] Define stable mappings among client-chosen AHP session/chat URIs, bridge
       handles, downstream ACP session IDs, targets, and workspace-provider IDs.
+- [ ] Consume #1449's logical delegated-agent identity and succession contract
+      when defining those mappings; do not introduce a second bridge lifecycle
+      identity inside the AHP adapter.
 - [ ] After that identity contract is fixed, implement paginated `listSessions`
       plus ephemeral `root/sessionAdded`, `root/sessionRemoved`, and
       `root/sessionSummaryChanged` notifications.
@@ -181,6 +186,9 @@ rather than binding to private implementation details.
 - [ ] Track `clientId`, monotonic `clientSeq`, origin echoes, confirmed state,
       ordered pending actions, foreign-action rebasing, and rejected-action
       rollback before accepting client-dispatched state.
+- [ ] Keep the ordered projection extensible for #1454's later
+      attention/result mapping without making that integration slice a gate on
+      this phase.
 - [ ] Keep rebuild epochs internal or behind a negotiated `x-` extension so an
       identity never resolves to different history without changing core AHP
       schemas; coordinate with #1138.
@@ -223,6 +231,9 @@ rather than binding to private implementation details.
       invariant while keeping all clients reconciled to server order.
 - [ ] Define observer-only and reduced-fidelity representations honestly rather
       than advertising mutation or replay guarantees they cannot satisfy.
+- [ ] Land #1454 through this PR lane after the AHP edge/state machines and
+      #1448 delegation contract are stable, preserving one downstream
+      controller while exposing standard AHP state/actions to multiple clients.
 
 ### Phase 7 — Converge with native hosts and migrate consumers
 
