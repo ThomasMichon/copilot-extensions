@@ -44,6 +44,19 @@ def test_session_start_hooks_use_payload_root_and_fail_open():
             assert "'{}'" in command
 
 
+def test_codespace_map_timeout_covers_registry_cold_path():
+    declaration = json.loads(
+        (PLUGIN_ROOT / "session-context.json").read_text(encoding="utf-8")
+    )
+    contributor = next(
+        item
+        for item in declaration["contributors"]
+        if item["id"] == "codespace-map"
+    )
+
+    assert 8 <= contributor["timeoutSeconds"] <= 15
+
+
 def test_provider_management_boundary_stays_explicit():
     text = _read("codespaces-lifecycle")
     normalized = " ".join(text.split())
