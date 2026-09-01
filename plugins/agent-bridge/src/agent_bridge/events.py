@@ -94,23 +94,24 @@ class EventLog:
             telemetry_source=telemetry_source,
         )
         rows = db.get_events(session_id, after=0)
-        for row in rows:
-            evt = SseEvent(
-                id=row["event_id"],
-                event=row["event_type"],
-                data=row["data"],
-                timestamp=row["timestamp"],
-            )
-            log._events.append(evt)
-            log._track_tool_event(evt)
-            if evt.id == 1:
-                log._telemetry.set_log_origin(evt.timestamp)
-            log._telemetry.observe(
-                evt.event, evt.data, event_id=evt.id
-            )
+        with log._lock:
+            for row in rows:
+                evt = SseEvent(
+                    id=row["event_id"],
+                    event=row["event_type"],
+                    data=row["data"],
+                    timestamp=row["timestamp"],
+                )
+                log._events.append(evt)
+                log._track_tool_event(evt)
+                if evt.id == 1:
+                    log._telemetry.set_log_origin(evt.timestamp)
+                log._telemetry.observe(
+                    evt.event, evt.data, event_id=evt.id
+                )
 
-        max_id = db.get_max_event_id(session_id)
-        log._next_id = max_id + 1
+            max_id = db.get_max_event_id(session_id)
+            log._next_id = max_id + 1
         return log
 
     def append(self, event_type: str, data: dict[str, Any]) -> SseEvent:
