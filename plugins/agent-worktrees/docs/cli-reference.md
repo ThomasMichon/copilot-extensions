@@ -149,7 +149,7 @@ continue to work unchanged.
 | `doctor` | Diagnose machine-wide Picker pivot hygiene plus this project's `config.d` and worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles (backfill), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment. Runs outside a project for machine-wide pivot diagnostics; project health/config is then explicitly skipped/absent. Registry cleanup is always report-only. Read-only by default; `--json` for the exhaustive report |
 | `status` | Show worktree git status; **write mode** (`--summary "<one-liner>"` / `--title "<headline>"` / `--follow-up` / `--resolved`) annotates THIS worktree's Picker disposition; **history mode** (`--history` `[--limit N]` `[--json]`) prints this worktree's durable disposition trajectory (summary/title over time). A `postToolUse` hook nudges you to refresh it as work drifts (`AGENT_WORKTREES_NUDGE=off` to silence) |
 | `recent-messages` | Show a worktree's latest session's last N conversation messages (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; reads `events.jsonl` directly. Backs the picker's **Messages** viewer |
-| `list-sessions` | List Copilot sessions with interface/origin metadata, append-only activation intervals, resolved head revision, and numbered handoffs (JSON); `--worktree <id>` scopes to one worktree and `--all-projects` enumerates every adopted project |
+| `list-sessions` | List Copilot sessions with interface/origin metadata, append-only activation intervals, resolved head revision, numbered handoffs, and any bound profile-assignment metadata (JSON); `--worktree <id>` scopes to one worktree and `--all-projects` enumerates every adopted project |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
@@ -243,6 +243,19 @@ worktree whose session held conversation turns -- the lowercase data-contract
 form of the bar's teal `CONVO` block). Centralized in
 `git_ops.refine_state_with_session` so the bar and the picker can never drift
 apart. Without `--classify`, records carry no `state` key.
+
+When balanced profile assignment is configured, the ordinary `list --json`
+record includes only `current_profile_assignment`: the bound assignment for the
+worktree's asserted head session, or `null`. Pass
+`--profile-assignment-history` on an explicit diagnostic/detail read to also
+include the bounded `profile_assignments` history and
+`latest_profile_assignment` (which may be pending, bound, or abandoned).
+Cache-polled Picker rows therefore stay constant-size as history accumulates.
+Fields are neutral and machine-readable: policy, opaque assignment label,
+selected profile, bag generation/position, timestamps, lane, disposition,
+session binding, and optional handoff predecessor session. The one-shot launch
+token is never included. `list-sessions --json` attaches the bound assignment
+to its actual session row.
 
 ### Left segment: worktree identity
 

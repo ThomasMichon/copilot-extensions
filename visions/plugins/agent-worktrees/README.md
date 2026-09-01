@@ -235,9 +235,12 @@ Manual profile selection remains the default. When an operator arms a profile
 assignment policy, selection happens before eligible new-session argv is built
 and is persisted as lifecycle identity rather than inferred later from mutable
 configuration. Retry and resume never redraw the same generation; concurrent
-draws are atomic; missing or invalid profiles fail closed. Each installation can
-stand alone without a coordinator, while machine-readable assignment metadata
-allows optional downstream analysis.
+draws are atomic; invalid armed profile pools fail closed before launch mutation.
+Excluded launches, unassigned older sessions, unavailable persisted replay
+profiles, and optional assignment-state failures preserve the ordinary concrete
+default/manual profile rather than erasing it. Each installation can stand alone
+without a coordinator, while machine-readable assignment metadata allows
+optional downstream analysis.
 
 Only user-owned configuration may arm assignment. Repository configuration may
 provide a default-off template or narrow an already armed user pool; it never

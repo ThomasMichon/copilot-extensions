@@ -37,6 +37,12 @@ def test_cache_key_stable_and_axis_sensitive():
         lc.cache_key(a, project="OTHER", tracking_status="all")
     assert lc.cache_key(a, project="p", tracking_status="all") != \
         lc.cache_key(a, project="p", tracking_status="active")
+    assert lc.cache_key(a, project="p", tracking_status="all") != \
+        lc.cache_key(
+            _args(profile_assignment_history=True),
+            project="p",
+            tracking_status="all",
+        )
 
 
 # --- ttl resolution ----------------------------------------------------------

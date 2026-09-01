@@ -10,7 +10,7 @@ agent-worktrees merges configuration from the layers below at load time.
 | Precedence | Source | Path | Scope | Committed? |
 |------------|--------|------|-------|-----------|
 | **Highest** | **Machine-local** | `~/.{project}/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
-| *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `headless`, `auto_fast_forward`, `new_picker`). Machine-specifics and the binding never graft. | Yes |
+| *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`, `new_picker`). Machine-specifics and the binding never graft. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. | Yes |
 | **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`. | No |
 
@@ -22,7 +22,7 @@ specific machine, or to adopt a *foreign* repo (work product, external GitHub)
 that carries no in-repo config.
 
 - **Top-level fields** (`srcroot`/`machine`/`platform`/`copilot_profiles`/
-  `headless`/`auto_fast_forward`/`new_picker`) resolve **machine-local >
+  `profile_assignment`/`headless`/`auto_fast_forward`/`new_picker`) resolve **machine-local >
   knowledge overlay (portable prefs only) > global > detected/default**.
 - **Per-repo settings** merge **in-repo flat settings < machine-local
   `repos.<name>` block**. The global tier carries *only* machine-wide top-level
@@ -88,6 +88,14 @@ copilot_profiles:                 # optional: selectable backend profiles
       COPILOT_PROVIDER_BASE_URL: "http://localhost:8090/v1"
     copilot_args: ["--deny-tool", "shell"]
 
+profile_assignment:               # optional; default-off
+  name: balanced-default
+  mode: balanced-random
+  armed: true
+  profiles: [cloud, local]
+  assignment_label: cohort-a      # optional opaque label
+  eligible_lanes: [new, handoff-cutover]
+
 repos:
   my-project:
     anchor: C:\Data\Src\my-project
@@ -106,6 +114,7 @@ repos:
 | `auto_fast_forward` | bool | `true` | On resume, fast-forward a clean worktree that is strictly behind upstream. Only ever a FF — never touches dirty / ahead / diverged worktrees. |
 | `new_picker` | bool | `true` | Use the Textual picker. `picker disable` writes `false` to opt the machine out to the legacy picker. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
+| `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
 
 ### Config drop-ins — `~/.{project}/config.d/`
@@ -163,6 +172,7 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `worktree_root` | string | `<anchor>.worktrees` | Where worktrees are created (a sibling folder by default). |
 | `default_branch` | string | `master` | Upstream branch worktrees rebase/merge onto. |
 | `remote` | string | `origin` | Git remote name. |
+| `profile_assignment` | map | absent/off | Machine-local per-project override for the top-level assignment policy. This user-owned location may arm it; the committed in-repo block with the same key may only template/narrow. |
 | `launch` | map(platform→list) | `{}` | Config-driven launch command per platform. Overrides the repo convention and built-in default. |
 | `launch_recovery` | map(platform→list) | `{}` | Launch command used in recovery mode (`-Recovery`). |
 | `copilot_path` | map(platform→string) | `{}` | Project-scoped Copilot executable. Uses `windows` or `linux` (`wsl` maps to `linux`) and supports `{work_dir}`, `{anchor}`, `{machine}`, `{repo_name}`, and `{home}` placeholders. The normalized launcher uses it for interactive, resume, recovery, and agent-bridge project launches without changing global `PATH`. An explicit `launch`/`launch_recovery` template remains authoritative. |
@@ -246,6 +256,61 @@ repos:
 | `env` | map(str→str) | `{}` | Environment variables exported for the session. Keys must be valid env-var identifiers. |
 | `copilot_args` | list[str] | `[]` | Extra arguments passed to `copilot`. |
 
+### Balanced profile assignment — `profile_assignment`
+
+Profile assignment is an explicit, default-off policy over the existing named
+profiles above. It never defines model/backend semantics itself: the selected
+`CopilotProfile` contributes its normal `env` and `copilot_args` to the ordinary
+launch planner.
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `name` | string | **required when configured** | Stable policy identifier. |
+| `mode` | string | **required when configured** | Currently `balanced-random`: a deterministic shuffled bag emits each pool member once per generation before reshuffling. |
+| `armed` | bool | `false` | Enables assignment. Only user-owned global, knowledge-overlay, or machine-local/per-project config has arming authority. |
+| `profiles` | list[str] | `[]` | Non-empty user-owned pool of names already present in `copilot_profiles`. |
+| `assignment_label` | string | `""` | Optional opaque label persisted with each assignment; agent-worktrees assigns no analytics meaning to it. |
+| `eligible_lanes` | list[str] | `[new, handoff-cutover]` | Eligible new-session lanes. Supported values are `new` and `handoff-cutover`. |
+
+`armed` is strictly boolean. Quoted values such as `armed: "true"` are
+configuration errors rather than truthy aliases or silent disarming.
+
+Eligibility is deliberately narrow:
+
+- `new` covers a cold/new generation in a tracked, user-origin, interactive CLI
+  worktree. A launch retry reuses the same pending token and bag position.
+- `handoff-cutover` treats the successor as a new generation. Retrying the same
+  pending cutover reuses its assignment.
+- Ordinary resume replays the assignment bound to that Copilot session, even if
+  the policy was later disarmed. It never advances the bag. If that persisted
+  profile is absent or renamed on the current machine, resume warns and falls
+  back to the ordinary default/manual profile rather than failing.
+- An explicit `--profile` remains authoritative and stays outside assignment.
+- Recovery launches, base-repo launches, ACP/bridge sessions, daemon/system
+  worktrees, and agent-delegated worktrees are hard-excluded; configuration
+  cannot opt them in. Exclusion does not clear the ordinary concrete profile:
+  the picker/launch path retains its selected default or manual profile,
+  including that profile's arguments and environment.
+
+Launch-class exclusion happens only after authoritative user configuration is
+validated. An invalid armed user-owned policy therefore fails before any
+worktree mutation even when the caller supplied `--profile`, requested
+recovery, or selected another excluded launch class. A malformed repository-only
+default-off template remains non-load-bearing.
+
+The project-local state file stores the installation seed, bag
+generation/position, token-keyed pending outcomes, and terminal history.
+Compaction never evicts a live pending assignment, so the ledger may
+temporarily exceed its history limit until assignments bind or expire. The
+pending record is durable before the launch plan is returned. Session
+registration binds its token to the actual Copilot session id and retires the
+one-shot capability. Public worktree/session records never contain the token.
+An unbound token expires to `abandoned` on a launch, session-registration, or
+status/list maintenance pass and retains its consumed bag position. Corrupt,
+future-schema, unreadable, or contended optional state emits a bounded warning
+and the core launch/session lifecycle continues without assignment; invalid
+armed user configuration still fails before any worktree mutation.
+
 ---
 
 ## PR workflow — `repos.<name>.pr` (machine-local **or** in-repo)
@@ -327,10 +392,23 @@ pr:
   required: true        # implies enabled; blocks direct-to-default-branch
   provider: gitea
   strategy: keep-alive  # default disposition after create-pr
+profile_assignment:
+  name: balanced-default
+  mode: balanced-random
+  armed: false          # committed config never arms, even if set true
+  profiles: [cloud]     # may only narrow a user-owned pool
+  eligible_lanes: [new]
 ```
 
 - These settings are the **base**; a machine-local `repos.<name>` block
   overrides them per key.
+- `profile_assignment` is trust-aware rather than a normal override: committed
+  config may publish a named default-off template and intersect an already
+  user-armed pool/eligible-lane set. It cannot arm assignment or introduce a
+  profile absent from the user-owned pool. A malformed committed template is
+  non-load-bearing while no user-owned policy is armed; if a user arms the
+  policy, malformed repository defaults or restrictions fail validation before
+  launch side effects.
 - Omitting `pr:` leaves PR mode **off** (direct-push finalization) — appropriate
   for a repo with no automated reviewer.
 - **Location:** the directory form `<anchor>/.agent-worktrees/config.yaml`
@@ -364,12 +442,23 @@ platform: wsl             # windows | wsl | linux
 copilot_profiles:         # machine-wide backend profiles (Tab-cycle in picker)
   - name: cloud
     label: "Cloud (GitHub)"
+  - name: alternate
+    label: "Alternate"
+    copilot_args: ["--model", "example-model"]
+
+profile_assignment:
+  name: balanced-default
+  mode: balanced-random
+  armed: true
+  profiles: [cloud, alternate]
+  assignment_label: cohort-a
 ```
 
 | Key | Type | Meaning |
 |-----|------|---------|
 | `srcroot` / `machine` / `platform` | string | Machine-wide top-level defaults (overridable per machine-local). |
 | `copilot_profiles` | list | Machine-wide backend profiles. |
+| `profile_assignment` | map | Optional user-owned balanced assignment policy. |
 | `auto_fast_forward` / `headless` | bool | Machine-wide top-level defaults. |
 
 A convention-adopted repo with its anchor in `~/.agent-worktrees/repos.yaml`,
