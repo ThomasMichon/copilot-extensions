@@ -313,6 +313,59 @@ class TestReresolveOnRejection:
         assert seen[0].startswith("http://127.0.0.1:57585")  # tried old first
         assert seen[-1].startswith("http://127.0.0.1:47000")  # then the new one
 
+    def test_idempotent_lookup_reresolves_after_connection_reset(self) -> None:
+        old_base = "http://127.0.0.1:57585"
+        new_base = "http://127.0.0.1:47000"
+        client = BridgeClient(
+            old_base,
+            "tok",
+            connect_grace=0.0,
+            reresolve=lambda: new_base,
+        )
+        seen: list[str] = []
+
+        def reset_old_endpoint(req, timeout=None):
+            seen.append(req.full_url)
+            if req.full_url.startswith(old_base):
+                raise ConnectionResetError("daemon generation retired")
+            return _FakeResp({"session_id": "s1"})
+
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=reset_old_endpoint,
+        ):
+            result = client._request("GET", "/api/v1/sessions/s1")
+
+        assert result == {"session_id": "s1"}
+        assert seen == [
+            f"{old_base}/api/v1/sessions/s1",
+            f"{new_base}/api/v1/sessions/s1",
+        ]
+
+    def test_non_idempotent_request_is_not_retried_after_reset(self) -> None:
+        reresolves = {"count": 0}
+
+        def reresolve():
+            reresolves["count"] += 1
+            return "http://127.0.0.1:47000"
+
+        client = BridgeClient(
+            "http://127.0.0.1:57585",
+            "tok",
+            connect_grace=30.0,
+            reresolve=reresolve,
+        )
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            side_effect=ConnectionResetError("response lost"),
+        ):
+            with pytest.raises(
+                BridgeConnectionError, match="non-idempotent POST",
+            ):
+                client._request("POST", "/api/v1/sessions", {"agent": "local"})
+
+        assert reresolves["count"] == 0
+
     def test_reresolve_preserves_encoded_query(self) -> None:
         old_base = "http://127.0.0.1:57585"
         new_base = "http://127.0.0.1:47000"

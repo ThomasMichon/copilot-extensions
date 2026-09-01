@@ -304,7 +304,14 @@ class BridgeClient:
                         backoff = min(backoff * 2, 1.0)
                         continue
                 raise BridgeClientError(exc.code, detail) from exc
-            except urllib.error.URLError:
+            except (urllib.error.URLError, ConnectionResetError) as exc:
+                if isinstance(exc, ConnectionResetError) and method not in (
+                    "GET", "HEAD",
+                ):
+                    raise BridgeConnectionError(
+                        f"Connection to agent-bridge at {self._base} reset "
+                        f"during non-idempotent {method}; request was not retried"
+                    ) from exc
                 if self._outage_deadline is None:
                     self._outage_deadline = (
                         _time.monotonic() + self._connect_grace
@@ -338,8 +345,8 @@ class BridgeClient:
                     backoff = min(backoff * 2, 1.0)
                     continue
                 raise BridgeConnectionError(
-                    f"Cannot connect to agent-bridge at {self._base}"
-                )
+                    f"Cannot connect to agent-bridge at {self._base}: {exc}"
+                ) from exc
 
     def refresh_endpoint(self) -> bool:
         """Re-resolve the daemon endpoint from the routing table.
