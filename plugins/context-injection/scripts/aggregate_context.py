@@ -36,7 +36,7 @@ ADOPTION_SCHEMA = "copilot-extensions.context-injection"
 ADOPTION_CONFIG = Path(".context-injection/config.yaml")
 MAX_ADOPTION_CONFIG_BYTES = 4096
 ENGINE_SCHEMA = "copilot-extensions.context-injection-engine"
-ENGINE_VERSION = 2
+ENGINE_VERSION = 3
 ADOPTED_AUTHORITY_SOURCE = "context-injection@copilot-extensions"
 IDENTIFIER = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
@@ -1405,7 +1405,7 @@ def main() -> int:
     try:
         with _cache_lock(cache_path):
             def emit_shared(output: bytes) -> int:
-                sys.stdout.buffer.write(b"{}" if producer is not None else output)
+                sys.stdout.buffer.write(output)
                 return 0
 
             cached = _load_cached(cache_path)

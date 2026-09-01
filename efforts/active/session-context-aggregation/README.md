@@ -128,7 +128,7 @@ The detailed investigation and proposed architecture are in
   record the version range. Do not rely on completion timing as a correctness
   mechanism.
 - [x] Do not depend on a cross-plugin execution order. Use one source-qualified
-  direct marketplace authority whose producer-empty rendezvous protocol makes
+  direct marketplace authority whose byte-identical rendezvous protocol makes
   alphabetical, installation, marketplace, and settings-object order
   irrelevant.
 - [x] Specify how exactly one `context-injection@copilot-extensions` authority
@@ -200,13 +200,13 @@ The detailed investigation and proposed architecture are in
   active set, trust, staged-plugin visibility, contributor consent, declared
   total bytes, and declared wall-clock cost are all authoritative and
   admissible. Before proof, direct the producer wrapper to its original context
-  script; after proof, every producer emits `{}`.
+  script; after proof, every producer emits the shared cached aggregate.
 - [x] Prove all rollout combinations: no aggregator/old producer,
   aggregator/old producer, no aggregator/new producer, compatible
   aggregator/new producer, incompatible aggregator/new producer, and ambiguous
   aggregators.
 - [x] Prove authority-first, producer-first, and concurrent execution all yield
-  exactly one non-empty result with identical authority bytes; prove the
+  byte-identical non-empty authority bytes; prove the
   ordinary direct path still operates when authority proof is unavailable.
 - [x] Pilot one runtime command-catalog producer and one payload-only policy
   producer before broad conversion.
@@ -342,17 +342,16 @@ See [`design.md`](design.md).
 - Rejected hook order as an ownership mechanism. The direct
   `context-injection@copilot-extensions` authority discovers and runs every
   pure contributor itself. Proven producers join its pair-key rendezvous and
-  emit `{}`, so authority-first, producer-first, and concurrent execution have
-  the same single non-empty result.
+  emit the same cached aggregate, so authority-first, producer-first, and
+  concurrent execution have byte-identical results.
 - Live Copilot CLI 1.0.82-1 probes with synthetic `--plugin-dir` and trusted
   repository-settings payloads confirmed that result selection depends on
   implementation-specific ordering. Argument order, plugin names,
   marketplaces, and `enabledPlugins` insertion order are not supported
   ownership contracts.
-- Verified the fail-open seam on the same host: an empty context result did not
-  erase a preceding non-empty result. The direct-authority protocol records
-  this output-composition behavior as a host-version compatibility precondition
-  rather than inferring ownership from execution order.
+- Corrected the live-host assumption: a later empty context result can erase a
+  preceding non-empty result. Engine v3 therefore returns byte-identical cached
+  aggregate bytes from every proven producer and the authority.
 - Confirmed repository folder trust is exact-path rather than inherited from a
   trusted parent worktree: an ignored nested test repository's settings were
   not loaded. The aggregator must independently reject untrusted repository

@@ -19,17 +19,16 @@ selects the exact direct marketplace authority
 host settings only enable the plugin. The authority discovers and runs every
 declared pure contributor.
 Once that authority is proven, participating producer hooks rendezvous on the
-same result but emit `{}`. The authority is therefore the only possible
-non-empty emitter regardless of hook execution order. Compatible host versions
-must preserve an earlier non-empty `additionalContext` when another hook returns
-`{}`; this is a versioned output-composition precondition, not an ordering
-assumption.
+same result and emit the same cached aggregate bytes as the authority. Whichever
+hook result the host retains is therefore equivalent. A later `{}` can erase an
+earlier non-empty result on affected hosts, so producer-empty is not a valid
+compatibility protocol.
 
 Current public documentation guarantees only that plugin hooks are loaded after
 policy, repository, user, and inline hook sources. It defines no hook priority,
 plugin dependency, `loadAfter`, or cross-plugin ordering field. Alphabetical
 plugin names, marketplace order, installation order, and JSON object order are
-therefore not contracts to build on. The producer-empty protocol makes those
+therefore not contracts to build on. Byte-identical shared output makes those
 unknowns irrelevant rather than trying to infer an ordering seam.
 
 Neither design should absorb bootstrap, registration, service reconciliation,
@@ -199,8 +198,8 @@ fragment consumed the budget first.
 
 The hook payload supplies `sessionId`. The aggregator hook and every migrated
 producer hook call one payload-local broker owned by the selected aggregator.
-The broker computes or reads one pair-key result. The authority returns its
-byte-identical aggregate JSON; proven producers return `{}` after the result is
+The broker computes or reads one pair-key result. The authority and every
+proven producer return its byte-identical aggregate JSON after the result is
 published or read.
 
 ```text
@@ -208,7 +207,7 @@ producer wrapper
   -> resolve the configured source-qualified aggregate authority
   -> invoke that exact payload's broker with the original hook input
   -> before proof, invoke this plugin's original producer
-  -> after proof, compute or read the shared result and emit {}
+  -> after proof, compute or read the shared result and emit it
 
 authority hook
   -> invoke the same broker without a producer identity
@@ -312,8 +311,8 @@ registered wrapper timeout. Admission considers declared worst-case cost and
 uses bounded parallelism where platform parity permits it. Safety and command
 discovery classes run before ordinary guidance.
 
-All callers rendezvous on the same completed result. Only the authority emits
-it; producers emit `{}` after proof. A contributor that crashes, times out, or
+All callers rendezvous on and emit the same completed result. A contributor
+that crashes, times out, or
 emits malformed output is represented by one shared cached failure result. The
 broker itself must recover stale computation ownership; one crashed caller
 cannot send later producers back through caller-specific direct fallback.
