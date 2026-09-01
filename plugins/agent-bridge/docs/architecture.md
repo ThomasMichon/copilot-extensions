@@ -163,6 +163,12 @@ STARTING --> IDLE <--> RUNNING --> STOPPED --> ENDED
 - **STOPPED** -- paused, state preserved
 - **ENDED** -- cleanup complete
 
+These runtime states are not the complete caller-facing delegation model.
+Logical delegate identity, caller attachment, transport liveness, and
+caller-attention reasons are separate axes. Their current mapping and target
+semantics are defined in
+[Delegated-agent contract](delegation-contract.md).
+
 ## ACP Agent Mode
 
 Agent-bridge can also run as a stdio ACP agent (not HTTP):
