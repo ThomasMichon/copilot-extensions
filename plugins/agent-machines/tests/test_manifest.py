@@ -122,7 +122,7 @@ def test_per_machine_layer_overrides_and_unsets(tmp_path):
         gate=["box-1", "box-2"],
         **{
             "per-machine": {
-                "box-2": {
+                "Box-2": {
                     "manage": {
                         "copilot.settings": {"values": {"model": None, "effortLevel": "low"}}
                     }
@@ -136,7 +136,23 @@ def test_per_machine_layer_overrides_and_unsets(tmp_path):
     base = resolve_for_machine(pkg, "box-1")
     assert base.manage["copilot.settings"]["values"]["model"] == "opus"
 
-    layered = resolve_for_machine(pkg, "box-2")
-    values = layered.manage["copilot.settings"]["values"]
-    assert "model" not in values  # null unset
-    assert values["effortLevel"] == "low"  # overridden
+    for machine in ("box-2", "BOX-2"):
+        layered = resolve_for_machine(pkg, machine)
+        values = layered.manage["copilot.settings"]["values"]
+        assert "model" not in values  # null unset
+        assert values["effortLevel"] == "low"  # overridden
+
+
+def test_per_machine_case_duplicates_rejected(tmp_path):
+    data = base_package(
+        **{
+            "per-machine": {
+                "box-2": {"manage": {}},
+                "BOX-2": {"manage": {}},
+            }
+        },
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="differ only by case"):
+        load_package(path)

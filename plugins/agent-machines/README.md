@@ -216,6 +216,10 @@ resources:
     dc: sleep
 ```
 
+Package gates and `per-machine` overlay keys both match machine identities
+case-insensitively. Defining two overlay keys that differ only by case is
+invalid.
+
 Within an `ensure-present` `enabledPlugins` map, `true` remains an additive
 floor and preserves an existing operator `false`. A declared `false` is a
 per-plugin tombstone: it authoritatively disables that one identity while

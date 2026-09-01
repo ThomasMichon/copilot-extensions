@@ -340,13 +340,31 @@ def load_package(
                     f"of process names"
                 )
 
+    per_machine = raw.get("per-machine") or raw.get("per_machine") or {}
+    if not isinstance(per_machine, dict):
+        raise ManifestError(f"{path}: 'per-machine' must be a mapping")
+    folded_machine_keys: dict[str, str] = {}
+    for machine_key in per_machine:
+        if not isinstance(machine_key, str) or not machine_key:
+            raise ManifestError(
+                f"{path}: per-machine keys must be non-empty strings"
+            )
+        folded = machine_key.casefold()
+        previous = folded_machine_keys.get(folded)
+        if previous is not None:
+            raise ManifestError(
+                f"{path}: per-machine keys {previous!r} and {machine_key!r} "
+                "differ only by case"
+            )
+        folded_machine_keys[folded] = machine_key
+
     return RequirementPackage(
         name=name,
         schema_version=schema,
         manage=manage,
         gate=[str(g) for g in gate],
         aliases=raw.get("aliases") or {},
-        per_machine=raw.get("per-machine") or raw.get("per_machine") or {},
+        per_machine=per_machine,
         bootstrap_floor=raw.get("bootstrap-floor") or raw.get("bootstrap_floor") or {},
         exclude=list(raw.get("exclude") or []),
         modules=modules,
@@ -382,7 +400,15 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
     unchanged. This is the *layer-within-repo* step that must precede any
     cross-repo union.
     """
-    overlay = pkg.per_machine.get(machine) or {}
+    machine_key = machine.casefold()
+    overlay = next(
+        (
+            value
+            for key, value in pkg.per_machine.items()
+            if key.casefold() == machine_key
+        ),
+        {},
+    ) or {}
     manage_overlay = overlay.get("manage", overlay) if isinstance(overlay, dict) else {}
     if not isinstance(manage_overlay, dict):
         manage_overlay = {}
