@@ -382,7 +382,7 @@ def test_override_outranks_declaration_and_survives_resync():
     assert "a" in d._units
 
 
-def test_logical_override_winds_down_every_registration_for_unit():
+def test_logical_override_winds_down_declared_unit_but_not_conflict():
     client = FakeClient(
         [
             _reg(
@@ -410,8 +410,8 @@ def test_logical_override_winds_down_every_registration_for_unit():
 
     summary = daemon.reconcile_once()
 
-    assert summary.running == []
-    assert daemon._units == {}
+    assert summary.running == ["legacy"]
+    assert set(daemon._units) == {"legacy"}
 
 
 def test_logical_override_is_scoped_to_declaration_owner():

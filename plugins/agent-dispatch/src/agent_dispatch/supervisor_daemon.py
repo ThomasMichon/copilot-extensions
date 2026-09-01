@@ -578,25 +578,9 @@ class SupervisorDaemon:
             replacement = merged.replacements.get(rid)
             if replacement:
                 desired.pop(replacement, None)
-        for declared_registration in declared:
-            logical_overrides = (
-                registration_override_ids(declared_registration)
-                - {declared_registration["id"]}
-            )
-            if not logical_overrides & overridden:
-                continue
-            logical_ids = registration_logical_ids(declared_registration)
-            declared_owner = declared_registration.get("owner")
-            for rid, registration in list(desired.items()):
-                registration_owner = registration.get("owner")
-                if (
-                    registration_owner
-                    and declared_owner
-                    and registration_owner != declared_owner
-                ):
-                    continue
-                if logical_ids & registration_logical_ids(registration):
-                    desired.pop(rid, None)
+        for rid, registration in list(desired.items()):
+            if registration_override_ids(registration) & overridden:
+                desired.pop(rid, None)
         self._deduplicated = merged.deduplicated
         self._conflicts = merged.conflicts
         return desired

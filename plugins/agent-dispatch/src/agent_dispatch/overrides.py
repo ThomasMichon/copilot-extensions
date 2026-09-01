@@ -31,6 +31,7 @@ the ``supervise override`` CLI reads/writes via :func:`set_override` /
 
 from __future__ import annotations
 
+import _thread
 import contextlib
 import json
 import os
@@ -44,7 +45,7 @@ from typing import Callable, TypeVar
 T = TypeVar("T")
 LOGICAL_OVERRIDE_PREFIX = "logical:"
 _THREAD_LOCKS_GUARD = threading.Lock()
-_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS: dict[str, _thread.LockType] = {}
 
 
 def logical_override_id(owner: str, logical_id: str) -> str:
@@ -52,7 +53,7 @@ def logical_override_id(owner: str, logical_id: str) -> str:
     return f"{LOGICAL_OVERRIDE_PREFIX}{owner}:{logical_id}"
 
 
-def _thread_lock(path: Path) -> threading.Lock:
+def _thread_lock(path: Path) -> _thread.LockType:
     key = str(path.resolve())
     with _THREAD_LOCKS_GUARD:
         return _THREAD_LOCKS.setdefault(key, threading.Lock())

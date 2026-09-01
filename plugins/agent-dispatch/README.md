@@ -593,6 +593,8 @@ declared emitter's on-demand command directly, preserving its producer-owned
 provenance, evaluator association, and target-stable dedup.
 Disabling prevents a new side-load from starting; like disabling a periodic
 emitter, it does not cancel a command that was already in flight.
+An explicitly conflicting direct registration remains a separate supervised
+unit; loop controls do not guess that a different spec should be stopped.
 
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
