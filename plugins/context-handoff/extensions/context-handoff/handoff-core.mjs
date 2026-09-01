@@ -182,8 +182,6 @@ function herdrAgentIdentity(
     if (
       agent?.agent !== "copilot"
       || agent?.pane_id !== paneId
-      || typeof agent?.name !== "string"
-      || !agent.name
       || typeof agent?.terminal_id !== "string"
       || !agent.terminal_id
     ) {
@@ -196,7 +194,10 @@ function herdrAgentIdentity(
       identity: {
         paneId,
         sessionId: reportedSessionId,
-        agentName: agent.name,
+        agentName:
+          typeof agent?.name === "string" && agent.name
+            ? agent.name
+            : null,
         terminalId: agent.terminal_id,
       },
       error: null,
@@ -236,14 +237,17 @@ export function resolveHerdrPredecessorIdentity(
         `${found.identity.sessionId}, not ${expectedSessionId}.`,
     };
   }
+  const predecessor = {
+    transport: "herdr",
+    paneId,
+    sessionId: expectedSessionId,
+    terminalId: found.identity.terminalId,
+  };
+  if (found.identity.agentName) {
+    predecessor.agentName = found.identity.agentName;
+  }
   return {
-    predecessor: {
-      transport: "herdr",
-      paneId,
-      sessionId: expectedSessionId,
-      agentName: found.identity.agentName,
-      terminalId: found.identity.terminalId,
-    },
+    predecessor,
     error: null,
   };
 }
@@ -313,8 +317,12 @@ export function retireHerdrPredecessorAfterConsume(
   const target = herdrAgentIdentity(predecessor.paneId, { execute, home });
   if (
     !target.identity
-    || target.identity.agentName !== predecessor.agentName
     || target.identity.terminalId !== predecessor.terminalId
+    || (
+      predecessor.agentName
+      && target.identity.agentName
+      && target.identity.agentName !== predecessor.agentName
+    )
     || (
       target.identity.sessionId
       && target.identity.sessionId !== predecessor.sessionId

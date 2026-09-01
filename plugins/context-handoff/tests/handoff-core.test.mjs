@@ -251,6 +251,116 @@ test("Herdr predecessor identity is persisted with pane and session", () => {
   });
 });
 
+test("null Herdr agent name still persists and retires exact predecessor", () => {
+  const resolved = resolveHerdrPredecessorIdentity("predecessor-session", {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2" },
+    home: "/home/tester",
+    execute: () => JSON.stringify({
+      result: {
+        agent: {
+          agent: "copilot",
+          name: null,
+          pane_id: "w1:p2",
+          terminal_id: "term-predecessor",
+        },
+      },
+    }),
+  });
+  const invocations = [];
+  const result = retireHerdrPredecessorAfterConsume({
+    consumed: true,
+    metadata: { predecessor: resolved.predecessor },
+    successorSessionId: "successor-session",
+  }, {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p3" },
+    home: "/home/tester",
+    launcherPath: "/home/tester/.local/bin/copilot-pane",
+    execute: (bin, args, options) => {
+      invocations.push({ bin, args, options });
+      if (bin.endsWith("/herdr")) {
+        const paneId = args.at(-1);
+        return JSON.stringify({
+          result: {
+            agent: {
+              agent: "copilot",
+              name: null,
+              pane_id: paneId,
+              terminal_id:
+                paneId === "w1:p3"
+                  ? "term-successor"
+                  : "term-predecessor",
+            },
+          },
+        });
+      }
+      return JSON.stringify({ result: { type: "ok" } });
+    },
+  });
+
+  assert.equal(resolved.error, null);
+  assert.deepEqual(resolved.predecessor, {
+    transport: "herdr",
+    paneId: "w1:p2",
+    sessionId: "predecessor-session",
+    terminalId: "term-predecessor",
+  });
+  assert.equal(
+    invocations.filter(
+      ({ bin }) => bin === "/home/tester/.local/bin/copilot-pane",
+    ).length,
+    1,
+  );
+  assert.equal(result.retired, true);
+});
+
+test("Herdr agent names are checked when both sides report them", () => {
+  let stopCalls = 0;
+  const result = retireHerdrPredecessorAfterConsume({
+    consumed: true,
+    metadata: {
+      predecessor: {
+        transport: "herdr",
+        paneId: "w1:p2",
+        sessionId: "predecessor-session",
+        agentName: "recorded-agent",
+        terminalId: "term-predecessor",
+      },
+    },
+    successorSessionId: "successor-session",
+  }, {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p3" },
+    home: "/home/tester",
+    launcherPath: "/home/tester/.local/bin/copilot-pane",
+    execute: (bin, args) => {
+      if (!bin.endsWith("/herdr")) {
+        stopCalls += 1;
+        return "";
+      }
+      const paneId = args.at(-1);
+      return JSON.stringify({
+        result: {
+          agent: {
+            agent: "copilot",
+            name:
+              paneId === "w1:p3"
+                ? "successor-agent"
+                : "different-agent",
+            pane_id: paneId,
+            terminal_id:
+              paneId === "w1:p3"
+                ? "term-successor"
+                : "term-predecessor",
+          },
+        },
+      });
+    },
+  });
+
+  assert.equal(stopCalls, 0);
+  assert.equal(result.retired, false);
+  assert.equal(result.status, "predecessor-session-mismatch");
+});
+
 test("failed consumption performs no Herdr stop", () => {
   let calls = 0;
   const result = retireHerdrPredecessorAfterConsume({
