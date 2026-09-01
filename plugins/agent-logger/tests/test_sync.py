@@ -71,6 +71,53 @@ def test_local_target_push_is_incremental(tmp_path: Path) -> None:
     assert second.file_count == 0
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows path namespace behavior")
+def test_windows_extended_path_formats_drive_and_unc_paths() -> None:
+    from agent_logger.sync.targets import filesystem
+
+    drive = Path(r"C:\example\session.json")
+    unc = Path(r"\\server\share\session.json")
+    extended = Path(r"\\?\C:\example\session.json")
+
+    assert filesystem._windows_extended_path(drive) == (
+        r"\\?\C:\example\session.json"
+    )
+    assert filesystem._windows_extended_path(unc) == (
+        r"\\?\UNC\server\share\session.json"
+    )
+    assert filesystem._windows_extended_path(extended) == str(extended)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
+def test_local_target_push_handles_long_temporary_path(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    source_parent = src / "session-state" / "abc-123" / "files"
+    destination_parent = (
+        tmp_path / "dest" / "m1" / "session-state" / "abc-123" / "files"
+    )
+    destination = destination_parent / "description"
+    legacy_temporary = destination.with_name(
+        f".{destination.name}.{'f' * 32}.tmp"
+    )
+    while len(str(legacy_temporary)) < 260:
+        source_parent /= "x"
+        destination_parent /= "x"
+        destination = destination_parent / "description"
+        legacy_temporary = destination.with_name(
+            f".{destination.name}.{'f' * 32}.tmp"
+        )
+
+    assert len(str(destination)) < 260
+    assert len(str(legacy_temporary)) >= 260
+    source_parent.mkdir(parents=True)
+    (source_parent / "description").write_text("long path", encoding="utf-8")
+
+    result = LocalTarget({"path": str(tmp_path / "dest")}).push(src, "m1")
+
+    assert result.ok, result.detail
+    assert destination.read_text(encoding="utf-8") == "long path"
+
+
 def test_filtered_local_target_push_is_incremental(tmp_path: Path) -> None:
     src = _make_source(tmp_path)
     target = LocalTarget({"path": str(tmp_path / "dest")})
