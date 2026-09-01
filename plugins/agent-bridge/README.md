@@ -18,6 +18,13 @@ state. Use native Task sub-agents for bounded work inside the current session,
 `agent-dispatch:agent-dispatch` for queued tasks, atomic claims, retries, and
 supervision.
 
+The current session-oriented controls and the target compact delegation
+semantics are mapped in
+[Delegated-agent contract](docs/delegation-contract.md). That baseline defines
+logical identity, caller relationships, attention reasons, and message
+idempotency without changing the existing CLI, HTTP/SSE, ACP, or Session Host
+contracts.
+
 Agent-facing sessions receive an exact payload-local command through the
 session command catalog. That command resolves and, when necessary, provisions
 the runtime from its own payload without searching `PATH` for another
@@ -240,6 +247,7 @@ for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Install, configure, start the service |
 | [Architecture](docs/architecture.md) | Service design, API reference, deployment |
+| [Delegated-agent contract](docs/delegation-contract.md) | Current-to-target lifecycle, identity, attention, and idempotency semantics |
 | [Machine Configuration](docs/machine-config.md) | Topology setup -- machines.yaml, agents config |
 
 ## Skills

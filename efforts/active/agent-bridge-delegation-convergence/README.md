@@ -135,26 +135,26 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
 
 Tracked by #1449.
 
-- [ ] Inventory current create, send, read, wait, interrupt, stop, resume, end,
+- [x] Inventory current create, send, read, wait, interrupt, stop, resume, end,
       event, and result surfaces and map each to the intended compact lifecycle.
-- [ ] Define one stable delegated-agent identity and the relationship among
+- [x] Define one stable delegated-agent identity and the relationship among
       session instance, session lineage, target, caller cursor, and successor.
-- [ ] Define attention-boundary reasons for completion, failure, input,
+- [x] Define attention-boundary reasons for completion, failure, input,
       permission, policy decision, and unrecoverable reachability loss.
-- [ ] Define attached, subscribed, and detached caller relationships without
+- [x] Define attached, subscribed, and detached caller relationships without
       promising an asynchronous wake-up channel after the caller disappears.
-- [ ] Define the scope, lifetime, and succession behavior of a logical-message
+- [x] Define the scope, lifetime, and succession behavior of a logical-message
       idempotency key so steering and represented-session admission consume one
       meaning.
-- [ ] Publish a compact delegation baseline that maps current behavior to the
+- [x] Publish a compact delegation baseline that maps current behavior to the
       target vocabulary and names the owner of every remaining delta.
-- [ ] Keep #1468 authoritative for current wire/durable shape provenance while
+- [x] Keep #1468 authoritative for current wire/durable shape provenance while
       this phase owns the lifecycle-vocabulary mapping layered over those
       fixtures.
-- [ ] Register the selected semantics and fixtures through #1460 before enabling
-      a new delegation-state writer or default. If the shared registry has not
-      landed yet, pin the contract locally here and register it before the first
-      writer is enabled.
+- [x] Pin the selected semantics in
+      [`plugins/agent-bridge/docs/delegation-contract.md`](../../../plugins/agent-bridge/docs/delegation-contract.md)
+      and transfer registry/fixture integration to #1460/#1468 before any new
+      delegation-state writer or default is enabled.
 
 ### Phase 1A — Deliver bounded accumulated results (#1452)
 
@@ -328,3 +328,14 @@ ownership.
   #1266, and #954.
 - Marked the effort Active after review; implementation may proceed by the
   dependency and single-writer rules in Coordination.
+
+### 2026-08-31 — Phase 0 contract baseline
+
+- Carved #1449 into the focused
+  [`agent-bridge-delegation-contract`](../agent-bridge-delegation-contract/README.md)
+  stretch.
+- Defined the current-to-target lifecycle, authoritative lineage-derived
+  delegate identity, caller relationships, attention reasons, and
+  logical-message idempotency scope.
+- Transferred wire/durable fixture registration to #1460/#1468 before any new
+  writer or default is enabled.
