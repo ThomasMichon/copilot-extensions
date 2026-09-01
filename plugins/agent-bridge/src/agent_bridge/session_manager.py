@@ -217,6 +217,7 @@ def _failed_acp_handshake_command() -> str:
 # (a different, still-alive worktree already controls the CodeSpace). Kept in
 # sync with ``agent_codespaces.__main__._BUSY_EXIT``.
 _CODESPACE_BUSY_EXIT = 75
+_CODESPACE_COORDINATION_EXIT = 78
 
 
 class CodespaceClaimConflictError(Exception):
@@ -238,6 +239,22 @@ class CodespaceClaimConflictError(Exception):
             or (
                 f"CodeSpace '{codespace}' is exclusively claimed by another "
                 f"worktree; refusing to dispatch '{owner}' over it."
+            )
+        )
+
+
+class CodespaceCoordinationRejectedError(Exception):
+    """Raised when durable coordination rejects a CodeSpace dispatch."""
+
+    def __init__(self, codespace: str, owner: str, detail: str) -> None:
+        self.codespace = codespace
+        self.owner = owner
+        self.detail = detail
+        super().__init__(
+            detail
+            or (
+                f"CodeSpace '{codespace}' cannot be claimed for '{owner}' "
+                "until durable coordination is repaired."
             )
         )
 
@@ -274,7 +291,12 @@ def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
     return name, owner
 
 
-def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
+def _claim_codespace(
+    codespace_name: str,
+    owner: str,
+    *,
+    holder_ref: str | None = None,
+) -> tuple[str, str]:
     """Acquire the exclusive, worktree-keyed CodeSpace claim before the
     Session-Host transport is established (#897 Increment B step 2).
 
@@ -285,31 +307,39 @@ def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
     two separately-versioned plugin venvs stay decoupled; mirrors
     ``gh_account``'s shell-out-to-a-sibling-binstub pattern.
 
-    Returns ``(True, "")`` on success or a degrade-safe skip (claim disabled,
-    no owner, binstub absent, or an unexpected error -- claim bookkeeping must
-    never block a dispatch) and ``(False, <detail>)`` on a live claim conflict
-    (the CLI exits ``_CODESPACE_BUSY_EXIT``), which the caller turns into a
-    bounce.
+    Returns ``("ok", "")`` on success or a degrade-safe skip,
+    ``("conflict", detail)`` for a live owner conflict, or
+    ``("coordination-rejected", detail)`` for a compatible binding rejection.
     """
-    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
-        return True, ""
-    if not owner or not codespace_name:
-        return True, ""
+    if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM") and not holder_ref:
+        return "ok", ""
+    if not codespace_name or (not owner and not holder_ref):
+        return "ok", ""
     binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
-        return True, ""
+        return "ok", ""
     creationflags = no_window_flags()
+    command = [binstub, "claim", codespace_name]
+    if owner:
+        command.extend(["--owner", owner])
+    if holder_ref:
+        command.extend(["--holder-ref", holder_ref])
     try:
         result = subprocess.run(
-            [binstub, "claim", codespace_name, "--owner", owner],
+            command,
             capture_output=True, text=True, timeout=30,
             creationflags=creationflags,
         )
     except Exception as exc:
         log.info("CodeSpace claim skipped for %s: %s", codespace_name, exc)
-        return True, ""
+        return "ok", ""
     if result.returncode == _CODESPACE_BUSY_EXIT:
-        return False, (result.stderr or result.stdout or "").strip()
+        return "conflict", (result.stderr or result.stdout or "").strip()
+    if result.returncode == _CODESPACE_COORDINATION_EXIT:
+        return (
+            "coordination-rejected",
+            (result.stderr or result.stdout or "").strip(),
+        )
     if result.returncode != 0:
         # Any other non-zero is a bookkeeping error, not a conflict -- never
         # block the dispatch on it (degrade-safe, mirroring the direct path).
@@ -317,7 +347,7 @@ def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
             "CodeSpace claim for %s exited %s: %s",
             codespace_name, result.returncode, (result.stderr or "").strip(),
         )
-    return True, ""
+    return "ok", ""
 
 
 def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
@@ -3961,12 +3991,18 @@ class SessionManager:
                 # of clobbering the incumbent. Degrade-safe: no owner / disabled
                 # / binstub absent -> proceed unclaimed, today's behavior.
                 claim_owner = getattr(target, "caller_worktree", None) or caller_id
-                _claimed, _conflict = _claim_codespace(
-                    cs_target["name"], claim_owner or ""
+                _claim_status, _claim_detail = _claim_codespace(
+                    cs_target["name"],
+                    claim_owner or "",
+                    holder_ref=getattr(target, "caller_owner_ref", None),
                 )
-                if not _claimed:
+                if _claim_status == "conflict":
                     raise CodespaceClaimConflictError(
-                        cs_target["name"], claim_owner or "", _conflict
+                        cs_target["name"], claim_owner or "", _claim_detail
+                    )
+                if _claim_status == "coordination-rejected":
+                    raise CodespaceCoordinationRejectedError(
+                        cs_target["name"], claim_owner or "", _claim_detail
                     )
 
 
@@ -4246,6 +4282,23 @@ class SessionManager:
             log.warning(
                 "Session %s bounced: CodeSpace '%s' is claimed by another "
                 "worktree (dispatcher '%s')",
+                session_id, exc.codespace, exc.owner,
+            )
+        except CodespaceCoordinationRejectedError as exc:
+            await _cleanup_failed_process_launch()
+            session.status = SessionStatus.FAILED
+            self._db.update_session_status(
+                session_id, SessionStatus.FAILED.value, time.time()
+            )
+            session.event_log.append("codespace_coordination_rejected", {
+                "codespace": exc.codespace,
+                "owner": exc.owner,
+                "message": exc.detail or str(exc),
+            })
+            session.event_log.append("error", {"message": str(exc)})
+            log.warning(
+                "Session %s blocked: CodeSpace '%s' lacks durable coordination "
+                "for dispatcher '%s'",
                 session_id, exc.codespace, exc.owner,
             )
         except Exception as exc:

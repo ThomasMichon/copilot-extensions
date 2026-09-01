@@ -33,6 +33,11 @@ def _neutralize_l2(monkeypatch):
 
     monkeypatch.setattr(coordination, "owner_ref", lambda *a, **k: None)
     monkeypatch.setattr(
+        coordination,
+        "preflight",
+        lambda *a, **k: coordination.PreflightResult("absent"),
+    )
+    monkeypatch.setattr(
         coordination, "acquire",
         lambda *a, **k: coordination.L2Result("unavailable"),
     )

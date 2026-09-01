@@ -81,6 +81,7 @@ _SSH_BOOT_TIMEOUT = float(os.environ.get("AGENT_CODESPACES_BOOT_TIMEOUT", "180")
 # use by another live process (see ssh_manager.TargetBusyError). Distinct from
 # generic failures (1) and the --remote-cmd timeout (124) so callers can react.
 _BUSY_EXIT = 75
+_COORDINATION_EXIT = 78
 
 # Exit code when the host cannot mint an ADO REST bearer and enforcement is on
 # (credentials.enforce_ado_rest_login) -- the connect aborts cleanly rather than
@@ -1001,7 +1002,6 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
 
     # Reusing a box (an explicit ssh connect) clears any prune-lifecycle marker
     # -- it is active work again, not a recovered/prunable reclaim candidate.
-    _clear_status_quietly(args.name)
     # Exclusive, worktree-keyed claim (#897). A CodeSpace is fronted by exactly
     # one agent-bridge Session Host, so only one worktree may control it at a
     # time. Resolve the owning worktree -- an explicit ``--effort`` (used by a
@@ -1013,6 +1013,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # agent-worktrees absent), we skip claiming and connect exactly as before.
     from .lease import (
         ClaimConflict,
+        CoordinationRejected,
         active_worktree_ids,
         claim,
         resolve_owner_worktree,
@@ -1035,6 +1036,15 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     fence_holder_ref = coordination.owner_ref(
         session_id=getattr(args, "session_id", None),
     )
+    if not claim_owner and fence_holder_ref:
+        readiness = coordination.preflight(fence_holder_ref)
+        if readiness.rejected:
+            print(
+                "[BLOCKED] CodeSpace operation requires durable coordination: "
+                f"{readiness.code}: {readiness.detail}",
+                file=sys.stderr,
+            )
+            return _COORDINATION_EXIT
     if claim_owner:
         holder_ref = fence_holder_ref
         try:
@@ -1056,6 +1066,12 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return _BUSY_EXIT
+        except CoordinationRejected as exc:
+            print(
+                f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
+                file=sys.stderr,
+            )
+            return _COORDINATION_EXIT
         except RuntimeError as exc:
             # Never let a claim-bookkeeping error block a connect.
             print(f"[WARN] CodeSpace claim skipped: {exc}", file=sys.stderr)
@@ -1075,6 +1091,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                     "Journaled CodeSpace %s as an obligation on %s",
                     args.name, fence_holder_ref,
                 )
+
+    # Reusing a box clears any prune-lifecycle marker only after coordination
+    # has allowed the operation to proceed.
+    _clear_status_quietly(args.name)
 
     # Credential relay state. The relay reverse-forward now has its own
     # supervised ``ssh -N -R`` channel, so it is not piggybacked on the
@@ -3812,46 +3832,65 @@ def _cmd_claim(args: argparse.Namespace) -> int:
     """
     from .lease import (
         ClaimConflict,
+        CoordinationRejected,
         active_worktree_ids,
         claim,
         resolve_owner_worktree,
     )
 
-    # Escape hatch parity with the ``ssh`` direct path: an operator (or a unit
-    # test) can disable exclusive-control enforcement entirely. Honored here too
-    # so the daemon's shelled ``claim`` is a no-op success when the daemon runs
-    # with claiming disabled.
+    from . import coordination
+
+    holder_ref = coordination.owner_ref(
+        explicit=getattr(args, "holder_ref", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    readiness = coordination.preflight(holder_ref) if holder_ref else None
+
+    # This escape hatch disables the local exclusive claim, not authorization
+    # for an owner-associated operation. The preflight above still applies.
     if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
+        if readiness and readiness.rejected:
+            print(
+                "[BLOCKED] CodeSpace operation requires durable coordination: "
+                f"{readiness.code}: {readiness.detail}",
+                file=sys.stderr,
+            )
+            return _COORDINATION_EXIT
         print("[OK] Claim disabled (AGENT_CODESPACES_DISABLE_CLAIM); skipped.")
         return 0
 
     owner = resolve_owner_worktree(explicit=getattr(args, "owner", None))
     if not owner:
+        if readiness and readiness.rejected:
+            print(
+                "[BLOCKED] CodeSpace operation requires durable coordination: "
+                f"{readiness.code}: {readiness.detail}",
+                file=sys.stderr,
+            )
+            return _COORDINATION_EXIT
         print(
             "[WARN] No owning worktree resolved (not in a worktree and no "
             "--owner given); claim skipped.",
             file=sys.stderr,
         )
         return 0
-    from . import coordination
-    # Cross-machine holder identity: an explicit --holder-ref (a dispatched
-    # caller, e.g. the bridge daemon, passes the original caller's qualified
-    # ClaimRef), else resolved from the calling worktree. None -> L2 skipped
-    # (degrade-safe, L1-only).
-    holder_ref = coordination.owner_ref(
-        explicit=getattr(args, "holder_ref", None),
-        session_id=getattr(args, "session_id", None),
-    )
     try:
         lease = claim(
             args.codespace, owner,
             force=getattr(args, "force_claim", False),
             active=active_worktree_ids(),
             holder_ref=holder_ref,
+            preflight_result=readiness,
         )
     except ClaimConflict as exc:
         print(f"[BUSY] {exc} Use --force-claim to take over.", file=sys.stderr)
         return _BUSY_EXIT
+    except CoordinationRejected as exc:
+        print(
+            f"[BLOCKED] CodeSpace claim requires durable coordination: {exc}",
+            file=sys.stderr,
+        )
+        return _COORDINATION_EXIT
     print(f"[OK] Claimed {lease.codespace} for {owner}")
     return 0
 

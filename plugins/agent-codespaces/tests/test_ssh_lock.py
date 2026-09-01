@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_codespaces import __main__ as cli
-from agent_codespaces.__main__ import _BUSY_EXIT, main
+from agent_codespaces.__main__ import _BUSY_EXIT, _COORDINATION_EXIT, main
 from agent_codespaces.resolver import _build_spawn_command
 
 
@@ -388,3 +388,45 @@ class TestSshClaimEnforcement:
         with pytest.raises(_Stop):
             main(["ssh", "cs-free", "--no-relay"])
         assert seen == {"cs": "cs-free", "owner": "/wt/mine"}
+
+    def test_coordination_rejection_precedes_status_clear_and_connect(
+        self,
+        monkeypatch,
+        capsys,
+    ):
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(
+            "agent_codespaces.__main__.load_merged_config",
+            lambda: SimpleNamespace(credentials=SimpleNamespace(relay_port=9857)),
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.lifecycle.account_for_codespace", lambda name: None,
+        )
+        from agent_codespaces import lease as lease_mod
+
+        monkeypatch.setattr(
+            lease_mod,
+            "resolve_owner_worktree",
+            lambda explicit=None, session_id=None: "/wt/mine",
+        )
+        monkeypatch.setattr(
+            lease_mod, "active_worktree_ids", lambda: {"/wt/mine"}
+        )
+        monkeypatch.setattr(
+            lease_mod,
+            "claim",
+            lambda *a, **k: (_ for _ in ()).throw(
+                lease_mod.CoordinationRejected(
+                    "knowledge_binding_required: repair binding"
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            cli,
+            "_clear_status_quietly",
+            lambda name: pytest.fail("rejected operation cleared status"),
+        )
+
+        rc = main(["ssh", "cs-blocked", "--no-relay"])
+        assert rc == _COORDINATION_EXIT
+        assert "knowledge_binding_required" in capsys.readouterr().err

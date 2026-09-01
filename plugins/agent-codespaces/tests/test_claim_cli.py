@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agent_codespaces import lease as lease_mod
-from agent_codespaces.__main__ import _BUSY_EXIT, main
+from agent_codespaces.__main__ import _BUSY_EXIT, _COORDINATION_EXIT, main
 
 
 def _fake_lease(cs: str, owner: str) -> "lease_mod.Lease":
@@ -42,6 +42,55 @@ def test_claim_cmd_bounces_on_conflict(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "BUSY" in err
     assert "/wt/a" in err
+
+
+def test_claim_cmd_blocks_on_coordination_rejection(monkeypatch, capsys):
+    monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+    monkeypatch.setattr(lease_mod, "active_worktree_ids", lambda: {"/wt/a"})
+
+    def _claim(cs, owner, **kw):
+        raise lease_mod.CoordinationRejected(
+            "knowledge_binding_required: repair binding"
+        )
+
+    monkeypatch.setattr(lease_mod, "claim", _claim)
+    rc = main(["claim", "cs-x", "--owner", "/wt/a"])
+    assert rc == _COORDINATION_EXIT
+    err = capsys.readouterr().err
+    assert "BLOCKED" in err
+    assert "knowledge_binding_required" in err
+
+
+def test_claim_cmd_passes_rejection_to_existing_owner_logic(
+    monkeypatch,
+    capsys,
+):
+    from agent_codespaces import coordination
+
+    monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+    monkeypatch.setattr(lease_mod, "active_worktree_ids", lambda: {"/wt/a"})
+    monkeypatch.setattr(
+        coordination,
+        "owner_ref",
+        lambda explicit=None, session_id=None: "machine/project/worktree",
+    )
+    rejected = coordination.PreflightResult(
+        "rejected",
+        code="knowledge_binding_required",
+        detail="repair binding",
+    )
+    monkeypatch.setattr(coordination, "preflight", lambda holder: rejected)
+    seen = {}
+
+    def _claim(cs, owner, **kwargs):
+        seen["preflight"] = kwargs["preflight_result"]
+        return _fake_lease(cs, owner)
+
+    monkeypatch.setattr(lease_mod, "claim", _claim)
+    rc = main(["claim", "cs-x", "--owner", "/wt/a"])
+    assert rc == 0
+    assert seen["preflight"] is rejected
+    assert "Claimed cs-x" in capsys.readouterr().out
 
 
 def test_claim_cmd_force_passes_through(monkeypatch):
@@ -104,6 +153,38 @@ def test_claim_cmd_disabled_env_is_noop(monkeypatch, capsys):
     assert rc == 0
     assert called == {"resolve": False, "claim": False}
     assert "disabled" in capsys.readouterr().out.lower()
+
+
+def test_claim_cmd_disabled_env_still_preflights_owner_ref(
+    monkeypatch,
+    capsys,
+):
+    from agent_codespaces import coordination
+
+    monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+    monkeypatch.setattr(
+        coordination,
+        "owner_ref",
+        lambda explicit=None, session_id=None: explicit,
+    )
+    monkeypatch.setattr(
+        coordination,
+        "preflight",
+        lambda holder: coordination.PreflightResult(
+            "rejected",
+            code="knowledge_binding_required",
+            detail="repair binding",
+        ),
+    )
+
+    rc = main([
+        "claim",
+        "cs-x",
+        "--holder-ref",
+        "machine/project/worktree",
+    ])
+    assert rc == _COORDINATION_EXIT
+    assert "knowledge_binding_required" in capsys.readouterr().err
 
 
 def test_release_claim_cmd_disabled_env_is_noop(monkeypatch, capsys):

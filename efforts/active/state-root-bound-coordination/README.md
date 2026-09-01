@@ -126,11 +126,11 @@ usable.
   readiness metadata.
 
 ### Phase 3 - Preflight optional provider integrations
-- [ ] Expose a stable, machine-readable agent-worktrees coordination preflight.
-- [ ] Make agent-codespaces invoke the preflight before provider work whenever
+- [x] Expose a stable, machine-readable agent-worktrees coordination preflight.
+- [x] Make agent-codespaces invoke the preflight before provider work whenever
   an agent-worktrees owner reference participates; fail closed only for a
   definitive binding rejection and preserve standalone degradation otherwise.
-- [ ] Version the preflight response. Treat unknown-command, malformed,
+- [x] Version the preflight response. Treat unknown-command, malformed,
   unversioned, or incompatible responses as an absent optional peer; reserve
   fail-closed behavior for an explicit compatible binding rejection.
 - [ ] Prove direct agent-containers fleet leasing remains an independent local
@@ -240,3 +240,11 @@ agent-worktrees-owned operation, preserving the suite's a-la-carte invariant.
   tests prove explicit and environment-carried original origins remain usable
   when current binding resolution fails, while new acquisition emits a
   versioned JSON rejection with a dedicated exit code.
+- Lease PR [#1583](https://github.com/ThomasMichon/copilot-extensions/pull/1583)
+  merged after CI and Copilot review.
+- Implemented the #1517 provider slice across agent-codespaces and agent-bridge:
+  the owning project is preflighted before new local ownership or CodeSpace
+  transport, compatible binding rejection blocks with a distinct event/exit,
+  and absent, old, malformed, or incompatible peers preserve standalone mode.
+  Existing same-owner lease renewal remains available without a new-acquisition
+  preflight.
