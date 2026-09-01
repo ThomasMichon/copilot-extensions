@@ -27,7 +27,6 @@ that pattern to this repository.
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
-| [Resilient Interactive Session Startup](active/resilient-interactive-session-startup/README.md) | Draft | #1534 |
 | [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Draft | #1303 |
 | [Terminal Worktree Reclamation](active/terminal-worktree-reclamation/README.md) | Draft | #1488 |
 | [Turn-key Reviewer Loops](active/turnkey-reviewer-loops/README.md) | Draft | #1403 |
