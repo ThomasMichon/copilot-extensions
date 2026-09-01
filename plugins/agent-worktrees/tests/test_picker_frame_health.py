@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
+
+import pytest
 
 from agent_worktrees.picker_tui.frame_health import FrameHealthReporter
 
@@ -23,3 +27,18 @@ def test_frame_health_reports_only_threshold_gaps(tmp_path, monkeypatch):
     assert [event["event"] for event in events] == ["start", "gap", "stop"]
     assert events[1]["gap_ms"] == 700.0
     assert events[1]["frame"] == 2
+
+
+def test_frame_health_full_queue_still_stops(tmp_path):
+    reporter = FrameHealthReporter(tmp_path / "unused.jsonl")
+    reporter._thread = threading.Thread(target=reporter._stop.wait, daemon=True)
+    reporter._thread.start()
+    for index in range(reporter._queue.maxsize):
+        reporter._queue.put_nowait({"index": index})
+
+    reporter.close(wait=True)
+
+    assert reporter._stop.is_set()
+    assert reporter._thread is None
+    with pytest.raises(queue.Full):
+        reporter._queue.put_nowait({"overflow": True})

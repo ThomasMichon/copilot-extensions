@@ -31,6 +31,7 @@ class FrameHealthReporter:
         self.threshold_seconds = max(0.1, float(threshold_seconds))
         self._queue: queue.Queue[dict | object] = queue.Queue(maxsize=_QUEUE_SIZE)
         self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
         self._last_tick: float | None = None
         self._dropped = 0
 
@@ -58,6 +59,7 @@ class FrameHealthReporter:
     def start(self) -> None:
         if self._thread is not None:
             return
+        self._stop.clear()
         self._last_tick = time.monotonic()
         self._thread = threading.Thread(
             target=self._write_loop,
@@ -88,13 +90,16 @@ class FrameHealthReporter:
         if self._thread is None:
             return
         self._enqueue({"event": "stop", "dropped": self._dropped})
+        self._stop.set()
         try:
             self._queue.put_nowait(_STOP)
         except queue.Full:
             pass
+        thread = self._thread
         if wait:
-            self._thread.join(timeout=2)
-        self._thread = None
+            thread.join(timeout=2)
+        if not thread.is_alive():
+            self._thread = None
 
     def _enqueue(self, event: dict) -> None:
         event = {"timestamp": _timestamp(), **event}
@@ -107,10 +112,15 @@ class FrameHealthReporter:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8", buffering=1) as stream:
-                while True:
-                    event = self._queue.get()
+                while not self._stop.is_set() or not self._queue.empty():
+                    try:
+                        event = self._queue.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
                     if event is _STOP:
                         return
                     stream.write(json.dumps(event, separators=(",", ":")) + "\n")
         except OSError:
             return
+        finally:
+            self._thread = None
