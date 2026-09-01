@@ -779,7 +779,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         TMUX_CREATE_TOTAL_ATTEMPTS=0
         TMUX_CREATE_EXIT=1
         TMUX_RETRY_CYCLE=1
-        TMUX_RETRY_PROMPT=1
+        TMUX_RETRY_PROMPT="$_SHOW_LAUNCH_STATUS"
         for _copilot_arg in "${COPILOT_PASSTHROUGH[@]+"${COPILOT_PASSTHROUGH[@]}"}"; do
             [[ "$_copilot_arg" == "--stdio" ]] && TMUX_RETRY_PROMPT=0
         done

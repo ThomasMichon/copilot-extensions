@@ -264,6 +264,7 @@ def test_launchers_retry_mux_creation_and_preserve_recovery_context():
 
     assert "TMUX_CREATE_MAX_ATTEMPTS=3" in sh
     assert "TMUX_CREATE_ATTEMPT<=TMUX_CREATE_MAX_ATTEMPTS" in sh
+    assert 'TMUX_RETRY_PROMPT="$_SHOW_LAUNCH_STATUS"' in sh
     assert '[[ "$_copilot_arg" == "--stdio" ]] && TMUX_RETRY_PROMPT=0' in sh
     assert '"$TMUX_RETRY_PROMPT" == "1" && -t 0 && -t 1' in sh
     assert "recoverable=true" in sh
