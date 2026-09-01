@@ -31,6 +31,11 @@ an explicit `agents_config` file:
 agent-bridge config adopt --repo /path/to/repo --profile my-project
 ```
 
+Adoption writes the user-level bridge profile; it does not edit the repository.
+Create or change `machines.yaml` and other repo-owned topology in a worktree,
+publish it through the repository's contribution flow, and deploy/sync the
+canonical checkout before adopting that state on a machine.
+
 This searches for `machines.yaml` at conventional paths and creates a topology
 profile. The agent roster is derived from it (plus `.agent-worktrees/related.yaml`
 and local repo registry data when available). A legacy `acp-agents.json` is **not
@@ -39,8 +44,18 @@ deprecated override.
 
 When `/path/to/repo` is a linked Git worktree, adoption resolves its common Git
 directory and persists the stable anchor checkout's `machines.yaml`. Removing
-the temporary worktree therefore does not strand the profile. An explicit
-`--machines-yaml` or `--agents-config` path is never remapped.
+the temporary worktree therefore does not strand an in-repo auto-discovered
+topology path. A stateless harness with no local topology may instead inherit
+`machines.yaml` from its bound knowledge/state root; that external path is
+stored as resolved. An explicit `--machines-yaml` or `--agents-config` path is
+also never remapped. If any external or explicit path points at a disposable
+worktree, removing that worktree strands the profile and `config validate`
+reports the missing file.
+
+`config adopt` replaces the named topology profile. Before using it as repair,
+back up the profile stanza in `~/.agent-bridge/config.yaml`, including any
+`default_copilot_args` and `default_env`, then restore those spawn defaults
+after re-adoption.
 
 ### Verify
 

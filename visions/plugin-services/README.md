@@ -218,11 +218,14 @@ Two lifecycle verbs, two scopes, never crossed. **Install/update** touches only
 **machine-local** content — it deploys and updates a plugin's own runtime and
 local config, and may migrate that config's *schema*, but it never changes the
 user's chosen *behaviors* and never alters a **repo** (its committed config or its
-git hooks). **Register/adopt** is the only verb that mutates a repo: it takes the
-user's preferences and wires the repo up — writing repo and machine-local config
-and injecting/validating in-repo git hooks. Because you only *adopt* a repo you
-own, that mutating power is confined to owned repos by construction; a repo you
-merely contribute to is never adopted, so its git is never touched.
+git hooks). Repository mutation happens only through an explicit,
+ownership-aware repo-integration command and the repository's normal
+contribution flow; it is never an incidental install/update side effect.
+**Register/adopt** commands declare integration intent, but their write scope is
+part of each command's contract: a repo-bootstrap command may write repo and
+machine-local wiring, while a projection command may only read published repo
+state and update user-level configuration. The verb name alone never grants
+repo-write authority.
 
 ## Behaviors
 
@@ -305,7 +308,8 @@ silently degrading — so the failure is diagnosable instead of mysterious.
 Running install or update never changes a repo: no commit, no edit to the repo's
 committed config, no git-hook injection. At most it migrates machine-local config
 schema and *warns* about a stale or deprecated repo convention it observes. Any
-repo-altering effect appears only after an explicit adopt / re-adopt.
+repo-altering effect is explicit, ownership-aware, and travels through the
+repository's normal contribution flow; it is never a side effect of deployment.
 
 ### zero-downtime-cutover
 Replacing a running service with a new version is **zero-downtime** for both the

@@ -164,9 +164,10 @@ after the table. You will encode the choice in
 
 Each capability ships a trigger-discoverable **setup skill**. They split along the
 [install-vs-adopt boundary](patterns/install-vs-adopt-boundary.md): **install/update**
-skills touch only **machine-local** runtime state, while **adopt/scaffold** skills
-write into **the repo**. This is the single lookup for "which skill sets up what";
-the phases below invoke them in order.
+skills touch only **machine-local** runtime state, while **adopt/scaffold**
+commands own only the repo and/or user-state integration scope their contract
+declares. This is the single lookup for "which skill sets up what"; the phases
+below invoke them in order.
 
 | Skill | Scope | What it does |
 |-------|-------|--------------|

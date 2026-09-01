@@ -20,55 +20,61 @@ governs its own hooks, typically server-side). Repo mutation must be
 
 ## Standard approach
 
-**Split the verbs by scope, and let only adoption mutate a repo.**
+**Split the verbs by scope. Install never mutates a repo; adoption mutates only
+the scopes its command explicitly owns.**
 
 | | `install` / `update` | `register` / `adopt` |
 |---|---|---|
-| **Scope** | machine-local only — runtime payloads, local user config, local services | the repo + its per-machine wiring |
+| **Scope** | machine-local only — runtime payloads, local user config, local services | explicit integration; repo, machine-local, or both according to the command's contract |
 | **Machine-local config** | may migrate it to a newer **schema** (format); never alters **behaviors** | writes / updates it to reflect new repo preferences |
-| **Repo config** | **read + warn** on invalid/deprecated conventions; never alters | **explicitly alters** (takes preferences; writes repo + local) |
-| **Repo git hooks** | **never touches** | **injects / validates** (the only repo-git mutation) |
+| **Repo config** | **read + warn** on invalid/deprecated conventions; never alters | may alter only when the command explicitly owns repo bootstrap; otherwise reads published repo state |
+| **Repo git hooks** | **never touches** | may inject / validate only for a repo-adopting command that explicitly owns git integration |
 | **Cadence** | re-runs on every deploy/update; repo-agnostic | run to adopt or **re-adopt** and change wiring |
 
-**Rule:** mutating a repo — or changing user *behaviors* — is an **adopt**
-concern, never an **install/update** one. install/update is machine-local and,
-w.r.t. behaviors, read-only: it may migrate config *schema* and *warn* on stale
-repo conventions, but it never changes what the config *means*.
+**Rule:** mutating a repo is never an **install/update** concern. It happens
+through the repository's normal contribution flow, optionally initiated by a
+repo-bootstrap adoption command whose contract explicitly says it writes repo
+state. A machine-local adoption command does not gain repo-write authority from
+the word "adopt": for example, `agent-bridge config adopt` reads published
+topology and writes only user-level bridge configuration.
 
 ### The lifecycle it produces
 
-- **Blank-slate machine:** install the plugins → open an agent in the target repo
-  → **install** (runtime payloads + a local-config scaffold) then **adopt** (after
-  taking the user's preferences: repo-specific hooks + local/repo config, wiring
-  the repo up). Adopt writes back into **both** the repo and machine-local config
-  as needed.
+- **Blank-slate machine:** install the plugins, publish any repository-owned
+  configuration through that repository's contribution flow, then run each
+  plugin's adoption command to establish the machine-local integration. A
+  repo-bootstrap adoption command may author repo state when its documented
+  contract says so; a projection command such as `agent-bridge config adopt`
+  only records paths in user-level state.
 - **Ongoing:** `update` (or a repo-scoped update) refreshes plugins/services and,
   at most, migrates local config **schema** after validation — it does **not**
-  change behaviors. To change how a repo is wired, **re-adopt**.
+  change behaviors. Publish repo changes first; **re-adopt** only when the
+  machine-local projection must be refreshed.
 
-### Ownership falls out of adopt
+### Repo mutation requires explicit authority
 
-Because adoption is the only repo-mutating verb and you adopt only repos you own,
-the "may we modify this repo's git?" question is answered structurally: **owned +
-adopted → yes; contributed-to-but-not-adopted → no.** No separate ownership flag
-is required (though one may be made explicit). A strong implicit signal that a
-repo is owned is a **committed, in-repo config that declares its own workflow** —
-you can only commit workflow config into a repo you own; a repo you merely
-contribute to carries any such preference **machine-locally**, if at all.
+Repo-write authority comes from the repository's ownership and contribution
+flow, plus a command contract that explicitly owns repo integration — not merely
+from running a command named `adopt`. A strong implicit signal that a repo is
+owned is a **committed, in-repo config that declares its own workflow** — you can
+only publish workflow config into a repo you own; a repo you merely contribute
+to carries any such preference **machine-locally**, if at all.
 
 ## Gotchas this pattern encodes
 
 - **A "uses PRs" flag is not an ownership signal.** A repo you contribute to is
   often PR-gated too (you open PRs *into* it). Gating repo mutation on "uses PRs"
-  would wrongly mutate an external repo. Gate on **adoption / ownership**, not on
-  a PR flag.
+  would wrongly mutate an external repo. Gate on **repo ownership plus an
+  explicit repo-write contract**, not on a PR flag or the verb name.
 - **A shadowing hooks path silently disables injected hooks.** If a repo's
   `core.hooksPath` points away from where the managed hooks are installed, git
   ignores them and the guard never runs. Reconciling that pointer is a repo
-  mutation → an **adopt** step; install/update may only *warn* that it is stale.
-- **Idempotent re-adopt, not install-time drift-repair.** When repo wiring must be
-  refreshed (a convention changed, a stale pointer), do it by **re-adopting** —
-  never by teaching install/update to quietly fix repos.
+  mutation → use the owning plugin's explicit repo-integration command;
+  install/update may only *warn* that it is stale.
+- **Idempotent explicit integration, not install-time drift-repair.** When repo
+  wiring must be refreshed, use the owning repo-integration command. When only a
+  machine-local projection is stale, re-run that projection command against
+  published canonical state. Never teach install/update to quietly fix repos.
 
 ## See Also
 

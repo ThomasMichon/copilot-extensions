@@ -127,6 +127,10 @@ If your repo has a `machines.yaml`:
 agent-bridge config adopt --repo /path/to/repo --profile my-project
 ```
 
+This projects already-published repository topology into user-level bridge
+configuration; it does not create or edit `machines.yaml`. Make repository
+changes in a worktree, merge them, and sync the canonical checkout first.
+
 This auto-discovers `machines.yaml` and creates a topology profile; the agent
 roster is **derived** from it (+ `.agent-worktrees/related.yaml` and local repo
 registry data when available). See
@@ -134,7 +138,13 @@ registry data when available). See
 `machines.yaml` format and the derived roster.
 
 Linked Git worktrees are canonicalized to their stable anchor before an
-auto-discovered topology path is stored. Explicit config paths remain exact.
+in-repo auto-discovered topology path is stored. A stateless harness may inherit
+topology from its bound knowledge/state root, while explicit config paths remain
+exact. Any external path into a disposable worktree will fail validation after
+that worktree is removed. Before repairing it with re-adoption, preserve the
+profile stanza from `~/.agent-bridge/config.yaml`, including
+`default_copilot_args` and `default_env`; adoption replaces the named profile
+rather than merging those defaults.
 
 ### Option B: Manual config
 
