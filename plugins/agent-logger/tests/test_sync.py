@@ -99,6 +99,8 @@ def test_local_target_push_handles_long_temporary_path(tmp_path: Path) -> None:
     legacy_temporary = destination.with_name(
         f".{destination.name}.{'f' * 32}.tmp"
     )
+    if len(str(destination)) >= 260:
+        pytest.skip("temporary test root already exceeds MAX_PATH")
     while len(str(legacy_temporary)) < 260:
         source_parent /= "x"
         destination_parent /= "x"

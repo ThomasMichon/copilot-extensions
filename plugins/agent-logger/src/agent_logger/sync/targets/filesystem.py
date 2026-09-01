@@ -66,7 +66,10 @@ def _unlink_replace_target(path: Path) -> None:
     except FileNotFoundError:
         return
     except PermissionError:
-        os.chmod(io_path, stat.S_IWRITE | stat.S_IREAD)
+        try:
+            os.chmod(io_path, stat.S_IWRITE | stat.S_IREAD)
+        except FileNotFoundError:
+            return
         try:
             os.unlink(io_path)
         except FileNotFoundError:
