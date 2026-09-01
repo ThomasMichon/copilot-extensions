@@ -11,7 +11,9 @@
   (prerequisite provisioning),
   [#356](https://github.com/ThomasMichon/copilot-extensions/issues/356) /
   [#357](https://github.com/ThomasMichon/copilot-extensions/issues/357)
-  (configurator: adoption + per-plugin config)
+  (configurator: adoption + per-plugin config),
+  [#1478](https://github.com/ThomasMichon/copilot-extensions/issues/1478)
+  (manual mux restoration for unreachable active sessions)
 - **Vision:** **vision-closing** against two already-stated visions (no revision
   needed — this closes their delta vs. reality):
   - [`visions/installer`](../../../visions/installer/README.md) —
@@ -137,6 +139,14 @@ realized in `main`; unchecked items are the remaining delta.
       actions, multi-machine at-a-glance, session/PR status columns. Closes picker
       §`front-door-entry`, §`decision-support-before-cost`, §`programmatic-parity`,
       §`render-derive-not-own`, §`live-not-snapshot`.
+- [ ] Add an engine-owned **manual mux restoration** operation for a worktree
+      whose bound Copilot process remains live but unreachable after its terminal
+      or mux wrapper disappears. The engine must refuse an existing live mux or
+      ambiguous owner, reuse the guarded reclaim path, and resume the same
+      persisted session through the normal mux launcher. Expose the operation to
+      both Picker implementations over the JSON process boundary; neither UI owns
+      process discovery or termination policy. Tracks #1478 and closes
+      agent-fabric §`recover-not-lose` plus picker §`programmatic-parity`.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
@@ -190,6 +200,10 @@ realized in `main`; unchecked items are the remaining delta.
   picker §`renderable-and-assertable-headless`, §`programmatic-parity`.
 - **Contract conformance.** Exercise the `--json` engine verbs the Picker depends
   on against both a current and an older engine to prove graceful degradation.
+- **Mux restoration safety.** Prove the recovery verb refuses attached/live-mux
+  and ambiguous-owner states, performs no mutation in preview mode, retires only
+  a confirmed unreachable no-mux owner, and launches exactly one mux-wrapped
+  resume of the selected persisted session.
 - **Clean-room / fresh-box.** Bootstrap → provision → core-install → bare-launch
   handoff exercised on a disposable fresh machine (the repo's clean-room rig),
   including the absent-Manager onboarding path and the stale-stub health-probe
@@ -230,3 +244,7 @@ its issues; the public artifacts stay self-contained and general-purpose.
   binstub, and the binstub runs on a stock login PATH — **7 passed, 0 failed**.
   Turns the unit-tested behavior into a hard fresh-box PASS. The git-absent
   tarball fallback stays unit-tested; a no-git image variant is a noted follow-up.
+- **2026-08-31** — Added #1478 to Phase 3: a single engine-owned manual
+  mux-restoration operation, surfaced by both Picker implementations. The design
+  explicitly restarts/resumes persisted session state instead of attempting to
+  reparent an arbitrary live Windows console process into a new ConPTY.
