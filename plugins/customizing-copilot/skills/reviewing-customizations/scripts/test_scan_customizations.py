@@ -1343,6 +1343,26 @@ def test_adopted_stack_rejects_unknown_repository_config_key(
     )
 
 
+def test_adopted_stack_rejects_previous_context_engine_version(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adoption = _adoption()
+    adoption["engine"]["version"] = scan.SESSION_CONTEXT_ENGINE_VERSION - 1
+    _settings(repo, {}, {}, aggregation=adoption)
+    report = scan.Report()
+
+    inventory = scan.scan_session_context(repo, [], report)
+
+    assert inventory["authority_proven"] is False
+    assert any(
+        finding.check == "session-context-authority"
+        and finding.severity == scan.BLOCKING
+        for finding in report.findings
+    )
+
+
 def test_adopted_stack_rejects_invalid_source_qualified_identity(
     tmp_path: Path,
 ):
