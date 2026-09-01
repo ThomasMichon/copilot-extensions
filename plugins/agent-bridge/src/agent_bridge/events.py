@@ -254,17 +254,20 @@ class EventLog:
             if durable and self._db is not None and self._session_id is not None:
                 self._db.flush()
                 durable_head = self._db.get_max_event_id(self._session_id)
-            eligible = [event for event in self._events if event.id <= durable_head]
-            if not eligible:
+            visible_count = min(len(self._events), max(0, durable_head))
+            if visible_count <= 0:
                 return (None, 0, [])
             continuity = self._telemetry.log_epoch or None
-            head = eligible[-1].id
+            head = self._events[visible_count - 1].id
             if limit <= 0:
                 return (continuity, head, [])
             if after is None:
-                rows = list(eligible[-limit:])
+                start = max(0, visible_count - limit)
+                rows = list(self._events[start:visible_count])
             else:
-                rows = [e for e in eligible if e.id > after][:limit]
+                start = max(0, after)
+                end = min(visible_count, start + limit)
+                rows = list(self._events[start:end])
             return (continuity, head, rows)
 
     def snapshot_event(
@@ -276,17 +279,17 @@ class EventLog:
             if durable and self._db is not None and self._session_id is not None:
                 self._db.flush()
                 durable_head = self._db.get_max_event_id(self._session_id)
+            visible_count = min(len(self._events), max(0, durable_head))
             continuity = (
-                self._telemetry.log_epoch or None if self._events else None
+                (self._telemetry.log_epoch or None)
+                if visible_count > 0
+                else None
             )
-            event = next(
-                (
-                    e
-                    for e in self._events
-                    if e.id == event_id and e.id <= durable_head
-                ),
-                None,
-            )
+            event = None
+            if 1 <= event_id <= visible_count:
+                candidate = self._events[event_id - 1]
+                if candidate.id == event_id:
+                    event = candidate
             return (continuity, event)
 
     def active_tool_call(self) -> dict[str, Any] | None:

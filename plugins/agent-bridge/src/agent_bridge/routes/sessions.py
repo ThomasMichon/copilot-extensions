@@ -33,6 +33,7 @@ from ..result_snapshot import (
     DEFAULT_MAX_TEXT_CHARS,
     MAX_MAX_ITEMS,
     MAX_MAX_TEXT_CHARS,
+    ResultHistoryChangedError,
     ResultTokenError,
     build_owned_result_snapshot,
     expand_owned_result_ref,
@@ -762,8 +763,10 @@ async def get_result_detail(
             session_id=session.session_id,
             token=ref,
         )
-    except ResultTokenError as exc:
+    except ResultHistoryChangedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ResultTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

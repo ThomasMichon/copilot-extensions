@@ -53,6 +53,10 @@ class ResultTokenError(ValueError):
     """An opaque result position or detail reference is malformed."""
 
 
+class ResultHistoryChangedError(ResultTokenError):
+    """A valid detail reference names a replaced event-log history."""
+
+
 @dataclass
 class _TextBudget:
     limit: int
@@ -593,7 +597,9 @@ def expand_owned_result_ref(
             raise ResultTokenError("invalid event detail reference") from exc
         continuity, event = event_log.snapshot_event(event_id, durable=True)
         if not continuity or decoded.get("continuity") != continuity:
-            raise ResultTokenError("result detail belongs to replaced history")
+            raise ResultHistoryChangedError(
+                "result detail belongs to replaced history"
+            )
         if event is None:
             raise KeyError("event detail is no longer available")
         return {
