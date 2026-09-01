@@ -2,6 +2,20 @@
 
 Back to the [effort](README.md).
 
+## Scope boundary
+
+This architecture is private runtime infrastructure for the runtime-bearing
+core plugin identities defined by the `copilot-extensions` suite. It is not a
+general plugin namespacing mechanism. An independent marketplace may carry a
+copy of those identities for source-isolation proof, but payload-only plugins
+and unrelated downstream, internal, or third-party plugin families must not
+create, validate, expose, or depend on these installation cells.
+
+Namespaced mode is explicit opt-in and default-off. While this effort is active,
+all namespaced installation and lifecycle execution occurs only in disposable
+clean-room environments. Persistent development and production machines remain
+in legacy mode and may inspect the model only through read-only diagnostics.
+
 ## Decisions
 
 1. **`copilot-extensions` is the durable host concept.** A marketplace with the
@@ -264,8 +278,10 @@ still control the machine-global daemon.
 
 ## Cross-platform gate
 
-Every operative phase must prove Windows and POSIX behavior before its contract
-becomes mandatory. Particular attention is required for:
+Every operative phase must prove Windows and POSIX behavior in disposable clean
+rooms before its contract becomes mandatory. A persistent workstation, server,
+or ordinary plugin installation is not a namespaced test venue during this
+effort. Particular attention is required for:
 
 - Windows payload replacement while a payload-local PowerShell/CMD shim is
   running;
@@ -278,7 +294,10 @@ becomes mandatory. Particular attention is required for:
 The acceptance test is two marketplace cells with the same plugin names running
 simultaneously through install, first use, service start, project adoption,
 update, rollback, repair, and uninstall without observing or modifying one
-another.
+another. Negative acceptance also proves that payload-only plugins and unrelated
+plugin families never enter this resolver or gain cell-owned runtime, state,
+command, service, or lifecycle artifacts, even when installed from a
+marketplace that also carries a core suite plugin.
 
 ## Report-only inventory guard
 

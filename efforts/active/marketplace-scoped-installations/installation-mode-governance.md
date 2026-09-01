@@ -13,6 +13,15 @@ The exact policy, activation, tombstone, resolver, status-precedence, and
 effective-mode contracts are normative only in
 [`docs/install-contract.md`](../../../docs/install-contract.md#installation-mode-governance).
 
+During this effort, namespaced installation and usage are clean-room-only.
+Persistent development and production machines remain in legacy mode with no
+namespaced activation, runtime, state, service, or migration. Read-only
+status/doctor inspection is permitted. The policy applies only to
+runtime-bearing core plugin identities from the `copilot-extensions` suite.
+Independent marketplaces may carry those identities for source-isolation proof;
+payload-only plugins and unrelated plugins remain out of scope, including
+plugins that expose tools or services.
+
 ## Decision and rationale
 
 Legacy, non-namespaced operation remains the implicit default. A user can opt
@@ -97,10 +106,12 @@ iteration boundary. Refusing lease renewal lets active work drain. A remote
 dispatcher that cannot determine target maintenance state treats the target as
 quiesced and does not provision.
 
-This permits an active machine to be taken out of rotation, reached over SSH,
-updated surgically, validated, and returned to service without a concurrent
-bootstrap restoring the old runtime. Windows and WSL must each be quiesced
-explicitly because their policy and maintenance homes are independent.
+The contract permits a future active machine to be taken out of rotation,
+reached remotely, updated surgically, validated, and returned to service without
+a concurrent bootstrap restoring the old runtime. That path is implemented and
+validated only in disposable clean rooms during this effort; it is not exercised
+on persistent machines. Windows and WSL remain separate environments because
+their policy and maintenance homes are independent.
 
 ## Normative rollout gates
 
@@ -141,6 +152,11 @@ pinned actual root rather than being stranded.
 
 ## Rollout
 
+Every rollout step that creates or operates a namespaced cell runs in a
+disposable clean room. Persistent machines remain legacy-only throughout the
+effort, and no rollout step enrolls plugins outside the runtime-bearing
+`copilot-extensions` core identity set.
+
 1. Land this specification and the normative install-contract additions with no
    operative callers.
 2. Add shared fixtures for policy precedence, unknown-field preservation,
@@ -178,6 +194,11 @@ No rollout step changes the absent-file default.
 - Windows and WSL receipts never validate each other.
 - Two marketplaces carrying the same plugin can be migrated, run, rolled back,
   repaired, and cleaned independently.
+- Persistent machines remain legacy-only and locally unused for namespaced
+  operation throughout the effort.
+- Payload-only plugins and unrelated plugin families never resolve or own an
+  installation cell, regardless of their source marketplace or whether they
+  expose tools or services.
 
 ## Open implementation choices
 
