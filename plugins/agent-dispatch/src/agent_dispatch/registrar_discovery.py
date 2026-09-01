@@ -27,7 +27,7 @@ import os
 import stat
 import tempfile
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
@@ -261,8 +261,28 @@ def _decode(text: str, suffix: str, *, where: str) -> Mapping:
     return data
 
 
-def read_declaration_file(path: str | Path) -> ProfileDeclaration:
-    """Read + validate one declaration document (``.yaml`` / ``.yml`` / ``.json``)."""
+def _resolve_declaration_paths(
+    declaration: ProfileDeclaration, directory: Path
+) -> ProfileDeclaration:
+    if declaration.kind != "emitter":
+        return declaration
+    spec = dict(declaration.spec)
+    cwd = spec.get("cwd")
+    is_absolute = (
+        Path(cwd).is_absolute()
+        or PurePosixPath(cwd).is_absolute()
+        or PureWindowsPath(cwd).is_absolute()
+    ) if isinstance(cwd, str) else False
+    if not isinstance(cwd, str) or not cwd or is_absolute:
+        return declaration
+    spec["cwd"] = str((directory / cwd).resolve())
+    return replace(declaration, spec=spec)
+
+
+def read_declaration_file_set(
+    path: str | Path,
+) -> tuple[ProfileDeclaration, ...]:
+    """Read one document and expand it into one or more runtime declarations."""
     p = Path(path).expanduser()
     if p.suffix not in _DECL_SUFFIXES:
         raise RegistrarError(
@@ -278,18 +298,27 @@ def read_declaration_file(path: str | Path) -> ProfileDeclaration:
             f"{p}: declaration could not be read: {exc}"
         ) from exc
     data = dict(_decode(text, p.suffix, where=str(p)))
-    if data.get("kind") == "emitter" and isinstance(data.get("spec"), Mapping):
-        spec = dict(data["spec"])
-        cwd = spec.get("cwd")
-        is_absolute = (
-            Path(cwd).is_absolute()
-            or PurePosixPath(cwd).is_absolute()
-            or PureWindowsPath(cwd).is_absolute()
-        ) if isinstance(cwd, str) else False
-        if isinstance(cwd, str) and cwd and not is_absolute:
-            spec["cwd"] = str((p.parent / cwd).resolve())
-            data["spec"] = spec
-    return load_declaration(data)
+    if data.get("kind") == "reviewer-loop":
+        from .reviewer_loops import expand_reviewer_loop
+
+        declarations = expand_reviewer_loop(data)
+    else:
+        declarations = (load_declaration(data),)
+    return tuple(
+        _resolve_declaration_paths(declaration, p.parent)
+        for declaration in declarations
+    )
+
+
+def read_declaration_file(path: str | Path) -> ProfileDeclaration:
+    """Read a document that represents exactly one runtime declaration."""
+    declarations = read_declaration_file_set(path)
+    if len(declarations) != 1:
+        raise RegistrarError(
+            f"{path}: expands to {len(declarations)} declarations; "
+            "read it through registrar discovery"
+        )
+    return declarations[0]
 
 
 def _iter_declaration_files(location: Path) -> list[Path]:
@@ -348,8 +377,8 @@ def read_location(location: str | Path, *, owner: str | None = None) -> list[Pro
     loc = Path(location).expanduser()
     out: list[ProfileDeclaration] = []
     for f in _iter_declaration_files(loc):
-        decl = read_declaration_file(f)
-        out.append(decl.with_owner(owner) if owner else decl)
+        for decl in read_declaration_file_set(f):
+            out.append(decl.with_owner(owner) if owner else decl)
     return out
 
 
