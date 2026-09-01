@@ -327,6 +327,10 @@ class ClaimConflict(RuntimeError):
         )
 
 
+class CoordinationRejected(RuntimeError):
+    """The owning worktree cannot create durable coordination state."""
+
+
 def _claim_owner(lease: Lease) -> str:
     """The owning identity of a hold: the worktree for a claim, else the effort."""
     return lease.worktree or lease.effort
@@ -481,6 +485,7 @@ def claim(
     active: set[str] | None = None,
     holder_ref: str | None = None,
     coordinate: bool = True,
+    preflight_result=None,
 ) -> Lease:
     """Acquire an **exclusive** claim on ``codespace`` for worktree ``owner``.
 
@@ -519,9 +524,16 @@ def claim(
         if same_owner and prior_token:
             res = coordination.renew(codespace, prior_token)
         else:
+            readiness = preflight_result or coordination.preflight(holder_ref)
+            if readiness.rejected:
+                raise CoordinationRejected(
+                    f"{readiness.code}: {readiness.detail}"
+                )
             res = coordination.acquire(codespace, holder_ref)
         if res.ok:
             lease_token = res.token
+        elif res.rejected:
+            raise CoordinationRejected(res.detail)
         elif res.conflict:
             # A conflict whose holder is THIS SAME worktree is re-entry, not a
             # real conflict -- the "holder" is the caller's own prior lease
