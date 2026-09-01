@@ -1,8 +1,9 @@
 {
-  "name": "copilot-extensions-review-source",
-  "kind": "emitter",
-  "spec": {
-    "id": "copilot-extensions-review-source",
+  "name": "copilot-extensions-review",
+  "kind": "reviewer-loop",
+  "repo": "github.com/ThomasMichon/copilot-extensions",
+  "task_label": "self-hosted-review",
+  "emitter": {
     "command": [
       "{python}",
       "plugins/copilot-extensions-harness/scripts/reviewer_source.py",
@@ -14,7 +15,6 @@
     "timeout_seconds": 120,
     "cwd": "../..",
     "task_output": "json",
-    "evaluator_ref": "copilot-extensions-review-lifecycle",
     "side_load": {
       "command": [
         "{python}",
@@ -25,5 +25,24 @@
         ".agent-dispatch/reviewer-loop.json"
       ]
     }
-  }
+  },
+  "evaluator": {
+    "labels": [
+      "internal:evaluator-only"
+    ],
+    "evaluator_spec": {
+      "rules": []
+    },
+    "interval": 30
+  },
+  "pool": {
+    "max_active_processes": 4,
+    "interval": 30,
+    "max_attempts": 3,
+    "body": {
+      "type": "headless",
+      "agent": "cloud1"
+    }
+  },
+  "description": "Self-hosted external pull-request reviewer loop"
 }

@@ -125,24 +125,24 @@ The missing capability is composition, not another bespoke reviewer.
 
 ### Phase 3 — Prove the raw composition on copilot-extensions
 
-- [ ] Define a repository-owned reviewer agent, acting identity, and guidance
+- [x] Define a repository-owned reviewer agent, acting identity, and guidance
       contract for
       copilot-extensions without replacing or depending on GitHub's baseline
       Copilot review.
-- [ ] Compose the existing low-level emitter/evaluator/supervised-lane
+- [x] Compose the existing low-level emitter/evaluator/supervised-lane
       primitives directly into a bounded reviewer loop for external pull
       requests.
-- [ ] Add discovery watermark, retry/backoff, and author/fork/ACL policy so an
+- [x] Add discovery watermark, retry/backoff, and author/fork/ACL policy so an
       outage or restart cannot emit every already-reviewed open change again.
-- [ ] Side-load one pull request through the same emitter path and prove one
+- [x] Side-load one pull request through the same emitter path and prove one
       evaluator-bound durable task, one worker, one recorded result, and the
       configured landing behavior.
-- [ ] Prove author/fork policy excludes an ineligible change before task
+- [x] Prove author/fork policy excludes an ineligible change before task
       creation and no untrusted branch code executes by default.
 
 ### Phase 4 — Extract the turn-key declaration and control surface
 
-- [ ] Extract the proven composition into one reviewer-loop declaration
+- [x] Extract the proven composition into one reviewer-loop declaration
       schema/helper that expands to the existing emitter/evaluator/pool
       primitives.
 - [ ] Add setup/inspect/status/doctor/enable/disable/side-load operations that
@@ -265,3 +265,31 @@ declarative expansion follows only after that composition is proven.
 - The final rebased suite passed 1,440 tests locally; the updated PR's
   agent-dispatch CI passed, and the Copilot review finding about a
   shape-inconsistent lease-denied emitter result was fixed before merge.
+
+### 2026-08-31 — Raw self-host and declaration extraction
+
+- Merged [PR 1461](https://github.com/ThomasMichon/copilot-extensions/pull/1461)
+  with the repository-owned reviewer agent, acting identity, API-only
+  untrusted-change policy, paginated discovery, watermark, emitter, evaluator,
+  and bounded pool. Follow-up
+  [PR 1464](https://github.com/ThomasMichon/copilot-extensions/pull/1464),
+  [PR 1466](https://github.com/ThomasMichon/copilot-extensions/pull/1466), and
+  [PR 1469](https://github.com/ThomasMichon/copilot-extensions/pull/1469)
+  corrected the execution-agent binding, startup capacity, and task-lane
+  identity.
+- The raw loop side-loaded an eligible external pull request, created one
+  evaluator-bound durable task, embodied one worker, and posted one
+  AI-acknowledged changes-requested review without checking out or executing
+  contributor code. An association-excluded pull request produced no task.
+- Merged [PR 1502](https://github.com/ThomasMichon/copilot-extensions/pull/1502)
+  as `agent-dispatch` `0.1.0-dev247`. Pool caps now count only matching
+  live/launching processes; card suspension ends headless bodies into durable
+  cold reservations, and steer/resume re-embodies a task only after the prior
+  body is confirmed stopped.
+- Added the first turn-key extraction: one repository-owned
+  `kind: reviewer-loop` declaration deterministically expands in memory to the
+  existing emitter, evaluator, and capped worker-pool declarations. Child
+  identity and evaluator association derive only from the stable loop name,
+  while mutable commands and capacity settings reconcile in place. The
+  self-hosted repository now consumes this declaration instead of three
+  hand-composed registrar files.

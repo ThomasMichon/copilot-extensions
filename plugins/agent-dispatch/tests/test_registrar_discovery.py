@@ -16,6 +16,7 @@ from agent_dispatch.registrar_discovery import (
     discover_with_legacy,
     load_pointers,
     read_declaration_file,
+    read_declaration_file_set,
     read_legacy_env_profiles,
     read_location,
     remove_pointer,
@@ -152,6 +153,98 @@ def test_relative_emitter_cwd_resolves_from_declaration_directory(tmp_path):
     )
     decl = read_declaration_file(path)
     assert decl.spec["cwd"] == str(root.resolve())
+
+
+def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
+    root = tmp_path / "repo"
+    registrar = root / ".agent-dispatch" / "registrar"
+    registrar.mkdir(parents=True)
+    path = registrar / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {
+                    "command": ["python", "tools/reviews.py", "discover"],
+                    "interval_seconds": 60,
+                    "cwd": "../..",
+                    "task_output": "json",
+                    "side_load": {
+                        "command": [
+                            "python",
+                            "tools/reviews.py",
+                            "side-load",
+                            "{change_ref}",
+                        ]
+                    },
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}, "interval": 30},
+                "pool": {
+                    "max_active_processes": 2,
+                    "body": {"type": "headless", "agent": "reviewer"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    assert [declaration.name for declaration in declarations] == [
+        "example-review-source",
+        "example-review-evaluator",
+        "example-review-workers",
+    ]
+    source, evaluator, workers = declarations
+    assert source.spec["id"] == "example-review-source"
+    assert source.spec["evaluator_ref"] == "example-review-lifecycle"
+    assert source.spec["cwd"] == str(root.resolve())
+    assert evaluator.spec["repo"] == "github.com/example/project"
+    assert evaluator.spec["evaluator_ref"] == "example-review-lifecycle"
+    assert workers.repos == "github.com/example/project"
+    assert workers.labels == ("external-review",)
+    assert workers.concurrency == 2
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("emitter", "id", "different"),
+        ("evaluator", "repo", "github.com/other/project"),
+        ("pool", "owner", "other-owner"),
+        ("pool", "description", "shadowed description"),
+    ],
+)
+def test_reviewer_loop_rejects_overrides_of_derived_identity(
+    tmp_path, section, field, value
+):
+    emitter = {
+        "command": ["reviews"],
+        "interval_seconds": 60,
+    }
+    evaluator = {"evaluator_spec": {"rules": []}}
+    pool = {"max_active_processes": 1}
+    {"emitter": emitter, "evaluator": evaluator, "pool": pool}[section][field] = value
+    path = tmp_path / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": emitter,
+                "evaluator": evaluator,
+                "pool": pool,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RegistrarError, match="derived from the loop"):
+        read_declaration_file_set(path)
 
 
 @pytest.mark.parametrize("cwd", ["/srv/repo", "C:\\src\\repo"])
