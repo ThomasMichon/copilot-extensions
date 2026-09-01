@@ -11937,11 +11937,15 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Adoption owns repository-local machine wiring. Seed source overrides after
     # the repo registry entry exists, so exact-name marketplace checkouts can be
     # resolved without guessing from the source root.
+    try:
+        registration_fast_forward = cfg.load_config(config_path).auto_fast_forward
+    except Exception:
+        registration_fast_forward = False
     _reconcile_marketplaces_for_checkout(
         repo_dir,
         ensure_ignored=True,
         refresh_repositories=True,
-        fast_forward_repositories=True,
+        fast_forward_repositories=registration_fast_forward,
     )
 
     # Refresh Windows Terminal profiles if installed via install.ps1
@@ -15157,11 +15161,27 @@ def cmd_reconcile_marketplaces(args: argparse.Namespace) -> int:
         from . import marketplace_overrides
 
         try:
+            fast_forward_repositories = False
+            if not args.session_start:
+                try:
+                    project = _reverse_lookup_project(repo)
+                    config_path = (
+                        cfg.project_dir(project) / "config.yaml"
+                        if project
+                        else None
+                    )
+                    fast_forward_repositories = (
+                        cfg.load_config(config_path).auto_fast_forward
+                        if config_path
+                        else True
+                    )
+                except Exception:
+                    fast_forward_repositories = True
             summary = marketplace_overrides.reconcile(
                 repo,
                 ensure_ignored=args.ensure_ignored,
                 refresh_repositories=not args.session_start,
-                fast_forward_repositories=not args.session_start,
+                fast_forward_repositories=fast_forward_repositories,
             )
         except marketplace_overrides.MarketplaceOverrideError as exc:
             if args.session_start:

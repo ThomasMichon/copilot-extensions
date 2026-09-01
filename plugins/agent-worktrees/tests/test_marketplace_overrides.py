@@ -422,6 +422,49 @@ def test_session_start_emits_restart_only_when_changed(
     ]
 
 
+def test_manual_reconcile_honors_project_fast_forward_opt_out(
+    tmp_path: Path, monkeypatch, capsys
+):
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    monkeypatch.setattr(main, "_checkout_root", lambda _path: repo)
+    monkeypatch.setattr(main, "_reverse_lookup_project", lambda _repo: "consumer")
+    monkeypatch.setattr(main.cfg, "project_dir", lambda _name: tmp_path / ".consumer")
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda _path=None: SimpleNamespace(auto_fast_forward=False),
+    )
+    calls = []
+
+    def reconcile(_repo, **kwargs):
+        calls.append(kwargs)
+        return {
+            "action": "reconciled",
+            "changed": False,
+            "settings_local": str(repo / "settings.local.json"),
+        }
+
+    monkeypatch.setattr(mo, "reconcile", reconcile)
+    args = SimpleNamespace(
+        cwd=str(repo),
+        stdin=False,
+        session_start=False,
+        ensure_ignored=False,
+        json=False,
+    )
+
+    assert main.cmd_reconcile_marketplaces(args) == 0
+    assert "Verified marketplace overrides" in capsys.readouterr().out
+    assert calls == [
+        {
+            "ensure_ignored": False,
+            "refresh_repositories": True,
+            "fast_forward_repositories": False,
+        }
+    ]
+
+
 def test_checkout_root_decodes_filesystem_bytes(tmp_path: Path, monkeypatch):
     repo = tmp_path / "consumer-\u00e9"
     repo.mkdir()
