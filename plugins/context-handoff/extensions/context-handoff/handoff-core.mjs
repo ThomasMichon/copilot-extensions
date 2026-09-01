@@ -164,6 +164,197 @@ export function resolveHandoffCwd(
   }
 }
 
+function herdrAgentIdentity(
+  paneId,
+  {
+    execute = runCli,
+    home = homedir(),
+  } = {},
+) {
+  try {
+    const output = execute(
+      join(home, ".local", "bin", "herdr"),
+      ["agent", "get", paneId],
+      { timeout: 5000 },
+    );
+    const agent = JSON.parse(output)?.result?.agent;
+    const reportedSessionId = agent?.agent_session?.value || null;
+    if (
+      agent?.agent !== "copilot"
+      || agent?.pane_id !== paneId
+      || typeof agent?.name !== "string"
+      || !agent.name
+      || typeof agent?.terminal_id !== "string"
+      || !agent.terminal_id
+    ) {
+      return {
+        identity: null,
+        error: `Herdr pane ${paneId} does not report a Copilot session identity.`,
+      };
+    }
+    return {
+      identity: {
+        paneId,
+        sessionId: reportedSessionId,
+        agentName: agent.name,
+        terminalId: agent.terminal_id,
+      },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      identity: null,
+      error:
+        commandErrorDetail(error)
+        || `Unable to resolve Copilot identity for Herdr pane ${paneId}.`,
+    };
+  }
+}
+
+export function resolveHerdrPredecessorIdentity(
+  expectedSessionId,
+  {
+    execute = runCli,
+    env = process.env,
+    home = homedir(),
+  } = {},
+) {
+  if (!isHerdrPane(env)) {
+    return { predecessor: null, error: null };
+  }
+  const paneId = env.HERDR_PANE_ID;
+  const found = herdrAgentIdentity(paneId, { execute, home });
+  if (!found.identity) return { predecessor: null, error: found.error };
+  if (
+    found.identity.sessionId
+    && found.identity.sessionId !== expectedSessionId
+  ) {
+    return {
+      predecessor: null,
+      error:
+        `Herdr pane ${paneId} belongs to Copilot session ` +
+        `${found.identity.sessionId}, not ${expectedSessionId}.`,
+    };
+  }
+  return {
+    predecessor: {
+      transport: "herdr",
+      paneId,
+      sessionId: expectedSessionId,
+      agentName: found.identity.agentName,
+      terminalId: found.identity.terminalId,
+    },
+    error: null,
+  };
+}
+
+export function retireHerdrPredecessorAfterConsume(
+  {
+    consumed,
+    metadata,
+    successorSessionId,
+  },
+  {
+    execute = runCli,
+    env = process.env,
+    home = homedir(),
+    launcherPath = join(home, ".local", "bin", "copilot-pane"),
+  } = {},
+) {
+  const predecessor = metadata?.predecessor;
+  if (!consumed) {
+    return {
+      handled: predecessor?.transport === "herdr",
+      retired: false,
+      gone: false,
+      method: "herdr-copilot-pane-stop",
+      status: "consume-failed",
+    };
+  }
+  if (predecessor?.transport !== "herdr") {
+    return { handled: false, retired: false, gone: false, status: "not-herdr" };
+  }
+  if (!isHerdrPane(env)) {
+    return {
+      handled: true,
+      retired: false,
+      gone: false,
+      method: "herdr-copilot-pane-stop",
+      status: "successor-host-mismatch",
+    };
+  }
+  const currentPane = env.HERDR_PANE_ID;
+  if (predecessor.paneId === currentPane) {
+    return {
+      handled: true,
+      retired: false,
+      gone: false,
+      method: "herdr-copilot-pane-stop",
+      status: "current-pane",
+    };
+  }
+  const successor = herdrAgentIdentity(currentPane, { execute, home });
+  if (
+    !successor.identity
+    || (
+      successor.identity.sessionId
+      && successor.identity.sessionId !== successorSessionId
+    )
+  ) {
+    return {
+      handled: true,
+      retired: false,
+      gone: false,
+      method: "herdr-copilot-pane-stop",
+      status: "successor-session-mismatch",
+      error: successor.error,
+    };
+  }
+  const target = herdrAgentIdentity(predecessor.paneId, { execute, home });
+  if (
+    !target.identity
+    || target.identity.agentName !== predecessor.agentName
+    || target.identity.terminalId !== predecessor.terminalId
+    || (
+      target.identity.sessionId
+      && target.identity.sessionId !== predecessor.sessionId
+    )
+  ) {
+    return {
+      handled: true,
+      retired: false,
+      gone: false,
+      method: "herdr-copilot-pane-stop",
+      status: "predecessor-session-mismatch",
+      error: target.error,
+    };
+  }
+  try {
+    execute(
+      launcherPath,
+      ["stop", "--pane", predecessor.paneId],
+      { timeout: 30_000 },
+    );
+    return {
+      handled: true,
+      retired: true,
+      gone: true,
+      method: "herdr-copilot-pane-stop",
+      status: "stopped",
+      pane: predecessor.paneId,
+    };
+  } catch (error) {
+    return {
+      handled: true,
+      retired: false,
+      gone: false,
+      method: "herdr-copilot-pane-stop",
+      status: "stop-failed",
+      error: commandErrorDetail(error),
+    };
+  }
+}
+
 export function currentPaneId(env = process.env) {
   if (isHerdrPane(env)) return null;
   return env.TMUX_PANE || env.PSMUX_PANE || null;
@@ -203,7 +394,9 @@ export function worktreeInfo(
   return { wtDir, worktree, stateDir };
 }
 
-export function makeHandoffMetadata({ sid, cwd, title, storage, taskId = null }) {
+export function makeHandoffMetadata({
+  sid, cwd, title, storage, taskId = null, predecessor = null,
+}) {
   const { wtDir, worktree, stateDir } = worktreeInfo(cwd, sid);
   const id = `handoff-${safePathSegment(sid)}`;
   return {
@@ -219,6 +412,7 @@ export function makeHandoffMetadata({ sid, cwd, title, storage, taskId = null })
     worktreeDir: wtDir,
     oldPane: currentPaneId(),
     muxSession: currentMuxSession(),
+    predecessor,
     stateDir,
     createdAt: new Date().toISOString(),
   };
@@ -269,7 +463,15 @@ export function writeJsonAtomic(path, value) {
 
 // --- file-backed store ----------------------------------------------------
 export function saveFileHandoff(promptText, sid, cwd, title) {
-  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
+  const identity = resolveHerdrPredecessorIdentity(sid);
+  if (identity.error) return { error: identity.error };
+  const metadata = makeHandoffMetadata({
+    sid,
+    cwd,
+    title,
+    storage: "file",
+    predecessor: identity.predecessor,
+  });
   const dir = handoffDirFor(cwd, sid);
   if (!dir) {
     const resolution = agentWorktreesGetResult(
@@ -542,9 +744,9 @@ export function noteHandoffInRecord(cwd, sid, ref, title) {
 // --- live-cutover trigger -------------------------------------------------
 // Herdr is selected only when the current session carries Herdr's pane identity.
 // It owns pane mechanics only: context-handoff keeps the durable baton, launches
-// one seeded sibling through the installed copilot-pane helper, and deliberately
-// retains the predecessor as the recovery point. Other sessions keep the
-// existing agent-worktrees mux choreography.
+// one seeded sibling through the installed copilot-pane helper. The successor
+// retires the identity-bound predecessor only after consuming the baton. Other
+// sessions keep the existing agent-worktrees mux choreography.
 export function parseHerdrLaunchOutput(output) {
   const values = {};
   for (const line of String(output || "").split(/\r?\n/)) {
@@ -622,7 +824,7 @@ export function runHerdrHandoffCutover(
       old_pane: env.HERDR_PANE_ID,
       new_pane: launched.pane,
       new_session: launched.sessionId,
-      predecessor_retained: true,
+      predecessor_retirement: "after-consume",
     };
   } catch (error) {
     const detail = commandErrorDetail(error);

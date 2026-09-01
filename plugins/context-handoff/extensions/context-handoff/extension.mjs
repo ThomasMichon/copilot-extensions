@@ -56,6 +56,8 @@ import {
   herdrHandoffDir,
   isHerdrPane,
   resolveHandoffCwd,
+  resolveHerdrPredecessorIdentity,
+  retireHerdrPredecessorAfterConsume,
   runHandoffCutover,
 } from "./handoff-core.mjs";
 
@@ -302,7 +304,9 @@ function worktreeInfo(cwd, sid) {
   return { wtDir, worktree, stateDir };
 }
 
-function makeHandoffMetadata({ sid, cwd, title, storage, taskId = null }) {
+function makeHandoffMetadata({
+  sid, cwd, title, storage, taskId = null, predecessor = null,
+}) {
   const { wtDir, worktree, stateDir } = worktreeInfo(cwd, sid);
   const id = `handoff-${safePathSegment(sid)}`;
   return {
@@ -318,6 +322,7 @@ function makeHandoffMetadata({ sid, cwd, title, storage, taskId = null }) {
     worktreeDir: wtDir,
     oldPane: currentPaneId(),
     muxSession: currentMuxSession(),
+    predecessor,
     stateDir,
     createdAt: new Date().toISOString(),
   };
@@ -365,7 +370,15 @@ function writeJsonAtomic(path, value) {
 }
 
 function saveFileHandoff(promptText, sid, cwd, title) {
-  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
+  const identity = resolveHerdrPredecessorIdentity(sid);
+  if (identity.error) return { error: identity.error };
+  const metadata = makeHandoffMetadata({
+    sid,
+    cwd,
+    title,
+    storage: "file",
+    predecessor: identity.predecessor,
+  });
   const dir = handoffDirFor(cwd, sid);
   if (!dir) {
     const resolution = agentWorktreesGetResult(
@@ -627,6 +640,15 @@ function retireAfterConsume(cwd, metadata, sid, handoffToken) {
     retireResult: null,
     concluded: false,
   };
+  if (metadata?.predecessor?.transport === "herdr") {
+    result.retireResult = retireHerdrPredecessorAfterConsume({
+      consumed: true,
+      metadata,
+      successorSessionId: sid,
+    });
+    result.retired = Boolean(result.retireResult?.retired);
+    return result;
+  }
   if (isHerdrPane()) return result;
   result.concluded = bindConsumedHandoff(cwd, handoffToken, metadata, sid);
   if (!result.concluded && metadata?.sessionId) {
@@ -889,6 +911,7 @@ function formatConsumeResult(result, { deferComplete = false } = {}) {
     retireResult
       ? `**Predecessor retire:** ${retireResult.method || "unknown"} ` +
         `(pane gone: ${Boolean(retireResult.gone)}` +
+        (retireResult.status ? `; status ${retireResult.status}` : "") +
         (retireResult.copilot
           ? `; old Copilot: reaped ${retireResult.copilot.reaped || 0}, ` +
             `survivors ${retireResult.copilot.survivors || 0}`
@@ -1331,9 +1354,8 @@ const session = await joinSession({
         "Consume a stored context handoff exactly once. For agent-dispatch " +
         "handoffs, pass task_id; for file-backed handoffs, pass handoff_id " +
         "(or path). The tool loads the handoff, marks file-backed handoffs " +
-        "consumed so they do not replay, and retires a recorded mux predecessor " +
-        "after the successor is alive. A Herdr predecessor remains the recovery " +
-        "pane.",
+        "consumed so they do not replay, and retires the identity-matched " +
+        "recorded predecessor only after successful consumption.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -1399,8 +1421,9 @@ const session = await joinSession({
         "save_handoff_prompt (the explicit 'kick the flow' step of a live " +
         "handoff): pass `seed` = the exact HANDOFF_SEED string save_handoff_prompt " +
         "returned. In an active Herdr pane it calls the installed copilot-pane " +
-        "launcher with a task file to create one seeded sibling and keeps this " +
-        "predecessor as the recovery point. Otherwise it uses the existing " +
+        "launcher with a task file to create one seeded sibling; the successor " +
+        "stops the identity-matched predecessor after consuming the baton. " +
+        "Otherwise it uses the existing " +
         "worktree mux cutover, where successor pickup retires the predecessor. " +
         "If launch fails, it does nothing destructive and the handoff remains " +
         "safely stored.",
@@ -1485,9 +1508,9 @@ const session = await joinSession({
             `Live cutover initiated through Herdr. A successor Copilot was ` +
             `created in sibling pane ${result.new_pane || "?"} and its first ` +
             `prompt was submitted to consume the saved handoff. The predecessor ` +
-            `pane remains available as the recovery point; Herdr retirement is ` +
-            `not inferred or attempted. Do NOT start new work here; simply end ` +
-            `your turn.`
+            `pane remains the recovery point until that successful consumption, ` +
+            `then the successor stops its exact recorded pane. Do NOT start new ` +
+            `work here; simply end your turn.`
           );
         }
         return (
@@ -1627,8 +1650,9 @@ const session = await joinSession({
             `Cutover re-attempted through Herdr from the saved handoff (${src}). ` +
             `A fresh successor Copilot was created in sibling pane ` +
             `${result.new_pane || "?"} and its first prompt was submitted. This ` +
-            `predecessor remains the recovery point; no Herdr pane retirement is ` +
-            `attempted. Do NOT start new work here; end your turn.`
+            `predecessor remains the recovery point until successful consumption, ` +
+            `then the successor stops its exact recorded pane. Do NOT start new ` +
+            `work here; end your turn.`
           );
         }
         return (
@@ -1668,8 +1692,8 @@ const session = await joinSession({
             "seeded successor Copilot through the active Herdr or worktree mux " +
             "host. After continue_handoff returns " +
             "its confirmation, DO NOT start new work -- just end your turn; this " +
-            "session remains as a recovery point. A mux successor retires it only " +
-            "after pickup; a Herdr predecessor is retained.",
+            "session remains as a recovery point until successful pickup, when the " +
+            "successor retires its exact identity-matched predecessor pane.",
           displayPrompt: "Live-cutover handoff (/handoff-continue)",
         });
       },

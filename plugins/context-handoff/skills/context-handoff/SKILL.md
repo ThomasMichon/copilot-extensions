@@ -228,9 +228,10 @@ loads the brief, marks file-backed handoffs spent, records the predecessor as
 handed off, and retires the old pane through
 `agent-worktrees handoff-cutover --retire-pane`. <!-- marketplace-isolation: allow handoff-core-management -->
 
-The safety rule is: **the predecessor never self-retires on idle.** Mux
-retirement remains successor-consume-driven. Herdr has no retirement step in
-this integration, so its predecessor remains the explicit recovery pane.
+The safety rule is: **the predecessor never self-retires on idle.** Retirement
+is successor-consume-driven. In Herdr the successor verifies the baton-recorded
+pane/session identity and stops only that exact predecessor through
+`copilot-pane stop`.
 
 ---
 

@@ -118,7 +118,7 @@ function cmdStore(args, { cutover }) {
     if (args.json) return emit(result, args);
     if (cut.ok) {
       const lifecycle = cut.host === "herdr"
-        ? "the predecessor remains the recovery pane"
+        ? "the successor stops the identity-matched predecessor after consumption"
         : "the successor retires this pane after it consumes the handoff";
       process.stdout.write(
         `Handoff stored (${stored.storage}: ${stored.id}) and live cutover started ` +

@@ -233,7 +233,8 @@ The plugin remains useful in a plain Copilot CLI session with only
   and a retry from the same successor session can recover delivery after the
   durable spent mark; another session still receives the one-time stop notice.
 - `continue_handoff` is best-effort. Herdr launches one sibling through
-  `copilot-pane` and retains the predecessor. A linked worktree otherwise
+  `copilot-pane`; after successful consumption, the successor verifies the
+  recorded predecessor pane/session and stops that exact pane. A linked worktree otherwise
   targets its `wt-<id>` mux; an adopted anchor targets the exact caller-owned
   mux containing the predecessor pane. Without a live pane host it does nothing
   destructive and tells the agent to use the saved paste or `/resume-handoff`

@@ -18,7 +18,8 @@ import {
   safePathSegment, quoteWinArg, agentWorktreesGet, handoffDirFor,
   agentWorktreesGetResult, consumeFileHandoffOnce, writeJsonAtomic,
   currentMuxSession, currentPaneId, herdrHandoffDir, runHandoffCutover,
-  resolveHandoffCwd, worktreeInfo,
+  makeHandoffMetadata, resolveHandoffCwd, resolveHerdrPredecessorIdentity,
+  retireHerdrPredecessorAfterConsume, worktreeInfo,
   HANDOFF_META_PREFIX,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import {
@@ -211,6 +212,211 @@ test("resolveHandoffCwd preserves stdout diagnostics when stderr is empty", () =
   });
 });
 
+test("Herdr predecessor identity is persisted with pane and session", () => {
+  const env = { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2" };
+  const resolved = resolveHerdrPredecessorIdentity("predecessor-session", {
+    env,
+    home: "/home/tester",
+    execute: (bin, args) => {
+      assert.equal(bin, "/home/tester/.local/bin/herdr");
+      assert.deepEqual(args, ["agent", "get", "w1:p2"]);
+      return JSON.stringify({
+        result: {
+          agent: {
+            agent: "copilot",
+            name: "copilot-w1-p2",
+            pane_id: "w1:p2",
+            terminal_id: "term-predecessor",
+            agent_session: { value: "predecessor-session" },
+          },
+        },
+      });
+    },
+  });
+  const metadata = makeHandoffMetadata({
+    sid: "predecessor-session",
+    cwd: "/repo",
+    title: "handoff",
+    storage: "file",
+    predecessor: resolved.predecessor,
+  });
+
+  assert.equal(resolved.error, null);
+  assert.deepEqual(metadata.predecessor, {
+    transport: "herdr",
+    paneId: "w1:p2",
+    sessionId: "predecessor-session",
+    agentName: "copilot-w1-p2",
+    terminalId: "term-predecessor",
+  });
+});
+
+test("failed consumption performs no Herdr stop", () => {
+  let calls = 0;
+  const result = retireHerdrPredecessorAfterConsume({
+    consumed: false,
+    metadata: {
+      predecessor: {
+        transport: "herdr",
+        paneId: "w1:p2",
+        sessionId: "predecessor-session",
+        agentName: "copilot-w1-p2",
+        terminalId: "term-predecessor",
+      },
+    },
+    successorSessionId: "successor-session",
+  }, {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p3" },
+    execute: () => {
+      calls += 1;
+      return "";
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.retired, false);
+  assert.equal(result.status, "consume-failed");
+});
+
+test("successful consumption stops exactly the recorded Herdr pane", () => {
+  const invocations = [];
+  const result = retireHerdrPredecessorAfterConsume({
+    consumed: true,
+    metadata: {
+      predecessor: {
+        transport: "herdr",
+        paneId: "w1:p2",
+        sessionId: "predecessor-session",
+        agentName: "copilot-w1-p2",
+        terminalId: "term-predecessor",
+      },
+    },
+    successorSessionId: "successor-session",
+  }, {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p3" },
+    home: "/home/tester",
+    launcherPath: "/home/tester/.local/bin/copilot-pane",
+    execute: (bin, args, options) => {
+      invocations.push({ bin, args, options });
+      if (bin.endsWith("/herdr")) {
+        const paneId = args.at(-1);
+        return JSON.stringify({
+          result: {
+            agent: {
+              agent: "copilot",
+              name: `copilot-${paneId.replace(":", "-")}`,
+              pane_id: paneId,
+              terminal_id:
+                paneId === "w1:p3"
+                  ? "term-successor"
+                  : "term-predecessor",
+              agent_session: {
+                value:
+                  paneId === "w1:p3"
+                    ? "successor-session"
+                    : "predecessor-session",
+              },
+            },
+          },
+        });
+      }
+      return JSON.stringify({ result: { type: "ok" } });
+    },
+  });
+
+  const stops = invocations.filter(
+    ({ bin }) => bin === "/home/tester/.local/bin/copilot-pane",
+  );
+  assert.equal(stops.length, 1);
+  assert.deepEqual(stops[0], {
+    bin: "/home/tester/.local/bin/copilot-pane",
+    args: ["stop", "--pane", "w1:p2"],
+    options: { timeout: 30_000 },
+  });
+  assert.equal(result.retired, true);
+  assert.equal(result.status, "stopped");
+});
+
+test("Herdr predecessor session mismatch performs no stop", () => {
+  const invocations = [];
+  const result = retireHerdrPredecessorAfterConsume({
+    consumed: true,
+    metadata: {
+      predecessor: {
+        transport: "herdr",
+        paneId: "w1:p2",
+        sessionId: "predecessor-session",
+        agentName: "copilot-w1-p2",
+        terminalId: "term-predecessor",
+      },
+    },
+    successorSessionId: "successor-session",
+  }, {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p3" },
+    home: "/home/tester",
+    launcherPath: "/home/tester/.local/bin/copilot-pane",
+    execute: (bin, args) => {
+      invocations.push({ bin, args });
+      const paneId = args.at(-1);
+      return JSON.stringify({
+        result: {
+          agent: {
+            agent: "copilot",
+            name: `copilot-${paneId.replace(":", "-")}`,
+            pane_id: paneId,
+            terminal_id:
+              paneId === "w1:p3"
+                ? "term-successor"
+                : "term-predecessor",
+            agent_session: {
+              value:
+                paneId === "w1:p3"
+                  ? "successor-session"
+                  : "different-predecessor",
+            },
+          },
+        },
+      });
+    },
+  });
+
+  assert.equal(
+    invocations.some(
+      ({ bin }) => bin === "/home/tester/.local/bin/copilot-pane",
+    ),
+    false,
+  );
+  assert.equal(result.retired, false);
+  assert.equal(result.status, "predecessor-session-mismatch");
+});
+
+test("Herdr retirement never stops the current successor pane", () => {
+  let calls = 0;
+  const result = retireHerdrPredecessorAfterConsume({
+    consumed: true,
+    metadata: {
+      predecessor: {
+        transport: "herdr",
+        paneId: "w1:p3",
+        sessionId: "predecessor-session",
+        agentName: "copilot-w1-p3",
+        terminalId: "term-successor",
+      },
+    },
+    successorSessionId: "successor-session",
+  }, {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p3" },
+    execute: () => {
+      calls += 1;
+      return "";
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.retired, false);
+  assert.equal(result.status, "current-pane");
+});
+
 test("runHandoffCutover routes Herdr through one copilot-pane task file", () => {
   const home = mkdtempSync(join(process.cwd(), ".test-herdr-cutover-"));
   const cwd = join(process.cwd(), "stale-process-cwd");
@@ -266,7 +472,7 @@ test("runHandoffCutover routes Herdr through one copilot-pane task file", () => 
       old_pane: "w1:p2",
       new_pane: "w1:p3",
       new_session: "01234567-89ab-4cde-8fab-0123456789ab",
-      predecessor_retained: true,
+      predecessor_retirement: "after-consume",
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
