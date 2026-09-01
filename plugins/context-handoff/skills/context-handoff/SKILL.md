@@ -111,7 +111,7 @@ the user explicitly requested an archival continuation prompt.
   `.context-handoff/config.yaml`.
   The nudge deliberately **does not prescribe individual tool calls** or a
   "write a file" outcome — it hands you to this skill, which owns the
-  sequencing. When you receive it **under a mux session**, the correct response
+  sequencing. When you receive it **under Herdr or a mux session**, the correct response
   is the **autonomous live cutover** described below (store the handoff, spin up
   the successor Copilot in place, end your turn) — *not* a paste prompt back to
   the operator. The nudge fires once per threshold and resets after compaction.
@@ -127,21 +127,21 @@ A handoff has three parts: the **stored handoff** (the full continuation
 context), an optional **live cutover** that spins up the successor *in place*,
 and a **short paste prompt** for environments where cutover is not available.
 
-**Live cutover is the default under mux.** A mux-backed session stores the
-handoff, spawns a successor in the same `wt-<id>` mux session, and then stops
-working. The predecessor does **not** retire itself on idle. The successor
-retires the predecessor only after it consumes the stored handoff, so a
-successor that never comes up leaves the predecessor and terminal available for
-recovery.
+**Live cutover is the default under Herdr or mux.** A Herdr session invokes the
+installed `copilot-pane launch --task-file` helper exactly once to create a
+seeded sibling and keeps the predecessor as the recovery pane. A mux-backed
+session spawns the successor in the same `wt-<id>` session; the successor
+retires the predecessor only after it consumes the stored handoff. Neither path
+self-retires the predecessor on idle.
 
 ### Storage and cutover matrix
 
-| agent-dispatch coordinator | live mux session | Behavior |
+| Stored baton | Live pane host | Behavior |
 |---|---|---|
-| yes | yes | Store a `proposed`, `handoff`-labeled task pinned to this worktree. `continue_handoff` spawns the successor. The successor calls `consume_handoff` for that task, which runs the consume path and retires the recorded predecessor pane after pickup. |
-| yes | no | Store the same task. Reply with the short paste prompt containing the full `agent-dispatch consume <id>` command. <!-- marketplace-isolation: allow handoff-seed-startup --> |
-| no | yes | Store a one-time JSON handoff file under the machine-local state directory reported by agent-worktrees, outside the repo checkout (`<worktree-id>` for a linked worktree, `@anchor` for an adopted anchor). `continue_handoff` spawns the successor in the worktree mux or the anchor's caller-owned mux. The successor calls `consume_handoff`, which marks the file consumed and retires the recorded predecessor pane. |
-| no | no | Store the same one-time machine-local file. Reply with the short paste prompt telling the next session to call `consume_handoff` with the exact stored path. |
+| machine-local file | Herdr | context-handoff resolves the current pane cwd through Herdr, stores the one-time JSON file in checkout-scoped state under `~/.copilot/context-handoff/`, passes the seed through a short-lived task file to `copilot-pane`, creates one sibling, and keeps the predecessor. agent-worktrees is not probed or required. |
+| agent-dispatch task | mux | When a coordinator and worktree are reachable outside Herdr, `continue_handoff` uses the existing worktree cutover. The successor consumes the task and retires the recorded mux predecessor after pickup. |
+| machine-local file | mux | If no task can be created, `continue_handoff` uses the existing worktree cutover with the file baton. The successor consumes it and retires the recorded mux predecessor after pickup. |
+| task or file | none | Reply with the short paste prompt telling the next session how to consume the exact stored baton. |
 
 ### Steps (default = live cutover)
 
@@ -167,9 +167,9 @@ recovery.
 5. **Call `save_handoff_prompt`** with that markdown as **`prompt_text`** (plus
    an optional short `title`). It stores the handoff and returns both the paste
    prompt and a `HANDOFF_SEED:` line.
-6. **If under mux, call `continue_handoff`** with `seed` exactly equal to the
-   `HANDOFF_SEED` string. Then end your turn. Do not start new work in the
-   predecessor.
+6. **If under Herdr or mux, call `continue_handoff`** with `seed` exactly equal
+   to the `HANDOFF_SEED` string. Then end your turn. Do not start new work in
+   the predecessor.
 7. **If cutover cannot run**, reply with only the short paste prompt returned by
    `save_handoff_prompt`.
 
@@ -204,8 +204,8 @@ node "$CH" save --title "<topic>" --prompt-file <handoff.md>
 # Consume a file-backed handoff:            node "$CH" consume --handoff-id <id>
 ```
 
-It reuses the SDK-free `handoff-core.mjs` (same store format +
-`agent-worktrees handoff-cutover` trigger <!-- marketplace-isolation: allow handoff-core-management -->
+It reuses the SDK-free `handoff-core.mjs` (same store format + Herdr-first,
+mux-preserving cutover trigger <!-- marketplace-isolation: allow handoff-core-management -->
 and the issue-#853 bash-first seed), so a handoff it stores is
 byte-compatible with `consume_handoff` / `/resume-handoff`. Session id defaults
 to `$COPILOT_AGENT_SESSION_ID`; pass `--session-id` / `--cwd` when running from
@@ -213,23 +213,25 @@ outside the worktree. `--no-task` forces the file store.
 
 If even `node` is unavailable, compose the handoff manually and follow the same
 storage rules: a task when a coordinator and worktree are resolvable, otherwise a
-one-time file under the worktree state directory outside the checkout. Do not
-write handoffs into the repo.
+one-time machine-local file outside the checkout. Do not write handoffs into the
+repo.
 
 ---
 
 ## Live-Cutover Handoff — the primary path (hand off *and continue* in place)
 
-`save_handoff_prompt` stores the baton. `continue_handoff` only performs the mux
-choreography: it opens a successor pane and seeds it. The stored baton includes
-the predecessor pane id and session id. The successor's first action is to call
-`consume_handoff`; that consume step loads the brief, marks file-backed handoffs
-spent, records the predecessor as handed off, and retires the old pane through
+`save_handoff_prompt` stores the baton. `continue_handoff` selects the current
+pane host. Under Herdr it writes the seed to a short-lived task file, invokes
+`~/.local/bin/copilot-pane launch --task-file`, and leaves the predecessor pane
+available. Under mux it opens a successor window; the successor's first action
+loads the brief, marks file-backed handoffs spent, records the predecessor as
+handed off, and retires the old pane through
 `agent-worktrees handoff-cutover --retire-pane`. <!-- marketplace-isolation: allow handoff-core-management -->
 
-This successor-consume-driven retire is the safety rule: **the predecessor never
-self-retires on idle.** If the successor hangs before consuming, no retire is
-attempted and the operator can switch back to the predecessor.
+The safety rule is: **the predecessor never self-retires on idle.** Retirement
+is successor-consume-driven. In Herdr the successor verifies the baton-recorded
+pane/session identity and stops only that exact predecessor through
+`copilot-pane stop`.
 
 ---
 
@@ -243,18 +245,20 @@ previous session produced:
    `/resume-handoff` can also
    find and consume this worktree's newest proposed handoff task and inject the
    continuation prompt.
-2. **File form** (no coordinator). The paste prompt tells the next session to
+2. **File form** (no pinned task). The paste prompt tells the next session to
    call the extension's `consume_handoff` tool with the handoff id. The tool
-   reads the worktree-state JSON file, marks it consumed, and injects the stored
+   reads the machine-local JSON file, marks it consumed, and injects the stored
    continuation. Re-running it on a consumed file returns a stop notice instead
-   of replaying the brief.
+   of replaying the brief. In Herdr this file lives in checkout-scoped
+   context-handoff state and does not require agent-worktrees.
 
 ### Natural-language resume requests: sweep this worktree's state first
 
 When the user says "resume from handoff", "pick up from last session", or
 similar **without pasting an exact handoff id/prompt**, do not begin with a
-global agent-dispatch query or cross-session search. The current worktree's
-the agent-worktrees state is the authoritative first stop:
+global agent-dispatch query or cross-session search. Let `/resume-handoff`
+resolve the current checkout's machine-local file first. Outside Herdr, the
+agent-worktrees state remains the authoritative first stop:
 
 1. Resolve the local state directory with
    `<agent-worktrees catalog argv[0]> get worktree-state-dir`. If the session resumed with a CWD
@@ -291,7 +295,7 @@ When the operator runs `/resume-handoff` in the target worktree, the extension:
 
 1. Prefers this worktree's newest `proposed`, `handoff`-labeled agent-dispatch
    task and consumes it.
-2. Otherwise finds the newest unconsumed worktree-state handoff file and consumes
+2. Otherwise finds the newest unconsumed checkout-scoped handoff file and consumes
    it with the same one-time semantics as `consume_handoff`.
 3. Injects the continuation prompt into the foreground session, or logs that no
    pending handoff was found.
@@ -318,7 +322,7 @@ most recent session for this repo/worktree and summarize what was worked on.
 
 Compose the appropriate shape and pass it to `save_handoff_prompt` as `prompt_text`
 (it becomes the agent-dispatch **task payload**, or the prompt content inside
-the one-time worktree-state handoff file). Full template:
+the one-time machine-local handoff file). Full template:
 [`references/handoff-template.md`](references/handoff-template.md). Its sections:
 
 ```markdown
@@ -387,8 +391,9 @@ Choose exactly one:
 - **Never claim auto-pickup.** A handoff is never loaded automatically on
   restart. Do not imply Copilot will resume on its own — the user resumes it
   (`/resume-handoff`, or paste the reply prompt).
-- **One home, not two.** A handoff lives in **one** place — the agent-dispatch
-  task when a coordinator is running, else a worktree-state file outside the
+- **One home, not two.** A handoff lives in **one** place — a checkout-scoped
+  machine-local file in Herdr, otherwise an agent-dispatch task when a
+  coordinator and worktree are available, else a machine-local file outside the
   repo checkout. Don't write a file *and* a task. Show the reply prompt to the
   user; don't hide it in a tool call.
 
@@ -397,8 +402,10 @@ Choose exactly one:
 ## Integration Notes
 
 - **Storage is mode-dependent.** `save_handoff_prompt` prefers an agent-dispatch
-  task (payload = metadata plus the markdown, no file handoff) and falls back to
-  a one-time JSON file under the worktree state directory reported by
-  the agent-worktrees state only when no coordinator is reachable. Pass the markdown as the
+  task outside Herdr (payload = metadata plus the markdown, no file handoff) and
+  falls back to a one-time JSON file outside the checkout. In Herdr,
+  context-handoff selects that checkout-scoped file directly without probing
+  agent-worktrees; other modes use the worktree state directory reported by
+  agent-worktrees. Pass the markdown as the
   **`prompt_text`** argument (the `prompt` alias is also accepted) plus an
   optional short **`title`**.

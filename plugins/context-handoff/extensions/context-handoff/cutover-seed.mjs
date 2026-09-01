@@ -52,7 +52,7 @@ export const CONTINUATION_DIRECTIVE =
 // cutover successor. Kept as the ONE source of this string so
 // save_handoff_prompt and retry_handoff_cutover always spawn an identical
 // successor. `kind` is "task" (agent-dispatch task-backed) or "file"
-// (worktree-state file-backed); `id` is the task id / file handoff id; `lead`
+// (machine-local file-backed); `id` is the task id / file handoff id; `lead`
 // comes from `leadFrom(title)`.
 //
 // For a TASK-backed cutover we prefer a BASH-FIRST seed (see GitHub issue #853):

@@ -117,10 +117,12 @@ function cmdStore(args, { cutover }) {
     result.cutover = cut;
     if (args.json) return emit(result, args);
     if (cut.ok) {
+      const lifecycle = cut.host === "herdr"
+        ? "the successor stops the identity-matched predecessor after consumption"
+        : "the successor retires this pane after it consumes the handoff";
       process.stdout.write(
         `Handoff stored (${stored.storage}: ${stored.id}) and live cutover started ` +
-        `(pane ${cut.new_pane || "?"}). End your turn now; the successor retires this ` +
-        `pane after it consumes the handoff.\n`);
+        `(pane ${cut.new_pane || "?"}). End your turn now; ${lifecycle}.\n`);
     } else {
       process.stdout.write(
         `Handoff stored (${stored.storage}: ${stored.id}), but the live cutover could not run ` +
@@ -134,7 +136,7 @@ function cmdStore(args, { cutover }) {
   process.stdout.write(
     `Handoff stored (${stored.storage}: ${stored.id}).\n\n` +
     `-- Paste prompt (for a new session) --\n${pastePrompt}\n\n` +
-    `-- HANDOFF_SEED (for \`handoff-cli continue --seed\` under mux) --\n${seed}\n`);
+    `-- HANDOFF_SEED (for \`handoff-cli continue --seed\` under Herdr or mux) --\n${seed}\n`);
 }
 
 function cmdContinue(args) {

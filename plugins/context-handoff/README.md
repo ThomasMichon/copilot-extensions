@@ -7,7 +7,7 @@ This plugin ships three cooperating pieces:
 | Piece | Type | Role |
 |-------|------|------|
 | **continuity guidance hook** | Declarative `sessionStart` hook | Injects a concise, owner-marked `additionalContext` kernel that tells objective-owning sessions to work thoroughly across context windows, treat handoff as a relay rather than completion, and move unfinished planning into execution without bypassing required gates |
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and a linked worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time machine-local state file outside the repo checkout, including from an adopted anchor. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff (no regeneration) — for when a spawned successor window came up empty because its first prompt never submitted, so no session was created. `/resume-handoff` digs up this checkout's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. In Herdr, `save_handoff_prompt` writes a checkout-scoped one-time machine-local file without probing agent-worktrees, and `continue_handoff` calls the installed `copilot-pane launch --task-file` path exactly once to create a seeded sibling while retaining the predecessor. Outside Herdr, a reachable coordinator plus linked worktree still stores a `proposed`/`handoff` task and uses the existing mux cutover, with the prior machine-local file fallback. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff without regeneration. `/resume-handoff` digs up this checkout's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
 ## Why the monitor is an extension
@@ -66,6 +66,13 @@ this plugin:
    already done so. This plugin does not set it and does not require registering
    the repo with agent-worktrees.
 
+Herdr live cutover is optional. When the current process has
+`HERDR_ENV=1` plus `HERDR_PANE_ID`, the extension expects the separately managed
+`~/.local/bin/copilot-pane` launcher. No extra environment variable or manual
+seed command is required; `/handoff-continue` selects that path automatically
+and resolves the checkout from `herdr pane current --current` rather than a
+possibly stale Copilot process cwd.
+
 ## Verify
 
 A session where the plugin hook loaded receives an owner marker beginning with
@@ -121,15 +128,22 @@ agent-facing `session.send()` nudge. The nudge is queued by
 it does not interrupt an in-flight turn. Failures to send the nudge are logged
 as warnings; they do not block the session.
 
-## Live cutover is successor-consume-driven
+## Live cutover keeps a recovery predecessor
 
-A live cutover (`continue_handoff`) spawns a successor Copilot in a new mux
-window and passes the exact first prompt through Copilot's native `-i` argv
-before the process starts; it never relies on terminal readiness parsing or
-`send-keys`. The prompt begins with the task title (for useful successor title
-inference), names the intended worktree id and cwd, names the dispatch task, and
-gives the exact consume/bind/retire/complete commands. It does **not**
-retire the predecessor on the predecessor's next idle.
+A live cutover (`continue_handoff`) selects the pane host already carrying the
+current session. In Herdr it writes the successor seed to a short-lived,
+owner-readable task file and invokes `~/.local/bin/copilot-pane launch --role
+coordinator --cwd <cwd> --host local --task-file <file>`. The launcher creates
+one sibling Copilot and submits that seed as its first prompt. Context-handoff
+does not infer completion from Herdr status and does not retire the predecessor
+pane.
+
+Outside Herdr, the existing mux path passes the exact first prompt through
+Copilot's native `-i` argv before the process starts; it never relies on
+terminal readiness parsing or `send-keys`. The prompt begins with the task title
+(for useful successor title inference), names the intended worktree id and cwd,
+names the dispatch task, and gives the exact consume/bind/retire/complete
+commands. It does **not** retire the predecessor on the predecessor's next idle.
 
 The successor's first command loads the brief and binds the new session to the
 handoff's exact durable token. That atomic bind links the numbered handoff,
@@ -139,9 +153,9 @@ ledger, and then retires the predecessor pane through
 
 This keeps recovery safe: if the successor never comes up or never consumes the
 handoff, the predecessor pane remains available and the terminal is not closed.
-The stored metadata also records the predecessor's mux session; retirement
-verifies that the pane token still belongs to that session, so a token reused
-after a mux restart is treated as an already-gone predecessor rather than an
+Herdr keeps that pane unconditionally. Mux metadata records the predecessor's
+session; retirement verifies that the pane token still belongs to that session,
+so a token reused after a mux restart is treated as already gone rather than an
 unrelated pane to interrupt.
 
 ### Continuity is objective-driven, not phase-driven
@@ -178,7 +192,7 @@ toward `Done` rather than finalizing after a handoff task, phase, or pull reques
 transport is receipt-checked by the pane wrapper; a rejected flag or immediately
 exiting successor is reaped without retiring the predecessor. Because the
 handoff is already stored, `retry_handoff_cutover` re-attempts the cutover **from
-that saved handoff without regenerating it**: it recovers the worktree's pending
+that saved handoff without regenerating it**: it recovers the checkout's pending
 task/file, rebuilds the *identical* cutover seed (via the same `buildCutoverSeed`
 used by `save_handoff_prompt`), and spawns a fresh seeded successor. Run it from
 the predecessor.
@@ -206,22 +220,28 @@ The plugin remains useful in a plain Copilot CLI session with only
 `context-handoff@copilot-extensions` enabled:
 
 - `generate_handoff_prompt` and `save_handoff_prompt` work without
-  agent-dispatch when agent-worktrees can resolve a worktree state directory.
+  agent-dispatch. Herdr sessions use checkout-scoped context-handoff state;
+  other sessions use agent-worktrees when it can resolve a worktree state
+  directory.
 - If `agent-dispatch` is absent or unhealthy, `save_handoff_prompt` writes a
-  one-time file under the machine-local state directory reported by
-  `agent-worktrees get worktree-state-dir`. Linked worktrees use their normal
-  state namespace; an adopted anchor uses the stable `@anchor` namespace. Both
-  are outside the repo checkout.
+  one-time file outside the repo checkout. Herdr stores it under
+  `~/.copilot/context-handoff/checkouts/<checkout>/handoff/` without requiring
+  agent-worktrees, using the current pane cwd as `<checkout>`. Linked worktrees
+  and adopted anchors outside Herdr keep their existing agent-worktrees state
+  namespaces.
 - File consumption uses an atomic claim. A dead consumer's claim is recoverable,
   and a retry from the same successor session can recover delivery after the
   durable spent mark; another session still receives the one-time stop notice.
-- `continue_handoff` is best-effort. A linked worktree targets its `wt-<id>`
-  mux; an adopted anchor targets the exact caller-owned mux containing the
-  predecessor pane. Without a live mux it does nothing destructive and tells
-  the agent to use the saved paste or `/resume-handoff` fallback.
+- `continue_handoff` is best-effort. Herdr launches one sibling through
+  `copilot-pane`; after successful consumption, the successor verifies the
+  recorded predecessor pane/session and stops that exact pane. A linked worktree otherwise
+  targets its `wt-<id>` mux; an adopted anchor targets the exact caller-owned
+  mux containing the predecessor pane. Without a live pane host it does nothing
+  destructive and tells the agent to use the saved paste or `/resume-handoff`
+  fallback.
 - `/resume-handoff` first tries a pinned agent-dispatch handoff task when that
   stack is available; otherwise it falls back to the newest unconsumed
-  worktree-state handoff file for the current CWD.
+  checkout-scoped handoff file for the current CWD.
 
 For a **natural-language** resume request handled by the skill (for example,
 "resume from handoff" without an exact id), discovery is deliberately
@@ -250,7 +270,7 @@ node "$CH" consume  --handoff-id <id>                               # load a fil
 ```
 
 The CLI is a thin wrapper over **`handoff-core.mjs`** — the SDK-free store/trigger
-core (same on-disk format, same `agent-worktrees handoff-cutover` trigger, same
+core (same on-disk format, Herdr-first and mux-preserving cutover selection, same
 issue-#853 bash-first seed shape from `cutover-seed.mjs`). A handoff it stores is
 therefore byte-compatible with `consume_handoff` / `/resume-handoff`. Session id
 defaults to `$COPILOT_AGENT_SESSION_ID`; `--session-id`/`--cwd` override; `--no-task`
