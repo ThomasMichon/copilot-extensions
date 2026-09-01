@@ -71,6 +71,43 @@ def test_skeleton_does_not_touch_src_local():
     assert screen.machine_state(1) == "loading"
 
 
+def test_live_setup_starts_after_first_refresh(monkeypatch):
+    pytest.importorskip("textual")
+    from agent_worktrees.picker_tui import engine as eng
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    deferred = []
+    monkeypatch.setattr(screen, "_setup_skeleton", lambda: None)
+    monkeypatch.setattr(screen, "_finish_mount", lambda: None)
+    monkeypatch.setattr(screen, "call_after_refresh", deferred.append)
+
+    screen.on_mount()
+
+    assert deferred == [screen._start_live_setup]
+
+
+def test_data_ssh_bootstrap_rows_skip_full_config(monkeypatch):
+    from agent_worktrees.picker_tui import data_ssh
+
+    monkeypatch.setattr(
+        data_ssh.cfg,
+        "load_config",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("bootstrap rows must not load full config")
+        ),
+    )
+    monkeypatch.setattr(
+        data_ssh.data_local,
+        "load",
+        lambda **kwargs: [kwargs],
+    )
+
+    assert data_ssh.bootstrap_rows() == [{"classify": False}]
+
+
 def test_setup_live_async_records_failure():
     pytest.importorskip("textual")
     from agent_worktrees.picker_tui import engine as eng
@@ -87,3 +124,78 @@ def test_setup_live_async_records_failure():
     screen._setup_live_async()
     assert "roster exploded" in screen.debug
     assert screen._busy_label == "Load failed"
+
+
+def test_setup_live_async_keeps_bootstrap_rows_on_roster_failure(monkeypatch):
+    pytest.importorskip("textual")
+    from agent_worktrees.picker_tui import engine as eng
+
+    class InlineThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def bootstrap_rows():
+            return [{"id": "cached"}]
+
+        @staticmethod
+        def make_loader(*_a, **_k):
+            raise RuntimeError("roster exploded")
+
+    monkeypatch.setattr(eng.threading, "Thread", InlineThread)
+    screen = eng.PickerScreen(Src(), live=True)
+    monkeypatch.setattr(screen, "_scan_pivot_payload", lambda: None)
+    screen._setup_skeleton()
+    screen._setup_live_async()
+
+    assert screen.data == [{"id": "cached"}]
+    assert "roster exploded" in screen.debug
+    assert screen._busy_label == "Load failed"
+
+
+def test_full_loader_does_not_blank_bootstrap_rows_while_loading():
+    pytest.importorskip("textual")
+    from agent_worktrees.picker_tui import engine as eng
+
+    class Loader:
+        @staticmethod
+        def records():
+            return []
+
+        @staticmethod
+        def counts():
+            return (0, 1, 0)
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def source_tabs(_snapshot):
+            return [{
+                "label": "host Win",
+                "machine": "host",
+                "env": "Win",
+                "ready": True,
+                "source_kind": "machine-ssh",
+                "source_id": "machine-ssh:host:win",
+                "capabilities": {},
+            }]
+
+    screen = eng.PickerScreen(Src(), live=True)
+    screen._setup_skeleton()
+    screen.data = [{"id": "cached"}]
+    screen.update_state = "idle"
+    screen._maybe_repoll = lambda: None
+    screen._maybe_repoll_pivot = lambda: None
+    screen.refresh = lambda: None
+
+    screen._apply_live_source((), Loader())
+    screen._tick()
+
+    assert screen.data == [{"id": "cached"}]

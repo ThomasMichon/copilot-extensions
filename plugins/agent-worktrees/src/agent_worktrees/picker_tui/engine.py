@@ -1524,12 +1524,18 @@ class PickerScreen(Widget):
             # run the roster/pivot/worktree fill off the UI thread.
             self._setup_skeleton()
             self._finish_mount()
-            threading.Thread(
-                target=self._setup_live_async, name="picker-setup", daemon=True,
-            ).start()
+            # Starting the worker here still lets its first heavy import/scan
+            # contend with Textual's initial layout before the terminal flushes.
+            # Cross the actual first-refresh boundary before doing any setup I/O.
+            self.call_after_refresh(self._start_live_setup)
             return
         self.setup()
         self._finish_mount()
+
+    def _start_live_setup(self):
+        threading.Thread(
+            target=self._setup_live_async, name="picker-setup", daemon=True,
+        ).start()
 
     def _finish_mount(self):
         self.sel = self.default_sel()
@@ -1600,13 +1606,36 @@ class PickerScreen(Widget):
         self._prof_unavailable = set()
 
     def _setup_live_async(self):
-        """I/O off-thread; apply widget state on the UI thread (#1504)."""
+        """Publish cached local rows, then fill roster and pivots independently."""
+        bootstrap_fn = getattr(self.src, "bootstrap_rows", None)
+        if callable(bootstrap_fn):
+            try:
+                bootstrap_rows = bootstrap_fn()
+            except Exception:
+                bootstrap_rows = None
+            if bootstrap_rows is not None:
+                def apply_bootstrap():
+                    if not self._roster_ready and self.loader is None:
+                        self.data = bootstrap_rows
+                        self.refresh()
+
+                try:
+                    self.app.call_from_thread(apply_bootstrap)
+                except Exception:
+                    apply_bootstrap()
+
+        # Pivot activation can take seconds on a cold filesystem. It is
+        # independent of the worktree roster, so never serialize rows behind it.
+        threading.Thread(
+            target=self._setup_live_pivots,
+            name="picker-pivots",
+            daemon=True,
+        ).start()
+
         err = None
         snapshot = None
         loader = None
-        pivot_payload = None
         try:
-            pivot_payload = self._scan_pivot_payload()
             snapshot_fn = getattr(self.src, "source_snapshot", None)
             snapshot = snapshot_fn() if callable(snapshot_fn) else None
             loader = (
@@ -1624,7 +1653,7 @@ class PickerScreen(Widget):
                 self._busy_label = "Load failed"
                 self.refresh()
                 return
-            self._apply_live_prefetched(snapshot, loader, pivot_payload)
+            self._apply_live_source(snapshot, loader)
             self._busy_label = None
             self.refresh()
 
@@ -1633,14 +1662,26 @@ class PickerScreen(Widget):
         except Exception:
             apply()
 
-    def _apply_live_prefetched(self, snapshot, loader, pivot_payload):
-        """Install prefetched live-mode state. UI-thread only."""
-        self._install_pivot_payload(pivot_payload)
-        for _rt in getattr(self, "_pivot_runtimes", {}).values():
-            try:
-                _rt.invalidate()
-            except Exception:
-                pass
+    def _setup_live_pivots(self):
+        """Scan contributed pivots without delaying local or fleet rows."""
+        pivot_payload = self._scan_pivot_payload()
+
+        def apply():
+            self._install_pivot_payload(pivot_payload)
+            for runtime in getattr(self, "_pivot_runtimes", {}).values():
+                try:
+                    runtime.invalidate()
+                except Exception:
+                    pass
+            self.refresh()
+
+        try:
+            self.app.call_from_thread(apply)
+        except Exception:
+            apply()
+
+    def _apply_live_source(self, snapshot, loader):
+        """Install a prefetched live roster/loader. UI-thread only."""
         source_tabs = getattr(self.src, "source_tabs", None)
         if callable(source_tabs):
             tabs = list(
@@ -1683,7 +1724,9 @@ class PickerScreen(Widget):
             for tab in self.source_tabs
         ]
         self.loader = loader
-        self.data = loader.records() if loader is not None else []
+        records = loader.records() if loader is not None else []
+        if records or not self.data:
+            self.data = records
         self._roster_ready = True
         self.machine_idx = self.local_index()
         self.maint_sel = ListSelection()
@@ -1695,7 +1738,7 @@ class PickerScreen(Widget):
         target_env_list = (te() if callable(te) else None) or _DEFAULT_TARGET_ENVS
         self.targets = target_rows(target_env_list)
         self.grid = {}
-        for ti, t in enumerate(self.targets):
+        for ti, target in enumerate(self.targets):
             for hi in range(len(self.host_cols)):
                 self.grid[(ti, hi)] = self.cell_locked(ti, hi)
         self.applied = dict(self.grid)
@@ -1714,6 +1757,16 @@ class PickerScreen(Widget):
         if callable(blr_fn):
             self._start_bound_live_reconcile(blr_fn)
         self._reconcile_wt_sel()
+
+    def _apply_live_prefetched(self, snapshot, loader, pivot_payload):
+        """Install prefetched live-mode state. UI-thread only."""
+        self._install_pivot_payload(pivot_payload)
+        for _rt in getattr(self, "_pivot_runtimes", {}).values():
+            try:
+                _rt.invalidate()
+            except Exception:
+                pass
+        self._apply_live_source(snapshot, loader)
 
     def on_unmount(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Kill any
@@ -1830,8 +1883,13 @@ class PickerScreen(Widget):
             busy = True
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
-            self.data = self.loader.records()
+            records = self.loader.records()
             _ready, loading, _failed = self.loader.counts()
+            # Keep the cache-only bootstrap rows visible while the replacement
+            # fleet loader is still resolving its first source. Once loading
+            # finishes, an authoritative empty result is allowed to clear them.
+            if records or loading == 0:
+                self.data = records
             busy = busy or loading > 0
             self._maybe_repoll()
             if self._wt_reconcile_after is not None:
