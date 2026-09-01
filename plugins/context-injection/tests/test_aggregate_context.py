@@ -19,6 +19,7 @@ PRODUCER_BASH_WRAPPER = PLUGIN / "scripts" / "invoke-context-contributor.sh"
 PRODUCER_POWERSHELL_WRAPPER = (
     PLUGIN / "scripts" / "invoke-context-contributor.ps1"
 )
+AUTHORITY_RESOLVER = PLUGIN / "scripts" / "resolve_context_authority.py"
 SCHEMA = "copilot-extensions.session-context-contributors"
 
 SPEC = importlib.util.spec_from_file_location("aggregate_context", SCRIPT)
@@ -175,6 +176,7 @@ def _plugin(
         PRODUCER_POWERSHELL_WRAPPER,
         scripts / PRODUCER_POWERSHELL_WRAPPER.name,
     )
+    shutil.copy2(AUTHORITY_RESOLVER, scripts / AUTHORITY_RESOLVER.name)
     declaration = {
         "schema": SCHEMA,
         "version": 1,
@@ -196,8 +198,11 @@ def _run_native_producer_wrapper(
     source: str,
     contributor_id: str,
     hook_input: str,
+    *,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
+    environment.update(extra_env or {})
     environment["COPILOT_PLUGIN_ROOT"] = str(plugin)
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -227,6 +232,395 @@ def _run_native_producer_wrapper(
         env=environment,
         check=True,
     )
+
+
+def _cross_marketplace_stack(
+    tmp_path: Path,
+    *,
+    staged: bool,
+    install_authority: bool = True,
+    directory_authority: bool = False,
+) -> tuple[Path, Path | None, Path, dict[str, str], str]:
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    marketplace = tmp_path / "market-b"
+    seed = _plugin(
+        tmp_path / "seed",
+        "seed-market",
+        "a-policy",
+        context="CROSS-MARKET",
+    )
+    producer = marketplace / "plugins" / "a-policy"
+    shutil.copytree(seed, producer)
+    declaration = json.loads(
+        (producer / "session-context.json").read_text(encoding="utf-8")
+    )
+    hooks = {
+        "version": 1,
+        "hooks": {
+            "sessionStart": [
+                {
+                    "type": "command",
+                    "bash": AGGREGATE_CONTEXT.conformance.canonical_bash_hook(
+                        "a-policy@market-b",
+                        contributor,
+                    ),
+                    "powershell": (
+                        AGGREGATE_CONTEXT.conformance.canonical_powershell_hook(
+                            "a-policy@market-b",
+                            contributor,
+                        )
+                    ),
+                    "timeoutSec": 30,
+                }
+                for contributor in declaration["contributors"]
+            ]
+        },
+    }
+    (producer / "hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+    marketplace_manifest = {
+        "name": "market-b",
+        "plugins": [
+            {"name": "a-policy", "source": "plugins/a-policy"},
+        ],
+    }
+    (marketplace / ".github" / "plugin").mkdir(parents=True)
+    (marketplace / ".github" / "plugin" / "marketplace.json").write_text(
+        json.dumps(marketplace_manifest),
+        encoding="utf-8",
+    )
+
+    authority: Path | None = None
+    if install_authority:
+        authority = (
+            tmp_path
+            / "authority-market"
+            / "plugins"
+            / "context-injection"
+            if directory_authority
+            else home
+            / ".copilot"
+            / "installed-plugins"
+            / "copilot-extensions"
+            / "context-injection"
+        )
+        _copy_plugin(authority)
+    settings = {
+        "extraKnownMarketplaces": {
+            "market-b": {
+                "source": {
+                    "source": "directory",
+                    "path": str(marketplace),
+                }
+            }
+        },
+        "enabledPlugins": {
+            "a-policy@market-b": True,
+            "context-injection@copilot-extensions": True,
+        },
+    }
+    if directory_authority:
+        authority_market = tmp_path / "authority-market"
+        authority_manifest = (
+            authority_market / ".github" / "plugin" / "marketplace.json"
+        )
+        authority_manifest.parent.mkdir(parents=True)
+        authority_manifest.write_text(
+            json.dumps(
+                {
+                    "name": "copilot-extensions",
+                    "plugins": [
+                        {
+                            "name": "context-injection",
+                            "source": "plugins/context-injection",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        settings["extraKnownMarketplaces"]["copilot-extensions"] = {
+            "source": {
+                "source": "directory",
+                "path": str(authority_market),
+            }
+        }
+    settings_path = repo / ".github" / "copilot" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(json.dumps(settings), encoding="utf-8")
+    config_path = repo / ".context-injection" / "config.yaml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        "schema: copilot-extensions.context-injection\n"
+        "version: 1\n"
+        "authority: context-injection@copilot-extensions\n"
+        "engine:\n"
+        "  schema: copilot-extensions.context-injection-engine\n"
+        "  version: 5\n",
+        encoding="utf-8",
+    )
+    copilot = home / ".copilot"
+    copilot.mkdir(parents=True, exist_ok=True)
+    (copilot / "config.json").write_text(
+        json.dumps({"trustedFolders": [str(repo)]}),
+        encoding="utf-8",
+    )
+    roots = [producer, *([authority] if authority is not None else [])]
+    ancestry = (
+        [["copilot", "--acp", *sum(
+            (["--plugin-dir", str(root)] for root in roots),
+            [],
+        )]]
+        if staged
+        else []
+    )
+    environment = {
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "COPILOT_CONTEXT_INJECTION_CACHE_DIR": str(tmp_path / "cache"),
+        "COPILOT_CONTEXT_INJECTION_TEST_ANCESTRY": json.dumps(ancestry),
+    }
+    payload = json.dumps(
+        {
+            "cwd": str(repo),
+            "sessionId": "cross-marketplace",
+            "source": "new",
+        }
+    )
+    return producer, authority, repo, environment, payload
+
+
+def _run_authority(
+    authority: Path,
+    environment: dict[str, str],
+    payload: str,
+) -> subprocess.CompletedProcess[str]:
+    authority_environment = {**os.environ, **environment}
+    authority_environment["COPILOT_PLUGIN_ROOT"] = str(authority)
+    return subprocess.run(
+        [
+            sys.executable,
+            str(authority / "scripts" / "aggregate_context.py"),
+        ],
+        input=payload,
+        text=True,
+        capture_output=True,
+        env=authority_environment,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("staged", [False, True], ids=["installed", "staged"])
+def test_cross_marketplace_producer_joins_exact_adopted_authority(
+    tmp_path: Path,
+    staged: bool,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(tmp_path, staged=staged)
+    )
+    assert authority is not None
+
+    produced = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+    authoritative = _run_authority(authority, environment, payload)
+
+    assert produced.stdout == authoritative.stdout
+    assert "CROSS-MARKET" in produced.stdout
+    assert "[context-contributor: a-policy@market-b/main]" in produced.stdout
+
+
+def test_directory_marketplace_producer_joins_directory_authority(
+    tmp_path: Path,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(
+            tmp_path,
+            staged=False,
+            directory_authority=True,
+        )
+    )
+    assert authority is not None
+
+    produced = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+    authoritative = _run_authority(authority, environment, payload)
+
+    assert produced.stdout == authoritative.stdout
+    assert "CROSS-MARKET" in produced.stdout
+
+
+def test_invalid_engine_root_cannot_hijack_adopted_authority(
+    tmp_path: Path,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(tmp_path, staged=False)
+    )
+    assert authority is not None
+    decoy = tmp_path / "decoy" / "context-injection"
+    _copy_plugin(decoy)
+    (decoy / "scripts" / "aggregate_context.py").write_text(
+        "print('{\"additionalContext\":\"HIJACK\"}')\n",
+        encoding="utf-8",
+    )
+    environment["COPILOT_CONTEXT_INJECTION_ENGINE_ROOT"] = str(decoy)
+
+    result = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+
+    assert json.loads(result.stdout) == {"additionalContext": "CROSS-MARKET"}
+    assert "HIJACK" not in result.stdout
+
+
+def test_valid_engine_root_selects_exact_adopted_authority(
+    tmp_path: Path,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(tmp_path, staged=False)
+    )
+    assert authority is not None
+    environment["COPILOT_CONTEXT_INJECTION_ENGINE_ROOT"] = str(authority)
+
+    produced = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+    authoritative = _run_authority(authority, environment, payload)
+
+    assert produced.stdout == authoritative.stdout
+    assert "CROSS-MARKET" in produced.stdout
+
+
+@pytest.mark.parametrize(
+    "ancestry",
+    [
+        "not-json",
+        json.dumps([["copilot", "--acp", "--plugin-dir"]]),
+    ],
+    ids=["indeterminate-ancestry", "malformed-staged-arguments"],
+)
+def test_indeterminate_staged_inventory_preserves_direct_fallback(
+    tmp_path: Path,
+    ancestry: str,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(tmp_path, staged=False)
+    )
+    assert authority is not None
+    environment["COPILOT_CONTEXT_INJECTION_TEST_ANCESTRY"] = ancestry
+
+    result = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+
+    assert json.loads(result.stdout) == {"additionalContext": "CROSS-MARKET"}
+    assert "[context-contributor:" not in result.stdout
+
+
+def test_installed_authority_symlink_escape_is_rejected(
+    tmp_path: Path,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(tmp_path, staged=False)
+    )
+    assert authority is not None
+    outside = tmp_path / "outside" / "context-injection"
+    _copy_plugin(outside)
+    (outside / "scripts" / "aggregate_context.py").write_text(
+        "print('{\"additionalContext\":\"ESCAPED\"}')\n",
+        encoding="utf-8",
+    )
+    shutil.rmtree(authority)
+    try:
+        authority.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink/reparse creation is unavailable: {exc}")
+
+    result = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+
+    assert json.loads(result.stdout) == {"additionalContext": "CROSS-MARKET"}
+    assert "ESCAPED" not in result.stdout
+
+
+def test_missing_installed_authority_preserves_direct_fallback(
+    tmp_path: Path,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(
+            tmp_path,
+            staged=False,
+            install_authority=False,
+        )
+    )
+    assert authority is None
+
+    result = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+
+    assert json.loads(result.stdout) == {"additionalContext": "CROSS-MARKET"}
+
+
+def test_same_named_unadopted_sibling_is_not_authority(
+    tmp_path: Path,
+) -> None:
+    producer, authority, _repo, environment, payload = (
+        _cross_marketplace_stack(
+            tmp_path,
+            staged=False,
+            install_authority=False,
+        )
+    )
+    assert authority is None
+    sibling = producer.parent / "context-injection"
+    _copy_plugin(sibling)
+    (sibling / "scripts" / "aggregate_context.py").write_text(
+        "print('{\"additionalContext\":\"UNADOPTED\"}')\n",
+        encoding="utf-8",
+    )
+
+    result = _run_native_producer_wrapper(
+        producer,
+        "a-policy@market-b",
+        "main",
+        payload,
+        extra_env=environment,
+    )
+
+    assert json.loads(result.stdout) == {"additionalContext": "CROSS-MARKET"}
+    assert "UNADOPTED" not in result.stdout
 
 
 def test_producer_wrapper_falls_back_without_sibling_authority(

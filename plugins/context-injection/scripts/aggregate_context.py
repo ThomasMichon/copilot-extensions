@@ -1281,6 +1281,7 @@ def _stack_fingerprint(
         for relative in (
             "scripts/invoke-context-contributor.sh",
             "scripts/invoke-context-contributor.ps1",
+            "scripts/resolve_context_authority.py",
             "scripts/emit-command-catalog.sh",
             "scripts/emit-command-catalog.ps1",
         ):
@@ -1551,6 +1552,14 @@ def _validation_main(argv: list[str]) -> int:
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--marketplace-root", type=Path)
     target.add_argument("--repository", type=Path)
+    parser.add_argument(
+        "--authority-root",
+        type=Path,
+        help=(
+            "Exact external context-injection@copilot-extensions payload "
+            "for a cross-marketplace roster"
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -1562,6 +1571,30 @@ def _validation_main(argv: list[str]) -> int:
             args.marketplace_root
         )
         initial.extend(discovery.violations)
+        if args.authority_root is not None:
+            try:
+                external_authority = args.authority_root.resolve(strict=True)
+            except OSError:
+                initial.append(
+                    conformance.Violation(
+                        "aggregate-authority-missing",
+                        "external authority root is unavailable",
+                        source=ADOPTED_AUTHORITY_SOURCE,
+                        path=str(args.authority_root),
+                    )
+                )
+            else:
+                targets = [
+                    item
+                    for item in targets
+                    if item.source != ADOPTED_AUTHORITY_SOURCE
+                ]
+                targets.append(
+                    conformance.PluginTarget(
+                        ADOPTED_AUTHORITY_SOURCE,
+                        external_authority,
+                    )
+                )
         authority = [
             item
             for item in targets
@@ -1579,6 +1612,8 @@ def _validation_main(argv: list[str]) -> int:
             )
         scope = discovery.scope
     else:
+        if args.authority_root is not None:
+            parser.error("--authority-root applies only to --marketplace-root")
         repository = _repo_root(args.repository)
         active = _active_plugins(repository, violations=initial)
         targets = [

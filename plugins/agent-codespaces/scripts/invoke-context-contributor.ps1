@@ -51,11 +51,24 @@ catch {
     exit 0
 }
 
-$authority = Join-Path (Split-Path -Parent $resolvedRoot) 'context-injection'
-$engine = Join-Path (Join-Path $authority 'scripts') 'aggregate_context.py'
 $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
-if ($python -and (Test-Path -LiteralPath $engine -PathType Leaf)) {
+$resolver = Join-Path (Join-Path $resolvedRoot 'scripts') 'resolve_context_authority.py'
+$authority = ''
+if ($python -and (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+    try {
+        $authority = (
+            $payload | & $python.Source $resolver 2>$null | Out-String
+        ).Trim()
+    }
+    catch { $authority = '' }
+}
+$engine = if ($authority) {
+    Join-Path (Join-Path $authority 'scripts') 'aggregate_context.py'
+} else {
+    ''
+}
+if ($python -and $engine -and (Test-Path -LiteralPath $engine -PathType Leaf)) {
     $output = [IO.Path]::GetTempFileName()
     try {
         $payload | & $python.Source $engine --producer "$SourceId/$ContributorId" > $output
