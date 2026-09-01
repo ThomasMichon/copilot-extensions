@@ -58,7 +58,10 @@ Confirm the launch repo is a stateless harness:
 
 If `requires_external` is `true` and `bound` is `false` (or `state_root` is
 null), it needs binding -- proceed. If it already resolves to a knowledge path,
-it's bound; only continue to **re-point** it.
+continue with the configurator's canonical registration check anyway:
+`state-root` may have succeeded through fallback checkout discovery. Only the
+configurator's `registration.status: ready` proves that the named repo has the
+required canonical `class: worktree` record.
 
 Fail loud on the chosen knowledge checkout before invoking the configurator:
 verify the path exists and is a git repo (or clone/create it first). The
@@ -106,20 +109,10 @@ The current harness issue workflow supports GitHub routing. A non-GitHub
 knowledge origin (for example Azure DevOps) is valid for state, but it cannot be
 the implicit target of `gh issue` commands.
 
-## 2. Register both repos with agent-worktrees
+## 2. Register and write the machine-local binding
 
-So the state-root resolver can find the knowledge checkout by name:
-
-```
-<agent-worktrees catalog argv[0]> repos add <knowledge-name> "<knowledge-path>" --class worktree
-```
-
-(The harness itself is normally already registered from its own adoption. If not,
-register it too.)
-
-## 3. Write the machine-local binding
-
-Run the configurator (idempotent -- safe to re-run). It writes the
+Run the configurator as the single idempotent registration-and-binding command.
+It writes the
 `knowledge_repo:` pointer into `~/.<harness>/config.yaml` and (when both repo
 paths are supplied) renders the personal-plugin overlay described in step 3b:
 
@@ -129,7 +122,24 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
   --knowledge <knowledge-name> \
   --knowledge-path "<knowledge-path>" \
   --harness-path "<harness-anchor-path>" \
+  --agent-worktrees-path "<agent-worktrees catalog argv[0]>" \
+  --account "<writable-github-login-if-needed>" \
+  --register
 ```
+
+`--register` creates or repairs the canonical record as `class: worktree`,
+including the checkout's effective origin and reliably detected default branch.
+The resulting canonical record reports the effective GitHub account mapping.
+The configurator does not persist a repository owner fallback as an explicit
+account; agent-worktrees retains authority for account resolution and
+clarification. Omit `--account` when an existing owner/account map is already
+usable. If readiness reports an unusable organization-owner fallback, re-run
+the same command with the authenticated writable login in `--account`; that
+single invocation repairs the mapping and binding together. Re-running the same
+command is safe. Without
+`--register`, the configurator is an inspection-only consumer of the registry:
+it writes the pointer but reports a missing or mismatched canonical record with
+the exact repair command.
 
 The binding is **machine-local** and is never committed into the harness.
 `agent-worktrees` owns the session-start state/worktree context and related-repo
@@ -153,6 +163,22 @@ This result validates repository configuration; it does not itself implement an
 issue backend. The consuming harness's personal issue-filing skill is the
 intended reader and must honor the declared route. `harness-knowledge` never
 files an issue or mutates the knowledge repo.
+
+The configurator separately reports:
+
+- `registration.status`: `ready`, `missing`, `mismatch`, or `unverified`;
+- `registration.path_source`: `canonical_registry`, `fallback_discovery`,
+  `unresolved`, or `unverified`;
+- the effective path, class, remote, default branch, and account;
+- `state_root.status`: whether the newly written binding resolves to the exact
+  canonical knowledge checkout.
+
+A successful `repos find` fallback is not canonical readiness. Do not create a
+paired worktree unless registration and state-root both report `ready`.
+Run this configurator check even when the initial `state-root` command already
+resolved a path.
+When the exact agent-worktrees command is unavailable, the configurator remains
+usable but reports `unverified`; it never claims the registration is missing.
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
 assembles the personal-plugin overlay** (see step 3b) -- so the operator's
