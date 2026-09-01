@@ -11,7 +11,6 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Draft | #1564 |
-| [MCP Agent Self-Diagnostics](active/mcp-agent-self-diagnostics/README.md) | Draft | #1520 |
 | [Plugin Inventory and Activation Scope](active/plugin-inventory-activation-scope/README.md) | Draft | #1507 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge Contract Baseline](active/agent-bridge-contract-baseline/README.md) | Draft | #1468 |
