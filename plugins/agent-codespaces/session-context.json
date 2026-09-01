@@ -35,7 +35,7 @@
       "id": "codespace-map",
       "pure": true,
       "order": 500,
-      "timeoutSeconds": 2,
+      "timeoutSeconds": 10,
       "maxBytes": 384,
       "bash": [
         "scripts/emit-codespace-map.sh",
