@@ -77,9 +77,20 @@ fleet, topology, or operating environment.
 
 ### Phase 3 - Reconcile through bounded modules
 
-- [ ] Make `plan`, `validate`, and `restore` default to the package-owning
-  repository containing CWD, with `--repo` for another single repository and
-  explicit `--all-projects` for the machine union (#1455).
+- [ ] Make `plan`, `validate`, and `restore` default to the adopted project
+  containing CWD plus only its required supplemental package repositories.
+  Preserve `--repo` as exact single-repository scope and explicit
+  `--all-projects` as the full machine union (#1418, #1455).
+- [ ] Resolve CWD through its canonical registered anchor/worktree identity.
+  An adopted project contributes its active required supplements one hop only;
+  entering a supplemental repository directly resolves that repository alone
+  unless it is independently adopted as a project.
+- [ ] Require supplements to be explicitly bound and canonically registered.
+  A configured but unavailable supplement blocks bare project reconciliation
+  with clear `--repo <current>` remediation for intentional physical-repository
+  isolation.
+- [ ] Update CLI help, README, architecture, and remediation text to distinguish
+  bare project scope from exact `--repo` and full `--all-projects` scope.
 - [ ] Add a schema-versioned, conflict-validated settings disposition for exact
   map-key absence, beginning with user-level plugin activation and preserving
   installed inventory (#1507).
@@ -108,8 +119,18 @@ fleet, topology, or operating environment.
   derived views.
 - [ ] Plan and apply touch only resources named by the selected scope and report
   every skipped or blocked dependency.
-- [ ] CWD-repo, explicit-repo, and all-projects fixtures prove that bootstrap
-  cannot execute packages from unrelated repositories (#1455).
+- [ ] CWD-project-plus-supplemental, explicit-single-repo, and all-projects
+  fixtures prove that bootstrap includes required relationship packages without
+  executing packages from unrelated projects (#1418, #1455).
+- [ ] Anchor and linked-worktree CWDs resolve the same adopted project scope.
+- [ ] Entering a supplemental repository directly does not pull its requiring
+  harness back into scope, and supplemental relationships are not traversed
+  transitively.
+- [ ] An unavailable or unregistered required supplement blocks bare reconcile
+  before module execution and names exact `--repo` as the local-only escape
+  hatch.
+- [ ] Only an explicit active relationship to a canonical registered repository
+  can add a second repository's modules to bare `restore --apply`.
 - [ ] Interrupted reconciliation resumes safely and a second successful run is
   a no-op.
 - [ ] Platform-specific modules share the same resource lifecycle and expose
@@ -145,3 +166,10 @@ behavioral parity is demonstrated.
 - Added #1507 as a bounded schema and settings-reconciler slice: exact desired
   absence for selected user-level plugin activation keys, distinct from
   installed inventory, capture exclusion, and out-of-band pruning.
+
+### 2026-08-31 - Relationship-aware default scope
+
+- Refined the safe default from one physical repository to one adopted project:
+  bare reconciliation includes only that project's required supplemental
+  package repositories. Explicit `--repo` remains the physical-repository escape
+  hatch, and `--all-projects` remains the full machine union.
