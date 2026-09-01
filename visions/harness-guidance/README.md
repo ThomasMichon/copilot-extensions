@@ -47,7 +47,9 @@ detailed procedures should live in skills.
 
 Plugin-owned ambient policy should reach every applicable session as a concise
 kernel containing only what must remain active, with detailed mechanics
-available on demand.
+available on demand. When the host cannot compose independent hook outputs,
+one attributable authority should compute the kernel and every proven producer
+should return the same bytes, so host result selection cannot discard guidance.
 
 ### portable-operator-policy
 

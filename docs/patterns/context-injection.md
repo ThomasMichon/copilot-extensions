@@ -47,12 +47,12 @@ reports can attribute the bytes:
 ```
 
 On affected Copilot CLI versions, the repository adopts the exact direct
-`context-injection@copilot-extensions` marketplace authority and engine-v2
+`context-injection@copilot-extensions` marketplace authority and engine-v3
 contract. Before exact authority proof, the wrapper invokes its own contributor
 directly. After proof, it joins the shared
-`(sessionId, canonical resolved cwd)` rendezvous and emits `{}`; only the
-authority emits the cached aggregate. Authority-first, producer-first, and
-concurrent execution therefore have one possible non-empty output. Missing,
+`(sessionId, canonical resolved cwd)` rendezvous and emits the same cached
+aggregate as the authority. Authority-first, producer-first, and concurrent
+execution therefore return byte-identical output. Missing,
 malformed, ambiguous, inactive, or incompatible authority proof preserves
 standalone output.
 
@@ -69,7 +69,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 2
+  version: 3
 ```
 
 Read that file only after exact persisted repository-trust proof. Reject
