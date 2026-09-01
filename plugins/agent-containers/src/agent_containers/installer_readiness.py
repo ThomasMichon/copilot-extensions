@@ -31,7 +31,7 @@ def inspect_toolchain(
 ) -> tuple[str, ...]:
     """Validate only tools required by the configured fleet backends."""
     failures: list[str] = []
-    if command_finder("docker") is None:
+    if config.fleets and command_finder("docker") is None:
         failures.append("docker CLI is not installed")
     if any(fleet.devcontainer_path for fleet in config.fleets.values()):
         if command_finder("devcontainer") is None:
@@ -66,8 +66,9 @@ def evaluate(
     if not config.fleets and not containers:
         return _result(
             "configuration-empty",
-            "The runtime and Docker service are healthy, but no fleet is configured "
-            "or provisioned. Readiness did not create a container or pull an image.",
+            "The runtime is healthy and no fleet is configured. Docker is not "
+            "required until a fleet is configured; readiness did not create a "
+            "container or pull an image.",
         )
     if not containers:
         return _result(

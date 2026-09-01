@@ -379,7 +379,9 @@ def _cmd_installer_readiness() -> int:
         config = load_config(strict=True)
         failures = list(inspect_toolchain(config))
         containers = []
-        if not failures or all("docker CLI" not in item for item in failures):
+        if config.fleets and (
+            not failures or all("docker CLI" not in item for item in failures)
+        ):
             try:
                 containers = list_containers(config)
             except (OSError, RuntimeError, ValueError) as exc:
