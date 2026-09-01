@@ -340,12 +340,24 @@ def load_package(
                     f"of process names"
                 )
 
-    per_machine = raw.get("per-machine") or raw.get("per_machine") or {}
+    if "per-machine" in raw and "per_machine" in raw:
+        raise ManifestError(
+            f"{path}: declare only one of 'per-machine' or 'per_machine'"
+        )
+    per_machine = (
+        raw["per-machine"]
+        if "per-machine" in raw
+        else raw.get("per_machine", {})
+    )
     if not isinstance(per_machine, dict):
         raise ManifestError(f"{path}: 'per-machine' must be a mapping")
     normalized_per_machine: dict[str, Any] = {}
     original_machine_keys: dict[str, str] = {}
     for machine_key, overlay in per_machine.items():
+        if not isinstance(overlay, dict):
+            raise ManifestError(
+                f"{path}: per-machine.{machine_key} must be a mapping"
+            )
         if (
             not isinstance(machine_key, str)
             or not machine_key.strip()

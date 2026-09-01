@@ -167,3 +167,27 @@ def test_per_machine_invalid_whitespace_rejected(tmp_path, machine_key):
 
     with pytest.raises(ManifestError, match="without surrounding whitespace"):
         load_package(path)
+
+
+def test_per_machine_dual_spellings_rejected(tmp_path):
+    data = base_package(
+        **{
+            "per-machine": {},
+            "per_machine": {"box-2": {"manage": {}}},
+        },
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="declare only one"):
+        load_package(path)
+
+
+@pytest.mark.parametrize("overlay", ["invalid", [], 1, False])
+def test_per_machine_non_mapping_overlay_rejected(tmp_path, overlay):
+    data = base_package(
+        **{"per-machine": {"box-2": overlay}},
+    )
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(ManifestError, match="must be a mapping"):
+        load_package(path)
