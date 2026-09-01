@@ -55,8 +55,8 @@ retain the predecessor pane.
 
 - [x] Focused Node tests prove Herdr wins over mux, writes the exact task file once, and retains the predecessor.
 - [x] Existing context-handoff tests pass.
-- [ ] A real local Herdr launch creates exactly one sibling and submits the seed.
-- [ ] Changed-file secret scan is clean.
+- [x] A real local Herdr launch creates exactly one sibling and submits the seed.
+- [x] Changed-file secret scan is clean.
 
 ## Proposal
 
@@ -76,3 +76,8 @@ path only.
 - Added Herdr-owned checkout state, exact one-call `copilot-pane launch --task-file` routing, and predecessor retention while preserving the existing mux path.
 - Corrected the extension's Herdr success response and aligned the subprocess timeout with the launcher's observed slow-start contract.
 - `node --test plugins/context-handoff/tests/*.test.mjs` passes 61 tests; real installed-plugin validation and the changed-file secret scan remain.
+
+### 2026-09-01 — Live validation
+- Installed the owner checkout through `copilot plugin install` and confirmed `copilot plugin update context-handoff` retains the direct `0.1.0-dev58` source while upstream publication is pending.
+- A real `/handoff-continue` run started with panes `w1:p1,w1:p2,w1:pS`, created only `w1:pT`, submitted the file-backed seed through `copilot-pane launch --task-file`, and consumed the baton once in the successor; `w1:pS` remained available until test cleanup.
+- The public pull request has a no-findings Copilot review. Upstream merge is blocked only by the available account lacking merge permission.
