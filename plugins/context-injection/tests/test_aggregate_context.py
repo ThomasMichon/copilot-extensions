@@ -457,7 +457,7 @@ def _run(
         "authority": authority_source,
         "engine": {
             "schema": "copilot-extensions.context-injection-engine",
-            "version": 4,
+            "version": 5,
         },
     }
     engine_config = config["engine"]
@@ -1071,7 +1071,7 @@ def test_engine_contract_is_versioned() -> None:
     )
     assert contract == {
         "schema": "copilot-extensions.context-injection-engine",
-        "version": 4,
+        "version": 5,
     }
 
 

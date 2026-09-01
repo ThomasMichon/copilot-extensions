@@ -54,7 +54,7 @@ def test_repository_adoption_is_plugin_owned_configuration() -> None:
         "authority: context-injection@copilot-extensions\n"
         "engine:\n"
         "  schema: copilot-extensions.context-injection-engine\n"
-        "  version: 2\n"
+        "  version: 5\n"
     )
 
 

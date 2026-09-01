@@ -51,7 +51,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 4
+  version: 5
 ```
 
 The authority must be that exact enabled marketplace plugin, and its adjacent
