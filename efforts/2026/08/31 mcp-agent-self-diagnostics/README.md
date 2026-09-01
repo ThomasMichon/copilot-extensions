@@ -108,9 +108,8 @@ reported no findings.
   consuming-harness remediation must merge before this enforcement change.
 
 ### 2026-08-31 — Landed, deployed, and archived
-- The prerequisite recovery guidance landed in
-  `gim-home/odsp-web-harness#157` and
-  `tmichon_microsoft/dotfiles#1970`.
+- The prerequisite recovery guidance landed in both consuming repositories
+  before the scanner enforcement.
 - PR #1549 merged the scanner enforcement after Copilot's final review reported
   no findings and required checks passed.
 - The unified update deployed `customizing-copilot@0.1.0-dev54`; its installed
