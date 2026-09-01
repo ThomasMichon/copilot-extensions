@@ -8,7 +8,7 @@ per-repo scripts. They sit between the Copilot **surfaces** (which converge
 A requirement package declares them under a top-level `resources:` list:
 
 ```yaml
-schema_version: 1
+schema_version: 2
 package: your-repo/machine-defaults
 gate: ["your-box"]
 resources:

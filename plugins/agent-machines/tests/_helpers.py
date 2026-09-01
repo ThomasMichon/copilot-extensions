@@ -37,7 +37,7 @@ def enable_plugin(repo_root: Path) -> None:
 
 def base_package(name: str = "acme/copilot-defaults", **over) -> dict:
     data = {
-        "schema_version": 1,
+        "schema_version": 2,
         "package": name,
         "gate": ["box-1"],
         "manage": {

@@ -71,16 +71,21 @@ fails. It never guesses machine scoping from package gates.
 
 ## Requirement-package schema
 
-`src\agent_machines\manifest.py` parses schema version `1` packages. Required
-keys are:
+`src\agent_machines\manifest.py` writes schema version `2` packages and retains
+read compatibility for legacy version `1`. Required keys are:
 
-- `schema_version: 1`
+- `schema_version: 2`
 - `package: <name>`
 
 Optional keys include `gate`, `aliases`, `manage`, `per-machine` /
 `per_machine`, `bootstrap-floor` / `bootstrap_floor`, `exclude`, `modules`, and
 `resources`. `per-machine.<machine>` is deep-merged onto `manage`; a `null` leaf
 unsets a key.
+
+Schema version 2 is the fail-closed capability boundary for
+`enabledPlugins.<plugin>: false` tombstones. A v1 package cannot rely on that
+behavior: current validators reject the declaration, and an older exact-v1
+runtime rejects a v2 package before any surface is applied.
 
 The accepted dispositions are:
 
@@ -187,6 +192,7 @@ guide.
 - list/opaque collection leaves under `enforce` are shape advisories because
   they should be `ensure-present` unions;
 - explicitly disabling a bootstrap-critical plugin is an error;
+- enabled-plugin tombstones under schema v1 are errors;
 - if any package manages marketplaces, omitting the bootstrap-critical
   `copilot-extensions` marketplace is an error.
 
