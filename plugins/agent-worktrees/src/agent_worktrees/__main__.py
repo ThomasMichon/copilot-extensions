@@ -13205,8 +13205,16 @@ def cmd_get(args: argparse.Namespace) -> int:
     # rather than failing or defaulting. Best-effort: no binding -> no-op.
     session_id = getattr(args, "session_id", None)
     session_wt_id = None
+    session_cwd = None
     if session_id:
         session_wt_id = _activate_session_binding(session_id)
+        if not session_wt_id:
+            try:
+                session_cwd = sessions.session_cwd(session_id)
+            except Exception:
+                session_cwd = None
+            if session_cwd is not None:
+                _activate_project_for_path(str(session_cwd))
 
     try:
         config = cfg.load_config()
@@ -13229,22 +13237,64 @@ def cmd_get(args: argparse.Namespace) -> int:
                 session_wt_id = tracking.find_worktree_id_by_session(session_id)
             except Exception:
                 session_wt_id = None
+        if not session_wt_id and session_cwd is not None:
+            try:
+                session_wt_id = tracking.find_worktree_id_by_cwd(str(session_cwd))
+            except Exception:
+                session_wt_id = None
         wt_id = session_wt_id
     current_worktree = str(Path(repo.worktree_root) / wt_id) if wt_id else ""
     state_scope_id = wt_id
-    if not state_scope_id and _cwd_is_inside_project(Path(repo.anchor)):
+    session_is_anchor = False
+    if session_cwd is not None and not wt_id:
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(session_cwd), "rev-parse", "--show-toplevel"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=git_ops.repository_identity_env(),
+                stdin=subprocess.DEVNULL,
+            )
+            session_is_anchor = (
+                proc.returncode == 0
+                and git_ops._normalize_wt_path(proc.stdout.strip())
+                == git_ops._normalize_wt_path(str(repo.anchor))
+            )
+        except Exception:
+            session_is_anchor = False
+    if not state_scope_id and (
+        _cwd_is_inside_project(Path(repo.anchor)) or session_is_anchor
+    ):
         # Adopted anchors have no linked-worktree id, but still need a stable,
         # machine-local state namespace for session continuity artifacts.  The
         # reserved @anchor segment is a directory namespace here, not a claim
         # that a worktree-class anchor is an editable worktree owner.
         state_scope_id = tracking.ANCHOR_ID
 
+    if key == "worktree-state-dir" and session_id and not state_scope_id:
+        output.err(
+            f"Cannot resolve state directory for session {session_id!r}; "
+            "the session is unknown or is not associated with an adopted project."
+        )
+        return 1
+
+    state_dir = (
+        cfg.project_dir() / "worktrees" / state_scope_id
+        if state_scope_id else None
+    )
+    if key == "worktree-state-dir" and state_dir is not None:
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            output.err(f"Cannot create worktree state directory: {exc}")
+            return 1
+
     values = {
         "repo-dir":     repo.anchor,
         "worktree-dir": current_worktree,
         "worktree-state-dir": (
-            str(cfg.project_dir() / "worktrees" / state_scope_id)
-            if state_scope_id else ""
+            str(state_dir) if state_dir is not None else ""
         ),
         "worktrees-root": repo.worktree_root,
         "src-dir":      config.srcroot,
