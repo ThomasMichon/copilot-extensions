@@ -24,6 +24,7 @@ from typing import BinaryIO
 SCHEMA = "copilot-extensions.session-context-contributors"
 MAX_INPUT_BYTES = 64 * 1024
 MAX_AGGREGATE_BYTES = 64 * 1024
+MAX_INLINE_CONTEXT_BYTES = 8 * 1024
 AGGREGATE_HEADROOM_BYTES = 4 * 1024
 MAX_CONTRIBUTORS = 128
 MAX_TIMEOUT_SECONDS = 10
@@ -36,9 +37,10 @@ ADOPTION_SCHEMA = "copilot-extensions.context-injection"
 ADOPTION_CONFIG = Path(".context-injection/config.yaml")
 MAX_ADOPTION_CONFIG_BYTES = 4096
 ENGINE_SCHEMA = "copilot-extensions.context-injection-engine"
-ENGINE_VERSION = 3
+ENGINE_VERSION = 4
 ADOPTED_AUTHORITY_SOURCE = "context-injection@copilot-extensions"
 IDENTIFIER = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,50 @@ def _emit_empty(message: str | None = None) -> int:
         _diagnose(message)
     print("{}", end="")
     return 0
+
+
+def _spill_context(session_id: str, context: str) -> str | None:
+    if not SESSION_IDENTIFIER.fullmatch(session_id):
+        return None
+    try:
+        state_root = (
+            Path.home() / ".copilot" / "session-state"
+        ).resolve()
+        session_root = (state_root / session_id).resolve()
+        session_root.relative_to(state_root)
+        files = session_root / "files"
+        files.mkdir(parents=True, exist_ok=True)
+        if files.is_symlink():
+            return None
+        target = files / "startup-context.md"
+        content = (
+            "# Aggregated startup context\n\n"
+            f"{context}\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=files,
+            prefix=".startup-context.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+        if os.name != "nt":
+            temporary.chmod(0o600)
+        os.replace(temporary, target)
+        if os.name != "nt":
+            target.chmod(0o600)
+    except (OSError, ValueError):
+        return None
+    return (
+        "[context-injection] Before acting, read the complete startup context "
+        f"from `{target}`. It contains authoritative policy, routing, readiness, "
+        "and exact command catalogs. Until loaded, preserve worktree boundaries "
+        "and do not publish or mutate external state."
+    )
 
 
 def _load_json(path: Path) -> dict | None:
@@ -1495,8 +1541,13 @@ def main() -> int:
                 return publish_empty(
                     "aggregate context exceeds the configured limit"
                 )
+            delivered_context = context
+            if len(context.encode("utf-8")) > MAX_INLINE_CONTEXT_BYTES:
+                spilled = _spill_context(session_id, context)
+                if spilled is not None:
+                    delivered_context = spilled
             output = json.dumps(
-                {"additionalContext": context},
+                {"additionalContext": delivered_context},
                 ensure_ascii=False,
                 separators=(",", ":"),
             ).encode("utf-8")
