@@ -51,7 +51,7 @@ version: 1
 authority: context-injection@copilot-extensions
 engine:
   schema: copilot-extensions.context-injection-engine
-  version: 2
+  version: 3
 ```
 
 The authority must be that exact enabled marketplace plugin, and its adjacent
@@ -124,29 +124,26 @@ side effects remain direct. A side-effect-only hook declares
 the direct side-effect command separate from the pure contributor command.
 
 An authority-aware producer asks the selected engine to rendezvous. It
-suppresses its direct `additionalContext` only when the exact repository
-authority is proven active and compatible; every earlier failure invokes its
-original pure contributor directly. After proof, a producer computes or waits
-for the shared result but emits `{}`. Only the selected authority, invoking the
-engine without `--producer`, emits the cached aggregate. Post-proof
-contributor, admission, or aggregate failures publish one shared cached `{}`
-instead of returning to caller-specific fallback.
+suppresses its caller-specific direct `additionalContext` only when the exact
+repository authority is proven active and compatible; every earlier failure
+invokes its original pure contributor directly. After proof, every producer and
+the selected authority emit the same cached aggregate. Post-proof contributor,
+admission, or aggregate failures publish one shared cached `{}` instead of
+returning to caller-specific fallback.
 
 Rendezvous identity is the pair `(sessionId, canonical resolved cwd)`. Repeated
 authority calls for that exact pair return byte-identical cached output, while
 either component changing selects a different result. The authority may run
-before, after, or concurrently with producers; producer hooks remain empty, so
-exactly one hook emits non-empty context. Producer and authority hooks must set
+before, after, or concurrently with producers; every participating hook returns
+the same aggregate bytes. Producer and authority hooks must set
 their host-level `timeoutSec` to at least the engine's 25-second rendezvous
 deadline; use 30 seconds to leave time for wrapper output. This host timeout is
 separate from the pure contributor's `timeoutSeconds` field.
 
 The declaration makes ownership and possible outputs inspectable. It does not
-assign host execution order. The rendezvous and single non-empty authority make
-that order irrelevant on compatible hosts, which must preserve an earlier
-non-empty `additionalContext` when another hook returns `{}`. Treat that
-output-composition behavior as a versioned compatibility requirement, never as
-an inference from observed hook order.
+assign host execution order. The rendezvous and byte-identical shared output
+make that order irrelevant even when a later empty result would otherwise erase
+earlier context.
 
 ## Review rule
 
