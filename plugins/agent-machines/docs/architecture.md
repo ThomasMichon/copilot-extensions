@@ -87,6 +87,13 @@ Schema version 2 is the fail-closed capability boundary for
 behavior: current validators reject the declaration, and an older exact-v1
 runtime rejects a v2 package before any surface is applied.
 
+The exact `copilot.settings.plugin-tombstones` enforce group is the
+backward-compatible migration form. It contains only
+`enabledPlugins.<plugin>: false` leaves, uses the settings surface's existing
+deep merge, and therefore works on older schema-v1 runtimes without replacing
+undeclared operator plugins. Current validators reject any other disposition,
+key, or value in that group.
+
 The accepted dispositions are:
 
 | Disposition | Current behavior |
@@ -193,6 +200,8 @@ guide.
   they should be `ensure-present` unions;
 - explicitly disabling a bootstrap-critical plugin is an error;
 - enabled-plugin tombstones under schema v1 are errors;
+- the false-only `copilot.settings.plugin-tombstones` enforce group is accepted
+  under schema v1 and validated as a distinct backward-compatible contract;
 - if any package manages marketplaces, omitting the bootstrap-critical
   `copilot-extensions` marketplace is an error.
 

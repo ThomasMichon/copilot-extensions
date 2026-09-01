@@ -264,3 +264,40 @@ def test_collect_contributions_prefix_scoping(tmp_path):
     pkg = load_package(write_package(tmp_path / "a", "p.yaml", data), source_repo="a")
     got = collect_contributions([pkg], "copilot.settings")
     assert len(got) == 2  # settings + settings.plugins, not permissions
+
+
+def test_plugin_tombstone_group_preserves_operator_extras(tmp_path):
+    repo = tmp_path / "acme"
+    repo.mkdir()
+    data = base_package(schema_version=1)
+    data["manage"]["copilot.settings.plugin-tombstones"] = {
+        "disposition": "enforce",
+        "values": {"enabledPlugins": {"legacy@m": False}},
+    }
+    package = load_package(
+        write_package(repo, "p.yaml", data),
+        source_repo="acme",
+    )
+    home = _settings(tmp_path)
+    (home / "settings.json").write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {
+                    "legacy@m": True,
+                    "operator-extra@m": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    contributions = collect_contributions([package], "copilot.settings")
+    settings.apply(contributions, home=home, dry_run=False)
+
+    restored = json.loads(
+        (home / "settings.json").read_text(encoding="utf-8")
+    )
+    assert restored["enabledPlugins"] == {
+        "legacy@m": False,
+        "operator-extra@m": True,
+    }

@@ -38,6 +38,7 @@ _OPAQUE_SETTING_MAPS = {
     ("copilot.settings", "enabledPlugins"),
     ("copilot.settings", "extraKnownMarketplaces"),
 }
+PLUGIN_TOMBSTONE_GROUP = "copilot.settings.plugin-tombstones"
 
 
 @dataclass
@@ -145,6 +146,27 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
             values = spec.get("values", spec.get("value"))
             if values is None:
                 continue
+            if key == PLUGIN_TOMBSTONE_GROUP:
+                enabled_plugins = (
+                    values.get("enabledPlugins")
+                    if isinstance(values, dict)
+                    else None
+                )
+                if isinstance(enabled_plugins, dict):
+                    for plugin, enabled in enabled_plugins.items():
+                        leaf_key = (
+                            "copilot.settings",
+                            "enabledPlugins",
+                            str(plugin),
+                        )
+                        enforced_shapes.setdefault(leaf_key, []).append(
+                            (pkg.name, _shape(enabled))
+                        )
+                        if isinstance(enabled, _SCALAR):
+                            enforced_scalar.setdefault(leaf_key, []).append(
+                                (pkg.name, enabled)
+                            )
+                continue
             # copilot.settings.* suffixes group contributions but do not change
             # their physical settings.json root.
             root = (
@@ -196,6 +218,44 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                     "enforce-conflict",
                     f"'{_format_path(leaf_key)}' is enforced to conflicting scalar values "
                     f"across packages: {detail}",
+                )
+            )
+    return findings
+
+
+def check_plugin_tombstone_group(
+    packages: list[RequirementPackage],
+) -> list[Finding]:
+    """Validate the backward-compatible false-only plugin tombstone group."""
+    findings: list[Finding] = []
+    for pkg in packages:
+        spec = pkg.manage.get(PLUGIN_TOMBSTONE_GROUP)
+        if spec is None:
+            continue
+        values = spec.get("values", spec.get("value"))
+        enabled_plugins = (
+            values.get("enabledPlugins")
+            if isinstance(values, dict) and set(values) == {"enabledPlugins"}
+            else None
+        )
+        valid = (
+            spec.get("disposition") == "enforce"
+            and isinstance(enabled_plugins, dict)
+            and all(
+                isinstance(name, str)
+                and bool(name)
+                and enabled is False
+                for name, enabled in enabled_plugins.items()
+            )
+        )
+        if not valid:
+            findings.append(
+                Finding(
+                    "error",
+                    "plugin-tombstone-contract",
+                    f"package '{pkg.name}' must declare "
+                    f"'{PLUGIN_TOMBSTONE_GROUP}' as an enforce contribution "
+                    "containing only enabledPlugins.<plugin>: false entries",
                 )
             )
     return findings
@@ -295,6 +355,7 @@ def validate(
     """Run every manifest-only validation rule over the resolved package union."""
     findings: list[Finding] = []
     findings.extend(check_scalar_conflicts(packages))
+    findings.extend(check_plugin_tombstone_group(packages))
     findings.extend(check_plugin_tombstone_schema(packages))
     findings.extend(check_bootstrap_floor(packages))
     findings.extend(check_resource_conflicts(packages, machine, plat))

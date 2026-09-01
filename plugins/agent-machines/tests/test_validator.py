@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_machines.manifest import load_package
 from agent_machines.reconcile import manifest_hash, plan, resolve_union
 from agent_machines.validator import has_errors, validate
@@ -255,6 +257,53 @@ def test_schema1_enforced_plugin_disable_is_not_a_tombstone(tmp_path):
     findings = validate([package])
 
     assert not any(finding.code == "schema-capability" for finding in findings)
+
+
+def test_plugin_tombstone_group_is_valid_under_schema1(tmp_path):
+    data = base_package(schema_version=1)
+    data["manage"]["copilot.settings.plugin-tombstones"] = {
+        "disposition": "enforce",
+        "values": {"enabledPlugins": {"legacy@example": False}},
+    }
+    package = _pkg(tmp_path, "legacy", data)
+
+    findings = validate([package])
+
+    assert not any(
+        finding.code in {"plugin-tombstone-contract", "shape-mismatch"}
+        for finding in findings
+    )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {
+            "disposition": "ensure-present",
+            "values": {"enabledPlugins": {"legacy@example": False}},
+        },
+        {
+            "disposition": "enforce",
+            "values": {"enabledPlugins": {"legacy@example": True}},
+        },
+        {
+            "disposition": "enforce",
+            "values": {"enabledPlugins": {"legacy@example": False}, "model": "x"},
+        },
+    ],
+)
+def test_plugin_tombstone_group_rejects_invalid_shapes(tmp_path, spec):
+    data = base_package(schema_version=1)
+    data["manage"]["copilot.settings.plugin-tombstones"] = spec
+    package = _pkg(tmp_path, "legacy", data)
+
+    findings = validate([package])
+
+    assert any(
+        finding.code == "plugin-tombstone-contract"
+        and finding.level == "error"
+        for finding in findings
+    )
 
 
 def test_bootstrap_floor_marketplace_union(tmp_path):
