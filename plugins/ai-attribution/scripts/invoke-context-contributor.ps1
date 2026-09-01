@@ -106,8 +106,15 @@ function Invoke-BufferedProcess {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         $bytes = $utf8.GetBytes($InputText)
-        $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-        $process.StandardInput.Close()
+        try {
+            $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+            $process.StandardInput.BaseStream.Flush()
+        }
+        catch [IO.IOException] { }
+        try {
+            $process.StandardInput.Close()
+        }
+        catch { }
         $process.WaitForExit()
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()

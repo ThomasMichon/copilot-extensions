@@ -960,7 +960,13 @@ def test_windows_wrapper_direct_fallback_without_python(
     )
     commands = tmp_path / "commands"
     commands.mkdir()
-    payload = json.dumps({"cwd": str(tmp_path), "sessionId": "standalone"})
+    payload = json.dumps(
+        {
+            "cwd": str(tmp_path),
+            "sessionId": "standalone",
+            "initialPrompt": "x" * (1024 * 1024),
+        }
+    )
 
     for shell in filter(
         None,

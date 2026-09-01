@@ -83,6 +83,8 @@ preserve stdin as UTF-8, resolve the exact source-qualified adopted authority,
 and otherwise run the local pure contributor directly. Engine and direct
 contributor output is buffered and accepted only when the child exits zero with
 exactly one JSON object; every other result becomes one `{}` with hook exit zero.
+If a non-reading child closes stdin early, a broken-pipe write does not override
+its successful exit and valid buffered output.
 PowerShell uses `ArgumentList` where available and the Windows command-line
 quoting algorithm on Windows PowerShell 5.1 so empty, quoted, and
 backslash-terminated arguments survive unchanged. The wrapper requires Python

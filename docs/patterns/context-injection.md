@@ -231,6 +231,8 @@ one `{}` with exit zero. It never appends a second fallback around a pipe whose
 stdin writer can receive SIGPIPE. A POSIX host without Python cannot select an
 authority or fully parse JSON; its compatibility fallback accepts only a
 successful, structurally bounded local object result.
+An early broken-pipe write from a non-reading child does not replace that
+child's successful exit and valid buffered output.
 
 PowerShell wrappers set explicit UTF-8 input and output encodings, write
 redirected native stdin as UTF-8 bytes, and preserve arbitrary contributor
