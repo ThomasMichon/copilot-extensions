@@ -233,6 +233,32 @@ class TestEventLogFromDB:
 
         assert log.active_tool_call()["tool_call_id"] == "tc1"
 
+    def test_durable_snapshot_reads_db_head_before_event_lock(
+        self, tmp_db: Database, monkeypatch
+    ) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        log = EventLog(db=tmp_db, session_id="s1")
+        log.append("agent_message", {"text": "done"})
+        original = tmp_db.get_max_event_id
+
+        def get_max_event_id(session_id: str) -> int:
+            assert log._lock.acquire(blocking=False)
+            log._lock.release()
+            return original(session_id)
+
+        monkeypatch.setattr(tmp_db, "get_max_event_id", get_max_event_id)
+
+        continuity, head, events = log.snapshot_window(
+            after=None, limit=10, durable=True
+        )
+        detail_continuity, event = log.snapshot_event(1, durable=True)
+
+        assert continuity == detail_continuity
+        assert head == 1
+        assert [item.id for item in events] == [1]
+        assert event is not None and event.id == 1
+
     def test_from_db_flushes_queued_burst(self, tmp_db: Database) -> None:
         now = time.time()
         tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)

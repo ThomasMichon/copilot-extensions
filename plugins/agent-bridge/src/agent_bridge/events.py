@@ -254,13 +254,16 @@ class EventLog:
         an append or rebuild from mixing a position from one history with events
         from another.
         """
+        durable_head: int | None = None
+        if durable and self._db is not None and self._session_id is not None:
+            durable_head = self._db.get_max_event_id(self._session_id)
         with self._lock:
             if not self._events:
                 return (None, 0, [])
-            durable_head = self._events[-1].id
-            if durable and self._db is not None and self._session_id is not None:
-                durable_head = self._db.get_max_event_id(self._session_id)
-            visible_count = min(len(self._events), max(0, durable_head))
+            head_limit = (
+                durable_head if durable_head is not None else self._events[-1].id
+            )
+            visible_count = min(len(self._events), max(0, head_limit))
             if visible_count <= 0:
                 return (None, 0, [])
             continuity = self._telemetry.log_epoch or None
@@ -280,11 +283,16 @@ class EventLog:
         self, event_id: int, *, durable: bool = False
     ) -> tuple[str | None, SseEvent | None]:
         """Atomically read one event with the continuity that identifies it."""
+        durable_head: int | None = None
+        if durable and self._db is not None and self._session_id is not None:
+            durable_head = self._db.get_max_event_id(self._session_id)
         with self._lock:
-            durable_head = self._events[-1].id if self._events else 0
-            if durable and self._db is not None and self._session_id is not None:
-                durable_head = self._db.get_max_event_id(self._session_id)
-            visible_count = min(len(self._events), max(0, durable_head))
+            head_limit = (
+                durable_head
+                if durable_head is not None
+                else (self._events[-1].id if self._events else 0)
+            )
+            visible_count = min(len(self._events), max(0, head_limit))
             continuity = (
                 (self._telemetry.log_epoch or None)
                 if visible_count > 0
