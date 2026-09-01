@@ -75,7 +75,7 @@ The missing capability is composition, not another bespoke reviewer.
 
 ### Phase 1 — Define the repository reviewer-loop contract
 
-- [ ] Specify one repository-owned declaration that composes discovery or
+- [x] Specify one repository-owned declaration that composes discovery or
       side-load input, reviewer recipe parameters, agent/body selection, pool
       filters/cap, evaluator behavior, and operator controls.
 - [x] Bind evaluator ownership to the producing emitter and stamp that
@@ -96,7 +96,7 @@ The missing capability is composition, not another bespoke reviewer.
       repository opt-in to sandboxed tests or `land=self` is explicit.
 - [x] Keep forge access and repository policy behind declared commands/agents;
       agent-dispatch remains a generic task-loop engine.
-- [ ] Define lifecycle/status output that joins declaration, emitted task,
+- [x] Define lifecycle/status output that joins declaration, emitted task,
       current worker, card/steer state, and terminal result without a second
       store.
 - [x] Document compatibility with the existing low-level registrar,
@@ -145,14 +145,14 @@ The missing capability is composition, not another bespoke reviewer.
 - [x] Extract the proven composition into one reviewer-loop declaration
       schema/helper that expands to the existing emitter/evaluator/pool
       primitives.
-- [ ] Add setup/inspect/status/doctor/enable/disable/side-load operations that
+- [x] Add setup/inspect/status/doctor/enable/disable/side-load operations that
       remain thin readers or writers over the declared source of truth.
-- [ ] Ensure repeated adoption and discovery are idempotent, provenance-aware,
+- [x] Ensure repeated adoption and discovery are idempotent, provenance-aware,
       and cannot create duplicate producers, evaluator bindings, or pools.
-- [ ] Make doctor distinguish declared-but-unserved, missing registrar pointer,
+- [x] Make doctor distinguish declared-but-unserved, missing registrar pointer,
       inactive-by-filter, overridden-off, blocked/dead-lettered, and healthy
       loops; include the existing atomic rearm path in actionable status.
-- [ ] Document the host/runtime prerequisites and how maintainers inspect,
+- [x] Document the host/runtime prerequisites and how maintainers inspect,
       pause, resume, recover, and side-load the loop.
 
 ### Phase 5 — Validate portability in a second repository
@@ -172,7 +172,7 @@ The missing capability is composition, not another bespoke reviewer.
 
 ## Validation Plan
 
-- [ ] Schema and expansion tests prove one declaration deterministically
+- [x] Schema and expansion tests prove one declaration deterministically
       materializes the intended emitter/evaluator/pool set.
 - [x] Recipe tests cover `land=self`, `land=author`, invalid combinations, CLI,
       local MCP, and hosted MCP.
@@ -184,7 +184,7 @@ The missing capability is composition, not another bespoke reviewer.
       completion.
 - [ ] Emitter tests prove discovery and side-load author byte-equivalent task
       contracts with emitter-owned evaluator association.
-- [ ] Registrar/supervisor tests prove repeated discovery produces one
+- [x] Registrar/supervisor tests prove repeated discovery produces one
       effective reviewer loop and operator disable remains higher precedence.
 - [ ] Filter tests prove two compatible pools do not receive an emitter-to-pool
       wire; the atomic claim alone selects one consumer.
@@ -199,7 +199,7 @@ The missing capability is composition, not another bespoke reviewer.
       repository-owned declaration/policy.
 - [ ] Recovery proof covers service restart, worker interruption, visible
       blocked state, atomic rearm, and continuation from durable card/progress.
-- [ ] Doctor proof reports a syntactically valid declaration with no serving
+- [x] Doctor proof reports a syntactically valid declaration with no serving
       host/pointer as inactive and actionable rather than silently healthy.
 - [ ] Discovery proof shows a restart resumes from its watermark/backoff state
       without re-emitting tasks for already-reviewed open changes.
@@ -310,3 +310,22 @@ declarative expansion follows only after that composition is proven.
   status/doctor diagnostics; this slice deliberately reuses the existing
   declaration, pointer, override, emitter, and task stores rather than adding a
   reviewer-loop database.
+
+### 2026-09-01 — Setup and joined diagnostics
+
+- Merged [PR 1590](https://github.com/ThomasMichon/copilot-extensions/pull/1590)
+  as `agent-dispatch` `0.1.0-dev255`. `reviewer-loop setup` now idempotently
+  registers the repository pointer without copying or rewriting the declaration,
+  rejects pointer-name and owner collisions, and preserves the registrar as a
+  thin index over the repository source of truth.
+- `reviewer-loop status|doctor` joins the declaration and pointer with the
+  supervisor's atomic per-cycle child-process snapshot, owner-scoped overrides,
+  repository-scoped actionable tasks, pool eligibility, and exact per-task
+  failed spawn history. It distinguishes missing pointers,
+  declared-but-unserved or filtered units, coordinator outages, blocked tasks,
+  spawn dead letters, and truncated scans.
+- Dead-letter output links directly to the existing atomic rearm command when
+  its three-failure safety precondition is met; lower attempt bounds receive an
+  explicit non-rearmable recovery explanation rather than an impossible command.
+  The final suite passed 1,558 tests and the runtime was deployed on the
+  validation host.
