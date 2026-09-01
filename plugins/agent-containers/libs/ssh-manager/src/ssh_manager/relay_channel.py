@@ -149,7 +149,7 @@ class SupervisedRelayForward:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=_creation_flags(),
                 start_new_session=(sys.platform != "win32"),
@@ -350,14 +350,13 @@ class SupervisedRelayForward:
 
     @staticmethod
     async def _kill(proc: asyncio.subprocess.Process) -> None:
-        if proc.returncode is not None:
-            return
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
         try:
-            proc.kill()
-        except ProcessLookupError:
-            return
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
+            await asyncio.wait_for(proc.communicate(), timeout=5.0)
         except (asyncio.TimeoutError, TimeoutError, ProcessLookupError):
             pass
 
