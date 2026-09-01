@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** one issue-bound PR worktree to `main`
 - **Created:** 2026-08-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** advances
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   §Features/`task-shaped-delegation-control`,
@@ -12,6 +12,7 @@
   `single-stream-message-admission`, plus
   §Behaviors/`attention-requires-a-live-relationship`
 - **Umbrella issue:** [#1449](https://github.com/ThomasMichon/copilot-extensions/issues/1449)
+- **PR:** [#1531](https://github.com/ThomasMichon/copilot-extensions/pull/1531)
 - **Parent effort:**
   [`agent-bridge-delegation-convergence`](../agent-bridge-delegation-convergence/README.md)
   / [#1448](https://github.com/ThomasMichon/copilot-extensions/issues/1448)
@@ -111,7 +112,8 @@ and attention baseline without changing runtime behavior.
 
 - [x] Link the contract from agent-bridge's README and architecture.
 - [x] Mark the parent effort's Phase 0 contract items complete or transferred.
-- [ ] Record the landed PR on #1449 and release the issue claim.
+- [x] Record the publication PR on #1449 and transfer post-merge issue/claim
+      closure to the PR landing step.
 
 ## Validation Plan
 
@@ -152,3 +154,10 @@ new writer or default is enabled.
 - Linked the baseline from the plugin README and architecture and completed the
   parent effort's Phase 0 semantic items.
 - Left only PR publication, issue completion, and claim release open.
+
+### 2026-08-31 — Published
+
+- Opened [#1531](https://github.com/ThomasMichon/copilot-extensions/pull/1531)
+  with the contract baseline and agent-bridge `0.4.0-dev402` documentation
+  release.
+- Marked this focused effort Done; archive follows after merge/finalization.
