@@ -63,7 +63,9 @@ class _TextBudget:
     limit: int
     used: int = 0
 
-    def clip(self, value: Any, *, field_limit: int | None = None) -> tuple[str, bool, int]:
+    def clip(
+        self, value: Any, *, field_limit: int | None = None
+    ) -> tuple[str, bool, int]:
         text = "" if value is None else str(value)
         original = len(text)
         allowed = max(0, self.limit - self.used)

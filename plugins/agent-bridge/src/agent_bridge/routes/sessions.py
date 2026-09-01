@@ -123,11 +123,11 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
             )
         return session
     raise HTTPException(
-            status_code=409,
-            detail=(
-                "The authoritative owned session head could not be resolved "
-                "without guessing"
-            ),
+        status_code=409,
+        detail=(
+            "The authoritative owned session head could not be resolved "
+            "without guessing"
+        ),
     )
 
 
