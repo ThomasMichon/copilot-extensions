@@ -799,6 +799,7 @@ def load_config(
     path: Path | None = None,
     *,
     include_control_plane_related_pr: bool = True,
+    project: str | None = None,
 ) -> Config:
     """Load and parse the layered project config.
 
@@ -833,6 +834,8 @@ def load_config(
         include_control_plane_related_pr: Include foreign-repo PR overlays from
             active harness plugins. Related-index bootstrap disables this to
             avoid resolving the same active-plugin corpus twice.
+        project: Explicit project identity. When supplied, it overrides legacy
+            machine/global ``repo_name`` values for this load.
 
     Returns:
         Parsed Config object.
@@ -860,7 +863,8 @@ def load_config(
     # ``session_env`` addition survives alongside the repo's own keys.
     machine_raw = _load_yaml_safe(path)
     preliminary_repo_name = (
-        machine_raw.get("repo_name")
+        project
+        or machine_raw.get("repo_name")
         or global_raw.get("repo_name")
         or _project_name_safe()
     )
@@ -887,7 +891,8 @@ def load_config(
 
     # Active project / default repo name.
     repo_name = (
-        machine_raw.get("repo_name")
+        project
+        or machine_raw.get("repo_name")
         or global_raw.get("repo_name")
         or _project_name_safe()
     )
@@ -1055,6 +1060,16 @@ def load_config(
             )
         ),
     )
+
+
+def load_project_config(name: str) -> Config:
+    """Load one project's layered config without inheriting caller identity."""
+    previous = active_project()
+    set_active_project(name)
+    try:
+        return load_config(project_dir(name) / "config.yaml", project=name)
+    finally:
+        set_active_project(previous)
 
 
 def _load_yaml_safe(path: Path) -> dict[str, Any]:

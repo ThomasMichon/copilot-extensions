@@ -10,7 +10,7 @@ import types
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import claim_handoffs, finalize, tracking
+from agent_worktrees import claim_handoffs, finalize, state_root, tracking
 
 
 MACHINE = "anomalous-potato"
@@ -43,6 +43,14 @@ def handoff_state(tmp_path, monkeypatch):
     monkeypatch.setattr(claim_handoffs.cfg, "install_dir", lambda: runtime)
     monkeypatch.setattr(
         claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
+    )
+    ready_root = state_root.StateRoot(
+        str(tmp_path), "launch_repo", "source-project", False, False, True)
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: state_root.CoordinationReadiness(
+            True, "ready", ready_root),
     )
     claims = [
         tracking.ResourceClaim(
@@ -473,6 +481,76 @@ def _args(target, **kwargs):
     }
     values.update(kwargs)
     return argparse.Namespace(**values)
+
+
+def test_cli_offer_rejects_unready_coordination_without_side_effects(
+    handoff_state,
+    monkeypatch,
+    capfd,
+):
+    config = types.SimpleNamespace(machine=MACHINE, repo_name="source-project")
+    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-source")
+    root = state_root.StateRoot(
+        None,
+        "knowledge_repo",
+        "",
+        True,
+        True,
+        False,
+        error="no knowledge_repo is bound",
+    )
+    readiness = state_root.CoordinationReadiness(
+        False,
+        "knowledge_binding_required",
+        root,
+        error="Bind the knowledge repository and retry the same operation.",
+    )
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: readiness,
+    )
+    source_path = (
+        claim_handoffs.cfg.project_dir("source-project")
+        / "worktrees"
+        / "wt-source.yaml"
+    )
+    before = source_path.read_bytes()
+
+    rc = m.cmd_claims(_args(
+        ["handoff", "offer", handoff_state[0].ref],
+        handoff_to=[CONSUMER],
+    ))
+    assert rc == 3
+    assert json.loads(capfd.readouterr().out)["code"] == (
+        "knowledge_binding_required"
+    )
+    assert source_path.read_bytes() == before
+    assert not claim_handoffs.registry_path().exists()
+
+
+def test_cli_decline_remains_available_when_coordination_is_unready(
+    handoff_state,
+    monkeypatch,
+    capfd,
+):
+    bundle = _offer([handoff_state[0].ref])[0]
+    config = types.SimpleNamespace(machine=MACHINE, repo_name="consumer-project")
+    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda config: pytest.fail("decline ran coordination readiness"),
+    )
+
+    rc = m.cmd_claims(_args(
+        ["handoff", "decline", bundle.bundle_id],
+        reason="binding unavailable",
+    ))
+    assert rc == 0
+    assert json.loads(capfd.readouterr().out)["state"] == "declined"
 
 
 def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):

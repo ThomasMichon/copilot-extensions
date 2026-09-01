@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed plan PR, followed by serial implementation PRs
 - **Created:** 2026-08-31
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/agent-fabric` - resource claims, resource leasing,
   resource accountability, and claimed-resource-not-reclaimed
 - **Umbrella issue:** [#1513](https://github.com/ThomasMichon/copilot-extensions/issues/1513)
@@ -95,19 +95,21 @@ usable.
 ## Plan
 
 ### Phase 1 - Lock the coordination-readiness contract
-- [ ] Add one structured readiness result that distinguishes ready,
+- [x] Add one structured readiness result that distinguishes ready,
   `knowledge_binding_required`, and other state-root resolution failures.
-- [ ] Add failing tests for unbound and unresolved stateless configurations,
+- [x] Add failing tests for unbound and unresolved stateless configurations,
   bound knowledge repositories, and self-hosted repositories.
 - [ ] Prove rejected operations leave worktree records, handoff registries,
   Git refs, subprocesses, and provider calls untouched.
 
 ### Phase 2 - Gate agent-worktrees claim and lease producers
-- [ ] Gate `claims add`, including every supported kind and `--owner-ref`,
+- [x] Gate `claims add`, including every supported kind and `--owner-ref`,
   before record mutation or cross-machine deferral.
-- [ ] Gate claim handoff offers before reservations are persisted.
+- [x] Gate claim handoff offers before reservations are persisted.
 - [ ] Gate claim handoff acceptance before consumer-side claims or resource
   ownership change; a rejected consumer leaves the source authoritative.
+  The current runtime has no acceptance surface; land this gate with the
+  acceptance implementation rather than speculating one in advance.
 - [ ] Gate `run` and automatic parent-child worktree ownership before child
   launch, Git worktree creation, or reciprocal claim writes.
 - [ ] Gate lease acquisition before store resolution or network I/O. For a
@@ -204,3 +206,22 @@ agent-worktrees-owned operation, preserving the suite's a-la-carte invariant.
 - Reconciled scope with `worktree-finality-and-obligations`: this effort owns
   pre-creation authorization; the existing effort owns post-creation lifecycle
   and finality.
+
+### 2026-08-31 - Proposal reviewed
+- Proposal PR [#1521](https://github.com/ThomasMichon/copilot-extensions/pull/1521)
+  merged after review.
+- Began the first serial implementation slice: the versioned readiness contract,
+  direct `claims add` gating, and claim-handoff offer gating.
+- Confirmed the current claim-handoff runtime has no acceptance command or API.
+  Its planned readiness gate remains coupled to the future acceptance
+  implementation; decline, cancel, and other teardown paths stay available.
+- Review found that `--owner-ref` initially checked the provider's ambient
+  project instead of the owning worktree's project. The gate now loads the
+  same-machine owner's project configuration before any mutation; cross-machine
+  deferral remains gated locally before returning a deferred result.
+- Rebased across concurrent mainline changes and assigned monotonic
+  agent-worktrees/catalog versions after the intervening releases.
+- Focused coordination tests and guard tests pass. The full agent-worktrees
+  portfolio repeatedly exceeded contained sub-suite budgets on this Windows
+  host during unrelated Git-heavy tests; each timeout suspect passed alone.
+  Required release-contract, payload-generation, version, and lint gates pass.

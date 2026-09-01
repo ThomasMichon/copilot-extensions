@@ -7985,6 +7985,25 @@ def _claim_handoff_actor(
     return tracking.format_claim_ref(config.machine, project, worktree_id)
 
 
+def _require_coordination_readiness(
+    config: cfg.Config,
+    *,
+    json_out: bool,
+) -> int | None:
+    readiness = state_root_mod.coordination_readiness(config)
+    if readiness.ready:
+        return None
+    if json_out:
+        _json_output({
+            "error": readiness.error,
+            "code": readiness.code,
+            "coordination_readiness": readiness.as_dict(),
+        })
+    else:
+        output.err(f"{readiness.code}: {readiness.error}")
+    return 3
+
+
 def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
     """Dispatch same-machine claim-bundle offer/show/decline/cancel."""
     if not target:
@@ -8013,6 +8032,12 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
             created = None
         else:
             config = cfg.load_config()
+            if action == "offer":
+                blocked = _require_coordination_readiness(
+                    config, json_out=args.json
+                )
+                if blocked is not None:
+                    return blocked
             actor = _claim_handoff_actor(
                 config, getattr(args, "release_worktree", None)
             )
@@ -8128,6 +8153,16 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 return _json_error(err, 2)
             output.err(err)
             return 2
+        readiness_config = config
+        if rec_path is not None:
+            parsed_owner = tracking.parse_claim_ref(owner_ref)
+            assert parsed_owner is not None and parsed_owner.is_qualified
+            readiness_config = cfg.load_project_config(parsed_owner.project)
+        blocked = _require_coordination_readiness(
+            readiness_config, json_out=args.json
+        )
+        if blocked is not None:
+            return blocked
         if rec_path is None:
             # Cross-machine owner -- its ledger is remote; the lease mirror owns
             # the disposition. Not an error: a no-op locally, surfaced for the
@@ -8141,6 +8176,9 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             output.warn(msg)
             return 0
     else:
+        blocked = _require_coordination_readiness(config, json_out=args.json)
+        if blocked is not None:
+            return blocked
         wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
         rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
@@ -8500,6 +8538,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
         output.err(f"worktree not found: {wt_id}")
         return 1
     rec = tracking.load_record(rec_path)
+    readiness = state_root_mod.coordination_readiness(config)
 
     outbound = [
         {
@@ -8521,6 +8560,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
         "owner_ref": rec.owner_ref,
         "outbound": outbound,
         "inbound": inbound,
+        "coordination_readiness": readiness.as_dict(),
     }
 
     if args.json:
@@ -8529,6 +8569,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
 
     # Human-facing ledger.
     print(f"Claim ledger for {wt_id}  ({rec.repo} @ {rec.machine})")
+    print(f"  coordination readiness: {readiness.code}")
     if rec.owner_ref:
         print(f"  owned as a resource by: {rec.owner_ref}")
     print("  Outbound (resources this worktree owns):")
@@ -15384,6 +15425,24 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     return 0 if res.path else 3
 
 
+def cmd_coordination_readiness_dispatch(argv: list[str]) -> int:
+    """Emit the versioned preflight for claim-producing integrations."""
+    p = argparse.ArgumentParser(
+        prog="agent-worktrees coordination-readiness",
+        description=(
+            "Report whether resource-claim coordination has a usable durable "
+            "state root."
+        ),
+    )
+    try:
+        p.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    readiness = state_root_mod.coordination_readiness(cfg.load_config())
+    print(json.dumps(readiness.as_dict(), indent=2))
+    return 0 if readiness.ready else 3
+
+
 def cmd_config_root_dispatch(argv: list[str]) -> int:
     """Resolve the guarded machine-local root for supported setup writers."""
     p = argparse.ArgumentParser(
@@ -17642,6 +17701,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Emit the full resolution as JSON")
     sp.add_argument("--repo", default=None, metavar="NAME",
                     help="Explicit override: resolve this registered repo")
+
+    # coordination-readiness -- dispatched pre-argparse.
+    sub.add_parser(
+        "coordination-readiness",
+        help="Emit versioned claim-coordination readiness as JSON",
+    )
 
     # config-root -- dispatched pre-argparse (see cmd_config_root_dispatch)
     sp = sub.add_parser(
@@ -21976,6 +22041,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "state-root":
         try:
             return cmd_state_root_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # coordination-readiness -- JSON preflight for claim-producing peers.
+    if args_list[0] == "coordination-readiness":
+        try:
+            return cmd_coordination_readiness_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130
