@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-machines"
-version = "0.1.0-dev77"
+version = "0.1.0-dev78"
 description = "Portable restore-machinestate for Copilot CLI -- converge a machine to in-repo requirement packages."
 readme = "README.md"
 license = "MIT"

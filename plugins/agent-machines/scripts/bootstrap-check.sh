@@ -88,12 +88,16 @@ PolicyPath="$ProfileHome/.copilot-extensions/installation-mode.json"
      [ "$status" = provenance-blocked ] &&
      [ "$(jsonValue "$(jsonPath policy state)" || true)" = valid ] &&
      [ "$(jsonValue "$(jsonPath policy enabled)" || true)" = false ]; then
-    marketplacesPath="$(jsonPath installationMode marketplaces)"
-    marketplacesType="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path="$marketplacesPath" "$PolicyPath" 2>/dev/null || true)"
-    if [ -z "$marketplacesType" ] ||
-       { [ "$marketplacesType" = object ] &&
-         [ "$(LC_ALL=C awk -f "$query" -v mode=len -v query_path="$marketplacesPath" "$PolicyPath" 2>/dev/null || true)" = 0 ]; }; then
+    if [ ! -e "$PolicyPath" ] && [ ! -L "$PolicyPath" ]; then
       simplePolicyLegacy=1
+    else
+      marketplacesPath="$(jsonPath installationMode marketplaces)"
+      marketplacesType="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path="$marketplacesPath" "$PolicyPath" 2>/dev/null || true)"
+      if [ -z "$marketplacesType" ] ||
+         { [ "$marketplacesType" = object ] &&
+           [ "$(LC_ALL=C awk -f "$query" -v mode=len -v query_path="$marketplacesPath" "$PolicyPath" 2>/dev/null || true)" = 0 ]; }; then
+        simplePolicyLegacy=1
+      fi
     fi
   fi
   if { [ "$status" = ready ] && [ "$actualMode" = legacy ] && [ "$desiredMode" = legacy ]; } ||

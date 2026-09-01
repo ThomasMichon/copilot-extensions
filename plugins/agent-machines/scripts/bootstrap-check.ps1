@@ -86,26 +86,31 @@ $policyPresent = (
         $status.policy.enabled -is [bool] -and
         -not $status.policy.enabled
     ) {
-        try {
-            $policyDocument = Get-Content -LiteralPath $policyPath -Raw |
-                ConvertFrom-Json
-            $installationMode = @(
-                $policyDocument.PSObject.Properties |
-                    Where-Object { $_.Name -ceq 'installationMode' }
-            )
-            $marketplaces = @()
-            if ($installationMode.Count -eq 1) {
-                $marketplaces = @(
-                    $installationMode[0].Value.PSObject.Properties |
-                        Where-Object { $_.Name -ceq 'marketplaces' }
+        if (-not $policyPresent) {
+            $simplePolicyLegacy = $true
+        }
+        else {
+            try {
+                $policyDocument = Get-Content -LiteralPath $policyPath -Raw |
+                    ConvertFrom-Json
+                $installationMode = @(
+                    $policyDocument.PSObject.Properties |
+                        Where-Object { $_.Name -ceq 'installationMode' }
                 )
+                $marketplaces = @()
+                if ($installationMode.Count -eq 1) {
+                    $marketplaces = @(
+                        $installationMode[0].Value.PSObject.Properties |
+                            Where-Object { $_.Name -ceq 'marketplaces' }
+                    )
+                }
+                $simplePolicyLegacy = (
+                    $marketplaces.Count -eq 0 -or
+                    $marketplaces[0].Value.PSObject.Properties.Count -eq 0
+                )
+            } catch {
+                $simplePolicyLegacy = $false
             }
-            $simplePolicyLegacy = (
-                $marketplaces.Count -eq 0 -or
-                $marketplaces[0].Value.PSObject.Properties.Count -eq 0
-            )
-        } catch {
-            $simplePolicyLegacy = $false
         }
     }
     if (
