@@ -248,7 +248,7 @@ if ($actualMode -ceq 'namespaced') {
 if (-not (Test-Path -LiteralPath $runtimeRoot)) {
     New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 }
-$lockPath = Join-Path $runtimeRoot '.payload-provision.lock'
+$lockPath = Join-Path $runtimeRoot '.provision.lock'
 $lock = $null
 while (-not $lock) {
     try {

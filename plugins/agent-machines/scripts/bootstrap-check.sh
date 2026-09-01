@@ -38,6 +38,19 @@ fi
 if [ -z "$ProfileHome" ] && [ -n "$uid" ] && [ -r /etc/passwd ]; then
   ProfileHome="$(awk -F: -v uid="$uid" '$3 == uid { print $6; exit }' /etc/passwd)"
 fi
+if [ -z "$ProfileHome" ] && command -v dscl >/dev/null 2>&1; then
+  user="$(id -un 2>/dev/null || true)"
+  if [ -n "$user" ]; then
+    ProfileHome="$(
+      dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null |
+        awk '/^NFSHomeDirectory:/ {
+          sub(/^NFSHomeDirectory:[[:space:]]*/, "")
+          print
+          exit
+        }'
+    )"
+  fi
+fi
 if [ -z "$ProfileHome" ]; then
   echo "[agent-machines] canonical profile home is unavailable; skipping reconcile." >&2
   exit 0

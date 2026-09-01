@@ -225,10 +225,10 @@ unlock_provision() {
     fi
 }
 if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
-    exec 9>"$RUNTIME_ROOT/.payload-provision.lock"
+    exec 9>"$RUNTIME_ROOT/.provision.lock"
     flock 9
 else
-    LOCK_LINK="$RUNTIME_ROOT/.payload-provision.lock.pid"
+    LOCK_LINK="$RUNTIME_ROOT/.provision.lock.pid"
     until ln -s "$$" "$LOCK_LINK" 2>/dev/null; do
         owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
         if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then

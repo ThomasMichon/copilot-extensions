@@ -3,7 +3,8 @@ set -euo pipefail
 
 : "${CR_SCENARIO_NAME:=agent-machines-installation-cells}"
 export CR_SCENARIO_NAME
-source "$CR_LIB"
+_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 
 cr_init
 phase 0 "source and clean fixture boundary"

@@ -1331,6 +1331,18 @@ def test_first_use_provision_is_serialized(tmp_path: Path) -> None:
     assert not shadow_marker.exists()
 
 
+def test_agent_machines_dispatchers_share_the_legacy_installer_lock() -> None:
+    scripts = REPO / "plugins" / "agent-machines" / "scripts"
+    posix = (scripts / "invoke-payload-runtime.sh").read_text(encoding="utf-8")
+    powershell = (scripts / "invoke-payload-runtime.ps1").read_text(encoding="utf-8")
+
+    assert '$RUNTIME_ROOT/.provision.lock"' in posix
+    assert '$RUNTIME_ROOT/.provision.lock.pid"' in posix
+    assert "Join-Path $runtimeRoot '.provision.lock'" in powershell
+    assert ".payload-provision.lock" not in posix
+    assert ".payload-provision.lock" not in powershell
+
+
 def test_windows_templates_preserve_context_and_release_payload_cwd(
     tmp_path: Path,
 ) -> None:

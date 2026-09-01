@@ -4,7 +4,13 @@ $ErrorActionPreference = 'Continue'
 if (-not $env:CR_SCENARIO_NAME) {
     $env:CR_SCENARIO_NAME = 'agent-machines-installation-cells'
 }
-. $env:CR_LIB
+$cleanRoomLib = if ($env:CR_LIB) {
+    $env:CR_LIB
+}
+else {
+    Join-Path $PSScriptRoot '..\..\lib\clean-room-lib.ps1'
+}
+. $cleanRoomLib
 
 cr_init
 phase 0 'source and clean fixture boundary'
