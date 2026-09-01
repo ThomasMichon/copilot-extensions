@@ -2,9 +2,10 @@
 
 - **Slug:** `agent-bridge-delegation-convergence`
 - **Repo:** copilot-extensions
-- **Branch(es):** serial per-phase PR worktrees to `main`
+- **Branch(es):** issue-bound PR worktrees to `main`; parallel readers and
+  serial shared-state writers
 - **Created:** 2026-08-31
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   §Features/`task-shaped-delegation-control`,
@@ -13,14 +14,43 @@
   §Behaviors/`attention-requires-a-live-relationship` and
   `prompt-injection-requires-single-stream-proof`
 - **Umbrella issue:** [#1448](https://github.com/ThomasMichon/copilot-extensions/issues/1448)
+- **Sub-issues:**
+  [#1449](https://github.com/ThomasMichon/copilot-extensions/issues/1449)
+  (delegated-agent lifecycle and attention contract) ·
+  [#1450](https://github.com/ThomasMichon/copilot-extensions/issues/1450)
+  (attention-oriented wait) ·
+  [#1451](https://github.com/ThomasMichon/copilot-extensions/issues/1451)
+  (queue-first, handoff-safe steering) ·
+  [#1452](https://github.com/ThomasMichon/copilot-extensions/issues/1452)
+  (bounded delegated-result snapshots) ·
+  [#1453](https://github.com/ThomasMichon/copilot-extensions/issues/1453)
+  (idempotent single-stream live-session admission) ·
+  [#1506](https://github.com/ThomasMichon/copilot-extensions/issues/1506)
+  (task-shaped control facade) ·
+  [#1454](https://github.com/ThomasMichon/copilot-extensions/issues/1454)
+  (AHP projection)
 - **Related issues/dependencies:** [#1460](https://github.com/ThomasMichon/copilot-extensions/issues/1460)
   (version-skew-safe contract foundation) ·
+  [#1468](https://github.com/ThomasMichon/copilot-extensions/issues/1468)
+  (contract registry and baseline fixtures) ·
+  [#22](https://github.com/ThomasMichon/copilot-extensions/issues/22)
+  (terminal reconciliation after transport loss) ·
+  [#48](https://github.com/ThomasMichon/copilot-extensions/issues/48)
+  (worktree ownership reservation) ·
+  [#60](https://github.com/ThomasMichon/copilot-extensions/issues/60)
+  (live-session lease reconciliation) ·
+  [#1045](https://github.com/ThomasMichon/copilot-extensions/issues/1045)
+  (low-noise progress inspection) ·
+  [#112](https://github.com/ThomasMichon/copilot-extensions/issues/112)
+  (in-place handoff) ·
   [#1138](https://github.com/ThomasMichon/copilot-extensions/issues/1138)
   (immutable event identity) ·
   [#1266](https://github.com/ThomasMichon/copilot-extensions/issues/1266)
   (AHP host convergence) ·
   [#1267](https://github.com/ThomasMichon/copilot-extensions/issues/1267)
-  (coordinator-first delegation guidance)
+  (coordinator-first delegation guidance) ·
+  [#954](https://github.com/ThomasMichon/copilot-extensions/issues/954)
+  (venue parity)
 
 ## Guiding Intent
 
@@ -51,15 +81,22 @@ Durable fire-and-forget task ownership remains agent-dispatch's concern.
 
 ## Coordination
 
-- **Topology:** serial contract and implementation phases; surface changes wait
-  for the shared #1460 prerequisite they consume.
+- **Topology:** #1449 freezes the semantic contract first. #1450 and #1452 may
+  then proceed independently. #1451 and #1453 land serially because both touch
+  message admission and queue ordering, and wait for #1460/#1468 gates before
+  adding durable writers. #1506 composes the stable slices into the compact
+  facade. #1454 lands through the #1266 AHP PR lane.
 - **Host (owns PRs):** delegation contract driver.
 - **Delegates:** compatibility machinery lands through #1460, AHP mapping through
-  #1266, and cross-venue runner changes through #954.
+  #1266/#1454, and cross-venue runner changes through #954. Each claimant owns
+  only its numbered issue and focused tests.
 - **Handoff:** each phase lands one independently usable control increment with
   CLI/API documentation, compatibility fixtures, and Journal evidence before
   the next phase changes defaults. Any phase that changes the bridge-owned
   durable ledger waits for #1460's registry and reader/fencing review.
+- **Single-writer seams:** delegated lifecycle vocabulary, message admission,
+  queue ordering, shared event identity, and bridge-owned durable schemas land
+  serially even when result and attention readers proceed in parallel.
 
 ## Context
 
@@ -96,6 +133,8 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
 
 ### Phase 0 — Freeze the delegation contract
 
+Tracked by #1449.
+
 - [ ] Inventory current create, send, read, wait, interrupt, stop, resume, end,
       event, and result surfaces and map each to the intended compact lifecycle.
 - [ ] Define one stable delegated-agent identity and the relationship among
@@ -104,23 +143,20 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
       permission, policy decision, and unrecoverable reachability loss.
 - [ ] Define attached, subscribed, and detached caller relationships without
       promising an asynchronous wake-up channel after the caller disappears.
+- [ ] Define the scope, lifetime, and succession behavior of a logical-message
+      idempotency key so steering and represented-session admission consume one
+      meaning.
+- [ ] Publish a compact delegation baseline that maps current behavior to the
+      target vocabulary and names the owner of every remaining delta.
+- [ ] Keep #1468 authoritative for current wire/durable shape provenance while
+      this phase owns the lifecycle-vocabulary mapping layered over those
+      fixtures.
 - [ ] Register the selected semantics and fixtures through #1460 before enabling
       a new delegation-state writer or default. If the shared registry has not
       landed yet, pin the contract locally here and register it before the first
       writer is enabled.
 
-### Phase 1 — Present one task-shaped control surface
-
-- [ ] Provide one compact create/identify/read/steer/wait/interrupt/end model
-      across CLI and authenticated API surfaces.
-- [ ] Return a stable delegated-agent handle and durable position rather than
-      requiring a caller to reconstruct identity from process or transport data.
-- [ ] Keep advanced bridge operations available, but make ordinary delegation
-      independent of venue-specific commands or raw protocol details.
-- [ ] Preserve existing command compatibility while the new surface is
-      capability-gated and canaried.
-
-### Phase 2 — Deliver bounded accumulated results
+### Phase 1A — Deliver bounded accumulated results (#1452)
 
 - [ ] Return bounded current state, latest result, and incremental work since a
       caller-held position.
@@ -129,8 +165,11 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
 - [ ] Use only stable event or projection identities supplied by #1138.
 - [ ] Represent truncation, unavailable detail, and reduced-fidelity targets
       explicitly.
+- [ ] Consume #1045's liveness/progress inspection plane for "is it advancing?"
+      while owning the result projection for "what did it produce?"; do not add
+      a second competing status payload.
 
-### Phase 3 — Make waits attention-oriented
+### Phase 1B — Make waits attention-oriented (#1450)
 
 - [ ] Let a retained caller or subscriber wait for selected attention boundaries
       rather than only transport completion or one successful turn.
@@ -142,8 +181,10 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
       only when the successor negotiates semantics compatible with the caller's
       retained contract. Otherwise settle with an explicit contract-changed
       attention reason and the successor identity.
+- [ ] Consume #22's terminal-event reconciliation for transport failure; #1450
+      owns wait settlement semantics, not the underlying terminal emission.
 
-### Phase 4 — Serialize steering and cancellation
+### Phase 2 — Make steering queue-first and handoff-safe (#1451)
 
 - [ ] Admit each accepted prompt exactly once to the authoritative controller for
       the session lineage.
@@ -151,19 +192,55 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
       attribution and order.
 - [ ] Distinguish interrupting the current turn, stopping future work, ending the
       session, and retiring its durable representation.
+- [ ] Return an acknowledgement identifying immediate versus queued admission
+      and the durable logical-message/queue identity.
+- [ ] Define succession behavior now and keep its handoff conformance case
+      explicit; the live test may remain gated until #112's handoff primitive is
+      available.
+
+### Phase 3 — Fence represented-session prompt admission (#1453)
+
 - [ ] Deny prompt injection when a represented interactive target cannot prove
       authoritative identity, serialized admission, and one-turn creation.
+- [ ] Compose #48's ownership reservation and terminal `taken-over` state plus
+      #60's lease/liveness reconciliation; this slice adds logical-message
+      idempotency and submission-to-turn/result correlation rather than another
+      ownership store.
+- [ ] Cover duplicate extension-handler delivery, ambiguous acknowledgement
+      retry, overlapping resume, stale subscribers, and duplicate rendering
+      versus duplicate model execution.
+- [ ] Keep lower-fidelity represented sessions useful for presence,
+      observation, and attributed notification when prompt admission cannot be
+      proven safe.
 
-### Phase 5 — Map the contract across venues and host faces
+### Phase 4 — Present the task-shaped control facade (#1506)
+
+- [ ] Provide one compact create/identify/read/steer/wait/interrupt/stop/resume/
+      end model across CLI and authenticated API surfaces.
+- [ ] Return a stable delegated-agent handle and durable position rather than
+      requiring a caller to reconstruct identity from process or transport
+      data.
+- [ ] Keep advanced bridge operations available, but make ordinary delegation
+      independent of venue-specific commands or raw protocol details.
+- [ ] Preserve existing command compatibility while the new surface is
+      capability-gated and canaried through #1460/#1468.
+
+### Phase 5A — Prove venue parity (#954)
 
 - [ ] Run the same lifecycle and attention fixtures against local, peer-owned,
       trusted-container, and CodeSpace targets through #954.
+- [ ] Verify that a provider or frontend update does not reinterpret the selected
+      delegation contract of an existing session.
+
+### Phase 5B — Map the contract through AHP (#1454, #1266)
+
 - [ ] Expose the model through AHP only where #1266 can map it to standard
       lifecycle, state, actions, or explicitly negotiated extensions.
 - [ ] Preserve reduced-fidelity representations for interactive or native-owned
       sessions instead of advertising unsupported control.
-- [ ] Verify that a provider or frontend update does not reinterpret the selected
-      delegation contract of an existing session.
+- [ ] Consume #1449's lifecycle/identity contract and #1450/#1452's
+      attention/result outcomes in the AHP resource, action, and subscription
+      model without redefining them inside the adapter.
 
 ### Phase 6 — Migrate callers and retire ambiguity
 
@@ -185,8 +262,11 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
       reasons are distinguishable and carry a durable resume position.
 - [ ] Detaching preserves the target but creates no false promise that the
       caller's model loop will wake later.
+- [ ] Detached status/result reads explicitly report that no retained
+      attention relationship exists.
 - [ ] Two concurrent callers produce one serialized prompt stream and at most one
-      model turn per accepted prompt across retries and successor handoff.
+      model turn per accepted prompt across retries. Successor-handoff coverage
+      may use the explicit gated conformance fixture until #112 lands.
 - [ ] Busy-target steering queues durably in order and survives caller,
       frontend, and transport loss.
 - [ ] Unsupported interactive-session injection exposes only the fidelity it can
@@ -196,8 +276,12 @@ does not redefine this lifecycle or turn bridge extensions into AHP core.
 - [ ] Local, peer, trusted-container, and CodeSpace scenarios produce the same
       lifecycle outcomes; restricted targets cannot gain authority through a
       richer capability.
-- [ ] AHP mapping passes #1266 conformance without turning bridge-only attention
-      or federation behavior into false AHP core requirements.
+- [ ] The full compact control vocabulary is exercised against at least one
+      remote venue, not only checked for regression.
+- [ ] #1454's focused AHP mapping fixtures pass without turning bridge-only
+      attention or federation behavior into false AHP core requirements. Full
+      AHP conformance remains owned by #1266 and is not a completion gate for
+      the core #1448 delegation surface.
 
 ## Proposal
 
@@ -229,3 +313,18 @@ ownership.
 - Defined the central honesty boundary: attention wake-up requires an attached
   invocation or retained subscription; detached work survives without claiming
   a future caller wake-up.
+- Carved #1449–#1454 and #1506 into independently claimable semantic-contract,
+  wait, steering, bounded-result, represented-session safety, compact-facade,
+  and AHP-projection slices.
+
+### 2026-08-31 — Plan review and activation
+
+- Reconciled the effort with the newer #1460/#1468 contract foundation rather
+  than duplicating compatibility machinery.
+- Gave #1449–#1454 full independent scope and acceptance criteria, attached
+  them as native sub-issues of #1448, and added #1506 for the previously
+  unowned compact control facade.
+- Drew explicit ownership boundaries with #22, #48, #60, #1045, #112, #1138,
+  #1266, and #954.
+- Marked the effort Active after review; implementation may proceed by the
+  dependency and single-writer rules in Coordination.
