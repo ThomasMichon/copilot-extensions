@@ -790,6 +790,11 @@ def source_snapshot():
     return tuple(_build_sources())
 
 
+def bootstrap_rows():
+    """Return cache-only rows for this host without loading config or roster."""
+    return data_local.load(classify=False)
+
+
 def machines(sources=None):
     """Ordered machine-tab descriptors: (label, machine, env, reachable).
 
