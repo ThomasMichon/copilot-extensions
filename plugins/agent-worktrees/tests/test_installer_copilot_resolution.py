@@ -40,6 +40,19 @@ def _bash_resolver_source() -> str:
     return "resolve_executable_command_path() {" + body + "\n}\n"
 
 
+def _bash_path(bash: str, path: Path) -> str:
+    if os.name != "nt":
+        return str(path)
+    result = subprocess.run(
+        [bash, "-c", 'cygpath -u -- "$1"', "_", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
 @pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
 def test_bash_resolver_ignores_aliases_and_functions_for_path_command(
     tmp_path: Path,
@@ -50,6 +63,8 @@ def test_bash_resolver_ignores_aliases_and_functions_for_path_command(
     executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     executable.chmod(0o755)
     resolver = _bash_resolver_source()
+    bash_dir = _bash_path(bash, tmp_path)
+    bash_executable = _bash_path(bash, executable)
 
     for shadow in (
         "alias copilot='printf alias'",
@@ -60,7 +75,7 @@ def test_bash_resolver_ignores_aliases_and_functions_for_path_command(
             "shopt -s expand_aliases\n"
             f"{resolver}\n"
             f"{shadow}\n"
-            f'PATH={shlex_quote(str(tmp_path))}:$PATH\n'
+            f"PATH={shlex_quote(bash_dir)}:$PATH\n"
             "resolve_executable_command_path copilot\n"
         )
         result = subprocess.run(
@@ -70,7 +85,7 @@ def test_bash_resolver_ignores_aliases_and_functions_for_path_command(
             timeout=30,
         )
         assert result.returncode == 0, result.stderr
-        assert Path(result.stdout.strip()).resolve() == executable.resolve()
+        assert result.stdout.strip().casefold() == bash_executable.casefold()
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
