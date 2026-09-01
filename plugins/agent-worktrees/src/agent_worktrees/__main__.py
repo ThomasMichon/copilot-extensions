@@ -91,6 +91,7 @@ from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
+from . import session_context as session_context_mod
 from . import services as svc
 from . import state_root as state_root_mod
 from . import validate as val
@@ -17850,7 +17851,28 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         target_cwd = (
             record.worktree_path if record is not None else cwd or "<unknown>"
         )
-        if recovered_mux:
+        message = ""
+        if record is not None:
+            try:
+                context_config = cfg.load_config()
+                registry_context = session_context_mod.render_registry_context(
+                    context_config,
+                    record,
+                    cwd=target_cwd,
+                    pane_id=pane_id,
+                    mux_session=(
+                        recovered_mux.get("session_name")
+                        if recovered_mux
+                        else None
+                    ),
+                )
+                message = (
+                    "[agent-worktrees] This Copilot session is bound.\n"
+                    f"{registry_context}"
+                )
+            except Exception:
+                message = ""
+        if not message and recovered_mux:
             message = (
                 f"[agent-worktrees] This Copilot session is inside mux session "
                 f"{recovered_mux['session_name']}, pane {pane_id} (recovered "
@@ -17859,13 +17881,13 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 "Treat this binding as authoritative even when TMUX/PSMUX "
                 "environment variables or the session payload cwd are absent."
             )
-        elif pane_id:
+        elif not message and pane_id:
             message = (
                 f"[agent-worktrees] This Copilot session reports mux pane "
                 f"{pane_id} and is bound to worktree {wt_id}; run task commands "
                 f"from {target_cwd}."
             )
-        else:
+        elif not message:
             message = (
                 f"[agent-worktrees] This Copilot session is bound to worktree "
                 f"{wt_id}; run task commands from {target_cwd}."

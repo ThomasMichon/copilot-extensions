@@ -119,9 +119,43 @@ def _plugin(
         "hooks": "hooks.json",
         "sessionContext": "session-context.json",
     }
+    contributor = {
+        "id": "main",
+        "pure": True,
+        "order": 100,
+        "timeoutSeconds": 5,
+        "maxBytes": 4096,
+        "bash": ["scripts/emit.sh"],
+        "powershell": ["scripts/emit.ps1"],
+    }
+    source = f"{name}@copilot-extensions"
     (plugin / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     (plugin / "hooks.json").write_text(
-        json.dumps({"version": 1, "hooks": {"sessionStart": [{"bash": "true"}]}}),
+        json.dumps(
+            {
+                "version": 1,
+                "hooks": {
+                    "sessionStart": [
+                        {
+                            "type": "command",
+                            "bash": (
+                                AGGREGATE_CONTEXT.conformance.canonical_bash_hook(
+                                    source,
+                                    contributor,
+                                )
+                            ),
+                            "powershell": (
+                                AGGREGATE_CONTEXT.conformance.canonical_powershell_hook(
+                                    source,
+                                    contributor,
+                                )
+                            ),
+                            "timeoutSec": 30,
+                        }
+                    ]
+                },
+            }
+        ),
         encoding="utf-8",
     )
     scripts = plugin / "scripts"
@@ -149,17 +183,7 @@ def _plugin(
             "sideEffects": "none",
             "context": "authority-aware",
         },
-        "contributors": [
-            {
-                "id": "main",
-                "pure": True,
-                "order": 100,
-                "timeoutSeconds": 5,
-                "maxBytes": 4096,
-                "bash": ["scripts/emit.sh"],
-                "powershell": ["scripts/emit.ps1"],
-            }
-        ],
+        "contributors": [contributor],
     }
     (plugin / "session-context.json").write_text(
         json.dumps(declaration), encoding="utf-8"
@@ -223,6 +247,109 @@ def test_producer_wrapper_falls_back_without_sibling_authority(
     )
 
     assert json.loads(result.stdout) == {"additionalContext": "STANDALONE"}
+
+
+def test_wrapper_direct_fallback_runs_from_payload_cwd(tmp_path: Path) -> None:
+    policy = _plugin(
+        tmp_path / "standalone",
+        "copilot-extensions",
+        "a-policy",
+        context="placeholder",
+    )
+    (policy / "scripts" / "emit.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '{\"additionalContext\":\"CWD:%s\"}' \"$PWD\"\n",
+        encoding="utf-8",
+    )
+    (policy / "scripts" / "emit.ps1").write_text(
+        "[Console]::Out.Write((@{ additionalContext = "
+        "('CWD:' + $PWD.Path) } | ConvertTo-Json -Compress))\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+
+    result = _run_native_producer_wrapper(
+        policy,
+        "a-policy@copilot-extensions",
+        "main",
+        json.dumps({"cwd": str(project), "sessionId": "standalone"}),
+    )
+
+    assert json.loads(result.stdout) == {
+        "additionalContext": f"CWD:{project}"
+    }
+
+
+def test_wrapper_direct_fallback_rejects_unavailable_payload_cwd(
+    tmp_path: Path,
+) -> None:
+    policy = _plugin(
+        tmp_path / "standalone",
+        "copilot-extensions",
+        "a-policy",
+        context="MUST-NOT-RUN",
+    )
+
+    result = _run_native_producer_wrapper(
+        policy,
+        "a-policy@copilot-extensions",
+        "main",
+        json.dumps(
+            {
+                "cwd": str(tmp_path / "missing"),
+                "sessionId": "standalone",
+            }
+        ),
+    )
+
+    assert json.loads(result.stdout) == {}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX no-Python fallback")
+def test_posix_wrapper_direct_fallback_without_python(
+    tmp_path: Path,
+) -> None:
+    policy = _plugin(
+        tmp_path / "standalone",
+        "copilot-extensions",
+        "a-policy",
+        context="placeholder",
+    )
+    (policy / "scripts" / "emit.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '{\"additionalContext\":\"CWD:%s\"}' \"$PWD\"\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    for name in ("bash", "cat", "dirname"):
+        source = shutil.which(name)
+        assert source is not None
+        (commands / name).symlink_to(source)
+    environment = {
+        **os.environ,
+        "PATH": str(commands),
+        "COPILOT_PLUGIN_ROOT": str(policy),
+        "COPILOT_PROJECT_DIR": str(project),
+    }
+
+    result = subprocess.run(
+        [str(commands / "bash"), str(policy / "scripts" / "invoke-context-contributor.sh"),
+         "a-policy@copilot-extensions", "main", "scripts/emit.sh"],
+        input=json.dumps({"cwd": str(project), "sessionId": "standalone"}),
+        text=True,
+        capture_output=True,
+        cwd=tmp_path,
+        env=environment,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == {
+        "additionalContext": f"CWD:{project}"
+    }
 
 
 def test_windows_ancestry_reader_passes_parent_pid_in_environment(
@@ -1036,6 +1163,60 @@ def test_contributors_run_from_session_cwd(tmp_path: Path) -> None:
     ]
 
 
+def test_direct_fallback_runs_from_validated_payload_cwd(tmp_path: Path) -> None:
+    plugin = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-cwd",
+        context="placeholder",
+    )
+    (plugin / "scripts" / "emit.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '{\"additionalContext\":\"CWD:%s\"}' \"$PWD\"\n",
+        encoding="utf-8",
+    )
+    (plugin / "scripts" / "emit.ps1").write_text(
+        "[Console]::Out.Write((@{ additionalContext = "
+        "('CWD:' + $PWD.Path) } | ConvertTo-Json -Compress))\n",
+        encoding="utf-8",
+    )
+    subdir = tmp_path / "repo" / "nested"
+    subdir.mkdir(parents=True)
+
+    result = _run(
+        tmp_path,
+        [("a-cwd", plugin)],
+        cwd=subdir,
+        producer="a-cwd@copilot-extensions/main",
+        adoption_case="missing",
+    )
+
+    assert json.loads(result.stdout) == {
+        "additionalContext": f"CWD:{subdir}"
+    }
+
+
+def test_direct_fallback_rejects_unavailable_payload_cwd(
+    tmp_path: Path,
+) -> None:
+    plugin = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-cwd",
+        context="MUST-NOT-RUN",
+    )
+
+    result = _run(
+        tmp_path,
+        [("a-cwd", plugin)],
+        cwd=tmp_path / "missing",
+        producer="a-cwd@copilot-extensions/main",
+        adoption_case="missing",
+    )
+
+    assert json.loads(result.stdout) == {}
+
+
 def test_one_failed_contributor_rejects_partial_aggregate(tmp_path: Path) -> None:
     sources = tmp_path / "sources"
     healthy = _plugin(sources, "mkt", "a-healthy", context="HEALTHY")
@@ -1531,7 +1712,7 @@ def test_post_admission_failure_is_one_shared_empty_result(
     assert "one or more contributors failed" in first.stderr
 
 
-def test_rendezvous_identity_is_exact_session_and_canonical_cwd_pair(
+def test_rendezvous_identity_includes_validated_stack_generation(
     tmp_path: Path,
 ) -> None:
     policy = _plugin(
@@ -1547,6 +1728,12 @@ def test_rendezvous_identity_is_exact_session_and_canonical_cwd_pair(
         [("a-policy", policy), ("context-injection", aggregator)],
         session_id="session-a",
     )
+    unchanged = _run(
+        tmp_path,
+        [("a-policy", policy), ("context-injection", aggregator)],
+        session_id="session-a",
+    )
+    assert unchanged.stdout == first.stdout
 
     (policy / "scripts" / "emit.sh").write_text(
         "#!/usr/bin/env bash\n"
@@ -1564,7 +1751,12 @@ def test_rendezvous_identity_is_exact_session_and_canonical_cwd_pair(
         encoding="utf-8",
     )
 
-    repeated = _run(
+    changed_stack = _run(
+        tmp_path,
+        [("a-policy", policy), ("context-injection", aggregator)],
+        session_id="session-a",
+    )
+    repeated_changed_stack = _run(
         tmp_path,
         [("a-policy", policy), ("context-injection", aggregator)],
         session_id="session-a",
@@ -1583,11 +1775,70 @@ def test_rendezvous_identity_is_exact_session_and_canonical_cwd_pair(
         session_id="session-b",
     )
 
-    assert repeated.stdout == first.stdout
+    assert changed_stack.stdout != first.stdout
+    assert "SECOND:session-a" in changed_stack.stdout
+    assert repeated_changed_stack.stdout == changed_stack.stdout
     assert different_cwd.stdout != first.stdout
     assert "SECOND:session-a" in different_cwd.stdout
     assert different_session.stdout != first.stdout
     assert "SECOND:session-b" in different_session.stdout
+
+
+def test_cached_guidance_is_retired_when_plugin_leaves_active_stack(
+    tmp_path: Path,
+) -> None:
+    policy = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-policy",
+        context="POLICY",
+    )
+    aggregator = tmp_path / "aggregator"
+    _copy_plugin(aggregator)
+    first = _run(
+        tmp_path,
+        [("a-policy", policy), ("context-injection", aggregator)],
+        session_id="changed-stack",
+    )
+    removed = _run(
+        tmp_path,
+        [("context-injection", aggregator)],
+        session_id="changed-stack",
+    )
+
+    assert "POLICY" in first.stdout
+    assert json.loads(removed.stdout) == {}
+
+
+def test_cached_guidance_cannot_bypass_new_nonconformance(
+    tmp_path: Path,
+) -> None:
+    policy = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "a-policy",
+        context="POLICY",
+    )
+    aggregator = tmp_path / "aggregator"
+    _copy_plugin(aggregator)
+    first = _run(
+        tmp_path,
+        [("a-policy", policy), ("context-injection", aggregator)],
+        session_id="invalid-stack",
+    )
+    declaration_path = policy / "session-context.json"
+    declaration = json.loads(declaration_path.read_text(encoding="utf-8"))
+    declaration["sessionStart"]["context"] = "none"
+    declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
+    invalid = _run(
+        tmp_path,
+        [("a-policy", policy), ("context-injection", aggregator)],
+        session_id="invalid-stack",
+    )
+
+    assert "POLICY" in first.stdout
+    assert json.loads(invalid.stdout) == {}
+    assert "not adoption-safe" in invalid.stderr
 
 
 def test_concurrent_producers_and_authority_emit_stable_bytes(
@@ -1714,6 +1965,7 @@ def test_concurrent_producers_and_authority_emit_stable_bytes(
     assert repeated_authority.stdout == outputs[2]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Bash wrapper test requires POSIX")
 def test_bash_wrapper_discards_partial_output_on_aggregator_failure(
     tmp_path: Path,
 ) -> None:
