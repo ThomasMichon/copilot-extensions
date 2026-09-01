@@ -72,8 +72,6 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
         item for item in mgr.list_sessions()
         if item.target.worktree_id == ref
     ]
-    if ownership is None and not candidates:
-        return None
     live_session_id = mgr.db.current_live_session_for_worktree(
         ref, now=time.time()
     )
@@ -86,6 +84,8 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
                 "protocol generation"
             ),
         )
+    if ownership is None and not candidates:
+        return None
 
     candidate_rows = {
         item.session_id: mgr.db.get_session(item.session_id) or {}

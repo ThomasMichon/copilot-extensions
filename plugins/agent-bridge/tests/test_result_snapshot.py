@@ -317,6 +317,26 @@ def test_worktree_handle_does_not_fall_back_past_unknown_authoritative_head(
     probe.assert_not_called()
 
 
+def test_represented_only_worktree_reports_unavailable(client, app) -> None:
+    mgr: SessionManager = app.state.session_manager
+    assert mgr.db.register_live_session(
+        "represented-head",
+        machine="host",
+        cwd="/wt",
+        worktree_id="wt-represented",
+        repo="example/repo",
+        branch="main",
+        pid=123,
+        role=None,
+        now=time.time(),
+    ) == "live"
+
+    response = client.get("/api/v1/sessions/wt-represented/result")
+
+    assert response.status_code == 409
+    assert "represented session" in response.json()["detail"]
+
+
 def test_predecessor_snapshot_names_successor(client, app) -> None:
     mgr, _session = _seed_session(app)
     successor = Session(
