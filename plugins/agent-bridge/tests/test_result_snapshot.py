@@ -142,7 +142,7 @@ def test_positioned_snapshot_always_advances_with_small_text_budget(
 
 
 def test_default_snapshot_keeps_latest_items(client, app) -> None:
-    _mgr, session = _seed_session(app)
+    _, session = _seed_session(app)
     for number in range(5):
         session.event_log.append("agent_message", {"text": f"message-{number}"})
 
@@ -363,7 +363,7 @@ def test_predecessor_snapshot_names_successor(client, app) -> None:
 
 
 def test_old_position_reports_discontinuity_after_rebuild(client, app) -> None:
-    _mgr, session = _seed_session(app)
+    _, session = _seed_session(app)
     session.event_log.append("agent_message", {"text": "before"})
     old = client.get("/api/v1/sessions/sess-1/result").json()
 
@@ -447,7 +447,7 @@ def test_pending_input_is_unknown_without_live_client(client, app) -> None:
 
 
 def test_pending_input_is_bounded_when_live(client, app) -> None:
-    _mgr, session = _seed_session(app)
+    _, session = _seed_session(app)
     fake = MagicMock()
     fake.pending_ask_user.return_value = [
         {
@@ -496,7 +496,7 @@ def test_detail_reference_expands_turn_and_event(client, app) -> None:
 
 
 def test_detail_reference_does_not_expand_unprojected_thought(client, app) -> None:
-    _mgr, session = _seed_session(app)
+    _, session = _seed_session(app)
     event = session.event_log.append("agent_thought", {"text": "private reasoning"})
     ref = _event_ref(
         "owned",
@@ -524,7 +524,7 @@ def test_result_position_is_flushed_to_durable_storage(client, app) -> None:
 
 
 def test_detail_reference_rejects_rebuilt_history(client, app) -> None:
-    _mgr, session = _seed_session(app)
+    _, session = _seed_session(app)
     session.event_log.append("agent_message", {"text": "before"})
     snapshot = client.get("/api/v1/sessions/sess-1/result").json()
     ref = snapshot["incremental"]["items"][0]["detail_ref"]
