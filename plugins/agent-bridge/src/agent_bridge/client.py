@@ -305,9 +305,14 @@ class BridgeClient:
                         continue
                 raise BridgeClientError(exc.code, detail) from exc
             except (urllib.error.URLError, ConnectionResetError) as exc:
-                if isinstance(exc, ConnectionResetError) and method not in (
-                    "GET", "HEAD",
-                ):
+                reset = (
+                    isinstance(exc, ConnectionResetError)
+                    or (
+                        isinstance(exc, urllib.error.URLError)
+                        and isinstance(exc.reason, ConnectionResetError)
+                    )
+                )
+                if reset and method not in ("GET", "HEAD"):
                     raise BridgeConnectionError(
                         f"Connection to agent-bridge at {self._base} reset "
                         f"during non-idempotent {method}; request was not retried"

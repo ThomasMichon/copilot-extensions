@@ -327,7 +327,9 @@ class TestReresolveOnRejection:
         def reset_old_endpoint(req, timeout=None):
             seen.append(req.full_url)
             if req.full_url.startswith(old_base):
-                raise ConnectionResetError("daemon generation retired")
+                raise urllib.error.URLError(
+                    ConnectionResetError("daemon generation retired")
+                )
             return _FakeResp({"session_id": "s1"})
 
         with patch(
@@ -357,7 +359,9 @@ class TestReresolveOnRejection:
         )
         with patch(
             "agent_bridge.client.urllib.request.urlopen",
-            side_effect=ConnectionResetError("response lost"),
+            side_effect=urllib.error.URLError(
+                ConnectionResetError("response lost")
+            ),
         ):
             with pytest.raises(
                 BridgeConnectionError, match="non-idempotent POST",
