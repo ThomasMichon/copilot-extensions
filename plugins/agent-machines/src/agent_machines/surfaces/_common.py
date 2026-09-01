@@ -53,6 +53,10 @@ def read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+class SurfaceStateError(ValueError):
+    """A managed live-state file is malformed and unsafe to change."""
+
+
 def backup_file(path: Path, stamp: str | None = None) -> Path | None:
     """Copy ``path`` into ``~/.agent-machines/backups/<stamp>/`` before mutation."""
     if not path.exists():

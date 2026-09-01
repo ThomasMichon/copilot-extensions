@@ -279,6 +279,30 @@ def test_read_user_enabled_no_file_returns_empty(tmp_path, monkeypatch):
     assert reconcile.read_user_enabled_plugins() == []
 
 
+def test_read_installed_plugins_uses_inventory_not_activation(tmp_path, monkeypatch):
+    home = tmp_path / "copilot-home"
+    home.mkdir()
+    monkeypatch.setattr(reconcile, "_copilot_home", lambda: home)
+    (home / "config.json").write_text(
+        json.dumps(
+            {
+                "installedPlugins": [
+                    {
+                        "name": "context-handoff",
+                        "marketplace": MKT,
+                        "enabled": False,
+                    },
+                    {"name": f"efforts@{MKT}", "enabled": False},
+                    {"name": "other", "marketplace": "elsewhere"},
+                    {"name": f"agent-worktrees@{MKT}", "enabled": True},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert reconcile.read_installed_plugins() == ["context-handoff", "efforts"]
+
+
 # ---------------------------------------------------------------------------
 # Payload presence
 # ---------------------------------------------------------------------------

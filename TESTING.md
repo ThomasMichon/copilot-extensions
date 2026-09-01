@@ -148,7 +148,8 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   verified provider-rescue ingestion, generic provenance transport, compaction,
   and background-chronicle source/sink orchestration.
 - **agent-worktrees:** a large suite covering worktree lifecycle, the
-  status/tracking model, PR flow, and the Picker-facing engine contracts.
+  status/tracking model, PR flow, activation-preserving installed-inventory
+  updates, and the Picker-facing engine contracts.
 - **Worktree Manager:** its standalone suite includes the production Textual
   **Picker** UX, golden, cache, pivot, streaming, steering, profile, SSH-source,
   selection, capture, mock, and PNG-validation corpus under
@@ -165,7 +166,9 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   attribution, the 2 KB context budget, direct script fallback, missing-root
   failure-open behavior, skill trigger boundaries, README inventory, and live
   Bash/PowerShell parity when both shells are available.
-- **customizing-copilot:** payload-only scanner tests covering loaded-plugin
+- **customizing-copilot:** payload-only scanner and plugin-state helper tests
+  covering installed inventory vs. user/repository activation, dry-run-safe
+  user deactivation, loaded-plugin
   discovery, project/`.claude`/`.ai`/suite agent ownership, Task-disabled
   exemptions, MCP readiness and equivalent fallback checks, origin/version-aware
   external advisories, collision remediation, and counts-only context inventory.

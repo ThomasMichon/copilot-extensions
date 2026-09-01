@@ -24,10 +24,10 @@ import yaml
 
 #: Current requirement-package schema version. Bumped only by a deliberate,
 #: fixture-guarded migration (see docs/patterns/config-schema-migration.md).
-SCHEMA_VERSION = 2
-SUPPORTED_SCHEMA_VERSIONS = (1, SCHEMA_VERSION)
+SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, SCHEMA_VERSION)
 
-#: The seven dispositions that govern a managed key.
+#: The dispositions that govern a managed key.
 DISPOSITIONS = (
     "enforce",           # manifest is authoritative; overwrite live
     "ensure-present",    # manifest is a floor; live additions preserved, never revoked
@@ -36,7 +36,10 @@ DISPOSITIONS = (
     "exclude",           # hard secret guard; `capture` must never serialize
     "prune",             # opt-in, never-during-reconcile GC of dead entries
     "prerequisite-check",  # assert a prerequisite is satisfied; never store/apply a secret
+    "ensure-absent",     # remove declared map keys while preserving the map and inventory
 )
+
+PLUGIN_ACTIVATION_GROUP = "copilot.settings.plugin-activation"
 
 #: The stack-critical plugins/marketplaces the bootstrap-floor assertion protects
 #: (a package may add to, but never remove from, the union of these).
@@ -172,6 +175,55 @@ def _require(mapping: dict[str, Any], key: str, path: Path) -> Any:
     return mapping[key]
 
 
+def _validate_manage(
+    manage: dict[str, Any], schema: int, path: Path
+) -> None:
+    for key, spec in manage.items():
+        if not isinstance(spec, dict):
+            raise ManifestError(f"{path}: manage.{key} must be a mapping")
+        disp = spec.get("disposition", "ignore")
+        if disp not in DISPOSITIONS:
+            raise ManifestError(
+                f"{path}: manage.{key}.disposition {disp!r} is not one of {DISPOSITIONS}"
+            )
+        if disp != "ensure-absent":
+            continue
+        if schema < 3:
+            raise ManifestError(
+                f"{path}: manage.{key} uses ensure-absent; schema_version 3 is required"
+            )
+        keys = spec.get("keys")
+        valid_keys = (
+            key == PLUGIN_ACTIVATION_GROUP
+            and set(spec) == {"disposition", "keys"}
+            and isinstance(keys, dict)
+            and set(keys) == {"enabledPlugins"}
+            and isinstance(keys.get("enabledPlugins"), list)
+        )
+        if not valid_keys:
+            raise ManifestError(
+                f"{path}: ensure-absent is supported only at "
+                f"manage.{PLUGIN_ACTIVATION_GROUP} with exactly "
+                "keys.enabledPlugins"
+            )
+        plugins = keys["enabledPlugins"]
+        if not plugins or any(
+            not isinstance(item, str)
+            or item.count("@") != 1
+            or item.startswith("@")
+            or item.endswith("@")
+            for item in plugins
+        ):
+            raise ManifestError(
+                f"{path}: ensure-absent keys.enabledPlugins must be a "
+                "non-empty list of <plugin>@<marketplace> identities"
+            )
+        if len(plugins) != len(set(plugins)):
+            raise ManifestError(
+                f"{path}: ensure-absent keys.enabledPlugins contains duplicates"
+            )
+
+
 def load_package(
     path: Path,
     source_repo: str = "",
@@ -199,14 +251,7 @@ def load_package(
     manage = raw.get("manage") or {}
     if not isinstance(manage, dict):
         raise ManifestError(f"{path}: 'manage' must be a mapping")
-    for key, spec in manage.items():
-        if not isinstance(spec, dict):
-            raise ManifestError(f"{path}: manage.{key} must be a mapping")
-        disp = spec.get("disposition", "ignore")
-        if disp not in DISPOSITIONS:
-            raise ManifestError(
-                f"{path}: manage.{key}.disposition {disp!r} is not one of {DISPOSITIONS}"
-            )
+    _validate_manage(manage, schema, path)
 
     gate = raw.get("gate") or []
     if not isinstance(gate, list):
@@ -428,6 +473,11 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
     if not isinstance(manage_overlay, dict):
         manage_overlay = {}
     resolved_manage = _deep_merge(pkg.manage, manage_overlay)
+    _validate_manage(
+        resolved_manage,
+        pkg.schema_version,
+        pkg.source_path or Path(pkg.name),
+    )
     return RequirementPackage(
         name=pkg.name,
         schema_version=pkg.schema_version,

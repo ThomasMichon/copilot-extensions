@@ -2359,7 +2359,9 @@ function Deploy-CopilotPlugin {
             Write-ServiceOk "Copilot plugin updated (marketplace)"
         }
     } else {
-        $out = copilot plugin install agent-worktrees@copilot-extensions 2>&1
+        $copilotPath = (Get-Command copilot).Source
+        $out = & $VenvPython -m agent_worktrees.activation_preservation `
+            agent-worktrees@copilot-extensions --copilot $copilotPath 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-ServiceWarn "Plugin install failed: $out"
             return

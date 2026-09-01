@@ -14,6 +14,8 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
+    "agent-dropin-registry",
+    "agent-plugin-activation",
     "agent-plugin-resolve",
     "agent-procutil",
 ]
@@ -23,6 +25,12 @@ dependencies = [
 # (module ``plugin_resolve``). Vendored byte-identical from libs/plugin-resolve;
 # shared with agent-worktrees / agent-bridge / agent-codespaces.
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
+# Strict plugin inventory and activation inspection, removal, and snapshots
+# (module ``plugin_activation``). Vendored byte-identically from
+# libs/plugin-activation.
+agent-plugin-activation = { path = "libs/plugin-activation" }
+# Resilient scan authority and decision types required by plugin-activation.
+agent-dropin-registry = { path = "libs/dropin-registry" }
 # Shared Windows-headless / detached process-spawn kwargs (module
 # ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }

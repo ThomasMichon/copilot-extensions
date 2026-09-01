@@ -283,6 +283,16 @@ def read_user_enabled_plugins() -> list[str]:
     return sorted(_ce_plugin_names(enabled))
 
 
+def read_installed_plugins() -> list[str]:
+    """Return copilot-extensions plugin names from persistent inventory."""
+    from .activation_preservation import installed_plugin_identities
+
+    enabled = {
+        identity: True for identity in installed_plugin_identities(_copilot_home())
+    }
+    return sorted(_ce_plugin_names(enabled))
+
+
 # --------------------------------------------------------------------------
 # Installed payload discovery + version/scope
 # --------------------------------------------------------------------------

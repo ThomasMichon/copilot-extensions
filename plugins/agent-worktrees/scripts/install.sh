@@ -1457,7 +1457,9 @@ deploy_copilot_plugin() {
         }
         ok "Copilot plugin updated (marketplace)"
     else
-        out=$(copilot plugin install agent-worktrees@copilot-extensions 2>&1) || {
+        out=$("$VENV_PYTHON" -m agent_worktrees.activation_preservation \
+            agent-worktrees@copilot-extensions \
+            --copilot "$(command -v copilot)" 2>&1) || {
             warn "Plugin install failed: $out"
             return
         }

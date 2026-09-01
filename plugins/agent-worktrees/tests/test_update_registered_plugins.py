@@ -17,7 +17,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import reconcile
+from agent_worktrees import activation_preservation, reconcile
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +35,12 @@ def _no_user_global(monkeypatch: pytest.MonkeyPatch) -> None:
     deterministic (the real reader would pick up this machine's
     ``~/.copilot/settings.json``). The dedicated user-global tests override it."""
     monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: [])
+    monkeypatch.setattr(reconcile, "read_installed_plugins", lambda: [])
+    monkeypatch.setattr(
+        activation_preservation,
+        "run_install_preserving_activation",
+        lambda argv, identity, **kwargs: subprocess.run(argv, **kwargs),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -97,6 +103,78 @@ def test_loop_covers_all_registered_including_payload_only(monkeypatch):
         assert [
             "copilot", "plugin", "update", f"{name}@{reconcile.MARKETPLACE}"
         ] in calls
+
+
+def test_installed_but_inactive_plugin_is_updated(monkeypatch):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: [])
+    monkeypatch.setattr(
+        reconcile, "read_installed_plugins", lambda: ["context-handoff"]
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kwargs: calls.append(list(argv)) or _ok(),
+    )
+
+    assert m._update_registered_plugins()
+    assert [
+        "copilot",
+        "plugin",
+        "update",
+        "context-handoff@copilot-extensions",
+    ] in calls
+
+
+def test_missing_payload_install_uses_activation_preserving_wrapper(monkeypatch):
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: None)
+    called: list[tuple[list[str], str]] = []
+
+    def preserving(argv, identity, **kwargs):
+        called.append((list(argv), identity))
+        return _ok()
+
+    monkeypatch.setattr(
+        activation_preservation, "run_install_preserving_activation", preserving
+    )
+
+    assert (
+        m._update_one_plugin_payload("efforts", "copilot-extensions")
+        == "OK (installed)"
+    )
+    assert called == [
+        (
+            [
+                "copilot",
+                "plugin",
+                "install",
+                "efforts@copilot-extensions",
+            ],
+            "efforts@copilot-extensions",
+        )
+    ]
+
+
+def test_malformed_activation_state_is_reported_without_raising(monkeypatch):
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: None)
+
+    def fail_preservation(argv, identity, **kwargs):
+        raise activation_preservation.PluginStateError("malformed settings")
+
+    monkeypatch.setattr(
+        activation_preservation,
+        "run_install_preserving_activation",
+        fail_preservation,
+    )
+    assert m._update_one_plugin_payload(
+        "efforts", "copilot-extensions"
+    ) == "plugin state error: malformed settings"
 
 
 def test_repo_declared_marketplace_operations_run_from_declaring_anchor(monkeypatch):

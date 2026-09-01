@@ -15,6 +15,73 @@ def _pkg(tmp_path: Path, name: str, data: dict):
     return load_package(write_package(tmp_path / name, "p.yaml", data), source_repo=name)
 
 
+def _removal_package(name: str, *identities: str) -> dict:
+    data = base_package(name, schema_version=3, gate=["*"])
+    data["manage"] = {
+        "copilot.settings.plugin-activation": {
+            "disposition": "ensure-absent",
+            "keys": {"enabledPlugins": list(identities)},
+        }
+    }
+    return data
+
+
+def test_duplicate_plugin_removals_compose(tmp_path):
+    a = _pkg(tmp_path, "a", _removal_package("a/x", "optional@m"))
+    b = _pkg(tmp_path, "b", _removal_package("b/x", "optional@m"))
+    findings = validate([a, b])
+    assert not has_errors(findings)
+    removal = plan([a, b], "box-1").removals
+    assert removal == [
+        {
+            "op": "remove",
+            "key": "enabledPlugins",
+            "item": "optional@m",
+            "contributors": ["a/x", "b/x"],
+        }
+    ]
+
+
+@pytest.mark.parametrize("managed_value", [True, False])
+def test_plugin_removal_conflicts_with_managed_value(tmp_path, managed_value):
+    remove = _pkg(tmp_path, "a", _removal_package("a/x", "optional@m"))
+    data = base_package("b/x", gate=["*"])
+    data["manage"]["copilot.settings"]["values"]["enabledPlugins"] = {
+        "optional@m": managed_value
+    }
+    managed = _pkg(tmp_path, "b", data)
+    findings = validate([remove, managed])
+    assert any(f.code == "plugin-activation-conflict" for f in findings)
+
+
+def test_plugin_removal_conflicts_with_tombstone_group(tmp_path):
+    remove = _pkg(tmp_path, "a", _removal_package("a/x", "optional@m"))
+    data = base_package("b/x", gate=["*"])
+    data["manage"] = {
+        "copilot.settings.plugin-tombstones": {
+            "disposition": "enforce",
+            "values": {"enabledPlugins": {"optional@m": False}},
+        }
+    }
+    findings = validate([remove, _pkg(tmp_path, "b", data)])
+    assert any(f.code == "plugin-activation-conflict" for f in findings)
+
+
+@pytest.mark.parametrize(
+    "identity", ["agent-worktrees@m", "agent-machines@m"]
+)
+def test_plugin_removal_protects_fixed_bootstrap_floor(tmp_path, identity):
+    package = _pkg(tmp_path, "a", _removal_package("a/x", identity))
+    assert any(f.code == "bootstrap-floor" for f in validate([package]))
+
+
+def test_plugin_removal_protects_declared_bootstrap_floor(tmp_path):
+    data = _removal_package("a/x", "required@m")
+    data["bootstrap-floor"] = {"plugins": ["required@m"]}
+    package = _pkg(tmp_path, "a", data)
+    assert any(f.code == "bootstrap-floor" for f in validate([package]))
+
+
 def test_no_conflict_when_scalars_agree(tmp_path):
     a = _pkg(tmp_path, "a", base_package("a/x", gate=["*"]))
     b = _pkg(tmp_path, "b", base_package("b/x", gate=["*"]))
