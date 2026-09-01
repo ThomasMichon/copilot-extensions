@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-08-28
+- **Last revised:** 2026-08-31
 - **Reality docs:** `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -65,6 +65,14 @@ Always-on context should be measurable by source and category so repositories,
 plugins, and operators can make deliberate tradeoffs within a shared budget.
 Injected kernels should carry a stable plugin owner marker.
 
+### resume-stable-context
+
+Ambient guidance should remain available after restart, resume, compaction, or
+other context reconstruction boundaries. When a start-time delivery channel is
+not durably represented in reconstructed history, a bounded model-facing prompt
+recovery channel should re-establish an exact, attributable context pointer
+without duplicating the full aggregate on every turn.
+
 ### coordinator-first-task-routing
 
 Harnesses should provide model-neutral guidance that helps a coordinating agent
@@ -107,6 +115,13 @@ Critical safety and publication constraints should retain a minimal static
 fallback when a launch path cannot load the richer plugin-owned guidance.
 Plugin setup should own any compatibility/fallback prose through a stable,
 idempotently reconciled marker or dedicated rule file.
+
+### recovery-revalidates-authority
+
+Context recovery should never replay a previously valid aggregate solely
+because session-local state exists. It should revalidate repository trust,
+scope, authority, and contributor identity at the current boundary, then either
+recover the matching context or fail closed with bounded guidance.
 
 ### transparent-cost
 

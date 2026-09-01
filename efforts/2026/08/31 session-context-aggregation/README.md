@@ -19,7 +19,8 @@
   [#1096](https://github.com/ThomasMichon/copilot-extensions/issues/1096) ·
   [#1496](https://github.com/ThomasMichon/copilot-extensions/issues/1496) ·
   [#1497](https://github.com/ThomasMichon/copilot-extensions/issues/1497) ·
-  [#1498](https://github.com/ThomasMichon/copilot-extensions/issues/1498)
+  [#1498](https://github.com/ThomasMichon/copilot-extensions/issues/1498) ·
+  [#1508](https://github.com/ThomasMichon/copilot-extensions/issues/1508)
 
 ## Guiding Intent
 
@@ -495,3 +496,15 @@ See [`design.md`](design.md).
   `migration-intake` effort.
 - Marked the effort Done and archived it. The umbrella issue can close without
   losing any remaining tracked scope.
+
+### 2026-08-31 - Resume robustness follow-up
+
+- Confirmed from a live host trace that `sessionStart` context is supplied to
+  the first model request as a synthetic user input rather than persisted in
+  the local `system.message` timeline. Tool continuations inherit it through
+  the response chain; resume runs `sessionStart` again to rehydrate it.
+- Recorded #1508 as the next robustness step: evaluate a fail-closed
+  `userPromptTransformed` hook that revalidates current authority and injects
+  one session-scoped context pointer when start-time context is unavailable.
+  The completed migration remains Done; this is a separately tracked
+  resilience enhancement.

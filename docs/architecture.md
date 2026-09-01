@@ -179,6 +179,25 @@ context-only; eleven plugins keep restart-safe idempotent side effects direct
 while publishing only their read-only context through the authority-aware
 wrapper. The authority never reruns those direct side effects.
 
+On current Copilot CLI hosts, a successful `sessionStart` `additionalContext`
+result is not written into the durable local timeline as part of the persisted
+`system.message`. The first model request instead receives it as a synthetic
+user input immediately before the transformed user prompt. Continuations within
+that response chain inherit it through the model API's `previous_response_id`,
+so the host does not resend it with every tool continuation. A resumed process
+reconstructs the local timeline and runs `sessionStart` again to rehydrate this
+ephemeral input.
+
+This makes resume robustness distinct from ordinary aggregation. Follow-up
+[#1508](https://github.com/ThomasMichon/copilot-extensions/issues/1508)
+proposes a fail-closed `userPromptTransformed` recovery path. Unlike command
+`userPromptSubmitted` output, which the host discards, a transformed-prompt
+replacement is model-facing, stored in session history, and replayed on resume.
+The recovery path would re-prove current trust, authority, cwd, and active-stack
+identity before adding one compact load-before-action pointer; session-state
+receipts record computation and fallback application, never claim that the
+model consumed startup context.
+
 Command glossaries are static breadcrumbs. They contain command ownership and,
 at most, stable bounded machine/repository pivots. Worktrees, sessions, leases,
 health, providers, and live agents are queried on demand because an initial
