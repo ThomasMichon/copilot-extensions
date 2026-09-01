@@ -25,7 +25,12 @@ import json
 import sys
 
 from . import obligations
-from .lease_config import ConfigError, load_lease_settings
+from .lease_config import (
+    ConfigError,
+    CoordinationReadinessError,
+    load_acquisition_lease_settings,
+    load_lease_settings,
+)
 from .lease_protocol import ProtocolError
 from .lease_store import (
     GitError,
@@ -68,9 +73,13 @@ def _print(snapshot: LeaseSnapshot | None, *, pretty: bool) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
-    settings = load_lease_settings(origin=args.origin)
-    store = GitLeaseStore(settings)
     command = args.command
+    settings = (
+        load_acquisition_lease_settings(origin=args.origin)
+        if command in {"acquire", "borrow"}
+        else load_lease_settings(origin=args.origin)
+    )
+    store = GitLeaseStore(settings)
     if command in {"acquire", "borrow"}:
         context = _with_disposition(_context(args.context), getattr(args, "disposition", None))
         snapshot = store.acquire(
@@ -190,6 +199,16 @@ def run_lease(argv: list[str]) -> int:
     except LeaseLost as exc:
         print(f"lease lost: {exc}", file=sys.stderr)
         return 3
+    except CoordinationReadinessError as exc:
+        print(
+            json.dumps({
+                "error": str(exc),
+                "code": exc.readiness.code,
+                "coordination_readiness": exc.readiness.as_dict(),
+            }),
+            file=sys.stderr,
+        )
+        return 5
     except (ConfigError, ProtocolError) as exc:
         print(f"invalid lease state or configuration: {exc}", file=sys.stderr)
         return 2
