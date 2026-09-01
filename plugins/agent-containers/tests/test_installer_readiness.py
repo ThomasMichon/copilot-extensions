@@ -25,6 +25,7 @@ def test_valid_empty_configuration_is_explicit(capsys):
     result = evaluate(ContainersConfig(), [], [])
 
     assert result["state"] == "configuration-empty"
+    assert "Docker is not required until a fleet is configured" in result["detail"]
     assert "did not create a container or pull an image" in result["detail"]
     assert emit(result) == 0
     assert json.loads(capsys.readouterr().out) == result
@@ -78,12 +79,23 @@ def test_toolchain_matches_configured_backend():
     )
 
 
+def test_empty_configuration_requires_no_container_toolchain():
+    findings = inspect_toolchain(
+        ContainersConfig(),
+        command_finder=lambda _command: None,
+    )
+
+    assert findings == ()
+
+
 def test_payload_command_is_read_only(monkeypatch, capsys):
     config = ContainersConfig()
     monkeypatch.setattr(cli, "load_config", lambda **_kwargs: config)
     monkeypatch.setattr(
         "agent_containers.lifecycle.list_containers",
-        lambda _config: [],
+        lambda _config: (_ for _ in ()).throw(
+            AssertionError("empty readiness must not probe Docker inventory")
+        ),
     )
     monkeypatch.setattr(
         "agent_containers.installer_readiness.inspect_toolchain",
