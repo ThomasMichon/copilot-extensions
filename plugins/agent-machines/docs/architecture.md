@@ -117,11 +117,15 @@ The accepted dispositions are:
 4. Apply declarative resources second (packages/files; see below).
 5. Run repo-local modules third.
 
-`plan`, `validate`, and `restore` default to the package-owning repository
-containing CWD. `--repo` selects one other repository; `--all-projects`
-explicitly selects the full machine union. `agent-machines restore` runs the
-validator over the selected scope before both dry-runs and applies. If the
-validator reports any error, restore refuses to continue.
+`plan`, `validate`, and `restore` default to the adopted project containing CWD
+plus its directly required supplemental repository. This relationship-aware
+scope is one hop and requires an explicit active binding to a canonically
+registered repository. `--repo` selects exactly one physical repository;
+`--all-projects` explicitly selects the full machine union. Entering a
+supplemental repository directly does not pull its requiring project back into
+scope. `agent-machines restore` runs the validator over the selected scope
+before both dry-runs and applies. If a required supplement is unavailable or
+the validator reports any error, restore refuses to continue.
 
 ## Managed Copilot surfaces
 

@@ -22,6 +22,11 @@ def test_reconcile_defaults_to_cwd_repo(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         cli._discover,
+        "project_scope_repos",
+        lambda name, path, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        cli._discover,
         "packages_in_repo",
         lambda path, name, machine, **kwargs: [package],
     )
@@ -35,6 +40,83 @@ def test_reconcile_defaults_to_cwd_repo(monkeypatch, tmp_path):
 
     assert packages == [package]
     assert scope == "repo:current"
+
+
+def test_reconcile_defaults_to_adopted_project_plus_supplement(
+    monkeypatch, tmp_path
+):
+    current = tmp_path / "current"
+    supplement = tmp_path / "supplement"
+    current.mkdir()
+    supplement.mkdir()
+    current_package = object()
+    supplemental_package = object()
+    calls = []
+    monkeypatch.setattr(
+        cli._layout,
+        "resolve_cwd_repo",
+        lambda: ("current", current, tmp_path / "anchor"),
+    )
+    monkeypatch.setattr(
+        cli._discover,
+        "project_scope_repos",
+        lambda name, path, **kwargs: [
+            cli._discover.RepoCandidate(name=name, path=path),
+            cli._discover.RepoCandidate(
+                name="supplement",
+                path=supplement,
+                required_by=("current",),
+            ),
+        ],
+    )
+
+    def packages_in_repo(path, name, machine, **kwargs):
+        calls.append((path, name, kwargs["source_anchor"]))
+        return [current_package if name == "current" else supplemental_package]
+
+    monkeypatch.setattr(cli._discover, "packages_in_repo", packages_in_repo)
+    monkeypatch.setattr(
+        cli,
+        "_collect_all_packages",
+        lambda machine: pytest.fail("project scope must not collect unrelated projects"),
+    )
+
+    packages, scope = cli._collect_reconcile_packages(_args(), "box")
+
+    assert packages == [current_package, supplemental_package]
+    assert scope == "project:current"
+    assert calls == [
+        (current, "current", tmp_path / "anchor"),
+        (supplement, "supplement", supplement),
+    ]
+
+
+def test_reconcile_unavailable_supplement_names_exact_repo_escape(
+    monkeypatch, tmp_path
+):
+    current = tmp_path / "current"
+    current.mkdir()
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(
+        cli._layout,
+        "resolve_cwd_repo",
+        lambda: ("current", current, current),
+    )
+    monkeypatch.setattr(
+        cli._discover,
+        "project_scope_repos",
+        lambda name, path, **kwargs: [
+            cli._discover.RepoCandidate(name=name, path=path),
+            cli._discover.RepoCandidate(
+                name="supplement",
+                path=missing,
+                required_by=("current",),
+            ),
+        ],
+    )
+
+    with pytest.raises(ManifestError, match=r"pass --repo .*current"):
+        cli._collect_reconcile_packages(_args(), "box")
 
 
 def test_reconcile_all_projects_is_explicit(monkeypatch):
@@ -52,6 +134,11 @@ def test_reconcile_all_projects_is_explicit(monkeypatch):
 
 def test_reconcile_accepts_registered_repo(monkeypatch, tmp_path):
     package = object()
+    monkeypatch.setattr(
+        cli._discover,
+        "project_scope_repos",
+        lambda name, path, **kwargs: pytest.fail("explicit --repo must remain exact"),
+    )
     monkeypatch.setattr(
         cli._discover,
         "resolve_registered_repo",

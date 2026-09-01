@@ -209,6 +209,122 @@ def test_discover_grafts_bound_supplemental_repo(tmp_path):
     ]
 
 
+def test_project_scope_resolves_only_direct_bound_supplement(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    knowledge = srcroot / "knowledge"
+    _mark_external_state(harness)
+    _mark_external_state(knowledge)
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+        archive={"class": "worktree"},
+    )
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+            "knowledge": _bind_knowledge(tmp_path, "knowledge", "archive"),
+        }
+    }
+
+    selected = discover.project_scope_repos(
+        "harness",
+        harness,
+        project_anchor=harness,
+        registry=reg,
+        projects=projects,
+        global_config={},
+    )
+
+    assert selected is not None
+    assert [candidate.name for candidate in selected] == ["harness", "knowledge"]
+    assert selected[1].required_by == ("harness",)
+
+
+def test_project_scope_returns_none_for_non_adopted_supplement(tmp_path):
+    srcroot = tmp_path / "Src"
+    knowledge = srcroot / "knowledge"
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+    )
+
+    selected = discover.project_scope_repos(
+        "knowledge",
+        knowledge,
+        project_anchor=knowledge,
+        registry=reg,
+        projects={"projects": {"harness": {}}},
+        global_config={},
+    )
+
+    assert selected is None
+
+
+def test_project_scope_requires_canonical_supplement_registration(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    _mark_external_state(harness)
+    reg = _registry(srcroot, harness={"class": "worktree"})
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+        }
+    }
+
+    with pytest.raises(ManifestError, match=r"no canonical repos\.yaml entry"):
+        discover.project_scope_repos(
+            "harness",
+            harness,
+            project_anchor=harness,
+            registry=reg,
+            projects=projects,
+            global_config={},
+        )
+
+
+def test_project_scope_for_normal_adopted_project_is_repo_only(tmp_path):
+    srcroot = tmp_path / "Src"
+    project = srcroot / "project"
+    project.mkdir(parents=True)
+    reg = _registry(srcroot, project={"class": "worktree"})
+    projects = {"projects": {"project": {}}}
+
+    selected = discover.project_scope_repos(
+        "project",
+        project,
+        project_anchor=project,
+        registry=reg,
+        projects=projects,
+        global_config={},
+    )
+
+    assert selected == [discover.RepoCandidate(name="project", path=project)]
+
+
+def test_project_scope_rejects_same_named_unregistered_clone(tmp_path):
+    srcroot = tmp_path / "Src"
+    registered = srcroot / "project"
+    clone = tmp_path / "other" / "project"
+    registered.mkdir(parents=True)
+    clone.mkdir(parents=True)
+    reg = _registry(srcroot, project={"class": "worktree"})
+    projects = {"projects": {"project": {}}}
+
+    selected = discover.project_scope_repos(
+        "project",
+        clone,
+        project_anchor=clone,
+        registry=reg,
+        projects=projects,
+        global_config={},
+    )
+
+    assert selected is None
+
+
 def test_bound_supplemental_repo_is_deduplicated_when_adopted(tmp_path):
     srcroot = tmp_path / "Src"
     harness = srcroot / "harness"

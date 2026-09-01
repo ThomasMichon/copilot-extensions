@@ -27,9 +27,11 @@ actions) and per-machine data stay in the consuming repo.
   conventional checkout is not accepted. A repo does not have to enable this
   plugin to contribute packages;
   `discover` annotates enablement, but the CLI does not require it by default.
-- **Restore is machine-scoped.** `~/.copilot/` is global to the user account, so
-  restore uses the union of every discovered package gated to this machine, not a
-  single current repo.
+- **Restore is relationship-aware.** Bare `plan`, `validate`, and `restore`
+  reconcile the adopted project containing CWD plus its directly bound required
+  supplemental repository. This keeps a stateless harness and its knowledge
+  packages together without pulling in unrelated projects. `--repo` selects one
+  physical repository exactly; `--all-projects` selects the full machine union.
 - **Restore is on-demand.** Session start reconciles the **agent-machines
   runtime** only; it never applies machine state.
 - **Declarative resources.** Beyond Copilot settings, a package can declare typed
@@ -93,9 +95,9 @@ agent-machines discover                 # packages gated to this machine
 agent-machines doctor                   # layout health across adopted repos
 agent-machines migrate --repo myrepo    # preview legacy -> canonical moves
 agent-machines migrate --repo myrepo --apply
-agent-machines plan                     # current repo (from CWD)
-agent-machines validate                 # current repo conflict validation
-agent-machines restore                  # current repo dry-run preview
+agent-machines plan                     # current project + required supplement
+agent-machines validate                 # project-scope conflict validation
+agent-machines restore                  # project-scope dry-run preview
 agent-machines restore --all-projects   # full machine-scoped union
 agent-machines restore --repo myrepo    # another single repo
 agent-machines restore --only ssh       # preview one surface/module
@@ -104,10 +106,15 @@ agent-machines restore --json           # structured plan/surface/module result
 agent-machines version
 ```
 
-`plan`, `validate`, and `restore` default to the package-owning Git repository
-containing CWD. Use `--repo <name-or-path>` for another single repository, or
+`plan`, `validate`, and `restore` default to the adopted project containing CWD
+plus its directly required supplemental repository. The relationship must be
+active, explicitly configured, and canonically registered; an unavailable
+required repository fails loudly. Use `--repo <name-or-path>` for exactly one
+physical repository (including an intentional local-only recovery), or
 `--all-projects` for the full adopted-project plus supplemental-repository
-machine union. A CWD outside Git fails rather than silently broadening scope.
+machine union. Entering a supplemental repository directly does not pull its
+requiring project back into scope. A CWD outside Git fails rather than silently
+broadening scope.
 `restore` defaults to a dry-run. `--apply` writes changes. `--only` filters by
 logical surface (`settings`, `permissions`, `trustedFolders`) or module name.
 Module stdout is shown by default in dry-runs, hidden during apply unless

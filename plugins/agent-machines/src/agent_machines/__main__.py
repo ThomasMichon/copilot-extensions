@@ -64,6 +64,32 @@ def _collect_reconcile_packages(
                 ) from exc
     else:
         repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo()
+        project_repos = _discover.project_scope_repos(
+            repo_name,
+            repo_path,
+            project_anchor=repo_anchor,
+        )
+        if project_repos is not None:
+            packages: list[RequirementPackage] = []
+            for index, candidate in enumerate(project_repos):
+                if not candidate.path.is_dir():
+                    owners = ", ".join(candidate.required_by) or repo_name
+                    raise ManifestError(
+                        f"project {owners!r} requires supplemental repo "
+                        f"{candidate.name!r}, but it is unavailable at "
+                        f"{candidate.path}; pass --repo {str(repo_path)!r} to "
+                        "reconcile only the current repository"
+                    )
+                packages.extend(
+                    _discover.packages_in_repo(
+                        candidate.path,
+                        candidate.name,
+                        machine,
+                        source_anchor=repo_anchor if index == 0 else candidate.path,
+                    )
+                )
+            scope_kind = "project" if len(project_repos) > 1 else "repo"
+            return packages, f"{scope_kind}:{repo_name}"
     return (
         _discover.packages_in_repo(
             repo_path,
@@ -318,8 +344,9 @@ def _build_parser() -> argparse.ArgumentParser:
         scope = command.add_mutually_exclusive_group()
         scope.add_argument(
             "--repo",
-            help="reconcile one registered repo name or repository path "
-                 "(default: repository containing CWD)",
+            help="reconcile exactly one registered repo name or repository path "
+                 "(default: adopted project containing CWD plus its required "
+                 "supplemental repositories)",
         )
         scope.add_argument(
             "--all-projects",

@@ -214,6 +214,59 @@ def adopted_project_repos(
     return list(candidates.values())
 
 
+def _bound_supplement(
+    project_name: str,
+    project: Any,
+    project_path: Path,
+    *,
+    repos: dict,
+    srcroot: dict,
+    global_config: dict,
+    platform_name: str,
+) -> RepoCandidate | None:
+    """Resolve one project's active direct supplemental repository."""
+    if not project_path.is_dir() or not _repo_requires_external_state(project_path):
+        return None
+    project_config = _project_config(project)
+    knowledge_repo = (
+        project_config.get("knowledge_repo")
+        or global_config.get("knowledge_repo")
+    )
+    if not knowledge_repo:
+        return None
+    if not isinstance(knowledge_repo, str):
+        raise ManifestError(
+            f"project {project_name!r} config: knowledge_repo must be a repository name"
+        )
+    required_name = knowledge_repo.strip()
+    if not required_name or required_name.casefold() == project_name.casefold():
+        return None
+    registered = _registered_repo_entry(repos, required_name)
+    if registered is None:
+        raise ManifestError(
+            f"project {project_name!r} binds supplemental repo {required_name!r}, "
+            "but it has no canonical repos.yaml entry"
+        )
+    supplemental_name, entry = registered
+    supplemental_path = resolve_repo_path(
+        supplemental_name,
+        entry,
+        srcroot,
+        platform_name,
+    )
+    if supplemental_path is None:
+        raise ManifestError(
+            f"project {project_name!r} binds supplemental repo "
+            f"{supplemental_name!r}, but its repos.yaml entry has no path for "
+            f"platform {platform_name!r}"
+        )
+    return RepoCandidate(
+        name=supplemental_name,
+        path=supplemental_path,
+        required_by=(project_name,),
+    )
+
+
 def resolve_registered_repo(
     name: str,
     registry: dict | None = None,
@@ -295,49 +348,98 @@ def candidate_repos(
     for raw_project_name, project in project_entries.items():
         project_name = str(raw_project_name)
         project_candidate = candidates.get(project_name.casefold())
-        if (
-            project_candidate is None
-            or not project_candidate.path.is_dir()
-            or not _repo_requires_external_state(project_candidate.path)
-        ):
+        if project_candidate is None:
             continue
-        project_config = _project_config(project)
-        knowledge_repo = (
-            project_config.get("knowledge_repo")
-            or global_config.get("knowledge_repo")
+        supplemental = _bound_supplement(
+            project_name,
+            project,
+            project_candidate.path,
+            repos=repos,
+            srcroot=srcroot,
+            global_config=global_config,
+            platform_name=plat,
         )
-        if not knowledge_repo:
+        if supplemental is None:
             continue
-        if not isinstance(knowledge_repo, str):
-            raise ManifestError(
-                f"project {project_name!r} config: knowledge_repo must be a repository name"
-            )
-        required_name = knowledge_repo.strip()
-        if not required_name:
-            continue
-        registered = _registered_repo_entry(repos, required_name)
-        if registered is None:
-            raise ManifestError(
-                f"project {project_name!r} binds supplemental repo {required_name!r}, "
-                "but it has no canonical repos.yaml entry"
-            )
-        canonical_name, entry = registered
-        path = resolve_repo_path(canonical_name, entry, srcroot, plat)
-        if path is None:
-            raise ManifestError(
-                f"project {project_name!r} binds supplemental repo {canonical_name!r}, "
-                f"but its repos.yaml entry has no path for platform {plat!r}"
-            )
-        folded = canonical_name.casefold()
+        folded = supplemental.name.casefold()
         existing = candidates.get(folded)
         prior_owners = existing.required_by if existing else ()
         required_by = tuple(sorted(set((*prior_owners, project_name))))
         candidates[folded] = RepoCandidate(
-            name=canonical_name,
-            path=path,
+            name=supplemental.name,
+            path=supplemental.path,
             required_by=required_by,
         )
     return list(candidates.values())
+
+
+def project_scope_repos(
+    project_name: str,
+    project_path: Path,
+    project_anchor: Path | None = None,
+    registry: dict | None = None,
+    projects: dict | None = None,
+    global_config: dict | None = None,
+) -> list[RepoCandidate] | None:
+    """Resolve one adopted project plus its direct required supplement.
+
+    ``None`` means ``project_name`` is not an adopted project, so callers should
+    preserve standalone repository-local behavior. An adopted project always
+    returns itself first. Its active ``knowledge_repo`` relationship contributes
+    one canonically registered supplemental repository; relationships are not
+    traversed transitively.
+    """
+    proj = projects if projects is not None else read_projects()
+    reg = registry if registry is not None else read_registry()
+    if not isinstance(proj, dict) or not isinstance(reg, dict):
+        return None
+    project_entries = proj.get("projects") or {}
+    if not isinstance(project_entries, dict):
+        return None
+    anchor = (project_anchor or project_path).resolve()
+    adopted = next(
+        (
+            candidate
+            for candidate in adopted_project_repos(reg, proj)
+            if candidate.name.casefold() == project_name.casefold()
+            and candidate.path.resolve() == anchor
+        ),
+        None,
+    )
+    if adopted is None:
+        return None
+    matched_project = next(
+        (
+            (str(raw_name), entry)
+            for raw_name, entry in project_entries.items()
+            if str(raw_name).casefold() == adopted.name.casefold()
+        ),
+        None,
+    )
+    if matched_project is None:
+        return None
+
+    canonical_project, project = matched_project
+    selected = [RepoCandidate(name=project_name, path=project_path)]
+    repos = reg.get("repos") or {}
+    srcroot = reg.get("srcroot") or {}
+    if not isinstance(repos, dict):
+        repos = {}
+    if not isinstance(srcroot, dict):
+        srcroot = {}
+    supplemental = _bound_supplement(
+        canonical_project,
+        project,
+        project_path,
+        repos=repos,
+        srcroot=srcroot,
+        global_config=global_config if global_config is not None else read_global_config(),
+        platform_name=current_platform(),
+    )
+    if supplemental is None:
+        return selected
+    selected.append(supplemental)
+    return selected
 
 
 def repo_enables_agent_machines(repo_path: Path) -> bool:
