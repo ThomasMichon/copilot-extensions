@@ -6,7 +6,7 @@
   "image": "base",
   "platforms": ["linux", "windows"],
   "prereqs": {
-    "present": ["python", "uv"],
+    "present": ["python3", "uv"],
     "provisioned_by_flow": []
   },
   "auth": {

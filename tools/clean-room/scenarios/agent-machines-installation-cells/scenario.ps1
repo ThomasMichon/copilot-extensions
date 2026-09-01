@@ -27,6 +27,14 @@ if (-not (Test-Path -LiteralPath $driver -PathType Leaf)) {
     jam 'drop-structural' 'scenario driver is absent' 'restore scenario.py'
     cr_finalize
 }
+$python = Get-Command python3 -ErrorAction SilentlyContinue
+if (-not $python) {
+    $python = Get-Command python -ErrorAction SilentlyContinue
+}
+if (-not $python) {
+    jam 'toolchain-python' 'python3 is unavailable' 'install Python 3'
+    cr_finalize
+}
 pass 'mounted source and scenario driver are present'
 
 $titles = @{
@@ -38,7 +46,7 @@ $titles = @{
 }
 foreach ($stage in 1..5) {
     phase $stage $titles[$stage]
-    $rc = capture "stage-$stage" { & python $driver $stage }
+    $rc = capture "stage-$stage" { & $python.Source $driver $stage }
     if ($rc -eq 0) {
         pass $titles[$stage]
     }

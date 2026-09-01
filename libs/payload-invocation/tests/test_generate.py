@@ -233,6 +233,24 @@ def test_required_installation_context_rejects_ineligible_plugin(
         generator.load_manifest(manifest)
 
 
+@pytest.mark.parametrize("catalog", [None, "{\n"])
+def test_required_installation_context_requires_valid_canonical_roster(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    catalog: str | None,
+) -> None:
+    manifest = _required_context_manifest(tmp_path)
+    repo = tmp_path / "isolated-repo"
+    if catalog is not None:
+        marketplace = repo / ".github" / "plugin" / "marketplace.json"
+        marketplace.parent.mkdir(parents=True)
+        marketplace.write_text(catalog, encoding="utf-8")
+    monkeypatch.setattr(generator, "REPO", repo)
+
+    with pytest.raises(ValueError, match="cannot load canonical marketplace roster"):
+        generator.load_manifest(manifest)
+
+
 def test_v1_rejects_installation_context_fields_without_changing_defaults(
     tmp_path: Path,
 ) -> None:

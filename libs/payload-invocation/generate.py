@@ -32,9 +32,20 @@ _INSTALLATION_CONTEXT_MODES = {"legacy", "required"}
 
 def _eligible_core_runtime_plugins() -> set[str]:
     marketplace_path = REPO / ".github" / "plugin" / "marketplace.json"
-    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    try:
+        marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"{marketplace_path}: cannot load canonical marketplace roster: {exc}"
+        ) from exc
+    if not isinstance(marketplace, dict) or not isinstance(
+        marketplace.get("plugins"), list
+    ):
+        raise ValueError(
+            f"{marketplace_path}: canonical marketplace roster is invalid"
+        )
     eligible: set[str] = set()
-    for entry in marketplace.get("plugins", []):
+    for entry in marketplace["plugins"]:
         if not isinstance(entry, dict):
             continue
         name = entry.get("name")
