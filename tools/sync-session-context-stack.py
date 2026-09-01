@@ -31,6 +31,10 @@ WRAPPERS = {
     "bash": "invoke-context-contributor.sh",
     "powershell": "invoke-context-contributor.ps1",
 }
+PRODUCER_SUPPORT_FILES = (
+    *WRAPPERS.values(),
+    "resolve_context_authority.py",
+)
 
 CONFORMANCE_PATH = (
     PLUGINS
@@ -143,8 +147,7 @@ def _desired_plugin(plugin: Path, marketplace: str) -> dict[Path, bytes]:
     if not contributors:
         return desired
 
-    for platform, filename in WRAPPERS.items():
-        del platform
+    for filename in PRODUCER_SUPPORT_FILES:
         source = PLUGINS / AUTHORITY / "scripts" / filename
         desired[plugin / "scripts" / filename] = source.read_bytes()
 

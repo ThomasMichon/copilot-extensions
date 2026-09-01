@@ -105,6 +105,13 @@ use the session cwd or target repository to rediscover the plugin's own code.
 The start payload's `cwd` is for applicability gating; the plugin root is for
 locating the wrapper and contributor. A missing root or wrapper emits `{}`; a
 present wrapper owns exact authority resolution and direct fallback.
+Authority lookup is source-qualified rather than sibling-relative: the wrapper
+resolves the repository-adopted `context-injection@copilot-extensions` payload
+through the effective settings/staged-plugin inventory, validates its engine
+contract, and only then executes it. An optional
+`COPILOT_CONTEXT_INJECTION_ENGINE_ROOT` is a claimed exact root, not an
+override; it is accepted only when it equals that resolved adopted payload.
+Same-named payloads from another marketplace never become a fallback.
 
 Before activation, validate the complete roster with the authority's reusable
 scanner. It accepts either a directory-marketplace root or a trusted
@@ -116,6 +123,9 @@ python plugins/context-injection/scripts/aggregate_context.py --validate \
   --marketplace-root . --json
 python plugins/context-injection/scripts/aggregate_context.py --validate \
   --repository /path/to/repository --json
+python plugins/context-injection/scripts/aggregate_context.py --validate \
+  --marketplace-root /path/to/producer-marketplace \
+  --authority-root /exact/context-injection/payload --json
 ```
 
 The scan covers payload availability, complete behavior declarations, bounded

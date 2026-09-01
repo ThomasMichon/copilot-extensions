@@ -111,6 +111,30 @@ def _broken_runtime_plugin(root: Path) -> Path:
     return plugin
 
 
+def _retarget_contributor_hooks(plugin: Path, source: str) -> None:
+    declaration = json.loads(
+        (plugin / "session-context.json").read_text(encoding="utf-8")
+    )
+    hooks = json.loads((plugin / "hooks.json").read_text(encoding="utf-8"))
+    entries = hooks["hooks"]["sessionStart"]
+    for contributor in declaration["contributors"]:
+        entry = next(
+            item
+            for item in entries
+            if contributor["id"] in str(item.get("bash", ""))
+            and "invoke-context-contributor.sh" in str(item.get("bash", ""))
+        )
+        entry["bash"] = CONFORMANCE.canonical_bash_hook(
+            source,
+            contributor,
+        )
+        entry["powershell"] = CONFORMANCE.canonical_powershell_hook(
+            source,
+            contributor,
+        )
+    (plugin / "hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+
+
 def test_library_reports_all_independent_violations(tmp_path: Path) -> None:
     broken = _broken_runtime_plugin(tmp_path)
     report = CONFORMANCE.scan_plugins(
@@ -142,6 +166,110 @@ def test_library_reports_all_independent_violations(tmp_path: Path) -> None:
         "runtime-command-catalog-missing",
         "runtime-command-catalog-payload-missing",
     } <= codes
+
+
+def test_cross_marketplace_scanner_proves_external_authority_topology(
+    tmp_path: Path,
+) -> None:
+    marketplace = tmp_path / "market-b"
+    producer = marketplace / "plugins" / "agent-index"
+    shutil.copytree(PLUGIN.parent / "agent-index", producer)
+    _retarget_contributor_hooks(producer, "agent-index@market-b")
+    authority = tmp_path / "authority" / "context-injection"
+    shutil.copytree(PLUGIN, authority)
+    _write_json(
+        marketplace / ".github" / "plugin" / "marketplace.json",
+        {
+            "name": "market-b",
+            "plugins": [
+                {
+                    "name": "agent-index",
+                    "source": "plugins/agent-index",
+                }
+            ],
+        },
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--validate",
+            "--marketplace-root",
+            str(marketplace),
+            "--authority-root",
+            str(authority),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    payload = json.loads(result.stdout)
+    assert result.returncode == 0
+    assert payload["ok"] is True
+
+    unadopted = marketplace / "plugins" / "context-injection"
+    shutil.copytree(PLUGIN, unadopted)
+    marketplace_path = (
+        marketplace / ".github" / "plugin" / "marketplace.json"
+    )
+    marketplace_data = json.loads(
+        marketplace_path.read_text(encoding="utf-8")
+    )
+    marketplace_data["plugins"].append(
+        {
+            "name": "context-injection",
+            "source": "plugins/context-injection",
+        }
+    )
+    marketplace_path.write_text(
+        json.dumps(marketplace_data),
+        encoding="utf-8",
+    )
+    ambiguous = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--validate",
+            "--marketplace-root",
+            str(marketplace),
+            "--authority-root",
+            str(authority),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ambiguous.returncode == 1
+    assert "aggregate-authority-missing" in {
+        item["code"] for item in json.loads(ambiguous.stdout)["violations"]
+    }
+
+    shutil.rmtree(unadopted)
+    marketplace_data["plugins"].pop()
+    marketplace_path.write_text(
+        json.dumps(marketplace_data),
+        encoding="utf-8",
+    )
+    (producer / "scripts" / "resolve_context_authority.py").unlink()
+    targets = [
+        CONFORMANCE.PluginTarget("agent-index@market-b", producer),
+        CONFORMANCE.PluginTarget(
+            "context-injection@copilot-extensions",
+            authority,
+        ),
+    ]
+    report = CONFORMANCE.scan_plugins(
+        targets,
+        authority_source="context-injection@copilot-extensions",
+        wrapper_root=authority,
+    )
+    assert "producer-authority-resolver-missing" in {
+        item.code for item in report.violations
+    }
 
 
 @pytest.mark.parametrize(

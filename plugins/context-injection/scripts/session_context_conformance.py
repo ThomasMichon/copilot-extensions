@@ -1007,6 +1007,52 @@ def scan_plugins(
                             source=source,
                             path=_relative(path, root),
                         )
+                try:
+                    content = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    content = ""
+                if (
+                    "resolve_context_authority.py" not in content
+                    or 'dirname "$root")/context-injection' in content
+                    or "Split-Path -Parent $resolvedRoot" in content
+                ):
+                    _add(
+                        report,
+                        "producer-authority-topology-invalid",
+                        f"{platform} producer wrapper cannot safely resolve a source-qualified authority",
+                        source=source,
+                        path=_relative(path, root),
+                    )
+            resolver = root / "scripts" / "resolve_context_authority.py"
+            if not resolver.is_file():
+                _add(
+                    report,
+                    "producer-authority-resolver-missing",
+                    "producer has no source-qualified authority resolver",
+                    source=source,
+                    path=_relative(resolver, root),
+                )
+            elif wrapper_root is not None:
+                expected_resolver = (
+                    wrapper_root
+                    / "scripts"
+                    / "resolve_context_authority.py"
+                )
+                try:
+                    matches = (
+                        resolver.read_bytes()
+                        == expected_resolver.read_bytes()
+                    )
+                except OSError:
+                    matches = False
+                if not matches:
+                    _add(
+                        report,
+                        "producer-authority-resolver-drift",
+                        "producer authority resolver differs from the adopted authority",
+                        source=source,
+                        path=_relative(resolver, root),
+                    )
 
         for platform in WRAPPERS:
             for entry in hooks:

@@ -17,10 +17,9 @@ case "$relative_script" in
 esac
 
 export COPILOT_PLUGIN_ROOT="$root"
-authority="$(dirname "$root")/context-injection"
-engine="$authority/scripts/aggregate_context.py"
 python_bin="$(command -v python3 || command -v python || true)"
 script="$root/$relative_script"
+resolver="$root/scripts/resolve_context_authority.py"
 payload="$(cat)" || {
     printf '{}'
     exit 0
@@ -69,7 +68,14 @@ if [[ -z "$launch_cwd" ]]; then
     printf '{}'
     exit 0
 fi
-if [[ -n "$python_bin" && -f "$engine" ]]; then
+authority=""
+if [[ -f "$resolver" ]]; then
+    authority="$(
+        printf '%s' "$payload" | "$python_bin" "$resolver" 2>/dev/null
+    )"
+fi
+engine="$authority/scripts/aggregate_context.py"
+if [[ -n "$authority" && -f "$engine" ]]; then
     output="$(mktemp "${TMPDIR:-/tmp}/context-producer.XXXXXXXX")" || {
         printf '{}'
         exit 0
