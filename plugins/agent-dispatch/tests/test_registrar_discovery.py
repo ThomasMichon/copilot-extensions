@@ -209,7 +209,25 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
     assert workers.concurrency == 2
 
 
-def test_reviewer_loop_rejects_overrides_of_derived_identity(tmp_path):
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("emitter", "id", "different"),
+        ("evaluator", "repo", "github.com/other/project"),
+        ("pool", "owner", "other-owner"),
+        ("pool", "description", "shadowed description"),
+    ],
+)
+def test_reviewer_loop_rejects_overrides_of_derived_identity(
+    tmp_path, section, field, value
+):
+    emitter = {
+        "command": ["reviews"],
+        "interval_seconds": 60,
+    }
+    evaluator = {"evaluator_spec": {"rules": []}}
+    pool = {"max_active_processes": 1}
+    {"emitter": emitter, "evaluator": evaluator, "pool": pool}[section][field] = value
     path = tmp_path / "reviews.json"
     path.write_text(
         json.dumps(
@@ -218,13 +236,9 @@ def test_reviewer_loop_rejects_overrides_of_derived_identity(tmp_path):
                 "kind": "reviewer-loop",
                 "repo": "github.com/example/project",
                 "task_label": "external-review",
-                "emitter": {
-                    "id": "different",
-                    "command": ["reviews"],
-                    "interval_seconds": 60,
-                },
-                "evaluator": {"evaluator_spec": {"rules": []}},
-                "pool": {"max_active_processes": 1},
+                "emitter": emitter,
+                "evaluator": evaluator,
+                "pool": pool,
             }
         ),
         encoding="utf-8",

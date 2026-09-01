@@ -82,7 +82,11 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
     pool = _mapping(data, "pool")
     _reject_reserved("emitter", emitter, {"id", "evaluator_ref"})
     _reject_reserved("evaluator", evaluator, {"repo", "evaluator_ref"})
-    _reject_reserved("pool", pool, {"name", "labels", "repos", "kind", "spec"})
+    _reject_reserved(
+        "pool",
+        pool,
+        {"name", "labels", "repos", "kind", "spec", "owner", "description"},
+    )
 
     evaluator_ref = f"{name}-lifecycle"
     common = {"owner": owner, "description": description}
