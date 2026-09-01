@@ -536,7 +536,7 @@ def test_stands_down_when_active_hook_plugin_has_no_declaration(tmp_path: Path) 
         [("legacy", legacy), ("context-injection", aggregator)],
     )
 
-    assert "POLICY" in json.loads(result.stdout)["additionalContext"]
+    assert json.loads(result.stdout) == {}
     assert "no complete context declaration" in result.stderr
 
 
@@ -1391,7 +1391,7 @@ def test_rendezvous_cache_files_are_private(tmp_path: Path) -> None:
         cache_dir=cache,
     )
 
-    assert json.loads(result.stdout) == {}
+    assert "POLICY" in json.loads(result.stdout)["additionalContext"]
     assert cache.stat().st_mode & 0o777 == 0o700
     assert all(path.stat().st_mode & 0o777 == 0o600 for path in cache.iterdir())
 
