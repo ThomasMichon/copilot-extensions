@@ -628,10 +628,78 @@ function Get-ApplicationPath {
         foreach ($command in $commands) {
             $source = [string]$command.Source
             if (-not $source -or $source -match 'WindowsApps') { continue }
-            if (Test-Path -LiteralPath $source) { return $source }
+            if (Test-Path -LiteralPath $source -PathType Leaf) { return $source }
         }
     }
     return $null
+}
+
+function Get-CurrentPowerShellPath {
+    <# Return the on-disk host needed to invoke an ExternalScript from the
+       Python activation-preservation subprocess. #>
+    $processPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    if ($processPath -and (Test-Path -LiteralPath $processPath -PathType Leaf)) {
+        return $processPath
+    }
+    $fallback = Get-ApplicationPath -Name @('pwsh', 'powershell')
+    if ($fallback) { return $fallback }
+    throw "Cannot resolve the current PowerShell host to an executable path"
+}
+
+function Resolve-CopilotCommand {
+    <# Resolve `copilot` to an argv prefix that Python can execute. Applications
+       bypass shadowing aliases/functions; aliases to a differently named
+       Application or ExternalScript are followed. Functions and cmdlets are
+       intentionally unsupported because they cannot cross the process boundary. #>
+    $pending = New-Object System.Collections.Queue
+    $pending.Enqueue('copilot')
+    $seen = @{}
+    $unsupported = New-Object System.Collections.Generic.HashSet[string]
+
+    while ($pending.Count -gt 0) {
+        $candidate = [string]$pending.Dequeue()
+        if ($seen.ContainsKey($candidate)) { continue }
+        $seen[$candidate] = $true
+
+        $application = Get-ApplicationPath -Name @($candidate)
+        if ($application) {
+            return @($application)
+        }
+
+        $commands = @(Get-Command $candidate -All -ErrorAction SilentlyContinue)
+        foreach ($command in $commands) {
+            $commandType = [string]$command.CommandType
+            if ($commandType -eq 'Alias') {
+                $unsupported.Add($commandType) | Out-Null
+                $target = [string]$command.Definition
+                if ($target) { $pending.Enqueue($target) }
+                continue
+            }
+            if ($commandType -eq 'ExternalScript') {
+                $scriptPath = [string]$command.Source
+                if (-not $scriptPath) { $scriptPath = [string]$command.Path }
+                if (
+                    $scriptPath -and
+                    [IO.Path]::GetExtension($scriptPath) -ieq '.ps1' -and
+                    (Test-Path -LiteralPath $scriptPath -PathType Leaf)
+                ) {
+                    return @(
+                        (Get-CurrentPowerShellPath),
+                        '-NoProfile',
+                        '-File',
+                        $scriptPath
+                    )
+                }
+            }
+            if ($commandType) { $unsupported.Add($commandType) | Out-Null }
+        }
+    }
+
+    if ($unsupported.Count -gt 0) {
+        $types = (@($unsupported) | Sort-Object) -join ', '
+        throw "Copilot CLI resolves only to unsupported PowerShell command type(s): $types"
+    }
+    return @()
 }
 
 function Get-BootstrapPython {
@@ -2313,9 +2381,20 @@ function Deploy-CopilotPlugin {
        'copilot plugin update'), skip the update call to avoid EBUSY
        errors from trying to replace files in our own working directory. #>
 
-    if (-not (Get-Command copilot -ErrorAction SilentlyContinue)) {
+    try {
+        $copilotCommand = @(Resolve-CopilotCommand)
+    } catch {
+        Write-ServiceErr $_.Exception.Message
+        throw
+    }
+    if ($copilotCommand.Count -eq 0) {
         Write-ServiceWarn "Copilot CLI not found - skipping plugin install"
         return
+    }
+    $copilotExecutable = $copilotCommand[0]
+    $copilotPrefix = @()
+    if ($copilotCommand.Count -gt 1) {
+        $copilotPrefix = @($copilotCommand[1..($copilotCommand.Count - 1)])
     }
 
     # Detect if we are running from the installed plugin directory.
@@ -2326,9 +2405,9 @@ function Deploy-CopilotPlugin {
     $runningFromInstalled = $PluginDir.Path -like "$installedPluginsDir*"
 
     # 1. Register marketplace if not present
-    $marketplaces = (copilot plugin marketplace list 2>$null) -join "`n"
+    $marketplaces = (& $copilotExecutable @copilotPrefix plugin marketplace list 2>$null) -join "`n"
     if ($marketplaces -notmatch 'copilot-extensions') {
-        $addOut = copilot plugin marketplace add ThomasMichon/copilot-extensions 2>&1
+        $addOut = & $copilotExecutable @copilotPrefix plugin marketplace add ThomasMichon/copilot-extensions 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-ServiceWarn "Failed to register marketplace: $addOut"
             return
@@ -2337,7 +2416,7 @@ function Deploy-CopilotPlugin {
     }
 
     # 2. Parse current plugin state
-    $pluginList = copilot plugin list 2>$null
+    $pluginList = & $copilotExecutable @copilotPrefix plugin list 2>$null
     $hasMarketplace = $false
     $hasDirect = $false
     foreach ($line in $pluginList) {
@@ -2352,16 +2431,17 @@ function Deploy-CopilotPlugin {
     if ($runningFromInstalled) {
         Write-ServiceOk "Copilot plugin updated (marketplace)"
     } elseif ($hasMarketplace) {
-        $out = copilot plugin update agent-worktrees@copilot-extensions 2>&1
+        $out = & $copilotExecutable @copilotPrefix plugin update agent-worktrees@copilot-extensions 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-ServiceWarn "Plugin update failed: $out"
         } else {
             Write-ServiceOk "Copilot plugin updated (marketplace)"
         }
     } else {
-        $copilotPath = (Get-Command copilot).Source
+        $copilotCommandJson = ConvertTo-Json -Compress -InputObject @($copilotCommand)
         $out = & $VenvPython -m agent_worktrees.activation_preservation `
-            agent-worktrees@copilot-extensions --copilot $copilotPath 2>&1
+            agent-worktrees@copilot-extensions `
+            --copilot-command-json $copilotCommandJson 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-ServiceWarn "Plugin install failed: $out"
             return
@@ -2371,9 +2451,9 @@ function Deploy-CopilotPlugin {
 
     # 4. Remove stale _direct install if marketplace is now present
     if ($hasDirect) {
-        $verify = (copilot plugin list 2>$null) -join "`n"
+        $verify = (& $copilotExecutable @copilotPrefix plugin list 2>$null) -join "`n"
         if ($verify -match 'agent-worktrees@copilot-extensions') {
-            copilot plugin uninstall agent-worktrees 2>$null | Out-Null
+            & $copilotExecutable @copilotPrefix plugin uninstall agent-worktrees 2>$null | Out-Null
             Write-ServiceChanged "Removed stale _direct plugin install"
         }
     }

@@ -165,3 +165,34 @@ config_path.write_text("// managed\\n" + json.dumps(config), encoding="utf-8")
     assert settings["enabledPlugins"][IDENTITY] is False
     _, config = read_json_object(home / "config.json", jsonc_header=True)
     assert config["installedPlugins"][0]["enabled"] is False
+
+
+def test_cli_forwards_validated_copilot_command_prefix(monkeypatch):
+    calls: list[list[str]] = []
+
+    def run(argv, identity):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(
+        activation_preservation,
+        "run_install_preserving_activation",
+        run,
+    )
+    command = ["pwsh", "-NoProfile", "-File", "copilot.ps1"]
+    result = activation_preservation._main(
+        [
+            IDENTITY,
+            "--copilot-command-json",
+            json.dumps(command),
+        ]
+    )
+
+    assert result == 0
+    assert calls == [[*command, "plugin", "install", IDENTITY]]
+
+
+@pytest.mark.parametrize("raw", ["{}", "[]", '[""]', "not-json"])
+def test_cli_rejects_invalid_copilot_command_prefix(raw):
+    with pytest.raises(activation_preservation.PluginStateError):
+        activation_preservation._parse_copilot_command(raw)

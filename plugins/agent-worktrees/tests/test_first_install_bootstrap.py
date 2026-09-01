@@ -115,6 +115,10 @@ def test_installers_preserve_activation_during_inventory_bootstrap() -> None:
 
     assert "-m agent_worktrees.activation_preservation" in sh
     assert "-m agent_worktrees.activation_preservation" in ps1
+    assert 'resolve_executable_command_path copilot' in sh
+    assert "--copilot-command-json" in ps1
+    assert '"$(command -v copilot)"' not in sh
+    assert "(Get-Command copilot).Source" not in ps1
     assert "copilot plugin install agent-worktrees@copilot-extensions" not in sh
     assert "copilot plugin install agent-worktrees@copilot-extensions" not in ps1
 
