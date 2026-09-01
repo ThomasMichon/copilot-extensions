@@ -12361,8 +12361,16 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
 
     output.header(f"Reconciling Runtime: {name}"
                   + (" (forced)" if force else ""))
+    child_environment = os.environ.copy()
+    child_environment.pop("COPILOT_PLUGIN_ROOT", None)
+    child_environment.pop("PYTHONPATH", None)
     try:
-        r = subprocess.run(argv, cwd=pdir, timeout=300)
+        r = subprocess.run(
+            argv,
+            cwd=pdir,
+            timeout=300,
+            env=child_environment,
+        )
     except subprocess.TimeoutExpired:
         return "timed out"
     except Exception as exc:  # never abort the loop

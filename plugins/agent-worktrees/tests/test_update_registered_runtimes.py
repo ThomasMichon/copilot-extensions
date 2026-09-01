@@ -127,6 +127,39 @@ def test_version_drift_triggers_runtime_install(monkeypatch):
     assert "agent-codespaces" in _installed_names(calls)
 
 
+def test_runtime_install_strips_caller_payload_environment(monkeypatch):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-codespaces"],
+        scopes={"agent-codespaces": "universal"},
+        deployed={"agent-codespaces": "0.3.4-dev62"},
+        payload={"agent-codespaces": "0.3.4-dev102"},
+    )
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/caller/payload")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python")
+    monkeypatch.setenv("RECONCILE_KEEP", "present")
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["env"] = kwargs["env"]
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    real_exists = Path.exists
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda self: True if str(self).endswith("install.sh") else real_exists(self),
+    )
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert "COPILOT_PLUGIN_ROOT" not in captured["env"]
+    assert "PYTHONPATH" not in captured["env"]
+    assert captured["env"]["RECONCILE_KEEP"] == "present"
+
+
 def test_current_runtime_is_skipped_without_force(monkeypatch):
     _install_config(monkeypatch)
     _stub_reconcile(
