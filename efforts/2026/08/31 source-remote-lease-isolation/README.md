@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** `worktree/tmichon-cloud1-win-20260831-221938-9ff0`
 - **Created:** 2026-08-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/plugins/agent-worktrees` — private coordination state is explicit and source remotes are not state stores
 - **Umbrella issue:** #1528
 - **Sub-issues:** none
@@ -69,7 +69,7 @@ surface.
 - [x] Prove no test path pushes lease refs to an ordinary source `origin` by default.
 - [x] Run the focused agent-worktrees suite and repository contract gates.
 - [x] Bump the agent-worktrees plugin and marketplace versions.
-- [ ] Publish, review, merge, deploy, and close #1528.
+- [x] Publish, review, merge, deploy, and close #1528.
 
 ## Validation Plan
 
@@ -79,7 +79,7 @@ surface.
 - [x] Unit tests prove no binding and no explicit origin fails instead of resolving the source remote.
 - [x] CLI tests prove the failure is actionable and issue-comment coordination is unaffected.
 - [x] Targeted plugin tests and install-contract checks pass.
-- [ ] The merged plugin is deployed through `agent-worktrees update`.
+- [x] The merged plugin is deployed through `agent-worktrees update`.
 
 ## Proposal
 
@@ -115,3 +115,13 @@ decision visible and keeps the safe default independent of hosting provider.
 - The full suite and the unchanged lease-store integration test both hit the
   same Windows temporary-Git subprocess timeout on the proposal baseline; the
   failure reproduces on unmodified `main` and is not introduced by this change.
+
+### 2026-08-31 — Completed
+- Implementation PR #1542 merged and automatically closed #1528.
+- Deployed runtime `agent-worktrees 1.5.3-dev693`. The live Copilot process
+  kept the old plugin payload directory locked, so the unified updater completed
+  the versioned runtime deployment through the repository's recovery installer;
+  a later session can refresh the payload copy once the lock is gone.
+- Removed the two pre-existing example lease refs from the public repository
+  remote and verified the lease namespace is empty.
+- Archived the effort with every Plan and Validation Plan item resolved.
