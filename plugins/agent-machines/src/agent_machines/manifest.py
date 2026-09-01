@@ -344,11 +344,12 @@ def load_package(
         raise ManifestError(
             f"{path}: declare only one of 'per-machine' or 'per_machine'"
         )
-    per_machine = (
+    raw_per_machine = (
         raw["per-machine"]
         if "per-machine" in raw
         else raw.get("per_machine", {})
     )
+    per_machine = {} if raw_per_machine is None else raw_per_machine
     if not isinstance(per_machine, dict):
         raise ManifestError(f"{path}: 'per-machine' must be a mapping")
     normalized_per_machine: dict[str, Any] = {}

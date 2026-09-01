@@ -182,6 +182,15 @@ def test_per_machine_dual_spellings_rejected(tmp_path):
         load_package(path)
 
 
+def test_per_machine_explicit_null_is_empty(tmp_path):
+    data = base_package(**{"per-machine": None})
+    path = write_package(tmp_path, "d.yaml", data)
+
+    package = load_package(path)
+
+    assert package.per_machine == {}
+
+
 @pytest.mark.parametrize("overlay", ["invalid", [], 1, False])
 def test_per_machine_non_mapping_overlay_rejected(tmp_path, overlay):
     data = base_package(
