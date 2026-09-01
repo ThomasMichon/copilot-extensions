@@ -26,30 +26,22 @@ def test_every_hook_leaves_payload_cwd_before_running_script():
         assert "-ErrorAction Stop" in powershell
         assert "GetPathRoot" in powershell
         ps_detach = powershell.find("Set-Location")
-        ps_script = min(
-            position
-            for position in (powershell.find("$s"), powershell.find("$w"))
-            if position >= 0
-        )
+        ps_script = powershell.find("$s")
         assert ps_detach >= 0 and ps_script >= 0
         assert ps_detach < ps_script
         assert 'cd "$HOME"' in bash
         bash_detach = bash.find("cd ")
-        bash_script = min(
-            position
-            for position in (bash.find("s="), bash.find("w="))
-            if position >= 0
-        )
+        bash_script = bash.find("s=")
         assert bash_detach >= 0 and bash_script >= 0
         assert bash_detach < bash_script
 
 
-def test_aggregate_context_has_a_cold_start_budget():
+def test_session_conduct_has_a_cold_start_budget():
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     hook = next(
         item
         for item in hooks["hooks"]["sessionStart"]
-        if "aggregate-context" in str(item)
+        if "session-conduct" in str(item)
     )
     assert hook["timeoutSec"] >= 30
 

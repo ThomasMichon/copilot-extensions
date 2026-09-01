@@ -55,19 +55,7 @@ function Get-LaunchKey([string]$InputPayload, [string]$Version) {
             return ''
         }
         $CanonicalCwd = if (Test-Path -LiteralPath $Cwd -PathType Container) {
-            $Item = Get-Item -LiteralPath $Cwd
-            $ResolvedTarget = if (
-                $Item.PSObject.Methods.Name -contains 'ResolveLinkTarget'
-            ) {
-                $Item.ResolveLinkTarget($true)
-            } else {
-                $null
-            }
-            if ($ResolvedTarget) {
-                $ResolvedTarget.FullName
-            } else {
-                (Resolve-Path -LiteralPath $Cwd).Path
-            }
+            (Resolve-Path -LiteralPath $Cwd).Path
         } else {
             [IO.Path]::GetFullPath($Cwd)
         }
