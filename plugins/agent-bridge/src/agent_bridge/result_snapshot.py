@@ -163,6 +163,28 @@ def _event_ref(
     )
 
 
+def _span_ref(
+    source: str,
+    session_id: str,
+    continuity: str,
+    start_event_id: int,
+    end_event_id: int,
+    *,
+    scope: str | None = None,
+) -> str:
+    payload = {
+        "kind": "span",
+        "source": source,
+        "session_id": session_id,
+        "continuity": continuity,
+        "start_event_id": start_event_id,
+        "end_event_id": end_event_id,
+    }
+    if scope:
+        payload["scope"] = scope
+    return _encode_token(payload)
+
+
 def _turn_ref(session_id: str, turn_index: int) -> str:
     return _encode_token(
         {
@@ -194,9 +216,12 @@ def _bounded_progress(
     return result
 
 
-def _active_work(session: Session, budget: _TextBudget) -> ResultField:
+def _active_work_values(
+    active: dict[str, Any] | None,
+    progress: dict[str, Any],
+    budget: _TextBudget,
+) -> ResultField:
     value: dict[str, Any] = {}
-    active = session.event_log.active_tool_call() if session.event_log else None
     if active:
         tool_call_id, tool_call_id_truncated, _ = budget.clip(
             active.get("tool_call_id"), field_limit=160
@@ -223,10 +248,15 @@ def _active_work(session: Session, budget: _TextBudget) -> ResultField:
                 else None
             ),
         }
-    milestones = _bounded_progress(dict(session.progress), budget)
+    milestones = _bounded_progress(progress, budget)
     if milestones:
         value["milestones"] = milestones
     return ResultField(availability="available", value=value or None)
+
+
+def _active_work(session: Session, budget: _TextBudget) -> ResultField:
+    active = session.event_log.active_tool_call() if session.event_log else None
+    return _active_work_values(active, dict(session.progress), budget)
 
 
 def _pending_input(session: Session, budget: _TextBudget) -> ResultField:
@@ -413,11 +443,12 @@ def _event_parts(
     return None
 
 
-def _incremental_owned(
-    db: Database,
+def _incremental_events(
     event_log: EventLog,
     session_id: str,
     *,
+    source: str,
+    durable: bool,
     position: str | None,
     max_items: int,
     budget: _TextBudget,
@@ -427,7 +458,7 @@ def _incremental_owned(
     if position:
         decoded = _decode_token(
             position,
-            source="owned",
+            source=source,
             session_id=session_id,
             kinds=frozenset({"position"}),
         )
@@ -440,17 +471,22 @@ def _incremental_owned(
     truncated_before = False
     raw_more = False
     continuity, head_id, rows = event_log.snapshot_window(
-        after=after_id, limit=scan_limit + 1, durable=True
+        after=after_id, limit=scan_limit + 1, durable=durable
     )
     if not continuity or head_id <= 0:
+        if decoded is not None:
+            return ResultIncrement(
+                availability="discontinuous",
+                reason="the prior event history is no longer available",
+            )
         return ResultIncrement(
             availability="not_yet_observed",
-            reason="the event log has no durable origin yet",
+            reason="the event log has no observable origin yet",
         )
     if decoded is not None and decoded.get("continuity") != continuity:
         return ResultIncrement(
             availability="discontinuous",
-            position=_position_token("owned", session_id, continuity, head_id),
+            position=_position_token(source, session_id, continuity, head_id),
             reason="the event log was rebuilt or replaced",
         )
     if after_id is not None and (after_id < 0 or after_id > head_id):
@@ -473,6 +509,9 @@ def _incremental_owned(
         event_type = event.event
         data = event.data
         timestamp = event.timestamp
+        if source == "represented" and data.get("agent_id"):
+            last_processed = event_id
+            continue
         parts = _event_parts(event_type, data)
         if parts is None:
             last_processed = event_id
@@ -491,7 +530,7 @@ def _incremental_owned(
                 status=bounded_status or None,
                 timestamp=timestamp,
                 detail_ref=_event_ref(
-                    "owned", session_id, continuity, event_id
+                    source, session_id, continuity, event_id
                 ),
                 truncated=clipped or status_clipped,
             )
@@ -509,7 +548,7 @@ def _incremental_owned(
         availability="available",
         items=items,
         position=_position_token(
-            "owned", session_id, continuity, next_event_id
+            source, session_id, continuity, next_event_id
         ),
         has_more=bool(after_id is not None and (raw_more or stopped_early)),
         truncated_before=truncated_before,
@@ -543,10 +582,11 @@ def build_owned_result_snapshot(
     latest_result, latest_stop_reason = _latest_result(
         db, session.session_id, latest_budget
     )
-    incremental = _incremental_owned(
-        db,
+    incremental = _incremental_events(
         session.event_log,
         session.session_id,
+        source="owned",
+        durable=True,
         position=position,
         max_items=max_items,
         budget=incremental_budget,
@@ -572,6 +612,327 @@ def build_owned_result_snapshot(
             liveness=session.liveness_state(),
             context_pct=session.context_pct,
             usage_model=session.usage_model,
+            attention=attention,
+            active_work=active_work,
+            pending_input=pending_input,
+        ),
+        latest_result=latest_result,
+        incremental=incremental,
+        limits=ResultLimits(
+            max_items=max_items,
+            max_text_chars=max_text_chars,
+            used_text_chars=(
+                state_budget.used + latest_budget.used + incremental_budget.used
+            ),
+        ),
+    )
+
+
+def _represented_tail(event_log: EventLog) -> tuple[str | None, list[Any]]:
+    continuity, _head, events = event_log.snapshot_window(
+        after=None, limit=_MAX_SCAN_EVENTS, durable=False
+    )
+    return continuity, events
+
+
+def _represented_latest_result(
+    event_log: EventLog, session_id: str, budget: _TextBudget
+) -> tuple[ResultField, str | None]:
+    continuity, events = _represented_tail(event_log)
+    if not continuity or not events:
+        return (
+            ResultField(
+                availability="not_yet_observed",
+                reason="no represented result is available in the live tail",
+            ),
+            None,
+        )
+
+    parent_events = [
+        event for event in events if not event.data.get("agent_id")
+    ]
+    if not parent_events:
+        return (
+            ResultField(
+                availability="not_yet_observed",
+                reason="the represented parent turn has not produced a result",
+            ),
+            None,
+        )
+    complete_index = next(
+        (
+            index
+            for index in range(len(parent_events) - 1, -1, -1)
+            if parent_events[index].event == "turn_complete"
+        ),
+        None,
+    )
+    end_index = (
+        complete_index if complete_index is not None else len(parent_events) - 1
+    )
+    start_index = 0
+    start_observed = False
+    for index in range(end_index - 1, -1, -1):
+        if parent_events[index].event == "turn_complete":
+            start_index = index + 1
+            start_observed = True
+            break
+        if parent_events[index].event == "user_message":
+            start_index = index + 1
+            start_observed = True
+            break
+    turn_events = parent_events[start_index:end_index + 1]
+    message_events = [
+        event
+        for event in turn_events
+        if event.event == "agent_message" and not event.data.get("agent_id")
+    ]
+    text_value = "".join(
+        str(event.data.get("text") or "") for event in message_events
+    )
+    if complete_index is None and not text_value:
+        return (
+            ResultField(
+                availability="not_yet_observed",
+                reason="the represented turn has not produced a result",
+            ),
+            None,
+        )
+
+    stop_reason = (
+        parent_events[complete_index].data.get("stop_reason")
+        if complete_index is not None
+        else None
+    )
+    text, truncated, original = budget.clip(text_value, field_limit=4000)
+    bounded_stop_reason, stop_reason_truncated, _ = budget.clip(
+        stop_reason, field_limit=300
+    )
+    incomplete = complete_index is None or not start_observed or bool(
+        stop_reason
+        and str(stop_reason).lower().startswith(
+            ("interrupted", "cancel", "max_tokens", "max_turn_requests")
+        )
+    )
+    first_id = turn_events[0].id
+    last_id = turn_events[-1].id
+    return (
+        ResultField(
+            availability="partial" if incomplete else "available",
+            value={
+                "turn_index": None,
+                "text": text or None,
+                "stop_reason": bounded_stop_reason or None,
+                "stop_reason_truncated": stop_reason_truncated,
+                "started_at": None,
+                "completed_at": (
+                    _iso_timestamp(parent_events[complete_index].timestamp)
+                    if complete_index is not None
+                    else None
+                ),
+            },
+            reason=(
+                "represented result is an in-memory partial turn or its "
+                "start boundary is unavailable"
+                if incomplete
+                else None
+            ),
+            detail_ref=_span_ref(
+                "represented",
+                session_id,
+                continuity,
+                first_id,
+                last_id,
+                scope="parent",
+            ),
+            truncation=ResultTruncation(
+                truncated=truncated,
+                original_chars=original,
+                emitted_chars=len(text),
+            ),
+        ),
+        str(stop_reason) if stop_reason is not None else None,
+    )
+
+
+def _represented_pending_input(
+    event_log: EventLog, budget: _TextBudget
+) -> tuple[ResultField, bool]:
+    _continuity, events = _represented_tail(event_log)
+    last_complete = max(
+        (
+            index
+            for index, event in enumerate(events)
+            if event.event == "turn_complete"
+            and not event.data.get("agent_id")
+        ),
+        default=-1,
+    )
+    pending_by_id: dict[str, Any] = {}
+    unkeyed: list[Any] = []
+    for event in events[last_complete + 1:]:
+        if event.data.get("agent_id"):
+            continue
+        tool_call_id = (
+            event.data.get("tool_call_id") or event.data.get("toolCallId")
+        )
+        key = str(tool_call_id) if tool_call_id else ""
+        if event.event in {"ask_user_request", "permission_request"}:
+            if key:
+                pending_by_id[key] = event
+            else:
+                unkeyed.append(event)
+        elif event.event in {"tool_call_start", "tool_call_update"} and key:
+            pending_by_id.pop(key, None)
+    pending = [*unkeyed, *pending_by_id.values()]
+    if not pending:
+        return (
+            ResultField(
+                availability="partial",
+                value=[],
+                reason="only the current process-lifetime tail is observable",
+            ),
+            False,
+        )
+    event = pending[-1]
+    raw_tool_call_id = (
+        event.data.get("tool_call_id") or event.data.get("toolCallId")
+    )
+    tool_call_id, tool_call_id_truncated, _ = budget.clip(
+        raw_tool_call_id, field_limit=160
+    )
+    if event.event == "permission_request":
+        summary, truncated, _ = budget.clip(
+            event.data.get("intention") or event.data.get("kind"),
+            field_limit=240,
+        )
+        return (
+            ResultField(
+                availability="partial",
+                value=[
+                    {
+                        "kind": "permission",
+                        "tool_call_id": tool_call_id or None,
+                        "tool_call_id_truncated": tool_call_id_truncated,
+                        "message": summary or None,
+                        "message_truncated": truncated,
+                        "read_only": True,
+                    }
+                ],
+                reason="represented permission evidence is read-only",
+            ),
+            True,
+        )
+    message, truncated, _ = budget.clip(
+        event.data.get("message"), field_limit=240
+    )
+    return (
+        ResultField(
+            availability="partial",
+            value=[
+                {
+                    "kind": "input",
+                    "tool_call_id": tool_call_id or None,
+                    "tool_call_id_truncated": tool_call_id_truncated,
+                    "message": message or None,
+                    "message_truncated": truncated,
+                    "read_only": True,
+                }
+            ],
+            reason="represented input evidence is read-only",
+        ),
+        True,
+    )
+
+
+def build_represented_result_snapshot(
+    *,
+    registration: dict[str, Any],
+    event_log: EventLog,
+    requested_ref: str,
+    position: str | None,
+    max_items: int = DEFAULT_MAX_ITEMS,
+    max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
+) -> DelegatedResultSnapshot:
+    """Build a reduced-fidelity snapshot for a represented live session."""
+    max_items, max_text_chars = normalize_bounds(max_items, max_text_chars)
+    state_budget = _TextBudget(max(64, max_text_chars // 4))
+    latest_budget = _TextBudget(max(128, max_text_chars // 2))
+    incremental_budget = _TextBudget(
+        max_text_chars - state_budget.limit - latest_budget.limit
+    )
+    session_id = str(registration["session_id"])
+    worktree_id = registration.get("worktree_id")
+    active_work = _active_work_values(
+        event_log.active_tool_call(include_nested=False),
+        registration.get("latest_progress") or {},
+        state_budget,
+    )
+    pending_input, attention_pending = _represented_pending_input(
+        event_log, state_budget
+    )
+    latest_result, latest_stop_reason = _represented_latest_result(
+        event_log, session_id, latest_budget
+    )
+    incremental = _incremental_events(
+        event_log,
+        session_id,
+        source="represented",
+        durable=False,
+        position=position,
+        max_items=max_items,
+        budget=incremental_budget,
+    )
+
+    attention = ResultField(availability="partial", value=None)
+    if attention_pending:
+        pending_value = pending_input.value
+        pending_kind = (
+            pending_value[0].get("kind")
+            if isinstance(pending_value, list) and pending_value
+            else None
+        )
+        attention.value = (
+            "permission_required"
+            if pending_kind == "permission"
+            else "input_required"
+        )
+        attention.reason = "derived from the current represented event tail"
+    elif registration.get("turn_state") == "idle" and latest_result.availability in {
+        "available",
+        "partial",
+    }:
+        attention.value = "turn_complete"
+        attention.reason = "derived from the represented turn boundary"
+    elif str(registration.get("status") or "") in {"expired", "taken-over"}:
+        attention.value = "ended"
+        attention.reason = "derived from the represented registration state"
+    elif latest_stop_reason and str(latest_stop_reason).lower().startswith("cancel"):
+        attention.reason = "represented cancellation evidence is incomplete"
+
+    return DelegatedResultSnapshot(
+        identity=ResultIdentity(
+            logical_delegate_kind="worktree" if worktree_id else "session",
+            logical_delegate_id=str(worktree_id or session_id),
+            requested_ref=requested_ref,
+            snapshot_session_id=session_id,
+            current_session_id=session_id,
+        ),
+        fidelity=ResultFidelity(
+            level="reduced",
+            event_retention="process_lifetime",
+            unavailable=[
+                "durable_latest_turn",
+                "restart_stable_position",
+                "durable_detail_expansion",
+                "authoritative_pending_input",
+            ],
+        ),
+        state=ResultCurrentState(
+            session_status=str(registration.get("status") or "live"),
+            liveness=registration.get("liveness"),
+            context_pct=None,
+            usage_model=None,
             attention=attention,
             active_work=active_work,
             pending_input=pending_input,
@@ -648,4 +1009,80 @@ def expand_owned_result_ref(
             "started_at": _iso_timestamp(row.get("started_at")),
             "completed_at": _iso_timestamp(row.get("completed_at")),
         },
+    }
+
+
+def expand_represented_result_ref(
+    *,
+    event_log: EventLog,
+    session_id: str,
+    token: str,
+) -> dict[str, Any]:
+    """Resolve one process-lifetime represented event or span reference."""
+    decoded = _decode_token(
+        token,
+        source="represented",
+        session_id=session_id,
+        kinds=frozenset({"event", "span"}),
+    )
+    continuity = event_log.continuity_id
+    if not continuity or decoded.get("continuity") != continuity:
+        raise ResultHistoryChangedError(
+            "represented result detail belongs to an expired "
+            "process-lifetime history"
+        )
+    if decoded["kind"] == "event":
+        try:
+            event_id = int(decoded["event_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ResultTokenError("invalid event detail reference") from exc
+        current_continuity, event = event_log.snapshot_event(event_id)
+        if current_continuity != continuity:
+            raise ResultHistoryChangedError(
+                "represented result detail belongs to replaced history"
+            )
+        if (
+            event is None
+            or event.data.get("agent_id")
+            or _event_parts(event.event, event.data) is None
+        ):
+            raise KeyError("event detail is no longer available")
+        events = [event]
+    else:
+        try:
+            start = int(decoded["start_event_id"])
+            end = int(decoded["end_event_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ResultTokenError("invalid result span reference") from exc
+        if start <= 0 or end < start or end - start >= _MAX_SCAN_EVENTS:
+            raise ResultTokenError("result span is outside the supported bounds")
+        current_continuity, _head, events = event_log.snapshot_window(
+            after=start - 1, limit=end - start + 1
+        )
+        if current_continuity != continuity:
+            raise ResultHistoryChangedError(
+                "represented result detail belongs to replaced history"
+            )
+        events = [
+            event
+            for event in events
+            if event.id <= end
+            and _event_parts(event.event, event.data) is not None
+            and not event.data.get("agent_id")
+        ]
+        if not events:
+            raise KeyError("result detail is no longer available")
+    return {
+        "kind": decoded["kind"],
+        "session_id": session_id,
+        "events": [
+            {
+                "id": event.id,
+                "event": event.event,
+                "data": event.data,
+                "timestamp": event.timestamp,
+            }
+            for event in events
+        ],
+        "retention": "process_lifetime",
     }

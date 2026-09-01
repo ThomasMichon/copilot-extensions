@@ -251,7 +251,7 @@ Rules:
 | Target capability | Current foundation | Remaining owner |
 |-------------------|--------------------|-----------------|
 | Stable lifecycle/attention vocabulary | Session statuses, events, queues, cursors, handoff links | [#1449](https://github.com/ThomasMichon/copilot-extensions/issues/1449), completed by this baseline |
-| Bounded accumulated result | `result` composes status, persisted turns, and opaque event-log positions for bridge-owned sessions; represented-session parity remains | [#1452](https://github.com/ThomasMichon/copilot-extensions/issues/1452) |
+| Bounded accumulated result | `result` composes status, persisted turns, and opaque event-log positions for owned sessions, plus an explicitly reduced process-lifetime projection for represented sessions | [#1452](https://github.com/ThomasMichon/copilot-extensions/issues/1452) |
 | Attention-oriented wait | Turn-settlement stream | [#1450](https://github.com/ThomasMichon/copilot-extensions/issues/1450) |
 | Queue-first steering | Opt-in hosted queue and separate live inbox | [#1451](https://github.com/ThomasMichon/copilot-extensions/issues/1451) |
 | Safe represented-session admission | Freshness, takeover fencing, inbox idempotency | [#1453](https://github.com/ThomasMichon/copilot-extensions/issues/1453) |

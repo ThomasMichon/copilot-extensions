@@ -121,15 +121,18 @@ The fixed-size response combines current lifecycle/attention state, bounded
 active-work and pending-input fields, the latest completed turn, and a collapsed
 increment of recent work. Reasoning and verbose tool output stay out of the
 ordinary result path; each projected event and completed turn carries an opaque
-detail reference for explicit expansion. The first increment covers
-bridge-owned sessions; represented interactive-session parity remains explicitly
-reduced-fidelity work under issue #1452.
+detail reference for explicit expansion. Bridge-owned sessions recover durable
+turns and event positions. Represented interactive sessions use the same shape
+but explicitly report process-lifetime retention, read-only requests, and
+unavailable durable recovery.
 
 Positions are bridge-issued and must not be parsed or compared across targets.
 They do not read or advance a delivery cursor. A resync rebuild invalidates an
 older position explicitly instead of reusing its event number for different
-history. Empty logs return no position until the first event establishes a
-durable origin.
+history. A represented process replacement uses a new session ID and therefore
+a new position scope; PID-mismatched re-registration is rejected. Empty logs
+return no position until the first event establishes an observable origin.
+Result detail expansion never returns reasoning or nested-agent events.
 
 ### Phased timeouts
 

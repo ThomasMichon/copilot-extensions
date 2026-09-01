@@ -305,7 +305,9 @@ class EventLog:
                     event = candidate
             return (continuity, event)
 
-    def active_tool_call(self) -> dict[str, Any] | None:
+    def active_tool_call(
+        self, *, include_nested: bool = True
+    ) -> dict[str, Any] | None:
         """Return the most recent in-flight tool call, or ``None`` if idle.
 
         A tool call is *in-flight* once a ``tool_call_start`` is seen and until
@@ -319,9 +321,15 @@ class EventLog:
         and never assigned an event id (so it cannot move a delivery cursor).
         """
         with self._lock:
-            if not self._open_tool_calls:
+            open_calls = list(self._open_tool_calls.values())
+            if not include_nested:
+                open_calls = [
+                    event for event in open_calls
+                    if not event.data.get("agent_id")
+                ]
+            if not open_calls:
                 return None
-            start = max(self._open_tool_calls.values(), key=lambda ev: ev.id)
+            start = max(open_calls, key=lambda ev: ev.id)
         raw = start.data.get("raw_input") or {}
         command = None
         if isinstance(raw, dict):

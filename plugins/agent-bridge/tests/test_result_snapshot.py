@@ -14,7 +14,10 @@ from agent_bridge.app import create_app
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig, SessionStatus
-from agent_bridge.protocol import RESULT_SNAPSHOT_PROTOCOL_VERSION
+from agent_bridge.protocol import (
+    REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION,
+    RESULT_SNAPSHOT_PROTOCOL_VERSION,
+)
 from agent_bridge.result_snapshot import _event_ref, _turn_ref
 from agent_bridge.routes import sessions as session_routes
 from agent_bridge.session_manager import Session, SessionManager
@@ -75,6 +78,30 @@ def _complete_turn(
     session.turn_count = 1
 
 
+def _register_live(client, session_id: str = "live-1", worktree_id: str = "wt-live"):
+    response = client.post(
+        "/api/v1/live-sessions",
+        json={
+            "session_id": session_id,
+            "machine": "host",
+            "cwd": "/wt",
+            "worktree_id": worktree_id,
+            "repo": "example/repo",
+            "branch": "main",
+            "pid": 123,
+        },
+    )
+    assert response.status_code == 200
+
+
+def _ingest_live(client, *events, session_id: str = "live-1"):
+    response = client.post(
+        f"/api/v1/live-sessions/{session_id}/events",
+        json={"events": list(events)},
+    )
+    assert response.status_code == 200
+
+
 def test_owned_snapshot_recovers_latest_result_and_position(client, app) -> None:
     mgr, session = _seed_session(app)
     _complete_turn(mgr, session, response="finished work")
@@ -93,6 +120,24 @@ def test_owned_snapshot_recovers_latest_result_and_position(client, app) -> None
         "assistant_message",
         "turn_complete",
     ]
+
+
+def test_owned_snapshot_recovers_latest_result_after_log_reload(client, app) -> None:
+    mgr, session = _seed_session(app)
+    _complete_turn(mgr, session, response="persisted result")
+    session.event_log.append("agent_message", {"text": "persisted result"})
+    session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+    mgr.db.flush()
+    session.event_log = EventLog.from_db(
+        mgr.db, session.session_id, worktree_id="wt-1"
+    )
+    session.client = None
+
+    body = client.get("/api/v1/sessions/sess-1/result").json()
+
+    assert body["latest_result"]["availability"] == "available"
+    assert body["latest_result"]["value"]["text"] == "persisted result"
+    assert body["incremental"]["position"]
 
 
 def test_snapshot_before_first_event_has_no_position(client, app) -> None:
@@ -203,7 +248,7 @@ def test_worktree_handle_falls_back_to_ground_layer_head(
     assert response.json()["identity"]["snapshot_session_id"] == "sess-1"
 
 
-def test_worktree_handle_prefers_ground_layer_head_over_reservation(
+def test_active_owned_reservation_precedes_ground_layer_probe(
     client, app, monkeypatch
 ) -> None:
     mgr, predecessor = _seed_session(app)
@@ -226,22 +271,14 @@ def test_worktree_handle_prefers_ground_layer_head_over_reservation(
     assert mgr.db.reserve_worktree_ownership(
         "wt-1", predecessor.session_id, now=time.time()
     )
-    monkeypatch.setattr(
-        session_routes,
-        "resolve_head",
-        lambda _worktree_id: HeadInfo(
-            active=True,
-            occupied=True,
-            head_session="acp-head",
-            state="active",
-            tracked=True,
-        ),
-    )
+    probe = MagicMock()
+    monkeypatch.setattr(session_routes, "resolve_head", probe)
 
     response = client.get("/api/v1/sessions/wt-1/result")
 
     assert response.status_code == 200
-    assert response.json()["identity"]["snapshot_session_id"] == "sess-2"
+    assert response.json()["identity"]["snapshot_session_id"] == "sess-1"
+    probe.assert_not_called()
 
 
 def test_ambiguous_worktree_without_ground_head_fails_explicitly(
@@ -591,8 +628,497 @@ def test_client_gates_snapshot_against_older_daemon(monkeypatch) -> None:
     assert "require agent-bridge HTTP protocol" in exc.value.detail
 
 
+def test_represented_snapshot_reports_reduced_fidelity(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "1", "type": "user.message", "data": {"content": "prompt"}},
+        {"id": "2", "type": "assistant.reasoning", "data": {"content": "hidden"}},
+        {"id": "3", "type": "assistant.message", "data": {"content": "visible"}},
+        {"id": "4", "type": "assistant.turn_end", "data": {}},
+    )
+
+    body = client.get("/api/v1/live-sessions/wt-live/result").json()
+
+    assert body["fidelity"]["level"] == "reduced"
+    assert body["fidelity"]["event_retention"] == "process_lifetime"
+    assert body["latest_result"]["availability"] == "available"
+    assert body["latest_result"]["value"]["text"] == "visible"
+    assert body["incremental"]["position"].startswith("abr1.")
+    assert "restart_stable_position" in body["fidelity"]["unavailable"]
+
+    detail = client.get(
+        "/api/v1/live-sessions/wt-live/result/detail",
+        params={"ref": body["latest_result"]["detail_ref"]},
+    ).json()
+    assert [event["event"] for event in detail["events"]] == [
+        "agent_message",
+        "turn_complete",
+    ]
+
+
+def test_represented_position_reports_discontinuity_after_store_reset(
+    client, app
+) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "1", "type": "assistant.message", "data": {"content": "before"}},
+    )
+    first = client.get("/api/v1/live-sessions/live-1/result").json()
+    app.state.live_event_store.drop("live-1")
+    _ingest_live(
+        client,
+        {"id": "2", "type": "assistant.message", "data": {"content": "after"}},
+    )
+
+    body = client.get(
+        "/api/v1/live-sessions/live-1/result",
+        params={"position": first["incremental"]["position"]},
+    ).json()
+
+    assert body["incremental"]["availability"] == "discontinuous"
+    assert "rebuilt or replaced" in body["incremental"]["reason"]
+
+
+def test_represented_pending_input_is_read_only(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {
+            "id": "1",
+            "type": "tool.execution_start",
+            "data": {
+                "toolCallId": "ask-1",
+                "toolName": "ask_user",
+                "arguments": {"message": "Choose"},
+            },
+        },
+    )
+
+    body = client.get("/api/v1/live-sessions/live-1/result").json()
+
+    pending = body["state"]["pending_input"]
+    assert pending["availability"] == "partial"
+    assert pending["value"][0]["read_only"] is True
+    assert body["state"]["attention"]["value"] == "input_required"
+
+
+def test_represented_latest_result_respects_user_turn_boundary(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "1", "type": "assistant.message", "data": {"content": "old"}},
+        {"id": "2", "type": "user.message", "data": {"content": "new prompt"}},
+        {"id": "3", "type": "assistant.message", "data": {"content": "new"}},
+        {"id": "4", "type": "assistant.turn_end", "data": {}},
+    )
+
+    body = client.get("/api/v1/live-sessions/live-1/result").json()
+
+    assert body["latest_result"]["availability"] == "available"
+    assert body["latest_result"]["value"]["text"] == "new"
+
+
+def test_represented_latest_result_excludes_nested_agent_output(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "1", "type": "user.message", "data": {"content": "prompt"}},
+        {
+            "id": "2",
+            "type": "assistant.message",
+            "data": {"content": "nested", "agentId": "sub-1"},
+        },
+        {"id": "3", "type": "assistant.message", "data": {"content": "parent"}},
+        {"id": "4", "type": "assistant.turn_end", "data": {}},
+    )
+
+    body = client.get("/api/v1/live-sessions/live-1/result").json()
+
+    assert body["latest_result"]["value"]["text"] == "parent"
+
+
+def test_nested_completion_does_not_set_parent_boundary(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "1", "type": "user.message", "data": {"content": "prompt"}},
+        {
+            "id": "2",
+            "type": "assistant.message",
+            "data": {"content": "nested", "agentId": "sub-1"},
+        },
+        {
+            "id": "3",
+            "type": "assistant.turn_end",
+            "data": {"agentId": "sub-1"},
+        },
+        {"id": "4", "type": "assistant.message", "data": {"content": "parent"}},
+    )
+
+    body = client.get("/api/v1/live-sessions/live-1/result").json()
+
+    assert body["latest_result"]["availability"] == "partial"
+    assert body["latest_result"]["value"]["text"] == "parent"
+    assert body["state"]["attention"]["value"] is None
+    detail = client.get(
+        "/api/v1/live-sessions/live-1/result/detail",
+        params={"ref": body["latest_result"]["detail_ref"]},
+    ).json()
+    assert [event["event"] for event in detail["events"]] == ["agent_message"]
+    assert detail["events"][0]["data"]["text"] == "parent"
+    assert [item["summary"] for item in body["incremental"]["items"]] == [
+        "parent"
+    ]
+
+
+def test_represented_detail_rejects_forged_nested_event_ref(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {
+            "id": "1",
+            "type": "assistant.message",
+            "data": {"content": "nested", "agentId": "sub-1"},
+        },
+    )
+    log = app.state.live_event_store.get("live-1")
+    assert log is not None
+    ref = _event_ref(
+        "represented",
+        "live-1",
+        log.continuity_id or "",
+        1,
+    )
+
+    response = client.get(
+        "/api/v1/live-sessions/live-1/result/detail",
+        params={"ref": ref},
+    )
+
+    assert response.status_code == 404
+
+
+def test_represented_resolved_input_is_not_pending(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {
+            "id": "1",
+            "type": "tool.execution_start",
+            "data": {
+                "toolCallId": "ask-1",
+                "toolName": "ask_user",
+                "arguments": {"message": "Choose"},
+            },
+        },
+        {
+            "id": "2",
+            "type": "tool.execution_complete",
+            "data": {"toolCallId": "ask-1", "success": True},
+        },
+    )
+
+    body = client.get("/api/v1/live-sessions/live-1/result").json()
+
+    assert body["state"]["pending_input"]["value"] == []
+    assert body["state"]["attention"]["value"] is None
+
+
+def test_nested_tool_is_not_parent_active_work(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {
+            "id": "1",
+            "type": "tool.execution_start",
+            "data": {
+                "toolCallId": "nested-tool",
+                "toolName": "Nested work",
+                "agentId": "sub-1",
+            },
+        },
+    )
+
+    body = client.get("/api/v1/live-sessions/live-1/result").json()
+
+    assert body["state"]["active_work"]["value"] is None
+
+
+def test_represented_pending_tool_id_is_bounded(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {
+            "id": "1",
+            "type": "tool.execution_start",
+            "data": {
+                "toolCallId": "x" * 5000,
+                "toolName": "ask_user",
+                "arguments": {"message": "Choose"},
+            },
+        },
+    )
+
+    body = client.get(
+        "/api/v1/live-sessions/live-1/result",
+        params={"max_text_chars": 256},
+    ).json()
+
+    pending = body["state"]["pending_input"]["value"][0]
+    assert len(pending["tool_call_id"]) <= 160
+    assert pending["tool_call_id_truncated"] is True
+    assert body["limits"]["used_text_chars"] <= 256
+
+
+def test_represented_snapshot_without_events_is_explicit(client, app) -> None:
+    _register_live(client)
+
+    body = client.get("/api/v1/live-sessions/live-1/result").json()
+
+    assert body["incremental"]["availability"] == "not_yet_observed"
+    assert body["incremental"]["position"] is None
+    assert body["latest_result"]["availability"] == "not_yet_observed"
+
+
+def test_process_replacement_requires_a_new_session_id(
+    client, app
+) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "1", "type": "assistant.message", "data": {"content": "before"}},
+    )
+    first = client.get("/api/v1/live-sessions/live-1/result").json()
+    app.state.db.execute_write(
+        "UPDATE live_sessions SET status='expired' WHERE session_id=?",
+        ("live-1",),
+    )
+    response = client.post(
+        "/api/v1/live-sessions",
+        json={
+            "session_id": "live-1",
+            "machine": "host",
+            "cwd": "/wt",
+            "worktree_id": "wt-live",
+            "repo": "example/repo",
+            "branch": "main",
+            "pid": 456,
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "incarnation_mismatch"
+    _register_live(client, session_id="live-2", worktree_id="wt-live")
+    _ingest_live(
+        client,
+        {"id": "1", "type": "assistant.message", "data": {"content": "after"}},
+        session_id="live-2",
+    )
+
+    current = client.get("/api/v1/live-sessions/wt-live/result").json()
+    stale = client.get(
+        "/api/v1/live-sessions/live-2/result",
+        params={"position": first["incremental"]["position"]},
+    )
+
+    assert current["identity"]["snapshot_session_id"] == "live-2"
+    assert stale.status_code == 400
+
+
+def test_new_process_incarnation_refreshes_worktree_ordering(client, app) -> None:
+    db = app.state.db
+    assert db.register_live_session(
+        "reused",
+        machine="host",
+        cwd="/wt",
+        worktree_id="wt-order",
+        repo="example/repo",
+        branch="main",
+        pid=100,
+        role=None,
+        now=100.0,
+    ) == "live"
+    db.execute_write(
+        "UPDATE live_sessions SET status='expired' WHERE session_id=?",
+        ("reused",),
+    )
+    assert db.register_live_session(
+        "other",
+        machine="host",
+        cwd="/wt",
+        worktree_id="wt-order",
+        repo="example/repo",
+        branch="main",
+        pid=200,
+        role=None,
+        now=200.0,
+    ) == "live"
+    db.execute_write(
+        "UPDATE live_sessions SET status='wedged' WHERE session_id=?",
+        ("other",),
+    )
+    assert db.register_live_session(
+        "replacement",
+        machine="host",
+        cwd="/wt",
+        worktree_id="wt-order",
+        repo="example/repo",
+        branch="main",
+        pid=300,
+        role=None,
+        now=300.0,
+    ) == "live"
+
+    assert db.current_represented_session_for_worktree(
+        "wt-order", now=300.0
+    ) == "replacement"
+
+
+def test_wedged_same_process_preserves_represented_history(client, app) -> None:
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "1", "type": "assistant.message", "data": {"content": "before"}},
+    )
+    first = client.get("/api/v1/live-sessions/live-1/result").json()
+    app.state.db.execute_write(
+        "UPDATE live_sessions SET status='wedged' WHERE session_id=?",
+        ("live-1",),
+    )
+    _register_live(client)
+    _ingest_live(
+        client,
+        {"id": "2", "type": "assistant.message", "data": {"content": "after"}},
+    )
+
+    body = client.get(
+        "/api/v1/live-sessions/wt-live/result",
+        params={"position": first["incremental"]["position"]},
+    ).json()
+
+    assert body["incremental"]["availability"] == "available"
+    assert [item["summary"] for item in body["incremental"]["items"]] == ["after"]
+
+
+def test_wedged_worktree_resolves_for_result_inspection(client, app) -> None:
+    _register_live(client)
+    app.state.db.execute_write(
+        "UPDATE live_sessions SET status='wedged' WHERE session_id=?",
+        ("live-1",),
+    )
+
+    response = client.get("/api/v1/live-sessions/wt-live/result")
+
+    assert response.status_code == 200
+    assert response.json()["state"]["session_status"] == "wedged"
+
+
+def test_owned_reservation_wins_over_wedged_worktree_result(client, app) -> None:
+    _register_live(client)
+    app.state.db.execute_write(
+        "UPDATE live_sessions SET status='wedged' WHERE session_id=?",
+        ("live-1",),
+    )
+    mgr: SessionManager = app.state.session_manager
+    owned = Session(
+        "owned-1",
+        "owned",
+        SpawnTarget(type="local", cwd="/wt", worktree_id="wt-live"),
+        "test-agent",
+    )
+    owned.status = SessionStatus.IDLE
+    owned.event_log = EventLog(
+        db=mgr.db, session_id="owned-1", worktree_id="wt-live"
+    )
+    mgr._sessions["owned-1"] = owned
+    mgr.db.create_session(
+        "owned-1", "owned", "test-agent", "/wt", "local", "idle", time.time()
+    )
+    assert mgr.db.reserve_worktree_ownership(
+        "wt-live", "owned-1", now=time.time()
+    )
+
+    represented = client.get(
+        "/api/v1/live-sessions/result-target",
+        params={"handle": "wt-live"},
+    )
+    owned_result = client.get("/api/v1/sessions/wt-live/result")
+
+    assert represented.status_code == 404
+    assert owned_result.status_code == 200
+    assert owned_result.json()["identity"]["snapshot_session_id"] == "owned-1"
+
+
+def test_failed_owned_reservation_yields_to_represented_result(client, app) -> None:
+    mgr, owned = _seed_session(app)
+    assert mgr.db.reserve_worktree_ownership(
+        "wt-1", owned.session_id, now=time.time()
+    )
+    owned.status = SessionStatus.FAILED
+    mgr.db.update_session_status(
+        owned.session_id, SessionStatus.FAILED.value, time.time()
+    )
+    _register_live(client, worktree_id="wt-1")
+
+    represented = client.get("/api/v1/live-sessions/wt-1/result")
+    owned_result = client.get("/api/v1/sessions/wt-1/result")
+
+    assert represented.status_code == 200
+    assert represented.json()["identity"]["snapshot_session_id"] == "live-1"
+    assert owned_result.status_code == 409
+    assert "represented session" in owned_result.json()["detail"]
+
+
+def test_wedged_representation_outranks_stopped_owned_history(client, app) -> None:
+    mgr, owned = _seed_session(app)
+    owned.status = SessionStatus.STOPPED
+    mgr.db.update_session_status(
+        owned.session_id, SessionStatus.STOPPED.value, time.time()
+    )
+    _register_live(client, worktree_id="wt-1")
+    app.state.db.execute_write(
+        "UPDATE live_sessions SET status='wedged' WHERE session_id=?",
+        ("live-1",),
+    )
+
+    represented = client.get("/api/v1/live-sessions/wt-1/result")
+    owned_result = client.get("/api/v1/sessions/wt-1/result")
+
+    assert represented.status_code == 200
+    assert represented.json()["identity"]["snapshot_session_id"] == "live-1"
+    assert owned_result.status_code == 409
+    assert "represented session" in owned_result.json()["detail"]
+
+
+def test_client_gates_represented_snapshot_against_protocol_six(
+    monkeypatch,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:1", token="x")
+    monkeypatch.setattr(
+        client,
+        "daemon_protocol",
+        lambda **_kwargs: (RESULT_SNAPSHOT_PROTOCOL_VERSION, 1),
+    )
+
+    with pytest.raises(BridgeClientError) as exc:
+        client.get_live_result_snapshot("live-1")
+
+    assert exc.value.status == 426
+    assert (
+        f"protocol v{REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION}"
+        in exc.value.detail
+    )
+
+
 def test_cli_result_renders_snapshot(monkeypatch, capsys) -> None:
     class _FakeClient:
+        def daemon_supports(self, _version):
+            return False
+
+        def resolve_live_result_target(self, _session_ref):
+            raise AssertionError("v6 owned result must not probe represented target")
+
         def get_result_snapshot(self, *_args, **_kwargs):
             return {
                 "identity": {
@@ -646,3 +1172,53 @@ def test_cli_result_renders_snapshot(monkeypatch, capsys) -> None:
     assert "wt-1  [idle]  fidelity=full" in output
     assert "Latest:    available" in output
     assert "Position:  abr1.position" in output
+
+
+def test_cli_result_uses_represented_surface(monkeypatch, capsys) -> None:
+    class _FakeClient:
+        def daemon_supports(self, _version):
+            return True
+
+        def resolve_live_result_target(self, _session_ref):
+            return {"session_id": "live-1"}
+
+        def get_live_result_snapshot(self, *_args, **_kwargs):
+            return {
+                "identity": {
+                    "logical_delegate_id": "wt-live",
+                    "snapshot_session_id": "live-1",
+                    "current_session_id": "live-1",
+                },
+                "fidelity": {"level": "reduced"},
+                "state": {
+                    "session_status": "live",
+                    "attention": {"availability": "partial", "value": None},
+                    "active_work": {"availability": "available", "value": None},
+                    "pending_input": {
+                        "availability": "partial",
+                        "value": [],
+                        "reason": "process tail only",
+                    },
+                },
+                "latest_result": {"availability": "not_yet_observed"},
+                "incremental": {
+                    "availability": "not_yet_observed",
+                    "items": [],
+                    "position": None,
+                },
+            }
+
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: _FakeClient())
+    args = argparse.Namespace(
+        session_ref="wt-live",
+        position=None,
+        max_items=None,
+        max_text_chars=None,
+        expand=None,
+        json=False,
+    )
+
+    cli._cmd_result(args)
+
+    output = capsys.readouterr().out
+    assert "wt-live  [live]  fidelity=reduced" in output

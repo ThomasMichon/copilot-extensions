@@ -137,51 +137,51 @@ reinterpreting the event ID against rebuilt history.
 
 ### Phase 4 — Add represented-session parity
 
-- [ ] Project represented sessions through the same typed shape from their
+- [x] Project represented sessions through the same typed shape from their
       translated in-memory tail.
-- [ ] Mark represented event positions as process-lifetime-only and report
+- [x] Mark represented event positions as process-lifetime-only and report
       durable latest-turn recovery and durable expansion unsupported.
-- [ ] Preserve read-only pending input and permission evidence while reporting
+- [x] Preserve read-only pending input and permission evidence while reporting
       fields the SDK does not supply as unavailable.
 
 ### Phase 5 — Validate and publish
 
-- [ ] Cover full/reduced fidelity, latest-result recovery, incremental reads,
+- [x] Cover full/reduced fidelity, latest-result recovery, incremental reads,
       deterministic truncation, position mismatch, succession, and cursor
       neutrality.
-- [ ] Run the focused agent-bridge suite and repository contract/version gates.
+- [x] Run the focused agent-bridge suite and repository contract/version gates.
 - [ ] Bump every agent-bridge version surface, publish and merge the PR, then
       reconcile the parent effort and #1452 claim.
 
 ## Validation Plan
 
-- [ ] A bridge-owned session returns its latest completed result after a daemon
+- [x] A bridge-owned session returns its latest completed result after a daemon
       restart without reading the full event history.
-- [ ] A turn interrupted by restart reports a partial/unavailable result with
+- [x] A turn interrupted by restart reports a partial/unavailable result with
       its stop reason rather than an empty successful result.
-- [ ] A no-position read returns a bounded latest window; a positioned read
+- [x] A no-position read returns a bounded latest window; a positioned read
       returns a bounded contiguous increment and a resumable next position.
-- [ ] A snapshot before the first event has `position: null`; the first
+- [x] A snapshot before the first event has `position: null`; the first
       origin-derived position does not create a false discontinuity.
-- [ ] Two callers can use independent positions without creating or advancing
+- [x] Two callers can use independent positions without creating or advancing
       delivery-cursor rows.
-- [ ] Every free-text field, collection, and total response stays within
+- [x] Every free-text field, collection, and total response stays within
       documented deterministic bounds.
-- [ ] Reasoning content and non-terminal tool output are absent by default;
+- [x] Reasoning content and non-terminal tool output are absent by default;
       explicit token-validated event expansion remains available.
-- [ ] A rebuilt event log rejects an old opaque token and reports discontinuity
+- [x] A rebuilt event log rejects an old opaque token and reports discontinuity
       rather than resolving the same event ID to different history.
-- [ ] A parked input request whose current truth was lost across restart is
+- [x] A parked input request whose current truth was lost across restart is
       reported unknown/unavailable rather than absent.
-- [ ] A predecessor snapshot names the successor, and a logical-delegate read
+- [x] A predecessor snapshot names the successor, and a logical-delegate read
       follows the current authoritative head without merging their histories.
-- [ ] A represented session reports reduced fidelity, in-memory retention, and
+- [x] A represented session reports reduced fidelity, in-memory retention, and
       unavailable durable latest-turn detail explicitly.
-- [ ] A represented-session position becomes explicitly discontinuous after a
+- [x] A represented-session position becomes explicitly discontinuous after a
       bridge restart and is never compared with an owned-session position.
-- [ ] A new client against an older daemon reports result snapshots unsupported
+- [x] A new client against an older daemon reports result snapshots unsupported
       without mutating session or cursor state.
-- [ ] Existing `status`, `read`, SSE, delivery-cursor, and resync behavior
+- [x] Existing `status`, `read`, SSE, delivery-cursor, and resync behavior
       remains compatible.
 
 ## Proposal
@@ -238,3 +238,27 @@ settlement, #1506 remains the owner of the compact cross-target facade, and
 - Covered latest-result recovery, interrupted turns, pending-input uncertainty,
   rebuild invalidation, worktree resolution, succession, expansion, truncation,
   cursor neutrality, CLI rendering, and old-daemon capability gating.
+
+### 2026-09-01 — Represented-session parity implemented
+
+- Added protocol-v7 represented result routes, client selection, CLI parity, and
+  a read-specific live/wedged worktree resolver.
+- Reconstructed only parent turns, filtered nested-agent boundaries/tools/detail,
+  correlated resolved input and permission requests, and kept every represented
+  position explicitly process-lifetime.
+- Preserved same-process wedged history, rejected PID-mismatched reuse of one
+  session ID, and required a new session ID for process replacement rather than
+  inventing the incarnation writer owned by the single-stream admission effort.
+- Unified worktree result authority: active owned reservations win; otherwise a
+  readable live or wedged representation prevents stale owned history from
+  masquerading as current.
+
+### 2026-09-01 — Validation complete
+
+- Passed the focused owned/represented result, event, live-session,
+  live-delivery, protocol-negotiation, and restart-recovery coverage.
+- Passed lint, install-contract, version-consistency, version-bump, and generated
+  payload-invocation gates.
+- Repeated full-suite attempts exposed an unrelated intermittent PowerShell 5.1
+  subprocess-reader hang; the test passes in isolation and is tracked by
+  [#1586](https://github.com/ThomasMichon/copilot-extensions/issues/1586).

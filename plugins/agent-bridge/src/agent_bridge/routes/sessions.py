@@ -72,7 +72,14 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
         item for item in mgr.list_sessions()
         if item.target.worktree_id == ref
     ]
-    live_session_id = mgr.db.current_live_session_for_worktree(
+    if ownership:
+        owned = mgr.get_session(ownership.get("session_id") or "")
+        if owned is not None and owned.status in {
+            SessionStatus.RUNNING,
+            SessionStatus.IDLE,
+        }:
+            return owned
+    live_session_id = mgr.db.current_represented_session_for_worktree(
         ref, now=time.time()
     )
     if live_session_id:
@@ -80,8 +87,8 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
             status_code=409,
             detail=(
                 "The authoritative worktree head is a represented session; "
-                "represented-session result parity is unavailable in this "
-                "protocol generation"
+                "use the represented result surface or the result CLI's "
+                "automatic target selection"
             ),
         )
     if ownership is None and not candidates:
@@ -116,9 +123,9 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "The authoritative worktree head is not a bridge-owned "
-                    "session; represented-session result parity is unavailable "
-                    "in this protocol generation"
+                    "The authoritative worktree head is a represented session; "
+                    "use the represented result surface or the result CLI's "
+                    "automatic target selection"
                 ),
             )
         return session
