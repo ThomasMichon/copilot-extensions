@@ -15,12 +15,13 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from ..models import (
     AckMessagesRequest,
     AckMessagesResult,
+    DelegatedResultSnapshot,
     IngestLiveEventsRequest,
     IngestLiveEventsResult,
     LiveMessage,
@@ -32,10 +33,21 @@ from ..models import (
     SendMessageRequest,
     SendMessageResult,
 )
+from ..events import EventLog
 from ..live_representation import (
     await_turn_reply,
     build_progress_snapshot,
     derive_turn_state,
+)
+from ..result_snapshot import (
+    DEFAULT_MAX_ITEMS,
+    DEFAULT_MAX_TEXT_CHARS,
+    MAX_MAX_ITEMS,
+    MAX_MAX_TEXT_CHARS,
+    ResultHistoryChangedError,
+    ResultTokenError,
+    build_represented_result_snapshot,
+    expand_represented_result_ref,
 )
 from .sessions import _sse_event_stream
 
@@ -75,6 +87,21 @@ def _store(request: Request) -> LiveEventStore:
     if store is None:
         raise HTTPException(status_code=503, detail="live event store not ready")
     return store
+
+
+def _resolve_registration(db: Database, ref: str) -> dict[str, Any] | None:
+    exact = db.get_live_session(ref)
+    if exact is not None:
+        return exact
+    ownership = db.get_worktree_ownership(ref)
+    if ownership:
+        owned = db.get_session(ownership.get("session_id") or "")
+        if owned is not None and owned.get("status") in {"running", "idle"}:
+            return None
+    session_id = db.current_represented_session_for_worktree(
+        ref, now=time.time()
+    )
+    return db.get_live_session(session_id) if session_id else None
 
 
 def _live_liveness(row: dict[str, Any], *, now: float | None = None) -> str | None:
@@ -141,6 +168,21 @@ async def register_live_session(
     """
     db = _db(request)
     now = time.time()
+    prior = db.get_live_session(body.session_id)
+    pid_changed = bool(
+        prior
+        and prior.get("pid") is not None
+        and body.pid is not None
+        and prior.get("pid") != body.pid
+    )
+    if pid_changed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": "incarnation_mismatch",
+                "session_id": body.session_id,
+            },
+        )
     status = db.register_live_session(
         body.session_id,
         machine=body.machine,
@@ -211,6 +253,17 @@ async def resolve_live_session(handle: str, request: Request) -> LiveSessionInfo
     return _to_info(row)
 
 
+@router.get("/result-target", response_model=LiveSessionInfo)
+def resolve_live_result_target(handle: str, request: Request) -> LiveSessionInfo:
+    """Resolve an exact session or readable live/wedged worktree target."""
+    row = _resolve_registration(_db(request), handle)
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail="no represented result target for handle"
+        )
+    return _to_info(row)
+
+
 @router.get("/{session_id}", response_model=LiveSessionInfo)
 async def get_live_session(session_id: str, request: Request) -> LiveSessionInfo:
     """Fetch a single registered live interactive CLI session."""
@@ -219,6 +272,76 @@ async def get_live_session(session_id: str, request: Request) -> LiveSessionInfo
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     return _to_info(row)
+
+
+@router.get(
+    "/{session_ref}/result",
+    response_model=DelegatedResultSnapshot,
+)
+def get_live_result_snapshot(
+    session_ref: str,
+    request: Request,
+    position: str | None = Query(default=None, max_length=2048),
+    max_items: int = Query(default=DEFAULT_MAX_ITEMS, ge=1, le=MAX_MAX_ITEMS),
+    max_text_chars: int = Query(
+        default=DEFAULT_MAX_TEXT_CHARS, ge=256, le=MAX_MAX_TEXT_CHARS
+    ),
+):
+    """Return a bounded reduced-fidelity result for a represented session."""
+    db = _db(request)
+    row = _resolve_registration(db, session_ref)
+    if row is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    log = _store(request).get(row["session_id"])
+    if log is None:
+        log = EventLog(
+            session_id=row["session_id"],
+            worktree_id=row.get("worktree_id"),
+            telemetry_source="represented",
+        )
+    try:
+        return build_represented_result_snapshot(
+            registration=_to_info(row).model_dump(mode="json"),
+            event_log=log,
+            requested_ref=session_ref,
+            position=position,
+            max_items=max_items,
+            max_text_chars=max_text_chars,
+        )
+    except ResultTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{session_ref}/result/detail")
+def get_live_result_detail(
+    session_ref: str,
+    request: Request,
+    ref: str = Query(max_length=2048),
+):
+    """Resolve a process-lifetime represented result detail reference."""
+    db = _db(request)
+    row = _resolve_registration(db, session_ref)
+    if row is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    log = _store(request).get(row["session_id"])
+    if log is None:
+        raise HTTPException(
+            status_code=404,
+            detail="represented event history is no longer available",
+        )
+    try:
+        return expand_represented_result_ref(
+            event_log=log,
+            session_id=row["session_id"],
+            token=ref,
+        )
+    except ResultHistoryChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ResultTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        detail = str(exc.args[0]) if exc.args else "Result detail is unavailable"
+        raise HTTPException(status_code=404, detail=detail) from exc
 
 
 @router.post("/{session_id}/progress", response_model=LiveSessionInfo)

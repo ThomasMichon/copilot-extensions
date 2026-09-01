@@ -245,6 +245,9 @@ def derive_turn_state(
     state = prior_state
     saw_activity = False
     for event in raw_events:
+        data = event.get("data")
+        if isinstance(data, dict) and data.get("agentId"):
+            continue
         etype = event.get("type")
         if etype == _TURN_END_TYPE:
             state = "idle"
