@@ -2295,7 +2295,6 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
     try:
         registrations = _reviewer_loop_registrations(args)
         machine, env = _registration_scope(args)
-        overrides = load_overrides(overrides_path())
         command = args.reviewer_loop_command
         logical_aliases = {
             registration["id"]: registration_override_ids(registration)

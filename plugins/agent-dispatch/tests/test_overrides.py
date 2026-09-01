@@ -69,6 +69,7 @@ def test_mutations_are_serialized_without_losing_unrelated_entries(tmp_path):
     path = tmp_path / "overrides.json"
     first_entered = threading.Event()
     release_first = threading.Event()
+    second_started = threading.Event()
     second_entered = threading.Event()
 
     def first(overrides):
@@ -80,11 +81,16 @@ def test_mutations_are_serialized_without_losing_unrelated_entries(tmp_path):
         second_entered.set()
         overrides["second"] = {"disabled": True}
 
+    def run_second():
+        second_started.set()
+        ov.mutate_overrides(path, second)
+
     thread_one = threading.Thread(target=lambda: ov.mutate_overrides(path, first))
-    thread_two = threading.Thread(target=lambda: ov.mutate_overrides(path, second))
+    thread_two = threading.Thread(target=run_second)
     thread_one.start()
     assert first_entered.wait(10)
     thread_two.start()
+    assert second_started.wait(10)
     time.sleep(0.1)
     assert not second_entered.is_set()
     release_first.set()
