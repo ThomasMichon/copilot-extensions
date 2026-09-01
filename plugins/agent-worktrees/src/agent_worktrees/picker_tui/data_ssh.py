@@ -34,6 +34,7 @@ import shlex
 import signal
 import socket
 import subprocess
+import sys
 import threading
 
 from agent_procutil import no_window_flags
@@ -200,6 +201,8 @@ def _drop_classify_arg(argv: list[str]) -> list[str]:
     marker = "-EncodedCommand "
     out: list[str] = []
     for a in argv:
+        if a == "--classify":
+            continue
         if marker in a:
             head, b64 = a.rsplit(marker, 1)
             try:
@@ -255,6 +258,11 @@ def _edit_remote_cmd(argv: list[str], transform) -> list[str]:
 def _add_cache_only_arg(argv: list[str]) -> list[str]:
     """Add ``--cache-only`` to a remote list argv (idempotent). Inserted after
     ``--json`` (always present in the picker's list command)."""
+    if "--json" in argv and "--cache-only" not in argv:
+        out = list(argv)
+        out.insert(out.index("--json") + 1, "--cache-only")
+        return out
+
     def _t(s: str) -> str:
         if "--cache-only" in s:
             return s
@@ -264,6 +272,8 @@ def _add_cache_only_arg(argv: list[str]) -> list[str]:
 
 def _drop_cache_only_arg(argv: list[str]) -> list[str]:
     """Remove ``--cache-only`` from a remote list argv (the old-remote fallback)."""
+    if "--cache-only" in argv:
+        return [arg for arg in argv if arg != "--cache-only"]
     return _edit_remote_cmd(argv, lambda s: s.replace(" --cache-only", ""))
 
 
@@ -310,6 +320,23 @@ def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
     return _ssh_argv(alias, f"bash -lc '{cmd}'")
 
 
+def _local_argv(project: str, *, classify: bool = True) -> list[str]:
+    """Run the local list producer out-of-process so it cannot stall Textual."""
+    argv = [
+        sys.executable,
+        "-m",
+        "agent_worktrees",
+        "--project",
+        project,
+        "list",
+        "--json",
+        "--mux-details",
+    ]
+    if classify:
+        argv.append("--classify")
+    return argv
+
+
 def _build_sources():
     """Derive machine/env sources from ``machines.yaml`` (the canonical roster).
 
@@ -352,8 +379,9 @@ def _build_sources():
             alias = ssh_env.alias or ""
             is_local = is_local_machine and ename == local_plat
             if is_local:
-                # Local env: in-process, no SSH profile required.
-                out.append(Source(m.key, elabel, None, local=True,
+                # Local env: no SSH profile required. The list still runs in a
+                # child process so Python/git work cannot starve Textual's loop.
+                out.append(Source(m.key, elabel, _local_argv(project), local=True,
                                   ready=True))
                 local_env_added = True
             elif not alias:
@@ -373,8 +401,10 @@ def _build_sources():
         # the running platform). The picker runs *here*, so it never needs to
         # SSH to itself.
         if is_local_machine and not local_env_added:
-            out.append(Source(m.key, local_elabel, None, local=True,
-                              ready=True))
+            out.append(Source(
+                m.key, local_elabel, _local_argv(project), local=True,
+                ready=True,
+            ))
 
     # Defensive fail-safe: guarantee a local source even when this machine is
     # entirely absent from machines.yaml (a freshly-provisioned box whose
@@ -383,8 +413,13 @@ def _build_sources():
     # crashes. The picker runs *here*, so a hostname-based local tab (from
     # ``data_local.LOCAL``) is always the correct, safe fallback.
     if not any(s.local for s in out):
-        out.append(Source(data_local.LOCAL[0], data_local.LOCAL[1], None,
-                          local=True, ready=True))
+        out.append(Source(
+            data_local.LOCAL[0],
+            data_local.LOCAL[1],
+            _local_argv(project),
+            local=True,
+            ready=True,
+        ))
     for registered in provider_sources.load(project):
         ready = bool(
             registered.venue.get("ready")
@@ -494,6 +529,30 @@ def _provider_remote_argv(
     ]
 
 
+def setup_metadata(sources=None):
+    """Pure Picker setup metadata derived from an already-built source snapshot."""
+    source_list = list(sources if sources is not None else _build_sources())
+    host_columns = []
+    target_environment_rows = []
+    seen_host_envs = set()
+    for source in source_list:
+        if source.source_kind != SOURCE_KIND_MACHINE_SSH:
+            continue
+        target_environment_rows.append((source.machine, source.env))
+        host_key = (source.machine, source.env)
+        if source.env not in ("Win", "Linux") or host_key in seen_host_envs:
+            continue
+        suffix = "Lx" if source.env == "Linux" else source.env
+        host_columns.append(
+            (f"{source.machine}\u00b7{suffix}", source.machine, source.env)
+        )
+        seen_host_envs.add(host_key)
+    return {
+        "host_cols": host_columns,
+        "target_envs": target_environment_rows,
+    }
+
+
 def _provider_transport_fingerprint(source) -> str:
     payload = {
         "alias": source.alias,
@@ -510,13 +569,15 @@ def _provider_transport_fingerprint(source) -> str:
 
 
 def _stream_argv(source):
-    """SSH argv that runs the remote ``list`` in NDJSON **streaming** mode.
+    """Subprocess argv that runs ``list`` in NDJSON **streaming** mode.
 
     Same classify + mux + platform list flags as :func:`_argv_for` plus
     ``--stream``: the producer emits a ``begin`` frame, fast (unclassified)
     rows, then classified rows, then a ``done`` frame -- one JSON object per
     flushed line -- so the whole two-phase load happens over a single SSH
     connection with progressive fill."""
+    if source.local and source.argv:
+        return [*source.argv, "--stream"]
     project = _project()
     cmd = f"{project} {_list_args(source.shell, classify=True)} --stream"
     return _wrap_remote(source.shell, source.alias, cmd)
@@ -823,6 +884,7 @@ def source_tabs(sources=None):
             "machine": source.machine,
             "env": source.env,
             "ready": source.ready,
+            "local": source.local,
             "source_kind": source.source_kind,
             "source_id": source.source_id,
             "source_label": source.source_label,
@@ -1194,7 +1256,8 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
     fast pass is driven by an ``argv`` override instead.
     """
     runner = runner or _run
-    if source.local:
+    use_argv = argv if argv is not None else source.argv
+    if source.local and not use_argv:
         return data_local.load(
             source.machine,
             source.env,
@@ -1205,7 +1268,6 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
         )
 
     eff_timeout = source.timeout if timeout is None else timeout
-    use_argv = argv if argv is not None else source.argv
     proc = runner(use_argv, eff_timeout)
     if proc.returncode != 0 and _is_cache_only_unsupported(proc.stderr):
         # Older remote without --cache-only (picker-cache-first-paint,
@@ -1625,7 +1687,14 @@ class LiveLoader:
 
     def _load_one_serial(self, source: Source, gen: int):
         if source.local:
-            # Local tab: fast-then-fill so rows paint immediately (see below).
+            if source.argv:
+                # The local producer is the same runtime, so streaming support
+                # is guaranteed. Keep a fallback for synthetic/older fixtures.
+                if self._load_remote_stream(source, gen):
+                    return
+                self._load_remote_two_phase(source)
+                return
+            # Synthetic test sources without argv retain the in-process seam.
             self._load_local_two_phase(source)
             return
         try:

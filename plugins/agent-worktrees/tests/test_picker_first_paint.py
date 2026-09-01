@@ -116,6 +116,14 @@ def test_setup_live_async_records_failure():
         LOCAL = ("host", "Win")
 
         @staticmethod
+        def source_tabs(_snapshot=None):
+            return []
+
+        @staticmethod
+        def setup_metadata(_snapshot):
+            return {}
+
+        @staticmethod
         def make_loader(*_a, **_k):
             raise RuntimeError("roster exploded")
 
@@ -139,6 +147,14 @@ def test_setup_live_async_keeps_bootstrap_rows_on_roster_failure(monkeypatch):
 
     class Src:
         LOCAL = ("host", "Win")
+
+        @staticmethod
+        def source_tabs(_snapshot=None):
+            return []
+
+        @staticmethod
+        def setup_metadata(_snapshot):
+            return {}
 
         @staticmethod
         def bootstrap_rows():
@@ -205,16 +221,23 @@ def test_full_loader_does_not_blank_bootstrap_rows_while_loading():
         LOCAL = ("host", "Win")
 
         @staticmethod
-        def source_tabs(_snapshot):
-            return [{
+        def setup_metadata(_snapshot):
+            raise AssertionError("source metadata must not run on the UI thread")
+
+    prepared = {
+        "tabs": [{
                 "label": "host Win",
                 "machine": "host",
                 "env": "Win",
                 "ready": True,
+                "local": True,
                 "source_kind": "machine-ssh",
                 "source_id": "machine-ssh:host:win",
                 "capabilities": {},
-            }]
+        }],
+        "host_cols": [("host\u00b7Win", "host", "Win")],
+        "target_envs": [("host", "Win")],
+    }
 
     screen = eng.PickerScreen(Src(), live=True)
     screen._setup_skeleton()
@@ -224,7 +247,35 @@ def test_full_loader_does_not_blank_bootstrap_rows_while_loading():
     screen._maybe_repoll_pivot = lambda: None
     screen.refresh = lambda: None
 
-    screen._apply_live_source((), Loader())
+    screen._apply_live_source(prepared, Loader())
     screen._tick()
 
     assert screen.data == [{"id": "cached"}]
+    assert screen.machine_idx == 1
+    assert screen.host_cols == [("host\u00b7Win", "host", "Win")]
+
+
+def test_local_live_source_uses_streaming_subprocess(monkeypatch):
+    from agent_worktrees.picker_tui import data_ssh
+
+    argv = data_ssh._local_argv("example-project")
+    source = data_ssh.Source("host", "Win", argv, local=True)
+    loader = data_ssh.LiveLoader([source])
+    calls = []
+    monkeypatch.setattr(
+        loader,
+        "_load_remote_stream",
+        lambda actual, generation: calls.append((actual, generation)) or True,
+    )
+    monkeypatch.setattr(
+        loader,
+        "_load_local_two_phase",
+        lambda _source: (_ for _ in ()).throw(
+            AssertionError("local authoritative load must not run in-process")
+        ),
+    )
+
+    loader._load_one_serial(source, 0)
+
+    assert calls == [(source, 0)]
+    assert data_ssh._stream_argv(source) == [*argv, "--stream"]
