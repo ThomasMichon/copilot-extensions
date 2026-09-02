@@ -23,6 +23,7 @@ MACHINE_TIMEOUT_SECONDS = 8.0
 CONDUCT_TIMEOUT_SECONDS = 8.0
 SNAPSHOT_TIMESTAMP_SKEW_MS = 5_000
 SNAPSHOT_MTIME_GRANULARITY_SECONDS = 2.0
+SNAPSHOT_RETENTION_SECONDS = 60 * 60
 SNAPSHOT_NAMES = (
     "marketplace-overrides",
     "register-session",
@@ -186,9 +187,20 @@ def _read_snapshot(
     except OSError:
         return None
     prefix = f"{name}-"
+    prune_before = time.time() - SNAPSHOT_RETENTION_SECONDS
     for path in paths:
         filename = path.name
         if not filename.startswith(prefix):
+            continue
+        try:
+            if (
+                not path.is_symlink()
+                and path.is_file()
+                and path.stat().st_mtime < prune_before
+            ):
+                path.unlink()
+                continue
+        except OSError:
             continue
         is_json = filename.endswith(".json")
         launch_key = filename[
@@ -216,12 +228,7 @@ def _read_snapshot(
                 and value.get("launchKey") == launch_key
                 and isinstance(value.get("output"), str)
             ):
-                context = _context(value["output"])
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-                return context
+                return _context(value["output"])
             continue
         try:
             raw = path.read_text(encoding="utf-8")
@@ -229,12 +236,7 @@ def _read_snapshot(
             continue
         stored_key, separator, output = raw.partition("\n")
         if separator and stored_key == launch_key:
-            context = _context(output)
-            try:
-                path.unlink()
-            except OSError:
-                pass
-            return context
+            return _context(output)
     return None
 
 

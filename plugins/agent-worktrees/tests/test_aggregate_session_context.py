@@ -128,7 +128,11 @@ def test_snapshot_reader_accepts_nearby_sibling_hook_timestamp(
     )
 
     assert snapshots["register-session"] == "binding"
-    assert not (root / f"register-session-{sibling_key}.json").exists()
+    assert (root / f"register-session-{sibling_key}.json").exists()
+    assert MODULE._read_snapshot(
+        "register-session",
+        (sibling_key,),
+    ) == "binding"
 
 
 def test_snapshot_reader_accepts_early_coarsely_timed_sibling(
@@ -205,7 +209,7 @@ def test_snapshot_reader_ignores_stale_or_missing_snapshot_roots(
         )
         is None
     )
-    assert snapshot.exists()
+    assert not snapshot.exists()
 
 
 def test_binding_snapshot_can_use_the_full_collector_deadline(
