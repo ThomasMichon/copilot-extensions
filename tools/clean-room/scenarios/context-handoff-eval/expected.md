@@ -18,5 +18,5 @@ Credit only the literal prompt-first flow:
    exact handoff seed. The completed `consume_handoff` call's structured
    `content` must contain the full stored payload byte-for-byte.
 
-A run that uses the raw recovery command but never performs lifecycle
-acknowledgement is a failure, even if it prints the payload.
+A run that finds the payload from the recovery locator but never performs
+lifecycle acknowledgement is a failure, even if it prints the payload.

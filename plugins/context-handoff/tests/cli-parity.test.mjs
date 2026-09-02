@@ -18,8 +18,54 @@ test("payload-local CLI exposes the extension fallback flow", () => {
   for (const command of ["facts", "save", "cutover", "continue", "retry", "consume"]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
+  assert.match(result.stdout, /--locator/);
+  assert.match(result.stdout, /"task:<id>"/);
+  assert.match(result.stdout, /"file:<id>"/);
   assert.match(result.stdout, /--task-id/);
   assert.match(result.stdout, /--handoff-token/);
+});
+
+test("consume requires exactly one recovery target", () => {
+  const missing = spawnSync(
+    process.execPath,
+    [cli, "consume", "--session-id", "successor-session"],
+    { encoding: "utf8" },
+  );
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /exactly one of --locator/);
+
+  const ambiguous = spawnSync(
+    process.execPath,
+    [
+      cli,
+      "consume",
+      "--session-id",
+      "successor-session",
+      "--task-id",
+      "task-1",
+      "--handoff-id",
+      "handoff-1",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(ambiguous.status, 2);
+  assert.match(ambiguous.stderr, /exactly one of --locator/);
+
+  const deferredFile = spawnSync(
+    process.execPath,
+    [
+      cli,
+      "consume",
+      "--session-id",
+      "successor-session",
+      "--locator",
+      "file:handoff-1",
+      "--defer-complete",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(deferredFile.status, 2);
+  assert.match(deferredFile.stderr, /only valid with a task target/);
 });
 
 test("extension and CLI delegate lifecycle behavior to the same core", () => {
@@ -35,6 +81,10 @@ test("extension and CLI delegate lifecycle behavior to the same core", () => {
   ]) {
     assert.match(source, new RegExp(`\\b${shared}\\b`));
   }
+  assert.match(
+    source,
+    /parsed\.kind === "task"[\s\S]*deferComplete = true/,
+  );
   assert.doesNotMatch(source, /function (?:completeHandoffLifecycle|makeHandoffMetadata)/);
 });
 

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -55,15 +56,21 @@ def field(path: Path, name: str) -> int:
 
 def verify(root: Path) -> int:
     seed = (root / "seed.txt").read_text(encoding="utf-8")
+    recovery = seed.rsplit(" | ", 1)[-1]
     payload = (root / "payload.md").read_text(encoding="utf-8")
     save = _json(root / "save.json")
     state_dir = Path((root / "state-dir").read_text(encoding="utf-8"))
     handoff = state_dir / "handoff" / "handoff-eval-predecessor.json"
     checks = [
-        len(seed) <= 1024,
+        len(seed) <= 200,
         "\n" not in seed,
         seed.count(" | ") == 2,
         "/consume-handoff" in seed,
+        re.fullmatch(
+            r"Recovery: context-handoff file:[A-Za-z0-9._-]+",
+            recovery,
+        )
+        is not None,
         "handoff-eval-predecessor" in seed,
         CANARY in payload,
         save.get("id") == "handoff-eval-predecessor",
@@ -265,7 +272,7 @@ def metrics(root: Path, results: Path) -> int:
     output = results / "context-handoff-eval-metrics.json"
     output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     passed = (
-        record["initialSeed"]["characters"] <= 1024
+        record["initialSeed"]["characters"] <= 200
         and record["initialSeed"]["parts"] == 3
         and record["submittedPrompt"]["submittedPrompts"] == 1
         and record["submittedPrompt"]["promptMatchesRunnerComposite"]
@@ -291,11 +298,8 @@ def self_test(root: Path) -> int:
     handoff_dir.mkdir(parents=True)
     payload = f"brief\nCanary: {CANARY}\n"
     seed = (
-        "Task: Measure | Recommendation: after startup invoke "
-        "`/consume-handoff` (the `consume_handoff` tool) to acknowledge and "
-        "take over | "
-        "Recovery: node handoff-cli.mjs consume --handoff-id "
-        "handoff-eval-predecessor"
+        "Task: Measure | Resume: /consume-handoff to take over | "
+        "Recovery: context-handoff file:handoff-eval-predecessor"
     )
     (root / "seed.txt").write_text(seed, encoding="utf-8")
     (root / "payload.md").write_text(payload, encoding="utf-8")

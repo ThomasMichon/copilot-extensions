@@ -22,7 +22,6 @@ const fileSeed = buildCutoverSeed(
   "file",
   handoffId,
   leadFrom("Measure handoff takeover"),
-  { handoffCliPath: "/home/operator/\u00fc/handoff-cli.mjs" },
 );
 const payload = [
   "## Session Continuation",
@@ -50,22 +49,24 @@ check(taskSeed.startsWith("Task: Measure handoff takeover | "), "stable task-fir
 check(taskSeed.split(" | ").length === 3, "exact three-part seed");
 check(
   taskSeed.includes(
-    "after startup invoke `/consume-handoff` (the `consume_handoff` tool) to acknowledge and take over",
+    "Resume: /consume-handoff to take over",
   ),
   "explicit post-startup acknowledgement",
 );
 check(
-  taskSeed.includes("handoff-cli.mjs") &&
-    taskSeed.endsWith(`consume --task-id ${taskId} --defer-complete`),
-  "task recovery re-enters payload-local checkpoint/ack/takeover",
+  taskSeed.endsWith(`Recovery: context-handoff task:${taskId}`),
+  "task recovery carries a short opaque locator",
 );
 check(
-  fileSeed.includes("require('os').homedir()") &&
-    fileSeed.endsWith(`consume --handoff-id ${handoffId}`) &&
+  fileSeed.endsWith(`Recovery: context-handoff file:${handoffId}`) &&
     !/[^\x00-\x7F]/.test(fileSeed),
-  "Unicode install path uses an ASCII-safe payload resolver",
+  "file recovery locator is ASCII and path-independent",
 );
-check(!taskSeed.includes("&&"), "no inline orchestration chain");
+check(
+  !/[`"';&]/.test(taskSeed.split(" | ")[2]) &&
+    !taskSeed.includes("node -e"),
+  "seed contains no inline executable source or shell syntax",
+);
 check(!taskSeed.includes(payload), "full payload is not inlined");
 check(!taskSeed.includes("\n"), "single-line launch transport");
 check(!/[^\x00-\x7F]/.test(taskSeed), "ASCII launch transport");
