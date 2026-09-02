@@ -144,6 +144,49 @@ def read(session_id: str) -> dict[str, Any] | None:
     return loaded
 
 
+def _read_recoverable(session_id: str) -> dict[str, Any]:
+    """Read parseable same-version state while dropping malformed list items."""
+    target, _lock_base, _temp_dir = _session_paths(session_id)
+    if not target.exists():
+        return _empty_projection(session_id)
+    try:
+        with target.open("rb") as handle:
+            raw = handle.read(MAX_BYTES + 1)
+    except OSError as exc:
+        raise ProjectionError(f"cannot read projection {target}: {exc}") from exc
+    if len(raw) > MAX_BYTES:
+        raise ProjectionError(f"projection exceeds {MAX_BYTES} bytes")
+    try:
+        loaded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProjectionError(f"invalid projection JSON: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise ProjectionError("projection must be a JSON object")
+    version = loaded.get("version")
+    if not isinstance(version, int):
+        raise ProjectionError("projection version must be an integer")
+    if version > SCHEMA_VERSION:
+        raise UnsupportedProjectionVersion(
+            f"projection version {version} is newer than supported {SCHEMA_VERSION}"
+        )
+    if version != SCHEMA_VERSION:
+        raise ProjectionError(f"unsupported projection version {version}")
+    if loaded.get("session_id") != session_id:
+        raise ProjectionError("projection session_id does not match its directory")
+    relations = loaded.get("relations")
+    tombstones = loaded.get("relation_tombstones", [])
+    if not isinstance(relations, list) or not isinstance(tombstones, list):
+        raise ProjectionError("projection relation fields must be arrays")
+    recovered = dict(loaded)
+    recovered["relations"] = [
+        relation for relation in relations if isinstance(relation, dict)
+    ]
+    recovered["relation_tombstones"] = [
+        tombstone for tombstone in tombstones if isinstance(tombstone, dict)
+    ]
+    return recovered
+
+
 def _handoff_ordinal(record: Any, session_id: str) -> int | None:
     matching = [
         handoff.ordinal
@@ -433,9 +476,14 @@ def _sync_relation(
             except UnsupportedProjectionVersion:
                 return "blocked"
             except ProjectionError:
-                if relation is None:
-                    return "deferred"
-                current = _empty_projection(session_id)
+                try:
+                    current = _read_recoverable(session_id)
+                except UnsupportedProjectionVersion:
+                    return "blocked"
+                except ProjectionError:
+                    if relation is None:
+                        return "deferred"
+                    current = _empty_projection(session_id)
             if relation is None:
                 if not remove_missing:
                     return "current"
