@@ -51,11 +51,15 @@ class FrameHealthReporter:
             health_raw
             and health_raw.lower() not in ("0", "false", "no", "off")
         )
-        if not health_enabled and not trace_raw:
+        trace_enabled = bool(
+            trace_raw
+            and trace_raw.lower() not in ("0", "false", "no", "off")
+        )
+        if not health_enabled and not trace_enabled:
             return None
         if health_enabled and health_raw.lower() not in ("1", "true", "yes", "on"):
             path = Path(health_raw).expanduser()
-        elif trace_raw:
+        elif trace_enabled:
             path = Path(trace_raw).expanduser()
         else:
             path = (

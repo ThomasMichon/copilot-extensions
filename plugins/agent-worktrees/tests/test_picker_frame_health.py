@@ -69,3 +69,11 @@ def test_launch_trace_records_first_refresh_without_gap_reporting(
     ]
     assert events[0]["launch_id"] == "demo-123"
     assert events[0]["binstub_started"] == "start-value"
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off"])
+def test_false_launch_trace_values_disable_reporter(monkeypatch, value):
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_FRAME_HEALTH", raising=False)
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_TRACE", value)
+
+    assert FrameHealthReporter.from_env() is None
