@@ -4656,6 +4656,14 @@ class TaskQueue:
                 params.append(evaluator_ref)
             else:
                 clauses.append("evaluator_ref IS NULL")
+        if label is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM json_each("
+                "CASE WHEN json_valid(tasks.labels) THEN tasks.labels ELSE '[]' END"
+                ") "
+                "WHERE json_each.value = ?)"
+            )
+            params.append(label)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._connect() as conn:
@@ -4665,10 +4673,7 @@ class TaskQueue:
                 f"{where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608
                 params,
             ).fetchall()
-        tasks = [Task._from_row(r) for r in rows]
-        if label is not None:
-            tasks = [t for t in tasks if label in t.labels]
-        return tasks
+        return [Task._from_row(r) for r in rows]
 
     def find(self, text: str, *, repo: str | None = None, limit: int = 50) -> list[Task]:
         """Substring search over title/prompt -- one primitive in the
