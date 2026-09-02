@@ -985,6 +985,13 @@ class Supervisor:
                 "Do not create a replacement task or worktree."
             )
             try:
+                self.client.record_spawn(
+                    res["key"],
+                    session_handle=res.get("session_handle"),
+                    worktree=res.get("worktree"),
+                )
+                self._cooled_reservations.discard(str(res["key"]))
+                self._cold_retry_after.pop(str(res["key"]), None)
                 if not self.local_resume_fn(local_sid, prompt):
                     continue
                 self.client.resume(
@@ -994,11 +1001,6 @@ class Supervisor:
                     reuse_session=True,
                     expected_owner_session_id=task.get("owner_session_id"),
                     expected_generation=task.get("generation"),
-                )
-                self.client.record_spawn(
-                    res["key"],
-                    session_handle=res.get("session_handle"),
-                    worktree=res.get("worktree"),
                 )
                 resumed += 1
                 log.info(

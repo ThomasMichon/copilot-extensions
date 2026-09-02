@@ -13,6 +13,7 @@ from dataclasses import asdict
 
 import pytest
 
+from agent_dispatch.client import DispatchError
 from agent_dispatch.queue import SpawnState, Status
 from agent_dispatch.supervisor import Supervisor
 from tests._helpers import TEST_REPO
@@ -394,6 +395,7 @@ def test_cold_steer_resumes_existing_acp_session(q, client):
             resumed.append((session_id, prompt)) or True
         ),
     )
+    sup._cooled_reservations.add(reservation.key)
 
     assert sup.poll_once() == []
     assert spawn.calls == []
@@ -401,6 +403,83 @@ def test_cold_steer_resumes_existing_acp_session(q, client):
     assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
     assert q.get(blocked.id).status == Status.STARTED
     assert q.get(blocked.id).resume_requested is False
+    assert reservation.key not in sup._cooled_reservations
+
+
+def test_cold_resume_does_not_start_process_before_reservation_transition(
+    q, client, monkeypatch
+):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+    resumed: list[str] = []
+
+    def fail_record_spawn(*_args, **_kwargs):
+        raise DispatchError(500, "write failed")
+
+    monkeypatch.setattr(
+        client,
+        "record_spawn",
+        fail_record_spawn,
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True,
+    )
+
+    assert sup.release_resumed_cold_tasks() == 0
+    assert resumed == []
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+    assert q.get(blocked.id).status == Status.SUSPENDED
+
+
+def test_cold_resume_task_failure_is_recoolable(q, client, monkeypatch):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+
+    def fail_resume(*_args, **_kwargs):
+        raise DispatchError(500, "resume failed")
+
+    monkeypatch.setattr(
+        client,
+        "resume",
+        fail_resume,
+    )
+    stopped: list[str] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_resume_fn=lambda _sid, _prompt: True,
+        local_cold_fn=lambda sid: stopped.append(sid) or True,
+    )
+
+    assert sup.release_resumed_cold_tasks() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert q.get(blocked.id).status == Status.SUSPENDED
+    assert sup.cool_dormant_bodies() == 1
+    assert stopped == ["blocked-session"]
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
 
 
 def test_idle_headless_turn_auto_suspends_and_cools(q, client):
