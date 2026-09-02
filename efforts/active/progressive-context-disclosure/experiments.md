@@ -21,15 +21,24 @@ Use synthetic contributors representing:
 | Class | Critical kernel | Deferred guide |
 |-------|-----------------|----------------|
 | Safety/publication | non-negotiable action boundary | edge cases and examples |
-| Ownership/routing | destination decision rule | complete routing matrix |
+| Contribution boundary | destination class decision | complete contribution matrix |
 | Continuity | completion gate and handoff rule | handoff procedure |
+| Ownership/routing | destination decision rule | complete routing matrix |
 | Runtime readiness | readiness state and exact next action | diagnostics |
+| Environment grounding | trusted identity and applicability cue | topology and containment detail |
 | Command discovery | attributable command identity | full command reference |
-| Product grounding | definition and applicability cue | detailed conceptual guide |
+| Capability procedure | definition and applicability cue | detailed execution guide |
 
 Each guide contains high-entropy canaries for strict selection evidence. Tasks
 declare the exact guide set that is necessary and the set that would be
 irrelevant.
+
+The frozen Phase 1 corpus, current-suite contributor inventory, baseline
+measurements, task prompts, variant protocol, evidence schema, and literal-mode
+rubric live in
+`tools/clean-room/scenarios/progressive-context-disclosure-baseline/`. Tier-E
+runs must generate fresh per-run canaries and readable guides outside that
+read-only fixture mount; reading the fixture or its answer key is a false pass.
 
 ## Axes
 
@@ -88,6 +97,15 @@ that causes routine over-reading.
 7. **Resume task:** the context generation is reconstructed.
 8. **Compaction task:** earlier conversation is compacted before a later guide need.
 9. **Spill task:** the aggregate uses the session-state pointer path.
+10. **Command-guide task:** a non-kernel command option requires the owned
+    command reference.
+11. **Capability-guide task:** entering a multi-step capability flow requires
+    its owned procedure.
+
+Every task binds to one boundary. Only the eight `fresh` tasks enter the primary
+calibration matrix; resume, compaction, and spill are finalist boundary
+confirmations, while ACP is a venue repeated for finalists rather than a task
+boundary.
 
 ## Evidence
 
@@ -97,6 +115,7 @@ Record per run:
 - model and venue;
 - first-turn correctness;
 - required and observed guide ids;
+- guide ids loaded eagerly by the host or model before an agent-initiated read;
 - irrelevant guide reads;
 - turns, tool calls, and elapsed time before grounded action;
 - missing or invented paths;
@@ -104,6 +123,10 @@ Record per run:
 - critical-rule violations;
 - structured-render hash and selected contributor set; and
 - clean-room judge verdict and classified jam.
+
+Transport or setup failures are `INVALID`, not behavioral failures. They record
+only a classified jam, do not eliminate a variant, and must be rerun after the
+scenario or venue failure is corrected.
 
 ## Decision gates
 
