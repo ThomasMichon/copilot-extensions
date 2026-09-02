@@ -502,6 +502,21 @@ _ensure_uv_index() {
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 
+# The adopted-project names from agent-worktrees' adoption registry, one per
+# line (empty when the registry is absent). Used only to give `agent-worktrees
+# get machine` a project so it can resolve the machine registry from any CWD.
+_adopted_projects() {
+    local reg="$HOME/.agent-worktrees/projects.yaml"
+    [[ -f "$reg" ]] || return 0
+    awk '
+        /^projects:[[:space:]]*$/ { inp = 1; next }
+        /^[^[:space:]#]/          { inp = 0 }
+        inp && /^  [A-Za-z0-9._-]+:[[:space:]]*$/ {
+            sub(/:[[:space:]]*$/, "", $1); print $1
+        }
+    ' "$reg" 2>/dev/null || true
+}
+
 # Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
 # venv's `python -m agent_dispatch`; otherwise it provisions on first use --
 # announcing (a human line + a machine-readable ::agent-provisioning:: signal so a
@@ -511,6 +526,22 @@ deploy_binstub() {
     local machine="${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
     if [[ -z "$machine" ]] && command -v agent-worktrees >/dev/null 2>&1; then # marketplace-isolation: allow installer-management
         machine="$(agent-worktrees get machine 2>/dev/null | head -n1 || true)"
+        # `get machine` resolves the machine registry THROUGH a project and
+        # discovers context from the CWD, so it yields nothing when the installer
+        # runs outside an adopted repo/worktree -- the common case. Falling
+        # straight through to `hostname` then pins the raw OS name, which on a
+        # host reporting a domain suffix (e.g. mDNS `host.local`) never matches
+        # the registry key (`host`) the Picker substitutes for `{machine}`; the
+        # board then reads this host as a remote peer and tries to SSH to itself.
+        # Every adopted project resolves the same machine identity, so retry with
+        # an explicit --project before giving up on the authority.
+        if [[ -z "$machine" ]]; then
+            local p
+            for p in $(_adopted_projects); do
+                machine="$(agent-worktrees --project "$p" get machine 2>/dev/null | head -n1 || true)" # marketplace-isolation: allow installer-management
+                [[ -n "$machine" ]] && break
+            done
+        fi
     fi
     [[ -n "$machine" ]] || machine="$(hostname 2>/dev/null || true)"
     [[ -n "$machine" ]] &&
