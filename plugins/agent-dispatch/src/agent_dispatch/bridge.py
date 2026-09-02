@@ -155,6 +155,22 @@ def stop_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
     return completed.returncode == 0
 
 
+def end_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
+    """Terminally end one local headless body after its task concludes."""
+    exe = _agent_bridge_launch_prefix()
+    if exe is None:
+        return False
+    completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
+        [*exe, "end", session_id],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    return completed.returncode == 0
+
+
 def resume_worker(
     session_id: str,
     prompt: str,

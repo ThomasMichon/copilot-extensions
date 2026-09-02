@@ -539,14 +539,18 @@ def test_supervisor_settles_terminal_cold_reservation(q, client):
     q.complete(
         task.id, "headless-owner", result_ref="condition:satisfied"
     )
+    ended: list[str] = []
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         labels=["review"],
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_end_fn=lambda sid: ended.append(sid) or True,
     )
 
     assert sup.reconcile() == 1
+    assert ended == ["session-1"]
     assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
 
 
@@ -887,6 +891,72 @@ def test_reconcile_settles_terminal_then_allows_respawn(q, client):
 
     settled = sup.reconcile()
     assert settled == 1
+    assert q.latest_reservation(t.id).state == SpawnState.SETTLED
+
+
+def test_reconcile_ends_terminal_local_body_before_settling(q, client):
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-terminal")
+    ended: list[str] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        local_body_verdict_fn=lambda _sid: "live",
+        local_end_fn=lambda sid: ended.append(sid) or True,
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=t.id)
+    q.start(t.id, "local-o")
+    q.complete(t.id, "local-o")
+
+    assert sup.reconcile() == 1
+    assert ended == ["brg-terminal"]
+    assert q.latest_reservation(t.id).state == SpawnState.SETTLED
+
+
+def test_reconcile_retains_terminal_local_reservation_when_end_fails(q, client):
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-terminal")
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        local_body_verdict_fn=lambda _sid: "live",
+        local_end_fn=lambda _sid: False,
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=t.id)
+    q.start(t.id, "local-o")
+    q.complete(t.id, "local-o")
+
+    assert sup.reconcile() == 0
+    assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
+
+
+def test_reconcile_ends_cold_terminal_local_body_before_settling(q, client):
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-cold")
+    ended: list[str] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_end_fn=lambda sid: ended.append(sid) or True,
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=t.id)
+    q.start(t.id, "local-o")
+    q.suspend(t.id, "local-o", reason="turn ended")
+    q.record_cold(q.latest_reservation(t.id).key)
+    q.complete(t.id, "local-o")
+
+    assert sup.reconcile() == 1
+    assert ended == ["brg-cold"]
     assert q.latest_reservation(t.id).state == SpawnState.SETTLED
 
 
