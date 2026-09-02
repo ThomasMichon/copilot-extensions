@@ -21,3 +21,26 @@ def test_manager_picker_records_first_refresh(tmp_path, monkeypatch):
         "picker_stop",
     ]
     assert events[0]["launch_id"] == "manager-123"
+
+
+def test_manager_picker_runs_post_refresh_callback(monkeypatch):
+    calls = []
+
+    class InlineThread:
+        def __init__(self, target, **kwargs):
+            calls.append(("thread", kwargs))
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(engine.threading, "Thread", InlineThread)
+    screen = engine.PickerScreen(
+        object(),
+        after_first_refresh=lambda: calls.append(("callback", {})),
+    )
+
+    screen._record_first_refresh()
+
+    assert calls[0][1]["name"] == "picker-after-first-refresh"
+    assert calls[1][0] == "callback"

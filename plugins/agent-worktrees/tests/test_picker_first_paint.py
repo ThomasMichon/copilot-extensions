@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from argparse import Namespace
 from types import SimpleNamespace
@@ -136,6 +137,70 @@ def test_first_refresh_callback_is_scheduled_in_every_mode(monkeypatch, live):
     screen.on_mount()
 
     assert deferred == [screen._after_first_refresh]
+
+
+def test_post_refresh_callback_starts_on_worker(monkeypatch):
+    pytest.importorskip("textual")
+    from agent_worktrees.picker_tui import engine as eng
+
+    calls = []
+
+    class InlineThread:
+        def __init__(self, target, **kwargs):
+            calls.append(("thread", kwargs))
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(eng.threading, "Thread", InlineThread)
+    screen = eng.PickerScreen(
+        object(),
+        live=False,
+        after_first_refresh=lambda: calls.append(("callback", {})),
+    )
+
+    screen._after_first_refresh()
+
+    assert calls[0][0] == "thread"
+    assert calls[0][1]["name"] == "picker-after-first-refresh"
+    assert calls[1][0] == "callback"
+
+
+def test_picker_housekeeping_continues_after_step_failure(
+    monkeypatch, tmp_path
+):
+    from agent_worktrees import __main__ as main
+
+    calls = []
+    trace = tmp_path / "picker-launches.jsonl"
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_TRACE", str(trace))
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_ID", "housekeeping-123")
+
+    def fail():
+        calls.append("fail")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main, "reap_orphan_mux_sessions", fail)
+    monkeypatch.setattr(
+        main, "_sweep_managed_on_exit", lambda: calls.append("managed")
+    )
+    monkeypatch.setattr(
+        main, "_sweep_launcher_shells_on_exit", lambda: calls.append("shells")
+    )
+    monkeypatch.setattr(
+        main,
+        "_sweep_finished_sessions_on_cadence",
+        lambda: calls.append("finished"),
+    )
+
+    main._run_picker_housekeeping()
+
+    assert calls == ["fail", "managed", "shells", "finished"]
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    error = next(event for event in events if event["event"] == "housekeeping_error")
+    assert error["step"] == "fail"
+    assert error["error_type"] == "RuntimeError"
 
 
 def test_data_ssh_bootstrap_rows_skip_full_config(monkeypatch):

@@ -66,7 +66,12 @@ def new_picker_enabled(config=None) -> bool:
     return True
 
 
-def run_tui_picker(source=None, live=False, mock_mode=None):
+def run_tui_picker(
+    source=None,
+    live=False,
+    mock_mode=None,
+    after_first_refresh=None,
+):
     """Run the TUI picker and return its result (a launch decision or None).
 
     With no source: ``live=True`` selects the multi-machine SSH source
@@ -78,6 +83,11 @@ def run_tui_picker(source=None, live=False, mock_mode=None):
     explicit dev sandbox: real data is shown but mutating actions are simulated
     (no side effects). It never turns on implicitly -- see
     ``engine._resolve_mock_mode``.
+
+    ``after_first_refresh`` is an optional no-argument housekeeping callback.
+    The screen starts it on a daemon worker only after Textual completes its
+    first refresh. It must not mutate Textual widgets; UI changes still belong
+    on the app thread via ``call_from_thread``.
 
     Launch-channel handling: this runs inside ``resolve``, whose **stdout
     (fd 1) is captured by the launcher for the JSON plan**. Textual's driver
@@ -113,7 +123,10 @@ def run_tui_picker(source=None, live=False, mock_mode=None):
     try:
         if redirect:
             sys.__stdout__ = sys.stderr
-        app = PickerApp(source, live=live, mock_mode=mock_mode)
+        app_kwargs = {"live": live, "mock_mode": mock_mode}
+        if after_first_refresh is not None:
+            app_kwargs["after_first_refresh"] = after_first_refresh
+        app = PickerApp(source, **app_kwargs)
         from .frame_health import append_launch_event
 
         append_launch_event("textual_app_start", live=live)
