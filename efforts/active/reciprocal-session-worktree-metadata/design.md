@@ -65,7 +65,7 @@ Illustrative schema:
       "project": "<stable-project-key>",
       "worktree_id": "<worktree-id>",
       "role": "bound",
-      "record_revision": 12,
+      "relation_revision": 12,
       "head_revision": 7,
       "lineage": {
         "predecessor": "<session-id>",
@@ -77,7 +77,7 @@ Illustrative schema:
       "project": "<stable-project-key>",
       "worktree_id": "<worktree-id>",
       "role": "controller",
-      "record_revision": 4,
+      "relation_revision": 4,
       "controller_revision": 2,
       "lineage": {
         "predecessor": null,
@@ -112,7 +112,9 @@ The exact schema is a Phase 1 decision, but these constraints are binding:
   report-only.
 - An older writer never replaces, merges down, or normalizes an unsupported
   newer major schema.
-- Every projection entry carries the authoritative revision that produced it.
+- Every projection entry carries a monotonic per-relation revision allocated by
+  the authoritative worktree record. Unrelated session changes do not rewrite
+  historical projections.
 - Volatile write timestamps are excluded from canonical content. Diagnostics
   may record an external write time, but semantic no-op comparison does not
   change the sidecar merely to refresh a clock.
