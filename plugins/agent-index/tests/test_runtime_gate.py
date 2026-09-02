@@ -19,9 +19,15 @@ def test_installer_readiness_uses_supported_update_arguments() -> None:
         (PLUGIN / "installer-readiness.json").read_text(encoding="utf-8")
     )
     runtime_module = next(
-        module
-        for module in readiness["modules"]
-        if module["id"] == "agent-index/runtime"
+        (
+            module
+            for module in readiness["modules"]
+            if module["id"] == "agent-index/runtime"
+        ),
+        None,
+    )
+    assert runtime_module is not None, (
+        "installer-readiness must declare agent-index/runtime"
     )
     installer = runtime_module["installer"]
 
