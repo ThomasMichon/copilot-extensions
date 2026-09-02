@@ -482,6 +482,40 @@ def test_cold_resume_task_failure_is_recoolable(q, client, monkeypatch):
     assert q.get_reservation(reservation.key).state == SpawnState.COLD
 
 
+def test_cold_resume_process_exception_is_recoolable(q, client):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+
+    def fail_process_resume(_sid, _prompt):
+        raise OSError("bridge unavailable")
+
+    stopped: list[str] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_resume_fn=fail_process_resume,
+        local_cold_fn=lambda sid: stopped.append(sid) or True,
+    )
+
+    assert sup.release_resumed_cold_tasks() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert q.get(blocked.id).status == Status.SUSPENDED
+    assert sup.cool_dormant_bodies() == 1
+    assert stopped == ["blocked-session"]
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+
+
 def test_idle_headless_turn_auto_suspends_and_cools(q, client):
     task = q.create("review turn", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)

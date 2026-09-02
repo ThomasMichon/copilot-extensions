@@ -992,7 +992,16 @@ class Supervisor:
                 )
                 self._cooled_reservations.discard(str(res["key"]))
                 self._cold_retry_after.pop(str(res["key"]), None)
-                if not self.local_resume_fn(local_sid, prompt):
+                try:
+                    process_resumed = self.local_resume_fn(local_sid, prompt)
+                except Exception:
+                    log.exception(
+                        "failed to resume cold local body %s for task %s",
+                        local_sid,
+                        task.get("id"),
+                    )
+                    continue
+                if not process_resumed:
                     continue
                 self.client.resume(
                     task["id"],
