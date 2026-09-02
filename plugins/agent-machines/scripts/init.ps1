@@ -2071,8 +2071,8 @@ if ($pathDirs -contains $LocalBin) {
 Write-Host ''
 Write-Host '=== agent-machines init complete ===' -ForegroundColor Cyan
 if ($CellMode) {
-    Write-Host '  Runtime is ready through the owning payload command.'
+    Write-Host '  Runtime is ready through the owning payload command.' -ForegroundColor DarkGray
 } else {
-    Write-Host '  Try: agent-machines version'
-} -ForegroundColor DarkGray
+    Write-Host '  Try: agent-machines version' -ForegroundColor DarkGray
+}
 exit 0

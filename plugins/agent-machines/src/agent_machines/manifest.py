@@ -16,6 +16,7 @@ the engine unions resolved packages across repos (see ``discover``/``reconcile``
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,7 @@ DISPOSITIONS = (
 )
 
 PLUGIN_ACTIVATION_GROUP = "copilot.settings.plugin-activation"
+PAYLOAD_COMMAND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 #: The stack-critical plugins/marketplaces the bootstrap-floor assertion protects
 #: (a package may add to, but never remove from, the union of these).
@@ -269,6 +271,45 @@ def load_package(
     for mod in modules:
         if not isinstance(mod, dict) or not mod.get("name"):
             raise ManifestError(f"{path}: each module must be a mapping with a 'name'")
+        invocation = mod.get("invocation")
+        if invocation is None:
+            continue
+        plugin_identity = (
+            invocation.get("plugin") if isinstance(invocation, dict) else None
+        )
+        plugin_parts = (
+            plugin_identity.split("@")
+            if isinstance(plugin_identity, str)
+            else []
+        )
+        valid = (
+            isinstance(invocation, dict)
+            and len(plugin_parts) == 2
+            and all(
+                part
+                and part == part.strip()
+                and not any(char.isspace() for char in part)
+                and "\0" not in part
+                for part in plugin_parts
+            )
+            and isinstance(invocation.get("command"), str)
+            and PAYLOAD_COMMAND_ID.fullmatch(invocation["command"]) is not None
+            and all(
+                key not in invocation or isinstance(invocation[key], list)
+                for key in (
+                    "arguments",
+                    "dry_run_arguments",
+                    "apply_arguments",
+                    "platforms",
+                )
+            )
+        )
+        if not valid:
+            raise ManifestError(
+                f"{path}: module {mod.get('name')!r} invocation requires "
+                "plugin '<name>@<marketplace>', command, and list-valued "
+                "arguments/dry_run_arguments/apply_arguments/platforms"
+            )
 
     resources = raw.get("resources") or []
     if not isinstance(resources, list):
