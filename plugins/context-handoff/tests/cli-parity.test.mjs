@@ -18,6 +18,7 @@ test("payload-local CLI exposes the extension fallback flow", () => {
   for (const command of ["facts", "save", "cutover", "continue", "retry", "consume"]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
+  assert.match(result.stdout, /--locator/);
   assert.match(result.stdout, /--task-id/);
   assert.match(result.stdout, /--handoff-token/);
 });
@@ -35,6 +36,10 @@ test("extension and CLI delegate lifecycle behavior to the same core", () => {
   ]) {
     assert.match(source, new RegExp(`\\b${shared}\\b`));
   }
+  assert.match(
+    source,
+    /parsed\.kind === "task"[\s\S]*deferComplete = true/,
+  );
   assert.doesNotMatch(source, /function (?:completeHandoffLifecycle|makeHandoffMetadata)/);
 });
 

@@ -1,18 +1,6 @@
 // Pure, SDK-free successor seed builders.
 
-export const MAX_CUTOVER_SEED_LENGTH = 1024;
-const CANONICAL_REPOSITORY =
-  "https://github.com/ThomasMichon/copilot-extensions";
-const PAYLOAD_CLI_RESOLVER = [
-  "const f=require('fs'),p=require('path'),c=require('child_process'),",
-  "r=p.join(require('os').homedir(),'.copilot','installed-plugins',",
-  "'copilot-extensions','context-handoff'),",
-  "m=JSON.parse(f.readFileSync(p.join(r,'plugin.json'),'utf8'));",
-  `if(m.name!=='context-handoff'||m.repository!=='${CANONICAL_REPOSITORY}')process.exit(2);`,
-  "const x=p.join(r,'extensions','context-handoff','handoff-cli.mjs'),",
-  "q=c.spawnSync(process.execPath,[x,...process.argv.slice(1)],{stdio:'inherit'});",
-  "process.exit(q.status??1)",
-].join("");
+export const MAX_CUTOVER_SEED_LENGTH = 200;
 
 function asciiSingleLine(value) {
   return String(value || "")
@@ -25,21 +13,17 @@ function asciiSingleLine(value) {
 function exactAsciiSingleLine(value) {
   const text = String(value || "").trim();
   if (!text || /[^\x20-\x7E]/.test(text)) {
-    throw new Error("handoff recovery command must be non-empty single-line ASCII");
+    throw new Error("handoff recovery locator must be non-empty single-line ASCII");
   }
   return text;
-}
-
-function commandArg(value) {
-  const text = exactAsciiSingleLine(value);
-  if (/^[A-Za-z0-9._:@%+\/\\=-]+$/.test(text)) return text;
-  return `"${text.replace(/"/g, '\\"')}"`;
 }
 
 export function leadFrom(title) {
   const normalized = asciiSingleLine(title)
     .replace(/^(?:continue|task)\s*:\s*/i, "")
-    .slice(0, 180)
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, 72)
     .trim();
   return `Task: ${normalized || "Continue the current work"}`;
 }
@@ -63,43 +47,54 @@ export const CONTINUATION_DIRECTIVE =
   "remains unresolved unless responsibility is explicitly transferred to a named " +
   "tracked objective.";
 
-export function recoveryCommandFor(
-  kind,
-  id,
-  _options = {},
-) {
-  const prefix = `node -e ${commandArg(PAYLOAD_CLI_RESOLVER)} consume`;
-  if (kind === "task") {
-    return `${prefix} --task-id ${commandArg(id)} --defer-complete`;
+export function recoveryLocatorFor(kind, id) {
+  if (kind !== "task" && kind !== "file") {
+    throw new Error(`unsupported handoff recovery kind: ${kind}`);
   }
-  return `${prefix} --handoff-id ${commandArg(id)}`;
+  const token = exactAsciiSingleLine(id);
+  if (!/^[A-Za-z0-9._-]+$/.test(token)) {
+    throw new Error("handoff recovery id contains unsafe characters");
+  }
+  return `${kind}:${token}`;
+}
+
+export function parseRecoveryLocator(value) {
+  const locator = exactAsciiSingleLine(value);
+  const separator = locator.indexOf(":");
+  if (separator <= 0) {
+    throw new Error("invalid handoff recovery locator");
+  }
+  const kind = locator.slice(0, separator);
+  const id = locator.slice(separator + 1);
+  const canonical = recoveryLocatorFor(kind, id);
+  if (canonical !== locator) {
+    throw new Error("invalid handoff recovery locator");
+  }
+  return { kind, id };
 }
 
 // Stable three-part contract:
 //   1. task/title lead
 //   2. one recommendation to use the extension command
-//   3. one exact raw recovery command
+//   3. one short opaque recovery locator
 export function buildCutoverSeed(
   kind,
   id,
   lead,
-  { recoveryCommand = null } = {},
 ) {
-  const command = exactAsciiSingleLine(
-    recoveryCommand || recoveryCommandFor(kind, id),
-  );
-  const recommendation =
-    "Recommendation: after startup invoke `/consume-handoff` " +
-    "(the `consume_handoff` tool) to acknowledge and take over";
+  const locator = recoveryLocatorFor(kind, id);
+  const recommendation = "Resume: /consume-handoff to take over";
   let taskLead = asciiSingleLine(lead) || leadFrom("");
-  let seed = `${taskLead} | ${recommendation} | Recovery: ${command}`;
+  let seed =
+    `${taskLead} | ${recommendation} | Recovery: context-handoff ${locator}`;
   if (seed.length > MAX_CUTOVER_SEED_LENGTH) {
     taskLead = leadFrom("");
-    seed = `${taskLead} | ${recommendation} | Recovery: ${command}`;
+    seed =
+      `${taskLead} | ${recommendation} | Recovery: context-handoff ${locator}`;
   }
   if (seed.length > MAX_CUTOVER_SEED_LENGTH) {
     throw new Error(
-      `handoff recovery command exceeds ${MAX_CUTOVER_SEED_LENGTH} characters`,
+      `handoff recovery locator exceeds ${MAX_CUTOVER_SEED_LENGTH} characters`,
     );
   }
   return seed;

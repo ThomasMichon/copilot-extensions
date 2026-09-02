@@ -147,9 +147,9 @@ the baton and take over.
 | agent-dispatch coordinator | live mux session | Behavior |
 |---|---|---|
 | yes | yes | Store a pinned handoff task. `continue_handoff` launches a successor with the bounded three-part seed; `/consume-handoff` checkpoints the task payload before consuming, establishes lifecycle state, then retires only the verified predecessor. |
-| yes | no | Store the same task and note-handoff pointer. Return a clearly delimited seed containing `/consume-handoff` plus one ASCII-safe payload-CLI `consume --task-id <id> --defer-complete` recovery command. |
+| yes | no | Store the same task and note-handoff pointer. Return a clearly delimited seed containing `/consume-handoff` plus one short opaque `task:<id>` recovery locator. |
 | no | yes | Store a one-time worktree-state file. Launch the same bounded seed; consumption applies the same bind/succession/head/title-before-retire ordering. |
-| no | no | Keep the file and note-handoff pointer. Return a clearly delimited seed with one exact file-CLI recovery command. Automatic terminal spawning remains deferred to #1632. |
+| no | no | Keep the file and note-handoff pointer. Return a clearly delimited seed with one short opaque `file:<id>` recovery locator. Automatic terminal spawning remains deferred to #1632. |
 
 ### Steps (default = live cutover)
 
@@ -182,16 +182,15 @@ the baton and take over.
    and exact copyable block returned by `save_handoff_prompt`; do not reduce it
    to an ambiguous raw prompt.
 
-> **Two completion models.** A task-backed paste resume uses payload-local
-> `handoff-cli.mjs consume --task-id <id>` and completes the baton on pickup.
-> A task-backed
-> live cutover uses `consume_handoff` with `defer_complete: true`; the successor
-> later runs `agent-dispatch complete <id>` only when it reaches the handoff <!-- marketplace-isolation: allow handoff-seed-startup -->
-> completion gate. Finishing the predecessor's latest phase is not sufficient
-> when the continuing objective still has actionable work. Canonical
-> `/consume-handoff` must leave the deferred task owned and inject that explicit
-> completion command; it never completes or yields the task merely because the
-> brief was delivered.
+> **Recovery locator completion semantics.** A task-backed recovery locator
+> passed to payload-local `handoff-cli.mjs consume --locator task:<id>`
+> automatically defers completion, matching canonical `/consume-handoff`. The
+> successor later runs `agent-dispatch complete <id>` only when it reaches the
+> handoff completion gate. <!-- marketplace-isolation: allow handoff-seed-startup -->
+> Explicit `consume --task-id <id>` without `--defer-complete` remains the
+> lower-level complete-on-pickup form, but a generated successor seed never asks
+> for it. Finishing the predecessor's latest phase is not sufficient when the
+> continuing objective still has actionable work.
 
 ### Fallback when the extension's tools are unavailable — the CLI
 
@@ -237,6 +236,8 @@ node "$CH" consume --task-id "<task-id>" --defer-complete \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" consume --handoff-id "<handoff-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" consume --locator "task:<task-id>" \
+  --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" retry --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 ```
 
@@ -260,6 +261,7 @@ $saved = node $ch save --json --title '<topic>' --prompt-file '<handoff.md>' --s
 node $ch continue --seed $saved.seed --handoff-token $saved.id --worktree-id '<worktree-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --task-id '<task-id>' --defer-complete --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --handoff-id '<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch retry --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 ```
 
@@ -301,15 +303,16 @@ A handoff is **not** auto-loaded. How you resume depends on which form the
 previous session produced:
 
 1. **agent-dispatch form** (coordinator available). The bounded seed recommends
-   `/consume-handoff` and carries one exact raw recovery command. <!-- marketplace-isolation: allow handoff-seed-startup -->
+   `/consume-handoff` and carries one opaque `task:<id>` recovery locator. <!-- marketplace-isolation: allow handoff-seed-startup -->
    `/consume-handoff` can
    find and consume this worktree's newest proposed handoff task and inject the
    continuation prompt.
 2. **File form** (no coordinator). The seed recommends `/consume-handoff` and
-   carries one exact `handoff-cli.mjs consume` recovery command. The consumer
-   reads the worktree-state JSON file, marks it consumed, and injects the stored
-   continuation. Re-running it on a consumed file returns a stop notice instead
-   of replaying the brief.
+   carries one opaque `file:<id>` recovery locator. If the extension is absent,
+   resolve the verified payload-local CLI as documented above and pass that
+   locator to `consume --locator`. The consumer reads the worktree-state JSON
+   file, marks it consumed, and injects the stored continuation. Re-running it
+   on a consumed file returns a stop notice instead of replaying the brief.
 
 ### Natural-language resume requests: sweep this worktree's state first
 
@@ -417,10 +420,10 @@ Choose exactly one:
   demand. Capture the complete parent objective, direction, progress, and
   successor roster when no valid effort owns them.
 - **The inline seed is a locator, not the handoff.** It is one ASCII line,
-  at most 1024 characters, with exactly three parts: `Task: ...`, one
-  recommendation to invoke `/consume-handoff` after startup to acknowledge and
-  take over, and one exact raw recovery command. Never inline the handoff
-  markdown or a multi-command shell chain.
+  at most 200 characters, with exactly three parts: `Task: ...`, one
+  recommendation to invoke `/consume-handoff` after startup to take over, and
+  one opaque `task:<id>` or `file:<id>` recovery locator. Never inline handoff
+  markdown, executable source, a shell command, or an installed path.
 - **Optimize the exchange, not the stored brief.** Preserve full-fidelity detail
   in the task/file payload. The normal successor path should consume and
   acknowledge in one agent turn and one extension tool call; the shared core

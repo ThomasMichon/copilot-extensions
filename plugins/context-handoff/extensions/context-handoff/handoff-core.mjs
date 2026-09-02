@@ -1411,17 +1411,13 @@ export function storeHandoff({ promptText, sid, cwd, title, preferTask = true })
   return { storage: "file", id: file.id, path: file.path, metadata: file.metadata };
 }
 
-// Compose the cutover seed for a stored handoff. `retry` false -> the short
-// human paste prompt; true -> the successor seed (bash-first when the pane /
-// worktree / session are known -- GitHub issue #853).
+// Compose the same short locator seed for live launch and manual recovery.
 export function buildSeedForStored(stored, { retry = true } = {}) {
   void retry;
   const md = stored.metadata || {};
   const kind = stored.storage === "agent-dispatch" ? "task" : "file";
   const lead = leadFrom(md.title);
-  return buildCutoverSeed(kind, stored.id, lead, {
-    handoffCliPath: HANDOFF_CLI_PATH,
-  });
+  return buildCutoverSeed(kind, stored.id, lead);
 }
 
 export function manualFallbackInstructions(stored, seed) {
@@ -1431,7 +1427,9 @@ export function manualFallbackInstructions(stored, seed) {
   return (
     `Handoff stored as ${location}. Automatic cutover did not run; the stored ` +
     "task/file and worktree handoff pointer remain available.\n\n" +
-    "Copy the following block exactly into the successor session:\n\n" +
+    "Copy only the following short locator prompt into the successor session. " +
+    "If `/consume-handoff` is unavailable, the successor should use the " +
+    "context-handoff payload-local CLI with the Recovery locator:\n\n" +
     "```text\n" +
     `${seed}\n` +
     "```"

@@ -126,17 +126,19 @@ as warnings; they do not block the session.
 
 A live cutover (`continue_handoff`) spawns a successor Copilot in a new mux
 window and passes the exact first prompt through Copilot's native `-i` argv.
-The single-line ASCII seed is at most 1024 characters and has exactly three
-parts: a stable task-first title lead, one recommendation to invoke
-`/consume-handoff` after startup to acknowledge and take over, and one raw
-recovery command that retrieves the stored task or file payload. The full
-handoff and lifecycle orchestration are never inlined in the seed.
-Both task and file recovery commands re-enter payload-local
-`handoff-cli.mjs consume`, so checkpointing, acknowledgement, takeover, and
-verified retirement are not bypassed. The command is ASCII-safe: it derives the
-canonical `context-handoff@copilot-extensions` payload beneath `os.homedir()` and
-verifies manifest provenance at runtime, so a Unicode home/install path remains
-lossless without entering the seed.
+The single-line ASCII seed is at most 200 characters and has exactly three
+parts: a stable task-first title lead, a `/consume-handoff` takeover
+recommendation, and one opaque `task:<id>` or `file:<id>` recovery locator. It
+contains no executable source, shell command, quote-dependent recovery text, or
+installed path, so terminal selection never has to preserve program syntax.
+The full handoff and lifecycle orchestration are never inlined in the seed.
+
+The locator is sufficient for both recovery surfaces. The extension consumes
+the worktree's pending baton normally; if extension tools are unavailable, the
+agent resolves the verified payload-local `handoff-cli.mjs` using the skill's
+fallback procedure and passes the locator to `consume --locator`. A task locator
+automatically retains deferred-completion semantics, so checkpointing,
+acknowledgement, takeover, and verified retirement are not bypassed.
 
 Copilot creates no successor session until that initial prompt is submitted.
 The launch carries the pending handoff token in the successor environment; only
@@ -235,8 +237,9 @@ used by `save_handoff_prompt`), and spawns a fresh seeded successor. Run it from
 the predecessor.
 
 If `/consume-handoff` is not yet available during extension startup, the seed's
-raw recovery command can retrieve the same stored payload. It is deliberately a
-single command rather than a long shell orchestration chain.
+opaque recovery locator tells the agent which stored payload to retrieve through
+the verified payload-local CLI. The executable resolution procedure remains in
+the skill and plugin payload instead of being copied into the terminal prompt.
 
 This split follows the repo-wide
 [`primitives below, orchestration above`](../../docs/patterns/README.md)
@@ -351,6 +354,7 @@ node "$CH" save     --title "<topic>" --prompt-file "<handoff.md>"
 node "$CH" continue --seed "<HANDOFF_SEED>" --handoff-token "<HANDOFF_TOKEN>"
 node "$CH" consume  --task-id "<task-id>" --defer-complete
 node "$CH" consume  --handoff-id "<handoff-id>"
+node "$CH" consume  --locator "task:<task-id>"
 node "$CH" retry
 ```
 

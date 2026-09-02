@@ -201,8 +201,9 @@ core of the principles above; a reviewer checks a change against these.
 - **A handoff seed is a locator, never the baton.** The full-fidelity
   continuation has exactly one durable home. The startup seed is bounded,
   single-line, and carries only a task lead, the canonical consume action, and
-  one exact recovery command. Shell quoting, terminal limits, or process argv
-  must never become the storage channel. (Serves *Vision agent-fabric
+  one short opaque recovery locator. It contains no executable source, shell
+  command, quote-sensitive recovery text, or installed path, so terminal
+  rendering, shell quoting, and process argv never become the storage channel. (Serves *Vision agent-fabric
   §Behaviors/context-pressure-is-a-continuity-signal*; see
   [`context-handoff-lifecycle.md`](context-handoff-lifecycle.md).)
 - **Cross-plugin payload argv remains data.** A payload-only orchestrator

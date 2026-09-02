@@ -21,7 +21,7 @@
 //   node handoff-cli.mjs save     --title "<t>" --prompt-file <f>   # store + print seed + paste prompt (no cutover)
 //   node handoff-cli.mjs continue --seed "<HANDOFF_SEED>"           # trigger the cutover for an existing seed
 //   node handoff-cli.mjs retry                                      # retry from the stored handoff
-//   node handoff-cli.mjs consume  --task-id <id> | --handoff-id <id> # consume + acknowledge/take over
+//   node handoff-cli.mjs consume  --locator <task:id|file:id>        # consume + acknowledge/take over
 //   node handoff-cli.mjs facts --json                              # basic extension-free handoff facts
 //   node handoff-cli.mjs help
 //
@@ -33,10 +33,12 @@
 //   --no-task             force the file store (skip an agent-dispatch task)
 //   --seed <s>            (continue) the exact HANDOFF_SEED to spawn a successor with
 //   --handoff-token <id>  (continue) stored token associated at successor sessionStart
-//   --task-id <id> | --handoff-id <id> | --path <f>  stored handoff to consume
+//   --locator <task:id|file:id> | --task-id <id> | --handoff-id <id> | --path <f>
+//                         stored handoff to consume
 //   --json                machine-readable output
 
 import { readFileSync } from "node:fs";
+import { parseRecoveryLocator } from "./cutover-seed.mjs";
 import {
   storeHandoff, buildSeedForStored, runHandoffCutover,
   consumeFileHandoff, consumeDispatchHandoffTask,
@@ -90,12 +92,12 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs save     --title "<t>" --prompt-file <f>   store + print seed + paste prompt
   node handoff-cli.mjs continue --seed "<HANDOFF_SEED>"           trigger the cutover for a seed
   node handoff-cli.mjs retry                                      retry cutover from saved state
-  node handoff-cli.mjs consume  --task-id <id> | --handoff-id <id> consume + acknowledge/take over
+  node handoff-cli.mjs consume  --locator <task:id|file:id>        consume + acknowledge/take over
   node handoff-cli.mjs facts --json                              emit basic extension-free facts
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id (\$COPILOT_AGENT_SESSION_ID),
          --cwd, --no-task, --seed, --handoff-token, --worktree-id,
-         --task-id|--handoff-id|--path, --defer-complete, --json`;
+         --locator|--task-id|--handoff-id|--path, --defer-complete, --json`;
 
 function cmdStore(args, { cutover }) {
   const promptText = readPrompt(args);
@@ -204,17 +206,42 @@ function cmdConsume(args) {
     );
     process.exit(2);
   }
-  const consumed = args["task-id"]
+  let taskId = args["task-id"];
+  let handoffId = args["handoff-id"];
+  let deferComplete = Boolean(args["defer-complete"]);
+  if (args.locator) {
+    let parsed;
+    try {
+      parsed = parseRecoveryLocator(args.locator);
+    } catch (error) {
+      process.stderr.write(`handoff-cli consume: ${error.message}\n`);
+      process.exit(2);
+    }
+    if (taskId || handoffId || args.path) {
+      process.stderr.write(
+        "handoff-cli consume: --locator cannot be combined with --task-id, " +
+        "--handoff-id, or --path\n",
+      );
+      process.exit(2);
+    }
+    if (parsed.kind === "task") {
+      taskId = parsed.id;
+      deferComplete = true;
+    } else {
+      handoffId = parsed.id;
+    }
+  }
+  const consumed = taskId
     ? consumeDispatchHandoffTask(
         cwd,
-        args["task-id"],
+        taskId,
         sid,
-        Boolean(args["defer-complete"]),
+        deferComplete,
       )
     : consumeFileHandoff(
         cwd,
         sid,
-        args["handoff-id"],
+        handoffId,
         args.path || null,
       );
   if (!consumed.ok) {
@@ -224,7 +251,7 @@ function cmdConsume(args) {
   if (args.json) return emit(consumed, args);
   process.stdout.write(
     formatConsumeResult(consumed, {
-      deferComplete: Boolean(args["defer-complete"]),
+      deferComplete,
     }) + "\n",
   );
 }

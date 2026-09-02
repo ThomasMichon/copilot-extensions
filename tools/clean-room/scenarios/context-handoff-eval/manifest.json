@@ -19,7 +19,7 @@
     "notes": "A synthetic worktree has predecessor session eval-predecessor as head and pending token handoff-eval-predecessor. The compact seed is the eval's sole initial prompt. AGENT_WORKTREES_HANDOFF_TOKEN is present in the ACP login environment so sessionStart can associate the real successor only after Copilot creates it."
   },
   "tier_p_precondition": "python3 /home/operator/scenario/fixture.py verify --root /home/operator/context-handoff-eval",
-  "prompt": "Task: Measure handoff takeover | Recommendation: after startup invoke `/consume-handoff` (the `consume_handoff` tool) to acknowledge and take over | Recovery: node -e \"const f=require('fs'),p=require('path'),c=require('child_process'),r=p.join(require('os').homedir(),'.copilot','installed-plugins','copilot-extensions','context-handoff'),m=JSON.parse(f.readFileSync(p.join(r,'plugin.json'),'utf8'));if(m.name!=='context-handoff'||m.repository!=='https://github.com/ThomasMichon/copilot-extensions')process.exit(2);const x=p.join(r,'extensions','context-handoff','handoff-cli.mjs'),q=c.spawnSync(process.execPath,[x,...process.argv.slice(1)],{stdio:'inherit'});process.exit(q.status??1)\" consume --handoff-id handoff-eval-predecessor",
+  "prompt": "Task: Measure handoff takeover | Resume: /consume-handoff to take over | Recovery: context-handoff file:handoff-eval-predecessor",
   "expected_outcome": {
     "steps": [
       "Receive the compact seed as the one initial submitted prompt; no Copilot session or successor binding exists before that submit.",
@@ -28,9 +28,9 @@
       "Return the stored HANDOFF_FIDELITY_7f1a9c2e canary and continue from the full stored brief without reconstructing or truncating it.",
       "Move the worktree head only during acknowledgement. Retire only a creation-verified predecessor; this fixture intentionally lacks that proof and must preserve it for manual cleanup."
     ],
-    "affirmative_ready": "context-handoff-eval-metrics.json derives from agent-bridge structured turn evidence and reports a seed <=1024 characters, exactly one submitted initial prompt equal to the runner-written literal-mode composite and containing the exact handoff seed, exactly one agent turn to acknowledgement, exactly one consume_handoff tool call whose structured result contains the complete stored payload byte-for-byte, candidate_acknowledged=true, headVerified=true, and predecessorPreserved=true.",
+    "affirmative_ready": "context-handoff-eval-metrics.json derives from agent-bridge structured turn evidence and reports a seed <=200 characters with no inline executable source, exactly one submitted initial prompt equal to the runner-written literal-mode composite and containing the exact handoff seed, exactly one agent turn to acknowledgement, exactly one consume_handoff tool call whose structured result contains the complete stored payload byte-for-byte, candidate_acknowledged=true, headVerified=true, and predecessorPreserved=true.",
     "pass_if": "the successor explicitly consumes the handoff, preserves the canary and payload hash, takes over only after startup association, and reaches the safe retire-or-preserve decision within the recorded timing budget.",
-    "false_pass_if": "the agent claims takeover without consuming, uses the recovery command as a substitute for lifecycle acknowledgement, reconstructs the brief from files/history, loses the canary, binds before a real successor session exists, or retires an unverified predecessor."
+    "false_pass_if": "the agent claims takeover without consuming, treats the recovery locator as lifecycle acknowledgement, reconstructs the brief from files/history, loses the canary, binds before a real successor session exists, or retires an unverified predecessor."
   },
   "eval": {
     "acp_cwd_file": "/home/operator/context-handoff-eval/acp-cwd",
