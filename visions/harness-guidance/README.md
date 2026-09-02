@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-08-31
+- **Last revised:** 2026-09-01
 - **Reality docs:** `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -33,6 +33,11 @@ portable, attributable, and intentionally budgeted.
   and sanitization policy remains with the operator/plugin owner.
 - **Context accounting** makes each loaded guidance source visible as a
   contributor to a shared budget.
+- **Grounding guides** hold detailed behavioral control and reference material
+  that remains overarching but does not need to occupy every model request.
+- **Aggregate document structure** gives independently owned contributions a
+  coherent, navigable shape without transferring their authorship to the
+  composition authority.
 
 ## Features
 
@@ -72,6 +77,29 @@ other context reconstruction boundaries. When a start-time delivery channel is
 not durably represented in reconstructed history, a bounded model-facing prompt
 recovery channel should re-establish an exact, attributable context pointer
 without duplicating the full aggregate on every turn.
+
+### progressive-context-disclosure
+
+Always-loaded guidance should contain only the critical policy, constraints,
+orientation, and decision cues an agent needs before it can safely choose what
+to inspect. Detailed overarching behavior and grounding material should remain
+available through attributable on-demand references rather than being eagerly
+loaded into every session.
+
+### navigable-on-demand-grounding
+
+Deferred guidance should remain easy for an agent to discover and apply. Each
+reference should make its owner, subject, applicability, and expected use clear
+enough that the agent reads the right guide when needed and does not explore
+irrelevant material by default.
+
+### coherent-attributable-assembly
+
+When several plugins contribute ambient guidance, the assembled context should
+form a deterministic, legible hierarchy of critical constraints, orientation,
+capability grounding, and deferred references. Composition should preserve
+source attribution and owner boundaries rather than rewriting independent
+policy into an unattributed central voice.
 
 ### coordinator-first-task-routing
 
@@ -123,6 +151,32 @@ because session-local state exists. It should revalidate repository trust,
 scope, authority, and contributor identity at the current boundary, then either
 recover the matching context or fail closed with bounded guidance.
 
+### critical-before-comprehensive
+
+Context authors should prefer a short, stable kernel that enables safe first
+decisions over a comprehensive procedure dump. Deferral must never hide a rule
+the agent needs in order to know that a guide exists or that an action is unsafe.
+
+### references-carry-applicability
+
+An on-demand reference should state when it matters, not merely where it lives.
+The agent should be able to distinguish mandatory grounding for the current
+task from optional background and unrelated capability documentation.
+
+### composition-preserves-owner-boundaries
+
+A composition authority may order, group, label, and budget contributed
+material, but should not silently paraphrase, merge, or resolve disagreements
+between independently owned policies. Conflicts remain attributable and
+diagnosable.
+
+### deferral-is-evidence-calibrated
+
+Decisions about kernel size, reference form, emphasis, and hierarchy should be
+validated against observed agent behavior. Context reduction is successful only
+when first-turn correctness and task-appropriate grounding are retained without
+causing routine unnecessary exploration.
+
 ### transparent-cost
 
 Context reporting should distinguish known static and metadata costs from
@@ -158,6 +212,12 @@ review unless a concrete defect or materially changed evidence justifies it.
 - It does not authorize recursive self-delegation or overlapping edit ownership.
 - It does not move repository-specific identity or invariants into plugins.
 - It does not make skills an always-on policy channel.
+- It does not require detailed overarching guidance to be recast as a skill
+  merely because it is loaded on demand.
+- It does not assume that a particular Markdown or path representation is
+  reliably followed or ignored without behavioral evidence.
+- It does not authorize a composition authority to rewrite plugin-owned policy
+  into one synthesized voice.
 - It does not require executing dynamic guidance producers to estimate their
   contribution.
 
