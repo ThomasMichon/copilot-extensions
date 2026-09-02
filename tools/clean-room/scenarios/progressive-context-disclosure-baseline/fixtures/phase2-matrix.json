@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "renderCount": 3080,
+  "distinctRenderHashes": 1160,
+  "phase2Assemblies": [
+    "flat-fragments",
+    "flat-with-index"
+  ],
+  "matrixSha256": "f39f0ac677fddd4876ee2bf79d1fed67a50e38a191a8eec2c5c31ea733fd1066"
+}

@@ -15,9 +15,11 @@ phase 0 "validate frozen progressive-disclosure fixture"
 if [ ! -d "$SOURCE/plugins" ]; then
     jam "repo-config" "the source checkout is not mounted at /harness" \
         "pass -HarnessMount <copilot-extensions-checkout> or --harness-mount <checkout>"
-elif capture "verify-fixture" -- \
-    python3 "$_SELF_DIR/fixture.py" verify --source "$SOURCE"; then
-    pass "inventory, corpus, tasks, baselines, protocol, and evidence schema are frozen and coherent"
+elif capture "verify-fixture" -- bash -c \
+    'python3 "$1" verify --source "$2" &&
+     python3 "$1" verify-phase2' \
+    progressive-context-verify "$_SELF_DIR/fixture.py" "$SOURCE"; then
+    pass "frozen inputs and all deterministic Phase 2 render cells are coherent"
 else
     jam "scenario-fixture" "progressive-disclosure fixture validation failed" \
         "repair the frozen fixture before running any behavioral comparison"
