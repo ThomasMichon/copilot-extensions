@@ -289,6 +289,14 @@ for binding, succession, head, title, and verified retirement.
   fallbacks for older metadata.
 - Added deterministic clean-room efficiency/fidelity metrics and an opt-in,
   identity-free Tier-E scenario for actual turn/tool/timing/fidelity evidence.
+
+### 2026-09-02 — Post-deploy fallback correction
+- Live deployment verified session-to-mux recovery for the active Copilot
+  session, but the extension-free `facts` command exposed a stale PATH-based
+  project-wrapper resolution.
+- Changed SDK-free system calls to resolve provenance-checked sibling payload
+  commands inside the same marketplace installation cell, so both extension and
+  CLI fallback avoid ambient PATH and repository-local wrapper ambiguity.
 - Final deterministic probe after review hardening: 736 initial-seed characters,
   184 estimated tokens, exactly three parts, one submitted-prompt / one-turn /
   one-consume-tool target, and byte-identical payload SHA-256. The increase buys
