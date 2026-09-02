@@ -17,15 +17,7 @@ case "$relative_script" in
 esac
 
 export COPILOT_PLUGIN_ROOT="$root"
-python_bin=""
-for candidate in python3 python; do
-    candidate_path="$(command -v "$candidate" 2>/dev/null || true)"
-    if [[ -n "$candidate_path" ]] &&
-       "$candidate_path" -c 'raise SystemExit(0)' >/dev/null 2>&1; then
-        python_bin="$candidate_path"
-        break
-    fi
-done
+python_bin="$(command -v python3 || command -v python || true)"
 script="$root/$relative_script"
 resolver="$root/scripts/resolve_context_authority.py"
 payload="$(cat)" || {
