@@ -329,10 +329,15 @@ def validate_restored_hint(
         projection = read(session_id)
     if projection is None:
         return {"status": "restored-missing-projection"}
+    overflow = projection.get("overflow", False)
     omitted = projection.get("omitted_relations", 0)
-    if projection.get("overflow") or (
-        isinstance(omitted, int) and omitted > 0
+    if (
+        not isinstance(overflow, bool)
+        or type(omitted) is not int
+        or omitted < 0
     ):
+        return {"status": "restored-invalid"}
+    if overflow or omitted:
         return {"status": "restored-incomplete"}
     bound = [
         relation
@@ -816,7 +821,11 @@ def _classify_relation(
         return item
     overflow = projection.get("overflow", False)
     omitted = projection.get("omitted_relations", 0)
-    if not isinstance(overflow, bool) or not isinstance(omitted, int) or omitted < 0:
+    if (
+        not isinstance(overflow, bool)
+        or type(omitted) is not int
+        or omitted < 0
+    ):
         item["status"] = "restored-invalid" if restored else "invalid"
         return item
     if overflow or omitted:

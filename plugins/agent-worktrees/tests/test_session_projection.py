@@ -256,6 +256,42 @@ def test_restored_hint_rejects_incomplete_projection(
     assert validation["status"] == "restored-incomplete"
 
 
+@pytest.mark.parametrize(
+    ("overflow", "omitted"),
+    [
+        ("false", 0),
+        (False, "0"),
+        (False, True),
+        (False, -1),
+    ],
+)
+def test_restored_hint_rejects_malformed_overflow_fields(
+    tmp_path,
+    tmp_tracking_dir,
+    monkeypatch,
+    monkeypatch_config,
+    overflow,
+    omitted,
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": overflow,
+        "omitted_relations": omitted,
+    }
+
+    validation = session_projection.validate_restored_hint(
+        "session-a",
+        projection,
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert validation["status"] == "restored-invalid"
+
+
 def test_backfill_repairs_stale_secondary_revision(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
