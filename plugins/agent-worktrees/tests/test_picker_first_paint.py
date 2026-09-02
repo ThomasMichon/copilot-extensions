@@ -166,6 +166,33 @@ def test_post_refresh_callback_starts_on_worker(monkeypatch):
     assert calls[1][0] == "callback"
 
 
+def test_picker_housekeeping_continues_after_step_failure(monkeypatch):
+    from agent_worktrees import __main__ as main
+
+    calls = []
+
+    def fail():
+        calls.append("fail")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main, "reap_orphan_mux_sessions", fail)
+    monkeypatch.setattr(
+        main, "_sweep_managed_on_exit", lambda: calls.append("managed")
+    )
+    monkeypatch.setattr(
+        main, "_sweep_launcher_shells_on_exit", lambda: calls.append("shells")
+    )
+    monkeypatch.setattr(
+        main,
+        "_sweep_finished_sessions_on_cadence",
+        lambda: calls.append("finished"),
+    )
+
+    main._run_picker_housekeeping()
+
+    assert calls == ["fail", "managed", "shells", "finished"]
+
+
 def test_data_ssh_bootstrap_rows_skip_full_config(monkeypatch):
     from agent_worktrees.picker_tui import data_ssh
 

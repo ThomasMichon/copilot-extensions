@@ -4120,6 +4120,23 @@ def _machine_key_for_display(config: cfg.Config, name: str) -> str:
     return name
 
 
+def _run_picker_housekeeping() -> None:
+    """Run each post-refresh sweep independently; one failure never stops peers."""
+    from .picker_tui.frame_health import append_launch_event
+
+    append_launch_event("housekeeping_start")
+    for action in (
+        reap_orphan_mux_sessions,
+        _sweep_managed_on_exit,
+        _sweep_launcher_shells_on_exit,
+        _sweep_finished_sessions_on_cadence,
+    ):
+        try:
+            action()
+        except Exception:
+            pass
+
+
 def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
     """Run the Textual worktree picker and resolve its launch decision.
 
@@ -4136,28 +4153,13 @@ def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
     # Run it on a background thread so the mux enumeration never delays the
     # picker appearing -- interaction must not wait on startup housekeeping
     # (#1432). Best-effort: a reap hiccup never touches the picker.
-    def _reap_bg():
-        from .picker_tui.frame_health import append_launch_event
-
-        append_launch_event("housekeeping_start")
-        try:
-            reap_orphan_mux_sessions()
-        except Exception:
-            pass
-        # Same no-daemon cadence for the managed (system/bridge) leak GC (#1069).
-        _sweep_managed_on_exit()
-        # ...and for orphaned launcher shells (copilot-extensions #102).
-        _sweep_launcher_shells_on_exit()
-        # ...and for FINISHED session worktrees (prune-on-next-start), so
-        # finished user worktrees don't accumulate without a daemon.
-        _sweep_finished_sessions_on_cadence()
     # Avoid a confusing double hop: when this picker is itself running over SSH,
     # don't fan out to other machines -- show only the local source (no remote
     # tabs / handoffs). See issue: "a process should know it's accessed via SSH."
     live = not _in_ssh_session()
     decision = picker_tui.run_tui_picker(
         live=live,
-        after_first_refresh=_reap_bg,
+        after_first_refresh=_run_picker_housekeeping,
     )
     if not decision:
         print("Cancelled.")
