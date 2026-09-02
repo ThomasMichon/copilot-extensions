@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_kwargs
-from plugin_activation import resolve_active_plugins
 
 from .manifest import RequirementPackage
 
@@ -115,13 +114,19 @@ def _tail(text: str, limit: int = 4000) -> str:
     return text if len(text) <= limit else text[-limit:]
 
 
+def _active_plugins():
+    from plugin_activation import resolve_active_plugins
+
+    return resolve_active_plugins().active
+
+
 def _payload_invocation_command(
     invocation: dict[str, Any],
     plat: str,
 ) -> tuple[list[str], dict[str, str]]:
     source = str(invocation["plugin"])
     command_name = str(invocation["command"])
-    active = resolve_active_plugins().active.get(source)
+    active = _active_plugins().get(source)
     if active is None:
         raise RuntimeError(f"required active plugin is unavailable: {source}")
     payload = active.root.resolve()

@@ -152,12 +152,10 @@ def test_payload_provider_invocation_uses_attributed_shim(
     )
     monkeypatch.setattr(
         modules,
-        "resolve_active_plugins",
-        lambda: SimpleNamespace(
-            active={
-                "agent-ssh@copilot-extensions": SimpleNamespace(root=payload)
-            }
-        ),
+        "_active_plugins",
+        lambda: {
+            "agent-ssh@copilot-extensions": SimpleNamespace(root=payload)
+        },
     )
     monkeypatch.setattr(modules.shutil, "which", lambda _name: "pwsh")
     captured = {}
@@ -200,12 +198,10 @@ def test_payload_provider_honors_commands_output_dir_and_cmd_shim(
     )
     monkeypatch.setattr(
         modules,
-        "resolve_active_plugins",
-        lambda: SimpleNamespace(
-            active={
-                "agent-ssh@copilot-extensions": SimpleNamespace(root=payload)
-            }
-        ),
+        "_active_plugins",
+        lambda: {
+            "agent-ssh@copilot-extensions": SimpleNamespace(root=payload)
+        },
     )
     monkeypatch.setenv("COMSPEC", "cmd.exe")
     monkeypatch.setattr(
@@ -232,8 +228,8 @@ def test_payload_provider_missing_is_failure(tmp_path, monkeypatch):
     pkg = _provider_package(tmp_path)
     monkeypatch.setattr(
         modules,
-        "resolve_active_plugins",
-        lambda: SimpleNamespace(active={}),
+        "_active_plugins",
+        lambda: {},
     )
 
     result = modules.run_module(
