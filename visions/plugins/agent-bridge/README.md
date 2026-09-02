@@ -448,7 +448,10 @@ authoritative log rather than silently diverging.
 
 A session never remains indefinitely "running" after its turn has actually
 ended. Clean finish, child death, interrupted stream, and frontend loss all
-eventually reconcile to a persisted terminal turn state.
+eventually reconcile to a persisted terminal turn state. Read surfaces also
+derive an **at-rest** verdict from the durable event tail, so a stale ACP
+"live/running" flag cannot hide a completed response from schedulers waiting on
+the turn boundary.
 
 ### local-first-peer-mesh
 

@@ -94,6 +94,7 @@ class SessionInfo(BaseModel):
     last_output_at: str | None = None
     last_heartbeat_at: str | None = None
     liveness: str | None = None
+    at_rest: bool = False
 
 
 class TurnInfo(BaseModel):
@@ -376,6 +377,7 @@ class ResultCurrentState(BaseModel):
         "taken-over",
         "reserved",
     ]
+    at_rest: bool = False
     liveness: str | None = None
     observer_only: bool = True
     retained_attention: bool = False

@@ -758,6 +758,27 @@ class Session:
             return "stalled"
         return "active"
 
+    def is_at_rest(self) -> bool:
+        """Return whether the durable ACP event tail says the turn ended."""
+        if self.status == SessionStatus.IDLE:
+            return True
+        if self.status != SessionStatus.RUNNING or self.event_log is None:
+            return False
+        return (
+            self.event_log.telemetry_conversation_state
+            in {"end-turn", "cancelled"}
+            and self.event_log.active_tool_call(include_nested=False) is None
+        )
+
+    def public_state(self) -> tuple[SessionStatus, bool, str | None]:
+        """Return a consistent status, at-rest, and liveness projection."""
+        at_rest = self.is_at_rest()
+        return (
+            SessionStatus.IDLE if at_rest else self.status,
+            at_rest,
+            None if at_rest else self.liveness_state(),
+        )
+
 
 class SessionManager:
     """Manages all agent-bridge sessions with SQLite persistence."""

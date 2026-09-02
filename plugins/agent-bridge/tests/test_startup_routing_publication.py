@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pytest
@@ -51,6 +52,11 @@ def test_normal_start_publishes_bound_port_before_resolver_init(
     app = create_app(config=_config(tmp_path), token="test-token")
     app.state.bound_port = 41002
     app.state.publish_on_ready = True
+    app.state.supersession_client_factory = lambda _ep: SimpleNamespace(
+        drain=lambda **_kwargs: {"drained": True},
+        shutdown=lambda: {"shutting_down": True},
+        undrain=lambda: {"draining": False},
+    )
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200

@@ -550,16 +550,19 @@ async def list_worktrees(request: Request) -> dict[str, Any]:
         entry = wt.to_dict()
         session = latest_by_wt.get(wt.id)
         if session is not None:
-            status = session.status.value
+            public_status, at_rest, _liveness = session.public_state()
+            status = public_status.value
             entry["session_id"] = session.session_id
             entry["acp_session_id"] = session.acp_session_id
             entry["session_status"] = status
+            entry["session_at_rest"] = at_rest
             entry["session_turn_count"] = session.turn_count
             entry["session_live"] = status in ("running", "idle")
         else:
             entry["session_id"] = None
             entry["acp_session_id"] = None
             entry["session_status"] = None
+            entry["session_at_rest"] = False
             entry["session_turn_count"] = 0
             entry["session_live"] = False
         return entry

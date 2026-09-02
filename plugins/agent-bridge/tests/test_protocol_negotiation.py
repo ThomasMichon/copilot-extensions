@@ -15,6 +15,7 @@ from agent_bridge.app import create_app
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import ServiceConfig
 from agent_bridge.protocol import (
+    AT_REST_PROJECTION_PROTOCOL_VERSION,
     CONTAINER_RECREATE_PROTOCOL_VERSION,
     FAILED_ACP_HANDSHAKE_FAULT,
     FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION,
@@ -41,6 +42,8 @@ def test_result_snapshot_capability_is_advertised() -> None:
     assert REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
     assert PROVIDER_TARGET_REFRESH_PROTOCOL_VERSION == 8
     assert PROVIDER_TARGET_REFRESH_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+    assert AT_REST_PROJECTION_PROTOCOL_VERSION == 9
+    assert AT_REST_PROJECTION_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from agent_bridge.app import create_app
 from agent_bridge.agent_registry import AgentConfig, AgentResolver
+from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.session_manager import Session, SessionManager
@@ -304,6 +305,37 @@ class TestSessionRoutes:
         assert resp.status_code == 200
         assert resp.json()["sessions"] == []
         assert client.get("/api/v1/sessions?status=").json()["sessions"] == []
+
+    def test_at_rest_session_projects_idle_on_read_surfaces(self, client) -> None:
+        manager = client.app.state.session_manager
+        session = Session(
+            "at-rest-session",
+            "reviewer",
+            SpawnTarget(type="local", cwd="/repo"),
+        )
+        session.status = SessionStatus.RUNNING
+        session.event_log = EventLog()
+        session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+        manager._sessions[session.session_id] = session
+
+        idle = client.get("/api/v1/sessions?status=idle").json()["sessions"]
+        assert [item["session_id"] for item in idle] == [session.session_id]
+        assert idle[0]["status"] == "idle"
+        assert idle[0]["at_rest"] is True
+        assert idle[0]["liveness"] is None
+        assert client.get("/api/v1/sessions?status=running").json()["sessions"] == []
+
+        usage = client.get(
+            f"/api/v1/sessions/{session.session_id}/usage"
+        ).json()
+        assert usage["status"] == "idle"
+        assert usage["at_rest"] is True
+
+        status = client.get(
+            f"/api/v1/sessions/{session.session_id}/status"
+        ).json()
+        assert status["status"] == "idle"
+        assert status["at_rest"] is True
 
     def test_get_nonexistent_session(self, client) -> None:
         resp = client.get("/api/v1/sessions/nonexistent")

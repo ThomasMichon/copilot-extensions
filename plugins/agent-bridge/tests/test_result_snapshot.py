@@ -636,6 +636,15 @@ def test_represented_snapshot_reports_reduced_fidelity(client, app) -> None:
         {"id": "2", "type": "assistant.reasoning", "data": {"content": "hidden"}},
         {"id": "3", "type": "assistant.message", "data": {"content": "visible"}},
         {"id": "4", "type": "assistant.turn_end", "data": {}},
+        {
+            "id": "5",
+            "type": "tool.execution_start",
+            "data": {
+                "toolCallId": "nested-tool",
+                "toolName": "Nested work",
+                "agentId": "sub-1",
+            },
+        },
     )
 
     body = client.get("/api/v1/live-sessions/wt-live/result").json()
@@ -644,6 +653,9 @@ def test_represented_snapshot_reports_reduced_fidelity(client, app) -> None:
     assert body["fidelity"]["event_retention"] == "process_lifetime"
     assert body["latest_result"]["availability"] == "available"
     assert body["latest_result"]["value"]["text"] == "visible"
+    assert body["state"]["session_status"] == "idle"
+    assert body["state"]["at_rest"] is True
+    assert body["state"]["liveness"] is None
     assert body["incremental"]["position"].startswith("abr1.")
     assert "restart_stable_position" in body["fidelity"]["unavailable"]
 
