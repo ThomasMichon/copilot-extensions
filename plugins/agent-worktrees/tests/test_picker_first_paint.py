@@ -71,22 +71,24 @@ def test_skeleton_does_not_touch_src_local():
     assert screen.machine_state(1) == "loading"
 
 
-def test_live_setup_starts_after_first_refresh(monkeypatch):
+@pytest.mark.parametrize("live", [False, True])
+def test_first_refresh_callback_is_scheduled_in_every_mode(monkeypatch, live):
     pytest.importorskip("textual")
     from agent_worktrees.picker_tui import engine as eng
 
     class Src:
         LOCAL = ("host", "Win")
 
-    screen = eng.PickerScreen(Src(), live=True)
+    screen = eng.PickerScreen(Src(), live=live)
     deferred = []
     monkeypatch.setattr(screen, "_setup_skeleton", lambda: None)
+    monkeypatch.setattr(screen, "setup", lambda: None)
     monkeypatch.setattr(screen, "_finish_mount", lambda: None)
     monkeypatch.setattr(screen, "call_after_refresh", deferred.append)
 
     screen.on_mount()
 
-    assert deferred == [screen._start_live_setup]
+    assert deferred == [screen._after_first_refresh]
 
 
 def test_data_ssh_bootstrap_rows_skip_full_config(monkeypatch):
