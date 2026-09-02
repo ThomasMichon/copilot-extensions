@@ -13,6 +13,19 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PLUGIN / "src"
 
 
+def test_reconcile_update_uses_installer_declared_arguments() -> None:
+    manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
+    readiness = json.loads(
+        (PLUGIN / "installer-readiness.json").read_text(encoding="utf-8")
+    )
+    installer = readiness["modules"][0]["installer"]
+
+    assert "zeroDowntimeUpdate" not in manifest
+    assert installer["windows"]["arguments"] == ["update"]
+    assert installer["linux"]["arguments"] == ["update"]
+    assert installer["wsl"]["arguments"] == ["update"]
+
+
 def test_runtime_gates_serialize_provisioning() -> None:
     posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "runtime-gate.ps1").read_text(
