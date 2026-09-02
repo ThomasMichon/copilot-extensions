@@ -187,6 +187,7 @@ def autopilot_worker_prompt(
     route: str = "",
     repo: str | None = None,
     all_repos: bool = False,
+    explicit_worker_identity: bool = False,
 ) -> str:
     """Build the autopilot seed handed to a dispatched, embodied CLI session.
 
@@ -195,13 +196,15 @@ def autopilot_worker_prompt(
     that **completing the task is its own deliberate signal that the work is
     done** -- it must not complete before the goal is met.
 
-    The worker drives its whole lifecycle under its **worktree identity**
+    A CLI-backed worker drives its whole lifecycle under its **worktree identity**
     (owner-less ``claim``/``start``/``complete``/``yield``, which the coordinator
     resolves to ``<machine>/<worktree>``). That keeps the task's owner equal to
     its worktree, so agent-bridge live-session tracking can join the task to the
     embodied session (see :mod:`agent_dispatch.tracking`) -- a dispatched CLI
     body is then as trackable as a headless worker. ``worker_id`` names the
-    session in the seed for legibility only.
+    session in the seed for legibility only. A headless body has no worktree
+    identity, so ``explicit_worker_identity`` makes every owner-gated command use
+    the generated worker id directly.
 
     ``route`` is the coordinator **routing intent** to bake into the worker's
     ``agent-dispatch`` commands, as a leading flag fragment (``""`` for the
@@ -216,6 +219,32 @@ def autopilot_worker_prompt(
     if repo and all_repos:
         raise ValueError("autopilot claim scope cannot set repo and all_repos")
     lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
+    claim_owner = f" --worker {worker_id}" if explicit_worker_identity else ""
+    owner_arg = f" {worker_id}" if explicit_worker_identity else ""
+    abandon_owner = (
+        f" --worker-id {worker_id}" if explicit_worker_identity else ""
+    )
+    identity_note = (
+        f"Claim and drive it under the explicit worker id `{worker_id}` shown in "
+        f"each owner-gated command; this headless body has no worktree identity. "
+        if explicit_worker_identity
+        else (
+            "Claim it under this worktree's own identity (no owner argument -- "
+            "the coordinator resolves machine/worktree), which keeps the task "
+            "trackable as your live session. "
+        )
+    )
+    decline = (
+        f"`{ad} yield {task_id}{owner_arg} --note <why>` returns it to the queue "
+        f"without inventing a worktree exclusion"
+        if explicit_worker_identity
+        else (
+            f"`{ad} yield {task_id} --exclude-self worktree --note <why>` returns "
+            f"it to the queue and appends a narrow 'not me' exclusion so you are "
+            f"not re-offered it (widen to `--exclude-self machine` only when the "
+            f"mismatch is machine-wide)"
+        )
+    )
     if route:
         route_note = (
             f"Use the `{ad}` CLI commands exactly as shown below so every command "
@@ -232,15 +261,13 @@ def autopilot_worker_prompt(
         f"{worker_id}), running in a fresh parallel worktree with tools "
         f"auto-approved (--allow-all-tools). A task has been queued for you. "
         f"{route_note}Work the task end-to-end, "
-        f"autonomously, without waiting for a human. Claim it under this "
-        f"worktree's own identity (no owner argument -- the coordinator resolves "
-        f"machine/worktree), which keeps the task trackable as your live "
-        f"session. This is a **contract-net evaluation**: you win an exclusive, "
+        f"autonomously, without waiting for a human. {identity_note}"
+        f"This is a **contract-net evaluation**: you win an exclusive, "
         f"tight-lease EVALUATION window first, decide whether the task is really "
         f"yours to do, and only THEN commit to running it. Steps: "
         f"(1) read it with `{ad} show {task_id}`; "
         f"(2) claim it for evaluation with "
-        f"`{ad} claim --task {task_id} --evaluation{lane}` "
+        f"`{ad} claim --task {task_id} --evaluation{claim_owner}{lane}` "
         f"(add `--capability <cap>` for each capability the task requires) -- "
         f"this takes a SHORT evaluation lease, not the full work lease; "
         f"(3) **EVALUATE before committing** -- while you hold the evaluation "
@@ -249,9 +276,9 @@ def autopilot_worker_prompt(
         f"equivalent already queued, claimed, or in progress; (b) FEASIBILITY -- "
         f"is the task well-formed and doable from here; (c) IS-THIS-FOR-ME -- do "
         f"your machine/worktree/capabilities actually fit it; "
-        f"(4a) on ACCEPT, `{ad} start {task_id}` (this extends the "
+        f"(4a) on ACCEPT, `{ad} start {task_id}{owner_arg}` (this extends the "
         f"lease from the tight evaluation window to the full work lease), run "
-        f"`{ad} steer take {task_id} --all` and incorporate any pending "
+        f"`{ad} steer take {task_id}{owner_arg} --all` and incorporate any pending "
         f"operator guidance, then carry out the work as follows. FIRST re-read the task with "
         f"`{ad} show {task_id}` and check whether it carries a durable "
         f"**goal** and **done-criteria** (the `goal` / `done_criteria` fields) "
@@ -260,30 +287,27 @@ def autopilot_worker_prompt(
         f"restart: read the prior progress log to see what earlier passes already "
         f"accomplished, then continue from there. LOOP: do one unit of work "
         f"toward the goal -> record a progress beat with "
-        f"`{ad} progress {task_id} --phase <phase> --summary "
+        f"`{ad} progress {task_id}{owner_arg} --phase <phase> --summary "
         f"\"<one line>\"` (this now APPENDS to the durable progress log, so a "
         f"replacement worker can resume) -> re-check the done-criteria -> repeat "
         f"until they are genuinely met. If the task carries NO goal/done-criteria "
         f"(a plain one-shot task), just carry out the work described in its "
         f"prompt/payload to completion as usual; "
         f"(4b) if the task is NOT FOR YOU or you hit a transient blocker, decline "
-        f"WITHOUT abandoning it: `{ad} yield {task_id} --exclude-self "
-        f"worktree --note <why>` returns it to the queue and appends a narrow "
-        f"'not me' exclusion so you are not re-offered it (widen to "
-        f"`--exclude-self machine` only when the mismatch is machine-wide); "
+        f"WITHOUT abandoning it: {decline}; "
         f"(4c) if it is a DUPLICATE or obsolete, retire it terminally with "
-        f"`{ad} abandon {task_id} --duplicate-of <ref>` (cite the "
+        f"`{ad} abandon {task_id}{abandon_owner} --duplicate-of <ref>` (cite the "
         f"existing task/PR/issue) so the dedup is recorded, never a silent drop; "
         f"(5) ONLY once you judge an accepted task's goal genuinely reached (its "
         f"done-criteria met, when it carries them), run "
-        f"`{ad} complete {task_id} --result-ref <ref>`. "
+        f"`{ad} complete {task_id}{owner_arg} --result-ref <ref>`. "
         f"Do NOT mark it complete before the goal is met -- completing the task "
         f"is your explicit signal that the work is done. "
         f"**Report progress as you go** so the operator can watch the fleet at a "
         f"glance and so a replacement worker can resume from your recorded "
         f"progress: at each phase boundary (plan settled, implementation done, a "
         f"PR opened, a blocker hit) and at each pass of a goal loop run "
-        f"`{ad} progress {task_id} --phase <phase> --summary "
+        f"`{ad} progress {task_id}{owner_arg} --phase <phase> --summary "
         f"\"<one line toward the goal>\"` (add `--pr <ref>` or `--blocker <why>` "
         f"when relevant). Keep each summary to a single line -- it is a status "
         f"beat, not a transcript; emit one at real transitions, never on a "
