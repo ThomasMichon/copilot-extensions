@@ -741,6 +741,33 @@ def test_sync_meta_bounds_deferred_file_samples(tmp_path: Path) -> None:
     )
 
 
+def test_sync_meta_tracks_and_resets_consecutive_partial_count(
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    meta.write_sync_meta(tmp_path, "machine", "local", "partial")
+    assert meta.read_sync_meta(tmp_path)["consecutive_partial_count"] == 1
+
+    meta.write_sync_meta(tmp_path, "machine", "local", "partial")
+    assert meta.read_sync_meta(tmp_path)["consecutive_partial_count"] == 2
+
+    meta.write_sync_meta(tmp_path, "machine", "local", "ok")
+    assert meta.read_sync_meta(tmp_path)["consecutive_partial_count"] == 0
+
+
+def test_sync_meta_rejects_integer_parser_limit_payload(tmp_path: Path) -> None:
+    from agent_logger.sync import meta
+
+    (tmp_path / "sync-meta.json").write_text(
+        '{"value": ' + ("1" * 5000) + "}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(OSError, match="invalid sync metadata"):
+        meta.read_sync_meta(tmp_path)
+
+
 def test_status_prints_latest_partial_sync(
     monkeypatch,
     capsys,
@@ -766,6 +793,7 @@ def test_status_prints_latest_partial_sync(
 
     output = capsys.readouterr().out
     assert "latest_status:  partial" in output
+    assert "partial_streak: 1" in output
     assert "sessions:       12" in output
     assert "deferred_files: 1" in output
     assert "session-state/one/locked.db" in output
@@ -841,6 +869,173 @@ def test_status_sanitizes_unreadable_metadata_error(
     output = capsys.readouterr().out
     assert "unreadable (bad[31mmetadata)" in output
     assert "\u001b" not in output
+
+
+def test_health_allows_one_fresh_partial_pass(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    meta.write_sync_meta(
+        dest / "machine",
+        "machine",
+        "local",
+        "partial",
+        deferred_files=["session-state/one/locked.db"],
+    )
+    cfg = _cfg(tmp_path / "home", source, dest)
+    monkeypatch.setattr(engine, "_machine", lambda _cfg: "machine")
+
+    assert engine.do_health(
+        cfg,
+        fleet=False,
+        machines=[],
+        max_age_hours=12,
+        partial_threshold=3,
+        json_output=False,
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "machine: degraded (transient_partial)" in output
+    assert "partial_streak=1" in output
+
+
+def test_health_fleet_json_fails_on_repeated_partial(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    meta.write_sync_meta(dest / "healthy", "healthy", "local", "ok", 10)
+    for _ in range(3):
+        meta.write_sync_meta(
+            dest / ".codespaces" / "repeated",
+            ".codespaces/repeated",
+            "local",
+            "partial",
+            4,
+            deferred_files=["session-state/one/locked.db"],
+        )
+    cfg = _cfg(tmp_path / "home", source, dest)
+
+    assert engine.do_health(
+        cfg,
+        fleet=True,
+        machines=[],
+        max_age_hours=12,
+        partial_threshold=3,
+        json_output=True,
+    ) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["health"] == "unhealthy"
+    assert payload["summary"] == {
+        "healthy": 1,
+        "degraded": 0,
+        "unhealthy": 1,
+    }
+    repeated = next(
+        machine
+        for machine in payload["machines"]
+        if machine["machine"] == ".codespaces/repeated"
+    )
+    assert repeated["reason"] == "repeated_partial"
+    assert repeated["consecutive_partial_count"] == 3
+
+
+def test_health_fleet_can_select_active_machine_subset(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    meta.write_sync_meta(dest / "active", "active", "local", "ok", 10)
+    meta.write_sync_meta(dest / "retired", "retired", "local", "partial", 4)
+    cfg = _cfg(tmp_path / "home", source, dest)
+
+    assert engine.do_health(
+        cfg,
+        fleet=True,
+        machines=["active"],
+        max_age_hours=12,
+        partial_threshold=1,
+        json_output=True,
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["health"] == "healthy"
+    assert [machine["machine"] for machine in payload["machines"]] == ["active"]
+
+
+def test_health_fleet_reports_machine_missing_metadata(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    (dest / "missing" / "session-state").mkdir(parents=True)
+    cfg = _cfg(tmp_path / "home", source, dest)
+
+    assert engine.do_health(
+        cfg,
+        fleet=True,
+        machines=[],
+        max_age_hours=12,
+        partial_threshold=3,
+        json_output=True,
+    ) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["machines"][0]["machine"] == "missing"
+    assert payload["machines"][0]["reason"] == "missing_metadata"
+
+
+def test_health_fleet_scan_is_globally_bounded(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    (dest / "one").mkdir(parents=True)
+    (dest / "two").mkdir()
+    cfg = _cfg(tmp_path / "home", source, dest)
+    monkeypatch.setattr(filesystem, "_MAX_FLEET_ENTRIES", 1)
+
+    assert engine.do_health(
+        cfg,
+        fleet=True,
+        machines=[],
+        max_age_hours=12,
+        partial_threshold=3,
+        json_output=False,
+    ) == 1
+
+    assert "fleet scan exceeds 1 entries" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("threshold", ["nan", "inf", "-inf", "0"])
+def test_health_cli_rejects_invalid_freshness_threshold(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+    threshold: str,
+) -> None:
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / "home"))
+
+    assert engine.main(["health", f"--max-age-hours={threshold}"]) == 2
+
+    assert "thresholds must be finite and positive" in capsys.readouterr().err
 
 
 def test_engine_run_sync_local(tmp_path: Path) -> None:

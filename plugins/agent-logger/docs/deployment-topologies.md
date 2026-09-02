@@ -79,3 +79,15 @@ OneDrive/(Copilot)/sessions/<machine>/
 A hub machine that has the folder synced locally then reads
 `(Copilot)/sessions/<machine>/...` for every machine, persists validated render
 bundles, and lands the resulting logs.
+
+The same hub can report bounded fleet health without reading task logs:
+
+```
+session-sync health --fleet --max-age-hours 12 --partial-threshold 3 --json
+```
+
+Fresh complete machines are healthy. A fresh partial result remains degraded
+until it reaches the repeated-partial threshold; stale, missing, unreadable, or
+repeatedly partial machines are unhealthy and make the command exit nonzero.
+Repeat `--machine NAME` to restrict alerting to the active fleet while retaining
+historical or ephemeral machine data in the shared corpus.
