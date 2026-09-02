@@ -101,15 +101,16 @@ completed review pass.
 ### bounded-verdict-reliability
 
 The normal target is a verdict within ten minutes of an eligible revision
-becoming reviewable. A failure to render a verdict is retried at most three
-times within a rolling twelve-hour window for the target review; a new revision
-does not reset that window. This is the default reliability policy; a repository
-may tighten it and may not weaken it. The budget counts failures to render a
-verdict across the target review, not successful verdicts. A new eligible
-revision that arrives while the failure budget is exhausted updates the pending
-review but does not start another reviewer attempt until the rolling window
-recovers or an operator explicitly rearms it. Attempts remain visible and do not
-discard the durable task or reviewer lineage.
+becoming reviewable. The reviewer gets at most three total attempts to render a
+verdict within a rolling twelve-hour window for the target review; the initial
+try and every retry count toward those three, and a new revision does not reset
+the window. This is the default reliability policy; a repository may tighten it
+and may not weaken it. Successful verdicts end the attempt sequence; only
+attempts that fail to render a verdict consume the remaining budget. A new
+eligible revision that arrives while the failure budget is exhausted updates
+the pending review but does not start another reviewer attempt until the rolling
+window recovers or an operator explicitly rearms it. Attempts remain visible and
+do not discard the durable task or reviewer lineage.
 
 ### cooperative-resolution
 
