@@ -360,6 +360,12 @@ class ActivityBody(BaseModel):
     reservation_key: str
 
 
+class OwnerSessionBody(BaseModel):
+    worker_id: str
+    owner_session_id: str
+    expected_generation: int | None = None
+
+
 class YieldBody(BaseModel):
     worker_id: str
     note: str | None = None
@@ -1363,6 +1369,18 @@ def create_app(
             lambda: queue.set_activity(
                 task_id, body.activity, reservation_key=body.reservation_key
             )
+        )
+
+    @app.post("/tasks/{task_id}/owner-session")
+    def bind_owner_session(task_id: str, body: OwnerSessionBody) -> dict:
+        return _guard(
+            lambda: queue.bind_owner_session(
+                task_id,
+                body.worker_id,
+                body.owner_session_id,
+                expected_generation=body.expected_generation,
+            ),
+            "task.owner_session_bound",
         )
 
     @app.post("/tasks/{task_id}/progress")

@@ -342,6 +342,25 @@ class DispatchClient:
             )
         )
 
+    def bind_owner_session(
+        self,
+        task_id: str,
+        worker_id: str,
+        owner_session_id: str,
+        *,
+        expected_generation: int | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/owner-session",
+                json={
+                    "worker_id": worker_id,
+                    "owner_session_id": owner_session_id,
+                    "expected_generation": expected_generation,
+                },
+            )
+        )
+
     def progress(
         self,
         task_id: str,
