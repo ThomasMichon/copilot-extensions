@@ -1063,33 +1063,41 @@ def _materialize_active_pivots(
         return []
     candidates: dict[str, list[tuple[str, Path, dict[str, object]]]] = {}
     for source, active in sorted(activation.active.items()):
-        pivot_dir = active.root / "pivots"
-        try:
-            templates = sorted(pivot_dir.glob("*.json"))
-        except OSError:
-            continue
-        for template_path in templates:
-            try:
-                info = template_path.lstat()
-                if (
-                    not stat.S_ISREG(info.st_mode)
-                    or stat.S_ISLNK(info.st_mode)
-                    or _is_reparse(info)
-                ):
-                    continue
-                raw = _read_json(template_path)
-                if not isinstance(raw, dict):
-                    continue
-                candidates.setdefault(template_path.name, []).append(
-                    (source, active.root, raw)
-                )
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        seen_roots: set[Path] = set()
+        for selected in active.live_roots:
+            if selected.root in seen_roots:
                 continue
+            seen_roots.add(selected.root)
+            pivot_dir = selected.root / "pivots"
+            try:
+                templates = sorted(pivot_dir.glob("*.json"))
+            except OSError:
+                continue
+            for template_path in templates:
+                try:
+                    info = template_path.lstat()
+                    if (
+                        not stat.S_ISREG(info.st_mode)
+                        or stat.S_ISLNK(info.st_mode)
+                        or _is_reparse(info)
+                    ):
+                        continue
+                    raw = _read_json(template_path)
+                    if not isinstance(raw, dict):
+                        continue
+                    candidates.setdefault(template_path.name, []).append(
+                        (source, selected.root, raw)
+                    )
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    continue
 
     changed: list[str] = []
     for name, owners in sorted(candidates.items()):
-        if len(owners) != 1:
+        sources = {source for source, _root, _template in owners}
+        if len(sources) != 1:
             continue
+        # live_roots is precedence-ordered, so a project-local directory wins
+        # over an installed copy without weakening cross-plugin collision safety.
         source, root, template = owners[0]
         try:
             data = _managed_manifest_data(
@@ -1342,7 +1350,8 @@ def _classify_managed(
                 detail=str(exc),
             )
         )
-    if canonical_root != active.root:
+    live_roots = {selected.root for selected in active.live_roots}
+    if canonical_root not in live_roots:
         return EntryDecision.inactive(
             _finding(
                 entry,
@@ -1350,11 +1359,14 @@ def _classify_managed(
                 target=canonical_root,
                 entry_class="managed-plugin",
                 owner=source,
-                detail=f"manifest root differs from active plugin root {active.root}",
+                detail=(
+                    "manifest root differs from authoritative live plugin roots "
+                    + ", ".join(str(root) for root in sorted(live_roots))
+                ),
             )
         )
 
-    template_path = active.root / "pivots" / template_name
+    template_path = canonical_root / "pivots" / template_name
     try:
         template = _read_json(template_path)
         if not isinstance(template, dict):
@@ -1362,7 +1374,7 @@ def _classify_managed(
         expected = _managed_manifest_data(
             template,
             source=source,
-            root=active.root,
+            root=canonical_root,
             template_name=template_name,
             require_targets=True,
         )
@@ -1476,22 +1488,43 @@ def _classify_legacy(
         return verdict
     active = cast(ActivePlugin, active)
     template_path = active.root / "pivots" / entry.name
-    try:
-        template = _read_json(template_path)
-        if template != data:
-            return EntryDecision.inactive(
+    matched_root: Path | None = None
+    for selected in active.live_roots:
+        candidate = selected.root / "pivots" / entry.name
+        try:
+            if _read_json(candidate) == data:
+                matched_root = selected.root
+                template_path = candidate
+                break
+        except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        except OSError as exc:
+            return EntryDecision.indeterminate(
                 _finding(
                     entry,
-                    "identity-mismatch",
-                    target=template_path,
+                    "target-unusable",
+                    status="indeterminate",
+                    target=candidate,
                     entry_class="legacy-plugin",
                     owner=source,
-                    detail="legacy manifest differs from the active plugin template",
+                    detail=str(exc),
                 )
             )
+    if matched_root is None:
+        return EntryDecision.inactive(
+            _finding(
+                entry,
+                "identity-mismatch",
+                target=template_path,
+                entry_class="legacy-plugin",
+                owner=source,
+                detail="legacy manifest differs from every active plugin template",
+            )
+        )
+    try:
         resolved = _rewrite_manifest_commands(
             data,
-            root=active.root,
+            root=matched_root,
             require_targets=True,
         )
         contribution = _parse_contribution(

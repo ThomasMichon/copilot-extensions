@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from plugin_activation import ActivePlugin, ActivePluginRoot
+
 from agent_codespaces import sessions
 
 
@@ -100,8 +102,21 @@ def test_stage_and_push_rejects_corrupt_archive():
     assert "corrupt" in res["detail"] or "invalid" in res["detail"]
 
 
-def _active_plugin(name: str, marketplace: str, root: Path) -> SimpleNamespace:
-    return SimpleNamespace(name=name, marketplace=marketplace, root=root)
+def _active_plugin(
+    name: str,
+    marketplace: str,
+    root: Path,
+    *,
+    roots: tuple[ActivePluginRoot, ...] = (),
+) -> ActivePlugin:
+    return ActivePlugin(
+        source=f"{name}@{marketplace}",
+        name=name,
+        marketplace=marketplace,
+        root=root,
+        scopes=("global",),
+        roots=roots,
+    )
 
 
 def test_find_session_sync_uses_invoking_payload_marketplace(
@@ -158,6 +173,43 @@ def test_find_session_sync_reports_missing_same_marketplace_logger(
 
     assert resolved is None
     assert "not installed and enabled" in detail
+
+
+def test_find_session_sync_matches_invoking_secondary_live_root(
+    tmp_path: Path,
+    monkeypatch,
+):
+    installed = tmp_path / "installed" / "agent-codespaces"
+    local = tmp_path / "local" / "agent-codespaces"
+    logger = tmp_path / "installed" / "agent-logger"
+    installed.mkdir(parents=True)
+    local.mkdir(parents=True)
+    command_name = "session-sync.cmd" if sys.platform == "win32" else "session-sync"
+    command = logger / "bin" / command_name
+    command.parent.mkdir(parents=True)
+    command.write_text("echo session-sync", encoding="utf-8")
+    command.chmod(0o755)
+    report = SimpleNamespace(active={
+        "agent-codespaces@market-a": _active_plugin(
+            "agent-codespaces",
+            "market-a",
+            local,
+            roots=(
+                ActivePluginRoot(local, ("project:demo",), "directory"),
+                ActivePluginRoot(installed, ("global",), "installed"),
+            ),
+        ),
+        "agent-logger@market-a": _active_plugin(
+            "agent-logger", "market-a", logger
+        ),
+    })
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(installed))
+
+    with patch.object(sessions, "resolve_active_plugins", return_value=report):
+        resolved, detail = sessions.find_session_sync()
+
+    assert resolved == str(command)
+    assert detail == ""
 
 
 def test_find_session_sync_rejects_ambiguous_marketplace_identity(

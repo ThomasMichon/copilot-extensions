@@ -3,6 +3,7 @@
 from .resolver import (
     ActivationReport,
     ActivePlugin,
+    ActivePluginRoot,
     normalize_remote,
     resolve_active_plugins,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "ActivationReport",
     "ActivationSnapshot",
     "ActivePlugin",
+    "ActivePluginRoot",
     "PluginStateError",
     "activation_value",
     "capture",

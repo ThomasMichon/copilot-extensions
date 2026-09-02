@@ -698,15 +698,14 @@ def installed_plugin_related_anchors(
         return []
     if report.authority is ScanAuthority.INDETERMINATE:
         return []
-    active = report.active.values()
-
     found: set[str] = set()
-    for plugin in active:
-        try:
-            if related_path(plugin.root).is_file():
-                found.add(str(plugin.root))
-        except OSError:
-            continue
+    for plugin in report.active.values():
+        for selected in plugin.live_roots:
+            try:
+                if related_path(selected.root).is_file():
+                    found.add(str(selected.root))
+            except OSError:
+                continue
     return [
         _PluginContributionAnchor(path)
         for path in sorted(found, key=os.path.normcase)

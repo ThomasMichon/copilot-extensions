@@ -378,6 +378,51 @@ def test_plugin_related_anchors_include_adopted_project_local_marketplace(
     ]
 
 
+def test_plugin_related_anchors_include_mixed_live_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    installed = _make_installed_plugin(
+        tmp_path / ".copilot" / "installed-plugins",
+        "local",
+        "example-harness",
+        RelatedConfig(
+            related={"installed": RelatedEntry(name="installed", role="tooling")}
+        ),
+    ).resolve()
+    _write_json(installed / "plugin.json", {"name": "example-harness"})
+    repo = tmp_path / "control-harness"
+    _register_project(tmp_path, "control-harness", repo)
+    local = _make_local_marketplace_plugin(
+        repo,
+        "local",
+        "example-harness",
+        RelatedConfig(
+            related={"local": RelatedEntry(name="local", role="tooling")}
+        ),
+    )
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"example-harness@local": True}},
+    )
+    _write_json(
+        repo / ".github" / "copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {"example-harness@local": True},
+        },
+    )
+
+    assert related.installed_plugin_related_anchors(home=tmp_path) == sorted(
+        [str(installed), str(local)],
+        key=os.path.normcase,
+    )
+
+
 def test_plugin_related_anchors_fail_closed_on_indeterminate_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):

@@ -281,14 +281,17 @@ def _classify_attribution(
             detail=finding.detail,
         )
 
-    expected_root = decision.value.root
-    if Path(manifest.plugin_root or "") != expected_root:
+    expected_roots = {selected.root for selected in decision.value.live_roots}
+    if Path(manifest.plugin_root or "") not in expected_roots:
         return _inactive(
             path,
             "identity-mismatch",
             target=manifest.plugin_root,
             owner=source,
-            detail=f"provider root differs from active plugin root {expected_root}",
+            detail=(
+                "provider root differs from authoritative live plugin roots "
+                + ", ".join(str(root) for root in sorted(expected_roots))
+            ),
         )
     if decision.status is EntryStatus.ACTIVE_WITH_ADVISORY:
         advisories = tuple(

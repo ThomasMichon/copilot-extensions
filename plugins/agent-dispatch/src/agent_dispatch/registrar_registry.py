@@ -632,7 +632,10 @@ def _classify_manifest(
             ),
             *declaration_snapshot.findings,
         )
-    if plugin_root != activation_decision.value.root:
+    live_roots = {
+        selected.root for selected in activation_decision.value.live_roots
+    }
+    if plugin_root not in live_roots:
         return EntryDecision.inactive(
             _finding(
                 path,
@@ -640,8 +643,8 @@ def _classify_manifest(
                 target=manifest.plugin_root,
                 owner=manifest.plugin,
                 detail=(
-                    "manifest plugin_root differs from active plugin root "
-                    f"{activation_decision.value.root}"
+                    "manifest plugin_root differs from authoritative live plugin roots "
+                    + ", ".join(str(root) for root in sorted(live_roots))
                 ),
             ),
             *declaration_snapshot.findings,
@@ -768,13 +771,17 @@ def _retention_rejection(
             owner=candidate.manifest.plugin,
             detail=cause.detail,
         )
-    if Path(candidate.manifest.plugin_root) != decision.value.root:
+    live_roots = {selected.root for selected in decision.value.live_roots}
+    if Path(candidate.manifest.plugin_root) not in live_roots:
         return _finding(
             entry,
             "identity-mismatch",
             target=candidate.manifest.plugin_root,
             owner=candidate.manifest.plugin,
-            detail=f"active plugin root is now {decision.value.root}",
+            detail=(
+                "active plugin roots are now "
+                + ", ".join(str(root) for root in sorted(live_roots))
+            ),
         )
     return None
 
