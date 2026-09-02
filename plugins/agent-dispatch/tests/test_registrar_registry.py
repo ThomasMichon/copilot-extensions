@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from dropin_registry import EntryDecision, Finding, ScanAuthority, WarningTracker
-from plugin_activation import ActivationReport, ActivePlugin
+from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
 from agent_dispatch.__main__ import main
 from agent_dispatch.registrar import load_declaration
@@ -153,6 +153,35 @@ def test_malformed_manifest_does_not_block_valid_peer(tmp_path):
 
     assert [entry.declaration.name for entry in report.declarations] == ["valid"]
     assert any(finding.reason == "invalid-entry" for finding in report.findings)
+
+
+def test_registrar_accepts_any_authoritative_live_root(tmp_path):
+    installed = _plugin_root(tmp_path, "installed")
+    local = _plugin_root(tmp_path, "local")
+    _write_declaration(installed, "valid")
+    registry = tmp_path / "registrar.d"
+    _write_manifest(registry, installed)
+    active = ActivePlugin(
+        source=SOURCE,
+        name=SOURCE.split("@", 1)[0],
+        marketplace=SOURCE.split("@", 1)[1],
+        root=local.resolve(),
+        scopes=("global", "project:demo"),
+        roots=(
+            ActivePluginRoot(local.resolve(), ("project:demo",), "directory"),
+            ActivePluginRoot(installed.resolve(), ("global",), "installed"),
+        ),
+    )
+
+    report = scan_registrar_registry(
+        registry,
+        activation_report=ActivationReport(
+            ScanAuthority.COMPLETE,
+            {SOURCE: EntryDecision.active(active)},
+        ),
+    )
+
+    assert [entry.declaration.name for entry in report.declarations] == ["valid"]
 
 
 def test_disabled_plugin_withdraws_previous_declarations(tmp_path):

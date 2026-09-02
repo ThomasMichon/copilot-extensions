@@ -640,7 +640,12 @@ def _managed_decision(
                 detail=f"pointer plugin_root could not be read: {exc}",
             )
         )
-    if canonical_root != active.root:
+    applicable_roots = {
+        selected.root
+        for selected in active.live_roots
+        if allowed_scopes.intersection(selected.scopes)
+    }
+    if canonical_root not in applicable_roots:
         return EntryDecision.inactive(
             _finding(
                 entry,
@@ -648,7 +653,10 @@ def _managed_decision(
                 target=target,
                 entry_class="managed-plugin",
                 owner=source,
-                detail=f"pointer root differs from active plugin root {active.root}",
+                detail=(
+                    "pointer root differs from active roots for this scope: "
+                    + ", ".join(str(root) for root in sorted(applicable_roots))
+                ),
             )
         )
 
@@ -659,7 +667,7 @@ def _managed_decision(
         return verdict
     canonical_target = cast(Path, canonical_target)
     try:
-        canonical_target.relative_to(active.root)
+        canonical_target.relative_to(canonical_root)
     except ValueError:
         return EntryDecision.inactive(
             _finding(

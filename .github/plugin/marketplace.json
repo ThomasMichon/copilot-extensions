@@ -18,13 +18,13 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev412",
+      "version": "0.4.0-dev414",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev103",
+      "version": "0.4.0-dev105",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -72,13 +72,13 @@
     {
       "name": "customizing-copilot",
       "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
-      "version": "0.1.0-dev56",
+      "version": "0.1.0-dev58",
       "source": "plugins/customizing-copilot"
     },
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.0-dev259",
+      "version": "0.1.0-dev260",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -108,7 +108,7 @@
     {
       "name": "agent-machines",
       "description": "Portable restore-machinestate for Copilot CLI - converge the current machine to desired state declared in in-repo requirement packages (Copilot settings first, then repo-local modules). Machine-scoped union restore discovered from the adopted-projects registry, an eight-disposition model (enforce/ensure-present/ensure-absent/capture-only/ignore/exclude/prune/prerequisite-check), a conflict validator that detects (never auto-arbitrates) cross-package clashes, and a repo-local module runner (dry-run-aware, gated, cross-platform) so sensitive OS-mutating modules stay in each harness repo while the engine stays generic.",
-      "version": "0.1.0-dev80",
+      "version": "0.1.0-dev81",
       "source": "plugins/agent-machines"
     },
     {

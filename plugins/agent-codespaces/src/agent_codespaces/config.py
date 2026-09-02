@@ -737,7 +737,17 @@ def scan_active_plugin_config_registry(
             continue
         else:
             active = cast(ActivePlugin, activation_decision.value)
-            decision = _active_plugin_config_decision(active)
+            decision = None
+            for selected in active.live_roots:
+                scoped = replace(
+                    active,
+                    root=selected.root,
+                    scopes=selected.scopes,
+                    roots=(selected,),
+                )
+                decision = _active_plugin_config_decision(scoped)
+                if decision is not None:
+                    break
             if decision is None:
                 continue
         decisions[source] = decision
@@ -956,7 +966,8 @@ def _managed_pointer_decision(
                 detail=f"pointer plugin_root could not be read: {exc}",
             )
         )
-    if canonical_stored_root != active.root:
+    live_roots = {selected.root for selected in active.live_roots}
+    if canonical_stored_root not in live_roots:
         return EntryDecision.inactive(
             _config_d_finding(
                 entry,
@@ -965,8 +976,10 @@ def _managed_pointer_decision(
                 entry_class="managed-plugin",
                 owner=source,
                 detail=(
-                    "pointer plugin_root differs from the current identity-verified "
-                    f"root ({active.root})"
+                    "pointer plugin_root differs from current identity-verified "
+                    "roots ("
+                    + ", ".join(str(root) for root in sorted(live_roots))
+                    + ")"
                 ),
             )
         )
@@ -978,7 +991,7 @@ def _managed_pointer_decision(
         return verdict
     canonical_target = cast(Path, canonical_target)
     try:
-        canonical_target.relative_to(active.root)
+        canonical_target.relative_to(canonical_stored_root)
     except ValueError:
         return EntryDecision.inactive(
             _config_d_finding(

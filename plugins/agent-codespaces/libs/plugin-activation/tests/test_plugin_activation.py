@@ -190,6 +190,9 @@ def test_global_local_plugin_is_active(tmp_path):
     assert report.authority is ScanAuthority.COMPLETE
     assert report.active["demo@local"].root == plugin
     assert report.active["demo@local"].scopes == ("global",)
+    assert report.active["demo@local"].live_roots == (
+        resolver.ActivePluginRoot(plugin, ("global",), "directory"),
+    )
 
 
 def test_local_override_disables_base_setting(tmp_path):
@@ -366,7 +369,7 @@ def test_git_environment_is_sanitized(monkeypatch):
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull
 
 
-def test_installed_payload_wins_over_convergent_local_source(tmp_path):
+def test_project_local_root_wins_over_convergent_installed_payload(tmp_path):
     repo = tmp_path / "src" / "demo-repo"
     remote = "https://github.com/example/demo-repo.git"
     _register_project(tmp_path, "demo-repo", repo, remote)
@@ -374,7 +377,35 @@ def test_installed_payload_wins_over_convergent_local_source(tmp_path):
     _settings(repo, "local", "demo")
     installed = _installed(tmp_path, "local", "demo")
     report = resolve_active_plugins(home=tmp_path)
-    assert report.active["demo@local"].root == installed
+    active = report.active["demo@local"]
+    assert active.root != installed
+    assert active.root == (repo / ".ai" / "demo").resolve()
+    assert [(item.root, item.scopes, item.kind) for item in active.live_roots] == [
+        (active.root, ("project:demo-repo",), "directory"),
+    ]
+
+
+def test_mixed_global_installed_and_project_local_roots_are_explicit(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    local = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+
+    active = resolve_active_plugins(home=tmp_path).active["demo@local"]
+
+    assert active.root == local
+    assert active.root_for_scope("global") == installed
+    assert active.root_for_scope("project:demo-repo") == local
+    assert [(item.root, item.scopes, item.kind) for item in active.live_roots] == [
+        (local, ("project:demo-repo",), "directory"),
+        (installed, ("global",), "installed"),
+    ]
 
 
 def test_installed_payload_cannot_mask_distinct_local_roots(tmp_path):
@@ -406,6 +437,60 @@ def test_installed_payload_requires_exact_manifest_identity(tmp_path):
     assert report.active["demo@local"].root == local
     assert report.decisions["demo@local"].status is EntryStatus.ACTIVE_WITH_ADVISORY
     assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+def test_unreadable_installed_payload_is_advisory_when_all_scopes_are_local(
+    tmp_path,
+    monkeypatch,
+):
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    local = _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    installed = _installed(tmp_path, "local", "demo")
+    manifest = installed / "plugin.json"
+    original = Path.read_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == manifest:
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    report = resolve_active_plugins(home=tmp_path)
+
+    assert report.active["demo@local"].root == local
+    assert report.decisions["demo@local"].status is EntryStatus.ACTIVE_WITH_ADVISORY
+    assert any(
+        finding.reason == "entry-indeterminate"
+        and finding.status == "advisory"
+        for finding in report.decisions["demo@local"].findings
+    )
+
+
+def test_unreadable_installed_payload_is_indeterminate_when_fallback_is_needed(
+    tmp_path,
+    monkeypatch,
+):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@catalog": True}},
+    )
+    installed = _installed(tmp_path, "catalog", "demo")
+    manifest = installed / "plugin.json"
+    original = Path.read_text
+
+    def denied(path: Path, *args, **kwargs):
+        if path == manifest:
+            raise PermissionError("denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    report = resolve_active_plugins(home=tmp_path)
+
+    assert "demo@catalog" not in report.active
+    assert report.decisions["demo@catalog"].status is EntryStatus.INDETERMINATE
 
 
 def test_installed_payload_does_not_mask_unreadable_local_evidence(
@@ -480,7 +565,11 @@ def test_remote_marketplace_can_use_exact_installed_payload(tmp_path):
     )
     installed = _installed(tmp_path, "catalog", "demo")
     report = resolve_active_plugins(home=tmp_path)
-    assert report.active["demo@catalog"].root == installed
+    active = report.active["demo@catalog"]
+    assert active.root == installed
+    assert active.live_roots == (
+        resolver.ActivePluginRoot(installed, ("global",), "installed"),
+    )
 
 
 def test_disabled_everywhere_does_not_resurrect_installed_payload(tmp_path):

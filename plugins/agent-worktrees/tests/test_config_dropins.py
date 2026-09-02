@@ -13,7 +13,7 @@ from dropin_registry import (
     ScanAuthority,
     WarningTracker,
 )
-from plugin_activation import ActivationReport, ActivePlugin
+from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
 from agent_worktrees import config_dropins as dropins
 
@@ -120,6 +120,39 @@ def test_managed_pointer_requires_current_project_scope_and_root(tmp_path):
     )
     assert not mismatch.active_configs
     assert mismatch.findings[0].reason == "identity-mismatch"
+
+
+def test_managed_pointer_uses_root_selected_for_project_scope(tmp_path):
+    source = "sample@example-marketplace"
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    local = tmp_path / "local"
+    target = _target(local)
+    directory = tmp_path / "config.d"
+    directory.mkdir()
+    entry = _pointer(directory, source, local, target)
+    active = ActivePlugin(
+        source=source,
+        name="sample",
+        marketplace="example-marketplace",
+        root=local.resolve(),
+        scopes=("global", "project:sample"),
+        roots=(
+            ActivePluginRoot(local.resolve(), ("project:sample",), "directory"),
+            ActivePluginRoot(installed.resolve(), ("global",), "installed"),
+        ),
+    )
+
+    report = dropins.scan_config_dropin_registry(
+        directory,
+        project_name="sample",
+        activation_report=ActivationReport(
+            ScanAuthority.COMPLETE,
+            {source: EntryDecision.active(active)},
+        ),
+    )
+
+    assert [item.entry for item in report.active_configs] == [entry]
 
 
 def test_managed_target_escape_and_invalid_shape_are_isolated(tmp_path):
