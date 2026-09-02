@@ -57,7 +57,7 @@ runtimes match their enabled payloads, and close all three issues with evidence.
 
 ## Plan
 
-### Phase 1 - Diagnose the registered-runtime paths
+### Phase 1 — Diagnose the registered-runtime paths
 
 - [ ] Trace installer-readiness discovery and invocation for Agent Index,
   Agent Machines, and Agent Containers from enabled payload metadata to the
@@ -68,7 +68,7 @@ runtimes match their enabled payloads, and close all three issues with evidence.
 - [ ] Reproduce the Agent Containers package installation with the smallest
   plugin-owned invocation and capture the suppressed package-manager failure.
 
-### Phase 2 - Repair attributable reconciliation
+### Phase 2 — Repair attributable reconciliation
 
 - [ ] Route Agent Index reconciliation through its attributable, plugin-owned
   installer path without relaxing legacy-entrypoint governance.
@@ -77,7 +77,7 @@ runtimes match their enabled payloads, and close all three issues with evidence.
 - [ ] Add focused reference and Windows/POSIX adapter coverage for the
   registered-runtime provenance contract.
 
-### Phase 3 - Repair Agent Containers installation reporting
+### Phase 3 — Repair Agent Containers installation reporting
 
 - [ ] Preserve and surface bounded package-manager stderr and the failing
   command context through the Agent Containers installer and unified
@@ -87,7 +87,7 @@ runtimes match their enabled payloads, and close all three issues with evidence.
 - [ ] Add regression coverage for both the real failure and actionable error
   propagation without leaking credentials or unbounded output.
 
-### Phase 4 - Publish, deploy, and close
+### Phase 4 — Publish, deploy, and close
 
 - [ ] Bump every changed plugin and catalog version consistently and land all
   implementation through reviewed PRs.
@@ -123,7 +123,7 @@ suite is green.
 
 ## Journal
 
-### 2026-09-01 - Kickoff
+### 2026-09-01 — Kickoff
 
 - Created a focused public effort for #1591, #1592, and #1593.
 - Kept provenance fail-closed semantics and actionable installer diagnostics as
