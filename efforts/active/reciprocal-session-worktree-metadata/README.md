@@ -20,7 +20,9 @@
   [#1692](https://github.com/ThomasMichon/copilot-extensions/issues/1692)
   (backfill and restored-hint validation) ·
   [#1695](https://github.com/ThomasMichon/copilot-extensions/issues/1695)
-  (validated session recovery pointers)
+  (validated session recovery pointers) ·
+  [#1700](https://github.com/ThomasMichon/copilot-extensions/issues/1700)
+  (Picker and JSON reciprocal relation state)
 
 ## Guiding Intent
 
@@ -163,7 +165,7 @@ Public-safe transcription of the operator request:
       session appears on more than one machine or project.
 
 ### Phase 6 - Recovery and presentation
-- [ ] Let a resumed session read its exact projection and receive a concise
+- [x] Let a resumed session read its exact projection and receive a concise
       re-binding/controller recovery pointer when needed.
 - [ ] Let Picker and JSON consumers distinguish **bound here**, **controlled
       from elsewhere**, **handed off**, and **ambiguous**.
@@ -204,7 +206,7 @@ Public-safe transcription of the operator request:
       stable worktree identity after restore.
 - [ ] A concluded controller with no successor yields an explicit terminal
       finding rather than an invented recovery target.
-- [ ] Remote controllers produce a navigable identity/action even when the
+- [x] Remote controllers produce a navigable identity/action even when the
       local Picker cannot focus their session directly.
 - [ ] Existing session launch, resume, handoff, finalize, and Picker contract
       suites remain green on Windows and POSIX.
@@ -300,3 +302,14 @@ Adopt the authority and schema model in [`design.md`](design.md):
   worktrees.
 - Opened #1695 and began Phase 6 with validated recovery pointers for resumed
   sessions and machine-readable recovery/presentation states.
+- Validated session recovery pointers landed through #1698. The exact
+  `session-recovery` surface and the existing session-start registration
+  contributor now classify authoritative bound, controller, handoff, terminal,
+  remote, stale, foreign, ambiguous, incomplete, invalid, and unsupported
+  projection states without changing a binding.
+- Recovery continuation requires a unique active terminal successor; concluded
+  sessions and unresolved handoff lineages remain explicit non-navigating
+  findings. Record-loader failures fail open to inspect-only context.
+- Opened #1700 for the next Phase 6 slice: one normalized reciprocal relation
+  state and validated navigation actions across worktree JSON and both Picker
+  implementations.
