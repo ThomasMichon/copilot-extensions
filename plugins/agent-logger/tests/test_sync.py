@@ -30,6 +30,7 @@ def _make_source(root: Path) -> Path:
     (sess / "events.jsonl").write_text('{"ts": 1}\n', encoding="utf-8")
     (sess / "workspace.yaml").write_text("id: abc-123\n", encoding="utf-8")
     (sess / ".lock").write_text("pid", encoding="utf-8")  # should be excluded
+    (sess / "LOCK").write_text("volatile", encoding="utf-8")
     return src
 
 
@@ -58,6 +59,7 @@ def test_local_target_push_excludes_lock_and_writes_meta(tmp_path: Path) -> None
     machine_dir = dest_root / "m1"
     assert (machine_dir / "session-state" / "abc-123" / "events.jsonl").is_file()
     assert not (machine_dir / "session-state" / "abc-123" / ".lock").exists()
+    assert not (machine_dir / "session-state" / "abc-123" / "LOCK").exists()
     assert (machine_dir / "sync-meta.json").is_file()
 
 
@@ -71,29 +73,65 @@ def test_local_target_push_is_incremental(tmp_path: Path) -> None:
     assert second.file_count == 0
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing violation behavior")
+def test_local_target_push_defers_locked_files(monkeypatch, tmp_path: Path) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    src = _make_source(tmp_path)
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    original = filesystem.open_regular_no_follow
+
+    def open_unless_locked(source: Path):
+        if source.name == "events.jsonl":
+            raise PermissionError(
+                13,
+                "The process cannot access the file",
+                str(source),
+                32,
+            )
+        return original(source)
+
+    monkeypatch.setattr(filesystem, "open_regular_no_follow", open_unless_locked)
+
+    result = target.push(src, "m1")
+
+    machine_dir = tmp_path / "dest" / "m1"
+    assert result.ok
+    assert "skipped 1 locked file(s), will retry" in result.detail
+    assert not (
+        machine_dir / "session-state" / "abc-123" / "events.jsonl"
+    ).exists()
+    assert (
+        machine_dir / "session-state" / "abc-123" / "workspace.yaml"
+    ).is_file()
+    metadata = json.loads((machine_dir / "sync-meta.json").read_text())
+    assert metadata["status"] == "partial"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows path namespace behavior")
 def test_windows_extended_path_formats_drive_and_unc_paths() -> None:
-    from agent_logger.sync.targets import filesystem
+    from agent_logger.sync import provenance
 
     drive = Path(r"C:\example\session.json")
     unc = Path(r"\\server\share\session.json")
     extended = Path(r"\\?\C:\example\session.json")
 
-    assert filesystem._windows_extended_path(drive) == (
+    assert provenance._windows_extended_path(drive) == (
         r"\\?\C:\example\session.json"
     )
-    assert filesystem._windows_extended_path(unc) == (
+    assert provenance._windows_extended_path(unc) == (
         r"\\?\UNC\server\share\session.json"
     )
-    assert filesystem._windows_extended_path(extended) == str(extended)
+    assert provenance._windows_extended_path(extended) == str(extended)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
 def test_local_target_push_handles_long_temporary_path(tmp_path: Path) -> None:
     src = _make_source(tmp_path)
+    dest_root = tmp_path / ("d" * 48)
     source_parent = src / "session-state" / "abc-123" / "files"
     destination_parent = (
-        tmp_path / "dest" / "m1" / "session-state" / "abc-123" / "files"
+        dest_root / "m1" / "session-state" / "abc-123" / "files"
     )
     destination = destination_parent / "description"
     legacy_temporary = destination.with_name(
@@ -114,10 +152,43 @@ def test_local_target_push_handles_long_temporary_path(tmp_path: Path) -> None:
     source_parent.mkdir(parents=True)
     (source_parent / "description").write_text("long path", encoding="utf-8")
 
-    result = LocalTarget({"path": str(tmp_path / "dest")}).push(src, "m1")
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
 
     assert result.ok, result.detail
     assert destination.read_text(encoding="utf-8") == "long path"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
+def test_local_target_push_handles_long_source_and_destination_paths(
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import provenance
+
+    src = _make_source(tmp_path)
+    dest_root = tmp_path / ("d" * 48)
+    source_parent = src / "session-state" / "abc-123" / "files"
+    destination_parent = (
+        dest_root / "m1" / "session-state" / "abc-123" / "files"
+    )
+    while len(str(source_parent)) < 260:
+        source_parent /= "x"
+        destination_parent /= "x"
+
+    source = source_parent / "events.jsonl"
+    destination = destination_parent / "events.jsonl"
+    os.makedirs(provenance._windows_extended_path(source_parent), exist_ok=True)
+    with open(
+        provenance._windows_extended_path(source),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write("long paths")
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert result.ok, result.detail
+    with open(provenance._windows_extended_path(destination), encoding="utf-8") as f:
+        assert f.read() == "long paths"
 
 
 def test_filtered_local_target_push_is_incremental(tmp_path: Path) -> None:

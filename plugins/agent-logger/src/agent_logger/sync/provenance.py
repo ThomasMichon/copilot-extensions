@@ -37,6 +37,16 @@ _OPTIONAL_TEXT = {
 }
 
 
+def _windows_extended_path(path: Path) -> str:
+    """Return a Win32 extended path for filesystem operations."""
+    raw = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or raw.startswith("\\\\?\\"):
+        return raw
+    if raw.startswith("\\\\"):
+        return f"\\\\?\\UNC\\{raw[2:]}"
+    return f"\\\\?\\{raw}"
+
+
 def rescue_snapshot_path(
     machine_root: Path,
     session_id: str,
@@ -105,7 +115,7 @@ def is_link_or_reparse(path: Path, mode: int) -> bool:
     close_handle = kernel32.CloseHandle
 
     handle = create_file(
-        str(path),
+        _windows_extended_path(path),
         0,
         file_share_all,
         None,
@@ -232,7 +242,7 @@ def open_regular_no_follow(path: Path):
     close_handle.restype = wintypes.BOOL
 
     handle = create_file(
-        str(path),
+        _windows_extended_path(path),
         generic_read,
         share_all,
         None,
@@ -264,7 +274,7 @@ def open_regular_no_follow(path: Path):
     if info.FileAttributes & file_attribute_reparse_point:
         close_handle(handle)
         handle = create_file(
-            str(path),
+            _windows_extended_path(path),
             generic_read,
             share_all,
             None,
