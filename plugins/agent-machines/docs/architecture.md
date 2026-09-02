@@ -49,13 +49,17 @@ CLI still runs. `repo_enables_agent_machines()` annotates whether the repo has a
 enabled `agent-machines` plugin, but `discover()` does not require enablement
 unless called with `require_enable=True`.
 
-Machine-directory and package-gate matching are case-insensitive. Files in
-`all/` and the matching machine directory are independent complete packages and
-must carry unique package names; the engine does not cross-file merge them.
-Partial overrides stay in the existing package-local `per-machine` block.
-Module gates and `per-machine` overlay keys are exact string matches today.
-The machine directory key is the raw `platform.node()` host name (Windows
-`%COMPUTERNAME%`), not an alias from an external topology file.
+Machine-directory and gate matching are case-insensitive. Files in `all/` and
+the matching machine directory are independent complete packages and must carry
+unique package names; the engine does not cross-file merge them. Partial
+overrides stay in the existing package-local `per-machine` block.
+
+The machine directory key is the canonical key from a matching adopted
+repository `machines.yaml` entry. The raw `platform.node()` host name (Windows
+`%COMPUTERNAME%`) resolves through the entry key, `hostname`, `alias`, and
+`display_name`; that accepted identity set applies to package, module, resource,
+overlay, and directory gates. Ambiguous matches fail before package loading.
+When no topology matches, the raw host remains the standalone identity.
 
 The legacy `.github/machine-state/` directory is read only when the canonical
 `.agent-machines/` root is absent. This makes migration atomic per repo and

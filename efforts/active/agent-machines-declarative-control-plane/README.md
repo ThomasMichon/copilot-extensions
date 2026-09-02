@@ -58,7 +58,7 @@ fleet, topology, or operating environment.
 
 - [ ] Specify versioned machine, capability, dependency, scope, and desired-state
   contracts with strict validation and forward-compatible extension seams.
-- [ ] Define one canonical machine identity plus a deterministic accepted-alias
+- [x] Define one canonical machine identity plus a deterministic accepted-alias
   set derived from portable topology fields, with raw-host fallback and
   fail-closed ambiguity detection (#1529).
 - [ ] Define an attributable provider invocation reference for requirement
@@ -76,7 +76,7 @@ fleet, topology, or operating environment.
 
 - [ ] Derive agent rosters, service requirements, connectivity expectations,
   and status views from the validated resource graph.
-- [ ] Resolve machine topology once per command, use the topology key as the
+- [x] Resolve machine topology once per command, use the topology key as the
   canonical identity, and use key/hostname/alias/display-name values only as
   accepted match identities for gates, per-machine overlays, and machine
   package directories (#1529).
@@ -129,10 +129,10 @@ fleet, topology, or operating environment.
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown
   resource types fail before mutation.
-- [ ] Raw host, topology key, hostname, alias, and display-name inputs resolve
+- [x] Raw host, topology key, hostname, alias, and display-name inputs resolve
   to one canonical machine and one deterministic accepted-alias set; ambiguous
   cross-entry identities fail before package loading (#1529).
-- [ ] Gates, per-machine overlays, and machine-scoped directories accept any
+- [x] Gates, per-machine overlays, and machine-scoped directories accept any
   resolved identity while canonical plan/drift output remains stable (#1529).
 - [x] Harness-only, harness-plus-supplemental, duplicate-adoption, unresolved
   relationship, and cross-repository conflict fixtures prove #1418.
@@ -226,3 +226,15 @@ behavioral parity is demonstrated.
 - Selected a staged implementation: land identity resolution first, then add
   the generic provider invocation seam and the agent-ssh dtssh-host command
   before any private machine declaration depends on it.
+
+### 2026-09-01 - Canonical machine identity implemented
+
+- Added a standalone topology resolver that recognizes canonical keys,
+  hostnames, aliases, and display names across established machines.yaml
+  locations, with raw-host fallback and fail-closed cross-entry ambiguity.
+- Threaded accepted identities through package gates, per-machine overlays,
+  nested module/resource gates, machine directories, layout diagnosis, and CLI
+  JSON while keeping the canonical key in plan and drift state.
+- Malformed topology files degrade with explicit identity warnings rather than
+  bricking restore. The full agent-machines suite passes, and a live source
+  smoke resolves a generated host name to its stable topology key and aliases.

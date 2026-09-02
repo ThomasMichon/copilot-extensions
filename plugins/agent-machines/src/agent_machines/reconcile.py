@@ -61,13 +61,19 @@ def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
 
 
 def resolve_union(
-    packages: list[RequirementPackage], machine: str
+    packages: list[RequirementPackage],
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
 ) -> list[RequirementPackage]:
     """Layer each package to ``machine`` first, then return the union list.
 
     Layer-within-repo precedes union-across-repos so the drift key is stable.
     """
-    return [resolve_for_machine(pkg, machine) for pkg in packages if pkg.applies_to(machine)]
+    return [
+        resolve_for_machine(pkg, machine, accepted_machines)
+        for pkg in packages
+        if pkg.applies_to(machine, accepted_machines)
+    ]
 
 
 def manifest_hash(resolved: list[RequirementPackage]) -> str:
@@ -89,10 +95,15 @@ def manifest_hash(resolved: list[RequirementPackage]) -> str:
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
-def plan(packages: list[RequirementPackage], machine: str, plat: str | None = None) -> Plan:
+def plan(
+    packages: list[RequirementPackage],
+    machine: str,
+    plat: str | None = None,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> Plan:
     """Build a read-only restore plan for ``machine`` (no mutation)."""
     plat = plat or current_platform()
-    resolved = resolve_union(packages, machine)
+    resolved = resolve_union(packages, machine, accepted_machines)
     surfaces: dict[str, ManagedSurface] = {}
     for pkg in resolved:
         for key, spec in pkg.manage.items():
@@ -186,6 +197,7 @@ def restore(
     plat: str | None = None,
     home: Any = None,
     only: list[str] | None = None,
+    accepted_machines: tuple[str, ...] | None = None,
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
@@ -196,8 +208,8 @@ def restore(
     just that section" flow.
     """
     plat = plat or current_platform()
-    p = plan(packages, machine, plat)
-    resolved = resolve_union(packages, machine)
+    p = plan(packages, machine, plat, accepted_machines)
+    resolved = resolve_union(packages, machine, accepted_machines)
     surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
 
     resource_names = _resources.resource_only_names(resolved, machine, plat)
