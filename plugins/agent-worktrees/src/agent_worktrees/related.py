@@ -54,10 +54,10 @@ loaders.
 
 from __future__ import annotations
 
-import os
 import json
+import os
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import yaml
@@ -638,6 +638,27 @@ class _PluginContributionAnchor(str):
         return marker
 
 
+class _ConfigContributionAnchor(str):
+    """Path marker preserving harness/knowledge config-source identity."""
+
+    source_layer: str
+
+    def __new__(
+        cls, value: str, source_layer: str,
+    ) -> "_ConfigContributionAnchor":
+        marker = super().__new__(cls, value)
+        marker.source_layer = source_layer
+        return marker
+
+
+def config_contribution_anchor(
+    anchor: str | Path, source_layer: str,
+) -> str:
+    """Tag one repository config anchor with its stable public source layer."""
+    layer = source_layer if source_layer in {"harness", "knowledge"} else "repository"
+    return _ConfigContributionAnchor(str(anchor), layer)
+
+
 def _plugin_manifest_name(plugin_root: Path) -> str:
     """Read a plugin's declared identity, or return empty when unverifiable."""
     for manifest in (
@@ -662,9 +683,19 @@ def entry_provenance(entry: RelatedEntry) -> dict[str, str]:
             "layer": "plugin",
             "plugin": entry.origin_plugin or "unknown",
         }
-    if entry.origin_layer == "repository":
-        return {"layer": "repository"}
+    if entry.origin_layer in {"harness", "knowledge", "repository"}:
+        return {"layer": entry.origin_layer}
     return {"layer": "unknown"}
+
+
+def public_doc(entry: RelatedEntry) -> str:
+    """Return a plugin-safe narrative path without exposing absolute paths."""
+    doc = entry.doc or f"{RELATED_DOCS_DIRNAME}/{entry.name}.md"
+    if entry.origin_layer != "plugin":
+        return doc
+    if PurePosixPath(doc).is_absolute() or PureWindowsPath(doc).is_absolute():
+        return f"{RELATED_DOCS_DIRNAME}/{entry.name}.md"
+    return doc
 
 
 def installed_plugins_root() -> Path:
@@ -817,7 +848,12 @@ def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
                 )
             )
             entry.origin_anchor = origin
-            entry.origin_layer = "plugin" if plugin_anchor else "repository"
+            if plugin_anchor:
+                entry.origin_layer = "plugin"
+            elif isinstance(anchor, _ConfigContributionAnchor):
+                entry.origin_layer = anchor.source_layer
+            else:
+                entry.origin_layer = "repository"
             entry.origin_plugin = (
                 origin.plugin_name
                 if isinstance(origin, _PluginContributionAnchor)

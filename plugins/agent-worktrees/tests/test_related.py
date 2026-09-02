@@ -493,14 +493,18 @@ def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
                                  summary="from knowledge")}))
 
     # anchor order as _related_config_source_anchors builds it: plugin, base, knowledge
-    merged = related.read_related_grafted([str(plugin), base, knowledge])
+    merged = related.read_related_grafted([
+        str(plugin),
+        related.config_contribution_anchor(base, "harness"),
+        related.config_contribution_anchor(knowledge, "knowledge"),
+    ])
 
     # union: plugin-only entry survives; collision resolves to knowledge
     assert set(merged.related) == {"example-web", "vessel"}
     assert merged.related["example-web"].summary == "from knowledge"   # user overrides plugin
     assert merged.related["example-web"].origin_anchor == str(knowledge)
     assert related.entry_provenance(merged.related["example-web"]) == {
-        "layer": "repository",
+        "layer": "knowledge",
     }
     # plugin-only entry is contributed purely by being installed
     assert merged.related["vessel"].origin_anchor == str(plugin)
@@ -510,6 +514,45 @@ def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
     }
     # a plugin's primary is NEVER adopted; the base primary stands
     assert merged.primary == "base-primary"
+
+
+def test_cli_config_sources_preserve_harness_and_knowledge_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from agent_worktrees import __main__ as cli
+    from agent_worktrees.state_root import ConfigSource
+
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    _write_related(harness, RelatedConfig(related={
+        "from-harness": RelatedEntry(name="from-harness"),
+    }))
+    _write_related(knowledge, RelatedConfig(related={
+        "from-knowledge": RelatedEntry(name="from-knowledge"),
+    }))
+    monkeypatch.setattr(cli.cfg, "load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        cli.state_root_mod,
+        "config_source_anchors",
+        lambda *_args, **_kwargs: [
+            ConfigSource(anchor=str(harness), origin="harness"),
+            ConfigSource(anchor=str(knowledge), origin="knowledge"),
+        ],
+    )
+    monkeypatch.setattr(
+        related, "installed_plugin_related_anchors", lambda: []
+    )
+
+    merged = related.read_related_grafted(
+        cli._related_config_source_anchors(str(harness))
+    )
+
+    assert related.entry_provenance(merged.related["from-harness"]) == {
+        "layer": "harness",
+    }
+    assert related.entry_provenance(merged.related["from-knowledge"]) == {
+        "layer": "knowledge",
+    }
 
 
 def test_grafted_plugin_only_entry_resolves_when_no_user_config(
@@ -613,6 +656,41 @@ def test_related_show_reports_plugin_provenance_without_local_path(
     assert "provenance: plugin (example-web-harness)" in rendered
     assert "doc:      related/example-web.md" in rendered
     assert str(plugin) not in rendered
+
+
+def test_related_show_sanitizes_absolute_plugin_doc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd,
+):
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+
+    root = tmp_path / "installed-plugins"
+    leaked_doc = r"C:\Users\operator\.copilot\installed-plugins\README.md"
+    _make_installed_plugin(
+        root,
+        "example-marketplace",
+        "example-web-harness",
+        RelatedConfig(related={
+            "example-web": RelatedEntry(
+                name="example-web",
+                role="product",
+                doc=leaked_doc,
+            )
+        }),
+    )
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
+    base = tmp_path / "harness"
+    _write_related(base, RelatedConfig())
+
+    assert run([
+        "show", "example-web", "--repo", str(base), "--json",
+    ]) == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["doc"] == "related/example-web.md"
+
+    assert run(["show", "example-web", "--repo", str(base)]) == 0
+    rendered = capfd.readouterr().out
+    assert "doc:      related/example-web.md" in rendered
+    assert leaked_doc not in rendered
 
 
 # ---------------------------------------------------------------------------
