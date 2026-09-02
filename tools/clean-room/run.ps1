@@ -586,7 +586,19 @@ function Invoke-ContainerPython(
         'sys.argv[1:]=[base64.b64decode(v).decode() for v in sys.argv[1:]];' +
         'exec(base64.b64decode(payload))'
     )
-    & docker exec $Container python3 -c $bootstrap $encoded @encodedArguments
+    $previousErrorAction = $ErrorActionPreference
+    $success = $false
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & docker exec $Container python3 -c `
+            $bootstrap $encoded @encodedArguments 2>&1
+        $success = $?
+        $output
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorAction
+        $script:ContainerPythonSucceeded = $success
+    }
 }
 
 # Drive one agent turn with a wall-clock timeout. `agent-bridge create` has no
@@ -825,7 +837,7 @@ print(cwd)
                 -Arguments @($acpCwdFile) |
                 Out-String
         ).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $acpCwd) {
+        if (-not $script:ContainerPythonSucceeded -or -not $acpCwd) {
             Write-ScenarioInvalidEvidence 'scenario-fixture'
             throw "eval: could not resolve a valid cwd from '$acpCwdFile'"
         }
@@ -915,7 +927,10 @@ print(digest.hexdigest()[:16])
         -Script $docsHashScript `
         -Arguments @($fingerprintDirsJson) |
         Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $docsHash -notmatch '^[0-9a-f]{16}$') {
+    if (
+        -not $script:ContainerPythonSucceeded -or
+        $docsHash -notmatch '^[0-9a-f]{16}$'
+    ) {
         Write-ScenarioInvalidEvidence 'scenario-transport-gap'
         throw 'eval: could not fingerprint the evaluated plugin payloads'
     }
