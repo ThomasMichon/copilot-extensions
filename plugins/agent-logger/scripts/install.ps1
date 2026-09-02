@@ -803,7 +803,7 @@ function Install-Package {
     Write-DeployManifest
 }
 
-function Register-SyncTask {
+function New-SyncTaskAction {
     # Prefer the windowless host so the task never flashes a console; fall back
     # to console python.exe only if pythonw.exe is somehow absent. Resolve through
     # the stable `.venv` link ($LinkPythonw), never a versions/<v> absolute a `gc`
@@ -823,8 +823,18 @@ function Register-SyncTask {
     if (-not ($runHost -and (Test-Path -LiteralPath $runHost))) {
         $runHost = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $cand = Join-Path $_.FullName 'Scripts\pythonw.exe'; if (Test-Path -LiteralPath $cand) { $cand } else { Join-Path $_.FullName 'Scripts\python.exe' } } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
     }
-    $action = New-ScheduledTaskAction -Execute $runHost `
+    if (-not ($runHost -and (Test-Path -LiteralPath $runHost))) {
+        return $null
+    }
+    return New-ScheduledTaskAction -Execute $runHost `
         -Argument '-m agent_logger.sync.engine run --prune'
+}
+
+function Register-SyncTask {
+    $action = New-SyncTaskAction
+    if (-not $action) {
+        throw "Cannot register scheduled task: no provisioned agent-logger runtime"
+    }
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) `
         -RepetitionInterval (New-TimeSpan -Hours 4)
     $trigger.Repetition.StopAtDurationEnd = $false
@@ -848,6 +858,20 @@ function Register-SyncTask {
             -Settings $settings -Principal $principal `
             -Description 'Agent Logger -- push Copilot session data to the configured target every 4 hours.' | Out-Null
         Write-Changed "scheduled task registered (every 4h)"
+    }
+}
+
+function Update-SyncTaskBinding {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        $action = New-SyncTaskAction
+        if (-not $action) {
+            Write-Warn2 "scheduled task left unchanged: no provisioned runtime"
+            return
+        }
+        Set-ScheduledTask -TaskName $TaskName -Action $action | Out-Null
+        Write-Changed "scheduled task runtime updated"
+    } else {
+        Write-Ok "package updated (task not registered)"
     }
 }
 
@@ -1017,7 +1041,7 @@ switch ($Action) {
     }
     'update' {
         if (-not $script:SkipPackageInstall) { Install-Package }
-        Write-Ok "package updated (task unchanged)"
+        Update-SyncTaskBinding
     }
     'uninstall' {
         if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
