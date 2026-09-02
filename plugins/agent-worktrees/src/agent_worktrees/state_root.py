@@ -624,7 +624,7 @@ def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StateP
         path=record.worktree_path,
         repo=record.repo,
         worktree_id=record.worktree_id,
-        kind=record.pair_kind or "worktree",
+        kind="worktree",
         status=record.status,
     )
     if not record.is_paired:

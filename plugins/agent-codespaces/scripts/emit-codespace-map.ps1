@@ -8,7 +8,7 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-function Emit-Empty { Write-Output '{}'; exit 0 }
+function Emit-Empty { [Console]::Out.Write('{}'); exit 0 }
 
 $_root = Join-Path $env:USERPROFILE '.agent-codespaces'
 $_ver = ''
@@ -22,5 +22,5 @@ if (-not (Test-Path $script)) { Emit-Empty }
 $env:PYTHONPATH = ''
 $out = (& $python $script @args 2>$null | Select-Object -First 1)
 if (-not $out) { Emit-Empty }
-Write-Output $out
+[Console]::Out.Write([string]$out)
 exit 0
