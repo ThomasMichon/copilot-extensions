@@ -307,6 +307,12 @@ def _validate_corpus_and_tasks() -> None:
             raise ValueError(f"task has unknown required guide: {task_id}")
         if irrelevant != guide_ids - required:
             raise ValueError(f"task irrelevant guide set drifted: {task_id}")
+        unknown_cues = triggered - set(cue_guides)
+        if unknown_cues:
+            raise ValueError(
+                f"task has unknown applicability cues: "
+                f"{task_id}: {sorted(unknown_cues)}"
+            )
         if {cue_guides[cue] for cue in triggered} != required:
             raise ValueError(
                 f"task applicability cues do not select required guides: {task_id}"
