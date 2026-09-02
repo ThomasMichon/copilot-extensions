@@ -40,6 +40,16 @@ rubric live in
 runs must generate fresh per-run canaries and readable guides outside that
 read-only fixture mount; reading the fixture or its answer key is a false pass.
 
+Phase 2 execution uses the same fixture's `configure-scenario`,
+`materialize`, `verify-materialized`, `observe`, `write-evidence`, and
+`validate-evidence` commands. The runnable ACP template is
+`tools/clean-room/scenarios/progressive-context-disclosure-eval/`. Each
+configured scenario binds exactly one runnable task and repetition; replicated
+claims come from independently generated scenarios rather than transcript
+aggregation. Fresh and spill cells are runnable now. Resume and compaction
+configuration fails closed until the clean-room driver performs those actual
+session transitions rather than relabeling a fresh session.
+
 ## Axes
 
 ### Deferral level

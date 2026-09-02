@@ -552,26 +552,76 @@ function Get-Sha256Short([string]$Text) {
 # Drive one agent turn with a wall-clock timeout. `agent-bridge create` has no
 # --reply-timeout, so bound it host-side via a job: on timeout, stop the job and
 # report the partial transcript so a hung agent is a FAIL, not an infinite wait.
-# Returns @{ transcript; duration_s; timed_out }.
-function Invoke-DriveWithTimeout([string]$Agent, [string]$PromptFile, [int]$TimeoutSec) {
+# Returns @{ transcript; duration_s; timed_out; exit_code; model }.
+function Invoke-DriveWithTimeout(
+    [string]$Agent,
+    [string]$PromptFile,
+    [int]$TimeoutSec,
+    [string]$Model
+) {
     $t0 = Get-Date
     $job = Start-Job -ScriptBlock {
-        param($a, $pf)
-        & agent-bridge create $a --prompt-file $pf --expand all --no-color 2>&1 | Out-String
-    } -ArgumentList $Agent, $PromptFile
+        param($a, $pf, $model)
+        $createArgs = @(
+            'create', $a, '--prompt-file', $pf, '--expand', 'all', '--no-color'
+        )
+        if ($model) { $createArgs += @('--model', $model) }
+        try {
+            $text = (& agent-bridge @createArgs 2>&1 | Out-String)
+            $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+        } catch {
+            $text = ($_ | Out-String)
+            $exitCode = 127
+        }
+        [pscustomobject]@{
+            transcript = $text
+            exit_code = [int]$exitCode
+        }
+    } -ArgumentList $Agent, $PromptFile, $Model
     $timedOut = $false
     if ($TimeoutSec -gt 0) {
         if (-not (Wait-Job $job -Timeout $TimeoutSec)) { $timedOut = $true }
     } else {
         Wait-Job $job | Out-Null
     }
-    $out = (Receive-Job $job 2>&1 | Out-String)
+    $jobResult = Receive-Job $job 2>&1
+    $out = if ($jobResult -and $jobResult.transcript) {
+        [string]$jobResult.transcript
+    } else {
+        ($jobResult | Out-String)
+    }
+    $exitCode = if ($timedOut) {
+        124
+    } elseif ($jobResult -and $null -ne $jobResult.exit_code) {
+        [int]$jobResult.exit_code
+    } else {
+        127
+    }
     if ($timedOut) {
         Stop-Job $job -ErrorAction SilentlyContinue
         $out += "`n[clean-room] TIMED OUT after ${TimeoutSec}s -- driven agent did not complete its turn.`n"
     }
     Remove-Job $job -Force -ErrorAction SilentlyContinue
-    return @{ transcript = $out; duration_s = [int]((Get-Date) - $t0).TotalSeconds; timed_out = $timedOut }
+    $usageModel = ''
+    $sessionsJson = (& agent-bridge --json sessions 2>$null | Out-String)
+    if ($sessionsJson.Trim()) {
+        try {
+            $usageModel = @(
+                $sessionsJson | ConvertFrom-Json |
+                    Where-Object { $_.agent_name -eq $Agent } |
+                    Sort-Object updated_at -Descending
+            )[0].usage_model
+        } catch {
+            $usageModel = ''
+        }
+    }
+    return @{
+        transcript = $out
+        duration_s = [int]((Get-Date) - $t0).TotalSeconds
+        timed_out = $timedOut
+        exit_code = $exitCode
+        model = [string]$usageModel
+    }
 }
 
 # Tier-E (agent-driven eval): establish the scenario's starting state, drive the
@@ -605,6 +655,9 @@ function Invoke-Eval {
     # is resolved after the setup driver runs.
     $acpCwd = ''
     $acpCwdFile = ''
+    $acpModel = ''
+    $invalidEvidenceWriter = ''
+    $invalidEvidenceOutput = ''
     $acpPluginDirs = @()
     $payloadFingerprintDirs = @()
     if ($manifest.eval -and $manifest.eval.acp_plugin_dirs) {
@@ -630,6 +683,32 @@ function Invoke-Eval {
     }
     if ($acpCwd -and $acpCwdFile) {
         throw 'eval.acp_cwd and eval.acp_cwd_file are mutually exclusive'
+    }
+    if ($manifest.eval -and $manifest.eval.model) {
+        $acpModel = [string]$manifest.eval.model
+        if ($acpModel -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
+            throw 'eval.model must be a portable model identifier'
+        }
+    }
+    if ($manifest.eval -and $manifest.eval.invalid_evidence_writer) {
+        $invalidEvidenceWriter = [string]$manifest.eval.invalid_evidence_writer
+        if ($invalidEvidenceWriter -notmatch '^[A-Za-z0-9._-]+$') {
+            throw 'eval.invalid_evidence_writer must be a scenario-local file name'
+        }
+    }
+    if ($manifest.eval -and $manifest.eval.invalid_evidence_output) {
+        $invalidEvidenceOutput = [string]$manifest.eval.invalid_evidence_output
+        if (
+            $invalidEvidenceOutput.StartsWith('/') -or
+            $invalidEvidenceOutput -match '\\' -or
+            $invalidEvidenceOutput -match '(^|/)\.\.(/|$)' -or
+            $invalidEvidenceOutput -match "[`0`r`n`t]"
+        ) {
+            throw 'eval.invalid_evidence_output must be a contained results-relative path'
+        }
+    }
+    if ([bool]$invalidEvidenceWriter -ne [bool]$invalidEvidenceOutput) {
+        throw 'eval invalid evidence writer and output must be declared together'
     }
     if ($manifest.eval -and $manifest.eval.payload_fingerprint_dirs) {
         $payloadFingerprintDirs = @(
@@ -659,18 +738,31 @@ function Invoke-Eval {
     $fullPrompt = "$literal`n`n--- TASK ---`n`n$prompt"
     $evalDir = Join-Path $Results 'eval'
     New-Item -ItemType Directory -Force -Path $evalDir | Out-Null
+    function Write-ScenarioInvalidEvidence([string]$Jam) {
+        if (-not $invalidEvidenceWriter) { return }
+        & docker exec $Container python3 `
+            "/home/operator/scenario/$invalidEvidenceWriter" `
+            --manifest /home/operator/scenario/manifest.json `
+            --output "/home/operator/out/$invalidEvidenceOutput" `
+            --jam $Jam | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "could not write scenario INVALID evidence"
+        }
+    }
 
     # --- 1) start box + 2) establish starting state --------------------------
     Start-Container
     Write-Host "== eval: establishing starting state ($setupRel) ==" -ForegroundColor Cyan
     docker exec $Container /bin/bash -lc `
         "bash /home/operator/scenario/$setupRel; rc=`$?; cp -r `$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit `$rc"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "warn: setup driver exited $LASTEXITCODE -- the starting state may be incomplete (see cr-report.json)." -ForegroundColor Yellow
-    }
+    $setupExitCode = $LASTEXITCODE
     $setupReport = Join-Path $Results 'cr-report.json'
     if (Test-Path -LiteralPath $setupReport -PathType Leaf) {
         Copy-Item -LiteralPath $setupReport -Destination (Join-Path $evalDir 'setup-report.json') -Force
+    }
+    if ($setupExitCode -ne 0) {
+        Write-ScenarioInvalidEvidence 'scenario-fixture'
+        throw "eval: setup driver exited $setupExitCode -- refusing to drive an agent from an invalid starting state (see cr-report.json)"
     }
 
     # Resolve and build the driven-agent command after setup. acp_cwd_file lets
@@ -688,6 +780,7 @@ if not cwd.is_dir():
 print(cwd)
 '@ $acpCwdFile | Out-String).Trim()
         if ($LASTEXITCODE -ne 0 -or -not $acpCwd) {
+            Write-ScenarioInvalidEvidence 'scenario-fixture'
             throw "eval: could not resolve a valid cwd from '$acpCwdFile'"
         }
     }
@@ -709,13 +802,19 @@ print(cwd)
         Write-Host "== eval: Tier-P precondition ($tierPCmd) ==" -ForegroundColor Cyan
         docker exec $Container /bin/bash -lc "$tierPCmd" | Out-Null
         if ($LASTEXITCODE -ne 0) {
+            Write-ScenarioInvalidEvidence 'scenario-fixture'
             throw "eval: Tier-P precondition '$tierPCmd' failed (exit $LASTEXITCODE) -- refusing to spend an eval on a broken CLI surface. Fix the plugin's *-solo Tier-P scenario first, or pass -SkipTierPGate to force."
         }
         Write-Host "   precondition OK" -ForegroundColor DarkGray
     }
 
     # --- 3) register the box as a bridge agent -------------------------------
-    Invoke-BridgeRegister
+    try {
+        Invoke-BridgeRegister
+    } catch {
+        Write-ScenarioInvalidEvidence 'scenario-transport-gap'
+        throw
+    }
 
     # --- eval/ artifacts -----------------------------------------------------
     Set-Content -Path (Join-Path $evalDir 'literal-mode.txt') -Value $literal -Encoding utf8
@@ -769,6 +868,7 @@ print(digest.hexdigest()[:16])
     $docsHash = (& docker exec $Container python3 -c $docsHashScript $fingerprintDirsJson |
         Select-Object -First 1)
     if ($LASTEXITCODE -ne 0 -or $docsHash -notmatch '^[0-9a-f]{16}$') {
+        Write-ScenarioInvalidEvidence 'scenario-transport-gap'
         throw 'eval: could not fingerprint the evaluated plugin payloads'
     }
 
@@ -787,18 +887,25 @@ print(digest.hexdigest()[:16])
         $transcriptPath = Join-Path $runDir 'transcript.txt'
         Write-Host "   -- run $n/$runCount --" -ForegroundColor DarkGray
         Invoke-EndAgentSessions $DriveAgent
-        $drv = Invoke-DriveWithTimeout $DriveAgent $promptTxt $perTurnTimeout
+        $drv = Invoke-DriveWithTimeout `
+            $DriveAgent $promptTxt $perTurnTimeout $acpModel
         Set-Content -Path $transcriptPath -Value $drv.transcript -Encoding utf8
         $runRecords += [pscustomobject]@{
             n          = $n
             transcript = ($transcriptPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'
             duration_s = $drv.duration_s
             timed_out  = $drv.timed_out
+            exit_code  = $drv.exit_code
+            model      = $drv.model
         }
         $tag = if ($drv.timed_out) { " -- TIMED OUT" } else { '' }
+        if ($drv.exit_code -ne 0) { $tag += " -- EXIT $($drv.exit_code)" }
+        if ($drv.model) { $tag += " -- MODEL $($drv.model)" }
         $col = if ($drv.timed_out) { 'Yellow' } else { 'DarkGray' }
         Write-Host "      transcript -> $transcriptPath  ($($drv.duration_s)s)$tag" -ForegroundColor $col
     }
+    ConvertTo-Json -InputObject @($runRecords) -Depth 4 |
+        Set-Content -Path (Join-Path $evalDir 'drive-runs.json') -Encoding utf8
 
     # --- 6) optional programmatic post-check (ground-truth evidence) ---------
     if ($postCheck -and (Test-Path (Join-Path $ScenarioDir $postCheck))) {
@@ -833,6 +940,7 @@ print(digest.hexdigest()[:16])
         docs_hash        = $docsHash
         acp_plugin_dirs  = @($acpPluginDirs)
         payload_fingerprint_dirs = @($fingerprintDirs)
+        requested_model  = $acpModel
         per_turn_timeout_s = $perTurnTimeout
         tier_p_precondition = if ($SkipTierPGate) { "$tierPCmd (SKIPPED)" } else { $tierPCmd }
         bridge_cleanup_error = $bridgeCleanupError

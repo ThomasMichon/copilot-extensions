@@ -1,6 +1,6 @@
 {
   "name": "progressive-context-disclosure-baseline",
-  "description": "Tier-P fixture gate for progressive session-context disclosure. It proves that the current suite contributor inventory is complete, the representative synthetic corpus and observable task set are internally consistent, guide locators are contained, baseline rendering is deterministic, and the behavioral evidence contract is counts-only before any Tier-E comparison is run.",
+  "description": "Tier-P fixture gate for progressive session-context disclosure. It proves that the current suite contributor inventory is complete, the representative synthetic corpus and observable task set are internally consistent, guide locators are contained, baseline rendering is deterministic, all F0-F4 by seven-reference by four-emphasis Phase 2 flat/index cells render deterministically, and the behavioral evidence contract is counts-only before any Tier-E comparison is run.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -17,6 +17,6 @@
     "notes": "The scenario directory contains the frozen corpus, task set, variant protocol, literal-mode rubric, counts-only evidence schema, observed suite inventory, and deterministic baseline measurements. The source checkout is mounted read-only at /harness so the inventory can be checked against every current session-context declaration."
   },
   "stages": [
-    "Validate the complete frozen inventory, corpus, task stimuli, locator containment, baseline rendering, protocol, literal-mode rubric, and counts-only evidence schema."
+    "Validate the complete frozen inventory, corpus, task stimuli, locator containment, baseline rendering, Phase 2 flat/index render matrix, protocol, literal-mode rubric, and counts-only evidence schema."
   ]
 }
