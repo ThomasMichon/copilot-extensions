@@ -1179,6 +1179,62 @@ def test_spilled_context_retains_bounded_catalog_and_critical_kernel(
     ).read_text(encoding="utf-8")
 
 
+def test_long_spill_path_still_keeps_later_routing_index() -> None:
+    pointer = (
+        "[context-injection] delivery=spill; complete-context=true; path=`"
+        "C:\\Users\\example\\.copilot\\session-state\\session-identifier\\files\\"
+        "startup-context-0123456789abcdef01234567.md`."
+    )
+    catalog = AGGREGATE_CONTEXT._catalog_fragment(
+        [
+            {
+                "source": "commands@example",
+                "plugin": "commands",
+                "payload": {"provenance": "payload-local"},
+                "commands": [
+                    {
+                        "id": "commands",
+                        "argv": ["/payload/bin/commands"],
+                        "purpose": "X" * 3_600,
+                    }
+                ],
+            }
+        ]
+    )
+    critical = (
+        "[context-contributor: worktrees@example/aggregate]\n"
+        "Checkout: id=wt; role=harness; path=/repo. "
+        "Pair: role=knowledge; writable=true; path=/knowledge."
+    )
+    guidance = [
+        (
+            200 + index,
+            f"guidance-{index}@example",
+            f"[context-contributor: guidance-{index}@example/context]\n"
+            + ("Detailed guidance " * 30),
+        )
+        for index in range(6)
+    ]
+    route = (
+        "[context-contributor: codespaces@example/codespace-map]\n"
+        "CodeSpace routes (delegate=agent-codespaces): "
+        "runtime(role=tooling,locus=codespace); "
+        "product(role=product,locus=codespace)."
+    )
+    fragments = [
+        (100, "worktrees@example", critical),
+        (150, "command-catalogs", catalog),
+        *guidance,
+        (900, "codespaces@example", route),
+    ]
+
+    kernel = AGGREGATE_CONTEXT._render_spill_kernel(pointer, fragments)
+
+    assert len(kernel.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
+    assert "runtime(role=tooling,locus=codespace)" in kernel
+    assert "product(role=product,locus=codespace)" in kernel
+
+
 def test_spill_kernel_is_deterministic_and_never_splits_large_catalog() -> None:
     pointer = "[context-injection] spill at `/session/context.md`."
     oversized_catalog = AGGREGATE_CONTEXT._catalog_fragment(
