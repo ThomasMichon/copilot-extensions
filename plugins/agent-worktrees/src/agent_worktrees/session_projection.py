@@ -1413,8 +1413,8 @@ def render_recovery_context(report: dict[str, Any]) -> str:
             f"{primary.get('project')}/{primary.get('worktree_id')}, but its "
             f"terminal lineage is {primary.get('terminal_status')}. Inspect "
             f"`agent-worktrees session-recovery --session-id "
-            f"{report.get('session_id')}`; no successor was selected and no "
-            "binding was changed."
+            f"{report.get('session_id')}`; no terminal successor was selected "
+            "and no binding was changed."
         )
     if status == "concluded":
         return (

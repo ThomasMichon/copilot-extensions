@@ -602,7 +602,7 @@ def test_recovery_report_does_not_guess_unresolved_handoff_successor(
     assert report["status"] == "handoff-unresolved"
     assert report["recommended_action"] == "inspect"
     context = session_projection.render_recovery_context(report)
-    assert "no successor was selected" in context
+    assert "no terminal successor was selected" in context
     assert "missing-session" in context
 
 

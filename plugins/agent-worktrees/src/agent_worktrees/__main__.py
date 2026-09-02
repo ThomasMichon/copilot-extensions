@@ -18388,7 +18388,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inspect one exact session projection for validated recovery guidance",
     )
     sp.add_argument("--session-id", default=None,
-                    help="Exact Copilot session id (read from --stdin when omitted)")
+                    help="Exact Copilot session id (read from --stdin or "
+                         "COPILOT_AGENT_SESSION_ID when omitted)")
     sp.add_argument("--cwd", default=None,
                     help="Current session cwd for bound-here comparison")
     sp.add_argument("--stdin", action="store_true",
