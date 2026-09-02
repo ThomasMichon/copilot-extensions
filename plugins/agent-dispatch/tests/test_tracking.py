@@ -452,3 +452,9 @@ def test_enrich_tasks_within_budget_enriches_all(monkeypatch):
     assert all("embodiment" in t for t in out)
     passthrough = tracking.enrich_tasks([{"id": "q", "status": "queued"}])
     assert "embodiment" not in passthrough[0]
+
+
+def test_session_activity_reports_explicit_idle():
+    assert tracking.session_activity(
+        {"status": "running", "liveness": "idle", "turn_state": "idle"}
+    ) == "IDLE"

@@ -140,12 +140,34 @@ def spawn_worker(
 
 
 def stop_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
-    """End one local headless body so its process is fully reclaimed."""
+    """Stop one local headless body while preserving its resumable ACP session."""
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
     completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
-        [*exe, "end", session_id],
+        [*exe, "stop", session_id],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    return completed.returncode == 0
+
+
+def resume_worker(
+    session_id: str,
+    prompt: str,
+    *,
+    timeout: float | None = 20.0,
+) -> bool:
+    """Resume an existing stopped ACP session and enqueue its next task turn."""
+    exe = _agent_bridge_launch_prefix()
+    if exe is None:
+        return False
+    completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
+        [*exe, "send", session_id, "--prompt-file", "-", "--no-wait"],
+        input=prompt,
         check=False,
         capture_output=True,
         text=True,

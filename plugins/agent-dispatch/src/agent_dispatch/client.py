@@ -241,6 +241,7 @@ class DispatchClient:
         wake: bool = True,
         message: str | None = None,
         adopt_session: bool = False,
+        reuse_session: bool = False,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
     ) -> dict:
@@ -252,6 +253,7 @@ class DispatchClient:
                     "wake": wake,
                     "message": message,
                     "adopt_session": adopt_session,
+                    "reuse_session": reuse_session,
                     "expected_owner_session_id": expected_owner_session_id,
                     "expected_generation": expected_generation,
                 },

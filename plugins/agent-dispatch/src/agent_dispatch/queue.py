@@ -2067,6 +2067,20 @@ class TaskQueue:
         ).fetchone()
         return row is not None
 
+    @staticmethod
+    def _has_cold_headless_reservation(
+        conn: sqlite3.Connection, task_id: str
+    ) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM spawn_reservations"
+            " WHERE task_id = ? AND state = ? AND"
+            " (session_handle LIKE 'local-body:%' OR"
+            " session_handle LIKE 'fleet-body:%')"
+            " LIMIT 1",
+            (task_id, SpawnState.COLD),
+        ).fetchone()
+        return row is not None
+
     # -- payload -------------------------------------------------------------
 
     def _payload_needs_spill(
@@ -3306,6 +3320,7 @@ class TaskQueue:
         wake_requested: bool = False,
         wake_message: str | None = None,
         adopt_owner_session_id: str | None = None,
+        reuse_session: bool = False,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
         now: float | None = None,
@@ -3339,7 +3354,7 @@ class TaskQueue:
             bump_generation=adopt_owner_session_id is not None,
             expected_owner_session_id=expected_owner_session_id,
             expected_generation=expected_generation,
-            reembody_headless_on_wake=True,
+            reembody_headless_on_wake=not reuse_session,
             wake_requested=wake_requested,
             wake_message=wake_message,
         )
@@ -3506,10 +3521,10 @@ class TaskQueue:
         now: float | None = None,
     ) -> Task:
         """Publish activity fenced to this task's active spawn reservation."""
-        if activity not in {None, "ACTIVE", "STALLED"}:
+        if activity not in {None, "ACTIVE", "IDLE", "STALLED"}:
             raise TaskError(
                 f"invalid task activity {activity!r} "
-                "(allowed: ACTIVE, STALLED, or null)"
+                "(allowed: ACTIVE, IDLE, STALLED, or null)"
             )
         ts = self._now(now)
         with self._connect() as conn:
@@ -3518,10 +3533,13 @@ class TaskQueue:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
-            if task.status == Status.SUSPENDED and activity is not None:
+            if (
+                task.status == Status.SUSPENDED
+                and activity not in {None, "IDLE"}
+            ):
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"cannot set non-null activity on suspended task {task_id!r}"
+                    f"cannot set active activity on suspended task {task_id!r}"
                 )
             reservation = conn.execute(
                 "SELECT task_id, state FROM spawn_reservations WHERE key = ?",
@@ -3754,9 +3772,7 @@ class TaskQueue:
             )
             resumed = task.status == Status.SUSPENDED
             cold_headless = bool(
-                resumed
-                and task.owner_session_id is None
-                and self._has_headless_reservation(conn, task_id)
+                resumed and self._has_headless_reservation(conn, task_id)
             )
             if cold_headless:
                 conn.execute(
@@ -4995,7 +5011,9 @@ class TaskQueue:
         return self._update_reservation(
             key,
             to_state=SpawnState.SPAWNED,
-            allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED}),
+            allowed_from=frozenset(
+                {SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD}
+            ),
             session_handle=session_handle,
             worktree=worktree,
             now=now,
