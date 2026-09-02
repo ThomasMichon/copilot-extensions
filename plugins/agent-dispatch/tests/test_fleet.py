@@ -433,7 +433,7 @@ def test_fleet_body_verdict_unknown_without_ssh(monkeypatch):
     [
         ('{"status":"running","liveness":"active"}', "ACTIVE"),
         ('{"status":"running","liveness":"stalled"}', "STALLED"),
-        ('{"status":"idle","liveness":"idle"}', None),
+        ('{"status":"idle","liveness":"idle"}', "IDLE"),
     ],
 )
 def test_fleet_body_activity_classifies(monkeypatch, payload, expected):

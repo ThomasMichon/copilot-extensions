@@ -289,6 +289,8 @@ FleetActivityFn = Callable[[str, str], str | None]
 #: session on this host (no SSH); ``unknown`` is never treated as death.
 #: Injectable so tests drive verdicts deterministically.
 LocalBodyVerdictFn = Callable[[str], str]
+LocalBodyActivityFn = Callable[[str], str | None]
+LocalResumeFn = Callable[[str, str], bool]
 
 #: Prefix stamped on the reservation ``session_handle`` of a headless fleet body,
 #: encoding its recovery handle as ``fleet-body:<host>:<bridge-session-id>`` (see
@@ -358,10 +360,25 @@ def _default_local_body_verdict(bridge_session_id: str) -> str:
     return embody.local_body_verdict(bridge_session_id)
 
 
+def _default_local_body_activity(bridge_session_id: str) -> str | None:
+    from . import tracking
+
+    for session in tracking.list_local_body_sessions():
+        if str(session.get("session_id") or "") == bridge_session_id:
+            return tracking.session_activity(session)
+    return None
+
+
 def _default_local_cold(bridge_session_id: str) -> bool:
     from . import bridge
 
     return bridge.stop_worker(bridge_session_id)
+
+
+def _default_local_resume(bridge_session_id: str, prompt: str) -> bool:
+    from . import bridge
+
+    return bridge.resume_worker(bridge_session_id, prompt)
 
 
 def _default_fleet_cold(host: str, bridge_session_id: str) -> bool:
@@ -563,7 +580,9 @@ class Supervisor:
         fleet_verdict_fn: FleetVerdictFn | None = None,
         fleet_activity_fn: FleetActivityFn | None = None,
         local_body_verdict_fn: LocalBodyVerdictFn | None = None,
+        local_body_activity_fn: LocalBodyActivityFn | None = None,
         local_cold_fn: LocalColdFn | None = None,
+        local_resume_fn: LocalResumeFn | None = None,
         fleet_cold_fn: FleetColdFn | None = None,
         nudge_fn: NudgeFn | None = None,
         redrive_fn: RedriveFn | None = None,
@@ -624,7 +643,11 @@ class Supervisor:
         self.local_body_verdict_fn = (
             local_body_verdict_fn or _default_local_body_verdict
         )
+        self.local_body_activity_fn = (
+            local_body_activity_fn or _default_local_body_activity
+        )
         self.local_cold_fn = local_cold_fn or _default_local_cold
+        self.local_resume_fn = local_resume_fn or _default_local_resume
         self.fleet_cold_fn = fleet_cold_fn or _default_fleet_cold
         self._cooled_reservations: set[str] = set()
         self._cold_retry_after: dict[str, float] = {}
@@ -850,9 +873,55 @@ class Supervisor:
                 self._cold_retry_after[key] = now + 60.0
         return cooled
 
+    def suspend_idle_headless_tasks(self) -> int:
+        """Treat a headless ACP turn-end as an implicit suspend request."""
+        suspended = 0
+        for res in self._pool_reservations(state=SpawnState.SPAWNED):
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if (
+                not self._matches_pool(task)
+                or task.get("status") != Status.STARTED
+                or not task.get("owner")
+            ):
+                continue
+            activity = None
+            fleet = _parse_fleet_body_handle(res.get("session_handle"))
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            try:
+                if fleet is not None:
+                    activity = self.fleet_activity_fn(*fleet)
+                elif local_sid is not None:
+                    activity = self.local_body_activity_fn(local_sid)
+            except Exception:
+                log.exception(
+                    "failed to read headless turn state for task %s",
+                    task.get("id"),
+                )
+                continue
+            if activity != "IDLE":
+                continue
+            try:
+                self.client.suspend(
+                    task["id"],
+                    task["owner"],
+                    reason="headless ACP turn ended",
+                )
+                self.client.set_activity(
+                    task["id"], "IDLE", reservation_key=res["key"]
+                )
+                suspended += 1
+            except DispatchError:
+                log.exception(
+                    "failed to suspend idle headless task %s", task.get("id")
+                )
+        return suspended
+
     def release_resumed_cold_tasks(self) -> int:
-        """Release cold reservations only after a durable resume request."""
-        released = 0
+        """Resume each cold task in its existing ACP session."""
+        resumed = 0
         for res in self._pool_reservations(
             state=SpawnState.COLD, resume_requested=True
         ):
@@ -863,23 +932,43 @@ class Supervisor:
             owner = task.get("owner")
             if task.get("status") != Status.SUSPENDED or not owner:
                 continue
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            if local_sid is None:
+                continue
+            prompt = (
+                f"Task {task['id']} has new durable steering. Resume this same "
+                "task and ACP conversation, run `agent-dispatch steer take "
+                f"{task['id']} --all`, and continue from the recorded progress. "
+                "Do not create a replacement task or worktree."
+            )
             try:
-                self.client.release(
+                if not self.local_resume_fn(local_sid, prompt):
+                    continue
+                self.client.resume(
                     task["id"],
                     owner,
-                    reason="cold body stopped; released for re-embodiment",
+                    wake=False,
+                    reuse_session=True,
+                    expected_owner_session_id=task.get("owner_session_id"),
+                    expected_generation=task.get("generation"),
                 )
-                released += 1
+                self.client.record_spawn(
+                    res["key"],
+                    session_handle=res.get("session_handle"),
+                    worktree=res.get("worktree"),
+                )
+                resumed += 1
                 log.info(
-                    "released resumed cold task %s for re-embodiment",
+                    "resumed cold task %s in existing ACP session %s",
                     task.get("id"),
+                    local_sid,
                 )
             except DispatchError:
                 log.exception(
                     "failed to release resumed cold task %s",
                     task.get("id"),
                 )
-        return released
+        return resumed
 
     # -- phases --------------------------------------------------------------
 
@@ -1807,6 +1896,7 @@ class Supervisor:
         """
         now = time.time() if now is None else now
         self.reconcile()
+        self.suspend_idle_headless_tasks()
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks()
         if self.evaluator is not None:

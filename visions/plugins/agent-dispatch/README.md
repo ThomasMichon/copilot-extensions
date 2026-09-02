@@ -586,6 +586,16 @@ loop **degrades cleanly** to exactly the periodic reconcile where no turn signal
 observable. *Which* signal (a raw event subscription, a derived turn-state sample)
 carries the turn boundary is spec-level, not fixed here.
 
+### suspend-idle-resume-same-session
+A headless worker that settles a turn without completing its task is
+**suspended, not replaced**. Supervision records the idle boundary, gracefully
+stops the Copilot process to release capacity, and retains the task owner,
+session handle, worktree, progress, and pending steering as one cold assignment.
+The next Resume or steer reattaches that exact ACP session in the same worktree;
+ordinary payload, revision, or target movement never creates a replacement
+session or workspace. Only confirmed context exhaustion permits an explicit
+handoff to a successor session within the same task/worktree lineage.
+
 ### repo-lane-isolation
 Every task belongs to the **repo lane** of the agent that produced it, and the
 queue is scoped to that lane by default — an agent sees and claims **its own

@@ -126,6 +126,36 @@ class QueueBackedClient:
             )
         )
 
+    def suspend(self, task_id, worker_id, *, reason):
+        return asdict(self._q.suspend(task_id, worker_id, reason=reason))
+
+    def resume(
+        self,
+        task_id,
+        worker_id,
+        *,
+        wake=True,
+        message=None,
+        adopt_session=False,
+        reuse_session=False,
+        expected_owner_session_id=None,
+        expected_generation=None,
+    ):
+        return asdict(
+            self._q.resume(
+                task_id,
+                worker_id,
+                wake_requested=wake,
+                wake_message=message,
+                adopt_owner_session_id=(
+                    expected_owner_session_id if adopt_session else None
+                ),
+                reuse_session=reuse_session,
+                expected_owner_session_id=expected_owner_session_id,
+                expected_generation=expected_generation,
+            )
+        )
+
     def progress_log(self, task_id):
         return self._q.progress_log(task_id)
 
@@ -316,7 +346,7 @@ def test_blocking_card_cools_body_and_frees_process_capacity(q, client):
     assert q.get(blocked.id).awaiting_steer is True
 
 
-def test_steer_waits_for_cold_stop_before_reembodiment(q, client):
+def test_cold_steer_resumes_existing_acp_session(q, client):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
@@ -324,11 +354,8 @@ def test_steer_waits_for_cold_stop_before_reembodiment(q, client):
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
-    q.set_card(
-        blocked.id,
-        "headless-owner",
-        card={"request_input": [{"name": "decision", "type": "text"}]},
-    )
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
     steered = q.submit_steer(
         blocked.id,
         fields={"decision": "continue"},
@@ -336,19 +363,54 @@ def test_steer_waits_for_cold_stop_before_reembodiment(q, client):
     )
     assert steered.status == Status.SUSPENDED
     assert steered.resume_requested is True
-    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
     spawn = _ok_spawn()
+    resumed = []
     sup = Supervisor(
         client,
         spawn_fn=spawn,
         repo=TEST_REPO,
         labels=["review"],
-        local_cold_fn=lambda _session_id: True,
+        local_body_activity_fn=lambda _session_id: "ACTIVE",
+        local_body_verdict_fn=lambda _session_id: "live",
+        local_resume_fn=lambda session_id, prompt: (
+            resumed.append((session_id, prompt)) or True
+        ),
     )
 
-    assert sup.poll_once() == [blocked.id]
-    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert resumed and resumed[0][0] == "blocked-session"
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert q.get(blocked.id).status == Status.STARTED
     assert q.get(blocked.id).resume_requested is False
+
+
+def test_idle_headless_turn_auto_suspends_and_cools(q, client):
+    task = q.create("review turn", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:review-session"
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    stopped = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_activity_fn=lambda _session_id: "IDLE",
+        local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+        local_body_verdict_fn=lambda _session_id: "live",
+    )
+
+    assert sup.poll_once() == []
+    current = q.get(task.id)
+    assert current.status == Status.SUSPENDED
+    assert current.activity == "IDLE"
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+    assert stopped == ["review-session"]
 
 
 def test_failed_cold_stop_keeps_live_process_capacity(q, client):
@@ -2308,7 +2370,7 @@ def test_supervisor_publishes_local_body_activity_while_task_is_queued(
         "liveness": "idle",
     }
     assert sup.hold_live_leases() == 0
-    assert q.get(t.id).activity is None
+    assert q.get(t.id).activity == "IDLE"
 
 
 def test_hold_live_leases_degrades_when_local_session_listing_fails(
