@@ -64,6 +64,29 @@ prose and never an event stream. The worktree's *current* disposition is simply 
 worktree can say what it was doing — and hand that to a successor — **from its own
 record alone**.
 
+### The session remembers — a reciprocal, rebuildable projection
+Copilot's exact session-state directory carries a **small, versioned sidecar**
+of the agent-worktrees relationships that concern that session: the worktree it
+is bound to, any separate worktrees it deliberately controls, and its explicit
+predecessor/successor lineage. This is a reciprocal index, not a second
+authority: every entry identifies the authoritative worktree-record revision
+that produced it, can be rebuilt from that record, and may be discarded when
+stale or unsupported. Because it travels with ordinary session state, a resumed
+or synchronized session can recover precise worktree and handoff pointers
+without searching transcript prose or relying on mutable directory strings.
+Offline analysis may consume these projections from a synchronized archive, but
+live tracking never enumerates the session-state root outside its explicit
+backfill and fixed-budget resident cursor.
+
+### Binding and control are distinct relations
+A session may deliberately operate another worktree or pull-request vessel
+without declaring that worktree as its execution home. The ground layer records
+that relationship as **control**, separate from **binding**. A controller may
+operate several worktrees; it does not become each child's bound head, affect
+their liveness reduction, or cause them to resume in the controller's working
+directory. Presentation and recovery can redirect to the controller while the
+underlying ownership semantics remain honest.
+
 ### Opt-in launch profile assignment
 An operator may explicitly arm a named assignment policy over user-owned Copilot
 profiles. Eligible **new session generations** then receive a durable,
@@ -230,6 +253,20 @@ the **tail** of it rather than a separate cell. A worktree therefore always carr
 an agent-digestible account of what it has recently been doing, across the sessions
 that worked it.
 
+### reciprocal session identity
+Each exact Copilot session can expose a bounded agent-worktrees projection that
+identifies its bound worktree, controlled worktrees, and explicit lineage. The
+projection is suitable for resume recovery, synchronized-session analysis, and
+worktree-centric visualization without transcript scans or CWD joins. Analysis
+across many sessions consumes a synchronized archive or prebuilt index rather
+than sweeping the live session-state root.
+
+### controller-aware recovery
+A worktree with no usable bound head but an explicit controller relationship can
+resolve that controller's unique terminal successor and present the correct
+continuation. It never fabricates a binding, chooses by timestamp alone, or
+silently mutates an active worktree.
+
 ### profile assignment is explicit and replayable
 Manual profile selection remains the default. When an operator arms a profile
 assignment policy, selection happens before eligible new-session argv is built
@@ -275,6 +312,9 @@ break tracking and must **never** jeopardize a mainline flow.
 Each piece of tracking truth has **one owner** (agent-worktrees). Higher layers
 **coordinate over and derive from** it; they do not keep a second copy that can
 drift. agent-bridge's contribution is *events into the owner*, not a rival store.
+Session-state projections follow the same rule: they are revision-stamped,
+rebuildable materializations of worktree-owned facts, never independent writers
+of binding, head, handoff, controller, or aggregate status.
 
 ### aggregate status is derived, never written
 No contributor ever writes the worktree's overall status or head directly; each
@@ -320,6 +360,12 @@ declaration, but the bind itself is the agent's own asserted act — auditable a
 intentional — so a stray observation can never mis-attach a session to the wrong
 worktree.
 
+### control never impersonates binding
+A session controlling another worktree is represented as a controller, not
+registered as that worktree's bound head. Automatic reconciliation may derive
+and refresh controller or successor pointers from explicit records, but only a
+session's own declaration establishes binding.
+
 ### recovery is record-first
 What a worktree was doing — its recent focus and the reference to any handoff it
 produced — is recoverable **from the worktree's own record**, without a second
@@ -328,6 +374,9 @@ successor (or a fresh session, or an operator) reconstructs the worktree's inten
 from the store alone; richer transports make a handoff *smoother* when present, but
 none is a **precondition** for the worktree remembering itself. The durable record
 is the floor under recovery, not an optimization layered on a fragile transfer.
+Reciprocal session-state metadata accelerates that recovery and carries it with a
+synchronized session, but a missing or stale projection never weakens the
+record-first guarantee.
 
 ### presentation is declarative and process-boundary only
 agent-worktrees exports presentation semantics but never imports or hosts the
