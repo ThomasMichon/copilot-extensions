@@ -351,7 +351,7 @@ def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
         calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(bridge, "run_ssh_command", fake_run)
 
     assert bridge.resume_steered_owner(
         "Worker-Host/worktree-1",

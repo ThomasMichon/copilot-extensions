@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ssh_manager.config_sources import SSHProfileSource
+from ssh_manager.config_sources import SSHConfig, SSHProfileSource
 from ssh_manager.manager import (
     CommandResult,
+    ConnectionInfo,
     ConnectionManager,
     get_default_manager,
 )
@@ -299,6 +300,41 @@ class TestConnectionManagerExec:
 
         terminate.assert_awaited_once_with(child)
         assert child not in info.child_processes
+
+    @pytest.mark.asyncio
+    async def test_disconnect_reaps_timed_out_graceful_exit(
+        self, unix_platform, tmp_path
+    ):
+        manager = ConnectionManager(platform=unix_platform)
+        socket_path = tmp_path / "master.sock"
+        socket_path.touch()
+        master = AsyncMock()
+        master.returncode = 0
+        info = ConnectionInfo(
+            host="test-host",
+            config=SSHConfig(host_alias="test-host"),
+            socket_path=socket_path,
+            master_process=master,
+            platform=unix_platform,
+        )
+        manager._connections["test-host"] = info
+        graceful = AsyncMock()
+        graceful.returncode = None
+        graceful.wait = AsyncMock(side_effect=asyncio.TimeoutError)
+
+        with (
+            patch(
+                "ssh_manager.manager.asyncio.create_subprocess_exec",
+                return_value=graceful,
+            ),
+            patch(
+                "ssh_manager.manager._terminate_process_tree",
+                new=AsyncMock(),
+            ) as terminate,
+        ):
+            await manager.disconnect("test-host")
+
+        terminate.assert_awaited_once_with(graceful)
 
 
 class TestGetDefaultManager:

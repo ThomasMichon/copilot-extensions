@@ -16,7 +16,11 @@ import subprocess
 from collections.abc import Sequence
 
 from . import remote_dispatch
-from .procutil import agent_bridge_launch_prefix, no_window_kwargs
+from .procutil import (
+    agent_bridge_launch_prefix,
+    no_window_kwargs,
+    run_ssh_command,
+)
 
 DEFAULT_WORKER_AGENT = "task-worker"
 
@@ -294,15 +298,18 @@ def redrive_embodied_worker(
             return False
         cmd = [*exe, *bridge_argv[1:]]
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved locally
-            cmd,
-            input=prompt,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            **no_window_kwargs(),
-        )
+        if is_remote:
+            proc = run_ssh_command(cmd, input=prompt, timeout=timeout)
+        else:
+            proc = subprocess.run(  # noqa: S603 -- fixed local argv
+                cmd,
+                input=prompt,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                **no_window_kwargs(),
+            )
     except (subprocess.SubprocessError, OSError):
         return False
     return proc.returncode == 0
@@ -384,15 +391,18 @@ def resume_steered_owner(
             return False
         cmd = [*exe, *bridge_argv[1:]]
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            cmd,
-            input=prompt,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            **no_window_kwargs(),
-        )
+        if is_remote:
+            proc = run_ssh_command(cmd, input=prompt, timeout=timeout)
+        else:
+            proc = subprocess.run(  # noqa: S603 -- fixed local argv
+                cmd,
+                input=prompt,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                **no_window_kwargs(),
+            )
     except (subprocess.SubprocessError, OSError):
         return False
     return proc.returncode == 0

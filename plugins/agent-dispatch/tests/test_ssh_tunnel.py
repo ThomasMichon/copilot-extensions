@@ -95,20 +95,21 @@ def test_resolve_peer_no_ssh_binary(monkeypatch):
         ssh_tunnel.resolve_peer_endpoint("peer-host")
 
 
-def test_ssh_capture_uses_no_window_kwargs(monkeypatch):
+def test_ssh_capture_uses_shared_capture_helper(monkeypatch):
     captured = {}
 
-    def fake_run(cmd, **kwargs):
-        captured["kwargs"] = kwargs
+    def fake_capture(cmd, *, timeout):
+        captured["cmd"] = cmd
+        captured["timeout"] = timeout
         return type("Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
 
-    monkeypatch.setattr(ssh_tunnel.subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        ssh_tunnel, "no_window_kwargs", lambda: {"creationflags": 123}
-    )
+    monkeypatch.setattr(ssh_tunnel, "run_ssh_capture", fake_capture)
 
     assert ssh_tunnel._ssh_capture("ssh", "peer", "true", 3) == "ok"
-    assert captured["kwargs"]["creationflags"] == 123
+    assert captured == {
+        "cmd": ["ssh", "-o", "BatchMode=yes", "peer", "true"],
+        "timeout": 3,
+    }
 
 
 # -- open_coordinator_tunnel: readiness + early-exit handling ----------------
@@ -148,7 +149,7 @@ def test_open_tunnel_returns_when_port_ready(monkeypatch):
 
     monkeypatch.setattr(ssh_tunnel.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(
-        ssh_tunnel, "no_window_kwargs", lambda: {"creationflags": 123}
+        ssh_tunnel, "ssh_subprocess_kwargs", lambda: {"creationflags": 123}
     )
     monkeypatch.setattr(ssh_tunnel, "_port_accepts", lambda port, **k: True)
     monkeypatch.setattr(ssh_tunnel, "_coordinator_reachable", lambda url, **k: True)

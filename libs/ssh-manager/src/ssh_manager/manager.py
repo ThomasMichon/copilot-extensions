@@ -22,6 +22,7 @@ from .platform import (
     ensure_socket_dir,
     socket_path_for_host,
 )
+from .process import ssh_subprocess_kwargs
 
 log = logging.getLogger("ssh-manager")
 
@@ -55,14 +56,6 @@ def _creation_flags() -> int:
     return 0
 
 
-def _subprocess_kwargs(**kwargs):  # noqa: ANN003, ANN202
-    """Common subprocess isolation kwargs for SSH children."""
-    kwargs["creationflags"] = _creation_flags()
-    if sys.platform != "win32":
-        kwargs["start_new_session"] = True
-    return kwargs
-
-
 async def _terminate_process_tree(
     proc: asyncio.subprocess.Process,
     *,
@@ -91,7 +84,7 @@ async def _terminate_process_tree(
     try:
         await asyncio.wait_for(proc.wait(), timeout=grace)
         return
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         pass
     if sys.platform != "win32":
         try:
@@ -102,7 +95,7 @@ async def _terminate_process_tree(
         proc.kill()
     try:
         await asyncio.wait_for(proc.wait(), timeout=2.0)
-    except TimeoutError:
+    except (TimeoutError, asyncio.TimeoutError):
         log.warning("Process tree rooted at pid %s did not exit", proc.pid)
 
 
@@ -301,7 +294,7 @@ class ConnectionManager:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            **_subprocess_kwargs(),
+            **ssh_subprocess_kwargs(),
         )
 
         # Wait briefly for connection to establish or fail
@@ -310,7 +303,7 @@ class ConnectionManager:
         except asyncio.CancelledError:
             await _terminate_process_tree(proc)
             raise
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             stderr = ""
             if proc.stderr:
                 try:
@@ -407,7 +400,7 @@ class ConnectionManager:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            **_subprocess_kwargs(),
+            **ssh_subprocess_kwargs(),
         )
 
         timed_out = False
@@ -420,7 +413,7 @@ class ConnectionManager:
             finally:
                 if proc in info.child_processes and proc.returncode is not None:
                     info.child_processes.remove(proc)
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             await _terminate_process_tree(proc)
             stdout_bytes, stderr_bytes = await proc.communicate()
             timed_out = True
@@ -470,7 +463,7 @@ class ConnectionManager:
             # POSIX: give the ssh child its own session/process group so
             # teardown signals only the ssh process tree -- never the parent's
             # group. Windows uses taskkill /T against the root pid.
-            **_subprocess_kwargs(limit=_STDIO_CHANNEL_LIMIT_BYTES),
+            **ssh_subprocess_kwargs(limit=_STDIO_CHANNEL_LIMIT_BYTES),
         )
 
         info.child_processes.append(proc)
@@ -509,10 +502,13 @@ class ConnectionManager:
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
-                    **_subprocess_kwargs(),
+                    **ssh_subprocess_kwargs(),
                 )
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except (TimeoutError, OSError) as e:
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                await _terminate_process_tree(proc)
+                log.warning("Graceful disconnect failed for %s: %s", host, e)
+            except OSError as e:
                 log.warning("Graceful disconnect failed for %s: %s", host, e)
 
         # Kill master process if still running

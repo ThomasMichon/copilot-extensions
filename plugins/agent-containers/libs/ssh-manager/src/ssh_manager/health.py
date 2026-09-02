@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .config_sources import ConfigSource
-from .manager import ConnectionManager, _creation_flags
+from .manager import ConnectionManager
+from .process import ssh_subprocess_kwargs, terminate_ssh_process_tree
 
 log = logging.getLogger("ssh-manager")
 
@@ -80,7 +81,7 @@ async def check_health(manager: ConnectionManager, host: str) -> HealthStatus:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
-            creationflags=_creation_flags(),
+            **ssh_subprocess_kwargs(),
         )
         _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=10.0)
         stderr = stderr_bytes.decode(errors="replace").rstrip()
@@ -90,6 +91,7 @@ async def check_health(manager: ConnectionManager, host: str) -> HealthStatus:
         return HealthStatus(ok=False, reason="check_failed", stderr=stderr)
 
     except (TimeoutError, asyncio.TimeoutError):
+        await terminate_ssh_process_tree(proc)
         return HealthStatus(
             ok=False, reason="check_failed", stderr="ssh -O check timed out"
         )

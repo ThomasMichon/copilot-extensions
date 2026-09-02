@@ -27,18 +27,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
-import subprocess
-import sys
 
 from .config_sources import SSHConfig
+from .process import ssh_subprocess_kwargs, terminate_ssh_process_tree
 
 log = logging.getLogger("ssh-manager.forward")
-
-
-def _creation_flags() -> int:
-    if sys.platform == "win32":
-        return subprocess.CREATE_NO_WINDOW
-    return 0
 
 
 def pick_free_local_port() -> int:
@@ -179,8 +172,7 @@ class LocalForward:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                creationflags=_creation_flags(),
-                start_new_session=(sys.platform != "win32"),
+                **ssh_subprocess_kwargs(),
             )
             self._proc = proc
             self.local_port = port
@@ -261,11 +253,4 @@ class LocalForward:
     async def _kill(proc: asyncio.subprocess.Process) -> None:
         if proc.returncode is not None:
             return
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            return
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except (asyncio.TimeoutError, ProcessLookupError):
-            pass
+        await terminate_ssh_process_tree(proc)

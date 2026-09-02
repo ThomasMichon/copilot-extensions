@@ -281,7 +281,7 @@ def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
 
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    monkeypatch.setattr(embody, "run_ssh_command", fake_run)
 
     embody.spawn_fleet_embodied_worker(
         "Host-B", "t7", origin="brain", owner="fleet-t7-xyz", worker_id="fleet-t7-xyz"
@@ -322,13 +322,12 @@ def test_host_can_bridge_probes_agent_bridge(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, stdout="/usr/bin/agent-bridge", stderr="")
 
     monkeypatch.setattr(fleet.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(fleet.subprocess, "run", fake_run)
-    monkeypatch.setattr(fleet, "no_window_kwargs", lambda: {"creationflags": 123})
+    monkeypatch.setattr(fleet, "run_ssh_command", fake_run)
     assert fleet.host_can_bridge("Host-B") is True
     cmd = captured["cmd"]
     assert cmd[-1] == "command -v agent-bridge"
     assert cmd[-2] == "host-b"  # alias lowercased
-    assert captured["kwargs"]["creationflags"] == 123
+    assert captured["kwargs"]["timeout"] == 8.0
 
 
 def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
@@ -341,7 +340,7 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    monkeypatch.setattr(embody, "run_ssh_command", fake_run)
 
     embody.spawn_fleet_headless_worker(
         "Host-B", "t7", origin="brain", owner="fleet-t7-xyz", worker_id="fleet-t7-xyz",
@@ -419,7 +418,7 @@ def _fake_status_run(rc, stdout, stderr=""):
 )
 def test_fleet_body_verdict_classifies(monkeypatch, rc, stdout, stderr, expected):
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(embody.subprocess, "run", _fake_status_run(rc, stdout, stderr))
+    monkeypatch.setattr(embody, "run_ssh_command", _fake_status_run(rc, stdout, stderr))
     assert embody.fleet_body_verdict("Host-B", "sid-1") == expected
 
 
@@ -438,7 +437,7 @@ def test_fleet_body_verdict_unknown_without_ssh(monkeypatch):
 )
 def test_fleet_body_activity_classifies(monkeypatch, payload, expected):
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(embody.subprocess, "run", _fake_status_run(0, payload))
+    monkeypatch.setattr(embody, "run_ssh_command", _fake_status_run(0, payload))
     assert embody.fleet_body_activity("Host-B", "sid-1") == expected
 
 
