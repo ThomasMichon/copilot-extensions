@@ -44,8 +44,8 @@ const CANONICAL_REPOSITORY =
 const RUNTIME_PROVISION_TIMEOUT_MS = 180000;
 
 // --- cross-platform system-CLI invocation ---------------------------------
-// Windows invokes the payload PowerShell shims directly so arguments never
-// pass through cmd.exe source parsing. Every system-CLI call goes through here.
+// Resolve sibling payload/runtime ownership before invoking exact isolated
+// Python argv. User-controlled handoff text never becomes shell source.
 
 function resolveSystemCliDescriptor(bin) {
   const layouts = {
