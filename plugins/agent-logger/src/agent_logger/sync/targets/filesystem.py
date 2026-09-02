@@ -1562,12 +1562,11 @@ class FilesystemTarget(Target):
                             raise OSError(
                                 f"fleet scan exceeds {_MAX_FLEET_ENTRIES} entries"
                             )
-                        children.append(
-                            (
-                                entry.name,
-                                entry.stat(follow_symlinks=False).st_mode,
-                            )
-                        )
+                        try:
+                            mode = entry.stat(follow_symlinks=False).st_mode
+                        except OSError:
+                            continue
+                        children.append((entry.name, mode))
                 if relative and any(
                     name in {"session-state", "provenance", "archived"}
                     for name, _mode in children
