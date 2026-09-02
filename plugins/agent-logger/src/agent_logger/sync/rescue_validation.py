@@ -171,13 +171,15 @@ def _hash_regular(path: Path, expected_size: int) -> str:
 
 
 def _require_regular_size(path: Path, expected_size: int) -> None:
-    mode = lstat_kind(path)
-    if is_link_or_reparse(path, mode) or not stat.S_ISREG(mode):
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise RescueSourceError(f"cannot inspect {path}: {exc}") from exc
+    if is_link_or_reparse(path, info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise RescueSourceError(f"not a regular file: {path}")
-    actual_size = path.lstat().st_size
-    if actual_size != expected_size:
+    if info.st_size != expected_size:
         raise RescueSourceError(
-            f"size mismatch for {path}: expected {expected_size}, got {actual_size}"
+            f"size mismatch for {path}: expected {expected_size}, got {info.st_size}"
         )
 
 
