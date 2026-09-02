@@ -7,7 +7,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from . import sessions
 
@@ -16,6 +16,7 @@ SIDECAR_NAME = "agent-worktrees.json"
 MAX_BYTES = 128 * 1024
 MAX_RELATIONS = 128
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+SyncOutcome = Literal["written", "current", "blocked", "deferred"]
 
 
 class ProjectionError(ValueError):
@@ -298,11 +299,11 @@ def _atomic_replace(target: Path, temp_dir: Path, content: bytes) -> None:
         raise
 
 
-def sync_bound(record: Any, session_id: str) -> bool:
+def sync_bound(record: Any, session_id: str) -> SyncOutcome:
     """Best-effort projection of one bound session after record persistence."""
     relation = bound_relation(record, session_id)
     if relation is None:
-        return False
+        return "current"
     try:
         target, lock_base, temp_dir = _session_paths(session_id, writing=True)
         from . import tracking
@@ -311,14 +312,14 @@ def sync_bound(record: Any, session_id: str) -> bool:
             try:
                 current = read(session_id) or _empty_projection(session_id)
             except UnsupportedProjectionVersion:
-                return False
+                return "blocked"
             except ProjectionError:
                 current = _empty_projection(session_id)
             updated = _merge_relation(current, relation)
             if updated == current:
-                return False
+                return "current"
             encoded = _encode(updated)
             _atomic_replace(target, temp_dir, encoded)
-        return True
+        return "written"
     except Exception:
-        return False
+        return "deferred"

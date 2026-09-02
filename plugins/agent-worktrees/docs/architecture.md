@@ -382,7 +382,10 @@ error cannot roll back the authoritative lifecycle operation. Corrupt
 same-version JSON can be rebuilt from the record; an unsupported newer schema
 is preserved untouched. Reads are capped before allocation, writes are
 deterministic and skip semantic no-ops, POSIX files are private, and temporary
-staging lives outside synchronized session directories.
+staging lives outside synchronized session directories. The writer reports
+`written`, `current`, `blocked`, or `deferred`; only deferred relations remain
+dirty for a later save retry, while a newer unsupported schema is deliberately
+blocked without repeated write attempts.
 
 Beyond the head bookkeeping, `register_session` also **re-seeds this session's
 mux status-bar updater** (`_spawn_status_updater` → a detached

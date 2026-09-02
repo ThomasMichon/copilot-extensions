@@ -1762,15 +1762,18 @@ def save_record(
         )
     dirty_sessions = getattr(record, "_session_projection_dirty", set())
     if dirty_sessions:
+        remaining = set(dirty_sessions)
         try:
             from . import session_projection
 
             for session_id in sorted(dirty_sessions):
-                session_projection.sync_bound(record, session_id)
+                outcome = session_projection.sync_bound(record, session_id)
+                if outcome in {"written", "current", "blocked"}:
+                    remaining.discard(session_id)
         except Exception:
             pass
         finally:
-            record._session_projection_dirty = set()
+            record._session_projection_dirty = remaining
 
 
 def list_records(

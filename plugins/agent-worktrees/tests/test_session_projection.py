@@ -79,7 +79,7 @@ def test_semantic_noop_does_not_replace_projection(
     sidecar = session_dir / session_projection.SIDECAR_NAME
     first_stat = sidecar.stat()
 
-    assert session_projection.sync_bound(record, "session-a") is False
+    assert session_projection.sync_bound(record, "session-a") == "current"
     assert sidecar.stat().st_mtime_ns == first_stat.st_mtime_ns
 
 
@@ -410,7 +410,8 @@ def test_concurrent_projection_updates_do_not_corrupt_sidecar(
     assert loaded is not None
     assert len(loaded["relations"]) == 1
     assert loaded["relations"][0]["worktree_id"] == "wt-a"
-    assert sum(results) <= 1
+    assert results.count("written") <= 1
+    assert set(results) <= {"written", "current"}
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
@@ -436,3 +437,23 @@ def test_projection_temporary_files_stay_outside_session_tree(
 
     assert list(session_dir.glob("*.tmp")) == []
     assert (sessions._session_state_dir() / ".agent-worktrees-tmp").is_dir()
+
+
+def test_deferred_projection_remains_dirty_for_next_save(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    outcomes = iter(["deferred", "written"])
+    monkeypatch.setattr(
+        session_projection,
+        "sync_bound",
+        lambda _record, _session_id: next(outcomes),
+    )
+    tracking._next_lifecycle_revision(record, "session-a")
+
+    tracking.save_record(record)
+    assert record._session_projection_dirty == {"session-a"}
+
+    tracking.save_record(record)
+    assert record._session_projection_dirty == set()
