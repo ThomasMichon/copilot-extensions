@@ -10168,7 +10168,8 @@ def sweep_managed_worktrees(*, dry_run: bool = False,
             continue
         try:
             activity.log_event("managed_worktree_gc",
-                               worktree_id=rec.worktree_id, reason=verdict.reason)
+                               worktree_id=rec.worktree_id,
+                               reason=fresh_verdict.reason)
         except Exception:
             pass
         reason = fresh_verdict.reason + (
