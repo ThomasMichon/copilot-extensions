@@ -201,6 +201,74 @@ def test_local_target_push_handles_long_source_and_destination_paths(
         assert f.read() == "long paths"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")
+def test_filtered_push_handles_long_source_and_staging_paths(
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import provenance
+
+    src = _make_source(tmp_path)
+    dest_root = tmp_path / ("d" * 48)
+    source_parent = src / "session-state" / "abc-123" / "files"
+    destination_parent = (
+        dest_root / "m1" / "session-state" / "abc-123" / "files"
+    )
+    while len(str(source_parent)) < 260:
+        source_parent /= "x"
+        destination_parent /= "x"
+
+    source = source_parent / "events.jsonl"
+    destination = destination_parent / "events.jsonl"
+    os.makedirs(provenance._windows_extended_path(source_parent), exist_ok=True)
+    with open(
+        provenance._windows_extended_path(source),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write("selected long paths")
+    provenance_dir = src / "provenance"
+    provenance_dir.mkdir()
+    source_provenance = provenance_dir / "abc-123.json"
+    source_provenance.write_text(
+        json.dumps(
+            {
+                "provider": "agent-containers",
+                "session_id": "abc-123",
+                "capture_id": "capture-1",
+                "captured_at": "2026-09-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = LocalTarget({"path": str(dest_root)}).push(
+        src,
+        "m1",
+        {"abc-123"},
+    )
+
+    assert result.ok, result.detail
+    with open(provenance._windows_extended_path(destination), encoding="utf-8") as f:
+        assert f.read() == "selected long paths"
+    snapshot = provenance.rescue_snapshot_path(
+        dest_root / "m1",
+        "abc-123",
+        "capture-1",
+    )
+    snapshot_file = snapshot / destination.relative_to(
+        dest_root / "m1" / "session-state" / "abc-123"
+    )
+    with open(
+        provenance._windows_extended_path(snapshot_file),
+        encoding="utf-8",
+    ) as f:
+        assert f.read() == "selected long paths"
+    assert result.file_count == 8
+    assert not (
+        dest_root / "m1" / ".session-sync-replacement"
+    ).exists()
+
+
 def test_filtered_local_target_push_is_incremental(tmp_path: Path) -> None:
     src = _make_source(tmp_path)
     target = LocalTarget({"path": str(tmp_path / "dest")})
@@ -337,6 +405,30 @@ def test_recursive_cleanup_refuses_link(tmp_path: Path) -> None:
     with pytest.raises(OSError, match="reparse point"):
         filesystem._remove_path_checked(linked)
     assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read-only directory behavior")
+def test_recursive_cleanup_removes_read_only_directories(tmp_path: Path) -> None:
+    import ctypes
+
+    from agent_logger.sync import provenance
+    from agent_logger.sync.targets import filesystem
+
+    root = tmp_path / "read-only-tree"
+    child = root / "child"
+    child.mkdir(parents=True)
+    (child / "data.txt").write_text("data", encoding="utf-8")
+    set_attributes = ctypes.WinDLL("kernel32", use_last_error=True).SetFileAttributesW
+    set_attributes.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+    set_attributes.restype = ctypes.c_int
+    assert set_attributes(provenance._windows_extended_path(child), 0x1)
+    try:
+        filesystem._remove_tree_checked(root)
+    finally:
+        if child.exists():
+            set_attributes(provenance._windows_extended_path(child), 0x80)
+
+    assert not root.exists()
 
 
 def test_recovery_manifest_cannot_target_machine_root(tmp_path: Path) -> None:
