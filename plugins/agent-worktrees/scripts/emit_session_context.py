@@ -21,6 +21,8 @@ DEADLINE_SECONDS = 8.5
 SNAPSHOT_WAIT_SECONDS = 3.2
 MACHINE_TIMEOUT_SECONDS = 8.0
 CONDUCT_TIMEOUT_SECONDS = 8.0
+SNAPSHOT_TIMESTAMP_SKEW_MS = 5_000
+SNAPSHOT_MTIME_GRANULARITY_SECONDS = 2.0
 SNAPSHOT_NAMES = (
     "marketplace-overrides",
     "register-session",
@@ -90,7 +92,12 @@ def _serialize(context: str) -> str:
     )
 
 
-def _launch_keys(payload: bytes, version: str) -> tuple[str, ...]:
+def _launch_keys(
+    payload: bytes,
+    version: str,
+    *,
+    timestamp_offsets: tuple[int, ...] = (0,),
+) -> tuple[str, ...]:
     try:
         value = json.loads(payload.decode("utf-8"))
         session_id = value.get("sessionId")
@@ -122,50 +129,112 @@ def _launch_keys(payload: bytes, version: str) -> tuple[str, ...]:
     except (UnicodeDecodeError, json.JSONDecodeError, OSError, ValueError):
         return ()
 
-    timestamp_text = (
-        str(timestamp)
+    timestamp_texts = (
+        tuple(str(timestamp + offset) for offset in timestamp_offsets)
         if isinstance(timestamp, int)
-        else f"f64:{struct.pack('>d', timestamp).hex()}"
+        else (f"f64:{struct.pack('>d', timestamp).hex()}",)
     )
     keys = []
-    for canonical_cwd in canonical_cwds:
-        identity = json.dumps(
-            [session_id, canonical_cwd, source, version, timestamp_text],
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        keys.append(hashlib.sha256(identity).hexdigest())
+    for timestamp_text in timestamp_texts:
+        for canonical_cwd in canonical_cwds:
+            identity = json.dumps(
+                [session_id, canonical_cwd, source, version, timestamp_text],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            keys.append(hashlib.sha256(identity).hexdigest())
     return tuple(keys)
+
+
+def _sibling_hook_timestamp_offsets() -> tuple[int, ...]:
+    offsets = [0]
+    for delta in range(1, SNAPSHOT_TIMESTAMP_SKEW_MS + 1):
+        offsets.extend((-delta, delta))
+    return tuple(offsets)
+
+
+def _payload_timestamp_seconds(payload: bytes) -> float | None:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+        timestamp = value.get("timestamp")
+        if (
+            isinstance(timestamp, bool)
+            or not isinstance(timestamp, (int, float))
+            or not math.isfinite(timestamp)
+        ):
+            return None
+        return timestamp / 1000 if timestamp >= 10_000_000_000 else float(timestamp)
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+        return None
 
 
 def _snapshot_root() -> Path:
     return Path.home() / ".agent-worktrees" / ".session-context"
 
 
-def _read_snapshot(name: str, launch_keys: tuple[str, ...]) -> str | None:
+def _read_snapshot(
+    name: str,
+    launch_keys: tuple[str, ...],
+    *,
+    min_mtime: float | None = None,
+) -> str | None:
     root = _snapshot_root()
-    for launch_key in launch_keys:
-        json_path = root / f"{name}-{launch_key}.json"
+    ranks = {launch_key: index for index, launch_key in enumerate(launch_keys)}
+    candidates: list[tuple[int, Path, str, bool]] = []
+    try:
+        paths = list(root.iterdir())
+    except OSError:
+        return None
+    prefix = f"{name}-"
+    for path in paths:
+        filename = path.name
+        if not filename.startswith(prefix):
+            continue
+        is_json = filename.endswith(".json")
+        launch_key = filename[
+            len(prefix) : -len(".json") if is_json else None
+        ]
+        rank = ranks.get(launch_key)
+        if rank is not None:
+            candidates.append((rank, path, launch_key, is_json))
+
+    for _, path, launch_key, is_json in sorted(candidates):
         try:
-            value = json.loads(json_path.read_text(encoding="utf-8-sig"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            pass
-        else:
+            if path.is_symlink() or not path.is_file():
+                continue
+            if min_mtime is not None and path.stat().st_mtime < min_mtime:
+                continue
+        except OSError:
+            continue
+        if is_json:
+            try:
+                value = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
             if (
                 isinstance(value, dict)
                 and value.get("launchKey") == launch_key
                 and isinstance(value.get("output"), str)
             ):
-                return _context(value["output"])
-
-        text_path = root / f"{name}-{launch_key}"
+                context = _context(value["output"])
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                return context
+            continue
         try:
-            raw = text_path.read_text(encoding="utf-8")
+            raw = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         stored_key, separator, output = raw.partition("\n")
         if separator and stored_key == launch_key:
-            return _context(output)
+            context = _context(output)
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return context
     return None
 
 
@@ -175,10 +244,23 @@ def _await_snapshots(
     *,
     deadline: float,
 ) -> dict[str, str]:
-    launch_keys = _launch_keys(payload, version)
+    launch_keys = _launch_keys(
+        payload,
+        version,
+        timestamp_offsets=_sibling_hook_timestamp_offsets(),
+    )
     if not launch_keys:
         return {name: "" for name in SNAPSHOT_NAMES}
     results: dict[str, str] = {}
+    payload_timestamp = _payload_timestamp_seconds(payload)
+    min_mtime = (
+        payload_timestamp
+        - (SNAPSHOT_TIMESTAMP_SKEW_MS / 1000)
+        - SNAPSHOT_MTIME_GRANULARITY_SECONDS
+        if payload_timestamp is not None
+        else time.time()
+        - SNAPSHOT_MTIME_GRANULARITY_SECONDS
+    )
     optional_deadline = min(deadline, time.monotonic() + SNAPSHOT_WAIT_SECONDS)
     while len(results) < len(SNAPSHOT_NAMES):
         for name in SNAPSHOT_NAMES:
@@ -187,7 +269,11 @@ def _await_snapshots(
             if name != "register-session" and time.monotonic() >= optional_deadline:
                 results[name] = ""
                 continue
-            context = _read_snapshot(name, launch_keys)
+            context = _read_snapshot(
+                name,
+                launch_keys,
+                min_mtime=min_mtime,
+            )
             if context is not None:
                 results[name] = context
         if len(results) == len(SNAPSHOT_NAMES) or time.monotonic() >= deadline:
