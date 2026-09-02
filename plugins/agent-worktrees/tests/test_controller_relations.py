@@ -108,6 +108,55 @@ def test_legacy_creation_metadata_stays_read_only_until_explicit_backfill(
     assert "owner_ref: host/example/parent#controller-session" in migrated
 
 
+def test_explicit_backfill_migrates_legacy_controller_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "child.yaml"
+    path.write_text(
+        "worktree_id: child\n"
+        "branch: worktree/child\n"
+        "worktree_path: /tmp/child\n"
+        "repo: example\n"
+        "machine: host\n"
+        "platform: windows\n"
+        "started_at: 2026-01-01T00:00:00\n"
+        "last_resumed_at: 2026-01-01T00:00:00\n"
+        "resume_count: 0\n"
+        "title: null\n"
+        "status: active\n"
+        "completed_at: null\n"
+        "parent_session: controller-session\n"
+        "owner_ref: host/example/parent#controller-session\n"
+        "sessions: []\n",
+        encoding="utf-8",
+    )
+    session_dir = _session_root(
+        tmp_path,
+        monkeypatch,
+        "controller-session",
+    ) / "controller-session"
+    record = tracking.load_record(path)
+
+    candidates = tracking.derive_legacy_controller_relations(record)
+    assert len(candidates) == 1
+    assert candidates[0].controller_session_id == "controller-session"
+
+    migrated = tracking.backfill_legacy_controller_relations(record, path=path)
+
+    assert len(migrated) == 1
+    reloaded = tracking.load_record(path)
+    assert reloaded.controller_revision == 1
+    assert reloaded.controllers == migrated
+    projection = json.loads(
+        (session_dir / session_projection.SIDECAR_NAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert projection["relations"][0]["role"] == "controller"
+    assert projection["relations"][0]["worktree_id"] == "child"
+
+
 def test_creation_projects_one_controller_across_multiple_children(
     tmp_path: Path,
     tmp_tracking_dir: Path,
@@ -961,11 +1010,59 @@ def test_controller_lineage_reports_forks_and_cycles(tmp_path: Path) -> None:
     assert cycle["terminal_session_id"] is None
 
 
-def test_controller_lineage_reports_restored_projection(
+def test_controller_lineage_validates_restored_projection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = _session_root(tmp_path, monkeypatch, "controller-session")
+    controller = tracking.WorktreeRecord(
+        worktree_id="parent",
+        branch="worktree/parent",
+        worktree_path="/tmp/parent",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=[
+            tracking.SessionEntry(
+                "controller-session",
+                "2026-01-01T00:00:00",
+                relation_revision=1,
+            )
+        ],
+        lifecycle_revision=1,
+        head_revision=1,
+        head_session="controller-session",
+        head_transitions=[
+            tracking.HeadTransition(
+                revision=1,
+                session_id="controller-session",
+                reason="initial",
+                at="2026-01-01T00:00:00",
+            )
+        ],
+    )
+    projection = {
+        "version": 1,
+        "session_id": "controller-session",
+        "relations": [
+            session_projection.bound_relation(
+                controller,
+                "controller-session",
+            )
+        ],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (root / "controller-session" / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
     (root / "controller-session" / "rescued-origin.json").write_text(
         "{}",
         encoding="utf-8",
@@ -996,10 +1093,98 @@ def test_controller_lineage_reports_restored_projection(
 
     findings = controller_lineage.controller_findings(
         child,
+        record_loader=lambda project, worktree_id: (
+            controller
+            if (project, worktree_id) == ("example", "parent")
+            else None
+        ),
         local_machine="host",
     )
 
-    assert findings[0]["status"] == "restored-foreign"
+    assert findings[0]["status"] == "resolved"
+    assert findings[0]["terminal_session_id"] == "controller-session"
+
+
+def test_controller_lineage_rejects_stale_restored_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _session_root(tmp_path, monkeypatch, "controller-session")
+    (root / "controller-session" / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "controller-session",
+            "relations": [{
+                "project": "example",
+                "worktree_id": "parent",
+                "role": "bound",
+                "relation_revision": 1,
+                "head_revision": 1,
+            }],
+            "overflow": False,
+            "omitted_relations": 0,
+        }),
+        encoding="utf-8",
+    )
+    (root / "controller-session" / "rescued-origin.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    controller = tracking.WorktreeRecord(
+        worktree_id="parent",
+        branch="worktree/parent",
+        worktree_path="/tmp/parent",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=[
+            tracking.SessionEntry(
+                "controller-session",
+                "2026-01-01T00:00:00",
+                relation_revision=2,
+            )
+        ],
+        lifecycle_revision=2,
+        head_revision=2,
+        head_session="controller-session",
+    )
+    child = tracking.WorktreeRecord(
+        worktree_id="child",
+        branch="worktree/child",
+        worktree_path="/tmp/child",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        controllers=[
+            tracking.ControllerRelation(
+                kind="session",
+                source="explicit",
+                relation_revision=1,
+                created_at="2026-01-01T00:00:00",
+                controller_session_id="controller-session",
+            )
+        ],
+    )
+
+    findings = controller_lineage.controller_findings(
+        child,
+        record_loader=lambda project, worktree_id: controller,
+        local_machine="host",
+    )
+
+    assert findings[0]["status"] == "restored-stale"
     assert findings[0]["terminal_session_id"] is None
 
 

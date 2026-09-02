@@ -44,6 +44,7 @@ def _controller_target(
     child: tracking.WorktreeRecord,
     relation: tracking.ControllerRelation,
     *,
+    record_loader: RecordLoader,
     projection_reader: ProjectionReader,
     local_machine: str,
 ) -> tuple[str, str, str | None, str | None]:
@@ -68,8 +69,7 @@ def _controller_target(
     if not session_id:
         return "missing-session", child.repo, None, None
     try:
-        if session_projection.is_restored(session_id):
-            return "restored-foreign", child.repo, None, session_id
+        restored = session_projection.is_restored(session_id)
         projection = projection_reader(session_id)
     except session_projection.MissingSessionTree:
         return "missing-session-tree", child.repo, None, session_id
@@ -79,6 +79,20 @@ def _controller_target(
         return "invalid-projection", child.repo, None, session_id
     if projection is None:
         return "missing-projection", child.repo, None, session_id
+    if restored:
+        validation = session_projection.validate_restored_hint(
+            session_id,
+            projection,
+            record_loader=record_loader,
+        )
+        if validation["status"] != "restored-validated":
+            return str(validation["status"]), child.repo, None, session_id
+        return (
+            "local",
+            str(validation["project"]),
+            str(validation["worktree_id"]),
+            session_id,
+        )
     bound = [
         item
         for item in projection.get("relations", [])
@@ -193,6 +207,7 @@ def controller_findings(
             target_status, project, worktree_id, session_id = _controller_target(
                 child,
                 relation,
+                record_loader=record_loader,
                 projection_reader=projection_reader,
                 local_machine=local_machine,
             )

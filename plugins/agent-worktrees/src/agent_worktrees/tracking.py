@@ -1111,6 +1111,69 @@ def _derive_initial_controller_relations(
     return relations, len(relations)
 
 
+def derive_legacy_controller_relations(
+    record: WorktreeRecord,
+) -> list[ControllerRelation]:
+    """Derive explicit controller state from one legacy creation record.
+
+    Ordinary loads and saves deliberately leave legacy creation fields alone.
+    This helper is reserved for explicit doctor/backfill flows.
+    """
+    if record.controller_metadata_opaque:
+        raise ControllerRelationError(
+            "controller metadata contains unsupported entries"
+        )
+    if record.controller_revision or record.controllers:
+        return []
+    if (
+        record.controller_raw_revision_present
+        or record.controller_raw_entries_present
+    ):
+        return []
+    if not (record.owner_ref or record.caller_worktree or record.parent_session):
+        return []
+    relations, _revision = _derive_initial_controller_relations(
+        machine=record.machine,
+        project=record.repo,
+        owner_ref=record.owner_ref,
+        caller_worktree=record.caller_worktree,
+        parent_session=record.parent_session,
+        created_at=record.started_at,
+    )
+    return relations
+
+
+def backfill_legacy_controller_relations(
+    record: WorktreeRecord,
+    *,
+    path: Path | None = None,
+) -> list[ControllerRelation]:
+    """Persist controller relations derived from legacy creation metadata."""
+    target = path or record.yaml_path
+    with _RecordLock(target, require_sidecar=True):
+        authoritative = load_record(target) if target.exists() else record
+        relations = derive_legacy_controller_relations(authoritative)
+        if not relations:
+            _sync_record_instance(record, authoritative)
+            return []
+        authoritative.controllers = relations
+        authoritative.controller_revision = max(
+            relation.relation_revision for relation in relations
+        )
+        _mark_controller_projection_dirty(
+            authoritative,
+            *(
+                relation.controller_session_id
+                for relation in relations
+                if relation.controller_session_id
+            ),
+        )
+        _save_record_unlocked(authoritative, target)
+    _flush_session_projections(authoritative)
+    _sync_record_instance(record, authoritative)
+    return relations
+
+
 def _controller_relation_matches(
     relation: ControllerRelation,
     *,
