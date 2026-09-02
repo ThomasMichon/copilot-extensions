@@ -4133,8 +4133,13 @@ def _run_picker_housekeeping() -> None:
     ):
         try:
             action()
-        except Exception:
-            pass
+        except Exception as exc:
+            append_launch_event(
+                "housekeeping_error",
+                step=action.__name__,
+                error_type=type(exc).__name__,
+                error=str(exc)[:300],
+            )
 
 
 def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:

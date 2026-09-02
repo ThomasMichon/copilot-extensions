@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from argparse import Namespace
 from types import SimpleNamespace
@@ -166,10 +167,15 @@ def test_post_refresh_callback_starts_on_worker(monkeypatch):
     assert calls[1][0] == "callback"
 
 
-def test_picker_housekeeping_continues_after_step_failure(monkeypatch):
+def test_picker_housekeeping_continues_after_step_failure(
+    monkeypatch, tmp_path
+):
     from agent_worktrees import __main__ as main
 
     calls = []
+    trace = tmp_path / "picker-launches.jsonl"
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_TRACE", str(trace))
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_ID", "housekeeping-123")
 
     def fail():
         calls.append("fail")
@@ -191,6 +197,10 @@ def test_picker_housekeeping_continues_after_step_failure(monkeypatch):
     main._run_picker_housekeeping()
 
     assert calls == ["fail", "managed", "shells", "finished"]
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    error = next(event for event in events if event["event"] == "housekeeping_error")
+    assert error["step"] == "fail"
+    assert error["error_type"] == "RuntimeError"
 
 
 def test_data_ssh_bootstrap_rows_skip_full_config(monkeypatch):
