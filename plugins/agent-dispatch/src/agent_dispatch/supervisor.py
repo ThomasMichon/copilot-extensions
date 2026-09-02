@@ -920,6 +920,39 @@ class Supervisor:
                 )
         return suspended
 
+    def bind_headless_owner_sessions(self) -> int:
+        """Attach held local headless tasks to their exact bridge session."""
+        bound = 0
+        for res in self._pool_reservations(state=SpawnState.SPAWNED):
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            if local_sid is None:
+                continue
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if (
+                not self._matches_pool(task)
+                or task.get("status") not in _LEASED
+                or not task.get("owner")
+                or task.get("owner_session_id")
+            ):
+                continue
+            try:
+                self.client.bind_owner_session(
+                    task["id"],
+                    task["owner"],
+                    local_sid,
+                    expected_generation=task.get("generation"),
+                )
+                bound += 1
+            except DispatchError:
+                log.exception(
+                    "failed to bind headless owner session for task %s",
+                    task.get("id"),
+                )
+        return bound
+
     def release_resumed_cold_tasks(self) -> int:
         """Resume each cold task in its existing ACP session."""
         resumed = 0
@@ -1897,6 +1930,7 @@ class Supervisor:
         """
         now = time.time() if now is None else now
         self.reconcile()
+        self.bind_headless_owner_sessions()
         self.suspend_idle_headless_tasks()
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks()
