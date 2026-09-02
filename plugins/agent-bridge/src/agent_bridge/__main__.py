@@ -4264,6 +4264,7 @@ def _cmd_agent(args: argparse.Namespace) -> None:
 
     # Load topology/resolver (includes auto-discovered local agents)
     resolver = build_resolver(cfg)
+    sm.set_resolver(resolver)
 
     agent_name = getattr(args, "agent", None)
     if not agent_name:

@@ -461,6 +461,24 @@ class TestSessionRoutes:
         resp = client.post("/api/v1/sessions/nonexistent/resume")
         assert resp.status_code == 404
 
+    def test_resume_provider_refresh_failure_returns_safe_502(
+        self, client, app,
+    ) -> None:
+        from agent_bridge.session_manager import ProviderTargetRefreshError
+
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr,
+            "resume_session",
+            AsyncMock(
+                side_effect=ProviderTargetRefreshError("internal provider detail")
+            ),
+        ):
+            resp = client.post("/api/v1/sessions/session-1/resume")
+
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == ProviderTargetRefreshError.public_message
+
     def test_resync_nonexistent(self, client) -> None:
         resp = client.post("/api/v1/sessions/nonexistent/resync")
         assert resp.status_code == 404
@@ -632,7 +650,10 @@ class TestSessionRoutes:
 
         mock_resolver = MagicMock()
         mock_resolver.resolve_async = AsyncMock(return_value=SpawnTarget(
-            type="local", cwd="/d", copilot_args=["--allow-all"],
+            type="local",
+            cwd="/d",
+            copilot_args=["--allow-all"],
+            venue={"kind": "provider"},
         ))
         app.state.resolver = mock_resolver
 
@@ -660,6 +681,7 @@ class TestSessionRoutes:
             json={
                 "agent": "test-agent",
                 "copilot_args": ["--additional-mcp-config", "@/tmp/run.json"],
+                "env": {"REQUEST_OVERRIDE": "kept"},
             },
         )
         assert resp.status_code == 201
@@ -669,6 +691,11 @@ class TestSessionRoutes:
         assert target.copilot_args == [
             "--allow-all", "--additional-mcp-config", "@/tmp/run.json",
         ]
+        assert target.env == {"REQUEST_OVERRIDE": "kept"}
+        assert target.venue["_agent_bridge_request_overrides"] == {
+            "env": {"REQUEST_OVERRIDE": "kept"},
+            "copilot_args": ["--additional-mcp-config", "@/tmp/run.json"],
+        }
 
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")
@@ -1167,6 +1194,34 @@ class TestWorktreeRoutes:
         assert data["session_id"] == "sess-fresh-1"
         assert data["acp_session_id"] == "acp-fresh-1"
         mgr.start_session.assert_awaited_once()
+
+    def test_resume_worktree_does_not_bypass_provider_refresh_failure(
+        self, client, app,
+    ) -> None:
+        """An unsafe provider target is never reused by fresh-start fallback."""
+        from unittest.mock import AsyncMock
+
+        from agent_bridge.session_manager import ProviderTargetRefreshError
+
+        wt_id = "anomalous-potato-wsl-20250101-180000-provider"
+        self._seed_worktree("test-agent", wt_id)
+
+        mgr: SessionManager = app.state.session_manager
+        target = SpawnTarget(type="command", worktree_id=wt_id)
+        stopped = Session("sess-provider-1", "stale-bay", target, "test-agent")
+        stopped.status = SessionStatus.STOPPED
+        stopped.acp_session_id = "acp-provider-1"
+        mgr._sessions[stopped.session_id] = stopped
+        mgr.resume_session = AsyncMock(
+            side_effect=ProviderTargetRefreshError("provider unavailable")
+        )
+        mgr.start_session = AsyncMock()
+
+        resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
+
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == ProviderTargetRefreshError.public_message
+        mgr.start_session.assert_not_awaited()
 
     # -- Worktree-scoped session reading (proxied to agent-worktrees) ------
 

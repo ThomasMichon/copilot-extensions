@@ -40,6 +40,7 @@ from ..result_snapshot import (
 )
 from ..session_manager import (
     DaemonDrainingError,
+    ProviderTargetRefreshError,
     SessionBusyError,
     SessionConflictError,
 )
@@ -589,6 +590,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             target, agent_name=agent_name, caller_id=req.caller_id,
             mcp_servers=req.mcp_servers,
             copilot_args=req.copilot_args,
+            env_overrides=req.env,
             caller_owner_ref=req.caller_owner_ref,
             model=req.model, effort=req.effort,
             parity_fault=req.parity_fault,
@@ -849,6 +851,11 @@ async def submit_prompt(
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except ProviderTargetRefreshError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=ProviderTargetRefreshError.public_message,
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -921,6 +928,11 @@ async def resync_session(session_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except ProviderTargetRefreshError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=ProviderTargetRefreshError.public_message,
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -1179,6 +1191,11 @@ async def resume_session(session_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except ProviderTargetRefreshError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=ProviderTargetRefreshError.public_message,
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

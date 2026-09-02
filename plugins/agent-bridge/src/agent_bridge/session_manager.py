@@ -42,6 +42,8 @@ from .transport import AgentProcess, SpawnTarget, _agent_worktrees_python, spawn
 
 log = logging.getLogger("agent-bridge")
 
+_REQUEST_OVERRIDES_KEY = "_agent_bridge_request_overrides"
+
 # The resume recovery ladder (#1468): a resume stall is Copilot CLI's ACP
 # startup race, not a broken session -- so on a failed/stalled resume attempt we
 # stop the wedged child and re-resume (a fresh Copilot launch re-rolls the race)
@@ -444,6 +446,15 @@ class DaemonDrainingError(Exception):
         )
 
 
+class ProviderTargetRefreshError(RuntimeError):
+    """A persisted provider target cannot be refreshed safely."""
+
+    public_message = (
+        "Provider target could not be refreshed safely; retry after repairing "
+        "provider configuration or recreate the session."
+    )
+
+
 def _workspace_key(
     agent_name: str | None,
     target: SpawnTarget,
@@ -783,6 +794,7 @@ class SessionManager:
     ) -> None:
         self._db = db
         self._sessions: dict[str, Session] = {}
+        self._resolver: Any | None = None
         # Session-Host mode is now the ONLY mode (dotfiles#1478): every local and
         # CodeSpace child lives in a survivable Session Host that outlives a
         # frontend restart. The host index is the durable session_id ->
@@ -889,6 +901,97 @@ class SessionManager:
             else float(drain_warn_interval_s)
         )
         self._rehydrate()
+
+    def set_resolver(self, resolver: Any) -> None:
+        """Attach the live resolver used for safe provider target refresh."""
+        self._resolver = resolver
+
+    @staticmethod
+    def _provider_backed_target(target: SpawnTarget) -> bool:
+        """Whether a persisted target carries namespace-provider metadata."""
+        return any(
+            isinstance(value, dict) and bool(value)
+            for value in (target.codespace, target.container, target.venue)
+        )
+
+    async def _refresh_provider_target(self, session: Session) -> None:
+        """Re-resolve a stopped provider session before spawning a new child.
+
+        Surviving Session Hosts are reattached before this seam, so only a
+        genuinely fresh launch adopts the current provider declaration.
+        Session-owned placement, caller identity, and request environment stay
+        bound to the existing bridge session.
+        """
+        if (
+            self._resolver is None
+            or not session.agent_name
+            or not self._provider_backed_target(session.target)
+        ):
+            return
+
+        persisted = session.target
+        persisted_venue = (
+            persisted.venue if isinstance(persisted.venue, dict) else {}
+        )
+        overrides = persisted_venue.get(_REQUEST_OVERRIDES_KEY)
+        if not isinstance(overrides, dict):
+            raise ProviderTargetRefreshError(
+                "Provider target predates override provenance; recreate the "
+                "session to adopt the current provider configuration"
+            )
+        request_env = overrides.get("env")
+        request_copilot_args = overrides.get("copilot_args")
+        if not isinstance(request_env, dict) or not isinstance(
+            request_copilot_args, list
+        ):
+            raise ProviderTargetRefreshError(
+                "Provider target has invalid override provenance; recreate the "
+                "session to adopt the current provider configuration"
+            )
+        try:
+            resolved = await self._resolver.resolve_async(session.agent_name)
+        except Exception as exc:
+            log.warning(
+                "Could not refresh provider target for session %s (%s)",
+                session.session_id,
+                session.agent_name,
+                exc_info=True,
+            )
+            raise ProviderTargetRefreshError(
+                "Current provider target could not be resolved; repair provider "
+                "configuration and retry"
+            ) from exc
+        refreshed = replace(
+            resolved,
+            cwd=persisted.cwd,
+            project=persisted.project,
+            worktree_id=persisted.worktree_id,
+            caller_worktree=persisted.caller_worktree,
+            caller_owner_ref=persisted.caller_owner_ref,
+            env={**resolved.env, **request_env},
+            copilot_args=[
+                *resolved.copilot_args,
+                *request_copilot_args,
+            ],
+            venue={
+                **(resolved.venue or {}),
+                _REQUEST_OVERRIDES_KEY: {
+                    "env": dict(request_env),
+                    "copilot_args": list(request_copilot_args),
+                },
+            },
+        )
+        session.target = refreshed
+        self._db.update_session_target(
+            session.session_id,
+            refreshed.to_json(),
+            refreshed.cwd,
+        )
+        log.info(
+            "Refreshed provider target for stopped session %s (%s)",
+            session.session_id,
+            session.agent_name,
+        )
 
     @property
     def is_draining(self) -> bool:
@@ -3633,6 +3736,7 @@ class SessionManager:
         permission_callback: Any | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         copilot_args: list[str] | None = None,
+        env_overrides: dict[str, str] | None = None,
         caller_owner_ref: str | None = None,
         model: str | None = None,
         effort: str | None = None,
@@ -3661,6 +3765,8 @@ class SessionManager:
             copilot_args: Optional extra ``copilot`` CLI args appended to
                 ``target.copilot_args`` for this session only (e.g. a per-run
                 ``--additional-mcp-config``). None preserves the agent's args.
+            env_overrides: Request-owned environment overrides already merged
+                into ``target.env`` by the route.
         """
         if self._draining:
             raise DaemonDrainingError("session")
@@ -3672,9 +3778,43 @@ class SessionManager:
         # THIS spawn only (a fresh target copy so a shared/cached AgentConfig
         # target is never mutated). Every spawn path appends target.copilot_args,
         # so this reaches local, SSH, and command launches uniformly.
+        existing_venue = target.venue if isinstance(target.venue, dict) else {}
+        existing_overrides = existing_venue.get(_REQUEST_OVERRIDES_KEY)
+        existing_request_env = (
+            existing_overrides.get("env")
+            if isinstance(existing_overrides, dict)
+            else None
+        )
+        existing_request_args = (
+            existing_overrides.get("copilot_args")
+            if isinstance(existing_overrides, dict)
+            else None
+        )
+        request_copilot_args = (
+            list(existing_request_args)
+            if copilot_args is None and isinstance(existing_request_args, list)
+            else list(copilot_args or [])
+        )
+        request_env = (
+            dict(existing_request_env)
+            if env_overrides is None and isinstance(existing_request_env, dict)
+            else dict(env_overrides or {})
+        )
         if copilot_args:
             target = replace(
-                target, copilot_args=[*target.copilot_args, *copilot_args]
+                target,
+                copilot_args=[*target.copilot_args, *copilot_args],
+            )
+        if self._provider_backed_target(target):
+            target = replace(
+                target,
+                venue={
+                    **(target.venue or {}),
+                    _REQUEST_OVERRIDES_KEY: {
+                        "env": request_env,
+                        "copilot_args": request_copilot_args,
+                    },
+                },
             )
         # #2178: bind the caller worktree onto the target so the worktree-resolve
         # step records it on the spawned (bridge) worktree, enabling the Picker's
@@ -4462,6 +4602,8 @@ class SessionManager:
                 )
                 session.touch()
                 return session
+
+            await self._refresh_provider_target(session)
 
             session.status = SessionStatus.STARTING
             self._db.update_session_status(
