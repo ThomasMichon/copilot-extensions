@@ -24,6 +24,7 @@ def evaluate(
     *,
     auth_findings: Sequence[str],
     registry_findings: Sequence[str],
+    registry_advisories: Sequence[str] = (),
     config_issues: Sequence[str],
     configured: bool,
 ) -> dict[str, Any]:
@@ -37,17 +38,25 @@ def evaluate(
             + ". Run `agent-codespaces doctor` for complete owner diagnostics.",
         )
     if not configured:
-        return _result(
+        result = _result(
             "configuration-empty",
             "The runtime and GitHub authentication are healthy, but no adopted "
-            "repository or config.d contribution is configured. A live CodeSpace "
-            "is not required for runtime readiness.",
+            "repository or active plugin/config.d contribution is configured. "
+            "A live CodeSpace is not required for runtime readiness.",
         )
-    return _result(
-        "ready",
-        "The runtime, GitHub authentication, and configured CodeSpace inputs are "
-        "healthy. A live CodeSpace instance is not required.",
-    )
+    else:
+        result = _result(
+            "ready",
+            "The runtime, GitHub authentication, and configured CodeSpace inputs are "
+            "healthy. A live CodeSpace instance is not required.",
+        )
+    if registry_advisories:
+        result["detail"] += (
+            " Compatibility config diagnostics: "
+            + "; ".join(registry_advisories)
+            + "."
+        )
+    return result
 
 
 def emit(result: dict[str, Any]) -> int:

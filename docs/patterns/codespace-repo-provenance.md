@@ -45,30 +45,40 @@ family) carries the venue's provenance and its in-venue plugin list, and
 seams. The harness plugin **depends on `agent-codespaces`** (the honorer) and
 writes into no repo.
 
-### Seam 1 — repo provenance via the config-provider drop-in (`config.d`)
+### Seam 1 — repo provenance via `codespaceConfig`
 
 The harness plugin **ships** its venue policy in place, as a *supplementary*
 `.agent-codespaces/config.yaml` fragment under its own `references/`, and makes it
-discoverable by dropping a **pointer** into the user-level
-`~/.agent-codespaces/config.d/` directory from a `sessionStart` hook:
+discoverable by declaring that relative path in its active `plugin.json`:
 
 ```
 <repo>-harness/
-├── plugin.json                              # dependsOn agent-codespaces; codespacePlugins (Seam 2)
-├── hooks.json                               # sessionStart -> register-config-provider.{sh,ps1}
-├── references/agent-codespaces/config.yaml  # the venue provenance (shipped, read in place)
-└── scripts/register-config-provider.{sh,ps1}
+├── plugin.json                              # codespaceConfig + codespacePlugins
+└── references/agent-codespaces/config.yaml  # the venue provenance (read in place)
 ```
 
-The hook writes one schema-v1 JSON pointer — normally through
-`agent-codespaces/scripts/write-config-dropin.{ps1,sh}` — into
-`~/.agent-codespaces/config.d/`. It records the plugin's exact
-`name@marketplace`, canonical in-place plugin root, and absolute `config.yaml`
-target. `agent-codespaces` verifies that the source is effectively enabled and
-still resolves to that exact root before it reads the target, then merges it at
-the **lowest precedence** — a provider *default* that any adopted-repo/cwd config
-still overrides. The old `<repo>-harness.conf` single-path shape remains a
-recognized, advisory legacy format only during migration.
+```jsonc
+{
+  "name": "example-web-harness",
+  "dependencies": [
+    { "name": "agent-codespaces", "marketplace": "copilot-extensions" }
+  ],
+  "codespaceConfig": "references/agent-codespaces/config.yaml"
+}
+```
+
+`agent-codespaces` uses effective plugin activation as authority, reads the
+declaration from that plugin's identity-verified active root, proves the target
+is a contained regular readable file, validates the existing supplementary
+config shape, and merges it at the **lowest precedence**. Any adopted-repo/cwd
+config still overrides it. Invalid declarations are isolated and surfaced in
+doctor/readiness diagnostics with the plugin identity, manifest, target, and
+reason. A disabled plugin contributes nothing.
+
+User-level `config.d` pointers remain compatibility inputs, not required
+authority. When a valid active declaration and a pointer claim the same plugin
+identity, the active declaration wins and the pointer is reported separately as
+superseded (or with its own stale/malformed finding).
 
 The provenance itself lives under `repos.<vessel>`:
 
@@ -94,13 +104,13 @@ repos:
 to agent-bridge as the ACP `session/new` cwd — so a dispatched agent's tools are
 rooted in the product checkout.
 
-**Why a pointer, not a copy, and not a writeback:** the edge stays one-way and
-dependency-free. The plugin ships a default and *points at it in place*;
-agent-codespaces discovers it dynamically; neither writes into the other's repo; a
-plugin update keeps the pointed config live (no stale copy). Because it merges
-**last**, it never overrides a consumer who *does* keep an adopted repo — it is the
-default when there is none. This keeps the *install/adopt boundary* intact: a
-provider default is discovered, not an adopt-time repo mutation.
+**Why a manifest declaration, not a copy, pointer, or writeback:** the edge stays
+one-way and dependency-free. The plugin ships a default and declares it in
+place; agent-codespaces discovers it from the already-active payload; neither
+writes into user state or another repo. A plugin update keeps the target and
+declaration aligned. Because provider config merges last, it never overrides a
+consumer who keeps an adopted repo — it is the default when there is none. This
+keeps the *install/adopt boundary* intact.
 
 ### Seam 2 — in-venue plugins via `codespacePlugins`
 
@@ -135,7 +145,7 @@ control harness (3 plugins enabled)                     GitHub CodeSpace
 ┌─────────────────────────────────────────┐            ┌────────────────────────────┐
 │ agent-bridge   ── codespace:<name> ─────▶│  dispatch  │ /workspaces/<product>       │
 │ agent-codespaces (honors both seams)     │──────────▶ │  + <product>-agent plugin   │
-│ <repo>-harness  ── config.d pointer      │            │    (injected, Seam 2)       │
+│ <repo>-harness  ── codespaceConfig       │            │    (injected, Seam 2)       │
 │                 └─ codespacePlugins       │            │  ACP cwd = provenance folder │
 └─────────────────────────────────────────┘            └────────────────────────────┘
      Seam 1 gives provenance ─────────────┘  (workspace_repo -> /workspaces/<product>)
@@ -158,20 +168,19 @@ control harness (3 plugins enabled)                     GitHub CodeSpace
   `setup-venue` that writes config + tools into a control-plane repo for a full
   build-capable venue — stays available for consumers who want it, but is **not
   required** for the golden path.)
-- **One-way, dependency-free edges.** Both seams are discovery, not coupling: a
-  filesystem pointer and an unrecognized manifest field. `agent-codespaces` never
-  imports the harness plugin; the harness plugin never writes into agent-codespaces'
-  state beyond its own drop-in pointer. A stale/uninstalled provider is skipped, not
-  fatal; it warns with an actionable finding, and `agent-codespaces doctor`
-  identifies the exact pointer and cleanup/re-registration remedy under the
-  suite-wide
-  [`drop-in-registry-hygiene`](drop-in-registry-hygiene.md) contract.
+- **One-way, dependency-free edges.** Both seams are unrecognized manifest
+  fields consumed only by agent-codespaces. It never imports the provider plugin,
+  and the provider writes no agent-codespaces state. A stale or malformed
+  declaration is isolated, warns with an actionable finding, and is reported by
+  `agent-codespaces doctor` under the suite-wide
+  [`drop-in-registry-hygiene`](drop-in-registry-hygiene.md) fault-isolation
+  contract.
 - **Provenance is authoritative, not guessed.** `workspace_repo` makes the
   vessel→product link explicit, so the ACP cwd is the product checkout by
   construction — not a fragile parse of the launch string, and not `/home/<user>`.
-- **Precedence keeps adoption sovereign.** The drop-in merges last, so a consumer
-  who *does* adopt a repo config always wins; the provider is the floor, never a
-  ceiling.
+- **Precedence keeps adoption sovereign.** Provider config merges last, so a
+  consumer who adopts a repo config always wins; the provider is the floor,
+  never a ceiling.
 
 ## Anti-patterns
 
@@ -179,9 +188,11 @@ control harness (3 plugins enabled)                     GitHub CodeSpace
   The harness plugin is central-harness-only; the `<repo>-agent` is injected into the
   CodeSpace, never enabled on the harness. (See the naming/propagation grammar in
   `authoring-harness-plugins`.)
-- **Copying the provider `config.yaml` into `config.d/`** instead of a pointer — a
-  copy drifts on plugin update. Ship the config in `references/` and point at it.
-- **Relying on the drop-in to *override* a consumer's config.** It is lowest
+- **Materializing a user-level pointer or config copy as required authority.**
+  Ship the config in `references/` and declare its relative path in
+  `codespaceConfig`; compatibility pointers must not override the active
+  declaration.
+- **Relying on the provider to *override* a consumer's config.** It is lowest
   precedence by design; put anything that must win in the consumer's adopted repo.
 - **Omitting the `agent-codespaces` dependency** from a plugin that uses either
   seam. The honorer must be present for the seams to fire.
@@ -194,8 +205,8 @@ control harness (3 plugins enabled)                     GitHub CodeSpace
 - Authoring the plugin family: the `authoring-harness-plugins` skill
   (`customizing-copilot`) — this pattern is its CodeSpace-venue provisioning arm.
 - The honorer's surfaces: `plugins/agent-codespaces/README.md`
-  (§ *Repo provenance & the config-provider seam*), and `config.py`
-  (`discover_dropin_configs`, `effective_acp_command_for`,
+  (§ *Repo provenance & the active-plugin config seam*), and `config.py`
+  (`scan_config_providers`, `effective_acp_command_for`,
   `resolved_workspace_folder_for`), `codespace_plugins.py`
   (`resolve_codespace_plugins`).
 - The provider-manifest seam agent-codespaces uses to reach agent-bridge:
