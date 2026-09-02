@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from .config_sources import SSHConfig
-from .forward import _creation_flags, build_forward_ssh_args
+from .forward import build_forward_ssh_args
+from .process import ssh_subprocess_kwargs, terminate_ssh_process_tree
 
 log = logging.getLogger("ssh-manager.relay")
 
@@ -151,8 +151,7 @@ class SupervisedRelayForward:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
-                creationflags=_creation_flags(),
-                start_new_session=(sys.platform != "win32"),
+                **ssh_subprocess_kwargs(),
             )
             self._proc = proc
             try:
@@ -351,10 +350,7 @@ class SupervisedRelayForward:
     @staticmethod
     async def _kill(proc: asyncio.subprocess.Process) -> None:
         if proc.returncode is None:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            await terminate_ssh_process_tree(proc)
         try:
             await asyncio.wait_for(proc.communicate(), timeout=5.0)
         except (asyncio.TimeoutError, TimeoutError, ProcessLookupError):

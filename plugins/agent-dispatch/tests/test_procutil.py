@@ -103,9 +103,88 @@ def test_background_capture_preserves_timeout_failure(monkeypatch):
     assert procutil.run_background_capture(["probe"], timeout=3) is None
 
 
+def test_ssh_subprocess_kwargs_uses_hidden_console_on_windows(monkeypatch):
+    class FakeStartupInfo:
+        def __init__(self):
+            self.dwFlags = 0
+            self.wShowWindow = None
+
+    monkeypatch.setattr(procutil.sys, "platform", "win32")
+    monkeypatch.setattr(procutil.subprocess, "STARTUPINFO", FakeStartupInfo, raising=False)
+    monkeypatch.setattr(procutil.subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
+    monkeypatch.setattr(procutil.subprocess, "SW_HIDE", 0, raising=False)
+    monkeypatch.setattr(procutil.subprocess, "CREATE_NEW_CONSOLE", 16, raising=False)
+
+    kwargs = procutil.ssh_subprocess_kwargs()
+
+    assert kwargs["creationflags"] == 16
+    startupinfo = kwargs["startupinfo"]
+    assert startupinfo.dwFlags & 1
+    assert startupinfo.wShowWindow == 0
+
+
+def test_ssh_capture_reaps_tree_on_timeout(monkeypatch):
+    class FakeProc:
+        returncode = None
+
+        def communicate(self, *, input, timeout):
+            raise subprocess.TimeoutExpired("ssh", timeout)
+
+    fake_proc = FakeProc()
+    reaped = []
+    monkeypatch.setattr(procutil.subprocess, "Popen", lambda *_a, **_k: fake_proc)
+    monkeypatch.setattr(
+        procutil, "terminate_ssh_process_tree", lambda proc: reaped.append(proc)
+    )
+
+    assert procutil.run_ssh_capture(["ssh", "example"], timeout=3) is None
+    assert reaped == [fake_proc]
+
+
+def test_ssh_command_reaps_tree_on_keyboard_interrupt(monkeypatch):
+    class FakeProc:
+        returncode = None
+
+        def communicate(self, *, input, timeout):
+            raise KeyboardInterrupt
+
+    fake_proc = FakeProc()
+    reaped = []
+    monkeypatch.setattr(procutil.subprocess, "Popen", lambda *_a, **_k: fake_proc)
+    monkeypatch.setattr(
+        procutil, "terminate_ssh_process_tree", lambda proc: reaped.append(proc)
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        procutil.run_ssh_command(["ssh", "example"], timeout=3)
+
+    assert reaped == [fake_proc]
+
+
+def test_terminate_ssh_tree_ignores_already_exited_signal_race():
+    class FakeProc:
+        pid = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            raise ProcessLookupError
+
+        def wait(self, timeout=None):
+            return 0
+
+    procutil.terminate_ssh_process_tree(FakeProc())
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows console integration")
-def test_background_capture_keeps_console_descendants_off_default_terminal():
-    """A captured console root must also suppress its real console descendants."""
+@pytest.mark.parametrize(
+    "capture",
+    [procutil.run_background_capture, procutil.run_ssh_capture],
+    ids=["no-window", "hidden-console"],
+)
+def test_capture_keeps_console_descendants_off_default_terminal(capture):
+    """Both console strategies must suppress real console descendants."""
     git = shutil.which("git")
     if git is None:
         pytest.skip("git console executable is unavailable")
@@ -162,9 +241,7 @@ def test_background_capture_keeps_console_descendants_off_default_terminal():
     result: dict[str, subprocess.CompletedProcess[str] | None] = {}
 
     def run_probe() -> None:
-        result["value"] = procutil.run_background_capture(
-            [sys.executable, "-c", child_code, git], timeout=15
-        )
+        result["value"] = capture([sys.executable, "-c", child_code, git], timeout=15)
 
     probe = threading.Thread(target=run_probe)
     probe.start()

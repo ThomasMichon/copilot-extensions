@@ -60,6 +60,14 @@ kind:
 5. **Shared helper + guard** — extract a `Start-Headless` pwsh helper (the
    `conhost --headless` wrapper) for uniform pwsh launches, and a guard that
    flags a pwsh/python launch site that isn't headless.
+6. **SSH ProxyCommand descendant containment** — tracked by #1742. Use an
+   inherited hidden console for non-interactive SSH trees on Windows because
+   `CREATE_NO_WINDOW` suppresses `ssh.exe` itself but does not reliably contain
+   console-subsystem proxy helpers. Reap the process tree on managed timeout and
+   teardown paths.
+7. **Crash-proof SSH tree ownership** — evaluate kill-on-close Windows Job
+   Objects for SSH trees whose root exits before a proxy descendant. PID-tree
+   cleanup cannot recover that already-orphaned shape reliably.
 
 ## Deferred Backlog Intake
 
@@ -139,3 +147,17 @@ against real behavior.
   it for both identity discovery and bridge liveness, and adds a Windows
   integration regression whose helper child repeatedly launches real
   `git.exe` while observing process and foreground state.
+
+### 2026-09-02 - SSH ProxyCommand descendant residual
+- Live process-tree capture found repeated non-interactive `ssh.exe` probes and
+  forwards whose direct child used `CREATE_NO_WINDOW`, while proxy helpers still
+  acquired their own console hosts.
+- #1742 adds an SSH-specific hidden-console spawn path for every ssh-manager and
+  agent-dispatch SSH launch site. Non-SSH capture retains the narrower
+  `CREATE_NO_WINDOW` primitive.
+- Managed cancellation and timeout paths now reap live SSH trees, including
+  forwards, relay channels, health checks, graceful disconnects, and dispatch
+  probes. Relay teardown still drains captured transports.
+- A Windows integration regression repeatedly launches real console descendants
+  under both capture modes while observing `OpenConsole.exe` and foreground
+  state. Standalone ssh-manager tests and the complete agent-dispatch suite pass.

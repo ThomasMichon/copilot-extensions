@@ -165,10 +165,7 @@ def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        remote_dispatch, "no_window_kwargs", lambda: {"creationflags": 123}
-    )
+    monkeypatch.setattr(remote_dispatch, "run_ssh_command", fake_run)
 
     remote_dispatch.dispatch_to_remote(
         "emancipation-cube", _args(prompt="go"), repo="gitea/x", payload="the brief"
@@ -183,7 +180,7 @@ def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
     assert "--spawn-backend embody" in remote_cmd
     assert "'do X'" in remote_cmd  # title is shell-quoted
     assert captured["input"] == "the brief"  # payload streamed over stdin
-    assert captured["kwargs"]["creationflags"] == 123
+    assert captured["kwargs"]["timeout"] is None
 
 
 def test_dispatch_to_remote_keeps_producer_capability_out_of_argv(monkeypatch):
@@ -195,8 +192,7 @@ def test_dispatch_to_remote_keeps_producer_capability_out_of_argv(monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
-    monkeypatch.setattr(remote_dispatch, "no_window_kwargs", lambda: {})
+    monkeypatch.setattr(remote_dispatch, "run_ssh_command", fake_run)
 
     remote_dispatch.dispatch_to_remote(
         "emancipation-cube",
@@ -233,8 +229,7 @@ def test_dispatch_to_remote_fetches_capability_once_for_argv_and_stdin(
         return "fetched-once" if len(fetches) == 1 else None
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
-    monkeypatch.setattr(remote_dispatch, "no_window_kwargs", lambda: {})
+    monkeypatch.setattr(remote_dispatch, "run_ssh_command", fake_run)
     monkeypatch.setattr(remote_dispatch, "producer_capability", fetch)
 
     remote_dispatch.dispatch_to_remote(
@@ -266,8 +261,7 @@ def test_dispatch_to_remote_empty_explicit_capability_keeps_envelope_framing(
         return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
-    monkeypatch.setattr(remote_dispatch, "no_window_kwargs", lambda: {})
+    monkeypatch.setattr(remote_dispatch, "run_ssh_command", fake_run)
 
     remote_dispatch.dispatch_to_remote(
         "emancipation-cube",
@@ -394,10 +388,7 @@ def test_browse_remote_builds_ssh_command(monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        remote_dispatch, "no_window_kwargs", lambda: {"creationflags": 123}
-    )
+    monkeypatch.setattr(remote_dispatch, "run_ssh_command", fake_run)
 
     out = remote_dispatch.browse_remote("emancipation-cube", ["agent-dispatch", "list"])
     cmd = captured["cmd"]
@@ -407,7 +398,7 @@ def test_browse_remote_builds_ssh_command(monkeypatch):
     assert "ConnectTimeout=5" in cmd
     assert cmd[-1] == "agent-dispatch list"
     assert out.stdout == "[]"
-    assert captured["kwargs"]["creationflags"] == 123
+    assert captured["kwargs"]["timeout"] is None
 
 
 def test_browse_remote_unavailable_without_ssh(monkeypatch):
@@ -428,7 +419,7 @@ def test_browse_remote_lowercases_display_cased_alias(monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(remote_dispatch, "run_ssh_command", fake_run)
 
     remote_dispatch.browse_remote("Emancipation-Cube", ["agent-dispatch", "list"])
     cmd = captured["cmd"]
@@ -444,7 +435,7 @@ def test_dispatch_to_remote_lowercases_display_cased_alias(monkeypatch):
         return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(remote_dispatch, "run_ssh_command", fake_run)
 
     remote_dispatch.dispatch_to_remote(
         "Emancipation-Cube", _args(prompt="go"), repo="gitea/x", payload="brief"

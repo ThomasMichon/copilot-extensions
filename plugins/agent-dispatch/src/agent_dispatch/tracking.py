@@ -38,8 +38,9 @@ from typing import Any
 from . import remote_dispatch
 from .procutil import (
     agent_bridge_launch_prefix,
-    run_background_capture,
     run_agent_worktrees_capture,
+    run_background_capture,
+    run_ssh_capture,
 )
 
 #: Sentinel distinguishing "local machine not yet computed" from a resolved
@@ -140,6 +141,8 @@ def _run_capture(
     argv: list[str], *, timeout: float
 ) -> subprocess.CompletedProcess[str] | None:
     """Run a passive probe without allocating a headed Windows console."""
+    if os.path.basename(argv[0]).casefold() in {"ssh", "ssh.exe"}:
+        return run_ssh_capture(argv, timeout=timeout)
     return run_background_capture(argv, timeout=timeout)
 
 

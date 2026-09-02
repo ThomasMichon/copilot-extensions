@@ -22,6 +22,7 @@ from .platform import (
     ensure_socket_dir,
     socket_path_for_host,
 )
+from .process import ssh_subprocess_kwargs
 
 log = logging.getLogger("ssh-manager")
 
@@ -53,14 +54,6 @@ def _creation_flags() -> int:
     if sys.platform == "win32":
         return subprocess.CREATE_NO_WINDOW
     return 0
-
-
-def _subprocess_kwargs(**kwargs):  # noqa: ANN003, ANN202
-    """Common subprocess isolation kwargs for SSH children."""
-    kwargs["creationflags"] = _creation_flags()
-    if sys.platform != "win32":
-        kwargs["start_new_session"] = True
-    return kwargs
 
 
 async def _terminate_process_tree(
@@ -301,7 +294,7 @@ class ConnectionManager:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            **_subprocess_kwargs(),
+            **ssh_subprocess_kwargs(),
         )
 
         # Wait briefly for connection to establish or fail
@@ -419,7 +412,7 @@ class ConnectionManager:
             ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            **_subprocess_kwargs(),
+            **ssh_subprocess_kwargs(),
         )
 
         timed_out = False
@@ -482,7 +475,7 @@ class ConnectionManager:
             # POSIX: give the ssh child its own session/process group so
             # teardown signals only the ssh process tree -- never the parent's
             # group. Windows uses taskkill /T against the root pid.
-            **_subprocess_kwargs(limit=_STDIO_CHANNEL_LIMIT_BYTES),
+            **ssh_subprocess_kwargs(limit=_STDIO_CHANNEL_LIMIT_BYTES),
         )
 
         info.child_processes.append(proc)
@@ -521,10 +514,13 @@ class ConnectionManager:
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
-                    **_subprocess_kwargs(),
+                    **ssh_subprocess_kwargs(),
                 )
                 await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except (TimeoutError, asyncio.TimeoutError, OSError) as e:
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                await _terminate_process_tree(proc)
+                log.warning("Graceful disconnect failed for %s: %s", host, e)
+            except OSError as e:
                 log.warning("Graceful disconnect failed for %s: %s", host, e)
 
         # Kill master process if still running

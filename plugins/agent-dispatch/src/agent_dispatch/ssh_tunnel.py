@@ -31,7 +31,11 @@ import subprocess
 import time
 from dataclasses import dataclass
 
-from .procutil import no_window_kwargs
+from .procutil import (
+    run_ssh_command,
+    ssh_subprocess_kwargs,
+    terminate_ssh_process_tree,
+)
 
 
 class TunnelUnavailable(RuntimeError):
@@ -101,14 +105,7 @@ def _ssh_capture(exe: str, alias: str, remote_cmd: str, timeout: float) -> str:
     Raises :class:`TunnelUnavailable` on ssh error / non-zero exit."""
     cmd = [exe, "-o", "BatchMode=yes", alias, remote_cmd]
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            **no_window_kwargs(),
-        )
+        proc = run_ssh_command(cmd, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
         raise TunnelUnavailable(f"ssh to {alias!r} failed: {exc}") from exc
     if proc.returncode != 0:
@@ -145,11 +142,7 @@ class CoordinatorTunnel:
         """Terminate the SSH forward (idempotent)."""
         proc = self._proc
         if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            terminate_ssh_process_tree(proc)
 
 
 def open_coordinator_tunnel(
@@ -213,7 +206,7 @@ def _open_forward_once(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
-        **no_window_kwargs(),
+        **ssh_subprocess_kwargs(),
     )
     deadline = time.monotonic() + ready_timeout
     while time.monotonic() < deadline:
@@ -228,11 +221,7 @@ def _open_forward_once(
             )
         time.sleep(0.1)
     # Timed out: tear the half-open forward down before returning None.
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    terminate_ssh_process_tree(proc)
     return None
 
 

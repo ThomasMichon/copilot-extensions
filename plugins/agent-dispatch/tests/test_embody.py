@@ -297,7 +297,7 @@ def test_fleet_spawn_threads_project_before_embody(monkeypatch):
     captured = {}
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(
-        embody.subprocess, "run",
+        embody, "run_ssh_command",
         lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
                            or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
     )
@@ -386,7 +386,7 @@ def test_remote_registered_agent_names_parses_over_ssh(monkeypatch):
         )
 
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    monkeypatch.setattr(embody, "run_ssh_command", fake_run)
     assert embody.remote_registered_agent_names("Pool-A") == {"sweep-worker"}
     # SSH to the lower-cased alias, running the JSON agents listing.
     assert seen["cmd"][0] == "/usr/bin/ssh"
