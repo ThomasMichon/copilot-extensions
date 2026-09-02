@@ -38,7 +38,8 @@ _SESSION_STATE_SIGNAL_KEYS = (
 )
 _INTERACTION_LAYER_KEYS = (
     "id4", "selection_id", "title", "machine", "env", "machine_env",
-    "cleanup_bucket", "ff_eligible", "state",
+    "cleanup_bucket", "ff_eligible", "state", "relation",
+    "reciprocal_relation",
 )
 
 

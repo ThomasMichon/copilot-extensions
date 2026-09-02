@@ -85,6 +85,7 @@ from . import (
     procs,
     prune,
     reclaim,
+    reciprocal_presentation,
     sessions,
     terminal_conclusion,
     tracking,
@@ -710,10 +711,16 @@ def _worktree_to_dict(
     # "Jump to caller" from a bridge worktree.
     if rec.caller_worktree:
         d["caller_worktree"] = rec.caller_worktree
+    controller_findings: list[dict[str, object]] = []
     if rec.controllers or rec.controller_revision:
         d["controller_revision"] = rec.controller_revision
         d["controllers"] = _controller_metadata(rec)
-        d["controller_findings"] = _controller_findings(rec)
+        controller_findings = _controller_findings(rec)
+        d["controller_findings"] = controller_findings
+    d["reciprocal_relation"] = reciprocal_presentation.derive(
+        rec,
+        controller_findings,
+    )
     # resource-claims: expose the backward owner link + forward outbound claim
     # list so the ledger view (and consumers like `run`) can read a worktree's
     # full claim set. Emitted only when present, keeping the envelope lean.
@@ -2911,6 +2918,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
             # Build picker menu
             menu_items: list[MenuItem] = []
+            reciprocal_relations = {
+                rec.worktree_id: reciprocal_presentation.derive(
+                    rec,
+                    _controller_findings(rec),
+                )
+                for rec, _info in classified
+            }
 
             def _wt_label(
                 rec: tracking.WorktreeRecord,
@@ -2945,7 +2959,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     else ""
                 )
                 short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
-                return f"{icon} …{short_id}  ({age}{resume}){tag}{drift_tag}{sync_tag}{state_tag}"
+                relation = reciprocal_presentation.short_label(
+                    reciprocal_relations[rec.worktree_id]
+                )
+                relation_tag = f" [{relation}]" if relation else ""
+                return (
+                    f"{icon} …{short_id}  ({age}{resume}){tag}{drift_tag}"
+                    f"{sync_tag}{state_tag}{relation_tag}"
+                )
 
             def _wt_subtitle(
                 rec: tracking.WorktreeRecord,

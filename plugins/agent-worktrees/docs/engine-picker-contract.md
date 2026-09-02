@@ -149,7 +149,7 @@ version and be coordinated with the Manager.
 
 | Verb (as invoked) | Purpose | Notes |
 |---|---|---|
-| `<project> list --json --classify --mux-details` | The core enumeration — every worktree with git-derived `state`, sync tags, and mux details. | `--include-other-platforms` (Windows), `--cache-only` (fast paint), `--stream` (incremental) are **optional** accelerators; the engine must still answer without them. An engine too old for `--classify` is tolerated by re-running without it. |
+| `<project> list --json --classify --mux-details` | The core enumeration — every worktree with git-derived `state`, sync tags, mux details, and additive normalized `reciprocal_relation` presentation state. | `--include-other-platforms` (Windows), `--cache-only` (fast paint), `--stream` (incremental) are **optional** accelerators; the engine must still answer without them. An engine too old for `--classify` is tolerated by re-running without it. A Picker facing an older engine treats a missing reciprocal field as legacy data; it never infers controller authority from partial fields. |
 | `<project> list-sessions --worktree <id> --json` | Sessions belonging to a worktree. | |
 | `<project> recent-messages --worktree <id> --limit N --json` | Last few conversation turns (the read-only Messages overlay). | |
 | `<project> profiles get --json` | Current backend-profile grid. | |

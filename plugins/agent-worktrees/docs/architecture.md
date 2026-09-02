@@ -444,6 +444,18 @@ head revision, and known bound fields must match the current authoritative
 record. Foreign, stale, newer, colliding, or multiply-bound restored state stays
 an explicit report-only finding.
 
+Worktree JSON additionally carries one normalized `reciprocal_relation`
+presentation object. Its `binding` and `control` members remain orthogonal, so a
+worktree can be both locally bound and controlled from elsewhere without
+turning the controller into its head. The top-level presentation `state`
+summarizes `bound-here`, `controlled-elsewhere`, `handed-off`, `terminal`, or
+`ambiguous` (`unbound` is the legacy/no-relation baseline). Controller
+navigation actions name an exact project/worktree/machine target only when one
+active target is unambiguous; restored, unsupported, incomplete, stale, or
+unknown findings are inspect-only. This object is advisory display data: it
+does not change classification, liveness, occupancy, cleanup, or resume
+authority.
+
 The explicit `backfill-sessions` and `doctor` paths also audit known bound and
 controller relations by exact session ID. A per-run projection budget bounds
 the work. Local missing, stale, or corrupt same-version projections can be

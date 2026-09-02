@@ -215,6 +215,12 @@ def controller_findings(
             finding["controller_worktree_id"] = worktree_id
             if target_status == "remote":
                 finding["status"] = "remote"
+                ref = (
+                    tracking.parse_claim_ref(relation.controller_ref)
+                    if relation.controller_ref
+                    else None
+                )
+                finding["controller_machine"] = ref.machine if ref else None
                 finding["terminal_session_id"] = None
                 finding["remote_session_id"] = session_id
                 findings.append(finding)
@@ -238,6 +244,7 @@ def controller_findings(
                 finding["terminal_session_id"] = None
                 findings.append(finding)
                 continue
+            finding["controller_machine"] = controller.machine
             finding["head_revision"] = controller.head_revision
             if session_id is None:
                 transition = controller.replayed_head_transition

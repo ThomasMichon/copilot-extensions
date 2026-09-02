@@ -348,12 +348,14 @@ def header_text(cols, width, label_style=C_HEADER, indent=1):
 
 ACTIVE_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
+    ("relation", "relation", 7, "l", 6),
     ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
     ("pr", "pr", 8, "l", 3), ("title", "title", 10, "l", 1),
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
+    ("relation", "relation", 7, "l", 5),
     ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
     ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
     ("title", "title", 10, "l", 1),
@@ -4963,6 +4965,8 @@ class PickerScreen(Widget):
         acts = self._session_action_verbs(rec)
         if rec.get("source_kind", "machine-ssh") != "machine-ssh":
             return acts, {}
+        if self._reciprocal_target_row(rec) is not None:
+            acts.append("Go to controller")
         # #1424/#2178: a bridge/system worktree is host-owned. Prefer jumping to
         # the *caller* worktree that requested it (the "caller-id"), when that
         # worktree is loaded; otherwise fall back to jumping to its own host tab.
@@ -4995,6 +4999,32 @@ class PickerScreen(Widget):
                 continue
 
         return acts, ext
+
+    def _reciprocal_target_row(self, rec):
+        """Return the one exact loaded controller target, if navigable."""
+        relation = rec.get("reciprocal_relation") or {}
+        actions = relation.get("actions") or []
+        candidates = [
+            action
+            for action in actions
+            if isinstance(action, dict)
+            and action.get("kind") == "navigate-worktree"
+            and isinstance(action.get("target"), dict)
+        ]
+        if len(candidates) != 1:
+            return None
+        target = candidates[0]["target"]
+        matches = [
+            row
+            for row in self.data
+            if (row.get("raw") or {}).get("id") == target.get("worktree_id")
+            and (row.get("raw") or {}).get("repo") == target.get("project")
+            and (
+                not target.get("machine")
+                or row.get("machine") == target.get("machine")
+            )
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     def _push_wt_submenu(self, rec, *, loading=False):
         """Open the native ``SubMenuScreen`` for ``rec`` IMMEDIATELY from its
@@ -5054,6 +5084,15 @@ class PickerScreen(Widget):
             # Navigate to the worktree that requested this bridge (#2178).
             self._jump_to_worktree(
                 (rec.get("raw") or {}).get("caller_worktree"))
+        elif cur == "Go to controller":
+            target = self._reciprocal_target_row(rec)
+            if target is None:
+                self.debug = "controller target is no longer uniquely available"
+            else:
+                self._jump_to_worktree(
+                    (target.get("raw") or {}).get("id"),
+                    source_id=target.get("source_id"),
+                )
         elif cur == "Sync":
             # Real per-worktree FF-sync via the shared dialog (#1427).
             self._open_sync(ids={self._row_key(rec)})
@@ -6303,6 +6342,9 @@ class SubMenuScreen(ModalScreen[tuple]):
         t.append(f" {rec.get('title', '')}\n", style="bold")
         t.append(meta1 + "\n", style=C_DIM)
         t.append(meta2, style=C_DIM)
+        relation = (rec.get("reciprocal_relation") or {}).get("state")
+        if relation and relation != "unbound":
+            t.append(f"\n relation {relation}", style=C_DIM)
         # two-step-restore: show the full session id so the operator can type
         # ``/resume <id>`` after a Bare resume; flag a live bound lock / residue.
         sid = rec.get("last_session_id")
