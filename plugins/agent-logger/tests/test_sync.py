@@ -108,6 +108,16 @@ def test_local_target_push_defers_locked_files(monkeypatch, tmp_path: Path) -> N
     assert metadata["status"] == "partial"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing violation behavior")
+def test_windows_sharing_violation_accepts_plain_oserror() -> None:
+    from agent_logger.sync.targets import filesystem
+
+    error = OSError("sharing violation")
+    error.winerror = 32
+
+    assert filesystem._is_windows_sharing_violation(error)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows path namespace behavior")
 def test_windows_extended_path_formats_drive_and_unc_paths() -> None:
     from agent_logger.sync import provenance

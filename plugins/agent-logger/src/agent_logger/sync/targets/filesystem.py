@@ -56,7 +56,6 @@ def _is_excluded_name(name: str) -> bool:
 def _is_windows_sharing_violation(exc: OSError) -> bool:
     return (
         os.name == "nt"
-        and isinstance(exc, PermissionError)
         and getattr(exc, "winerror", None) in {32, 33}
     )
 
@@ -433,7 +432,7 @@ def _ignore_session_entries(directory: str, names: list[str]) -> list[str]:
     for name in names:
         path = Path(directory) / name
         try:
-            mode = path.lstat().st_mode
+            mode = _lstat(path).st_mode
         except OSError:
             ignored.append(name)
             continue
