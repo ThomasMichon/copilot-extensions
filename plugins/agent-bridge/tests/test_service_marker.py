@@ -78,6 +78,19 @@ def test_reconcile_reads_new_daemon_from_routing_table(tmp_path, monkeypatch):
     assert data["version"] == "9.9.9"
 
 
+def test_reconcile_service_marker_unknown_version_only_updates_pid(
+    tmp_path, monkeypatch
+):
+    pid_file = tmp_path / "agent-bridge.pid"
+    monkeypatch.setattr(m, "_PID_FILE", str(pid_file))
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path)
+
+    m._reconcile_service_marker(444, None)
+
+    assert pid_file.read_text(encoding="utf-8").strip() == "444"
+    assert not (tmp_path / RUNNING_VERSION_FILE).exists()
+
+
 def test_retired_daemon_exits_gracefully_without_kill(monkeypatch):
     states = iter([True, False])
     killed = []

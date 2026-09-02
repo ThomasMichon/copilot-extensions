@@ -776,14 +776,208 @@ def _service_port() -> int:
 
 def _service_is_running() -> bool:
     """Quiet health probe -- direct GET, no client error spam."""
+    return _service_health_on_port(_service_port()) is not None
+
+
+def _service_health_on_port(
+    port: int, *, timeout: float = 2.0
+) -> dict[str, Any] | None:
+    """Return one verified agent-bridge health payload for *port*."""
+    import http.client
     import urllib.request
 
-    url = f"http://127.0.0.1:{_service_port()}/health"
+    url = f"http://127.0.0.1:{port}/health"
     try:
-        with urllib.request.urlopen(url, timeout=2) as resp:
-            return resp.status == 200
-    except Exception:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            body = json.loads(resp.read().decode("utf-8"))
+    except (
+        OSError,
+        ValueError,
+        UnicodeError,
+        http.client.HTTPException,
+        urllib.error.URLError,
+    ):
+        return None
+    if (
+        not isinstance(body, dict)
+        or body.get("status") != "ok"
+        or body.get("service") != "agent-bridge"
+        or body.get("ready") is not True
+    ):
+        return None
+    return body
+
+
+def _listening_ports_for_pid(pid: int) -> list[int]:
+    """Best-effort listener census for one daemon process."""
+    import re
+    import subprocess as sp
+
+    if pid <= 0:
+        return []
+    if sys.platform == "win32":
+        command = (
+            "@(Get-NetTCPConnection -State Listen -OwningProcess "
+            f"{pid} -ErrorAction SilentlyContinue).LocalPort | "
+            "Sort-Object -Unique"
+        )
+        try:
+            result = sp.run(
+                ["powershell", "-NoProfile", "-Command", command],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except (OSError, sp.TimeoutExpired):
+            return []
+        return sorted(
+            {
+                int(line.strip())
+                for line in (result.stdout or "").splitlines()
+                if line.strip().isdigit()
+            }
+        )
+
+    try:
+        result = sp.run(
+            ["ss", "-lptnH"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, sp.TimeoutExpired):
+        return []
+    ports: set[int] = set()
+    for line in (result.stdout or "").splitlines():
+        if f"pid={pid}," not in line:
+            continue
+        match = re.search(r":(\d+)\s", line)
+        if match:
+            ports.add(int(match.group(1)))
+    return sorted(ports)
+
+
+def _undrain_service_at(port: int) -> bool:
+    """Release one directly addressed daemon's drain gate."""
+    from .client import (
+        BridgeClient,
+        BridgeClientError,
+        BridgeConnectionError,
+    )
+    from .config import load_or_create_auth_token
+
+    client = BridgeClient(
+        f"http://127.0.0.1:{port}",
+        load_or_create_auth_token(),
+        timeout=10,
+    )
+    try:
+        client.undrain()
+    except (
+        BridgeClientError,
+        BridgeConnectionError,
+        OSError,
+        UnicodeError,
+        ValueError,
+    ):
         return False
+    return True
+
+
+def _matching_routed_version(pid: int, port: int) -> str | None:
+    """Version from a route entry that names this exact daemon."""
+    from zdd.routing import Endpoint, read_table
+
+    table = read_table(_INSTALL_DIR) or {}
+    for key in ("active", "previous"):
+        raw = table.get(key)
+        endpoint = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        if (
+            endpoint is not None
+            and endpoint.pid == pid
+            and endpoint.port == port
+        ):
+            return endpoint.version
+    return None
+
+
+def _same_endpoint(left, right) -> bool:
+    if left is None or right is None:
+        return left is right
+    return (
+        left.bind,
+        left.port,
+        left.pid,
+        left.generation,
+    ) == (
+        right.bind,
+        right.port,
+        right.pid,
+        right.generation,
+    )
+
+
+def _reconcile_live_dynamic_daemon() -> bool:
+    """Adopt a healthy port-0 singleton stranded behind stale routing.
+
+    A classic update/start can leave ``active.json`` naming a retired dynamic
+    endpoint while the real daemon still holds ``agent-bridge.0.lock`` and
+    listens elsewhere. Discover that exact singleton holder, verify its health,
+    undrain it before publication, then atomically repoint routing and service
+    markers. No process is started or killed here.
+    """
+    stale = _active_endpoint()
+    pid = _pid_from_lock(0)
+    if not pid:
+        return False
+    candidate: tuple[int, dict[str, Any]] | None = None
+    for port in _listening_ports_for_pid(pid):
+        health = _service_health_on_port(port)
+        if health is not None:
+            candidate = (port, health)
+            break
+    if candidate is None:
+        return False
+    port, _health = candidate
+
+    from zdd import routing
+
+    with routing._routing_lock(_INSTALL_DIR):
+        table = routing.read_table(_INSTALL_DIR) or {}
+        active_raw = table.get("active")
+        current = (
+            routing.Endpoint.from_dict(active_raw)
+            if isinstance(active_raw, dict)
+            else None
+        )
+        if not _same_endpoint(current, stale):
+            return False
+        if (
+            current is not None
+            and _service_health_on_port(current.port, timeout=0.25) is not None
+        ):
+            return False
+        health = _service_health_on_port(port)
+        if health is None:
+            return False
+        if health.get("draining") is True:
+            if not _undrain_service_at(port):
+                return False
+            health = _service_health_on_port(port)
+            if health is None or health.get("draining") is True:
+                return False
+        version = health.get("version") or _matching_routed_version(pid, port)
+        active, _previous = routing._publish_active_unlocked(
+            _INSTALL_DIR,
+            bind=stale.bind if stale is not None else "127.0.0.1",
+            port=port,
+            pid=pid,
+            version=version,
+        )
+    _reconcile_service_marker(pid, active.version)
+    return True
 
 
 def _read_pid_file() -> int | None:
@@ -811,6 +1005,7 @@ def _service_process_is_live(*, probe_timeout: float = 1.0) -> bool:
     candidates = {
         endpoint.pid if endpoint is not None else None,
         _read_pid_file(),
+        _pid_from_lock(0),
     }
     candidates.discard(None)
     return any(
@@ -912,7 +1107,8 @@ def _reconcile_service_marker(pid: int, version: str | None) -> None:
             fh.write(str(pid))
     except OSError:
         pass
-    write_running_version(pid=pid, version=version)
+    if version:
+        write_running_version(pid=pid, version=version)
 
 
 def _pid_on_port(port: int) -> int | None:
@@ -1371,6 +1567,8 @@ def _ensure_daemon() -> bool:
         return _service_is_running()
     if _service_is_running():
         return True
+    if _reconcile_live_dynamic_daemon():
+        return True
     if _service_process_is_live() and _wait_for_service_start():
         return True
 
@@ -1420,6 +1618,12 @@ def _service_start() -> None:
     import subprocess as sp
     if _service_is_running():
         print(f"[OK] agent-bridge already running (port {_service_port()})")
+        return
+    if _reconcile_live_dynamic_daemon():
+        print(
+            f"[OK] agent-bridge recovered dynamic route "
+            f"(port {_service_port()})"
+        )
         return
 
     used_platform_manager = False
@@ -1478,7 +1682,12 @@ def _service_stop() -> None:
     # (health already fails) while the wedged process lives on and defeats the
     # following start.
     port = _service_port()
-    victims = {_read_pid_file(), _pid_on_port(port), _pid_from_lock(port)}
+    victims = {
+        _read_pid_file(),
+        _pid_on_port(port),
+        _pid_from_lock(port),
+        _pid_from_lock(0),
+    }
     victims.discard(None)
     for victim in victims:
         _kill_pid(victim)
@@ -1498,7 +1707,17 @@ def _service_stop() -> None:
     # singleton lock -- a wedged holder answers neither, yet still blocks the next
     # start, so health alone is not a sufficient success signal.
     for _ in range(10):
-        if not _service_is_running() and _pid_from_lock(_service_port()) is None:
+        locks = {
+            _pid_from_lock(_service_port()),
+            _pid_from_lock(0),
+        }
+        locks.discard(None)
+        live_victims = {
+            victim
+            for victim in victims
+            if _pid_is_agent_bridge(victim)
+        }
+        if not _service_is_running() and not locks and not live_victims:
             print("[OK] agent-bridge stopped")
             return
         time.sleep(1)
