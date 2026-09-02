@@ -215,7 +215,7 @@ optional sibling capabilities without absorbing their responsibilities:
   movement, title updates, and identity-bound process retirement.
 - `agent-dispatch` is an optional durable handoff store. A managed worktree and
   reachable coordinator produce a pinned task; otherwise a resolvable managed
-  worktree or adopted anchor uses one one-time file in machine-local worktree
+  worktree or adopted anchor uses a one-time file in machine-local worktree
   state.
 - An active effort is optional objective context. It selects a compact
   effort-backed relay, but neither an effort nor a knowledge repository is a
