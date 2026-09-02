@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from agent_bridge import __version__
 from agent_bridge.app import create_app
 from agent_bridge.agent_registry import AgentConfig, AgentResolver
 from agent_bridge.events import EventLog
@@ -128,6 +129,7 @@ class TestHealthEndpoint:
             resp = c.get("/health")
             assert resp.status_code == 200
             assert resp.json()["status"] == "ok"
+            assert resp.json()["version"] == __version__
             assert resp.json()["topology_error_count"] == 0
             assert resp.json()["topology_warning_count"] == 0
 

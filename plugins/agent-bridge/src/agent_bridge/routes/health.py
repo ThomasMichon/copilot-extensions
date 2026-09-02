@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from .. import __version__
 from ..protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 
 router = APIRouter()
@@ -20,6 +21,7 @@ async def health(request: Request) -> dict:
     body = {
         "status": "ok",
         "service": "agent-bridge",
+        "version": __version__,
         "ready": bool(getattr(request.app.state, "ready", False)),
         "topology_ready": bool(
             getattr(request.app.state, "topology_ready", False)

@@ -98,6 +98,15 @@ def test_is_running_probes_the_dynamic_port(monkeypatch, tmp_path):
     class _Resp:
         status = 200
 
+        def read(self):
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "service": "agent-bridge",
+                    "ready": True,
+                }
+            ).encode("utf-8")
+
         def __enter__(self):
             return self
 
