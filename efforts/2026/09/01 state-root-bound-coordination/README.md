@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed plan PR, followed by serial implementation PRs
 - **Created:** 2026-08-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/agent-fabric` - resource claims, resource leasing,
   resource accountability, and claimed-resource-not-reclaimed
 - **Umbrella issue:** [#1513](https://github.com/ThomasMichon/copilot-extensions/issues/1513)
@@ -143,9 +143,9 @@ usable.
 - [x] Update `docs/architecture.md` and add or extend the focused pattern
   documentation for the state-root coordination invariant and provider
   integration boundary.
-- [ ] Bump every changed plugin version and pass version/install contracts.
-- [ ] Publish, review, self-merge, deploy, and verify the installed runtime.
-- [ ] Close #1513 after the Validation Plan matrix below passes on an installed
+- [x] Bump every changed plugin version and pass version/install contracts.
+- [x] Publish, review, self-merge, deploy, and verify the installed runtime.
+- [x] Close #1513 after the Validation Plan matrix below passes on an installed
   runtime.
 
 ## Validation Plan
@@ -177,15 +177,15 @@ acceptance feature was implemented.
   rejection and degrades safely when agent-worktrees is genuinely absent.
 - [x] An agent-worktrees version older than the preflight contract degrades as
   an absent optional peer instead of blocking provider work.
-- [ ] A bound-but-unresolvable state root produces its distinct resolution
+- [x] A bound-but-unresolvable state root produces its distinct resolution
   diagnostic, not `knowledge_binding_required`, on the installed runtime.
 - [x] Operator-initiated owner-less worktree/session creation remains available
   in an unbound harness so the operator can complete knowledge binding; only
   creation that would establish ownership or a claim is gated.
 - [x] agent-containers provider-local lease behavior is unchanged.
-- [ ] agent-containers remains independently installable (covered by the final
+- [x] agent-containers remains independently installable (covered by the final
   install-contract gate).
-- [ ] Focused suites, changed-plugin suites, lint, install-contract, generated
+- [x] Focused suites, changed-plugin suites, lint, install-contract, generated
   payload, and version-consistency gates pass.
 
 ## Proposal
@@ -273,3 +273,17 @@ agent-worktrees-owned operation, preserving the suite's a-la-carte invariant.
   agent-worktrees readiness (`python tools/run-plugin-tests.py agent-containers
   -k lease`: `38` tests passed); the ownership gate applies only when an
   agent-worktrees owner/run boundary participates.
+
+### 2026-09-01 - Completed
+- Documentation PR [#1605](https://github.com/ThomasMichon/copilot-extensions/pull/1605)
+  merged with an approval recommendation.
+- Reloading extensions released the Windows plugin-directory lock. Unified
+  update installed agent-worktrees `1.5.3-dev706`, agent-bridge
+  `0.4.0-dev412`, and agent-codespaces `0.4.0-dev103`.
+- Installed validation exercised the real `coordination-readiness` command, the
+  installed package's unbound and bound-but-unresolved classifications, and a
+  real agent-codespaces-to-agent-worktrees owner-project preflight.
+- The same update reported a nonzero legacy `zz-context-injection` alias update
+  after canonical payloads and relevant runtimes were current; tracked
+  separately in [#1606](https://github.com/ThomasMichon/copilot-extensions/issues/1606).
+- Closed #1513. Claim-handoff acceptance remains transferred to #1602.
