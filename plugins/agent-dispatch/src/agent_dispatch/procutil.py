@@ -304,6 +304,9 @@ def run_ssh_command(
             output=exc.output,
             stderr=exc.stderr,
         ) from exc
+    except KeyboardInterrupt:
+        terminate_ssh_process_tree(proc)
+        raise
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 

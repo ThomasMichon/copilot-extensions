@@ -141,6 +141,26 @@ def test_ssh_capture_reaps_tree_on_timeout(monkeypatch):
     assert reaped == [fake_proc]
 
 
+def test_ssh_command_reaps_tree_on_keyboard_interrupt(monkeypatch):
+    class FakeProc:
+        returncode = None
+
+        def communicate(self, *, input, timeout):
+            raise KeyboardInterrupt
+
+    fake_proc = FakeProc()
+    reaped = []
+    monkeypatch.setattr(procutil.subprocess, "Popen", lambda *_a, **_k: fake_proc)
+    monkeypatch.setattr(
+        procutil, "terminate_ssh_process_tree", lambda proc: reaped.append(proc)
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        procutil.run_ssh_command(["ssh", "example"], timeout=3)
+
+    assert reaped == [fake_proc]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows console integration")
 @pytest.mark.parametrize(
     "capture",

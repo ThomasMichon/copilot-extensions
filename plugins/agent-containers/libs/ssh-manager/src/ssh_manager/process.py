@@ -44,7 +44,8 @@ async def terminate_ssh_process_tree(
         return
     if sys.platform == "win32":
         try:
-            subprocess.run(  # noqa: S603, S607
+            await asyncio.to_thread(
+                subprocess.run,
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
