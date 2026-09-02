@@ -108,7 +108,7 @@
     {
       "name": "agent-machines",
       "description": "Portable restore-machinestate for Copilot CLI - converge the current machine to desired state declared in in-repo requirement packages (Copilot settings first, then repo-local modules). Machine-scoped union restore discovered from the adopted-projects registry, an eight-disposition model (enforce/ensure-present/ensure-absent/capture-only/ignore/exclude/prune/prerequisite-check), a conflict validator that detects (never auto-arbitrates) cross-package clashes, and a repo-local module runner (dry-run-aware, gated, cross-platform) so sensitive OS-mutating modules stay in each harness repo while the engine stays generic.",
-      "version": "0.1.0-dev77",
+      "version": "0.1.0-dev78",
       "source": "plugins/agent-machines"
     },
     {
@@ -132,7 +132,7 @@
     {
       "name": "context-injection",
       "description": "Deterministic session-start context aggregation for Copilot CLI plugins. Resolves the active plugin stack, runs declared pure context contributors, and emits one final additionalContext value while affected hosts retain only the last hook result.",
-      "version": "0.1.0-dev16",
+      "version": "0.1.0-dev17",
       "source": "plugins/context-injection"
     }
   ]

@@ -730,6 +730,36 @@ def test_payload_command_requires_payload_command_manifest(tmp_path):
     )
 
 
+def test_payload_command_accepts_installation_context_v2(tmp_path):
+    payload = _payload(tmp_path / "agent-demo", "agent-demo")
+    manifest = payload / "payload-invocation.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["version"] = 2
+    data["legacyRuntimeRoot"] = data.pop("runtimeRoot")
+    data["installationContext"] = "required"
+    _write(manifest, data)
+
+    report = discover_modules([_installation(payload, "agent-demo")])
+
+    assert report.valid
+    assert report.modules[0].module_id == "agent-demo/runtime"
+
+
+def test_payload_command_rejects_mixed_installation_context_versions(tmp_path):
+    payload = _payload(tmp_path / "agent-demo", "agent-demo")
+    manifest = payload / "payload-invocation.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["version"] = 2
+    data["legacyRuntimeRoot"] = data["runtimeRoot"]
+    data["installationContext"] = "required"
+    _write(manifest, data)
+
+    report = discover_modules([_installation(payload, "agent-demo")])
+
+    assert not report.valid
+    assert "version 2 installation context is invalid" in report.findings[0].message
+
+
 def test_contradictory_payload_command_shapes_match_canonical_rejection(tmp_path):
     payload = _payload(tmp_path / "agent-demo", "agent-demo")
     manifest = payload / "payload-invocation.json"

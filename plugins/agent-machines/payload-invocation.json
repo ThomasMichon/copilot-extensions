@@ -1,12 +1,18 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-machines",
   "module": "agent_machines",
-  "runtimeRoot": ".agent-machines",
+  "legacyRuntimeRoot": ".agent-machines",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_MACHINES_NO_SELFPROVISION",
   "purpose": "Discover validate and restore declared machine state",
   "installer": "init",
+  "payloadRootEnv": "AGENT_MACHINES_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/invoke-payload-runtime.sh",
+    "windows": "scripts/invoke-payload-runtime.ps1"
+  },
   "installation": {
     "legacyFootprint": {
       "paths": [

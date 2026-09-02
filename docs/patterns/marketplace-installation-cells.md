@@ -12,9 +12,10 @@
 `cell-scoped-project-adoption`, `cell-local-invocation`,
 `attributable-agent-capabilities`, `provenance-safe-transition`; and all
 corresponding Behaviors.
-**Exemplars:** none yet. Phase 3 of the
+**Exemplars:** Agent Machines is the command-only operative exemplar. Phase 3
+of the
 [marketplace-scoped-installations effort](../../efforts/active/marketplace-scoped-installations/README.md)
-will establish one on-demand runtime and one service-bearing runtime.
+still requires a service-bearing exemplar.
 
 ## Problem
 
@@ -185,6 +186,15 @@ it never scans for a same-named coordinator or contributor in another cell.
   parallel empty runtime beside an existing legacy footprint.
 - Provision, update, rollback, repair, supervision, reconciliation, and
   uninstall operate on one validated installation identity.
+- One cell-root provisioning lock serializes each complete operative build and
+  cutover transaction, not only the short receipt publications within it.
+  Snapshot copy is staged in an owned temporary sibling and atomically published;
+  recovery removes only a marker-proven, still-unproven directory created by
+  that publisher. Successful cutover republishes the active-runtime deploy
+  manifest before the adapter reports completion. The manifest keeps the latest
+  reconciled payload provenance separate from the selected runtime slot, so an
+  explicit historical rollback survives bootstrap while a later payload update
+  still reconciles. Failed compare-and-swap leaves the manifest unchanged.
 - Legacy unqualified state has no trustworthy owner. Migration requires the
   operator to name the destination cell and writes an ownership receipt.
 - New and legacy state found together are reported; registries are never merged

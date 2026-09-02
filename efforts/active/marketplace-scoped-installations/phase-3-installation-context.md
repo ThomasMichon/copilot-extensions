@@ -5,10 +5,11 @@
 
 ## Status
 
-**Non-operative foundation.** The reviewed contract, cross-platform resolver,
-immutable runtime-slot ownership, and immutable build-completion publication are
-in place before the installation root becomes operative. Phase 2 payload-local
-shims continue using legacy runtime roots.
+**Command-only exemplar operative.** The reviewed contract, cross-platform
+resolver, immutable runtime-slot ownership/completion/cutover, and the
+Agent Machines payload/runtime flow are in place. Agent Machines alone may use
+an already-active validated cell; absent/false policy remains legacy. The
+service exemplar, repair/release, and uninstall remain non-operative.
 
 ## Goals
 
@@ -645,6 +646,22 @@ only the payload version's owned slot after matching snapshot provenance to the
 exact installer payload root and version. Completion reads the build evidence
 from that canonical slot. Ambient context is not authorization, and these
 adapter actions do not complete the operative exemplar slice.
+
+The operative payload dispatcher evaluates installation-mode governance before
+runtime resolution. Absent/false policy preserves the legacy root; an active
+validated Agent Machines activation selects only its cell-local runtime.
+Requested-only, malformed, foreign, maintenance, orphaned, and stale evidence
+never falls back to legacy. First use and bootstrap reconciliation may snapshot,
+build, complete, and cut over only after that active proof; neither path writes
+activation. A fixed-identity `slot-cutover` adapter selects a completed current
+or historical slot under receipt-generation and current-marker CAS, covering
+update and rollback without adding repair or uninstall behavior. Its schema-4
+deploy manifest records reconciled payload provenance separately from active
+runtime selection: historical rollback preserves the former and changes the
+latter, so bootstrap leaves the rollback selected until a different payload
+provenance requires forward reconciliation. Snapshot publication stages into an
+owned sibling and retries may reclaim only a marker-proven, unproven
+interruption.
 
 ### Service-bearing: agent-index
 
