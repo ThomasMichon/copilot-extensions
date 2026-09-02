@@ -41,7 +41,9 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "Stop-Process -Id $targetPid" in text
     assert "reaped dedicated sshd process tree" in text
     assert "reaped orphaned dtssh proxy process tree" in text
+    assert "reaped orphaned devtunnel helper" in text
     assert "$current.ExecutablePath -ne $proxy.ExecutablePath" in text
+    assert "$current.ExecutablePath -ne $helper.ExecutablePath" in text
     assert "$parent.CreationDate -le $proxy.CreationDate" in text
     assert "$children.ContainsKey($current)" in text
     assert "$seen.Add($current)" in text
