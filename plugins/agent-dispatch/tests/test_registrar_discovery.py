@@ -7,6 +7,7 @@ import json
 import pytest
 
 from agent_dispatch.registrar import RegistrarError
+from agent_dispatch.registrar_reconcile import declared_registrations
 from agent_dispatch.registrar_discovery import (
     INREPO_SUBDIR,
     Pointer,
@@ -167,6 +168,10 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
                 "kind": "reviewer-loop",
                 "repo": "github.com/example/project",
                 "task_label": "external-review",
+                "filters": {
+                    "permit": {"machine": ["host-a", "host-b"]},
+                    "reject": {"machine": ["retired"]},
+                },
                 "emitter": {
                     "command": ["python", "tools/reviews.py", "discover"],
                     "interval_seconds": 60,
@@ -185,6 +190,16 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
                 "pool": {
                     "max_active_processes": 2,
                     "additional_labels": ["review-inbox", "external-review"],
+                    "filters": {
+                        "permit": {
+                            "machine": ["host-b", "host-c"],
+                            "role": ["review"],
+                        },
+                        "reject": {
+                            "env": ["unsafe"],
+                            "capabilities": ["dangerous"],
+                        },
+                    },
                     "body": {"type": "headless", "agent": "reviewer"},
                 },
             }
@@ -203,11 +218,133 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
     assert source.spec["id"] == "example-review-source"
     assert source.spec["evaluator_ref"] == "example-review-lifecycle"
     assert source.spec["cwd"] == str(root.resolve())
+    assert source.filters.permit == {
+        "machine": frozenset({"host-a", "host-b"})
+    }
+    assert source.filters.reject == {"machine": frozenset({"retired"})}
     assert evaluator.spec["repo"] == "github.com/example/project"
     assert evaluator.spec["evaluator_ref"] == "example-review-lifecycle"
+    assert evaluator.filters == source.filters
     assert workers.repos == "github.com/example/project"
     assert workers.labels == ("external-review", "review-inbox")
     assert workers.concurrency == 2
+    assert workers.filters.permit == {
+        "machine": frozenset({"host-b"}),
+        "role": frozenset({"review"}),
+    }
+    assert workers.filters.reject == {
+        "machine": frozenset({"retired"}),
+        "env": frozenset({"unsafe"}),
+        "capabilities": frozenset({"dangerous"}),
+    }
+    assert workers.effective_filters().permit["repo"] == frozenset(
+        {"github.com/example/project"}
+    )
+    assert workers.effective_filters().permit["task-type"] == frozenset(
+        {"example-review-workers", "external-review", "review-inbox"}
+    )
+    assert len(declared_registrations(declarations, machine="host-b")) == 3
+    assert declared_registrations(declarations, machine="host-c") == []
+
+
+@pytest.mark.parametrize(
+    ("filters", "message"),
+    [
+        ({"permit": {"region": ["west"]}}, "unknown dimension 'region'"),
+        (
+            {"permit": {"repo": ["github.com/example/project"]}},
+            "top-level placement supports only the 'machine' dimension",
+        ),
+    ],
+)
+def test_reviewer_loop_rejects_invalid_placement_filters(tmp_path, filters, message):
+    path = tmp_path / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "filters": filters,
+                "emitter": {"command": ["reviews"], "interval_seconds": 60},
+                "evaluator": {"evaluator_spec": {"rules": []}},
+                "pool": {"max_active_processes": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RegistrarError, match=message):
+        read_declaration_file_set(path)
+
+
+@pytest.mark.parametrize(
+    ("placement", "pool_filters", "message"),
+    [
+        (
+            {"permit": {"machine": ["host-a"]}},
+            {"permit": {"machine": ["host-b"]}},
+            "combined filters permit no 'machine' value",
+        ),
+        (
+            {"permit": {"machine": ["host-a"]}},
+            {"reject": {"machine": ["host-a"]}},
+            "every permitted 'machine' value is rejected",
+        ),
+    ],
+)
+def test_reviewer_loop_rejects_impossible_filter_composition(
+    tmp_path, placement, pool_filters, message
+):
+    path = tmp_path / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "filters": placement,
+                "emitter": {"command": ["reviews"], "interval_seconds": 60},
+                "evaluator": {"evaluator_spec": {"rules": []}},
+                "pool": {
+                    "max_active_processes": 1,
+                    "filters": pool_filters,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RegistrarError, match=message):
+        read_declaration_file_set(path)
+
+
+def test_reviewer_loop_preserves_pool_filters_without_placement(tmp_path):
+    path = tmp_path / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {"command": ["reviews"], "interval_seconds": 60},
+                "evaluator": {"evaluator_spec": {"rules": []}},
+                "pool": {
+                    "max_active_processes": 1,
+                    "filters": {"permit": {"role": ["review"]}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    source, evaluator, workers = read_declaration_file_set(path)
+    assert source.filters.is_empty()
+    assert evaluator.filters.is_empty()
+    assert workers.filters.permit == {"role": frozenset({"review"})}
 
 
 def test_reviewer_loop_rejects_invalid_additional_labels(tmp_path):

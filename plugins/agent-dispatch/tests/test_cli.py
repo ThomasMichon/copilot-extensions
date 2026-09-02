@@ -792,6 +792,42 @@ def test_reviewer_loop_side_load_uses_declared_emitter(
     }
 
 
+def test_reviewer_loop_side_load_refuses_inactive_source(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as m
+
+    declaration = tmp_path / "repo" / ".agent-dispatch" / "registrar" / "review.json"
+    _write_reviewer_loop(declaration)
+    payload = json.loads(declaration.read_text(encoding="utf-8"))
+    payload["filters"] = {"permit": {"machine": ["host-b"]}}
+    declaration.write_text(json.dumps(payload), encoding="utf-8")
+    observed = []
+
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient())
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.producers.emitter.run_side_load",
+        lambda *_args, **_kwargs: observed.append(True),
+    )
+
+    assert main(
+        [
+            "reviewer-loop",
+            "side-load",
+            str(declaration),
+            "pr/42",
+            "--owner",
+            "repo:repo",
+        ]
+    ) == 2
+
+    assert "inactive on machine 'host-a'" in capsys.readouterr().err
+    assert observed == []
+
+
 def test_reviewer_loop_side_load_refuses_disabled_source(
     tmp_path, monkeypatch, capsys
 ):
