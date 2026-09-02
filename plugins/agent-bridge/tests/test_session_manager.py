@@ -2362,7 +2362,7 @@ class TestResumeSession:
             "_try_reattach_live_host",
             AsyncMock(return_value=False),
         ):
-            with pytest.raises(RuntimeError, match="recreate it"):
+            with pytest.raises(RuntimeError, match="recreate the session"):
                 await session_manager.resume_session(session.session_id)
 
         resolver.resolve_async.assert_not_awaited()
