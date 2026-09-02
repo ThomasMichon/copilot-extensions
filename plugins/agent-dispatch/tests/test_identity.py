@@ -8,8 +8,26 @@ from agent_dispatch import identity
 
 
 def test_resolve_identity_via_agent_worktrees(monkeypatch):
+    calls = []
+
     def fake_run(*args, timeout):
         key = args[-1]
+        calls.append(key)
+        out = "host-a/widget/host-a-wt-123#session-1"
+        return subprocess.CompletedProcess(args, 0, out + "\n", "")
+
+    monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
+    machine, worktree = identity.resolve_identity()
+    assert machine == "host-a"
+    assert worktree == "host-a-wt-123"
+    assert calls == ["owner-ref"]
+
+
+def test_resolve_identity_falls_back_for_older_agent_worktrees(monkeypatch):
+    def fake_run(*args, timeout):
+        key = args[-1]
+        if key == "owner-ref":
+            return subprocess.CompletedProcess(args, 2, "", "unknown key")
         out = {
             "machine": "host-a",
             "worktree-dir": "/home/u/src/x.worktrees/host-a-wt-123",
@@ -17,9 +35,21 @@ def test_resolve_identity_via_agent_worktrees(monkeypatch):
         return subprocess.CompletedProcess(args, 0, out + "\n", "")
 
     monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
-    machine, worktree = identity.resolve_identity()
-    assert machine == "host-a"
-    assert worktree == "host-a-wt-123"
+    assert identity.resolve_identity() == ("host-a", "host-a-wt-123")
+
+
+def test_resolve_identity_falls_back_for_malformed_owner_ref(monkeypatch):
+    def fake_run(*args, timeout):
+        key = args[-1]
+        out = {
+            "owner-ref": "malformed",
+            "machine": "host-a",
+            "worktree-dir": "/home/u/src/x.worktrees/host-a-wt-123",
+        }[key]
+        return subprocess.CompletedProcess(args, 0, out + "\n", "")
+
+    monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
+    assert identity.resolve_identity() == ("host-a", "host-a-wt-123")
 
 
 def test_resolve_identity_absent_agent_worktrees(monkeypatch):
@@ -29,16 +59,59 @@ def test_resolve_identity_absent_agent_worktrees(monkeypatch):
     assert identity.resolve_identity() == (None, None)
 
 
+def test_resolve_identity_does_not_retry_after_owner_ref_timeout(monkeypatch):
+    calls = []
+
+    def fake_run(*args, timeout):
+        calls.append(args[-1])
+        return None
+
+    monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
+    assert identity.resolve_identity() == (None, None)
+    assert calls == ["owner-ref"]
+
+
 def test_resolve_identity_not_in_worktree(monkeypatch):
+    calls = []
+
     def fake_run(*args, timeout):
         # machine resolves, but worktree-dir is empty (not inside a worktree)
-        out = "host-a" if args[-1] == "machine" else ""
+        key = args[-1]
+        calls.append(key)
+        out = "host-a" if key == "machine" else ""
         return subprocess.CompletedProcess(args, 0, out + "\n", "")
 
     monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
     machine, worktree = identity.resolve_identity()
     assert machine == "host-a"
     assert worktree is None
+    assert calls == ["owner-ref", "machine", "worktree-dir"]
+
+
+def test_resolve_machine_skips_worktree_probe(monkeypatch):
+    calls = []
+
+    def fake_run(*args, timeout):
+        key = args[-1]
+        calls.append(key)
+        out = "host-a"
+        return subprocess.CompletedProcess(args, 0, out + "\n", "")
+
+    monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
+    assert identity.resolve_machine() == "host-a"
+    assert calls == ["machine"]
+
+
+def test_resolve_machine_does_not_retry_after_machine_timeout(monkeypatch):
+    calls = []
+
+    def fake_run(*args, timeout):
+        calls.append(args[-1])
+        return None
+
+    monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
+    assert identity.resolve_machine() is None
+    assert calls == ["machine"]
 
 
 # -- repo (lane) resolution --------------------------------------------------

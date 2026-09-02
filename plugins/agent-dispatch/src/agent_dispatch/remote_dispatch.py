@@ -89,9 +89,9 @@ def local_machine() -> str | None:
     if configured:
         return configured.strip().casefold()
 
-    from .identity import resolve_identity
+    from .identity import resolve_machine
 
-    machine = resolve_identity()[0]
+    machine = resolve_machine()
     if machine:
         return machine
     import platform

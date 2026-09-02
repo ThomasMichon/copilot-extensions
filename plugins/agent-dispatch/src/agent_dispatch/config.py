@@ -510,16 +510,16 @@ def federation_instance() -> str | None:
     """The stable directory id this node registers under.
 
     ``AGENT_DISPATCH_FEDERATION_INSTANCE`` when set; otherwise the machine id
-    resolved from context (``identity.resolve_identity``), falling back to the
+    resolved from context (``identity.resolve_machine``), falling back to the
     hostname. ``None`` only when nothing can be resolved (the caller must then
     supply one explicitly)."""
     explicit = (os.environ.get("AGENT_DISPATCH_FEDERATION_INSTANCE") or "").strip()
     if explicit:
         return explicit
     try:
-        from .identity import resolve_identity
+        from .identity import resolve_machine
 
-        machine, _worktree = resolve_identity()
+        machine = resolve_machine()
         if machine:
             return machine
     except Exception:
