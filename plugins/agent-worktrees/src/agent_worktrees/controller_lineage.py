@@ -10,6 +10,8 @@ from . import tracking
 
 RecordLoader = Callable[[str, str], tracking.WorktreeRecord | None]
 ProjectionReader = Callable[[str], dict | None]
+SessionIndex = dict[str, tracking.SessionEntry]
+SuccessorIndex = dict[str, set[str]]
 
 
 def _safe_identity_token(value: str) -> bool:
@@ -113,28 +115,46 @@ def _controller_target(
     return "local", child.repo, next(iter(targets)), session_id
 
 
-def _successors(
+def lineage_indexes(
     record: tracking.WorktreeRecord,
-    session_id: str,
-) -> set[str]:
-    entry = record.session_entry(session_id)
-    candidates = {entry.successor} if entry and entry.successor else set()
-    candidates.update(
-        handoff.successor
-        for handoff in record.handoffs
-        if handoff.predecessor == session_id and handoff.successor
-    )
-    return candidates
+) -> tuple[SessionIndex, SuccessorIndex]:
+    """Index one authoritative record for repeated bounded lineage reads."""
+    sessions: SessionIndex = {}
+    for entry in record.sessions or ():
+        sessions.setdefault(entry.session_id, entry)
+    successors: SuccessorIndex = {
+        session_id: ({entry.successor} if entry.successor else set())
+        for session_id, entry in sessions.items()
+    }
+    for handoff in record.handoffs:
+        if handoff.successor:
+            successors.setdefault(handoff.predecessor, set()).add(
+                handoff.successor
+            )
+    return sessions, successors
 
 
 def resolve_terminal_session(
     record: tracking.WorktreeRecord,
     start_session_id: str,
+    *,
+    max_steps: int | None = None,
+    session_index: SessionIndex | None = None,
+    successor_index: SuccessorIndex | None = None,
 ) -> dict[str, object]:
     """Follow explicit successor links to one terminal session."""
+    if session_index is None or successor_index is None:
+        session_index, successor_index = lineage_indexes(record)
     current = start_session_id
     visited: list[str] = []
     while True:
+        if max_steps is not None and len(visited) >= max(0, max_steps):
+            return {
+                "status": "overflow",
+                "terminal_session_id": None,
+                "lineage": visited,
+                "next_session_id": current,
+            }
         if current in visited:
             return {
                 "status": "cycle",
@@ -142,14 +162,14 @@ def resolve_terminal_session(
                 "lineage": visited + [current],
             }
         visited.append(current)
-        entry = record.session_entry(current)
+        entry = session_index.get(current)
         if entry is None:
             return {
                 "status": "missing-session",
                 "terminal_session_id": None,
                 "lineage": visited,
             }
-        successors = _successors(record, current)
+        successors = successor_index.get(current, set())
         if len(successors) > 1:
             return {
                 "status": "ambiguous",
@@ -178,6 +198,7 @@ def controller_findings(
     record_loader: RecordLoader = _default_record_loader,
     projection_reader: ProjectionReader = session_projection.read,
     local_machine: str | None = None,
+    max_lineage_steps: int | None = None,
 ) -> list[dict[str, object]]:
     """Resolve controller relations without mutating authoritative records."""
     if local_machine is None:
@@ -189,6 +210,9 @@ def controller_findings(
     findings: list[dict[str, object]] = []
     record_cache: dict[
         tuple[str, str], tracking.WorktreeRecord | None
+    ] = {}
+    lineage_cache: dict[
+        tuple[str, str], tuple[SessionIndex, SuccessorIndex]
     ] = {}
     for relation in child.controllers:
         finding: dict[str, object] = {
@@ -254,7 +278,16 @@ def controller_findings(
                     findings.append(finding)
                     continue
                 session_id = transition.session_id
-            finding.update(resolve_terminal_session(controller, session_id))
+            if cache_key not in lineage_cache:
+                lineage_cache[cache_key] = lineage_indexes(controller)
+            session_index, successor_index = lineage_cache[cache_key]
+            finding.update(resolve_terminal_session(
+                controller,
+                session_id,
+                max_steps=max_lineage_steps,
+                session_index=session_index,
+                successor_index=successor_index,
+            ))
             findings.append(finding)
         except Exception:
             finding["status"] = "error"
