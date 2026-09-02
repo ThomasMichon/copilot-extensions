@@ -440,6 +440,43 @@ def test_projection_backfill_budget_is_bounded(
     assert report["remaining"] == 1
 
 
+def test_projection_backfill_preserves_duplicate_bound_authority(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    first = _record(tmp_tracking_dir)
+    second = tracking.WorktreeRecord(
+        worktree_id="wt-b",
+        branch="worktree/wt-b",
+        worktree_path="/tmp/wt-b",
+        repo="other",
+        machine="test",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=[
+            tracking.SessionEntry("session-a", "2026-01-01T00:00:00")
+        ],
+    )
+
+    report = session_projection.backfill_relations(
+        [first, second],
+        apply=True,
+        budget=2,
+    )
+
+    assert [item["status"] for item in report["items"]] == [
+        "ambiguous-authority",
+        "ambiguous-authority",
+    ]
+    assert report["repaired"] == 0
+    assert not (session_dir / session_projection.SIDECAR_NAME).exists()
+
+
 @pytest.mark.parametrize("session_id", ["../escape", "a/b", r"a\b", ".", ".."])
 def test_invalid_session_id_is_rejected(tmp_path, monkeypatch, session_id):
     root = tmp_path / "session-state"

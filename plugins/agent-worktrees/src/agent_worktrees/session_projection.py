@@ -1053,9 +1053,13 @@ def backfill_relations(
     """Bounded explicit audit/backfill for known session projection relations."""
     candidates: list[tuple[Any, str, Literal["bound", "controller"]]] = []
     seen: set[tuple[str, str, str, str]] = set()
+    bound_owners: dict[str, set[tuple[str, str]]] = {}
     for record in sorted(records, key=lambda item: item.worktree_id):
         for entry in record.sessions or ():
             key = (record.repo, record.worktree_id, entry.session_id, "bound")
+            bound_owners.setdefault(entry.session_id, set()).add(
+                (record.repo, record.worktree_id)
+            )
             if key not in seen:
                 seen.add(key)
                 candidates.append((record, entry.session_id, "bound"))
@@ -1074,16 +1078,22 @@ def backfill_relations(
                     (record, relation.controller_session_id, "controller")
                 )
     limit = max(0, budget)
-    items = [
-        audit_relation(
-            record,
-            session_id,
-            role=role,
-            apply=apply,
-            record_loader=record_loader,
+    items = []
+    for record, session_id, role in candidates[:limit]:
+        if role == "bound" and len(bound_owners.get(session_id, set())) > 1:
+            item = _audit_item(record, session_id, role)
+            item["status"] = "ambiguous-authority"
+            items.append(item)
+            continue
+        items.append(
+            audit_relation(
+                record,
+                session_id,
+                role=role,
+                apply=apply,
+                record_loader=record_loader,
+            )
         )
-        for record, session_id, role in candidates[:limit]
-    ]
     status_counts: dict[str, int] = {}
     for item in items:
         status = str(item["status"])
