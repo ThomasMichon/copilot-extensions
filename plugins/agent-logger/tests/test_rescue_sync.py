@@ -15,9 +15,14 @@ from agent_logger import sessions
 from agent_logger.chronicle.source import ReservationStore, SyncedSessionSource
 from agent_logger.config import Config, load_config
 from agent_logger.sync import engine, rescue
-from agent_logger.sync.provenance import MAX_PROVENANCE_BYTES, rescue_snapshot_path
+from agent_logger.sync.provenance import (
+    MAX_PROVENANCE_BYTES,
+    open_regular_no_follow,
+    rescue_snapshot_path,
+)
 from agent_logger.sync.rescue_validation import RescueSourceError
 from agent_logger.sync.targets import PushResult
+from agent_logger.sync.targets import filesystem
 
 SESSION_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -433,8 +438,10 @@ def test_chronicler_capture_path_remains_immutable_after_newer_rescue(
     second = by_capture["200-b"]
 
     assert first.session_path != second.session_path
-    assert (first.session_path / "events.jsonl").read_bytes() == b'{"value":"old"}\n'
-    assert (second.session_path / "events.jsonl").read_bytes() == b'{"value":"new"}\n'
+    with open_regular_no_follow(first.session_path / "events.jsonl") as stream:
+        assert stream.read() == b'{"value":"old"}\n'
+    with open_regular_no_follow(second.session_path / "events.jsonl") as stream:
+        assert stream.read() == b'{"value":"new"}\n'
 
 
 def test_all_unjournaled_rescue_snapshots_are_discovered(tmp_path: Path) -> None:
@@ -610,17 +617,17 @@ def test_replacement_backup_is_outside_session_state_and_cleanup_failure_is_nonf
     assert rescue.push_rescues(cfg, rescue_roots=[older_root]).accepted == 1
     _write_capture(newer_root, "200-b", events=b'{"value":"new"}\n')
 
-    original_force_rmtree = sessions.force_rmtree
+    original_remove_tree = filesystem._remove_tree_checked
 
-    def fail_backup(path: Path) -> bool:
+    def fail_backup(path: Path, *, allow_nonempty: bool = False) -> None:
         if (
             path.name.endswith(".cleanup")
             and (path / "old").exists()
         ):
-            return False
-        return original_force_rmtree(path)
+            raise OSError("simulated cleanup failure")
+        original_remove_tree(path, allow_nonempty=allow_nonempty)
 
-    monkeypatch.setattr(sessions, "force_rmtree", fail_backup)
+    monkeypatch.setattr(filesystem, "_remove_tree_checked", fail_backup)
     summary = rescue.push_rescues(
         cfg,
         rescue_roots=[older_root, newer_root],
@@ -647,7 +654,7 @@ def test_replacement_backup_is_outside_session_state_and_cleanup_failure_is_nonf
         for item in discovered
     } == {"100-a", "200-b"}
 
-    monkeypatch.setattr(sessions, "force_rmtree", original_force_rmtree)
+    monkeypatch.setattr(filesystem, "_remove_tree_checked", original_remove_tree)
     _write_capture(newer_root, "300-c", events=b'{"value":"newer"}\n')
     assert rescue.push_rescues(
         cfg,
@@ -684,7 +691,7 @@ def test_filesystem_venue_failure_rolls_back_sessions_and_provenance(
     )
     from agent_logger.sync.targets import filesystem
 
-    original_replace = filesystem.os.replace
+    original_replace = filesystem._durable_replace
 
     def fail_second_provenance(src: Path, dst: Path) -> None:
         if (
@@ -695,7 +702,7 @@ def test_filesystem_venue_failure_rolls_back_sessions_and_provenance(
             raise OSError("synthetic provenance failure")
         original_replace(src, dst)
 
-    monkeypatch.setattr(filesystem.os, "replace", fail_second_provenance)
+    monkeypatch.setattr(filesystem, "_durable_replace", fail_second_provenance)
     summary = rescue.push_rescues(
         cfg,
         rescue_roots=[first_root, second_root],
@@ -736,7 +743,7 @@ def test_failed_rollback_retains_recovery_backup(
     _write_capture(newer_root, "200-b", events=b'{"value":"new"}\n')
     from agent_logger.sync.targets import filesystem
 
-    original_replace = filesystem.os.replace
+    original_replace = filesystem._durable_replace
     destination = _destination(tmp_path) / "session-state" / SESSION_ID
 
     def fail_publish_and_restore(src: Path, dst: Path) -> None:
@@ -746,7 +753,7 @@ def test_failed_rollback_retains_recovery_backup(
             raise OSError("synthetic session replacement failure")
         original_replace(src, dst)
 
-    monkeypatch.setattr(filesystem.os, "replace", fail_publish_and_restore)
+    monkeypatch.setattr(filesystem, "_durable_replace", fail_publish_and_restore)
     summary = rescue.push_rescues(
         cfg,
         rescue_roots=[older_root, newer_root],
@@ -763,7 +770,7 @@ def test_failed_rollback_retains_recovery_backup(
     assert len(recovery) == 1
     assert (recovery[0] / "events.jsonl").read_bytes() == b'{"value":"old"}\n'
 
-    monkeypatch.setattr(filesystem.os, "replace", original_replace)
+    monkeypatch.setattr(filesystem, "_durable_replace", original_replace)
     retry = rescue.push_rescues(
         cfg,
         rescue_roots=[older_root, newer_root],
@@ -783,14 +790,14 @@ def test_failure_to_mark_completed_transaction_is_target_failure(
     _write_capture(root, "100-a")
     from agent_logger.sync.targets import filesystem
 
-    original_replace = filesystem.os.replace
+    original_replace = filesystem._durable_replace
 
     def fail_completion_mark(src: Path, dst: Path) -> None:
         if src.name.endswith(".active") and dst.name.endswith(".cleanup"):
             raise OSError("synthetic completion-mark failure")
         original_replace(src, dst)
 
-    monkeypatch.setattr(filesystem.os, "replace", fail_completion_mark)
+    monkeypatch.setattr(filesystem, "_durable_replace", fail_completion_mark)
     cfg = _cfg(tmp_path)
     summary = rescue.push_rescues(cfg, rescue_roots=[root])
 
@@ -805,7 +812,7 @@ def test_failure_to_mark_completed_transaction_is_target_failure(
     )
     assert not (cfg.home / "rescue-sync" / "checkpoint.json").exists()
 
-    monkeypatch.setattr(filesystem.os, "replace", original_replace)
+    monkeypatch.setattr(filesystem, "_durable_replace", original_replace)
     retry = rescue.push_rescues(cfg, rescue_roots=[root])
     assert retry.accepted == 1
     assert not list(
