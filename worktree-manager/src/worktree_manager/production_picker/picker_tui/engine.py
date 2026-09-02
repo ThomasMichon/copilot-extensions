@@ -1098,7 +1098,13 @@ class PickerScreen(Widget):
         "ctrl+shift+right", "ctrl+shift+left", "ctrl+right", "ctrl+left",
     })
 
-    def __init__(self, source, live=False, mock_mode=None):
+    def __init__(
+        self,
+        source,
+        live=False,
+        mock_mode=None,
+        after_first_refresh=None,
+    ):
         super().__init__()
         # NF5 (#88): the native compose tree is the *sole display path* -- the
         # env toggle and the render() fallback are retired. ``render()`` survives
@@ -1232,6 +1238,7 @@ class PickerScreen(Widget):
         self.t0 = 0.0
         self.load_delay = {}
         self._frame_health = None
+        self._after_first_refresh_callback = after_first_refresh
         # Injected data source (local / SSH / fixture). ``live`` enables the
         # async per-machine loader the source supplies via ``make_loader()``.
         self.src = source
@@ -1493,16 +1500,22 @@ class PickerScreen(Widget):
         self.call_after_refresh(self._record_first_refresh)
 
     def _record_first_refresh(self):
-        if not (
+        if (
             os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH")
             or os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE")
         ):
-            return
-        from .frame_health import FrameHealthReporter
+            from .frame_health import FrameHealthReporter
 
-        self._frame_health = FrameHealthReporter.from_env()
-        if self._frame_health is not None:
-            self._frame_health.start()
+            self._frame_health = FrameHealthReporter.from_env()
+            if self._frame_health is not None:
+                self._frame_health.start()
+        callback = self._after_first_refresh_callback
+        if callable(callback):
+            threading.Thread(
+                target=callback,
+                name="picker-after-first-refresh",
+                daemon=True,
+            ).start()
 
     def on_unmount(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Kill any
@@ -8751,12 +8764,24 @@ class PickerApp(App):
     PickerScreen > #nf-body-sticky { width: 100%; height: 1; }
     """
 
-    def __init__(self, source, live=False, mock_mode=None):
+    def __init__(
+        self,
+        source,
+        live=False,
+        mock_mode=None,
+        after_first_refresh=None,
+    ):
         super().__init__()
         self._source = source
         self._live = live
         self._mock_mode = mock_mode
+        self._after_first_refresh = after_first_refresh
         self.result = None            # set by the screen on a launch decision
 
     def compose(self) -> ComposeResult:
-        yield PickerScreen(self._source, self._live, mock_mode=self._mock_mode)
+        yield PickerScreen(
+            self._source,
+            self._live,
+            mock_mode=self._mock_mode,
+            after_first_refresh=self._after_first_refresh,
+        )

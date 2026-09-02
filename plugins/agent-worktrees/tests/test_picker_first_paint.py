@@ -138,6 +138,34 @@ def test_first_refresh_callback_is_scheduled_in_every_mode(monkeypatch, live):
     assert deferred == [screen._after_first_refresh]
 
 
+def test_post_refresh_callback_starts_on_worker(monkeypatch):
+    pytest.importorskip("textual")
+    from agent_worktrees.picker_tui import engine as eng
+
+    calls = []
+
+    class InlineThread:
+        def __init__(self, target, **kwargs):
+            calls.append(("thread", kwargs))
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(eng.threading, "Thread", InlineThread)
+    screen = eng.PickerScreen(
+        object(),
+        live=False,
+        after_first_refresh=lambda: calls.append(("callback", {})),
+    )
+
+    screen._after_first_refresh()
+
+    assert calls[0][0] == "thread"
+    assert calls[0][1]["name"] == "picker-after-first-refresh"
+    assert calls[1][0] == "callback"
+
+
 def test_data_ssh_bootstrap_rows_skip_full_config(monkeypatch):
     from agent_worktrees.picker_tui import data_ssh
 

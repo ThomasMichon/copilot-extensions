@@ -66,7 +66,12 @@ def new_picker_enabled(config=None) -> bool:
     return True
 
 
-def run_tui_picker(source=None, live=False, mock_mode=None):
+def run_tui_picker(
+    source=None,
+    live=False,
+    mock_mode=None,
+    after_first_refresh=None,
+):
     """Run the TUI picker and return its result (a launch decision or None).
 
     With no source: ``live=True`` selects the multi-machine SSH source
@@ -113,7 +118,12 @@ def run_tui_picker(source=None, live=False, mock_mode=None):
     try:
         if redirect:
             sys.__stdout__ = sys.stderr
-        app = PickerApp(source, live=live, mock_mode=mock_mode)
+        app = PickerApp(
+            source,
+            live=live,
+            mock_mode=mock_mode,
+            after_first_refresh=after_first_refresh,
+        )
         from .frame_health import append_launch_event
 
         append_launch_event("textual_app_start", live=live)
