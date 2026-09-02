@@ -238,6 +238,8 @@ node "$CH" consume --handoff-id "<handoff-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" consume --locator "task:<task-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" consume --locator "file:<handoff-id>" \
+  --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" retry --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 ```
 
@@ -262,6 +264,7 @@ node $ch continue --seed $saved.seed --handoff-token $saved.id --worktree-id '<w
 node $ch consume --task-id '<task-id>' --defer-complete --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --handoff-id '<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch retry --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 ```
 

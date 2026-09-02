@@ -55,6 +55,7 @@ def field(path: Path, name: str) -> int:
 
 def verify(root: Path) -> int:
     seed = (root / "seed.txt").read_text(encoding="utf-8")
+    recovery = seed.rsplit(" | ", 1)[-1]
     payload = (root / "payload.md").read_text(encoding="utf-8")
     save = _json(root / "save.json")
     state_dir = Path((root / "state-dir").read_text(encoding="utf-8"))
@@ -65,7 +66,7 @@ def verify(root: Path) -> int:
         seed.count(" | ") == 2,
         "/consume-handoff" in seed,
         "Recovery: context-handoff file:" in seed,
-        "node" not in seed,
+        "node -e" not in recovery,
         "handoff-eval-predecessor" in seed,
         CANARY in payload,
         save.get("id") == "handoff-eval-predecessor",

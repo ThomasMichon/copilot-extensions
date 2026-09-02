@@ -231,6 +231,14 @@ function cmdConsume(args) {
       handoffId = parsed.id;
     }
   }
+  const targetCount = [taskId, handoffId, args.path].filter(Boolean).length;
+  if (targetCount !== 1) {
+    process.stderr.write(
+      "handoff-cli consume: exactly one of --locator, --task-id, " +
+      "--handoff-id, or --path is required\n",
+    );
+    process.exit(2);
+  }
   const consumed = taskId
     ? consumeDispatchHandoffTask(
         cwd,

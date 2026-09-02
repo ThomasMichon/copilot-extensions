@@ -355,6 +355,7 @@ node "$CH" continue --seed "<HANDOFF_SEED>" --handoff-token "<HANDOFF_TOKEN>"
 node "$CH" consume  --task-id "<task-id>" --defer-complete
 node "$CH" consume  --handoff-id "<handoff-id>"
 node "$CH" consume  --locator "task:<task-id>"
+node "$CH" consume  --locator "file:<handoff-id>"
 node "$CH" retry
 ```
 

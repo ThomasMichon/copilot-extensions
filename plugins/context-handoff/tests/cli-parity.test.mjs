@@ -23,6 +23,33 @@ test("payload-local CLI exposes the extension fallback flow", () => {
   assert.match(result.stdout, /--handoff-token/);
 });
 
+test("consume requires exactly one recovery target", () => {
+  const missing = spawnSync(
+    process.execPath,
+    [cli, "consume", "--session-id", "successor-session"],
+    { encoding: "utf8" },
+  );
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /exactly one of --locator/);
+
+  const ambiguous = spawnSync(
+    process.execPath,
+    [
+      cli,
+      "consume",
+      "--session-id",
+      "successor-session",
+      "--task-id",
+      "task-1",
+      "--handoff-id",
+      "handoff-1",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(ambiguous.status, 2);
+  assert.match(ambiguous.stderr, /exactly one of --locator/);
+});
+
 test("extension and CLI delegate lifecycle behavior to the same core", () => {
   const source = readFileSync(cli, "utf8");
   for (const shared of [
