@@ -95,7 +95,12 @@ def _empty_projection(session_id: str) -> dict[str, Any]:
 
 
 def read(session_id: str) -> dict[str, Any] | None:
-    """Read one exact projection, returning ``None`` when it does not exist."""
+    """Read one exact projection.
+
+    Returns ``None`` only when the validated session directory exists but its
+    sidecar does not. Invalid identities, unsafe paths, and malformed or
+    unsupported projections raise :class:`ProjectionError`.
+    """
     target, _lock_base, _temp_dir = _session_paths(session_id)
     if not target.exists():
         return None
