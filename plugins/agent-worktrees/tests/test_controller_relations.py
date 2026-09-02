@@ -1078,6 +1078,23 @@ def test_remote_controller_is_not_reported_as_resolved() -> None:
     assert findings[0]["remote_session_id"] == "controller-session"
 
 
+@pytest.mark.parametrize(
+    ("project", "worktree_id"),
+    [
+        ("../project", "parent"),
+        ("project", "../parent"),
+        ("project", r"..\parent"),
+        (".", "parent"),
+        ("project", ".."),
+    ],
+)
+def test_default_controller_loader_rejects_path_escape(
+    project: str,
+    worktree_id: str,
+) -> None:
+    assert controller_lineage._default_record_loader(project, worktree_id) is None
+
+
 def test_picker_passes_controller_findings_without_affecting_state() -> None:
     finding = {
         "status": "resolved",

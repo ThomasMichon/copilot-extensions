@@ -12,12 +12,27 @@ RecordLoader = Callable[[str, str], tracking.WorktreeRecord | None]
 ProjectionReader = Callable[[str], dict | None]
 
 
+def _safe_identity_token(value: str) -> bool:
+    return bool(
+        value
+        and value not in {".", ".."}
+        and "/" not in value
+        and "\\" not in value
+        and "\x00" not in value
+    )
+
+
 def _default_record_loader(
     project: str,
     worktree_id: str,
 ) -> tracking.WorktreeRecord | None:
+    if not _safe_identity_token(project) or not _safe_identity_token(worktree_id):
+        return None
     try:
-        path = cfg.project_dir(project) / "worktrees" / f"{worktree_id}.yaml"
+        tracking_dir = cfg.project_dir(project) / "worktrees"
+        path = tracking_dir / f"{worktree_id}.yaml"
+        if path.parent != tracking_dir:
+            return None
         if not path.is_file():
             return None
         return tracking.load_record(path)
