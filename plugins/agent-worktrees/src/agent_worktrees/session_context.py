@@ -82,9 +82,13 @@ def render_registry_context(
 
     resolved_state = state_root.resolve_state_root(config, cwd=cwd)
     pair = state_root.resolve_pair(config, cwd=cwd)
+    current_kind = _clean(
+        getattr(pair.current, "kind", "") if pair.current else "",
+        "worktree",
+    )
     checkout_writable = (
         bool(getattr(record, "worktree_path", cwd))
-        and _clean(getattr(record, "pair_kind", ""), "worktree") == "worktree"
+        and current_kind == "worktree"
         and _clean(getattr(record, "status", ""), "unknown")
         in {"active", "ready"}
     )
@@ -93,7 +97,7 @@ def render_registry_context(
         f"repo={_clean(getattr(record, 'repo', ''))}; "
         f"id={_clean(getattr(record, 'worktree_id', ''))}; "
         f"role={_clean(getattr(record, 'pair_role', ''), 'unpaired')}; "
-        f"kind={_clean(getattr(record, 'pair_kind', ''), 'worktree')}; "
+        f"kind={current_kind}; "
         f"status={_clean(getattr(record, 'status', ''), 'unknown')}; "
         f"writable={'true' if checkout_writable else 'false'}; "
         f"path={_clean(getattr(record, 'worktree_path', cwd))}."

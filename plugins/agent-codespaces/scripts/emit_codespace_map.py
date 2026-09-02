@@ -78,7 +78,7 @@ def _codespace_delegated(related: list[dict]) -> list[dict]:
             continue
         locus = entry.get("locus") or {}
         preferred = (locus.get("preferred") or "local").strip()
-        preferred_kind = preferred.split(":", 1)[0].lower()
+        preferred_kind = preferred.lower()
         if preferred_kind != "codespace":
             continue
         cs = locus.get("codespace") or {}

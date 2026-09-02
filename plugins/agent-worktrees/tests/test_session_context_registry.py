@@ -187,6 +187,69 @@ def test_knowledge_checkout_is_writable_but_harness_sibling_is_not(
     assert "Pair: role=harness; kind=worktree; status=active; writable=false" in context
 
 
+def test_anchor_pair_does_not_change_current_worktree_kind(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    checkout = tmp_path / "harness"
+    state_anchor = tmp_path / "state-anchor"
+    checkout.mkdir()
+    state_anchor.mkdir()
+    monkeypatch.setattr(
+        session_context.state_root,
+        "resolve_state_root",
+        lambda *_a, **_k: state_root.StateRoot(
+            str(state_anchor),
+            "knowledge_repo",
+            "state",
+            True,
+            True,
+            True,
+        ),
+    )
+    monkeypatch.setattr(
+        session_context.state_root,
+        "resolve_pair",
+        lambda *_a, **_k: state_root.StatePair(
+            paired=True,
+            pair_id="pair-anchor",
+            pair_kind="anchor",
+            current=state_root.PairCheckout(
+                role="harness",
+                path=str(checkout),
+                repo="control",
+                worktree_id="wt-control",
+                status="active",
+                kind="worktree",
+            ),
+            sibling=state_root.PairCheckout(
+                role="knowledge",
+                path=str(state_anchor),
+                repo="state",
+                worktree_id="[main]",
+                status="ready",
+                kind="anchor",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        session_context,
+        "_related_summary",
+        lambda *_a: ("application", ""),
+    )
+    record = _record(checkout)
+    record.pair_kind = "anchor"
+
+    context = session_context.render_registry_context(
+        SimpleNamespace(),
+        record,
+        cwd=str(checkout),
+    )
+
+    assert "role=harness; kind=worktree; status=active; writable=true" in context
+    assert "Pair: role=knowledge; kind=anchor; status=ready; writable=false" in context
+
+
 def test_context_fails_closed_when_state_and_pair_are_unavailable(
     tmp_path: Path,
     monkeypatch,

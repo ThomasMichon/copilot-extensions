@@ -127,6 +127,19 @@ def test_preferred_locus_kind_is_case_insensitive():
     assert rows[0]["locus"] == "codespace"
 
 
+def test_qualified_codespace_locus_is_rejected():
+    assert mod._codespace_delegated(
+        [
+            {
+                "name": "invalid-route",
+                "role": "tooling",
+                "delegate": "agent-codespaces",
+                "locus": {"preferred": "codespace:typo"},
+            }
+        ]
+    ) == []
+
+
 def test_empty_when_no_delegated_repos():
     assert mod._codespace_delegated([]) == []
     assert mod._codespace_delegated(RELATED[1:]) == []
