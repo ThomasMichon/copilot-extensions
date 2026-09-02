@@ -2202,7 +2202,7 @@ def mux_binding_for_session(
     if not live_pids:
         return None
 
-    from . import reclaim
+    from . import locks, reclaim
 
     table = reclaim.build_process_table()
     if not table:
@@ -2283,7 +2283,9 @@ def mux_binding_for_session(
                 "session_name": session_name,
                 "pane_id": pane_id,
                 "pane_pid": pane_pid,
+                "pane_start_time": locks.process_start_time(pane_pid),
                 "copilot_pid": copilot_pid,
+                "copilot_start_time": locks.process_start_time(copilot_pid),
             }
 
     return next(iter(matches.values())) if len(matches) == 1 else None

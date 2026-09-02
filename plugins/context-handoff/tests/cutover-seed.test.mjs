@@ -1,179 +1,172 @@
-// cutover-seed.test.mjs -- unit tests for the live-cutover seed builders.
-//
-// Run: node --test  (from plugins/context-handoff/, or point at this file)
-//
-// These guard the load-bearing invariant behind GitHub issue #853: a
-// TASK-backed cutover seed with a known predecessor pane / worktree / session
-// must be BASH-FIRST -- the successor's first actionable step is a core `bash`
-// command chain, NOT the `consume_handoff` extension tool -- so the successor
-// cannot be orphaned by the CLI's startup extension-reload race. The tool-based
-// seed is retained only as the fallback (file-backed handoffs, or when the
-// pane/worktree/session are unknown).
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import {
-  CONTINUATION_DIRECTIVE,
-  leadFrom,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import {
+  MAX_CUTOVER_SEED_LENGTH,
   buildCutoverSeed,
+  leadFrom,
+  recoveryCommandFor,
 } from "../extensions/context-handoff/cutover-seed.mjs";
 
-const TASK = "abc123def456";
-const WT = "lambda-core-wsl-20260101-000000-0000";
-const SID = "11111111-2222-3333-4444-555555555555";
-const PANE = "%42";
-const WTDIR = "/tmp/src/lambda-core";
-const known = {
-  oldPane: PANE,
-  worktree: WT,
-  worktreeDir: WTDIR,
-  sessionId: SID,
-  muxSession: `wt-${WT}`,
-};
-
-test("leadFrom: empty -> generic lead", () => {
-  assert.equal(leadFrom(""), "Task: Continue the current work");
-  assert.equal(leadFrom(null), "Task: Continue the current work");
-  assert.equal(leadFrom(undefined), "Task: Continue the current work");
-});
-
-test("leadFrom: leads with the actual task title", () => {
+test("leadFrom preserves a stable task-first title lead", () => {
   assert.equal(leadFrom("Fix the widget"), "Task: Fix the widget");
+  assert.equal(leadFrom("Continue: Fix it"), "Task: Fix it");
+  assert.equal(leadFrom(""), "Task: Continue the current work");
 });
 
-test("leadFrom: replaces inherited handoff prefixes", () => {
-  assert.equal(leadFrom("Continue: Fix the widget"), "Task: Fix the widget");
-  assert.equal(leadFrom("task: fix"), "Task: fix");
+test("task seed is a bounded ASCII three-part locator", () => {
+  const seed = buildCutoverSeed(
+    "task", "task-42", leadFrom("Fix the widget"),
+  );
+  assert.match(seed, /^Task: Fix the widget \| Recommendation:/);
+  assert.match(seed, /Recovery: node -e /);
+  assert.match(seed, /copilot-extensions/);
+  assert.match(seed, /handoff-cli\.mjs/);
+  assert.match(seed, /consume --task-id task-42 --defer-complete$/);
+  assert.doesNotMatch(seed, /Recovery: agent-dispatch consume/);
+  assert.equal(seed.split(" | ").length, 3);
+  assert.ok(seed.length <= MAX_CUTOVER_SEED_LENGTH);
+  assert.ok(!seed.includes("\n"));
+  assert.ok(!/[^\x00-\x7F]/.test(seed));
 });
 
-test("continuation directive makes an active effort the completion gate", () => {
-  assert.match(CONTINUATION_DIRECTIVE, /Consuming the handoff is setup, not completion/);
-  assert.match(
-    CONTINUATION_DIRECTIVE,
-    /finish the planning needed to act and then execute it/,
-  );
-  assert.match(
-    CONTINUATION_DIRECTIVE,
-    /subject to any required safety, review, approval, or confirmation gate/,
-  );
-  assert.match(
-    CONTINUATION_DIRECTIVE,
-    /effort -- not the handoff task, latest phase, or pull request -- as the source of truth and completion gate/,
-  );
-  assert.match(CONTINUATION_DIRECTIVE, /bounded delegates continue only their inherited scope/);
-  assert.match(CONTINUATION_DIRECTIVE, /return or re-handoff at that boundary/);
-  assert.match(CONTINUATION_DIRECTIVE, /Objective owners focus on driving it to `Done`/);
-  assert.match(
-    CONTINUATION_DIRECTIVE,
-    /select and execute the next authorized Plan or Validation Plan item/,
-  );
-  assert.match(
-    CONTINUATION_DIRECTIVE,
-    /do not finalize the worktree while any item remains unresolved/,
-  );
-  assert.match(
-    CONTINUATION_DIRECTIVE,
-    /explicitly transferred to a named tracked objective/,
-  );
-});
-
-test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () => {
-  const seed = buildCutoverSeed("task", TASK, leadFrom("Fix the widget"), known);
-
-  // The actionable first step is a shell chain, not the extension tool.
-  assert.match(seed, /As your FIRST action, run this single shell command/);
-  assert.ok(
-    !seed.includes("consume_handoff"),
-    "bash-first task seed must NOT reference the consume_handoff extension tool",
-  );
-
-  // It consumes, claims the exact numbered handoff while binding, then retires.
-  const consumeAt = seed.indexOf(`agent-dispatch consume ${TASK} --defer-complete`);
-  const retireAt = seed.indexOf(
-    `agent-worktrees handoff-cutover --retire-pane ${PANE} --successor-verified`,
-  );
-  assert.ok(consumeAt >= 0, "seed must contain the consume verb");
-  const bindAt = seed.indexOf(
-    `agent-worktrees bind-session --worktree-id ${WT} --handoff-token ${TASK}`,
-  );
-  assert.ok(bindAt > consumeAt, "successor binding must follow consume");
-  assert.ok(retireAt > bindAt, "retire verb must follow successor binding");
-  assert.ok(
-    !seed.includes("agent-worktrees conclude-session"),
-    "exact handoff binding atomically concludes the predecessor",
-  );
-
-  assert.match(seed, new RegExp(`worktree ID ${WT}`));
-  assert.ok(seed.includes(`intended cwd "${WTDIR}"`));
-  assert.ok(seed.includes(`--mux-session wt-${WT}`));
-
-  // Retire verb passes the explicit worktree/session so it resolves from any cwd.
-  assert.match(seed, new RegExp(`--worktree-id ${WT} --session-id ${SID}`));
-
-  // Completion is explicit + deferred (autopilot successor).
-  assert.match(seed, new RegExp(`agent-dispatch complete ${TASK}`));
-  assert.ok(seed.includes(CONTINUATION_DIRECTIVE));
-  assert.match(seed, /completion of the predecessor's latest phase is not enough/);
-  assert.match(seed, /Objective owners focus on driving it to `Done`/);
-
-  // Rides `copilot -i`: single line, ASCII only.
-  assert.ok(!seed.includes("\n"), "seed must be a single line");
-  // eslint-disable-next-line no-control-regex
-  assert.ok(!/[^\x00-\x7F]/.test(seed), "seed must be ASCII");
-});
-
-test("task + missing pane -> tool-based fallback seed", () => {
-  const seed = buildCutoverSeed("task", TASK, leadFrom("x"), {
-    worktree: WT,
-    sessionId: SID, // no oldPane
+test("file seed carries one ASCII-safe payload CLI recovery command", () => {
+  const command = recoveryCommandFor("file", "handoff-1", {
+    handoffCliPath: "C:\\Users\\Jos\u00e9\\handoff-cli.mjs",
   });
-  assert.match(seed, /consume_handoff tool/);
-  assert.ok(
-    !seed.includes("As your FIRST action, run this single shell command"),
-    "without a known pane, fall back to the tool-based seed",
+
+  const seed = buildCutoverSeed("file", "handoff-1", leadFrom("Continue"), {
+    handoffCliPath: "C:\\Users\\Jos\u00e9\\handoff-cli.mjs",
+  });
+  assert.match(command, /^node -e /);
+  assert.match(command, /require\('os'\)\.homedir\(\)/);
+  assert.match(command, /copilot-extensions/);
+  assert.match(command, /handoff-cli\.mjs/);
+  assert.match(command, /consume --handoff-id handoff-1$/);
+  assert.ok(!/[^\x00-\x7F]/.test(command));
+  assert.doesNotMatch(command, /Jos/);
+  assert.ok(seed.endsWith(`Recovery: ${command}`));
+  assert.ok(!seed.includes("## Session Continuation"));
+  assert.ok(seed.length <= MAX_CUTOVER_SEED_LENGTH);
+});
+
+test("ASCII-safe resolver executes from a Unicode home path", () => {
+  const base = mkdtempSync(join(process.cwd(), ".test-unicode-home-"));
+  const home = join(base, "\u7528\u6237");
+  const plugin = join(
+    home, ".copilot", "installed-plugins", "copilot-extensions",
+    "context-handoff",
   );
-  // Fallback still carries the retry-on-not-ready clause by default.
-  assert.match(seed, /retry the SAME/);
-  assert.doesNotMatch(seed, /Treat the handoff as active responsibility/);
-  assert.match(seed, /successful consume result supplies the continuation directive/i);
-  assert.match(seed, /missing brief is not completion/);
+  const cli = join(
+    plugin, "extensions", "context-handoff", "handoff-cli.mjs",
+  );
+  const output = join(base, "args.json");
+  try {
+    mkdirSync(join(plugin, "extensions", "context-handoff"), {
+      recursive: true,
+    });
+
+    writeFileSync(join(plugin, "plugin.json"), JSON.stringify({
+      name: "context-handoff",
+      repository: "https://github.com/ThomasMichon/copilot-extensions",
+    }));
+    writeFileSync(
+      cli,
+      "import { writeFileSync } from 'node:fs';" +
+        "writeFileSync(process.env.RECOVERY_ARGS_OUT," +
+        "JSON.stringify(process.argv.slice(2)));",
+    );
+    execSync(recoveryCommandFor("file", "handoff-unicode"), {
+      shell: true,
+      stdio: "pipe",
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        RECOVERY_ARGS_OUT: output,
+      },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), [
+      "consume", "--handoff-id", "handoff-unicode",
+    ]);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
-test("task + missing worktree/session -> tool-based fallback seed", () => {
-  const seed = buildCutoverSeed("task", TASK, leadFrom("x"), {
-    oldPane: PANE,
-    worktreeDir: WTDIR,
-  });
-  assert.match(seed, /consume_handoff tool/);
-  assert.ok(!seed.includes("agent-worktrees handoff-cutover --retire-pane"));
+test("payload resolver rejects a same-named plugin with wrong provenance", () => {
+  const base = mkdtempSync(join(process.cwd(), ".test-wrong-marketplace-"));
+  const plugin = join(
+    base, ".copilot", "installed-plugins", "copilot-extensions",
+    "context-handoff",
+  );
+  const cli = join(
+    plugin, "extensions", "context-handoff", "handoff-cli.mjs",
+  );
+  const output = join(base, "should-not-run");
+  try {
+    mkdirSync(join(plugin, "extensions", "context-handoff"), {
+      recursive: true,
+    });
+    writeFileSync(join(plugin, "plugin.json"), JSON.stringify({
+      name: "context-handoff",
+      repository: "https://example.invalid/other/context-handoff",
+    }));
+    writeFileSync(
+      cli,
+      "import { writeFileSync } from 'node:fs';" +
+        "writeFileSync(process.env.RECOVERY_ARGS_OUT,'ran');",
+    );
+    assert.throws(
+      () => execSync(recoveryCommandFor("file", "handoff-wrong"), {
+        shell: true,
+        stdio: "pipe",
+        env: {
+          ...process.env,
+          HOME: base,
+          USERPROFILE: base,
+          RECOVERY_ARGS_OUT: output,
+        },
+      }),
+    );
+    assert.equal(existsSync(output), false);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
-test("task + missing worktree cwd -> tool-based fallback seed", () => {
-  const seed = buildCutoverSeed("task", TASK, leadFrom("x"), {
-    oldPane: PANE,
-    worktree: WT,
-    sessionId: SID,
-  });
-  assert.match(seed, /consume_handoff tool/);
-  assert.ok(!seed.includes("agent-worktrees bind-session"));
+test("long titles are compacted without changing the recovery command", () => {
+  const command = "agent-dispatch consume task-99 --defer-complete";
+  const seed = buildCutoverSeed(
+    "task",
+    "task-99",
+    leadFrom("x".repeat(3000)),
+    { recoveryCommand: command },
+  );
+  assert.ok(seed.length <= MAX_CUTOVER_SEED_LENGTH);
+  assert.ok(seed.endsWith(`Recovery: ${command}`));
 });
 
-test("file-backed handoff -> tool-based seed (never bash-first)", () => {
-  const seed = buildCutoverSeed("file", "handoff-xyz", leadFrom("x"), known);
-  assert.match(seed, /consume_handoff tool/);
-  assert.match(seed, /"handoff_id":"handoff-xyz"/);
-  assert.ok(!seed.includes("agent-dispatch consume"));
-  assert.ok(!seed.includes(CONTINUATION_DIRECTIVE));
-  assert.match(seed, /successful consume result supplies the continuation directive/i);
-  assert.match(seed, /missing brief is not completion/);
+test("an impossible recovery command fails instead of truncating it", () => {
+  assert.throws(
+    () => buildCutoverSeed(
+      "task", "task-1", leadFrom("x"),
+      { recoveryCommand: "x".repeat(MAX_CUTOVER_SEED_LENGTH) },
+    ),
+    /exceeds 1024/,
+  );
 });
 
-test("retry:false drops the retry-on-not-ready clause (human paste prompt)", () => {
-  const seed = buildCutoverSeed("file", "handoff-xyz", leadFrom("x"), {
-    ...known,
-    retry: false,
-  });
-  assert.ok(!seed.includes("retry the SAME"));
-  assert.ok(!seed.includes(CONTINUATION_DIRECTIVE));
-  assert.match(seed, /missing brief is not completion/);
+test("recovery commands reject non-ASCII instead of corrupting it", () => {
+  assert.throws(
+    () => buildCutoverSeed(
+      "task", "task-1", leadFrom("x"),
+      { recoveryCommand: "echo caf\u00e9" },
+    ),
+    /single-line ASCII/,
+  );
 });

@@ -20,7 +20,9 @@
 //   node handoff-cli.mjs cutover  --title "<t>" --prompt-file <f>   # store + live cutover (default)
 //   node handoff-cli.mjs save     --title "<t>" --prompt-file <f>   # store + print seed + paste prompt (no cutover)
 //   node handoff-cli.mjs continue --seed "<HANDOFF_SEED>"           # trigger the cutover for an existing seed
-//   node handoff-cli.mjs consume  --handoff-id <id> | --path <f>    # load a file handoff, mark consumed, print brief
+//   node handoff-cli.mjs retry                                      # retry from the stored handoff
+//   node handoff-cli.mjs consume  --task-id <id> | --handoff-id <id> # consume + acknowledge/take over
+//   node handoff-cli.mjs facts --json                              # basic extension-free handoff facts
 //   node handoff-cli.mjs help
 //
 // Options:
@@ -30,13 +32,18 @@
 //   --cwd <dir>            default: current directory
 //   --no-task             force the file store (skip an agent-dispatch task)
 //   --seed <s>            (continue) the exact HANDOFF_SEED to spawn a successor with
-//   --handoff-id <id> | --path <f>   (consume) which file-backed handoff to load
+//   --handoff-token <id>  (continue) stored token associated at successor sessionStart
+//   --task-id <id> | --handoff-id <id> | --path <f>  stored handoff to consume
 //   --json                machine-readable output
 
 import { readFileSync } from "node:fs";
 import {
   storeHandoff, buildSeedForStored, runHandoffCutover,
-  consumeFileHandoffOnce, decodeHandoffPayload,
+  consumeFileHandoff, consumeDispatchHandoffTask,
+  collectCliHandoffFacts, formatConsumeResult,
+  retryStoredHandoffCutover,
+  manualFallbackInstructions,
+  normalizeHandoffTitle,
 } from "./handoff-core.mjs";
 
 function parseArgs(argv) {
@@ -45,7 +52,9 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a.startsWith("--")) {
       const key = a.slice(2);
-      const flags = new Set(["no-task", "json", "no-cutover"]);
+      const flags = new Set([
+        "no-task", "json", "no-cutover", "defer-complete",
+      ]);
       if (flags.has(key)) { out[key] = true; continue; }
       out[key] = argv[++i];
     } else {
@@ -80,10 +89,13 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs cutover  --title "<t>" --prompt-file <f>   store + live cutover (default)
   node handoff-cli.mjs save     --title "<t>" --prompt-file <f>   store + print seed + paste prompt
   node handoff-cli.mjs continue --seed "<HANDOFF_SEED>"           trigger the cutover for a seed
-  node handoff-cli.mjs consume  --handoff-id <id> | --path <f>    load a file handoff + mark consumed
+  node handoff-cli.mjs retry                                      retry cutover from saved state
+  node handoff-cli.mjs consume  --task-id <id> | --handoff-id <id> consume + acknowledge/take over
+  node handoff-cli.mjs facts --json                              emit basic extension-free facts
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id (\$COPILOT_AGENT_SESSION_ID),
-         --cwd, --no-task, --seed, --handoff-id|--path, --json`;
+         --cwd, --no-task, --seed, --handoff-token, --worktree-id,
+         --task-id|--handoff-id|--path, --defer-complete, --json`;
 
 function cmdStore(args, { cutover }) {
   const promptText = readPrompt(args);
@@ -98,7 +110,10 @@ function cmdStore(args, { cutover }) {
   }
   const cwd = args.cwd || process.cwd();
   const stored = storeHandoff({
-    promptText, sid, cwd, title: args.title || "",
+    promptText,
+    sid,
+    cwd,
+    title: normalizeHandoffTitle(args.title),
     preferTask: !args["no-task"],
   });
   if (!stored?.storage) {
@@ -108,12 +123,21 @@ function cmdStore(args, { cutover }) {
     process.exit(1);
   }
   const seed = buildSeedForStored(stored, { retry: true });
-  const pastePrompt = buildSeedForStored(stored, { retry: false });
+  const pastePrompt = seed;
   const result = { ok: true, storage: stored.storage, id: stored.id, seed, pastePrompt };
   if (stored.path) result.path = stored.path;
 
   if (cutover && !args["no-cutover"]) {
-    const cut = runHandoffCutover(cwd, seed, sid);
+    const cut = runHandoffCutover(
+      cwd,
+      seed,
+      sid,
+      undefined,
+      {
+        handoffToken: stored.id,
+        worktreeId: stored.metadata?.worktree || null,
+      },
+    );
     result.cutover = cut;
     if (args.json) return emit(result, args);
     if (cut.ok) {
@@ -124,8 +148,8 @@ function cmdStore(args, { cutover }) {
     } else {
       process.stdout.write(
         `Handoff stored (${stored.storage}: ${stored.id}), but the live cutover could not run ` +
-        `(reason: ${cut.reason}${cut.error ? " -- " + cut.error : ""}). ` +
-        `Resume it in a new session with this paste prompt:\n\n${pastePrompt}\n`);
+        `(reason: ${cut.reason}${cut.error ? " -- " + cut.error : ""}).\n\n` +
+        `${manualFallbackInstructions(stored, pastePrompt)}\n`);
     }
     return;
   }
@@ -133,8 +157,9 @@ function cmdStore(args, { cutover }) {
   if (args.json) return emit(result, args);
   process.stdout.write(
     `Handoff stored (${stored.storage}: ${stored.id}).\n\n` +
-    `-- Paste prompt (for a new session) --\n${pastePrompt}\n\n` +
-    `-- HANDOFF_SEED (for \`handoff-cli continue --seed\` under mux) --\n${seed}\n`);
+    `${manualFallbackInstructions(stored, pastePrompt)}\n\n` +
+    `HANDOFF_SEED: ${seed}\n` +
+    `HANDOFF_TOKEN: ${stored.id}\n`);
 }
 
 function cmdContinue(args) {
@@ -143,9 +168,24 @@ function cmdContinue(args) {
     process.stderr.write("handoff-cli continue: --seed <HANDOFF_SEED> required\n");
     process.exit(2);
   }
+  if (!args["handoff-token"]) {
+    process.stderr.write(
+      "handoff-cli continue: --handoff-token <id> required for startup association\n",
+    );
+    process.exit(2);
+  }
   const cwd = args.cwd || process.cwd();
   const sid = resolveSid(args);
-  const cut = runHandoffCutover(cwd, seed, sid);
+  const cut = runHandoffCutover(
+    cwd,
+    seed,
+    sid,
+    undefined,
+    {
+      handoffToken: args["handoff-token"] || null,
+      worktreeId: args["worktree-id"] || null,
+    },
+  );
   if (args.json) return emit({ ok: cut.ok, cutover: cut }, args);
   if (cut.ok) {
     process.stdout.write(`Live cutover started (pane ${cut.new_pane || "?"}). End your turn now.\n`);
@@ -158,18 +198,65 @@ function cmdContinue(args) {
 function cmdConsume(args) {
   const cwd = args.cwd || process.cwd();
   const sid = resolveSid(args);
-  const consumed = consumeFileHandoffOnce(
-    cwd, sid, args["handoff-id"], args.path || null,
-  );
+  if (!sid) {
+    process.stderr.write(
+      "handoff-cli consume: --session-id or COPILOT_AGENT_SESSION_ID is required for acknowledgement\n",
+    );
+    process.exit(2);
+  }
+  const consumed = args["task-id"]
+    ? consumeDispatchHandoffTask(
+        cwd,
+        args["task-id"],
+        sid,
+        Boolean(args["defer-complete"]),
+      )
+    : consumeFileHandoff(
+        cwd,
+        sid,
+        args["handoff-id"],
+        args.path || null,
+      );
   if (!consumed.ok) {
     process.stderr.write(`handoff-cli consume: ${consumed.message}\n`);
     process.exit(1);
   }
-  const brief = consumed.record.promptText
-    || decodeHandoffPayload(consumed.record.payload || "").text
-    || "";
-  if (args.json) return emit({ ok: true, id: consumed.record.id, brief }, args);
-  process.stdout.write(brief.endsWith("\n") ? brief : brief + "\n");
+  if (args.json) return emit(consumed, args);
+  process.stdout.write(
+    formatConsumeResult(consumed, {
+      deferComplete: Boolean(args["defer-complete"]),
+    }) + "\n",
+  );
+}
+
+function cmdRetry(args) {
+  const cwd = args.cwd || process.cwd();
+  const sid = resolveSid(args);
+  if (!sid) {
+    process.stderr.write(
+      "handoff-cli retry: --session-id or COPILOT_AGENT_SESSION_ID is required\n",
+    );
+    process.exit(2);
+  }
+  const result = retryStoredHandoffCutover(cwd, sid);
+  if (args.json) return emit(result, args);
+  if (!result.ok) {
+    process.stderr.write(
+      `handoff-cli retry: ${result.error || result.reason || "failed"}\n`,
+    );
+    process.exit(1);
+  }
+  process.stdout.write(
+    `Cutover retried from ${result.stored.storage} handoff ${result.stored.id} ` +
+    `(pane ${result.new_pane || "?"}).\n`,
+  );
+}
+
+function cmdFacts(args) {
+  const cwd = args.cwd || process.cwd();
+  const result = collectCliHandoffFacts(cwd, resolveSid(args));
+  if (args.json) return emit(result, args);
+  process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 
 function main() {
@@ -180,7 +267,9 @@ function main() {
     case "cutover": return cmdStore(args, { cutover: true });
     case "save":    return cmdStore(args, { cutover: false });
     case "continue": return cmdContinue(args);
+    case "retry": return cmdRetry(args);
     case "consume": return cmdConsume(args);
+    case "facts": return cmdFacts(args);
     case "help": case "-h": case "--help":
       process.stdout.write(HELP + "\n"); return;
     default:

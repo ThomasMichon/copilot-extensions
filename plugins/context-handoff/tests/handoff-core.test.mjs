@@ -16,12 +16,20 @@ import { join } from "node:path";
 import {
   encodeHandoffPayload, decodeHandoffPayload, buildSeedForStored,
   safePathSegment, quoteWinArg, agentWorktreesGet, handoffDirFor,
+  runCli,
   agentWorktreesGetResult, consumeFileHandoffOnce, writeJsonAtomic,
-  currentMuxSession,
+  currentMuxSession, sessionBindingForSession, manualFallbackInstructions,
+  prepareTaskCutoverCheckpoint, completeHandoffLifecycle,
+  consumeDispatchHandoffTask,
+  makeHandoffMetadata,
+  runHandoffCutover,
+  buildResumePrompt,
+  normalizeHandoffTitle,
   HANDOFF_META_PREFIX,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import {
-  mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, utimesSync,
+  existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+  utimesSync,
 } from "node:fs";
 import {
   AGENT_WORKTREES_QUERY_TIMEOUT_MS,
@@ -51,7 +59,7 @@ test("decode tolerates malformed metadata JSON (falls back to raw)", () => {
   assert.equal(text, raw);
 });
 
-test("buildSeedForStored: task-backed + known pane/worktree/session -> bash-first seed", () => {
+test("buildSeedForStored: task-backed -> compact recovery locator", () => {
   const stored = {
     storage: "agent-dispatch",
     id: "task-42",
@@ -64,17 +72,18 @@ test("buildSeedForStored: task-backed + known pane/worktree/session -> bash-firs
     },
   };
   const seed = buildSeedForStored(stored, { retry: true });
-  // Bash-first invariant (issue #853): the successor's first action is a core
-  // shell chain, not the consume_handoff tool.
-  assert.match(seed, /agent-dispatch consume task-42 --defer-complete/);
-  assert.match(seed, /agent-worktrees handoff-cutover --retire-pane %7/);
+  assert.match(seed, /Recovery: node -e /);
+  assert.match(seed, /consume --task-id task-42 --defer-complete/);
+  assert.doesNotMatch(seed, /Recovery: agent-dispatch consume/);
   assert.match(seed, /^Task: Ship the thing/);
-  assert.match(seed, /intended cwd "\/tmp\/src\/wt-abc"/);
-  assert.match(seed, /agent-worktrees bind-session --worktree-id wt-abc/);
-  assert.doesNotMatch(seed, /consume_handoff tool/);
+  assert.match(
+    seed,
+    /Recommendation: after startup invoke `\/consume-handoff` \(the `consume_handoff` tool\) to acknowledge and take over/,
+  );
+  assert.ok(seed.length <= 1024);
 });
 
-test("buildSeedForStored: file-backed -> tool-based consume_handoff seed", () => {
+test("buildSeedForStored: file-backed -> exact file CLI recovery", () => {
   const stored = {
     storage: "file",
     id: "handoff-sid1",
@@ -82,17 +91,20 @@ test("buildSeedForStored: file-backed -> tool-based consume_handoff seed", () =>
     metadata: { title: "Fix the parser", oldPane: null, worktree: null, sessionId: "sid1" },
   };
   const seed = buildSeedForStored(stored, { retry: true });
-  assert.match(seed, /consume_handoff tool/);
-  assert.match(seed, /"path":"C:\\\\state\\\\handoff-sid1.json"/);
+  assert.match(seed, /handoff-cli\.mjs/);
+  assert.match(seed, /consume --handoff-id handoff-sid1/);
+  assert.doesNotMatch(seed, /C:\\\\state\\\\handoff-sid1\.json/);
 });
 
-test("buildSeedForStored: paste prompt (retry:false) omits the loading-race retry clause", () => {
+test("buildSeedForStored is identical for launch and manual fallback", () => {
   const stored = {
     storage: "file", id: "h1",
     metadata: { title: "x", oldPane: null, worktree: null, sessionId: "s" },
   };
-  const paste = buildSeedForStored(stored, { retry: false });
-  assert.doesNotMatch(paste, /tool-not-found/);
+  assert.equal(
+    buildSeedForStored(stored, { retry: false }),
+    buildSeedForStored(stored, { retry: true }),
+  );
 });
 
 test("safePathSegment sanitizes and caps", () => {
@@ -102,10 +114,78 @@ test("safePathSegment sanitizes and caps", () => {
   assert.equal(safePathSegment("x".repeat(300)).length, 160);
 });
 
-test("quoteWinArg quotes only when needed", () => {
-  assert.equal(quoteWinArg("plain"), "plain");
+test("quoteWinArg emits batch-safe literal arguments", () => {
+  assert.equal(quoteWinArg("plain"), '"plain"');
   assert.equal(quoteWinArg("has space"), '"has space"');
-  assert.equal(quoteWinArg('a"b'), '"a""b"');
+  assert.equal(quoteWinArg('a"b'), '"a\\"b"');
+  assert.equal(quoteWinArg("it's literal"), `"it's literal"`);
+  assert.equal(quoteWinArg("Task %PATH%"), '"Task %%PATH%%"');
+  assert.throws(() => quoteWinArg("line1\r\nline2"), /CR, LF, or NUL/);
+  assert.throws(() => quoteWinArg("bad\0arg"), /CR, LF, or NUL/);
+});
+
+test("handoff titles are normalized to one line at entry", () => {
+  assert.equal(
+    normalizeHandoffTitle("  Fix %PATH%\r\nthen\0 validate\t now  "),
+    "Fix %PATH% then validate now",
+  );
+});
+
+test("Windows runCli preserves percent-delimited title and seed", {
+  skip: process.platform !== "win32",
+}, () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-percent-args-"));
+  try {
+    const capture = join(dir, "capture.mjs");
+    const shim = join(dir, "capture.cmd");
+    const output = join(dir, "args.json");
+    writeFileSync(
+      capture,
+      "import { writeFileSync } from 'node:fs';" +
+        "writeFileSync(process.env.ARGS_OUT," +
+        "JSON.stringify(process.argv.slice(2)));",
+    );
+    writeFileSync(
+      shim,
+      `@echo off\r\nnode "${capture}" %*\r\n`,
+    );
+    runCli(shim, [
+      "Task: preserve %PATH% title",
+      "Seed contains %PATH% exactly",
+    ], {
+      cwd: dir,
+      timeout: 5000,
+      env: { ...process.env, ARGS_OUT: output },
+    });
+
+    assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), [
+      "Task: preserve %PATH% title",
+      "Seed contains %PATH% exactly",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Windows runCli rejects batch-source injection", {
+  skip: process.platform !== "win32",
+}, () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-cmd-injection-"));
+  try {
+    const shim = join(dir, "capture.cmd");
+    const output = join(dir, "called");
+    writeFileSync(shim, `@echo off\r\necho called>"${output}"\r\n`);
+    assert.throws(
+      () => runCli(shim, ["safe\r\nwhoami"], {
+        cwd: dir,
+        timeout: 5000,
+      }),
+      /CR, LF, or NUL/,
+    );
+    assert.equal(existsSync(output), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("currentMuxSession resolves the predecessor pane identity", () => {
@@ -119,6 +199,496 @@ test("currentMuxSession resolves the predecessor pane identity", () => {
     "display-message", "-p", "-t", "%7", "#{session_name}",
   ]);
 });
+
+test("sessionBindingForSession uses the public bounded JSON query", () => {
+  let invocation = null;
+  const result = sessionBindingForSession(
+    "session-1",
+    "/repo",
+    (bin, args, options) => {
+      invocation = { bin, args, options };
+      return JSON.stringify({
+        found: true,
+        session_id: "session-1",
+        pane_id: "%7",
+        copilot_pid: 42,
+      });
+    },
+  );
+  assert.equal(result.found, true);
+  assert.deepEqual(invocation, {
+    bin: "agent-worktrees",
+    args: ["session-binding", "--session-id", "session-1", "--json"],
+    options: { cwd: "/repo", timeout: AGENT_WORKTREES_QUERY_TIMEOUT_MS },
+  });
+});
+
+test("metadata discovers mux and process identity without pane environment", () => {
+  const oldTmux = process.env.TMUX_PANE;
+  const oldPsmux = process.env.PSMUX_PANE;
+  delete process.env.TMUX_PANE;
+  delete process.env.PSMUX_PANE;
+  try {
+    const metadata = makeHandoffMetadata(
+      {
+        sid: "session-1",
+        cwd: "/repo",
+        title: "Continue",
+        storage: "file",
+      },
+      (_bin, args) => {
+        assert.equal(args[0], "session-binding");
+        return JSON.stringify({
+          found: true,
+          session_id: "session-1",
+          worktree_id: "wt-example",
+          mux_session: "wt-wt-example",
+          pane_id: "%7",
+          pane_pid: 70,
+          pane_start_time: "pane-created",
+          copilot_pid: 80,
+          copilot_start_time: "copilot-created",
+        });
+      },
+      (key) => key === "worktree-dir"
+        ? "/repo/wt-example"
+        : "/state/wt-example",
+    );
+    assert.equal(metadata.oldPane, "%7");
+    assert.equal(metadata.muxSession, "wt-wt-example");
+    assert.equal(metadata.predecessor.source, "session-binding");
+    assert.equal(metadata.predecessor.copilotPid, 80);
+    assert.equal(metadata.predecessor.copilotStartTime, "copilot-created");
+  } finally {
+    if (oldTmux === undefined) delete process.env.TMUX_PANE;
+    else process.env.TMUX_PANE = oldTmux;
+    if (oldPsmux === undefined) delete process.env.PSMUX_PANE;
+    else process.env.PSMUX_PANE = oldPsmux;
+  }
+});
+
+test("cutover passes startup association after predecessor discovery", () => {
+  const calls = [];
+  const result = runHandoffCutover(
+    "/repo",
+    "Task: Continue | Recommendation: after startup invoke `/consume-handoff` (the `consume_handoff` tool) to acknowledge and take over | Recovery: cmd",
+    "session-1",
+    (_bin, args) => {
+      calls.push(args);
+      if (args[0] === "session-binding") {
+        return JSON.stringify({
+          found: true,
+          session_id: "session-1",
+          pane_id: "%9",
+        });
+      }
+      return JSON.stringify({
+        ok: true, old_pane: "%9", new_pane: "%10",
+      });
+    },
+    { handoffToken: "task-1", worktreeId: "wt-example" },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls[1].slice(-8), [
+    "--old-pane", "%9",
+    "--session-id", "session-1",
+    "--handoff-token", "task-1",
+    "--worktree-id", "wt-example",
+  ]);
+});
+
+test("manual fallback clearly delimits the exact copyable seed", () => {
+    const seed = "Task: Continue | Recommendation: after startup invoke `/consume-handoff` (the `consume_handoff` tool) to acknowledge and take over | Recovery: command";
+    const text = manualFallbackInstructions(
+      { storage: "file", id: "handoff-1" },
+      seed,
+    );
+    assert.match(text, /Copy the following block exactly/);
+    assert.match(text, /```text/);
+    assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("deferred resume prompt returns explicit completion gate command", () => {
+  const prompt = buildResumePrompt(
+    "full brief",
+    "agent-dispatch task",
+    { deferredTaskId: "task-42" },
+  );
+  assert.match(prompt, /Keep agent-dispatch task task-42 owned/);
+  assert.match(
+    prompt,
+    /Only after the handoff objective's completion gate is met run: agent-dispatch complete task-42/,
+  );
+  assert.ok(prompt.indexOf("agent-dispatch complete") < prompt.indexOf("full brief"));
+});
+
+test("task checkpoint persists payload before one-time consume", () => {
+    const dir = mkdtempSync(join(process.cwd(), ".test-handoff-checkpoint-"));
+    try {
+      const decoded = {
+        metadata: {
+          stateDir: dir,
+          sessionId: "predecessor",
+          worktree: "wt-example",
+        },
+        text: "durable brief",
+      };
+      const result = prepareTaskCutoverCheckpoint(
+        "/repo", "task-1", "successor", decoded,
+      );
+      assert.equal(result.ok, true);
+      const saved = JSON.parse(readFileSync(result.checkpoint.path, "utf-8"));
+      assert.equal(saved.payload, "durable brief");
+      assert.equal(saved.steps.payloadStored, true);
+      assert.equal(saved.steps.taskConsumed, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("task retry requires structured ownership by this successor", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-owner-retry-"));
+  const metadata = {
+    stateDir: dir,
+    worktree: "wt-example",
+    worktreeDir: "/repo",
+    title: "Structured retry",
+    predecessor: {
+      sessionId: "predecessor",
+      paneId: "%3",
+      muxSession: "wt-wt-example",
+      copilotPid: 33,
+      copilotStartTime: "created-33",
+    },
+  };
+  const payload = encodeHandoffPayload("continue", metadata);
+  try {
+    const prepared = prepareTaskCutoverCheckpoint(
+      "/repo", "task-owner", "successor", decodeHandoffPayload(payload),
+      () => dir,
+    );
+    prepared.checkpoint.steps.consumeAttempted = true;
+    writeJsonAtomic(prepared.checkpoint.path, prepared.checkpoint);
+    const result = consumeDispatchHandoffTask(
+      "/repo",
+      "task-owner",
+      "successor",
+      true,
+      {
+        readPayload: () => "",
+        consumeTask: () => {
+          throw new Error("coordinator says task-owner cannot be consumed");
+        },
+        taskStateReader: () => ({
+          id: "task-owner",
+          status: "started",
+          owner: "machine/wt-example",
+          owner_session_id: "successor",
+        }),
+        worktreeGet: () => "machine",
+        stateDirResolver: () => dir,
+        execute: (_bin, args) => {
+          if (args[0] === "bind-session") {
+            return JSON.stringify({
+              bound: true, head_session: "successor",
+            });
+          }
+          if (args[0] === "status") return JSON.stringify({});
+          if (args[0] === "handoff-cutover") {
+            return JSON.stringify({ ok: true });
+          }
+          throw new Error(args.join(" "));
+        },
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.retire.retired, true);
+    assert.equal(
+      result.checkpointState.details.taskConsumed.authoritativeTask.owner_session_id,
+      "successor",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("free-form consume error cannot trigger takeover during outage", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-outage-"));
+  const metadata = {
+    stateDir: dir,
+    worktree: "wt-example",
+    sessionId: "predecessor",
+  };
+  const payload = encodeHandoffPayload("continue", metadata);
+  let lifecycleCalls = 0;
+  try {
+    const prepared = prepareTaskCutoverCheckpoint(
+      "/repo", "task-outage", "successor", decodeHandoffPayload(payload),
+      () => dir,
+    );
+    prepared.checkpoint.steps.consumeAttempted = true;
+    writeJsonAtomic(prepared.checkpoint.path, prepared.checkpoint);
+    const result = consumeDispatchHandoffTask(
+      "/repo",
+      "task-outage",
+      "successor",
+      true,
+      {
+        readPayload: () => "",
+        consumeTask: () => {
+          throw new Error(
+            "timeout while running agent-dispatch consume task-outage",
+          );
+        },
+        taskStateReader: () => null,
+        worktreeGet: () => "machine",
+        stateDirResolver: () => dir,
+        execute: () => {
+          lifecycleCalls++;
+          throw new Error("lifecycle must stay stopped");
+        },
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.ownershipConfirmed, false);
+    assert.equal(lifecycleCalls, 0);
+    assert.equal(
+      JSON.parse(readFileSync(prepared.checkpoint.path, "utf-8"))
+        .steps.predecessorRetired,
+      false,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("takeover uses atomic bind/head ack, title, then verified retire", () => {
+    const calls = [];
+    const execute = (bin, args) => {
+      calls.push(args);
+      if (args[0] === "bind-session") {
+        return JSON.stringify({ bound: true, head_session: "successor" });
+      }
+      if (args[0] === "status") return JSON.stringify({ updated: true });
+      if (args[0] === "handoff-cutover") return JSON.stringify({ ok: true });
+      throw new Error(`${bin} ${args.join(" ")}`);
+    };
+    const result = completeHandoffLifecycle(
+      "/repo",
+      {
+        worktree: "wt-example",
+        worktreeDir: "/repo",
+        title: "Continue parser fix",
+        predecessor: {
+          sessionId: "predecessor",
+          paneId: "%3",
+          muxSession: "wt-wt-example",
+          copilotPid: 33,
+          copilotStartTime: "created-33",
+        },
+      },
+      "successor",
+      "task-1",
+      {
+        execute,
+      },
+    );
+    assert.deepEqual(calls.map((args) => args[0]), [
+      "bind-session",
+      "status",
+      "handoff-cutover",
+    ]);
+    const retireArgs = calls.at(-1);
+    assert.ok(retireArgs.includes("--expected-copilot-pid"));
+    assert.ok(retireArgs.includes("--expected-copilot-start-time"));
+    assert.equal(result.retired, true);
+});
+
+test("old metadata without process creation identity preserves predecessor", () => {
+    const calls = [];
+    const execute = (_bin, args) => {
+      calls.push(args[0]);
+      if (args[0] === "bind-session") {
+        return JSON.stringify({ bound: true, head_session: "successor" });
+      }
+      if (args[0] === "link-succession") {
+        return JSON.stringify({ head_session: "successor" });
+      }
+      if (args[0] === "head-session") {
+        return JSON.stringify({ head_session: "successor" });
+      }
+      if (args[0] === "status") return JSON.stringify({});
+      throw new Error("retire must not be called");
+    };
+    const result = completeHandoffLifecycle(
+      "/repo",
+      {
+        worktree: "wt-example",
+        worktreeDir: "/repo",
+        title: "Old handoff",
+        sessionId: "predecessor",
+        oldPane: "%3",
+        muxSession: "wt-wt-example",
+      },
+      "successor",
+      "task-old",
+      { execute },
+    );
+    assert.equal(result.retired, false);
+    assert.match(result.manualCleanup, /creation identity is unavailable/);
+    assert.ok(!calls.includes("handoff-cutover"));
+});
+
+test("same successor retry resumes from task checkpoint without replaying payload", () => {
+    const dir = mkdtempSync(join(process.cwd(), ".test-handoff-retry-"));
+    let consumeCalls = 0;
+    let failTitle = true;
+    const metadata = {
+      stateDir: dir,
+      worktree: "wt-example",
+      worktreeDir: "/repo",
+      title: "Retry cutover",
+      predecessor: {
+        sessionId: "predecessor",
+        paneId: "%3",
+        muxSession: "wt-wt-example",
+        copilotPid: 33,
+        copilotStartTime: "created-33",
+      },
+    };
+    const payload = encodeHandoffPayload("continue", metadata);
+    const execute = (_bin, args) => {
+      if (args[0] === "bind-session") {
+        return JSON.stringify({ bound: true, head_session: "successor" });
+      }
+      if (args[0] === "status") {
+        if (failTitle) {
+          failTitle = false;
+          throw new Error("injected title failure");
+        }
+        return JSON.stringify({});
+      }
+      if (args[0] === "handoff-cutover") return JSON.stringify({ ok: true });
+      throw new Error(args.join(" "));
+    };
+    try {
+      assert.throws(
+        () => consumeDispatchHandoffTask(
+          "/repo", "task-1", "successor", true,
+          {
+            readPayload: () => payload,
+            consumeTask: () => {
+              consumeCalls++;
+              return payload;
+            },
+            execute,
+            stateDirResolver: () => dir,
+          },
+        ),
+        /injected title failure/,
+      );
+      const retry = consumeDispatchHandoffTask(
+        "/repo", "task-1", "successor", true,
+        {
+          readPayload: () => "",
+          consumeTask: () => {
+            consumeCalls++;
+            throw new Error("task already consumed by this successor");
+          },
+          execute,
+          stateDirResolver: () => dir,
+        },
+      );
+      assert.equal(retry.ok, true);
+      assert.equal(retry.retire.retired, true);
+      assert.equal(consumeCalls, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+for (const failedStep of ["bind-session", "status", "handoff-cutover"]) {
+    test(`checkpoint retry converges after ${failedStep} failure`, () => {
+      const dir = mkdtempSync(join(
+        process.cwd(), `.test-handoff-step-${failedStep}-`,
+      ));
+      let consumeCalls = 0;
+      let failureBudget = failedStep === "bind-session" ? 2 : 1;
+      const metadata = {
+        stateDir: dir,
+        worktree: "wt-example",
+        worktreeDir: "/repo",
+        title: "Retry every step",
+        predecessor: {
+          sessionId: "predecessor",
+          paneId: "%3",
+          muxSession: "wt-wt-example",
+          copilotPid: 33,
+          copilotStartTime: "created-33",
+        },
+      };
+      const payload = encodeHandoffPayload("continue", metadata);
+      const execute = (_bin, args) => {
+        const step = args[0];
+        if (step === failedStep && failureBudget > 0) {
+          failureBudget--;
+          if (step === "handoff-cutover") {
+            return JSON.stringify({ ok: false });
+          }
+          throw new Error(`injected ${step} failure`);
+        }
+        if (step === "bind-session") {
+          return JSON.stringify({ bound: true, head_session: "successor" });
+        }
+        if (step === "link-succession") {
+          return JSON.stringify({ head_session: "successor" });
+        }
+        if (step === "head-session") {
+          return JSON.stringify({ head_session: "successor" });
+        }
+        if (step === "status") return JSON.stringify({});
+        if (step === "handoff-cutover") return JSON.stringify({ ok: true });
+        throw new Error(args.join(" "));
+      };
+      const options = {
+        readPayload: () => payload,
+        consumeTask: () => {
+          consumeCalls++;
+          return payload;
+        },
+        execute,
+        stateDirResolver: () => dir,
+      };
+      try {
+        try {
+          consumeDispatchHandoffTask(
+            "/repo", "task-step", "successor", true, options,
+          );
+        } catch {
+          // A command failure may abort the first attempt after its prior
+          // checkpoint has already been persisted.
+        }
+        const retry = consumeDispatchHandoffTask(
+          "/repo",
+          "task-step",
+          "successor",
+          true,
+          {
+            ...options,
+            readPayload: () => "",
+            consumeTask: () => {
+              consumeCalls++;
+              throw new Error("task already consumed by this successor");
+            },
+          },
+        );
+        assert.equal(retry.retire.retired, true);
+        assert.equal(consumeCalls, 1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+}
 
 test("agentWorktreesGet allows slow startup-time identity queries", () => {
   let invocation = null;

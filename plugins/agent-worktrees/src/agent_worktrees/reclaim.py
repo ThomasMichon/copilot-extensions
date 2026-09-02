@@ -51,7 +51,7 @@ _MUX_NAMES = ("psmux", "tmux")
 
 
 # ---------------------------------------------------------------------------
-# Process table (pid -> {ppid, name}) -- one dependency-free snapshot
+# Process table (pid -> {ppid, name, start_time}) -- one snapshot
 # ---------------------------------------------------------------------------
 
 def _process_table_windows() -> dict[int, dict]:
@@ -96,9 +96,11 @@ def _process_table_windows() -> dict[int, dict]:
         ok = k32.Process32FirstW(snap, ctypes.byref(entry))
         while ok:
             name = Path(entry.szExeFile).name.lower()
-            table[int(entry.th32ProcessID)] = {
+            pid = int(entry.th32ProcessID)
+            table[pid] = {
                 "ppid": int(entry.th32ParentProcessID),
                 "name": name,
+                "start_time": locks.process_start_time(pid),
             }
             ok = k32.Process32NextW(snap, ctypes.byref(entry))
     finally:
@@ -129,19 +131,24 @@ def _process_table_posix() -> dict[int, dict]:
             continue
         comm = stat[lparen + 1:rparen]
         rest = stat[rparen + 1:].split()
-        # After comm: state (0), ppid (1) in the remaining fields.
-        if len(rest) < 2:
+        # After comm: state (0), ppid (1), starttime (19).
+        if len(rest) < 20:
             continue
         try:
             ppid = int(rest[1])
         except ValueError:
             continue
-        table[pid] = {"ppid": ppid, "name": comm.lower()}
+        start_time = rest[19] if rest[19].isdigit() else None
+        table[pid] = {
+            "ppid": ppid,
+            "name": comm.lower(),
+            "start_time": start_time,
+        }
     return table
 
 
 def build_process_table() -> dict[int, dict]:
-    """Return a ``{pid: {"ppid": int, "name": str}}`` snapshot of all processes.
+    """Return a ``{pid: {ppid, name, start_time}}`` process snapshot.
 
     One best-effort snapshot used for ancestry (mux vs. bare) and descendant
     (child-tree) resolution. Empty dict if enumeration fails.
@@ -398,6 +405,7 @@ def resolve_bound_copilots(
             results.append({
                 "session_id": sid,
                 "pid": pid,
+                "start_time": locks.process_start_time(pid),
                 "cwd": cwd,
                 "worktree_id": wt_id,
                 "homing": homing,
@@ -615,7 +623,10 @@ def reap_bound_copilots(
     ``include_children`` is set, their transitive **Copilot** descendants (the
     per-session preload/extension children the CLI spawns) -- are killed. No
     sibling session, and no unrelated process that merely shares a working
-    directory, is touched.
+    directory, is touched. Child creation tokens come from the original process
+    snapshot that established ancestry. The identity-bound terminate primitive
+    compares that expected token through its terminating handle/pidfd, so a
+    process that exited and reused the pid after discovery is spared.
 
     Returns one result per input target::
 
@@ -627,19 +638,36 @@ def reap_bound_copilots(
     out: list[dict] = []
     for t in targets:
         pid = t["pid"]
-        child_pids: list[int] = []
+        child_targets: list[tuple[int, str | None]] = []
         if include_children:
             for c in descendants_of(pid, table):
                 # Only reap Copilot descendants -- never an unrelated child that
                 # a shell in the pane happened to spawn.
                 if sessions._is_copilot_process(c):
-                    child_pids.append(c)
+                    child_targets.append(
+                        (c, table.get(c, {}).get("start_time"))
+                    )
         # Kill children first so the parent's exit can't re-home them.
         children_killed = 0
-        for c in child_pids:
-            if procs.terminate_pid(c):
+        children_identity_mismatch: list[int] = []
+        for c, expected_child_start in child_targets:
+            child_result = procs.terminate_pid_if_identity(
+                c, expected_child_start,
+            )
+            if not child_result.get("identity_verified"):
+                children_identity_mismatch.append(c)
+                continue
+            if child_result.get("killed"):
                 children_killed += 1
-        killed = procs.terminate_pid(pid)
+        expected_start = (
+            t.get("expected_start_time")
+            or t.get("start_time")
+        )
+        terminate_result = procs.terminate_pid_if_identity(
+            pid, str(expected_start) if expected_start else None,
+        )
+        identity_verified = bool(terminate_result.get("identity_verified"))
+        killed = bool(terminate_result.get("killed"))
         out.append({
             "session_id": t.get("session_id"),
             "pid": pid,
@@ -647,6 +675,9 @@ def reap_bound_copilots(
             "homing": t.get("homing"),
             "killed": killed,
             "children_killed": children_killed,
+            "identity_verified": identity_verified,
+            "identity_method": terminate_result.get("method"),
+            "children_identity_mismatch": children_identity_mismatch,
         })
     return out
 
@@ -654,6 +685,8 @@ def reap_bound_copilots(
 def ensure_session_copilot_reaped(
     session_id: str,
     *,
+    expected_pid: int | None = None,
+    expected_start_time: str | None = None,
     grace: float = 2.0,
     settle: float = 3.0,
     poll_interval: float = 0.3,
@@ -682,13 +715,47 @@ def ensure_session_copilot_reaped(
 
     started = time.monotonic()
     deadline = started + max(grace, 0.0)
-    bound = resolve_bound_copilots(session_id=session_id)
+    def _matching_bound() -> tuple[list[dict], bool]:
+        current = resolve_bound_copilots(session_id=session_id)
+        if expected_pid is None:
+            return current, True
+        exact = [item for item in current if item.get("pid") == expected_pid]
+        if not exact:
+            # The expected predecessor is already gone. A different pid bound
+            # to this session is not ours to terminate.
+            return [], not current
+        if expected_start_time is None:
+            return [], False
+        if locks.process_start_time(expected_pid) != str(expected_start_time):
+            return [], False
+        return [
+            {**item, "expected_start_time": str(expected_start_time)}
+            for item in exact
+        ], True
+
+    bound, identity_verified = _matching_bound()
+    if not identity_verified:
+        return {
+            "checked": True, "identity_verified": False,
+            "found": len(resolve_bound_copilots(session_id=session_id)),
+            "reaped": 0, "survivors": 0, "pids": [],
+            "waited_s": round(time.monotonic() - started, 2),
+        }
     while bound and time.monotonic() < deadline:
         time.sleep(poll_interval)
-        bound = resolve_bound_copilots(session_id=session_id)
+        bound, identity_verified = _matching_bound()
+        if not identity_verified:
+            return {
+                "checked": True, "identity_verified": False,
+                "found": 0, "reaped": 0, "survivors": 0, "pids": [],
+                "waited_s": round(time.monotonic() - started, 2),
+            }
     if not bound:
-        return {"checked": True, "found": 0, "reaped": 0, "survivors": 0,
-                "pids": [], "waited_s": round(time.monotonic() - started, 2)}
+        return {
+            "checked": True, "identity_verified": True,
+            "found": 0, "reaped": 0, "survivors": 0,
+            "pids": [], "waited_s": round(time.monotonic() - started, 2),
+        }
     pids = [b["pid"] for b in bound]
     reaped = reap_bound_copilots(bound)
     # Block for the reaped process(es) to actually exit before reporting -- a
@@ -696,12 +763,16 @@ def ensure_session_copilot_reaped(
     # falsely report a survivor (or a just-alive orphan the caller is waiting
     # out). Poll until gone or the settle budget elapses.
     settle_deadline = time.monotonic() + max(settle, 0.0)
-    survivors = resolve_bound_copilots(session_id=session_id)
+    survivors, identity_verified = _matching_bound()
     while survivors and time.monotonic() < settle_deadline:
         time.sleep(poll_interval)
-        survivors = resolve_bound_copilots(session_id=session_id)
+        survivors, identity_verified = _matching_bound()
     return {
         "checked": True,
+        "identity_verified": (
+            identity_verified
+            and all(item.get("identity_verified", False) for item in reaped)
+        ),
         "found": len(bound),
         "reaped": sum(1 for r in reaped if r.get("killed")),
         "survivors": len(survivors),

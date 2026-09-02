@@ -51,6 +51,13 @@ at session startup and loads `context-handoff/extension.mjs` as a `plugin`-sourc
 extension. No installed runtime, venv, binstub, copy to
 `~/.copilot/extensions/`, `scripts/install.*`, or manifest.
 
+If extension registration fails, the enabled plugin payload still contains
+`extensions/context-handoff/handoff-cli.mjs`. Resolve it relative to the
+verified `COPILOT_PLUGIN_ROOT` (or an installed `context-handoff/plugin.json`
+whose `name` is exactly `context-handoff`) and invoke it with `node`; do not look
+for a PATH binstub or run an installer. The main `context-handoff` skill carries
+the exact cross-platform fallback commands.
+
 ## Loading gates
 
 The hook and extension have different gates. Check the component that is

@@ -475,6 +475,7 @@ class TestMuxRetirePane:
 def _ns(**kw):
     base = dict(seed=None, worktree_id=None, session_id=None, old_pane=None,
                 retire_pane=None, mux_session=None, require_mux_identity=False,
+                expected_copilot_pid=None, expected_copilot_start_time=None,
                 dry_run=False,
                 copilot_args=[], recovery=False)
     base.update(kw)
@@ -491,6 +492,33 @@ class TestCmdHandoffCutover:
         ])
         assert args.mux_session == "caller-session"
         assert args.require_mux_identity is True
+
+    def test_retire_rejects_reused_predecessor_pid(self, monkeypatch, capfd):
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid: {
+                "pane_id": "%9",
+                "copilot_pid": 77,
+                "copilot_start_time": "new-process",
+            },
+        )
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda *a, **k: pytest.fail("must not retire an unverified process"),
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            retire_pane="%9",
+            session_id="old-sess",
+            expected_copilot_pid=77,
+            expected_copilot_start_time="old-process",
+        ))
+
+        assert rc == 1
+        out = json.loads(capfd.readouterr().out)
+        assert out["method"] == "process-identity-mismatch"
 
     def test_retire_mode(self, monkeypatch, capfd):
         monkeypatch.setattr(sessions, "mux_retire_pane",
@@ -893,7 +921,11 @@ class TestCmdHandoffCutover:
             }
 
         monkeypatch.setattr(sessions, "mux_new_window", _fake_new_window)
-        rc = m.cmd_handoff_cutover(_ns(seed="resume the multi word work", old_pane="%2"))
+        rc = m.cmd_handoff_cutover(_ns(
+            seed="resume the multi word work",
+            old_pane="%2",
+            handoff_token="task-123",
+        ))
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         assert out["ok"] is True
@@ -907,4 +939,5 @@ class TestCmdHandoffCutover:
         assert captured["kwargs"]["initial_prompt"] == (
             "resume the multi word work"
         )
+        assert captured["env"]["AGENT_WORKTREES_HANDOFF_TOKEN"] == "task-123"
         assert out["seed_method"] == "interactive-argv"

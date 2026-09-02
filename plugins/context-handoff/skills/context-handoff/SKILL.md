@@ -9,6 +9,7 @@ description: >
   - 'handoff'
   - '/handoff'
   - '/handoff-continue'
+  - '/consume-handoff'
   - '/resume-handoff'
   - 'resume handoff'
   - 'resume from handoff'
@@ -125,7 +126,7 @@ the user explicitly requested an archival continuation prompt.
 
 A handoff has three parts: the **stored handoff** (the full continuation
 context), an optional **live cutover** that spins up the successor *in place*,
-and a **short paste prompt** for environments where cutover is not available.
+and a **bounded recovery seed** for environments where cutover is not available.
 
 **Live cutover is the default under mux.** A mux-backed session stores the
 handoff, spawns a successor in the same `wt-<id>` mux session, and then stops
@@ -134,14 +135,21 @@ retires the predecessor only after it consumes the stored handoff, so a
 successor that never comes up leaves the predecessor and terminal available for
 recovery.
 
+Copilot creates no successor session until the compact initial prompt is
+submitted. The launch environment carries the pending handoff token, so
+`sessionStart` can associate the resulting real session with the token and target
+worktree. That association is only a candidate binding: the predecessor remains
+head until the successor explicitly invokes `/consume-handoff` to acknowledge
+the baton and take over.
+
 ### Storage and cutover matrix
 
 | agent-dispatch coordinator | live mux session | Behavior |
 |---|---|---|
-| yes | yes | Store a `proposed`, `handoff`-labeled task pinned to this worktree. `continue_handoff` spawns the successor. The successor calls `consume_handoff` for that task, which runs the consume path and retires the recorded predecessor pane after pickup. |
-| yes | no | Store the same task. Reply with the short paste prompt containing the full `agent-dispatch consume <id>` command. <!-- marketplace-isolation: allow handoff-seed-startup --> |
-| no | yes | Store a one-time JSON handoff file under the machine-local state directory reported by agent-worktrees, outside the repo checkout (`<worktree-id>` for a linked worktree, `@anchor` for an adopted anchor). `continue_handoff` spawns the successor in the worktree mux or the anchor's caller-owned mux. The successor calls `consume_handoff`, which marks the file consumed and retires the recorded predecessor pane. |
-| no | no | Store the same one-time machine-local file. Reply with the short paste prompt telling the next session to call `consume_handoff` with the exact stored path. |
+| yes | yes | Store a pinned handoff task. `continue_handoff` launches a successor with the bounded three-part seed; `/consume-handoff` checkpoints the task payload before consuming, establishes lifecycle state, then retires only the verified predecessor. |
+| yes | no | Store the same task and note-handoff pointer. Return a clearly delimited seed containing `/consume-handoff` plus one ASCII-safe payload-CLI `consume --task-id <id> --defer-complete` recovery command. |
+| no | yes | Store a one-time worktree-state file. Launch the same bounded seed; consumption applies the same bind/succession/head/title-before-retire ordering. |
+| no | no | Keep the file and note-handoff pointer. Return a clearly delimited seed with one exact file-CLI recovery command. Automatic terminal spawning remains deferred to #1632. |
 
 ### Steps (default = live cutover)
 
@@ -165,51 +173,101 @@ recovery.
    journal. Otherwise preserve the full parent objective and ordered successor
    roster. Both modes keep separate handoff and worktree completion gates.
 5. **Call `save_handoff_prompt`** with that markdown as **`prompt_text`** (plus
-   an optional short `title`). It stores the handoff and returns both the paste
-   prompt and a `HANDOFF_SEED:` line.
+   an optional short `title`). It stores the handoff and returns a clearly
+   delimited fallback block plus a `HANDOFF_SEED:` line.
 6. **If under mux, call `continue_handoff`** with `seed` exactly equal to the
-   `HANDOFF_SEED` string. Then end your turn. Do not start new work in the
-   predecessor.
-7. **If cutover cannot run**, reply with only the short paste prompt returned by
-   `save_handoff_prompt`.
+   `HANDOFF_SEED` string and, when requested, the returned `HANDOFF_TOKEN`.
+   Then end your turn. Do not start new work in the predecessor.
+7. **If cutover cannot run**, show the user the explicit fallback instruction
+   and exact copyable block returned by `save_handoff_prompt`; do not reduce it
+   to an ambiguous raw prompt.
 
-> **Two completion models.** A task-backed paste resume uses
-> `agent-dispatch consume <id>` and completes the baton on pickup. <!-- marketplace-isolation: allow handoff-seed-startup -->
+> **Two completion models.** A task-backed paste resume uses payload-local
+> `handoff-cli.mjs consume --task-id <id>` and completes the baton on pickup.
 > A task-backed
 > live cutover uses `consume_handoff` with `defer_complete: true`; the successor
 > later runs `agent-dispatch complete <id>` only when it reaches the handoff <!-- marketplace-isolation: allow handoff-seed-startup -->
 > completion gate. Finishing the predecessor's latest phase is not sufficient
-> when the continuing objective still has actionable work.
+> when the continuing objective still has actionable work. Canonical
+> `/consume-handoff` must leave the deferred task owned and inject that explicit
+> completion command; it never completes or yields the task merely because the
+> brief was delivered.
 
 ### Fallback when the extension's tools are unavailable — the CLI
 
 The tools above are provided by the context-handoff **extension**. When the
 extension does not resolve or fails to load, they are simply absent — most
 notably in a **Bare-resumed session**, where *no* extensions load at all
-(`extensions list` shows nothing). The plugin's **payload files are still on
-disk**, so an agent can drive the same store + live-cutover directly through a
-standalone Node CLI — no extension runtime required:
+(`extensions list` shows nothing). The plugin's **payload files are still on disk**, so an agent can drive the same
+facts → compose → store → cutover → consume/acknowledge → retry/manual-fallback
+flow through a standalone Node CLI. This is payload-local JavaScript: there is
+no installer, venv, service, binstub, or runtime step.
 
 ```bash
-CH="$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff/extensions/context-handoff/handoff-cli.mjs"
+# Prefer the exact hook-supplied plugin root. Otherwise find one installed
+# context-handoff payload and verify its manifest before invoking it.
+CH_ROOT="${COPILOT_PLUGIN_ROOT:-}"
+if [ ! -f "$CH_ROOT/plugin.json" ]; then
+  CH_ROOT="$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff"
+  provenance="$(node -e 'const fs=require("fs"),m=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(`${m.name||""}|${m.repository||""}`)' "$CH_ROOT/plugin.json" 2>/dev/null)"
+  [ "$provenance" = "context-handoff|https://github.com/ThomasMichon/copilot-extensions" ] ||
+    { echo "canonical context-handoff@copilot-extensions payload not found" >&2; exit 1; }
+fi
+CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
+[ -f "$CH" ] || { echo "context-handoff payload-local CLI not found" >&2; exit 1; }
 
-# Store the handoff AND start the live cutover (the save_handoff_prompt +
-# continue_handoff equivalent). Compose the markdown yourself (the extension's
-# in-memory session facts are unavailable out-of-band) and pass it in:
-node "$CH" cutover --title "<topic>" --prompt-file <handoff.md>
+# Rich token/turn facts require the extension; collect the exact facts available
+# out-of-band, then compose the normal effort-backed/standalone markdown.
+node "$CH" facts --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 
-# Store only + print the paste prompt (no cutover):
-node "$CH" save --title "<topic>" --prompt-file <handoff.md>
-# Trigger a cutover for an existing seed:   node "$CH" continue --seed "<HANDOFF_SEED>"
-# Consume a file-backed handoff:            node "$CH" consume --handoff-id <id>
+# Most efficient path: store first, then launch under mux. The command prints an
+# explicit copyable fallback and preserves the task/file if no mux exists.
+node "$CH" cutover --title "<topic>" --prompt-file "<handoff.md>" \
+  --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+
+# Split path when storage and launch are separate. Read `id` and `seed` from the
+# JSON; id is the HANDOFF_TOKEN.
+node "$CH" save --json --title "<topic>" --prompt-file "<handoff.md>" \
+  --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" continue --seed "<HANDOFF_SEED>" --handoff-token "<HANDOFF_TOKEN>" \
+  --worktree-id "<worktree-id>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+
+# Successor acknowledgement/takeover (task or file), then same-state retry.
+node "$CH" consume --task-id "<task-id>" --defer-complete \
+  --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" consume --handoff-id "<handoff-id>" \
+  --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" retry --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 ```
 
-It reuses the SDK-free `handoff-core.mjs` (same store format +
-`agent-worktrees handoff-cutover` trigger <!-- marketplace-isolation: allow handoff-core-management -->
-and the issue-#853 bash-first seed), so a handoff it stores is
-byte-compatible with `consume_handoff` / `/resume-handoff`. Session id defaults
-to `$COPILOT_AGENT_SESSION_ID`; pass `--session-id` / `--cwd` when running from
-outside the worktree. `--no-task` forces the file store.
+PowerShell uses the same verified, plugin-folder-relative invocation:
+
+```powershell
+$chRoot = $env:COPILOT_PLUGIN_ROOT
+if (-not (Test-Path -LiteralPath "$chRoot\plugin.json")) {
+  $chRoot = Join-Path $HOME '.copilot\installed-plugins\copilot-extensions\context-handoff'
+  try { $manifest = Get-Content -Raw "$chRoot\plugin.json" | ConvertFrom-Json } catch { $manifest = $null }
+  if ($manifest.name -ne 'context-handoff' -or
+      $manifest.repository -ne 'https://github.com/ThomasMichon/copilot-extensions') {
+    throw 'canonical context-handoff@copilot-extensions payload not found'
+  }
+}
+$ch = Join-Path $chRoot 'extensions\context-handoff\handoff-cli.mjs'
+if (-not (Test-Path -LiteralPath $ch -PathType Leaf)) { throw 'context-handoff payload-local CLI not found' }
+node $ch facts --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch cutover --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+$saved = node $ch save --json --title '<topic>' --prompt-file '<handoff.md>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD | ConvertFrom-Json
+node $ch continue --seed $saved.seed --handoff-token $saved.id --worktree-id '<worktree-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch consume --task-id '<task-id>' --defer-complete --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch consume --handoff-id '<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch retry --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+```
+
+`handoff-cli.mjs`, the extension, and retry/consume all delegate to the same
+SDK-free `handoff-core.mjs`: identical store format, compact seed, checkpoint,
+acknowledgement/head takeover, verified retire, retry, and manual fallback.
+`--no-task` forces the file store. If no mux exists, `save`/`cutover` still keep
+the stored payload and print the exact block to copy.
 
 If even `node` is unavailable, compose the handoff manually and follow the same
 storage rules: a task when a coordinator and worktree are resolvable, otherwise a
@@ -221,11 +279,15 @@ write handoffs into the repo.
 ## Live-Cutover Handoff — the primary path (hand off *and continue* in place)
 
 `save_handoff_prompt` stores the baton. `continue_handoff` only performs the mux
-choreography: it opens a successor pane and seeds it. The stored baton includes
-the predecessor pane id and session id. The successor's first action is to call
-`consume_handoff`; that consume step loads the brief, marks file-backed handoffs
-spent, records the predecessor as handed off, and retires the old pane through
-`agent-worktrees handoff-cutover --retire-pane`. <!-- marketplace-isolation: allow handoff-core-management -->
+choreography: it opens a successor pane and seeds it. The stored baton records the predecessor through agent-worktrees'
+`session-binding` authority, including process-creation identity where
+available. The initial prompt creates the successor before any binding can
+occur; `sessionStart` then records the successor as the token's candidate without
+moving the head. The successor invokes `/consume-handoff`; task-backed
+consumption checkpoints the brief before the one-time consume, then atomically
+acknowledges/binds the token (linking succession and verifying the head), updates
+the title, and retires only the verified predecessor.
+<!-- marketplace-isolation: allow handoff-core-management -->
 
 This successor-consume-driven retire is the safety rule: **the predecessor never
 self-retires on idle.** If the successor hangs before consuming, no retire is
@@ -238,13 +300,13 @@ attempted and the operator can switch back to the predecessor.
 A handoff is **not** auto-loaded. How you resume depends on which form the
 previous session produced:
 
-1. **agent-dispatch form** (coordinator available). The paste prompt contains
-   the complete `agent-dispatch consume <id>` command. <!-- marketplace-isolation: allow handoff-seed-startup -->
-   `/resume-handoff` can also
+1. **agent-dispatch form** (coordinator available). The bounded seed recommends
+   `/consume-handoff` and carries one exact raw recovery command. <!-- marketplace-isolation: allow handoff-seed-startup -->
+   `/consume-handoff` can
    find and consume this worktree's newest proposed handoff task and inject the
    continuation prompt.
-2. **File form** (no coordinator). The paste prompt tells the next session to
-   call the extension's `consume_handoff` tool with the handoff id. The tool
+2. **File form** (no coordinator). The seed recommends `/consume-handoff` and
+   carries one exact `handoff-cli.mjs consume` recovery command. The consumer
    reads the worktree-state JSON file, marks it consumed, and injects the stored
    continuation. Re-running it on a consumed file returns a stop notice instead
    of replaying the brief.
@@ -285,9 +347,9 @@ the agent-worktrees state is the authoritative first stop:
 If the user supplied an exact handoff id/path or the extension already injected
 the handoff, skip discovery and consume/continue that exact baton.
 
-### `/resume-handoff` — an injected slash command (extension-provided)
+### `/consume-handoff` — the canonical injected slash command
 
-When the operator runs `/resume-handoff` in the target worktree, the extension:
+When the operator runs `/consume-handoff` in the target worktree, the extension:
 
 1. Prefers this worktree's newest `proposed`, `handoff`-labeled agent-dispatch
    task and consumes it.
@@ -297,7 +359,8 @@ When the operator runs `/resume-handoff` in the target worktree, the extension:
    pending handoff was found.
 
 So your job on resume is: **read the injected handoff and keep going.** Do not
-re-claim or re-complete a baton that `/resume-handoff` already consumed. Apply
+re-claim or re-complete a baton that `/consume-handoff` already consumed.
+`/resume-handoff` remains a compatibility alias. Apply
 the Continuity Contract above: the completed items are history; the continuing
 objective and successor work roster are the authorization to keep driving.
 For an effort-backed baton, load the cited effort README first. Use session
@@ -353,14 +416,16 @@ Choose exactly one:
 - **Standalone handoff content can be as long as needed** because it is read on
   demand. Capture the complete parent objective, direction, progress, and
   successor roster when no valid effort owns them.
-- **The inline REPLY prompt must be short — one or two sentences.** It is
-  addressed to the **next agent** and is whichever form `save_handoff_prompt`
-  returned: either the agent-dispatch resume seed with the full
-  `agent-dispatch consume <id>` command, <!-- marketplace-isolation: allow handoff-seed-startup -->
-  or the file-backed seed instructing
-  the next agent to call `consume_handoff` with the handoff id. It is
-  copy-pasted verbatim into `/clear` (or `/new`); keep it scannable and do
-  **not** repeat the handoff contents.
+- **The inline seed is a locator, not the handoff.** It is one ASCII line,
+  at most 1024 characters, with exactly three parts: `Task: ...`, one
+  recommendation to invoke `/consume-handoff` after startup to acknowledge and
+  take over, and one exact raw recovery command. Never inline the handoff
+  markdown or a multi-command shell chain.
+- **Optimize the exchange, not the stored brief.** Preserve full-fidelity detail
+  in the task/file payload. The normal successor path should consume and
+  acknowledge in one agent turn and one extension tool call; the shared core
+  collapses succession/head verification into the atomic token bind before the
+  title and verified-retire calls.
 - **Lead with the original topic.** The "Original Request" must reference the
   session's founding purpose, not just recent activity.
 - **Preserve the parent objective.** A phase-complete milestone belongs under
@@ -386,7 +451,7 @@ Choose exactly one:
   non-awaited path" is useful. Include file paths, what failed, and the why.
 - **Never claim auto-pickup.** A handoff is never loaded automatically on
   restart. Do not imply Copilot will resume on its own — the user resumes it
-  (`/resume-handoff`, or paste the reply prompt).
+  (`/consume-handoff`, its `/resume-handoff` alias, or the exact fallback block).
 - **One home, not two.** A handoff lives in **one** place — the agent-dispatch
   task when a coordinator is running, else a worktree-state file outside the
   repo checkout. Don't write a file *and* a task. Show the reply prompt to the

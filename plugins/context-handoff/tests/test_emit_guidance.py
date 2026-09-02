@@ -32,6 +32,19 @@ def _powershell() -> str | None:
     return shutil.which("pwsh")
 
 
+def _bash() -> str:
+    executable = shutil.which("bash")
+    assert executable
+    return executable
+
+
+def _bash_path(path: Path) -> str:
+    text = str(path)
+    if os.name == "nt" and len(text) >= 3 and text[1:3] == ":\\":
+        return f"/{text[0].lower()}/{text[3:].replace(chr(92), '/')}"
+    return text
+
+
 def _run(
     command: list[str],
     *,
@@ -54,7 +67,7 @@ def _run_bash(
     *args: str,
     plugin_root: Path | None = PLUGIN,
 ) -> subprocess.CompletedProcess[str]:
-    return _run(["bash", str(BASH_PRODUCER), *args], plugin_root=plugin_root)
+    return _run([_bash(), str(BASH_PRODUCER), *args], plugin_root=plugin_root)
 
 
 def _run_powershell(
@@ -225,10 +238,10 @@ def test_bash_falls_back_to_script_location() -> None:
 def test_hook_commands_use_plugin_root() -> None:
     entry = _hook_entry()
     environment = os.environ.copy()
-    environment["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
+    environment["COPILOT_PLUGIN_ROOT"] = _bash_path(PLUGIN)
 
     result = subprocess.run(
-        ["bash", "-c", str(entry["bash"])],
+        [_bash(), "-c", str(entry["bash"])],
         input=_hook_input(),
         check=True,
         capture_output=True,
@@ -239,13 +252,15 @@ def test_hook_commands_use_plugin_root() -> None:
 
     powershell = _powershell()
     if powershell:
+        powershell_environment = os.environ.copy()
+        powershell_environment["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
         result = subprocess.run(
             [powershell, "-NoProfile", "-Command", str(entry["powershell"])],
             input=_hook_input(),
             check=True,
             capture_output=True,
             text=True,
-            env=environment,
+            env=powershell_environment,
         )
         assert _context(result) == _context(_run_powershell("--aggregate"))
 
@@ -256,10 +271,10 @@ def test_hook_commands_accept_compatibility_root_aliases() -> None:
         environment = os.environ.copy()
         for name in ("COPILOT_PLUGIN_ROOT", "PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
             environment.pop(name, None)
-        environment[alias] = str(PLUGIN)
+        environment[alias] = _bash_path(PLUGIN)
 
         result = subprocess.run(
-            ["bash", "-c", str(entry["bash"])],
+            [_bash(), "-c", str(entry["bash"])],
             input=_hook_input(),
             check=True,
             capture_output=True,

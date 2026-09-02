@@ -888,18 +888,113 @@ print(digest.hexdigest()[:16])
     # a FAIL, not an infinite wait.
     Write-Host "== eval: driving '$DriveAgent' x$runCount (fresh session; literal-mode + stated purpose) ==" -ForegroundColor Cyan
     if ($perTurnTimeout -gt 0) { Write-Host "   per-turn timeout: ${perTurnTimeout}s" -ForegroundColor DarkGray }
+    $captureNames = @(
+        'transcript.txt',
+        'structured-result.json',
+        'turn-detail.json',
+        'turns.jsonl'
+    )
+    $priorRunDirs = @($evalDir) + @(
+        Get-ChildItem -Path $evalDir -Directory -Filter 'run-*' `
+            -ErrorAction SilentlyContinue
+    )
+    foreach ($priorRunDir in $priorRunDirs) {
+        foreach ($captureName in $captureNames) {
+            Remove-Item -Force -ErrorAction SilentlyContinue `
+                (Join-Path $priorRunDir $captureName)
+        }
+    }
+    Remove-Item -Force -ErrorAction SilentlyContinue `
+        (Join-Path $evalDir 'drive-runs.json')
     $runRecords = @()
     for ($n = 1; $n -le $runCount; $n++) {
         $runDir = if ($runCount -eq 1) { $evalDir } else { $d = Join-Path $evalDir "run-$n"; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d }
         $transcriptPath = Join-Path $runDir 'transcript.txt'
+        $structuredPath = Join-Path $runDir 'structured-result.json'
+        $turnPath = Join-Path $runDir 'turn-detail.json'
+        $turnsPath = Join-Path $runDir 'turns.jsonl'
+        Remove-Item -Force -ErrorAction SilentlyContinue `
+            $transcriptPath, $structuredPath, $turnPath, $turnsPath
         Write-Host "   -- run $n/$runCount --" -ForegroundColor DarkGray
         Invoke-EndAgentSessions $DriveAgent
         $drv = Invoke-DriveWithTimeout `
             $DriveAgent $promptTxt $perTurnTimeout $acpModel
         Set-Content -Path $transcriptPath -Value $drv.transcript -Encoding utf8
+        $turnEvidence = [System.Collections.Generic.List[string]]::new()
+        try {
+            $sessionRows = (& agent-bridge --json sessions 2>$null | Out-String |
+                ConvertFrom-Json)
+            $sessionRow = @($sessionRows) |
+                Where-Object { $_.agent_name -eq $DriveAgent } |
+                Sort-Object updated_at -Descending |
+                Select-Object -First 1
+            if ($sessionRow -and $sessionRow.session_id) {
+                $snapshotText = (& agent-bridge --json result $sessionRow.session_id 2>$null |
+                    Out-String).Trim()
+                if ($snapshotText) {
+                    Set-Content -Path $structuredPath -Value $snapshotText -Encoding utf8
+                    $snapshot = $snapshotText | ConvertFrom-Json
+                    $detailRef = $snapshot.latest_result.detail_ref
+                    $seenTurnRefs = @{}
+                    if ($detailRef) {
+                        $latestDetailText = (& agent-bridge --json result `
+                            $sessionRow.session_id --expand $detailRef 2>$null |
+                            Out-String).Trim()
+                        if ($latestDetailText) {
+                            Set-Content -Path $turnPath `
+                                -Value $latestDetailText -Encoding utf8
+                            $latestDetail = $latestDetailText | ConvertFrom-Json
+                            if ($latestDetail.turn) {
+                                $turnEvidence.Add(
+                                    ($latestDetail |
+                                        ConvertTo-Json -Depth 20 -Compress)
+                                )
+                                $seenTurnRefs[$detailRef] = $true
+                            }
+                        }
+                    }
+                    foreach ($item in @($snapshot.incremental.items)) {
+                        if (-not $item.detail_ref) { continue }
+                        if ($seenTurnRefs.ContainsKey($item.detail_ref)) {
+                            continue
+                        }
+                        try {
+                            $detailText = (& agent-bridge --json result `
+                                $sessionRow.session_id `
+                                --expand $item.detail_ref 2>$null |
+                                Out-String).Trim()
+                            if (-not $detailText) { continue }
+                            $detail = $detailText | ConvertFrom-Json
+                            if ($detail.turn) {
+                                $turnEvidence.Add(
+                                    ($detail |
+                                        ConvertTo-Json -Depth 20 -Compress)
+                                )
+                            }
+                        } catch { }
+                    }
+                    if ($turnEvidence.Count -gt 0) {
+                        Set-Content -Path $turnsPath `
+                            -Value $turnEvidence -Encoding utf8
+                    }
+                }
+            }
+        } catch {
+            # Structured evidence is best-effort for general scenarios; a
+            # scenario that requires it must fail closed in post_check.
+        }
         $runRecords += [pscustomobject]@{
             n          = $n
             transcript = ($transcriptPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'
+            structured_result = if (Test-Path $structuredPath) {
+                ($structuredPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'
+            } else { $null }
+            turn_detail = if (Test-Path $turnPath) {
+                ($turnPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'
+            } else { $null }
+            turns = if (Test-Path $turnsPath) {
+                ($turnsPath -replace [regex]::Escape($Results + '\'), '') -replace '\\','/'
+            } else { $null }
             duration_s = $drv.duration_s
             timed_out  = $drv.timed_out
             exit_code  = $drv.exit_code

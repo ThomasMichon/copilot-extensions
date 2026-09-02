@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import tracking
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -46,12 +47,34 @@ def _args(**kw) -> argparse.Namespace:
         pane=None,
         emit_context=False,
         handoff_token=None,
+        handoff_candidate_token=None,
     )
     base.update(kw)
     return argparse.Namespace(**base)
 
 
 class TestRegisterSessionStdin:
+    def test_session_start_associates_candidate_without_moving_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-cutover", "/tmp/src/wt-cutover")
+        tracking.register_session("wt-cutover", "old")
+        rec = load_record(tmp_tracking_dir / "wt-cutover.yaml")
+        tracking.open_handoff(rec, "old", "task-123")
+        monkeypatch.setenv("AGENT_WORKTREES_HANDOFF_TOKEN", "task-123")
+
+        rc = m.cmd_register_session(_args(
+            worktree_id="wt-cutover",
+            session_id="new",
+            emit_context=True,
+        ))
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-cutover.yaml")
+        assert rec.resolved_head_session == "old"
+        assert rec.handoffs[0].candidate == "new"
+        assert rec.handoffs[0].state == "pending"
+
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

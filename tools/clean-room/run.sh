@@ -692,19 +692,94 @@ print(digest.hexdigest()[:16])
     [ "${PER_TURN:-0}" -gt 0 ] 2>/dev/null && echo "   per-turn timeout: ${PER_TURN}s"
     local prompt_txt="$eval_dir/prompt.txt" recs="$eval_dir/.runrecords"
     : > "$recs"
+    rm -f \
+        "$eval_dir/transcript.txt" \
+        "$eval_dir/structured-result.json" \
+        "$eval_dir/turn-detail.json" \
+        "$eval_dir/turns.jsonl" \
+        "$eval_dir/drive-runs.json"
+    local prior_run_dir
+    for prior_run_dir in "$eval_dir"/run-*; do
+        [ -d "$prior_run_dir" ] || continue
+        rm -f \
+            "$prior_run_dir/transcript.txt" \
+            "$prior_run_dir/structured-result.json" \
+            "$prior_run_dir/turn-detail.json" \
+            "$prior_run_dir/turns.jsonl"
+    done
     local n run_dir transcript rel tag
     for n in $(seq 1 "$RUN_COUNT"); do
         if [ "$RUN_COUNT" -eq 1 ]; then run_dir="$eval_dir"; else run_dir="$eval_dir/run-$n"; mkdir -p "$run_dir"; fi
         transcript="$run_dir/transcript.txt"
+        local structured="$run_dir/structured-result.json"
+        local turn_detail="$run_dir/turn-detail.json"
+        local turns_jsonl="$run_dir/turns.jsonl"
+        rm -f "$transcript" "$structured" "$turn_detail" "$turns_jsonl"
         echo "   -- run $n/$RUN_COUNT --"
         end_agent_sessions "$DRIVE_AGENT"
         drive_with_timeout \
             "$DRIVE_AGENT" "$prompt_txt" "${PER_TURN:-0}" "$ACP_MODEL" \
             > "$transcript"
+        local session_id detail_ref
+        session_id="$(
+            agent-bridge --json sessions 2>/dev/null |
+            "$(_py)" -c 'import json,sys
+agent=sys.argv[1]
+try: rows=json.load(sys.stdin)
+except Exception: rows=[]
+matches=[row for row in rows if row.get("agent_name")==agent]
+matches.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
+print(matches[0].get("session_id","") if matches else "", end="")' "$DRIVE_AGENT"
+        )"
+        if [ -n "$session_id" ] &&
+           agent-bridge --json result "$session_id" >"$structured" 2>/dev/null; then
+            : >"$turns_jsonl"
+            detail_ref="$("$(_py)" -c 'import json,sys
+try: value=json.load(open(sys.argv[1],encoding="utf-8"))
+except Exception: value={}
+print(((value.get("latest_result") or {}).get("detail_ref") or ""), end="")' "$structured")"
+            if [ -n "$detail_ref" ]; then
+                agent-bridge --json result "$session_id" --expand "$detail_ref" \
+                    >"$turn_detail" 2>/dev/null || rm -f "$turn_detail"
+                if [ -f "$turn_detail" ]; then
+                    "$(_py)" -c 'import json,sys
+try: value=json.load(open(sys.argv[1],encoding="utf-8"))
+except Exception: raise SystemExit(1)
+if value.get("turn") is not None:
+    print(json.dumps(value,separators=(",",":")))' \
+                        "$turn_detail" >>"$turns_jsonl" || true
+                fi
+            fi
+            while IFS= read -r item_ref; do
+                [ -n "$item_ref" ] || continue
+                [ "$item_ref" = "$detail_ref" ] && continue
+                agent-bridge --json result "$session_id" --expand "$item_ref" \
+                    2>/dev/null |
+                    "$(_py)" -c 'import json,sys
+try: value=json.load(sys.stdin)
+except Exception: raise SystemExit(1)
+if value.get("turn") is not None:
+    print(json.dumps(value,separators=(",",":")))' \
+                    >>"$turns_jsonl" || true
+            done < <("$(_py)" -c 'import json,sys
+try: value=json.load(open(sys.argv[1],encoding="utf-8"))
+except Exception: value={}
+for item in ((value.get("incremental") or {}).get("items") or []):
+    ref=item.get("detail_ref")
+    if ref: print(ref)' "$structured")
+            [ -s "$turns_jsonl" ] || rm -f "$turns_jsonl"
+        else
+            rm -f "$structured"
+        fi
         rel="${transcript#"$RESULTS"/}"
-        printf '%s|%s|%s|%s|%s|%s\n' \
+        local structured_rel="" turn_rel="" turns_rel=""
+        [ -f "$structured" ] && structured_rel="${structured#"$RESULTS"/}"
+        [ -f "$turn_detail" ] && turn_rel="${turn_detail#"$RESULTS"/}"
+        [ -f "$turns_jsonl" ] && turns_rel="${turns_jsonl#"$RESULTS"/}"
+        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
             "$n" "$rel" "$DRIVE_DURATION" "$DRIVE_TIMED_OUT" \
-            "$DRIVE_EXIT_CODE" "$DRIVE_MODEL" >> "$recs"
+            "$DRIVE_EXIT_CODE" "$DRIVE_MODEL" \
+            "$structured_rel" "$turn_rel" "$turns_rel" >> "$recs"
         tag=""; [ "$DRIVE_TIMED_OUT" = 1 ] && tag=" -- TIMED OUT"
         [ "$DRIVE_EXIT_CODE" = 0 ] || tag="$tag -- EXIT $DRIVE_EXIT_CODE"
         [ -z "$DRIVE_MODEL" ] || tag="$tag -- MODEL $DRIVE_MODEL"
@@ -720,7 +795,10 @@ for line in open(sys.argv[1], encoding="utf-8"):
     line = line.rstrip("\n")
     if not line:
         continue
-    n, transcript, duration, timed_out, exit_code, model = line.split("|")
+    (
+        n, transcript, duration, timed_out, exit_code, model,
+        structured_result, turn_detail, turns,
+    ) = line.split("|")
     runs.append({
         "n": int(n),
         "transcript": transcript,
@@ -728,6 +806,9 @@ for line in open(sys.argv[1], encoding="utf-8"):
         "timed_out": timed_out == "1",
         "exit_code": int(exit_code),
         "model": model,
+        "structured_result": structured_result or None,
+        "turn_detail": turn_detail or None,
+        "turns": turns or None,
     })
 json.dump(runs, sys.stdout, indent=2)
 PY
@@ -763,9 +844,15 @@ if os.path.exists(recs_path):
         line = line.rstrip("\n")
         if not line:
             continue
-        n, transcript, dur, timed, exit_code, model = line.split("|")
+        (
+            n, transcript, dur, timed, exit_code, model,
+            structured, turn_detail, turns,
+        ) = line.split("|")
         runs.append({
             "n": int(n), "transcript": transcript,
+            "structured_result": structured or None,
+            "turn_detail": turn_detail or None,
+            "turns": turns or None,
             "duration_s": int(dur), "timed_out": timed == "1",
             "exit_code": int(exit_code), "model": model,
         })
