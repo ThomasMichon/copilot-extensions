@@ -75,6 +75,20 @@ detonate the multiplier on the hottest path.
    is the only O(sessions) path left; parse `workspace.yaml` with libyaml
    (`yaml.CSafeLoader` when available) so even the repair is fast.
 
+6. **Project known relationships reciprocally by exact ID.** A plugin may write
+   a bounded, versioned sidecar beneath an exact session-state directory
+   when it already knows the session ID. The projection must identify the
+   authoritative source revision, remain rebuildable, and never become a second
+   owner of the relationship. This gives resumed and synchronized sessions a
+   random-access pointer back to their owning records without permitting another
+   discovery sweep.
+
+7. **Separate binding from control.** A session that deliberately operates
+   another worktree is not thereby bound to it. Store a controller relation in
+   the authoritative worktree state and mirror it into the exact session
+   projection. Never repair a missing worktree head by registering one foreign
+   controller session against multiple worktrees.
+
 ## The invariant
 
 > A **session-state directory sweep** — any iteration over the subfolders of the
@@ -90,6 +104,11 @@ detonate the multiplier on the hottest path.
 > A full immediate recovery sweep must be initiated explicitly. Normal
 > operation may only make bounded incremental progress through the resident
 > cursor; it cannot turn a single read or refresh into O(total sessions) work.
+>
+> A reciprocal session-state projection is written and read only through an
+> **exact validated session ID**. It is a rebuildable index over an authoritative
+> plugin-owned record, not permission to infer or overwrite ownership from
+> synchronized metadata.
 
 ## Accepted tradeoff
 
@@ -109,6 +128,24 @@ invariant beats momentary completeness of a row.
   root — so a future "helpful fallback" cannot silently reintroduce the sweep.
 - **A review rule.** A change that adds a session-state sweep is only acceptable
   as part of `backfill`; anywhere else it fails this contract.
+- **Projection containment.** Session-scoped metadata writers validate the exact
+  session ID, remain beneath the configured session-state root, reject
+  symlink/reparse escapes, write atomically, and apply private permissions where
+  the platform supports them.
+- **Projection serialization.** Read-merge-replace updates to one session
+  sidecar are protected by an exclusive sidecar-scoped lock or one equivalent
+  serializing writer. Atomic replacement alone does not prevent concurrent
+  writers from dropping each other's relations.
+- **Restored-state distrust.** Synchronized projections are hints until their
+  schema, session identity, project identity, and source revisions are validated
+  against current local authority. They cannot silently bind a session or
+  override a newer worktree record.
+- **Offline corpus boundary.** Cross-session visualization and analysis consume
+  a synchronized archive or an index produced while synchronizing. They do not
+  add another enumeration path over the live session-state root.
+- **Version monotonicity.** A writer that encounters an unsupported newer major
+  projection schema leaves it untouched and reports the incompatibility; older
+  code never rewrites newer state into its own shape.
 
 ## Rationale
 
