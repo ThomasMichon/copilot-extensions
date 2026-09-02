@@ -26,9 +26,15 @@ class FrameHealthReporter:
         path: Path,
         *,
         threshold_seconds: float = _DEFAULT_THRESHOLD_SECONDS,
+        report_gaps: bool = True,
+        launch_id: str = "",
+        binstub_started: str = "",
     ) -> None:
         self.path = path
         self.threshold_seconds = max(0.1, float(threshold_seconds))
+        self.report_gaps = report_gaps
+        self.launch_id = launch_id
+        self.binstub_started = binstub_started
         self._queue: queue.Queue[dict | object] = queue.Queue(maxsize=_QUEUE_SIZE)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -37,14 +43,27 @@ class FrameHealthReporter:
 
     @classmethod
     def from_env(cls) -> FrameHealthReporter | None:
-        raw = os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH", "").strip()
-        if not raw or raw.lower() in ("0", "false", "no", "off"):
-            return None
-        path = (
-            Path.home() / ".agent-worktrees" / "logs" / "picker-frame-health.jsonl"
-            if raw.lower() in ("1", "true", "yes", "on")
-            else Path(raw).expanduser()
+        health_raw = os.environ.get(
+            "AGENT_WORKTREES_PICKER_FRAME_HEALTH", ""
+        ).strip()
+        trace_raw = os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE", "").strip()
+        health_enabled = bool(
+            health_raw
+            and health_raw.lower() not in ("0", "false", "no", "off")
         )
+        if not health_enabled and not trace_raw:
+            return None
+        if health_enabled and health_raw.lower() not in ("1", "true", "yes", "on"):
+            path = Path(health_raw).expanduser()
+        elif trace_raw:
+            path = Path(trace_raw).expanduser()
+        else:
+            path = (
+                Path.home()
+                / ".agent-worktrees"
+                / "logs"
+                / "picker-frame-health.jsonl"
+            )
         try:
             threshold = float(
                 os.environ.get(
@@ -54,7 +73,15 @@ class FrameHealthReporter:
             )
         except ValueError:
             threshold = _DEFAULT_THRESHOLD_SECONDS
-        return cls(path, threshold_seconds=threshold)
+        return cls(
+            path,
+            threshold_seconds=threshold,
+            report_gaps=health_enabled,
+            launch_id=os.environ.get("AGENT_WORKTREES_LAUNCH_ID", ""),
+            binstub_started=os.environ.get(
+                "AGENT_WORKTREES_BINSTUB_STARTED", ""
+            ),
+        )
 
     def start(self) -> None:
         if self._thread is not None:
@@ -67,13 +94,18 @@ class FrameHealthReporter:
             daemon=True,
         )
         self._thread.start()
-        self._enqueue({"event": "start", "pid": os.getpid()})
+        self._enqueue({
+            "event": "textual_first_refresh",
+            "pid": os.getpid(),
+            "launch_id": self.launch_id,
+            "binstub_started": self.binstub_started,
+        })
 
     def tick(self, *, frame: int, debug: str, busy: str | None) -> None:
         now = time.monotonic()
         previous = self._last_tick
         self._last_tick = now
-        if previous is None:
+        if not self.report_gaps or previous is None:
             return
         gap = now - previous
         if gap < self.threshold_seconds:
@@ -84,12 +116,17 @@ class FrameHealthReporter:
             "gap_ms": round(gap * 1000, 1),
             "debug": debug,
             "busy": busy,
+            "launch_id": self.launch_id,
         })
 
     def close(self, *, wait: bool = False) -> None:
         if self._thread is None:
             return
-        self._enqueue({"event": "stop", "dropped": self._dropped})
+        self._enqueue({
+            "event": "picker_stop",
+            "dropped": self._dropped,
+            "launch_id": self.launch_id,
+        })
         self._stop.set()
         try:
             self._queue.put_nowait(_STOP)

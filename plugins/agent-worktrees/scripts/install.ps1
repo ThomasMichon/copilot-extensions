@@ -1509,6 +1509,12 @@ function Deploy-Binstub {
     $content = @"
 @echo off
 set "PYTHONUTF8=1"
+set "AGENT_WORKTREES_LAUNCH_ID=$ProjectName-%RANDOM%-%RANDOM%"
+set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"
+set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\.agent-worktrees\logs\picker-launches.jsonl"
+if not exist "%USERPROFILE%\.agent-worktrees\logs" mkdir "%USERPROFILE%\.agent-worktrees\logs" >nul 2>&1
+(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {"event":"binstub_start","timestamp_local":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"$ProjectName"}) 2>nul
+set "AGENT_WORKTREES_BINSTUB_TRACED=1"
 rem Context resolves from CWD / --project (git-like); the binstub names its
 rem project via --project, not an ambient env var.
 where pwsh >nul 2>&1
@@ -1529,6 +1535,17 @@ exit /b %ERRORLEVEL%
     # to launch-session when the venv is missing (recovery).
     $ps1Content = (@'
 $env:PYTHONUTF8 = '1'
+if (-not $env:AGENT_WORKTREES_BINSTUB_TRACED) {
+    $env:AGENT_WORKTREES_LAUNCH_ID = '%%PROJECT%%-' + [guid]::NewGuid().ToString('N')
+    $env:AGENT_WORKTREES_BINSTUB_STARTED = [DateTime]::UtcNow.ToString('o')
+    $_awTraceDir = Join-Path $env:USERPROFILE '.agent-worktrees\logs'
+    $env:AGENT_WORKTREES_LAUNCH_TRACE = Join-Path $_awTraceDir 'picker-launches.jsonl'
+    try {
+        [IO.Directory]::CreateDirectory($_awTraceDir) | Out-Null
+        $_awEvent = [ordered]@{ event = 'binstub_start'; timestamp = $env:AGENT_WORKTREES_BINSTUB_STARTED; launch_id = $env:AGENT_WORKTREES_LAUNCH_ID; project = '%%PROJECT%%' }
+        [IO.File]::AppendAllText($env:AGENT_WORKTREES_LAUNCH_TRACE, ($_awEvent | ConvertTo-Json -Compress) + [Environment]::NewLine)
+    } catch {}
+}
 # Context resolves from CWD / --project (git-like). This .ps1 runs in-process in
 # the caller's session, so it names its project via --project (not an ambient
 # env var), leaving the live session env untouched. Recovery (venv missing)

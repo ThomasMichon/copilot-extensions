@@ -113,6 +113,9 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
     for name in ("demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
         assert "bin\\payload\\agent-worktrees" in content
+        assert "AGENT_WORKTREES_LAUNCH_ID" in content
+        assert "picker-launches.jsonl" in content
+        assert "binstub_start" in content
         assert "--project" in content
         assert "agent-worktrees.exe" not in content
 

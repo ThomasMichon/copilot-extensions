@@ -705,12 +705,26 @@ def _project_binstub_specs(
         cmd_content = "\r\n".join([
             "@echo off",
             'set "PYTHONUTF8=1"',
+            f'set "AGENT_WORKTREES_LAUNCH_ID={project}-%RANDOM%-%RANDOM%"',
+            'set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"',
+            'set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\\.agent-worktrees\\logs\\picker-launches.jsonl"',
+            'if not exist "%USERPROFILE%\\.agent-worktrees\\logs" mkdir "%USERPROFILE%\\.agent-worktrees\\logs" >nul 2>&1',
+            f'(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {{"event":"binstub_start","timestamp_local":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"{project}"}}) 2>nul',
             "rem This attributable project entry point is pinned to its owning payload.",
             f'"{cmd_path}" --project {project} %*',
             "exit /b %ERRORLEVEL%",
         ])
         ps1_content = "\r\n".join([
             "$env:PYTHONUTF8 = '1'",
+            f"$env:AGENT_WORKTREES_LAUNCH_ID = '{ps1_project}-' + [guid]::NewGuid().ToString('N')",
+            "$env:AGENT_WORKTREES_BINSTUB_STARTED = [DateTime]::UtcNow.ToString('o')",
+            "$_awTraceDir = Join-Path $env:USERPROFILE '.agent-worktrees\\logs'",
+            "$env:AGENT_WORKTREES_LAUNCH_TRACE = Join-Path $_awTraceDir 'picker-launches.jsonl'",
+            "try {",
+            "    [IO.Directory]::CreateDirectory($_awTraceDir) | Out-Null",
+            f"    $_awEvent = [ordered]@{{ event = 'binstub_start'; timestamp = $env:AGENT_WORKTREES_BINSTUB_STARTED; launch_id = $env:AGENT_WORKTREES_LAUNCH_ID; project = '{ps1_project}' }}",
+            "    [IO.File]::AppendAllText($env:AGENT_WORKTREES_LAUNCH_TRACE, ($_awEvent | ConvertTo-Json -Compress) + [Environment]::NewLine)",
+            "} catch {}",
             "# This attributable project entry point is pinned to its owning payload.",
             f"& '{ps1_path}' --project '{ps1_project}' @args",
             "exit $LASTEXITCODE",
@@ -723,6 +737,11 @@ def _project_binstub_specs(
     sh_content = (
         "#!/usr/bin/env bash\n"
         "export PYTHONUTF8=1\n"
+        f"export AGENT_WORKTREES_LAUNCH_ID={shlex.quote(project)}-$$-$(date +%s%N)\n"
+        "export AGENT_WORKTREES_BINSTUB_STARTED=\"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)\"\n"
+        "export AGENT_WORKTREES_LAUNCH_TRACE=\"$HOME/.agent-worktrees/logs/picker-launches.jsonl\"\n"
+        "mkdir -p \"$(dirname \"$AGENT_WORKTREES_LAUNCH_TRACE\")\" 2>/dev/null || true\n"
+        f"printf '%s\\n' '{{\"event\":\"binstub_start\",\"timestamp\":\"'\"$AGENT_WORKTREES_BINSTUB_STARTED\"'\",\"launch_id\":\"'\"$AGENT_WORKTREES_LAUNCH_ID\"'\",\"project\":\"{project}\"}}' >>\"$AGENT_WORKTREES_LAUNCH_TRACE\" 2>/dev/null || true\n"
         "# This attributable project entry point is pinned to its owning payload.\n"
         f"exec {shlex.quote(str(payload_cmd))} --project "
         f"{shlex.quote(project)} \"$@\"\n"

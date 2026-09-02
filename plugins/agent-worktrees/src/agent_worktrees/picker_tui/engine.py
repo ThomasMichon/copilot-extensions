@@ -1536,7 +1536,10 @@ class PickerScreen(Widget):
         self._finish_mount()
 
     def _start_live_setup(self):
-        if os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH"):
+        if (
+            os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH")
+            or os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE")
+        ):
             from .frame_health import FrameHealthReporter
 
             self._frame_health = FrameHealthReporter.from_env()

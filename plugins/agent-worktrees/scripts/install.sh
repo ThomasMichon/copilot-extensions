@@ -860,6 +860,11 @@ deploy_binstub() {
 BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
 export PYTHONUTF8=1
+export AGENT_WORKTREES_LAUNCH_ID="$PROJECT_NAME-\$\$-\$(date +%s%N)"
+export AGENT_WORKTREES_BINSTUB_STARTED="\$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+export AGENT_WORKTREES_LAUNCH_TRACE="\$HOME/.agent-worktrees/logs/picker-launches.jsonl"
+mkdir -p "\$(dirname "\$AGENT_WORKTREES_LAUNCH_TRACE")" 2>/dev/null || true
+printf '%s\n' '{"event":"binstub_start","timestamp":"'"\$AGENT_WORKTREES_BINSTUB_STARTED"'","launch_id":"'"\$AGENT_WORKTREES_LAUNCH_ID"'","project":"$PROJECT_NAME"}' >>"\$AGENT_WORKTREES_LAUNCH_TRACE" 2>/dev/null || true
 # Context resolves from CWD / --project (git-like); the binstub names its
 # project via --project, not an ambient env var.
 # Resolve the active versioned runtime directly (the .venv junction is retired
