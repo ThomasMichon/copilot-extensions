@@ -21,6 +21,7 @@ from agent_procutil import no_window_flags
 
 from . import __version__, fragment_registry, ssh_profile
 from . import explore as explore_mod
+from . import host_restore
 from . import mesh as mesh_mod
 
 
@@ -174,6 +175,17 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if report.findings else 0
 
 
+def _cmd_restore_host(args: argparse.Namespace) -> int:
+    apply = False if args.dry_run else args.apply
+    result = host_restore.restore_host(
+        args.transport,
+        args.alias,
+        args.port,
+        apply=apply,
+    )
+    return host_restore.emit_result(result, json_output=args.json)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-ssh",
@@ -260,6 +272,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
     doctor.set_defaults(func=_cmd_doctor)
+
+    restore_host = sub.add_parser(
+        "restore-host",
+        help="Plan or apply transport-owned host restoration.",
+    )
+    restore_host.add_argument("--transport", required=True)
+    restore_host.add_argument("--alias", required=True)
+    restore_host.add_argument("--port", type=int, default=22)
+    mode = restore_host.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--apply", action="store_true")
+    restore_host.add_argument("--json", action="store_true")
+    restore_host.set_defaults(func=_cmd_restore_host)
 
     sub.add_parser("version", help="Show version")
     return parser

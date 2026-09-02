@@ -29,8 +29,13 @@ supports preview); otherwise it is skipped, never executed speculatively.
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_kwargs
@@ -70,6 +75,19 @@ def platform_block(module: dict[str, Any], plat: str) -> dict[str, Any] | None:
     return None
 
 
+def invocation_block(module: dict[str, Any], plat: str) -> dict[str, Any] | None:
+    """Return a payload-attributable invocation supported on ``plat``."""
+    invocation = module.get("invocation")
+    if not isinstance(invocation, dict):
+        return None
+    platforms = invocation.get("platforms")
+    if platforms and plat not in platforms:
+        return None
+    if not invocation.get("plugin") or not invocation.get("command"):
+        return None
+    return invocation
+
+
 def module_applies(module: dict[str, Any], pkg: RequirementPackage, machine: str) -> bool:
     """A module applies when its own gate (or the package gate) includes machine."""
     gate = module.get("gate")
@@ -85,7 +103,9 @@ def resolve_modules(
     out: list[tuple[RequirementPackage, dict[str, Any]]] = []
     for pkg in packages:
         for module in pkg.modules:
-            if module_applies(module, pkg, machine) and platform_block(module, plat):
+            if module_applies(module, pkg, machine) and (
+                platform_block(module, plat) or invocation_block(module, plat)
+            ):
                 out.append((pkg, module))
     return out
 
@@ -93,6 +113,97 @@ def resolve_modules(
 def _tail(text: str, limit: int = 4000) -> str:
     text = text or ""
     return text if len(text) <= limit else text[-limit:]
+
+
+def _active_plugins():
+    from plugin_activation import resolve_active_plugins
+
+    return resolve_active_plugins().active
+
+
+def _payload_invocation_command(
+    invocation: dict[str, Any],
+    plat: str,
+) -> tuple[list[str], dict[str, str]]:
+    source = str(invocation["plugin"])
+    command_name = str(invocation["command"])
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", command_name) is None:
+        raise RuntimeError(f"invalid payload command id: {command_name!r}")
+    active = _active_plugins().get(source)
+    if active is None:
+        raise RuntimeError(f"required active plugin is unavailable: {source}")
+    payload = active.root.resolve()
+    descriptor_path = payload / "payload-invocation.json"
+    try:
+        descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"cannot read payload invocation for {source}: {exc}"
+        ) from exc
+    if not isinstance(descriptor, dict) or descriptor.get("version") not in (1, 2):
+        raise RuntimeError(
+            f"plugin {source} has an invalid payload invocation descriptor"
+        )
+    raw_commands = descriptor.get("commands")
+    if raw_commands is None:
+        declared = [descriptor]
+    elif isinstance(raw_commands, list):
+        declared = [item for item in raw_commands if isinstance(item, dict)]
+    else:
+        declared = []
+    if not any(item.get("command") == command_name for item in declared):
+        raise RuntimeError(
+            f"plugin {source} does not declare payload command {command_name!r}"
+        )
+    output_dir = descriptor.get("outputDir", "bin")
+    output_path = Path(str(output_dir))
+    if (
+        not isinstance(output_dir, str)
+        or not output_dir
+        or output_path.is_absolute()
+        or re.match(r"^[A-Za-z]:", output_dir) is not None
+        or ".." in output_path.parts
+    ):
+        raise RuntimeError(f"plugin {source} has an invalid payload outputDir")
+    if plat == "windows":
+        windows_shim = descriptor.get("windowsCatalogShim", "powershell")
+        if windows_shim == "cmd":
+            shim = payload / output_path / f"{command_name}.cmd"
+            host = os.environ.get("COMSPEC") or shutil.which("cmd")
+            if host is None:
+                raise RuntimeError("cmd.exe is required for a Windows payload command")
+            command = [host, "/d", "/c", str(shim)]
+        elif windows_shim == "powershell":
+            shim = payload / output_path / f"{command_name}.ps1"
+            host = shutil.which("pwsh") or shutil.which("powershell")
+            if host is None:
+                raise RuntimeError(
+                    "PowerShell is required for a Windows payload command"
+                )
+            command = [
+                host,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(shim),
+            ]
+        else:
+            raise RuntimeError(
+                f"plugin {source} has an invalid windowsCatalogShim"
+            )
+    else:
+        shim = payload / output_path / command_name
+        command = [str(shim)]
+    try:
+        shim.resolve().relative_to(payload)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"payload command escapes plugin root: {shim}") from exc
+    if not shim.is_file():
+        raise RuntimeError(f"payload command shim is unavailable: {shim}")
+    env = dict(os.environ)
+    env["COPILOT_PLUGIN_ROOT"] = str(payload)
+    return command, env
 
 
 def run_module(
@@ -106,28 +217,65 @@ def run_module(
     name = str(module.get("name"))
     repo_root = pkg.repo_root()
     block = platform_block(module, plat)
-    if block is None:
+    invocation = invocation_block(module, plat)
+    if block is None and invocation is None:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run,
                             skipped_reason=f"no command for platform '{plat}'")
     if repo_root is None:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run,
                             skipped_reason="could not derive repo root from package path")
 
-    command = [str(c) for c in block.get("command", [])]
-    if dry_run:
+    env = None
+    if invocation is not None:
+        try:
+            command, env = _payload_invocation_command(invocation, plat)
+        except RuntimeError as exc:
+            return ModuleResult(
+                name,
+                pkg.source_repo,
+                ran=True,
+                dry_run=dry_run,
+                returncode=127,
+                stderr_tail=str(exc),
+            )
+        command.extend(str(arg) for arg in invocation.get("arguments", []))
+        mode_args = (
+            invocation.get("dry_run_arguments")
+            if dry_run
+            else invocation.get("apply_arguments", [])
+        )
+        if dry_run and not mode_args:
+            return ModuleResult(
+                name,
+                pkg.source_repo,
+                ran=False,
+                dry_run=True,
+                command=command,
+                skipped_reason=(
+                    "payload invocation declares no dry_run_arguments "
+                    "(skipped in dry-run)"
+                ),
+            )
+        command.extend(str(arg) for arg in (mode_args or []))
+    else:
+        assert block is not None
+        command = [str(c) for c in block.get("command", [])]
         dry_args = block.get("dry_run_args")
-        if not dry_args:
-            # Never run a mutating module speculatively during a dry-run.
+        if not dry_run:
+            dry_args = None
+        if dry_run and not dry_args:
             return ModuleResult(
                 name, pkg.source_repo, ran=False, dry_run=True, command=command,
                 skipped_reason="module declares no dry_run_args (skipped in dry-run)",
             )
-        command = command + [str(a) for a in dry_args]
+        if dry_args:
+            command = command + [str(a) for a in dry_args]
 
     try:
         proc = subprocess.run(  # noqa: S603 - argv list, repo-declared trusted module
             command, cwd=str(repo_root), capture_output=True,
             encoding="utf-8", errors="replace", timeout=timeout,
+            env=env,
             **no_window_kwargs(),
         )
     except FileNotFoundError as exc:

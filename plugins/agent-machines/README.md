@@ -138,6 +138,26 @@ logical surface (`settings`, `permissions`, `trustedFolders`) or module name.
 Module stdout is shown by default in dry-runs, hidden during apply unless
 `--verbose`, and always present in `--json`.
 
+Modules may also reference another active plugin's declared payload command
+without embedding its installed path:
+
+```yaml
+modules:
+  - name: ssh-host
+    invocation:
+      plugin: agent-ssh@copilot-extensions
+      command: agent-ssh
+      platforms: [windows]
+      arguments: [restore-host, --transport, dtssh, --alias, example-host, --port, "2222"]
+      dry_run_arguments: [--dry-run]
+      apply_arguments: [--apply]
+```
+
+The resolver requires the exact source-qualified active plugin, validates its
+`payload-invocation.json`, invokes its payload-local shim with matching
+`COPILOT_PLUGIN_ROOT`, and fails the module when that attributable provider is
+unavailable.
+
 ## Requirement packages
 
 Requirement packages use a repo-owned namespace:

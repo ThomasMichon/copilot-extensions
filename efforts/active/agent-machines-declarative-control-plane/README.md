@@ -9,7 +9,7 @@
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
 - **Umbrella issue:** #1418
-- **Sub-issues:** #1455 · #1507 · #1529 · #1627
+- **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631
 
 ## Guiding Intent
 
@@ -61,7 +61,7 @@ fleet, topology, or operating environment.
 - [x] Define one canonical machine identity plus a deterministic accepted-alias
   set derived from portable topology fields, with raw-host fallback and
   fail-closed ambiguity detection (#1529).
-- [ ] Define an attributable provider invocation reference for requirement
+- [x] Define an attributable provider invocation reference for requirement
   modules so one plugin can own restoration behavior without package authors
   embedding installed payload paths or ambiguous PATH commands (#1627).
 - [ ] Distinguish portable declarations from discovered facts and generated
@@ -106,10 +106,10 @@ fleet, topology, or operating environment.
   installed inventory (#1507).
 - [ ] Give each resource module plan, apply, verify, and report operations with
   explicit privilege and restart boundaries.
-- [ ] Resolve provider-backed module invocations through payload-attributable
+- [x] Resolve provider-backed module invocations through payload-attributable
   plugin command metadata, preserving dry-run/apply separation and optional
   sibling independence (#1627).
-- [ ] Let agent-ssh expose transport-host plan/status/apply behavior through its
+- [x] Let agent-ssh expose transport-host plan/status/apply behavior through its
   own command and transport metadata; agent-machines remains the optional
   declarative orchestrator rather than learning dtssh internals (#1627).
 - [ ] Order actions from declared dependencies and preserve idempotence across
@@ -156,7 +156,7 @@ fleet, topology, or operating environment.
   a no-op.
 - [ ] Platform-specific modules share the same resource lifecycle and expose
   honest unsupported states.
-- [ ] An agent-ssh dtssh-host provider fixture proves healthy no-op, absent
+- [x] An agent-ssh dtssh-host provider fixture proves healthy no-op, absent
   dry-run, idempotent apply, missing authentication, unavailable provider,
   unsupported platform, and repeated no-op behavior without hardcoded payload
   paths (#1627).
@@ -238,3 +238,18 @@ behavioral parity is demonstrated.
 - Malformed topology files degrade with explicit identity warnings rather than
   bricking restore. The full agent-machines suite passes, and a live source
   smoke resolves a generated host name to its stable topology key and aliases.
+
+### 2026-09-01 - Attributable SSH host restoration implemented
+
+- Added source-qualified payload-command invocations for requirement modules,
+  resolved through active plugin provenance and validated payload invocation
+  descriptors rather than PATH or installed-directory guesses.
+- Added agent-ssh `restore-host` with dtssh status dry-runs, noninteractive
+  login preflight, idempotent install, bounded post-install health retries, and
+  verification of the host, banner, watchdog, persistence, and live tunnel
+  connection.
+- Fixed #1631 by attaching the completion color argument to the intended
+  PowerShell output calls, preventing a successful runtime activation from
+  exiting as a formatting failure.
+- Full agent-machines and agent-ssh suites plus version, install-contract,
+  payload-generation, and focused live dry-run checks pass.
