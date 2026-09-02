@@ -7,6 +7,7 @@ resolving explicit > env > cwd, with ``--no-owner`` opt-out).
 from __future__ import annotations
 
 import argparse
+import json
 import types
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import state_root
 
 # ── _self_owner_ref ──────────────────────────────────────────────────────────
 
@@ -154,3 +156,42 @@ def test_cmd_create_system_is_never_owned(monkeypatch):
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "env/proj/parent")
     m.cmd_create(_create_args(system=True, name="svc"))
     assert captured["owner_ref"] is None
+
+
+def test_cmd_create_emits_structured_coordination_rejection(
+    monkeypatch,
+    capfd,
+):
+    monkeypatch.setattr(m.cfg, "load_config", lambda: types.SimpleNamespace())
+    root = state_root.StateRoot(
+        None,
+        "knowledge_repo",
+        "",
+        True,
+        True,
+        False,
+        error="no knowledge_repo is bound",
+    )
+    readiness = state_root.CoordinationReadiness(
+        False,
+        "knowledge_binding_required",
+        root,
+        error="bind the knowledge repository",
+    )
+    monkeypatch.setattr(
+        m,
+        "_create_worktree_core",
+        lambda *a, **k: (_ for _ in ()).throw(
+            m.CoordinationReadinessFailure(readiness)
+        ),
+    )
+
+    rc = m.cmd_create(_create_args(
+        owner_ref="machine/project/worktree",
+        json=True,
+    ))
+
+    assert rc == 3
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["code"] == "knowledge_binding_required"
+    assert payload["coordination_readiness"]["version"] == 1
