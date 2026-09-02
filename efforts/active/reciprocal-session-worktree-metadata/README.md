@@ -12,7 +12,9 @@
 - **Sub-issues:** [#1643](https://github.com/ThomasMichon/copilot-extensions/issues/1643)
   (bound-session projection core) ·
   [#1671](https://github.com/ThomasMichon/copilot-extensions/issues/1671)
-  (controller relations)
+  (controller relations) ·
+  [#1681](https://github.com/ThomasMichon/copilot-extensions/issues/1681)
+  (bounded controller lineage reconciliation)
 
 ## Guiding Intent
 
@@ -120,19 +122,19 @@ Public-safe transcription of the operator request:
 - [x] Expose normalized controller information through machine-readable
       worktree/session surfaces without changing head, liveness, occupancy, or
       resume semantics.
-- [ ] Expose terminal-successor findings after Phase 4 adds bounded,
+- [x] Expose terminal-successor findings after Phase 4 adds bounded,
       ambiguity-aware controller lineage resolution.
 
 ### Phase 4 - Bounded reconciliation
-- [ ] Extend the resident reconciler with a fixed-budget controller/head pass
+- [x] Extend the resident reconciler with a fixed-budget controller/head pass
       that uses record-local links and exact session IDs.
-- [ ] Follow explicit succession links to a unique terminal session; never
+- [x] Follow explicit succession links to a unique terminal session; never
       select a successor by timestamp alone.
-- [ ] Mutate only dark, inactive worktrees under a nonblocking record lock and
+- [x] Mutate only dark, inactive worktrees under a nonblocking record lock and
       a compare-before-write revision check.
-- [ ] Report ambiguity, cycles, missing records, live conflicts, and restored
+- [x] Report ambiguity, cycles, missing records, live conflicts, and restored
       foreign state without mutation.
-- [ ] Add a low-duty, one-shot scheduled backstop for machines with no active
+- [x] Add a low-duty, one-shot scheduled backstop for machines with no active
       resident monitor, or document why launch/Picker-triggered reconciliation
       provides sufficient convergence.
 
@@ -185,11 +187,11 @@ Public-safe transcription of the operator request:
 - [ ] A bound session remains distinct from a controller session.
 - [ ] One controller may reference multiple worktrees without becoming the
       bound head of any child vessel.
-- [ ] Multi-hop handoff chains resolve through explicit links to one terminal
+- [x] Multi-hop handoff chains resolve through explicit links to one terminal
       successor; cycles and forks remain unresolved.
-- [ ] Active or mux-attached worktrees are never automatically repointed.
-- [ ] Inactive unambiguous records converge under fixed per-tick budgets.
-- [ ] Hot worktree reads never enumerate the session-state root.
+- [x] Active or mux-attached worktrees are never automatically repointed.
+- [x] Inactive unambiguous records converge under fixed per-tick budgets.
+- [x] Hot worktree reads never enumerate the session-state root.
 - [ ] A restored projection cannot override a newer authoritative worktree
       revision or silently bind a foreign project.
 - [ ] Session-state synchronization preserves metadata and enables grouping by
@@ -255,3 +257,16 @@ Adopt the authority and schema model in [`design.md`](design.md):
   normalization now carry controller metadata. Automatic controller/head
   reconciliation and terminal-successor findings remain unimplemented for
   Phase 4.
+- Controller relations landed through #1672. Phase 4 began under #1681 with a
+  shared explicit-successor resolver and a fixed-budget resident projection
+  repair pass gated on fresh dark-worktree evidence, nonblocking locks, and
+  compare-before-write revisions.
+- Phase 4 resolves controller lineage from exact records/projections, emits
+  explicit remote, terminal, fork, cycle, missing, restored, and unsupported
+  findings, and preserves controller findings through both Picker
+  implementations without changing occupancy or resume state.
+- The resident queue has independent record/session/projection budgets,
+  bounded verification and cooldown caches, and a `reconcile-sessions`
+  one-shot suitable for optional low-duty scheduling. Current and permanently
+  blocked revisions quiesce; live or unknown-liveness candidates remain
+  report-only and retry later.

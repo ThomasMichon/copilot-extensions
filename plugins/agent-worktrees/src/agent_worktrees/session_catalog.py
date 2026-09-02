@@ -12,11 +12,15 @@ import yaml
 
 from . import config as cfg
 from . import installer
+from . import session_projection
 from . import sessions
 from . import tracking
 
 _DEFAULT_RECORD_BUDGET = 16
 _DEFAULT_SESSION_BUDGET = 32
+_DEFAULT_PROJECTION_BUDGET = 16
+_MAX_VERIFIED_PROJECTIONS = 1024
+_LIVE_RETRY_STEPS = 4
 
 
 def _path_key(path: str) -> str:
@@ -90,11 +94,13 @@ class ResidentSessionReconciler:
         *,
         record_budget: int = _DEFAULT_RECORD_BUDGET,
         session_budget: int = _DEFAULT_SESSION_BUDGET,
+        projection_budget: int = _DEFAULT_PROJECTION_BUDGET,
         register_monitor_session: Callable[[str, str | None], bool] | None = None,
         mux_max_age: float = 45.0,
     ) -> None:
         self.record_budget = max(1, record_budget)
         self.session_budget = max(1, session_budget)
+        self.projection_budget = max(1, projection_budget)
         self.register_monitor_session = register_monitor_session
         self.mux_max_age = mux_max_age
         self._projects: list[str] = []
@@ -110,6 +116,14 @@ class ResidentSessionReconciler:
         self._session_iter = None
         self._live_mux: set[str] | None = None
         self._live_mux_at: float | None = None
+        self._projection_queue: dict[
+            tuple[str, str, str], tuple[Path, int, int, int]
+        ] = {}
+        self._projection_verified: dict[
+            tuple[str, str, str], tuple[int, int, int]
+        ] = {}
+        self._projection_cooldown: dict[tuple[str, str, str], int] = {}
+        self._step_number = 0
 
     def observe_mux(self, session_names: set[str]) -> None:
         """Publish a successful full mux observation for later record stamps."""
@@ -123,6 +137,11 @@ class ResidentSessionReconciler:
             self._live_mux is not None
             and any(name.startswith("wt-") for name in self._live_mux)
         )
+
+    @property
+    def has_mux_observation(self) -> bool:
+        """Whether a successful mux catalog is available for dark proof."""
+        return self._live_mux is not None
 
     def _refresh_projects(self) -> None:
         try:
@@ -193,6 +212,150 @@ class ResidentSessionReconciler:
     def _repair_head(self, record: tracking.WorktreeRecord) -> bool:
         return tracking.repair_head_cache(record)
 
+    def _queue_projection_repairs(
+        self,
+        project: str,
+        yaml_path: Path,
+        record: tracking.WorktreeRecord,
+    ) -> None:
+        limit = self.projection_budget * 4
+        added = 0
+        revisions = (
+            record.lifecycle_revision,
+            record.head_revision,
+            record.controller_revision,
+        )
+        for entry in record.sessions or ():
+            if (
+                len(self._projection_queue) >= limit
+                or added >= self.projection_budget
+            ):
+                break
+            key = (project, entry.session_id, "bound")
+            if self._projection_cooldown.get(key, 0) > self._step_number:
+                continue
+            if self._projection_verified.get(key) == revisions:
+                continue
+            self._projection_queue[key] = (yaml_path, *revisions)
+            added += 1
+        for relation in record.controllers:
+            session_id = relation.controller_session_id
+            if (
+                len(self._projection_queue) >= limit
+                or added >= self.projection_budget
+            ):
+                break
+            if not session_id:
+                continue
+            key = (project, session_id, "controller")
+            if self._projection_cooldown.get(key, 0) > self._step_number:
+                continue
+            if self._projection_verified.get(key) == revisions:
+                continue
+            self._projection_queue[key] = (yaml_path, *revisions)
+            added += 1
+
+    def _record_dark_state(
+        self,
+        record: tracking.WorktreeRecord,
+    ) -> str:
+        mux_fresh = (
+            self._live_mux is not None
+            and self._live_mux_at is not None
+            and time.monotonic() - self._live_mux_at <= self.mux_max_age
+        )
+        if not mux_fresh:
+            return "unknown"
+        if sessions.mux_session_name(record.worktree_id) in self._live_mux:
+            return "live"
+        return (
+            "live"
+            if sessions.worktree_has_live_session(record)
+            else "dark"
+        )
+
+    def _remember_projection_verified(
+        self,
+        key: tuple[str, str, str],
+        revisions: tuple[int, int, int],
+    ) -> None:
+        self._projection_verified.pop(key, None)
+        self._projection_verified[key] = revisions
+        while len(self._projection_verified) > _MAX_VERIFIED_PROJECTIONS:
+            self._projection_verified.pop(next(iter(self._projection_verified)))
+
+    def _cooldown_projection(
+        self,
+        key: tuple[str, str, str],
+    ) -> None:
+        self._projection_cooldown.pop(key, None)
+        self._projection_cooldown[key] = (
+            self._step_number + _LIVE_RETRY_STEPS
+        )
+        while len(self._projection_cooldown) > _MAX_VERIFIED_PROJECTIONS:
+            self._projection_cooldown.pop(next(iter(self._projection_cooldown)))
+
+    def _scan_projections(self) -> dict[str, int]:
+        result = {
+            "projection_checked": 0,
+            "projection_written": 0,
+            "projection_current": 0,
+            "projection_blocked": 0,
+            "projection_deferred": 0,
+            "projection_live_conflicts": 0,
+            "projection_liveness_unknown": 0,
+            "projection_revision_conflicts": 0,
+        }
+        for key in list(self._projection_queue)[: self.projection_budget]:
+            project, session_id, role = key
+            yaml_path, lifecycle_revision, head_revision, controller_revision = (
+                self._projection_queue.pop(key)
+            )
+            result["projection_checked"] += 1
+            try:
+                cfg.set_active_project(project)
+                with tracking._RecordLock(yaml_path, blocking=False) as lock:
+                    if not lock.acquired:
+                        result["projection_deferred"] += 1
+                        continue
+                    record = tracking.load_record(yaml_path)
+                    if (
+                        record.lifecycle_revision != lifecycle_revision
+                        or record.head_revision != head_revision
+                        or record.controller_revision != controller_revision
+                    ):
+                        result["projection_revision_conflicts"] += 1
+                        continue
+                    dark_state = self._record_dark_state(record)
+                    if dark_state != "dark":
+                        if dark_state == "unknown":
+                            result["projection_liveness_unknown"] += 1
+                        else:
+                            result["projection_live_conflicts"] += 1
+                        self._cooldown_projection(key)
+                        continue
+                    if role == "bound":
+                        outcome = session_projection.sync_bound(
+                            record, session_id, blocking=False
+                        )
+                    else:
+                        outcome = session_projection.sync_controller(
+                            record, session_id, blocking=False
+                        )
+            except Exception:
+                outcome = "deferred"
+            result[f"projection_{outcome}"] += 1
+            if outcome in {"written", "current", "blocked"}:
+                self._remember_projection_verified(
+                    key,
+                    (
+                        lifecycle_revision,
+                        head_revision,
+                        controller_revision,
+                    ),
+                )
+        return result
+
     def _index_record(self, project: str, yaml_path: Path) -> dict:
         result = {"records": 0, "heads": 0, "mux": 0, "registered_mux": 0}
         try:
@@ -209,6 +372,7 @@ class ResidentSessionReconciler:
             project, record.worktree_id, yaml_path, record.worktree_path)
         self._pending_heads[(project, record.worktree_id)] = (
             record.resolved_head_session)
+        self._queue_projection_repairs(project, yaml_path, record)
 
         if self._repair_head(record):
             try:
@@ -432,10 +596,12 @@ class ResidentSessionReconciler:
         """Advance both cursors by one bounded batch and return repair counts."""
         prior = cfg.active_project()
         try:
+            self._step_number += 1
             self._refresh_projects()
             result = self._scan_records()
+            projection_result = self._scan_projections()
             session_result = self._scan_sessions()
-            for key, value in session_result.items():
+            for key, value in {**projection_result, **session_result}.items():
                 if key in result and isinstance(value, int):
                     result[key] += value
                 else:

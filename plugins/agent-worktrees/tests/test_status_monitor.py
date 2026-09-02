@@ -29,6 +29,59 @@ def test_status_monitor_registered():
     assert "status-monitor" in m._LAUNCHER_REAP_VETOES
 
 
+def test_reconcile_sessions_registered():
+    assert m.COMMAND_MAP["reconcile-sessions"] is m.cmd_reconcile_sessions
+    assert m._WORKTREE_VERBS["reconcile-sessions"] == "reconcile-sessions"
+    assert "reconcile-sessions" in m._NO_PROJECT_COMMANDS
+
+
+def test_reconcile_sessions_emits_one_bounded_pass(monkeypatch):
+    captured: dict = {}
+
+    class _Reconciler:
+        def __init__(self, **kwargs):
+            captured["budgets"] = kwargs
+
+        def observe_mux(self, names):
+            captured["mux"] = names
+
+        @property
+        def has_mux_observation(self):
+            return "mux" in captured
+
+        def step(self):
+            return {"projection_written": 1}
+
+    monkeypatch.setattr(
+        "agent_worktrees.session_catalog.ResidentSessionReconciler",
+        _Reconciler,
+    )
+    monkeypatch.setattr(m.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        m,
+        "_json_output",
+        lambda value: captured.update({"output": value}),
+    )
+
+    assert m.cmd_reconcile_sessions(
+        argparse.Namespace(
+            record_budget=2,
+            session_budget=3,
+            projection_budget=4,
+        )
+    ) == 0
+    assert captured["budgets"] == {
+        "record_budget": 2,
+        "session_budget": 3,
+        "projection_budget": 4,
+    }
+    assert captured["mux"] == set()
+    assert captured["output"] == {
+        "projection_written": 1,
+        "mux_observed": True,
+    }
+
+
 @pytest.mark.parametrize(
     "val,expected",
     [("1", True), ("true", True), ("YES", True), ("on", True), ("", True),
