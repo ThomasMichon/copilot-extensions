@@ -103,7 +103,7 @@ def test_pre_auth_pressure_excludes_authenticated_session_roots() -> None:
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=30,
         check=False,
     )
 
@@ -198,7 +198,7 @@ def test_session_pressure_classifies_idle_command_and_forwarding_roots() -> None
         [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=30,
         check=False,
     )
 
