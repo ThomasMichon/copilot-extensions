@@ -2,7 +2,7 @@
   "schema_version": 1,
   "label": "Bridges",
   "after": "Worktrees",
-  "list": ["agent-bridge", "agents", "--json"],
+  "list": ["agent-bridge", "--json", "agents"],
   "entry": {
     "id": "name",
     "title": "name",
