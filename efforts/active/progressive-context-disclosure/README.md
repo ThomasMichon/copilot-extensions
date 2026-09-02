@@ -5,7 +5,7 @@
 - **Branch(es):** reviewed vision and plan PR, then serial experiment,
   contract, guidance, reviewer, and migration PRs
 - **Created:** 2026-09-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** advances
   [`visions/harness-guidance`](../../../visions/harness-guidance/README.md)
   §Features/`progressive-context-disclosure`,
@@ -15,7 +15,7 @@
   `composition-preserves-owner-boundaries`, and
   `deferral-is-evidence-calibrated`
 - **Umbrella issue:** #1612
-- **Sub-issues:** pending Phase 1 decomposition
+- **Sub-issues:** #1615 · #1616 · #1617 · #1618 · #1619
 
 ## Guiding Intent
 
@@ -111,9 +111,9 @@ prompts the primary context channel.
   deferral.
 - [x] Define the initial experiment and structured-assembly questions in linked
   design documents.
-- [ ] Submit this vision and effort plan for repository review and merge before
+- [x] Submit this vision and effort plan for repository review and merge before
   implementation begins.
-- [ ] After merge, sync the execution worktree forward, set Status to Active,
+- [x] After merge, sync the execution worktree forward, set Status to Active,
   and file focused sub-issues for experiments, contributor contracts,
   authoring guidance, reviewer enforcement, and migration.
 
@@ -301,5 +301,11 @@ enforcement before migrating the complete contributor stack.
   proposing a second context system.
 - Kept link representation and hierarchical assembly intentionally undecided
   pending clean-room evidence.
-- Next gate: merge this reviewed vision and plan, then activate Phase 1 and file
-  the focused sub-issues.
+- Merged the reviewed vision and plan in #1614, synced the planning worktree
+  forward, and activated the effort.
+- Filed #1615 for the clean-room experiment matrix, #1616 for structured
+  assembly and contributor contracts, #1617 for authoring guidance, #1618 for
+  customization-review enforcement, and #1619 for authority implementation and
+  complete-stack migration.
+- Next gate: begin Phase 1 under #1615 with the contributor inventory, frozen
+  synthetic corpus, baseline, and evidence schema.
