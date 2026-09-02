@@ -1136,6 +1136,23 @@ def _create_worktree_core(
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
+    if owner_ref:
+        parsed_owner = tracking.parse_claim_ref(owner_ref)
+        if parsed_owner is None or not parsed_owner.is_qualified:
+            raise RuntimeError(
+                "--owner-ref must be qualified as "
+                f"machine/project/worktree_id (got {owner_ref!r})"
+            )
+        if parsed_owner.machine != config.machine:
+            raise RuntimeError(
+                f"cross-machine owner {owner_ref} cannot synchronously accept "
+                "this worktree obligation; use a dispatch/lease flow that "
+                "persists remote ownership before creation"
+            )
+        readiness = _coordination_readiness_for_owner_ref(owner_ref, config)
+        if not readiness.ready:
+            raise CoordinationReadinessFailure(readiness)
+
     _validate_profile_assignment_config(config)
     launches_copilot = kind != "system"
     fake_args = None
@@ -1173,25 +1190,14 @@ def _create_worktree_core(
     # finalize cannot hand off/clean a not-yet-created child reference.
     owner_guard = None
     if owner_ref:
-        parsed_owner = tracking.parse_claim_ref(owner_ref)
-        if parsed_owner is None or not parsed_owner.is_qualified:
+        owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(
+            owner_ref, config)
+        if owner_err or owner_path is None or not owner_path.exists():
             raise RuntimeError(
-                f"--owner-ref must be qualified as "
-                f"machine/project/worktree_id (got {owner_ref!r})")
-        if parsed_owner.machine != config.machine:
-            raise RuntimeError(
-                f"cross-machine owner {owner_ref} cannot synchronously accept "
-                "this worktree obligation; use a dispatch/lease flow that "
-                "persists remote ownership before creation")
-        if parsed_owner.machine == config.machine:
-            owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(
-                owner_ref, config)
-            if owner_err or owner_path is None or not owner_path.exists():
-                raise RuntimeError(
-                    owner_err or f"owner ledger is missing: {owner_ref}")
-            owner_guard = tracking._RecordLock(
-                owner_path, require_sidecar=True)
-            owner_guard.__enter__()
+                owner_err or f"owner ledger is missing: {owner_ref}")
+        owner_guard = tracking._RecordLock(
+            owner_path, require_sidecar=True)
+        owner_guard.__enter__()
 
     try:
         if owner_guard is not None and not _journal_owner_reciprocal_claim(
@@ -2455,6 +2461,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         caller_worktree=getattr(args, "caller_worktree", None),
                         owner_ref=getattr(args, "owner_ref", None),
                         recovery=getattr(args, "recovery", False),
+                    )
+                except CoordinationReadinessFailure as exc:
+                    return _emit_coordination_rejection(
+                        exc.readiness, json_out=True
                     )
                 except RuntimeError as e:
                     return _json_error(str(e))
@@ -4446,6 +4456,15 @@ def _resolve_new(
             launch_preflight=launch_preflight,
             recovery=getattr(args, "recovery", False),
         )
+    except CoordinationReadinessFailure as exc:
+        _emit_coordination_rejection(exc.readiness, json_out=False)
+        _emit_plan({
+            "action": "error",
+            "error": exc.readiness.error,
+            "code": exc.readiness.code,
+            "exit_code": 3,
+        })
+        return 3
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
@@ -7993,6 +8012,14 @@ def _require_coordination_readiness(
     readiness = state_root_mod.coordination_readiness(config)
     if readiness.ready:
         return None
+    return _emit_coordination_rejection(readiness, json_out=json_out)
+
+
+def _emit_coordination_rejection(
+    readiness: state_root_mod.CoordinationReadiness,
+    *,
+    json_out: bool,
+) -> int:
     if json_out:
         _json_output({
             "error": readiness.error,
@@ -8002,6 +8029,54 @@ def _require_coordination_readiness(
     else:
         output.err(f"{readiness.code}: {readiness.error}")
     return 3
+
+
+class CoordinationReadinessFailure(RuntimeError):
+    """A claim-producing operation lacks a durable coordination identity."""
+
+    def __init__(
+        self,
+        readiness: state_root_mod.CoordinationReadiness,
+    ) -> None:
+        self.readiness = readiness
+        super().__init__(readiness.error or readiness.code)
+
+
+def _coordination_readiness_for_owner_ref(
+    owner_ref: str,
+    config: cfg.Config,
+) -> state_root_mod.CoordinationReadiness:
+    """Resolve readiness in the project that owns a produced resource."""
+    parsed_owner = tracking.parse_claim_ref(owner_ref)
+    if parsed_owner is None or not parsed_owner.is_qualified:
+        raise ValueError(
+            "--owner-ref must be a qualified "
+            f"machine/project/worktree_id ref (got {owner_ref!r})"
+        )
+    readiness_config = config
+    if parsed_owner.machine == config.machine:
+        try:
+            readiness_config = cfg.load_project_config(parsed_owner.project)
+        except (OSError, RuntimeError, ValueError) as exc:
+            root = state_root_mod.StateRoot(
+                None,
+                "knowledge_repo",
+                parsed_owner.project,
+                False,
+                True,
+                False,
+                error=str(exc),
+            )
+            return state_root_mod.CoordinationReadiness(
+                False,
+                "state_root_resolution_failed",
+                root,
+                error=(
+                    f"Could not resolve owner project "
+                    f"'{parsed_owner.project}' for durable coordination: {exc}"
+                ),
+            )
+    return state_root_mod.coordination_readiness(readiness_config)
 
 
 def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
@@ -8153,16 +8228,11 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 return _json_error(err, 2)
             output.err(err)
             return 2
-        readiness_config = config
-        if rec_path is not None:
-            parsed_owner = tracking.parse_claim_ref(owner_ref)
-            assert parsed_owner is not None and parsed_owner.is_qualified
-            readiness_config = cfg.load_project_config(parsed_owner.project)
-        blocked = _require_coordination_readiness(
-            readiness_config, json_out=args.json
-        )
-        if blocked is not None:
-            return blocked
+        readiness = _coordination_readiness_for_owner_ref(owner_ref, config)
+        if not readiness.ready:
+            return _emit_coordination_rejection(
+                readiness, json_out=args.json
+            )
         if rec_path is None:
             # Cross-machine owner -- its ledger is remote; the lease mirror owns
             # the disposition. Not an error: a no-op locally, surfaced for the
@@ -8687,6 +8757,10 @@ def cmd_create(args: argparse.Namespace) -> int:
                 origin=getattr(args, "origin", None),
                 owner_ref=owner_ref,
             )
+        except CoordinationReadinessFailure as exc:
+            return _emit_coordination_rejection(
+                exc.readiness, json_out=args.json
+            )
         except Exception as e:
             if args.json:
                 return _json_error(str(e))
@@ -8944,6 +9018,30 @@ def cmd_run(args: argparse.Namespace) -> int:
             "ownership; run from a managed worktree or pass --owner-ref.")
         return 1
 
+    try:
+        run_config = cfg.load_config()
+        parsed_owner = tracking.parse_claim_ref(owner_ref)
+    except (OSError, RuntimeError, ValueError) as exc:
+        output.err(f"run: cannot resolve owner: {exc}")
+        return 1
+    if parsed_owner is None or not parsed_owner.is_qualified:
+        output.err(
+            "run: --owner-ref must be a qualified "
+            f"machine/project/worktree_id ref (got {owner_ref!r})"
+        )
+        return 1
+    if parsed_owner.machine != run_config.machine:
+        output.err(
+            f"run: cross-machine owner {owner_ref} cannot synchronously reserve "
+            "this resource; use a dispatch/lease flow that persists remote "
+            "ownership before creation"
+        )
+        return 1
+    readiness = _coordination_readiness_for_owner_ref(owner_ref, run_config)
+    if not readiness.ready:
+        output.err(f"run: {readiness.code}: {readiness.error}")
+        return 3
+
     child_env = dict(os.environ)
     if owner_ref:
         child_env["AGENT_WORKTREES_OWNER_REF"] = owner_ref
@@ -8958,20 +9056,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     pending_ref = ""
     if owner_ref:
         try:
-            run_config = cfg.load_config()
             owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(
                 owner_ref, run_config)
             if owner_err:
                 raise RuntimeError(owner_err)
-            parsed_owner = tracking.parse_claim_ref(owner_ref)
-            if (parsed_owner and parsed_owner.machine
-                    and parsed_owner.machine != run_config.machine):
-                raise RuntimeError(
-                    f"cross-machine owner {owner_ref} cannot synchronously "
-                    "reserve this resource; use a dispatch/lease flow that "
-                    "persists remote ownership before creation")
             if owner_path is not None and not owner_path.exists():
-                parsed_owner = tracking.parse_claim_ref(owner_ref)
                 if parsed_owner and parsed_owner.is_anchor:
                     _ensure_anchor_ledger(
                         parsed_owner, owner_path.parent)

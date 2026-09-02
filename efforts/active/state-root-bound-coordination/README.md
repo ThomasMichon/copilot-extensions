@@ -110,7 +110,7 @@ usable.
   ownership change; a rejected consumer leaves the source authoritative.
   The current runtime has no acceptance surface; land this gate with the
   acceptance implementation rather than speculating one in advance.
-- [ ] Gate `run` and automatic parent-child worktree ownership before child
+- [x] Gate `run` and automatic parent-child worktree ownership before child
   launch, Git worktree creation, or reciprocal claim writes.
 - [x] Gate lease acquisition before store resolution or network I/O. For a
   required external state root, an explicit origin is accepted only after
@@ -153,7 +153,7 @@ usable.
   `knowledge_binding_required` output.
 - [ ] `--owner-ref`, cross-project, and cross-machine paths cannot bypass the
   gate.
-- [ ] Rejected `run`, child creation, handoff offer, and lease operations
+- [x] Rejected `run`, child creation, handoff offer, and lease operations
   perform no local mutation, subprocess launch, Git worktree creation, remote
   ref read, or remote ref write.
 - [ ] Handoff acceptance by an unready consumer fails atomically and leaves the
@@ -172,7 +172,7 @@ usable.
   an absent optional peer instead of blocking provider work.
 - [ ] A bound-but-unresolvable state root produces its distinct resolution
   diagnostic, not `knowledge_binding_required`, on the installed runtime.
-- [ ] Operator-initiated owner-less worktree/session creation remains available
+- [x] Operator-initiated owner-less worktree/session creation remains available
   in an unbound harness so the operator can complete knowledge binding; only
   creation that would establish ownership or a claim is gated.
 - [ ] agent-containers remains independently installable and its provider-local
@@ -248,3 +248,9 @@ agent-worktrees-owned operation, preserving the suite's a-la-carte invariant.
   and absent, old, malformed, or incompatible peers preserve standalone mode.
   Existing same-owner lease renewal remains available without a new-acquisition
   preflight.
+- Provider PR [#1587](https://github.com/ThomasMichon/copilot-extensions/pull/1587)
+  merged after both plugin suites passed CI; #1517 and #1518 are closed.
+- Implemented the remaining direct creation gate: `run` now rejects before
+  pending ownership or subprocess launch, and owner-linked worktree creation
+  rejects before source preparation, directory creation, reciprocal claims, or
+  Git worktree creation. Owner-less/system bootstrap creation remains available.

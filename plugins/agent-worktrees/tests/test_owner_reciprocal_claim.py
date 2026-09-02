@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import types
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import state_root
 from agent_worktrees import tracking
 
 
@@ -75,3 +78,117 @@ def test_idempotent_dedups_by_ref(tmp_path, monkeypatch):
     m._journal_owner_reciprocal_claim(_config(), "wt-child", ref)
     rec = tracking.load_record(owner_dir / "wt-owner.yaml")
     assert len(rec.resources) == 1  # deduped, not doubled
+
+
+def test_owned_create_rejects_unready_before_source_or_worktree_side_effects(
+    tmp_path,
+    monkeypatch,
+):
+    owner_dir = _seed_owner(
+        tmp_path,
+        monkeypatch,
+        project="owner-project",
+    )
+    owner_path = owner_dir / "wt-owner.yaml"
+    before = owner_path.read_bytes()
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    worktree_root = tmp_path / "worktrees"
+    config = cfg.Config(
+        srcroot=str(tmp_path),
+        machine="anomalous-potato",
+        platform="windows",
+        repo_name="child-project",
+        repos={
+            "child-project": cfg.RepoConfig(
+                anchor=str(anchor),
+                worktree_root=str(worktree_root),
+            )
+        },
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
+    root = state_root.StateRoot(
+        None,
+        "knowledge_repo",
+        "",
+        True,
+        True,
+        False,
+        error="no knowledge_repo is bound",
+    )
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "coordination_readiness",
+        lambda loaded: state_root.CoordinationReadiness(
+            False,
+            "knowledge_binding_required",
+            root,
+            error="bind the knowledge repository",
+        ),
+    )
+    monkeypatch.setattr(
+        m,
+        "_prepare_worktree_source",
+        lambda *a, **k: pytest.fail("unready create prepared the source"),
+    )
+    monkeypatch.setattr(
+        m.git_ops,
+        "create_worktree",
+        lambda *a, **k: pytest.fail("unready create made a Git worktree"),
+    )
+
+    with pytest.raises(m.CoordinationReadinessFailure) as caught:
+        m._create_worktree_core(
+            config,
+            no_mux=True,
+            owner_ref="anomalous-potato/owner-project/wt-owner",
+            launch_preflight=m.LaunchPreflight(),
+        )
+    assert caught.value.readiness.code == "knowledge_binding_required"
+    assert not worktree_root.exists()
+    assert owner_path.read_bytes() == before
+
+
+def test_ownerless_create_reaches_source_preparation_when_unready(
+    tmp_path,
+    monkeypatch,
+):
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    config = cfg.Config(
+        srcroot=str(tmp_path),
+        machine="anomalous-potato",
+        platform="windows",
+        repo_name="child-project",
+        repos={
+            "child-project": cfg.RepoConfig(
+                anchor=str(anchor),
+                worktree_root=str(tmp_path / "worktrees"),
+            )
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "_coordination_readiness_for_owner_ref",
+        lambda *a, **k: pytest.fail(
+            "owner-less creation evaluated owner coordination"
+        ),
+    )
+
+    class ReachedSourcePreparation(Exception):
+        pass
+
+    monkeypatch.setattr(
+        m,
+        "_prepare_worktree_source",
+        lambda *a, **k: (_ for _ in ()).throw(
+            ReachedSourcePreparation()
+        ),
+    )
+    with pytest.raises(ReachedSourcePreparation):
+        m._create_worktree_core(
+            config,
+            no_mux=True,
+            owner_ref=None,
+            launch_preflight=m.LaunchPreflight(),
+        )
