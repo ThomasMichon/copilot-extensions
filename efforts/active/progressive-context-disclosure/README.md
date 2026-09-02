@@ -375,3 +375,25 @@ enforcement before migrating the complete contributor stack.
   healthy, published, accepting endpoint. Rerun the fresh ACP cell only after
   that tracked fix lands; the current `INVALID` runs do not eliminate any
   progressive-context variant.
+
+### 2026-09-02 - Tier-E blockers fixed at source
+
+- #1740 fixed #1724 in agent-bridge `0.4.0-dev417`: service recovery now
+  discovers the exact port-0 singleton holder, verifies and undrains it under a
+  routing-table compare-and-swap, atomically republishes its dynamic endpoint,
+  preserves known runtime-version provenance, reconciles service markers, and
+  refuses to report stop success while the dynamic holder remains live.
+- The first manually routed ACP turn was not credited as behavioral evidence.
+  It depended on working around the broken host route and also exposed a
+  provenance defect: the runner selected model/status from a broad same-agent
+  session listing.
+- #1750 fixed the remaining #1725 gap in agent-bridge `0.4.0-dev418` and the
+  clean-room runner. `agent-bridge create --session-id-file` now publishes the
+  exact create-owned session before prompt streaming; the runners keep that ID
+  and the session snapshot in host-only temporary state and bind model plus
+  structured results only to that exact ID. Missing or ambiguous provenance is
+  `INVALID`.
+- Do not reconnect to or repair the shared cloud host inline. The next
+  calibration attempt starts only after the merged versions are deployed
+  through the normal machine update flow and the host reports one healthy,
+  published, accepting bridge endpoint. No Tier-E behavioral result exists yet.
