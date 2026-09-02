@@ -649,6 +649,38 @@ def test_projection_tombstone_rejects_delayed_controller_upsert(
     )
 
 
+def test_removal_preserves_newer_existing_tombstone() -> None:
+    key = ("example", "child", "controller")
+    projection = {
+        "version": 1,
+        "session_id": "controller-session",
+        "relations": [{
+            "project": key[0],
+            "worktree_id": key[1],
+            "role": key[2],
+            "relation_revision": 3,
+        }],
+        "relation_tombstones": [{
+            "project": key[0],
+            "worktree_id": key[1],
+            "role": key[2],
+            "relation_revision": 7,
+        }],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+
+    removed = session_projection._remove_relation(projection, key, 4)
+
+    assert removed["relations"] == []
+    assert removed["relation_tombstones"] == [{
+        "project": key[0],
+        "worktree_id": key[1],
+        "role": key[2],
+        "relation_revision": 7,
+    }]
+
+
 def test_new_tombstone_survives_cap_with_record_local_revision() -> None:
     projection = {
         "version": 1,

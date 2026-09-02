@@ -350,11 +350,16 @@ def _remove_relation(
         and len(relations) == len(projection.get("relations", []))
     ):
         return projection
+    tombstone_revision = max(
+        relation_revision,
+        _relation_revision(current_tombstone)
+        if current_tombstone is not None else 0,
+    )
     tombstones.append({
         "project": relation_key[0],
         "worktree_id": relation_key[1],
         "role": relation_key[2],
-        "relation_revision": relation_revision,
+        "relation_revision": tombstone_revision,
     })
     tombstones = tombstones[-MAX_RELATION_TOMBSTONES:]
     result = dict(projection)
