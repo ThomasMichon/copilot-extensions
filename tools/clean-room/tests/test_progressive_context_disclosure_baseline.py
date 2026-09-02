@@ -310,6 +310,7 @@ def test_clean_room_runner_binds_requested_acp_model() -> None:
         assert "drive-runs.json" in source
         assert "exit_code" in source
         assert "invalid_evidence_writer" in source
+    assert "??" not in powershell
 
 
 def test_evidence_separates_eager_loading_and_validates_invalid_records(
