@@ -935,7 +935,11 @@ def build_represented_result_snapshot(
             ],
         ),
         state=ResultCurrentState(
-            session_status=str(registration.get("status") or "live"),
+            session_status=(
+                SessionStatus.IDLE
+                if at_rest
+                else str(registration.get("status") or "live")
+            ),
             at_rest=at_rest,
             liveness=None if at_rest else registration.get("liveness"),
             context_pct=None,

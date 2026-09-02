@@ -653,6 +653,7 @@ def test_represented_snapshot_reports_reduced_fidelity(client, app) -> None:
     assert body["fidelity"]["event_retention"] == "process_lifetime"
     assert body["latest_result"]["availability"] == "available"
     assert body["latest_result"]["value"]["text"] == "visible"
+    assert body["state"]["session_status"] == "idle"
     assert body["state"]["at_rest"] is True
     assert body["state"]["liveness"] is None
     assert body["incremental"]["position"].startswith("abr1.")
