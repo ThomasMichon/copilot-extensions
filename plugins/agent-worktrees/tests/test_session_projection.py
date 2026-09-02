@@ -457,3 +457,57 @@ def test_deferred_projection_remains_dirty_for_next_save(
 
     tracking.save_record(record)
     assert record._session_projection_dirty == set()
+
+
+def test_controller_retraction_salvages_parseable_projection(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    unrelated_relation = {
+        "project": "example",
+        "worktree_id": "other",
+        "role": "controller",
+        "relation_revision": 9,
+    }
+    unrelated_tombstone = {
+        "project": "example",
+        "worktree_id": "removed",
+        "role": "controller",
+        "relation_revision": 8,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [unrelated_relation, "malformed"],
+            "relation_tombstones": [unrelated_tombstone, 42],
+            "overflow": False,
+            "omitted_relations": 0,
+            "future_metadata": {"preserve": True},
+        }),
+        encoding="utf-8",
+    )
+
+    outcome = session_projection.sync_controller(record, "session-a")
+
+    assert outcome == "written"
+    rebuilt = session_projection.read("session-a")
+    assert rebuilt is not None
+    assert rebuilt["relations"] == [unrelated_relation]
+    assert unrelated_tombstone in rebuilt["relation_tombstones"]
+    assert len(rebuilt["relation_tombstones"]) == 2
+    assert rebuilt["future_metadata"] == {"preserve": True}
+
+
+def test_controller_retraction_defers_unparseable_json(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        "{not-json",
+        encoding="utf-8",
+    )
+
+    assert session_projection.sync_controller(record, "session-a") == "deferred"

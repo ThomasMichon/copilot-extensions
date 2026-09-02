@@ -15,6 +15,7 @@ SCHEMA_VERSION = 1
 SIDECAR_NAME = "agent-worktrees.json"
 MAX_BYTES = 128 * 1024
 MAX_RELATIONS = 128
+MAX_RELATION_TOMBSTONES = 128
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 SyncOutcome = Literal["written", "current", "blocked", "deferred"]
 
@@ -133,7 +134,57 @@ def read(session_id: str) -> dict[str, Any] | None:
         raise ProjectionError("projection relations must be an array")
     if any(not isinstance(relation, dict) for relation in relations):
         raise ProjectionError("projection relations must contain JSON objects")
+    tombstones = loaded.get("relation_tombstones", [])
+    if not isinstance(tombstones, list):
+        raise ProjectionError("projection relation_tombstones must be an array")
+    if any(not isinstance(tombstone, dict) for tombstone in tombstones):
+        raise ProjectionError(
+            "projection relation_tombstones must contain JSON objects"
+        )
     return loaded
+
+
+def _read_recoverable(session_id: str) -> dict[str, Any]:
+    """Read parseable same-version state while dropping malformed list items."""
+    target, _lock_base, _temp_dir = _session_paths(session_id)
+    if not target.exists():
+        return _empty_projection(session_id)
+    try:
+        with target.open("rb") as handle:
+            raw = handle.read(MAX_BYTES + 1)
+    except OSError as exc:
+        raise ProjectionError(f"cannot read projection {target}: {exc}") from exc
+    if len(raw) > MAX_BYTES:
+        raise ProjectionError(f"projection exceeds {MAX_BYTES} bytes")
+    try:
+        loaded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProjectionError(f"invalid projection JSON: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise ProjectionError("projection must be a JSON object")
+    version = loaded.get("version")
+    if not isinstance(version, int):
+        raise ProjectionError("projection version must be an integer")
+    if version > SCHEMA_VERSION:
+        raise UnsupportedProjectionVersion(
+            f"projection version {version} is newer than supported {SCHEMA_VERSION}"
+        )
+    if version != SCHEMA_VERSION:
+        raise ProjectionError(f"unsupported projection version {version}")
+    if loaded.get("session_id") != session_id:
+        raise ProjectionError("projection session_id does not match its directory")
+    relations = loaded.get("relations")
+    tombstones = loaded.get("relation_tombstones", [])
+    if not isinstance(relations, list) or not isinstance(tombstones, list):
+        raise ProjectionError("projection relation fields must be arrays")
+    recovered = dict(loaded)
+    recovered["relations"] = [
+        relation for relation in relations if isinstance(relation, dict)
+    ]
+    recovered["relation_tombstones"] = [
+        tombstone for tombstone in tombstones if isinstance(tombstone, dict)
+    ]
+    return recovered
 
 
 def _handoff_ordinal(record: Any, session_id: str) -> int | None:
@@ -163,6 +214,30 @@ def bound_relation(record: Any, session_id: str) -> dict[str, Any] | None:
             "successor": entry.successor,
             "handoff_ordinal": _handoff_ordinal(record, session_id),
         },
+    }
+
+
+def controller_relation(
+    record: Any,
+    session_id: str,
+) -> dict[str, Any] | None:
+    """Build one controller relation for an exact controller session."""
+    relation = record.controller_for_session(session_id)
+    if relation is None:
+        return None
+    return {
+        "project": record.repo,
+        "worktree_id": record.worktree_id,
+        "role": "controller",
+        "relation_revision": relation.relation_revision,
+        "controller_revision": record.controller_revision,
+        "controller_kind": relation.kind,
+        "controller_source": relation.source,
+        "controller_ref": relation.controller_ref,
+        "controller_session_id": relation.controller_session_id,
+        "relation_state": relation.state,
+        "created_at": relation.created_at,
+        "ended_at": relation.ended_at,
     }
 
 
@@ -197,6 +272,27 @@ def _merge_relation(
     relation: dict[str, Any],
 ) -> dict[str, Any]:
     relation_key = _relation_key(relation)
+    tombstones = [
+        item for item in projection.get("relation_tombstones", [])
+        if isinstance(item, dict)
+    ]
+    tombstone = next(
+        (
+            item for item in tombstones
+            if _relation_key(item) == relation_key
+        ),
+        None,
+    )
+    incoming_revision = _relation_revision(relation)
+    if (
+        tombstone is not None
+        and _relation_revision(tombstone) >= incoming_revision
+    ):
+        return projection
+    tombstones = [
+        item for item in tombstones
+        if _relation_key(item) != relation_key
+    ]
     existing = next(
         (
             item for item in projection.get("relations", [])
@@ -206,10 +302,8 @@ def _merge_relation(
     )
     if existing is not None:
         existing_revision = existing.get("relation_revision", 0)
-        incoming_revision = relation.get("relation_revision", 0)
         if (
             isinstance(existing_revision, int)
-            and isinstance(incoming_revision, int)
             and existing_revision > incoming_revision
         ):
             return projection
@@ -254,6 +348,66 @@ def _merge_relation(
         "overflow": bool(omitted or projection.get("overflow")),
         "omitted_relations": omitted,
     })
+    if tombstones:
+        result["relation_tombstones"] = tombstones
+    else:
+        result.pop("relation_tombstones", None)
+    return result
+
+
+def _remove_relation(
+    projection: dict[str, Any],
+    relation_key: tuple[str, str, str],
+    relation_revision: int,
+) -> dict[str, Any]:
+    existing = next(
+        (
+            item for item in projection.get("relations", [])
+            if isinstance(item, dict) and _relation_key(item) == relation_key
+        ),
+        None,
+    )
+    if (
+        existing is not None
+        and _relation_revision(existing) > relation_revision
+    ):
+        return projection
+    relations = [
+        item for item in projection.get("relations", [])
+        if isinstance(item, dict) and _relation_key(item) != relation_key
+    ]
+    tombstones = [
+        item for item in projection.get("relation_tombstones", [])
+        if isinstance(item, dict) and _relation_key(item) != relation_key
+    ]
+    current_tombstone = next(
+        (
+            item for item in projection.get("relation_tombstones", [])
+            if isinstance(item, dict) and _relation_key(item) == relation_key
+        ),
+        None,
+    )
+    if (
+        current_tombstone is not None
+        and _relation_revision(current_tombstone) >= relation_revision
+        and len(relations) == len(projection.get("relations", []))
+    ):
+        return projection
+    tombstone_revision = max(
+        relation_revision,
+        _relation_revision(current_tombstone)
+        if current_tombstone is not None else 0,
+    )
+    tombstones.append({
+        "project": relation_key[0],
+        "worktree_id": relation_key[1],
+        "role": relation_key[2],
+        "relation_revision": tombstone_revision,
+    })
+    tombstones = tombstones[-MAX_RELATION_TOMBSTONES:]
+    result = dict(projection)
+    result["relations"] = relations
+    result["relation_tombstones"] = tombstones
     return result
 
 
@@ -304,11 +458,14 @@ def _atomic_replace(target: Path, temp_dir: Path, content: bytes) -> None:
         raise
 
 
-def sync_bound(record: Any, session_id: str) -> SyncOutcome:
-    """Best-effort projection of one bound session after record persistence."""
-    relation = bound_relation(record, session_id)
-    if relation is None:
-        return "current"
+def _sync_relation(
+    record: Any,
+    session_id: str,
+    *,
+    relation: dict[str, Any] | None,
+    role: str,
+    remove_missing: bool,
+) -> SyncOutcome:
     try:
         target, lock_base, temp_dir = _session_paths(session_id, writing=True)
         from . import tracking
@@ -319,8 +476,24 @@ def sync_bound(record: Any, session_id: str) -> SyncOutcome:
             except UnsupportedProjectionVersion:
                 return "blocked"
             except ProjectionError:
-                current = _empty_projection(session_id)
-            updated = _merge_relation(current, relation)
+                try:
+                    current = _read_recoverable(session_id)
+                except UnsupportedProjectionVersion:
+                    return "blocked"
+                except ProjectionError:
+                    if relation is None:
+                        return "deferred"
+                    current = _empty_projection(session_id)
+            if relation is None:
+                if not remove_missing:
+                    return "current"
+                updated = _remove_relation(
+                    current,
+                    (record.repo, record.worktree_id, role),
+                    record.controller_revision,
+                )
+            else:
+                updated = _merge_relation(current, relation)
             if updated == current:
                 return "current"
             encoded = _encode(updated)
@@ -328,3 +501,25 @@ def sync_bound(record: Any, session_id: str) -> SyncOutcome:
         return "written"
     except Exception:
         return "deferred"
+
+
+def sync_bound(record: Any, session_id: str) -> SyncOutcome:
+    """Best-effort projection of one bound session after record persistence."""
+    return _sync_relation(
+        record,
+        session_id,
+        relation=bound_relation(record, session_id),
+        role="bound",
+        remove_missing=False,
+    )
+
+
+def sync_controller(record: Any, session_id: str) -> SyncOutcome:
+    """Upsert or retract one exact controller-session projection relation."""
+    return _sync_relation(
+        record,
+        session_id,
+        relation=controller_relation(record, session_id),
+        role="controller",
+        remove_missing=True,
+    )

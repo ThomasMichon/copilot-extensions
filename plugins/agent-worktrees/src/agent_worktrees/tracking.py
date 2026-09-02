@@ -44,6 +44,11 @@ WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"
 SessionState = Literal["active", "handed-off", "concluded"]
 HandoffState = Literal["pending", "linked", "cancelled"]
 ProfileAssignmentDisposition = Literal["pending", "bound", "abandoned"]
+ControllerRelationKind = Literal["worktree", "session"]
+ControllerRelationSource = Literal[
+    "explicit", "owner-ref", "caller-worktree", "parent-session"
+]
+ControllerRelationState = Literal["active", "ended"]
 
 # States that mean "no longer the current session" -- a replayed head pointing
 # at one resolves to no current session until an explicit successor/adoption.
@@ -92,6 +97,7 @@ _MAX_SESSION_ACTIVATIONS = 256
 _MAX_HEAD_TRANSITIONS = 512
 _MAX_HANDOFFS = 256
 _MAX_PROFILE_ASSIGNMENTS = 128
+_MAX_CONTROLLER_RELATIONS = 32
 MAX_PERSISTED_COUNTER = (1 << 63) - 1
 
 
@@ -407,6 +413,30 @@ class ResourceClaim:
 
 
 @dataclass
+class ControllerRelation:
+    """One authoritative controller relationship for a child worktree.
+
+    Control is deliberately separate from session binding. A controller may
+    name a worktree, an exact Copilot session, or both; it never participates in
+    ``sessions`` or ``head_session``. ``relation_revision`` is allocated from
+    the record's monotonic ``controller_revision`` counter.
+    """
+
+    kind: ControllerRelationKind
+    source: ControllerRelationSource
+    relation_revision: int
+    created_at: str
+    controller_ref: str | None = None
+    controller_session_id: str | None = None
+    state: ControllerRelationState = "active"
+    ended_at: str | None = None
+
+
+class ControllerRelationError(ValueError):
+    """A controller relation is invalid or cannot be mutated safely."""
+
+
+@dataclass
 class WorktreeRecord:
     """Parsed worktree tracking record."""
 
@@ -464,6 +494,22 @@ class WorktreeRecord:
     # available through the ordinary record and JSON status surfaces.
     profile_assignment_revision: int = 0
     profile_assignments: list[ProfileAssignment] = field(default_factory=list)
+    # Reciprocal session/worktree metadata: controllers deliberately operate
+    # this worktree without becoming bound sessions or affecting its head,
+    # liveness, occupancy, or resume eligibility. The list is bounded; ended
+    # relations are retained until displaced by newer history.
+    controller_revision: int = 0
+    controllers: list[ControllerRelation] = field(default_factory=list)
+    controller_metadata_opaque: bool = field(
+        default=False, repr=False, compare=False)
+    controller_raw_revision: object = field(
+        default=None, repr=False, compare=False)
+    controller_raw_entries: object = field(
+        default=None, repr=False, compare=False)
+    controller_raw_revision_present: bool = field(
+        default=False, repr=False, compare=False)
+    controller_raw_entries_present: bool = field(
+        default=False, repr=False, compare=False)
     # #2178: for a bridge-spawned worktree, the *caller* worktree that requested
     # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
     # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
@@ -584,6 +630,26 @@ class WorktreeRecord:
     def live_resources(self) -> list[ResourceClaim]:
         """The outbound resources this worktree still actively holds."""
         return [r for r in self.resources if r.is_live]
+
+    @property
+    def active_controllers(self) -> list[ControllerRelation]:
+        """Controller relations that have not been explicitly ended."""
+        return [relation for relation in self.controllers
+                if relation.state == "active"]
+
+    def controller_for_session(
+        self, session_id: str,
+    ) -> ControllerRelation | None:
+        """Return the newest relation for one exact controller session."""
+        matching = [
+            relation for relation in self.controllers
+            if relation.controller_session_id == session_id
+        ]
+        return max(
+            matching,
+            key=lambda relation: relation.relation_revision,
+            default=None,
+        )
 
     @property
     def resolved_interface(self) -> WorktreeInterface:
@@ -752,6 +818,605 @@ class WorktreeRecord:
         from . import config as cfg
 
         return cfg.tracking_dir() / f"{self.worktree_id}.yaml"
+
+
+def _valid_relation_session_id(session_id: str) -> bool:
+    return bool(
+        session_id
+        and session_id not in {".", ".."}
+        and "/" not in session_id
+        and "\\" not in session_id
+        and "\x00" not in session_id
+        and Path(session_id).name == session_id
+    )
+
+
+def _normalize_controller_ref(
+    controller_ref: str,
+    *,
+    session_id: str | None = None,
+) -> tuple[str, ClaimRef]:
+    """Validate and canonicalize one controller ClaimRef."""
+    if not controller_ref or controller_ref.count("#") > 1:
+        raise ControllerRelationError(
+            "controller_ref must be a worktree ClaimRef"
+        )
+    body, _, ref_session = controller_ref.partition("#")
+    parts = body.split("/")
+    if len(parts) not in (1, 3) or any(not part for part in parts):
+        raise ControllerRelationError(
+            "controller_ref must be worktree_id or "
+            "machine/project/worktree_id[#session]"
+        )
+    parsed = parse_claim_ref(controller_ref)
+    if parsed is None or not parsed.worktree_id:
+        raise ControllerRelationError(
+            "controller_ref must identify a worktree"
+        )
+    if any(token in parsed.worktree_id for token in ("/", "\\", "\x00")):
+        raise ControllerRelationError(
+            "controller_ref worktree_id must be one path-safe identifier"
+        )
+    exact_session = session_id or ref_session or None
+    if session_id and ref_session and session_id != ref_session:
+        raise ControllerRelationError(
+            "controller_ref session does not match controller_session_id"
+        )
+    if exact_session and not _valid_relation_session_id(exact_session):
+        raise ControllerRelationError(
+            f"invalid controller session id {exact_session!r}"
+        )
+    normalized = format_claim_ref(
+        parsed.machine,
+        parsed.project,
+        parsed.worktree_id,
+        exact_session,
+    )
+    return normalized, ClaimRef(
+        worktree_id=parsed.worktree_id,
+        machine=parsed.machine,
+        project=parsed.project,
+        session=exact_session,
+    )
+
+
+def _controller_ref_key(controller_ref: str | None) -> tuple[
+    str | None, str | None, str
+] | None:
+    if not controller_ref:
+        return None
+    _normalized, parsed = _normalize_controller_ref(controller_ref)
+    return parsed.machine, parsed.project, parsed.worktree_id
+
+
+def _controller_refs_overlap(
+    left: str | None,
+    right: str | None,
+) -> bool:
+    left_key = _controller_ref_key(left)
+    right_key = _controller_ref_key(right)
+    if left_key is None or right_key is None:
+        return False
+    if left_key[2] != right_key[2]:
+        return False
+    left_qualified = bool(left_key[0] and left_key[1])
+    right_qualified = bool(right_key[0] and right_key[1])
+    return (
+        left_key == right_key
+        if left_qualified and right_qualified
+        else True
+    )
+
+
+def controller_relation_to_dict(
+    relation: ControllerRelation,
+) -> dict[str, object]:
+    """Render one normalized controller relation for JSON surfaces."""
+    return {
+        "kind": relation.kind,
+        "source": relation.source,
+        "controller_ref": relation.controller_ref,
+        "controller_session_id": relation.controller_session_id,
+        "state": relation.state,
+        "relation_revision": relation.relation_revision,
+        "created_at": relation.created_at,
+        "ended_at": relation.ended_at,
+    }
+
+
+def _mark_controller_projection_dirty(
+    record: WorktreeRecord,
+    *session_ids: str | None,
+) -> None:
+    dirty = set(getattr(record, "_controller_projection_dirty", set()))
+    dirty.update(
+        session_id for session_id in session_ids
+        if session_id and _valid_relation_session_id(session_id)
+    )
+    record._controller_projection_dirty = dirty
+
+
+def _next_controller_revision(record: WorktreeRecord) -> int:
+    highest = max(
+        (relation.relation_revision for relation in record.controllers),
+        default=0,
+    )
+    revision = max(record.controller_revision, highest) + 1
+    if revision > MAX_PERSISTED_COUNTER:
+        raise ControllerRelationError("controller revision counter is exhausted")
+    record.controller_revision = revision
+    return revision
+
+
+def _limit_controller_relations(
+    relations: list[ControllerRelation],
+) -> tuple[list[ControllerRelation], list[ControllerRelation]]:
+    if len(relations) <= _MAX_CONTROLLER_RELATIONS:
+        return relations, []
+    active = sorted(
+        (relation for relation in relations if relation.state == "active"),
+        key=lambda relation: relation.relation_revision,
+    )
+    if len(active) > _MAX_CONTROLLER_RELATIONS:
+        raise ControllerRelationError(
+            f"at most {_MAX_CONTROLLER_RELATIONS} active controller relations "
+            "may be recorded"
+        )
+    ended = sorted(
+        (relation for relation in relations if relation.state == "ended"),
+        key=lambda relation: relation.relation_revision,
+    )
+    keep_ended = _MAX_CONTROLLER_RELATIONS - len(active)
+    retained = active + ended[-keep_ended:] if keep_ended else active
+    retained_ids = {id(relation) for relation in retained}
+    removed = [
+        relation for relation in relations if id(relation) not in retained_ids
+    ]
+    retained.sort(key=lambda relation: relation.relation_revision)
+    return retained, removed
+
+
+def _validate_controller_relation_set(
+    relations: list[ControllerRelation],
+) -> None:
+    for index, relation in enumerate(relations):
+        for prior in relations[:index]:
+            if (
+                relation.controller_session_id
+                and relation.controller_session_id
+                == prior.controller_session_id
+            ):
+                raise ControllerRelationError(
+                    "controller session is assigned to multiple relations"
+                )
+            if _controller_refs_overlap(
+                relation.controller_ref, prior.controller_ref
+            ):
+                raise ControllerRelationError(
+                    "controller worktree is assigned to multiple relations"
+                )
+
+
+def _derive_initial_controller_relations(
+    *,
+    machine: str,
+    project: str,
+    owner_ref: str | None,
+    caller_worktree: str | None,
+    parent_session: str | None,
+    created_at: str,
+) -> tuple[list[ControllerRelation], int]:
+    """Derive deterministic initial control from legacy creation metadata."""
+    if parent_session and not _valid_relation_session_id(parent_session):
+        raise ControllerRelationError(
+            f"invalid controller session id {parent_session!r}"
+        )
+    relations: list[ControllerRelation] = []
+
+    def add_reference(
+        source: ControllerRelationSource,
+        raw_ref: str,
+    ) -> None:
+        normalized, parsed = _normalize_controller_ref(raw_ref)
+        for relation in relations:
+            if _controller_refs_overlap(relation.controller_ref, normalized):
+                if parsed.session and not relation.controller_session_id:
+                    relation.controller_session_id = parsed.session
+                    relation.controller_ref = normalized
+                elif (
+                    parsed.is_qualified
+                    and relation.controller_ref
+                    and not all(
+                        _controller_ref_key(relation.controller_ref)[:2]
+                    )
+                ):
+                    relation.controller_ref = normalized
+                return
+            if (parsed.session and
+                    relation.controller_session_id == parsed.session):
+                if relation.controller_ref is None:
+                    relation.controller_ref = normalized
+                    relation.kind = "worktree"
+                return
+        relations.append(ControllerRelation(
+            kind="worktree",
+            source=source,
+            controller_ref=normalized,
+            controller_session_id=parsed.session,
+            relation_revision=len(relations) + 1,
+            created_at=created_at,
+        ))
+
+    if owner_ref:
+        add_reference("owner-ref", owner_ref)
+    if caller_worktree:
+        caller_ref = caller_worktree
+        parsed_caller = parse_claim_ref(caller_worktree)
+        matches_richer_owner = bool(
+            parsed_caller is not None
+            and not parsed_caller.is_qualified
+            and any(
+                (
+                    key := _controller_ref_key(
+                        relation.controller_ref
+                    )
+                ) is not None
+                and key[2] == parsed_caller.worktree_id
+                for relation in relations
+            )
+        )
+        if (
+            parsed_caller is not None
+            and not parsed_caller.is_qualified
+            and machine
+            and project
+            and not matches_richer_owner
+        ):
+            caller_ref = format_claim_ref(
+                machine,
+                project,
+                parsed_caller.worktree_id,
+                parsed_caller.session,
+            )
+        add_reference("caller-worktree", caller_ref)
+    if parent_session:
+        matching = next((relation for relation in relations
+                         if relation.source == "caller-worktree"), None)
+        if matching is None:
+            matching = next((relation for relation in relations
+                             if relation.controller_session_id == parent_session), None)
+        if matching is None:
+            unbound_refs = [
+                relation for relation in relations
+                if relation.controller_session_id is None
+            ]
+            if len(unbound_refs) == 1:
+                matching = unbound_refs[0]
+                matching.controller_session_id = parent_session
+                normalized, _parsed = _normalize_controller_ref(
+                    matching.controller_ref or "",
+                    session_id=parent_session,
+                )
+                matching.controller_ref = normalized
+            else:
+                relations.append(ControllerRelation(
+                    kind="session",
+                    source="parent-session",
+                    controller_session_id=parent_session,
+                    relation_revision=len(relations) + 1,
+                    created_at=created_at,
+                ))
+    return relations, len(relations)
+
+
+def _controller_relation_matches(
+    relation: ControllerRelation,
+    *,
+    controller_ref: str | None,
+    controller_session_id: str | None,
+) -> bool:
+    selector_session = controller_session_id
+    if controller_ref is not None:
+        normalized, parsed = _normalize_controller_ref(
+            controller_ref,
+            session_id=controller_session_id,
+        )
+        selector_session = parsed.session
+        if not _controller_refs_overlap(
+            relation.controller_ref, normalized
+        ):
+            return False
+    if (selector_session is not None and
+            relation.controller_session_id != selector_session):
+        return False
+    return True
+
+
+def _sync_record_instance(
+    target: WorktreeRecord,
+    source: WorktreeRecord,
+) -> None:
+    """Refresh a caller-held record after a relation-only transaction."""
+    if target is source:
+        return
+    target.controller_revision = source.controller_revision
+    target.controllers = source.controllers
+    target.controller_metadata_opaque = source.controller_metadata_opaque
+    target.controller_raw_revision = source.controller_raw_revision
+    target.controller_raw_entries = source.controller_raw_entries
+    target.controller_raw_revision_present = (
+        source.controller_raw_revision_present)
+    target.controller_raw_entries_present = (
+        source.controller_raw_entries_present)
+    target._controller_projection_dirty = (
+        set(getattr(target, "_controller_projection_dirty", set()))
+        | set(getattr(source, "_controller_projection_dirty", set()))
+    )
+
+
+def set_controller_relation(
+    record: WorktreeRecord,
+    *,
+    controller_ref: str | None = None,
+    controller_session_id: str | None = None,
+    source: ControllerRelationSource = "explicit",
+    created_at: str | None = None,
+    save: bool = True,
+    path: Path | None = None,
+) -> ControllerRelation:
+    """Add or refresh a controller without changing session binding or head.
+
+    The default write path is a locked reload-mutate-save transaction, so two
+    processes cannot allocate the same revision from stale snapshots. Callers
+    using ``save=False`` must already hold the record lock through their final
+    :func:`save_record`.
+    """
+    if save:
+        target = path or record.yaml_path
+        with _RecordLock(target, require_sidecar=True):
+            authoritative = load_record(target) if target.exists() else record
+            relation = set_controller_relation(
+                authoritative,
+                controller_ref=controller_ref,
+                controller_session_id=controller_session_id,
+                source=source,
+                created_at=created_at,
+                save=False,
+                path=target,
+            )
+            _save_record_unlocked(authoritative, target)
+        _flush_session_projections(authoritative)
+        _sync_record_instance(record, authoritative)
+        return relation
+    if source not in (
+        "explicit", "owner-ref", "caller-worktree", "parent-session"
+    ):
+        raise ControllerRelationError(f"unsupported controller source {source!r}")
+    if record.controller_metadata_opaque:
+        raise ControllerRelationError(
+            "controller metadata contains unsupported entries; explicit repair "
+            "is required before mutation"
+        )
+    normalized_ref = None
+    parsed = None
+    if controller_ref:
+        normalized_ref, parsed = _normalize_controller_ref(
+            controller_ref,
+            session_id=controller_session_id,
+        )
+        controller_session_id = parsed.session
+    elif controller_session_id:
+        if not _valid_relation_session_id(controller_session_id):
+            raise ControllerRelationError(
+                f"invalid controller session id {controller_session_id!r}"
+            )
+    else:
+        raise ControllerRelationError(
+            "controller_ref or controller_session_id is required"
+        )
+
+    ref_matches = [
+        candidate for candidate in record.controllers
+        if normalized_ref is not None and _controller_refs_overlap(
+            candidate.controller_ref, normalized_ref
+        )
+    ]
+    session_matches = [
+        candidate for candidate in record.controllers
+        if (
+            controller_session_id is not None
+            and candidate.controller_session_id == controller_session_id
+        )
+    ]
+    if len(ref_matches) > 1 or len(session_matches) > 1:
+        raise ControllerRelationError(
+            "existing controller identity is ambiguous"
+        )
+    if (
+        ref_matches
+        and session_matches
+        and ref_matches[0] is not session_matches[0]
+    ):
+        raise ControllerRelationError(
+            "controller_ref and controller_session_id identify "
+            "different relations"
+        )
+    relation = (
+        ref_matches[0]
+        if ref_matches
+        else session_matches[0] if session_matches else None
+    )
+    prior_session = relation.controller_session_id if relation else None
+    if (
+        relation is None
+        and len(record.active_controllers) >= _MAX_CONTROLLER_RELATIONS
+    ):
+        raise ControllerRelationError(
+            f"at most {_MAX_CONTROLLER_RELATIONS} active controller relations "
+            "may be recorded"
+        )
+    revision = _next_controller_revision(record)
+    if relation is None:
+        relation = ControllerRelation(
+            kind="worktree" if normalized_ref else "session",
+            source=source,
+            controller_ref=normalized_ref,
+            controller_session_id=controller_session_id,
+            relation_revision=revision,
+            created_at=created_at or _now_iso(),
+        )
+        record.controllers.append(relation)
+    else:
+        if normalized_ref:
+            relation.controller_ref = normalized_ref
+            relation.kind = "worktree"
+        if controller_session_id:
+            relation.controller_session_id = controller_session_id
+        relation.source = source
+        relation.state = "active"
+        relation.ended_at = None
+        relation.relation_revision = revision
+        if created_at:
+            relation.created_at = created_at
+
+    _validate_controller_relation_set(record.controllers)
+    record.controllers, removed = _limit_controller_relations(record.controllers)
+    _mark_controller_projection_dirty(
+        record,
+        prior_session,
+        relation.controller_session_id,
+        *(item.controller_session_id for item in removed),
+    )
+    if save:
+        save_record(record)
+    return relation
+
+
+def end_controller_relation(
+    record: WorktreeRecord,
+    *,
+    controller_ref: str | None = None,
+    controller_session_id: str | None = None,
+    ended_at: str | None = None,
+    save: bool = True,
+    path: Path | None = None,
+) -> ControllerRelation:
+    """End one exact controller relation without altering the bound head."""
+    if save:
+        target = path or record.yaml_path
+        with _RecordLock(target, require_sidecar=True):
+            authoritative = load_record(target) if target.exists() else record
+            relation = end_controller_relation(
+                authoritative,
+                controller_ref=controller_ref,
+                controller_session_id=controller_session_id,
+                ended_at=ended_at,
+                save=False,
+                path=target,
+            )
+            _save_record_unlocked(authoritative, target)
+        _flush_session_projections(authoritative)
+        _sync_record_instance(record, authoritative)
+        return relation
+    if controller_ref is None and controller_session_id is None:
+        raise ControllerRelationError(
+            "controller_ref or controller_session_id is required"
+        )
+    if record.controller_metadata_opaque:
+        raise ControllerRelationError(
+            "controller metadata contains unsupported entries; explicit repair "
+            "is required before mutation"
+        )
+    if (controller_session_id is not None and
+            not _valid_relation_session_id(controller_session_id)):
+        raise ControllerRelationError(
+            f"invalid controller session id {controller_session_id!r}"
+        )
+    matching = [
+        relation for relation in record.controllers
+        if _controller_relation_matches(
+            relation,
+            controller_ref=controller_ref,
+            controller_session_id=controller_session_id,
+        )
+    ]
+    if len(matching) != 1:
+        raise ControllerRelationError(
+            "controller relation was not found"
+            if not matching else "controller relation selector is ambiguous"
+        )
+    relation = matching[0]
+    revision = _next_controller_revision(record)
+    relation.state = "ended"
+    relation.ended_at = ended_at or _now_iso()
+    relation.relation_revision = revision
+    _mark_controller_projection_dirty(
+        record, relation.controller_session_id
+    )
+    if save:
+        save_record(record)
+    return relation
+
+
+def remove_controller_relation(
+    record: WorktreeRecord,
+    *,
+    controller_ref: str | None = None,
+    controller_session_id: str | None = None,
+    save: bool = True,
+    path: Path | None = None,
+) -> None:
+    """Remove one relation for explicit repair and retract its projection."""
+    if save:
+        target = path or record.yaml_path
+        with _RecordLock(target, require_sidecar=True):
+            authoritative = load_record(target) if target.exists() else record
+            remove_controller_relation(
+                authoritative,
+                controller_ref=controller_ref,
+                controller_session_id=controller_session_id,
+                save=False,
+                path=target,
+            )
+            _save_record_unlocked(authoritative, target)
+        _flush_session_projections(authoritative)
+        _sync_record_instance(record, authoritative)
+        return
+    if controller_ref is None and controller_session_id is None:
+        raise ControllerRelationError(
+            "controller_ref or controller_session_id is required"
+        )
+    if record.controller_metadata_opaque:
+        raise ControllerRelationError(
+            "controller metadata contains unsupported entries; explicit repair "
+            "is required before mutation"
+        )
+    if (controller_session_id is not None and
+            not _valid_relation_session_id(controller_session_id)):
+        raise ControllerRelationError(
+            f"invalid controller session id {controller_session_id!r}"
+        )
+    matching = [
+        relation for relation in record.controllers
+        if _controller_relation_matches(
+            relation,
+            controller_ref=controller_ref,
+            controller_session_id=controller_session_id,
+        )
+    ]
+    if len(matching) != 1:
+        raise ControllerRelationError(
+            "controller relation was not found"
+            if not matching else "controller relation selector is ambiguous"
+        )
+    relation = matching[0]
+    _next_controller_revision(record)
+    record.controllers.remove(relation)
+    _mark_controller_projection_dirty(
+        record, relation.controller_session_id
+    )
+    if save:
+        save_record(record)
 
 
 def _now_iso() -> str:
@@ -1131,6 +1796,64 @@ def load_record(path: Path) -> WorktreeRecord:
     origin_val: WorktreeOrigin | None = (
         origin_raw if origin_raw in ("user", "system", "delegate") else None)
 
+    controller_metadata_opaque = False
+    controllers_list: list[ControllerRelation] = []
+    raw_controllers = data.get("controllers")
+    if "controllers" in data and not isinstance(raw_controllers, list):
+        controller_metadata_opaque = True
+    if isinstance(raw_controllers, list):
+        for raw in raw_controllers:
+            try:
+                if not isinstance(raw, dict):
+                    raise ControllerRelationError("controller entry must be a mapping")
+                allowed_keys = {
+                    "kind",
+                    "source",
+                    "controller_ref",
+                    "controller_session_id",
+                    "state",
+                    "relation_revision",
+                    "created_at",
+                    "ended_at",
+                }
+                if set(raw) - allowed_keys:
+                    controller_metadata_opaque = True
+                raw_kind = raw.get("kind")
+                if raw_kind not in ("worktree", "session"):
+                    raise ControllerRelationError("invalid controller kind")
+                source = raw.get("source")
+                if source not in ("explicit", "owner-ref", "caller-worktree", "parent-session"):
+                    raise ControllerRelationError("invalid controller source")
+                ref = raw.get("controller_ref")
+                sid = raw.get("controller_session_id")
+                if ref is not None and not isinstance(ref, str):
+                    raise ControllerRelationError("controller_ref must be a string")
+                if sid is not None and not isinstance(sid, str):
+                    raise ControllerRelationError("controller_session_id must be a string")
+                if ref:
+                    ref, parsed = _normalize_controller_ref(ref, session_id=sid)
+                    sid = parsed.session
+                elif not sid or not _valid_relation_session_id(sid):
+                    raise ControllerRelationError("controller identity is required")
+                derived_kind = "worktree" if ref else "session"
+                if raw_kind != derived_kind:
+                    raise ControllerRelationError(
+                        "controller kind does not match its identity"
+                    )
+                revision = _bounded_nonnegative_int(raw.get("relation_revision", 0), field="controller relation_revision")
+                if revision <= 0 or raw.get("state", "active") not in ("active", "ended"):
+                    raise ControllerRelationError("invalid controller relation state")
+                created = raw.get("created_at") or started_at_raw
+                ended = raw.get("ended_at")
+                controllers_list.append(ControllerRelation(
+                    kind=derived_kind, source=source,
+                    controller_ref=ref, controller_session_id=sid,
+                    state=raw.get("state", "active"), relation_revision=revision,
+                    created_at=str(created), ended_at=str(ended) if ended else None,
+                ))
+            except (ControllerRelationError, TypeError, ValueError, OverflowError):
+                controller_metadata_opaque = True
+                continue
     # agent-fabric resource-claims: the forward outbound list. Absent in
     # worktrees that own nothing (the common case), so legacy records parse to
     # an empty list and re-serialize byte-identically.
@@ -1276,7 +1999,46 @@ def load_record(path: Path) -> WorktreeRecord:
         profile_assignment_revision = 0
         profile_assignments = []
 
-    return WorktreeRecord(
+    try:
+        controller_revision = _bounded_nonnegative_int(
+            data.get("controller_revision", 0),
+            field="controller_revision",
+        )
+        controller_revision = max(
+            controller_revision,
+            max(
+                (
+                    relation.relation_revision
+                    for relation in controllers_list
+                ),
+                default=0,
+            ),
+        )
+        _validate_controller_relation_set(controllers_list)
+        controllers_list, _removed = _limit_controller_relations(
+            controllers_list
+        )
+    except (
+        ControllerRelationError,
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        controller_metadata_opaque = True
+        controller_revision = max(
+            (
+                relation.relation_revision
+                for relation in controllers_list
+            ),
+            default=0,
+        )
+    if controller_metadata_opaque:
+        try:
+            _validate_controller_relation_set(controllers_list)
+        except ControllerRelationError:
+            controllers_list = []
+
+    record = WorktreeRecord(
         worktree_id=data["worktree_id"],
         branch=data["branch"],
         worktree_path=data.get("worktree_path", ""),
@@ -1306,6 +2068,13 @@ def load_record(path: Path) -> WorktreeRecord:
         handoffs=handoffs,
         profile_assignment_revision=profile_assignment_revision,
         profile_assignments=profile_assignments[-_MAX_PROFILE_ASSIGNMENTS:],
+        controller_revision=controller_revision,
+        controllers=controllers_list,
+        controller_metadata_opaque=controller_metadata_opaque,
+        controller_raw_revision=data.get("controller_revision"),
+        controller_raw_entries=raw_controllers,
+        controller_raw_revision_present=("controller_revision" in data),
+        controller_raw_entries_present=("controllers" in data),
         caller_worktree=(str(data["caller_worktree"])
                          if data.get("caller_worktree") else None),
         owner_ref=(str(data["owner_ref"])
@@ -1339,6 +2108,7 @@ def load_record(path: Path) -> WorktreeRecord:
         pair_kind=(data["pair_kind"]
                    if data.get("pair_kind") in ("worktree", "anchor") else None),
     )
+    return record
 
 
 def resolve_worktree_path(worktree_id: str, worktree_root: str) -> str:
@@ -1432,6 +2202,25 @@ def _save_record_unlocked(
                 current.profile_assignment_revision
             )
             record.profile_assignments = current.profile_assignments
+        if current.controller_revision > record.controller_revision:
+            record.controller_revision = current.controller_revision
+            record.controllers = current.controllers
+            record.controller_metadata_opaque = (
+                current.controller_metadata_opaque)
+            record.controller_raw_revision = current.controller_raw_revision
+            record.controller_raw_entries = current.controller_raw_entries
+            record.controller_raw_revision_present = (
+                current.controller_raw_revision_present)
+            record.controller_raw_entries_present = (
+                current.controller_raw_entries_present)
+        elif current.controller_metadata_opaque:
+            record.controller_metadata_opaque = True
+            record.controller_raw_revision = current.controller_raw_revision
+            record.controller_raw_entries = current.controller_raw_entries
+            record.controller_raw_revision_present = (
+                current.controller_raw_revision_present)
+            record.controller_raw_entries_present = (
+                current.controller_raw_entries_present)
         current_by_ref = {claim.ref: claim for claim in current.resources}
         reserved = {
             claim.ref: claim for claim in current.resources
@@ -1466,6 +2255,30 @@ def _save_record_unlocked(
         record.profile_assignments = record.profile_assignments[
             -_MAX_PROFILE_ASSIGNMENTS:
         ]
+    _validate_controller_relation_set(record.controllers)
+    record.controllers, removed_controllers = _limit_controller_relations(
+        record.controllers
+    )
+    record.controller_revision = _bounded_nonnegative_int(
+        max(
+            record.controller_revision,
+            max(
+                (
+                    relation.relation_revision
+                    for relation in record.controllers
+                ),
+                default=0,
+            ),
+        ),
+        field="controller_revision",
+    )
+    _mark_controller_projection_dirty(
+        record,
+        *(
+            relation.controller_session_id
+            for relation in removed_controllers
+        ),
+    )
 
     title_val = record.title or "null"
     # Quote titles that contain YAML-special characters (colons, etc.)
@@ -1554,6 +2367,51 @@ def _save_record_unlocked(
     # common-case session-record YAML stays byte-identical (no churn).
     if record.parent_session:
         content += f"parent_session: {record.parent_session}\n"
+    if record.controller_metadata_opaque:
+        raw_controller_data = {}
+        if record.controller_raw_revision_present:
+            raw_controller_data["controller_revision"] = (
+                record.controller_raw_revision)
+        if record.controller_raw_entries_present:
+            raw_controller_data["controllers"] = record.controller_raw_entries
+        if raw_controller_data:
+            content += yaml.safe_dump(
+                raw_controller_data,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+    elif record.controller_revision:
+        content += f"controller_revision: {record.controller_revision}\n"
+    if record.controllers and not record.controller_metadata_opaque:
+        content += yaml.safe_dump(
+            {"controllers": [
+                {
+                    "kind": relation.kind,
+                    "source": relation.source,
+                    **(
+                        {"controller_ref": relation.controller_ref}
+                        if relation.controller_ref else {}
+                    ),
+                    **(
+                        {
+                            "controller_session_id":
+                                relation.controller_session_id
+                        }
+                        if relation.controller_session_id else {}
+                    ),
+                    "state": relation.state,
+                    "relation_revision": relation.relation_revision,
+                    "created_at": relation.created_at,
+                    **(
+                        {"ended_at": relation.ended_at}
+                        if relation.ended_at else {}
+                    ),
+                }
+                for relation in record.controllers
+            ]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
     # session-lifecycle: the current-session head pointer. Emitted only when
     # explicitly set (absent = derived), keeping legacy YAMLs byte-identical.
     if record.head_session:
@@ -1745,6 +2603,35 @@ def _save_record_unlocked(
     _atomic_write(path, content)
 
 
+def _flush_session_projections(record: WorktreeRecord) -> None:
+    """Flush exact dirty session projections after authoritative persistence."""
+    dirty_sessions = getattr(record, "_session_projection_dirty", set())
+    dirty_controllers = getattr(
+        record, "_controller_projection_dirty", set()
+    )
+    if dirty_sessions or dirty_controllers:
+        remaining_sessions = set(dirty_sessions)
+        remaining_controllers = set(dirty_controllers)
+        try:
+            from . import session_projection
+
+            for session_id in sorted(dirty_sessions):
+                outcome = session_projection.sync_bound(record, session_id)
+                if outcome in {"written", "current", "blocked"}:
+                    remaining_sessions.discard(session_id)
+            for session_id in sorted(dirty_controllers):
+                outcome = session_projection.sync_controller(
+                    record, session_id
+                )
+                if outcome in {"written", "current", "blocked"}:
+                    remaining_controllers.discard(session_id)
+        except Exception:
+            pass
+        finally:
+            record._session_projection_dirty = remaining_sessions
+            record._controller_projection_dirty = remaining_controllers
+
+
 def save_record(
     record: WorktreeRecord,
     path: Path | None = None,
@@ -1760,20 +2647,7 @@ def save_record(
             path,
             preserve_handoff_reservations=preserve_handoff_reservations,
         )
-    dirty_sessions = getattr(record, "_session_projection_dirty", set())
-    if dirty_sessions:
-        remaining = set(dirty_sessions)
-        try:
-            from . import session_projection
-
-            for session_id in sorted(dirty_sessions):
-                outcome = session_projection.sync_bound(record, session_id)
-                if outcome in {"written", "current", "blocked"}:
-                    remaining.discard(session_id)
-        except Exception:
-            pass
-        finally:
-            record._session_projection_dirty = remaining
+    _flush_session_projections(record)
 
 
 def list_records(
@@ -2712,6 +3586,20 @@ def create_new_record(
 ) -> WorktreeRecord:
     """Create and save a new worktree tracking record."""
     now = _now_iso()
+    normalized_parent_session = parent_session or None
+    normalized_caller_worktree = caller_worktree or None
+    normalized_owner_ref = owner_ref or None
+    try:
+        controllers, controller_revision = _derive_initial_controller_relations(
+            machine=machine,
+            project=repo,
+            owner_ref=normalized_owner_ref,
+            caller_worktree=normalized_caller_worktree,
+            parent_session=normalized_parent_session,
+            created_at=now,
+        )
+    except ControllerRelationError:
+        controllers, controller_revision = [], 0
     record = WorktreeRecord(
         worktree_id=worktree_id,
         branch=branch,
@@ -2730,13 +3618,22 @@ def create_new_record(
         owner=owner,
         interface=interface,
         origin=origin,
-        parent_session=parent_session or None,
-        caller_worktree=caller_worktree or None,
-        owner_ref=owner_ref or None,
+        parent_session=normalized_parent_session,
+        controller_revision=controller_revision,
+        controllers=controllers,
+        caller_worktree=normalized_caller_worktree,
+        owner_ref=normalized_owner_ref,
         pair_id=pair_id or None,
         pair_role=pair_role or None,
         pair_ref=pair_ref or None,
         pair_kind=pair_kind or None,
+    )
+    _mark_controller_projection_dirty(
+        record,
+        *(
+            relation.controller_session_id
+            for relation in controllers
+        ),
     )
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)

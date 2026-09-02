@@ -602,6 +602,16 @@ def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
     return ""
 
 
+def _controller_metadata(
+    rec: tracking.WorktreeRecord,
+) -> list[dict[str, object]]:
+    """Normalized controller relations shared by machine-readable surfaces."""
+    return [
+        tracking.controller_relation_to_dict(relation)
+        for relation in rec.controllers
+    ]
+
+
 def _worktree_to_dict(
     rec: tracking.WorktreeRecord,
     *,
@@ -687,6 +697,9 @@ def _worktree_to_dict(
     # "Jump to caller" from a bridge worktree.
     if rec.caller_worktree:
         d["caller_worktree"] = rec.caller_worktree
+    if rec.controllers or rec.controller_revision:
+        d["controller_revision"] = rec.controller_revision
+        d["controllers"] = _controller_metadata(rec)
     # resource-claims: expose the backward owner link + forward outbound claim
     # list so the ledger view (and consumers like `run`) can read a worktree's
     # full claim set. Emitted only when present, keeping the envelope lean.
@@ -19679,6 +19692,8 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     head_session: str | None = None
     head_revision = 0
     handoffs: list[dict] = []
+    controller_revision = 0
+    controllers: list[dict[str, object]] = []
     for rec in records:
         for s in sessions.list_worktree_sessions(rec):
             row = dict(s)
@@ -19727,12 +19742,16 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
         handoffs = [
             dataclasses.asdict(handoff) for handoff in records[0].handoffs
         ]
+        controller_revision = records[0].controller_revision
+        controllers = _controller_metadata(records[0])
 
     _json_output({
         "sessions": list(by_session.values()),
         "head_session": head_session,
         "head_revision": head_revision,
         "handoffs": handoffs,
+        "controller_revision": controller_revision,
+        "controllers": controllers,
     })
     return 0
 
@@ -19850,6 +19869,8 @@ def cmd_head_session(args: argparse.Namespace) -> int:
             "state": None,
             "head_revision": 0,
             "pending_handoffs": [],
+            "controller_revision": 0,
+            "controllers": [],
         })
         return 0
     record = tracking.load_record(yaml_path)
@@ -19874,6 +19895,8 @@ def cmd_head_session(args: argparse.Namespace) -> int:
         "state": (entry.state if entry is not None else None),
         "head_revision": transition.revision if transition is not None else 0,
         "pending_handoffs": pending,
+        "controller_revision": record.controller_revision,
+        "controllers": _controller_metadata(record),
     })
     return 0
 
