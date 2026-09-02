@@ -613,6 +613,24 @@ function Test-ZddInstalled {
     return $LASTEXITCODE -eq 0
 }
 
+function Get-AdoptedProjects {
+    <# The adopted-project names from agent-worktrees' adoption registry (empty
+       when the registry is absent). Used only to give `agent-worktrees get
+       machine` a project so it resolves the machine registry from any CWD. #>
+    $reg = Join-Path $HOME '.agent-worktrees/projects.yaml'
+    if (-not (Test-Path $reg)) { return @() }
+    $names = @()
+    $inProjects = $false
+    foreach ($line in [System.IO.File]::ReadAllLines($reg)) {
+        if ($line -match '^projects:\s*$') { $inProjects = $true; continue }
+        if ($line -match '^[^\s#]') { $inProjects = $false }
+        if ($inProjects -and $line -match '^  ([A-Za-z0-9._-]+):\s*$') {
+            $names += $Matches[1]
+        }
+    }
+    return $names
+}
+
 function Deploy-SelfProvisioningBinstub {
     <# Deploy the agent-dispatch CLI binstubs into ~/.local/bin, SELF-PROVISIONING
        (#1393): fast-path the built versioned slot's python; if no slot is built
@@ -633,6 +651,19 @@ function Deploy-SelfProvisioningBinstub {
         try {
             $aw = Get-Command agent-worktrees -ErrorAction Stop # marketplace-isolation: allow installer-management
             $machine = (& $aw.Source get machine 2>$null | Select-Object -First 1)
+            # `get machine` resolves the machine registry THROUGH a project and
+            # discovers context from the CWD, so it yields nothing when the
+            # installer runs outside an adopted repo/worktree. Falling straight
+            # through to the OS name then pins an identity that need not equal the
+            # registry key the Picker substitutes for `{machine}` (a key may be
+            # decoupled from COMPUTERNAME). Every adopted project resolves the
+            # same identity, so retry with an explicit --project first.
+            if (-not $machine) {
+                foreach ($p in (Get-AdoptedProjects)) {
+                    $machine = (& $aw.Source --project $p get machine 2>$null | Select-Object -First 1) # marketplace-isolation: allow installer-management
+                    if ($machine) { break }
+                }
+            }
         } catch {}
     }
     if (-not $machine) { $machine = [Environment]::MachineName.ToLowerInvariant() }
