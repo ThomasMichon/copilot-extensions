@@ -180,7 +180,8 @@ function Invoke-WithCleanGitEnvironment([scriptblock] $Action) {
 
 try {
     $PluginVersion = Read-PluginVersion
-    if ($args -contains '--aggregate') {
+    $Aggregate = $args -contains '--aggregate'
+    if ($Aggregate) {
         $Kernel = "[owner: agent-dispatch@$PluginVersion]" + [char]10 +
             'Before new work, use the exact session-catalog command with ' +
             '`worktree-status` and prefer work targeted at this worktree. Check ' +
@@ -238,9 +239,11 @@ try {
             if (-not $Project) {
                 return $null
             }
-            & $AgentWorktrees.Source status --help *> $null
-            if ($LASTEXITCODE -ne 0) {
-                return $null
+            if (-not $Aggregate) {
+                & $AgentWorktrees.Source status --help *> $null
+                if ($LASTEXITCODE -ne 0) {
+                    return $null
+                }
             }
         } finally {
             Pop-Location

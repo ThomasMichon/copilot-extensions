@@ -325,6 +325,32 @@ def test_missing_status_core_emits_empty(tmp_path: Path) -> None:
         assert _run(hook, repo, tools).stdout == b"{}"
 
 
+def test_aggregate_mode_skips_expensive_status_capability_probe(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    tools = _tool_path(tmp_path / "bin", status_core=False)
+    for hook in _hooks():
+        context = json.loads(
+            _run(hook, repo, tools, "--aggregate").stdout
+        )["additionalContext"]
+        assert context.startswith(f"[owner: agent-dispatch@{VERSION}]\n")
+
+
+def test_focus_guidance_timeout_survives_windows_process_fanout() -> None:
+    declaration = json.loads(
+        (PLUGIN / "session-context.json").read_text(encoding="utf-8")
+    )
+    contributor = next(
+        item
+        for item in declaration["contributors"]
+        if item["id"] == "focus-guidance"
+    )
+
+    assert contributor["timeoutSeconds"] >= 8
+    assert contributor["timeoutSeconds"] <= 10
+
+
 @pytest.mark.parametrize(
     "payload",
     ["", "{", "[]", '{"source":"copilot-cli"}', '{"cwd":"relative"}'],

@@ -7,7 +7,7 @@
       "id": "focus-guidance",
       "pure": true,
       "order": 120,
-      "timeoutSeconds": 1,
+      "timeoutSeconds": 8,
       "maxBytes": 1024,
       "bash": [
         "scripts/focus-guidance.sh",

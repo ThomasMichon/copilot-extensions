@@ -37,7 +37,9 @@ PY
 )" || emit_empty
 [[ -n "$plugin_version" ]] || emit_empty
 
+aggregate=0
 if [[ "${1:-}" == "--aggregate" ]]; then
+    aggregate=1
     kernel="[owner: agent-dispatch@${plugin_version}]
 Before new work, use the exact session-catalog command with \`worktree-status\` and prefer work targeted at this worktree. Check \`focus --list\` before overlapping work; advertise substantial or changed focus with \`focus \"<subject>\"\`. Agent-worktrees status remains authoritative. Use the \`agent-dispatch:pick-and-claim\` skill for details."
 else
@@ -149,8 +151,11 @@ PY
 project="$(cd "$cwd" &&
     clean_git_env "$agent_worktrees" get project 2>/dev/null)" || emit_empty
 [[ -n "$project" ]] || emit_empty
-(cd "$cwd" &&
-    clean_git_env "$agent_worktrees" status --help >/dev/null 2>&1) || emit_empty
+if (( ! aggregate )); then
+    (cd "$cwd" &&
+        clean_git_env "$agent_worktrees" status --help >/dev/null 2>&1) ||
+        emit_empty
+fi
 
 output="$("$python" - "$kernel" <<'PY'
 import json
