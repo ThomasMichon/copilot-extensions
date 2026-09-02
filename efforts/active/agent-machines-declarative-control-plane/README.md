@@ -9,7 +9,7 @@
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
 - **Umbrella issue:** #1418
-- **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631
+- **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631 · #1721
 
 ## Guiding Intent
 
@@ -66,6 +66,9 @@ fleet, topology, or operating environment.
   embedding installed payload paths or ambiguous PATH commands (#1627).
 - [ ] Distinguish portable declarations from discovered facts and generated
   projections.
+- [ ] Add explicit authority metadata so a more-specific requirement package
+  can supersede a lower-authority declaration deterministically while
+  equal-authority contradictions remain errors (#1721).
 - [x] Resolve supplemental package repositories from generic project
   relationships, preserve source provenance, deduplicate independently adopted
   repositories, and fail clearly when a declared relationship is unresolved
@@ -82,6 +85,8 @@ fleet, topology, or operating environment.
   package directories (#1529).
 - [ ] Make every projection reproducible and attributable to its source
   declaration and resource module.
+- [ ] Preserve both selected and superseded declaration provenance in plans,
+  validation, restore results, and drift identity (#1721).
 - [ ] Eliminate independently authored shadow inventories after parity is
   proven.
 
@@ -114,6 +119,9 @@ fleet, topology, or operating environment.
   declarative orchestrator rather than learning dtssh internals (#1627).
 - [ ] Order actions from declared dependencies and preserve idempotence across
   interrupted or repeated runs.
+- [ ] Define whether imperative modules participate in authority selection or
+  remain explicitly opaque; never let module discovery order become hidden
+  last-writer behavior (#1721).
 - [ ] Fail loudly on unsupported platforms, unavailable prerequisites, and
   unsafe mutations.
 
@@ -129,6 +137,11 @@ fleet, topology, or operating environment.
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown
   resource types fail before mutation.
+- [ ] Portable-default, operator-policy, and project-policy fixtures prove
+  deterministic authority selection independent of package discovery order;
+  equal-authority contradictions still fail (#1721).
+- [ ] Plans and restore results identify the selected declaration and retain
+  source-qualified evidence for declarations it superseded (#1721).
 - [x] Raw host, topology key, hostname, alias, and display-name inputs resolve
   to one canonical machine and one deterministic accepted-alias set; ambiguous
   cross-entry identities fail before package loading (#1529).
@@ -264,3 +277,13 @@ behavioral parity is demonstrated.
 - The installed proof restored the transport host, banner, watchdog, startup
   persistence, and live tunnel connection; an end-to-end SSH command completed
   through the restored alias.
+
+### 2026-09-02 - Explicit package authority slice
+
+- Added #1721 to replace implicit overlap avoidance with deterministic,
+  source-attributable authority selection.
+- Kept the validator's fail-loud contract: contradictory declarations at the
+  same authority remain errors, and discovery order never selects a winner.
+- Scoped the design across managed settings, declarative resources, and
+  imperative modules, with opaque module behavior requiring an explicit
+  contract rather than accidental last-writer semantics.
