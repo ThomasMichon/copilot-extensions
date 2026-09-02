@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from . import reciprocal
 from . import source_identity
 
 # The "now" derived ages are measured against. Data sources refresh this to the
@@ -397,6 +398,11 @@ def norm(
     source.update(source_metadata or {})
     capabilities = dict(source_capabilities or {})
     id4 = w["id"][-4:]
+    reciprocal_relation = reciprocal.normalize(
+        w.get("reciprocal_relation"),
+        has_bound_session=bool(w.get("last_session_id")),
+        has_controllers=bool(w.get("controllers") or w.get("controller_revision")),
+    )
     return {
         "id4": id4,
         "selection_id": f"{source_id}\x1f{w['id']}",
@@ -427,6 +433,8 @@ def norm(
         "kind": kind,
         "tracking": w.get("status", ""),
         "state": _state(w),
+        "relation": reciprocal.short_label(reciprocal_relation),
+        "reciprocal_relation": reciprocal_relation,
         "age": _age(
             w.get("completed_at") if w.get("status") == "finalized"
             else w.get("started_at")
