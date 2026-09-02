@@ -56,6 +56,7 @@ from agent_logger.sync.provenance import (
     read_provenance,
     read_provenance_file,
     rescue_snapshot_path,
+    windows_extended_path as _windows_extended_path,
 )
 
 # The settle window: never claim a session whose synced state changed within
@@ -426,11 +427,19 @@ class SyncedSessionSource(SessionSource):
                 machine_dir / ".session-sync-rescue-captures"
             )
             if snapshots_root is not None:
-                for session_root_entry in sorted(snapshots_root.iterdir()):
+                with os.scandir(_windows_extended_path(snapshots_root)) as entries:
+                    session_root_entries = sorted(
+                        snapshots_root / entry.name for entry in entries
+                    )
+                for session_root_entry in session_root_entries:
                     session_root = existing_real_directory(session_root_entry)
                     if session_root is None:
                         continue
-                    for snapshot_entry in sorted(session_root.iterdir()):
+                    with os.scandir(_windows_extended_path(session_root)) as entries:
+                        snapshot_entries = sorted(
+                            session_root / entry.name for entry in entries
+                        )
+                    for snapshot_entry in snapshot_entries:
                         snapshot = existing_real_directory(snapshot_entry)
                         if snapshot is None:
                             continue
@@ -673,11 +682,11 @@ def _tree_is_real(root: Path) -> bool:
     while pending:
         directory = pending.pop()
         try:
-            with os.scandir(directory) as entries:
+            with os.scandir(_windows_extended_path(directory)) as entries:
                 for entry in entries:
-                    path = Path(entry.path)
+                    path = directory / entry.name
                     try:
-                        mode = path.lstat().st_mode
+                        mode = entry.stat(follow_symlinks=False).st_mode
                     except OSError:
                         return False
                     if is_link_or_reparse(path, mode):

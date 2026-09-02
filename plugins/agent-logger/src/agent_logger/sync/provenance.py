@@ -37,7 +37,7 @@ _OPTIONAL_TEXT = {
 }
 
 
-def _windows_extended_path(path: Path) -> str:
+def windows_extended_path(path: Path) -> str:
     """Return a Win32 extended path for filesystem operations."""
     raw = os.path.abspath(os.fspath(path))
     if os.name != "nt" or raw.startswith("\\\\?\\"):
@@ -45,6 +45,17 @@ def _windows_extended_path(path: Path) -> str:
     if raw.startswith("\\\\"):
         return f"\\\\?\\UNC\\{raw[2:]}"
     return f"\\\\?\\{raw}"
+
+
+_windows_extended_path = windows_extended_path
+
+
+def _lstat(path: Path) -> os.stat_result:
+    return os.stat(_windows_extended_path(path), follow_symlinks=False)
+
+
+def _mkdir(path: Path) -> None:
+    os.mkdir(_windows_extended_path(path))
 
 
 def rescue_snapshot_path(
@@ -151,7 +162,7 @@ def existing_real_directory(path: Path) -> Path | None:
     absolute = anchored_path(path)
     current = Path(absolute.anchor)
     try:
-        anchor_mode = current.lstat().st_mode
+        anchor_mode = _lstat(current).st_mode
     except FileNotFoundError:
         return None
     if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
@@ -159,7 +170,7 @@ def existing_real_directory(path: Path) -> Path | None:
     for part in absolute.parts[1:]:
         current /= part
         try:
-            mode = current.lstat().st_mode
+            mode = _lstat(current).st_mode
         except FileNotFoundError:
             return None
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
@@ -171,16 +182,16 @@ def ensure_real_directory(path: Path) -> Path:
     """Create a directory only through real directory components."""
     absolute = anchored_path(path)
     current = Path(absolute.anchor)
-    anchor_mode = current.lstat().st_mode
+    anchor_mode = _lstat(current).st_mode
     if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
         raise OSError(f"directory is unsafe: {current}")
     for part in absolute.parts[1:]:
         current /= part
         try:
-            mode = current.lstat().st_mode
+            mode = _lstat(current).st_mode
         except FileNotFoundError:
-            current.mkdir()
-            mode = current.lstat().st_mode
+            _mkdir(current)
+            mode = _lstat(current).st_mode
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"directory is unsafe: {current}")
     return absolute
@@ -305,7 +316,7 @@ def existing_rescue_snapshot_path(
     for part in snapshot.relative_to(machine_root).parts:
         current /= part
         try:
-            mode = current.lstat().st_mode
+            mode = _lstat(current).st_mode
         except OSError:
             return None
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
@@ -316,7 +327,7 @@ def existing_rescue_snapshot_path(
 def read_provenance_file(path: Path, session_id: str) -> dict[str, Any] | None:
     """Read one valid provenance file through a no-follow handle."""
     try:
-        mode = path.lstat().st_mode
+        mode = _lstat(path).st_mode
     except OSError:
         return None
     if is_link_or_reparse(path, mode) or not stat.S_ISREG(mode):
@@ -357,9 +368,9 @@ def read_provenance(machine_root: Path, session_id: str) -> dict[str, Any] | Non
     schema, symlink, malformed JSON, or invalid known field returns ``None``.
     """
     try:
-        root_mode = machine_root.lstat().st_mode
+        root_mode = _lstat(machine_root).st_mode
         provenance_dir = machine_root / "provenance"
-        provenance_mode = provenance_dir.lstat().st_mode
+        provenance_mode = _lstat(provenance_dir).st_mode
     except OSError:
         return None
     if (

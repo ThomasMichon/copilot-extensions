@@ -28,11 +28,11 @@ from agent_logger.sync.meta import write_sync_meta
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
     RESCUE_SNAPSHOT_PROVENANCE,
-    _windows_extended_path,
     existing_rescue_snapshot_path,
     is_link_or_reparse,
     open_regular_no_follow,
     rescue_snapshot_path,
+    windows_extended_path as _windows_extended_path,
 )
 from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
 
@@ -62,6 +62,24 @@ def _is_windows_sharing_violation(exc: OSError) -> bool:
 
 class _LockedSourceFile(OSError):
     pass
+
+
+def _rmdir_replace_target(path: Path) -> None:
+    """Remove an empty directory, clearing Windows read-only if needed."""
+    io_path = _windows_extended_path(path)
+    try:
+        os.rmdir(io_path)
+    except FileNotFoundError:
+        return
+    except PermissionError:
+        try:
+            os.chmod(io_path, stat.S_IWRITE | stat.S_IREAD | stat.S_IXUSR)
+        except FileNotFoundError:
+            return
+        try:
+            os.rmdir(io_path)
+        except FileNotFoundError:
+            return
 
 
 def _unlink_replace_target(path: Path) -> None:
@@ -128,7 +146,7 @@ def _durable_replace(source: Path, destination: Path) -> None:
 
 
 def _write_bytes_fsync(path: Path, payload: bytes) -> None:
-    with path.open("xb") as stream:
+    with open(_windows_extended_path(path), "xb") as stream:
         stream.write(payload)
         stream.flush()
         os.fsync(stream.fileno())
@@ -184,7 +202,7 @@ def _fsync_regular_file(path: Path) -> None:
     close_handle = kernel32.CloseHandle
 
     handle = create_file(
-        str(path),
+        _windows_extended_path(path),
         generic_write,
         share_all,
         None,
@@ -224,10 +242,10 @@ def _fsync_tree(root: Path) -> None:
     pending = [root]
     while pending:
         directory = pending.pop()
-        with os.scandir(directory) as children:
+        with os.scandir(_windows_extended_path(directory)) as children:
             for child in children:
-                path = Path(child.path)
-                mode = path.lstat().st_mode
+                path = directory / child.name
+                mode = child.stat(follow_symlinks=False).st_mode
                 if is_link_or_reparse(path, mode):
                     raise OSError(f"cannot fsync unsafe staged path: {path}")
                 if stat.S_ISDIR(mode):
@@ -250,7 +268,7 @@ def _copy_replace(src: Path, dst: Path) -> None:
             source = open_regular_no_follow(src)
         except OSError as exc:
             if _is_windows_sharing_violation(exc):
-                raise _LockedSourceFile(str(src)) from exc
+                raise _LockedSourceFile(f"source file is locked: {src}") from exc
             raise
         with source:
             with open(temporary_io, "xb") as target:
@@ -287,8 +305,8 @@ def _needs_copy(src: Path, dst: Path) -> bool:
 def _same_file_content(src: Path, dst: Path) -> bool:
     """Compare selected files by content when timestamps cannot be trusted."""
     try:
-        source_mode = src.lstat().st_mode
-        destination_mode = dst.lstat().st_mode
+        source_mode = _lstat(src).st_mode
+        destination_mode = _lstat(dst).st_mode
         if (
             is_link_or_reparse(src, source_mode)
             or not stat.S_ISREG(source_mode)
@@ -296,8 +314,8 @@ def _same_file_content(src: Path, dst: Path) -> bool:
             or not stat.S_ISREG(destination_mode)
         ):
             return False
-        source_stat = src.stat()
-        destination_stat = dst.stat()
+        source_stat = os.stat(_windows_extended_path(src))
+        destination_stat = os.stat(_windows_extended_path(dst))
     except OSError:
         return False
     if source_stat.st_size != destination_stat.st_size:
@@ -319,7 +337,7 @@ def _same_file_content(src: Path, dst: Path) -> bool:
 def _read_json_regular(path: Path) -> dict | None:
     """Read one bounded regular JSON object without following links."""
     try:
-        mode = path.lstat().st_mode
+        mode = _lstat(path).st_mode
     except FileNotFoundError:
         return None
     except OSError as exc:
@@ -426,25 +444,6 @@ def _snapshot_matches_source(
     )
 
 
-def _ignore_session_entries(directory: str, names: list[str]) -> list[str]:
-    """Omit locks, links, and special files from selected session trees."""
-    ignored: list[str] = []
-    for name in names:
-        path = Path(directory) / name
-        try:
-            mode = _lstat(path).st_mode
-        except OSError:
-            ignored.append(name)
-            continue
-        if (
-            (_is_excluded_name(name) and stat.S_ISREG(mode))
-            or is_link_or_reparse(path, mode)
-            or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode))
-        ):
-            ignored.append(name)
-    return ignored
-
-
 def _path_exists(path: Path) -> bool:
     """Return true for normal paths and dangling symlinks."""
     return os.path.lexists(_windows_extended_path(path))
@@ -456,6 +455,22 @@ def _lstat(path: Path) -> os.stat_result:
 
 def _mkdir(path: Path) -> None:
     os.mkdir(_windows_extended_path(path))
+
+
+def _is_real_directory(path: Path) -> bool:
+    try:
+        mode = _lstat(path).st_mode
+    except OSError:
+        return False
+    return stat.S_ISDIR(mode) and not is_link_or_reparse(path, mode)
+
+
+def _is_real_file(path: Path) -> bool:
+    try:
+        mode = _lstat(path).st_mode
+    except OSError:
+        return False
+    return stat.S_ISREG(mode) and not is_link_or_reparse(path, mode)
 
 
 def _anchored_path(path: Path) -> Path:
@@ -573,7 +588,7 @@ def _remove_path_checked(path: Path) -> None:
     """Remove one file/link/tree, preserving cleanup failures."""
     if not _path_exists(path):
         return
-    mode = path.lstat().st_mode
+    mode = _lstat(path).st_mode
     if is_link_or_reparse(path, mode):
         raise OSError(f"refusing to remove link or reparse point: {path}")
     if not stat.S_ISDIR(mode):
@@ -588,11 +603,11 @@ def _session_files(root: Path, *, source: bool) -> dict[Path, Path]:
     pending = [root]
     while pending:
         directory = pending.pop()
-        with os.scandir(directory) as entries:
+        with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
-                path = Path(entry.path)
+                path = directory / entry.name
                 relative = path.relative_to(root)
-                mode = path.lstat().st_mode
+                mode = entry.stat(follow_symlinks=False).st_mode
                 if is_link_or_reparse(path, mode):
                     if source:
                         continue
@@ -624,14 +639,29 @@ def _iter_regular_source_files(root: Path):
                     yield path
 
 
+def _copy_session_tree(source: Path, destination: Path) -> tuple[int, int]:
+    """Copy one session tree without following links or relying on MAX_PATH."""
+    _ensure_real_directory(destination)
+    parents: dict[Path, Path] = {Path("."): destination}
+    copied = 0
+    nbytes = 0
+    for src_file in _iter_regular_source_files(source):
+        if _is_excluded_name(src_file.name):
+            continue
+        relative = src_file.relative_to(source)
+        parent = parents.get(relative.parent)
+        if parent is None:
+            parent = _ensure_relative_directory(destination, relative.parent)
+            parents[relative.parent] = parent
+        _copy_replace(src_file, parent / relative.name)
+        copied += 1
+        nbytes += os.stat(_windows_extended_path(src_file)).st_size
+    return copied, nbytes
+
+
 def _session_needs_replace(source: Path, destination: Path) -> bool:
     """Return whether the selected destination differs from the safe source tree."""
-    if (
-        destination.is_symlink()
-        or not destination.is_dir()
-        or source.is_symlink()
-        or not source.is_dir()
-    ):
+    if not _is_real_directory(destination) or not _is_real_directory(source):
         return True
     source_files = _session_files(source, source=True)
     destination_files = _session_files(destination, source=False)
@@ -646,7 +676,7 @@ def _session_needs_replace(source: Path, destination: Path) -> bool:
 
 def _finish_transaction(transaction: Path) -> str | None:
     """Mark completed transaction residue as sweepable, then remove it."""
-    if not transaction.exists():
+    if not _path_exists(transaction):
         return None
     cleanup = transaction.with_name(f"{transaction.name}.cleanup")
     try:
@@ -666,9 +696,9 @@ def _finish_transaction(transaction: Path) -> str | None:
 
 def _sweep_completed_transactions(replacement_root: Path) -> list[str]:
     """Remove only residue known to follow a completed publish or rollback."""
-    if not replacement_root.exists():
+    if not _path_exists(replacement_root):
         return []
-    mode = replacement_root.lstat().st_mode
+    mode = _lstat(replacement_root).st_mode
     if is_link_or_reparse(replacement_root, mode) or not stat.S_ISDIR(mode):
         raise OSError(f"replacement root must be a directory: {replacement_root}")
     active = [
@@ -718,12 +748,12 @@ def _write_transaction_manifest(
         _write_bytes_fsync(temporary, encoded)
         _durable_replace(temporary, manifest)
     finally:
-        temporary.unlink(missing_ok=True)
+        _unlink_replace_target(temporary)
 
 
 def _load_transaction_manifest(transaction: Path) -> list[dict] | None:
     manifest = transaction / "manifest.json"
-    if not manifest.exists():
+    if not _path_exists(manifest):
         return None
     with open_regular_no_follow(manifest) as stream:
         raw = stream.read(_MAX_TRANSACTION_MANIFEST_BYTES + 1)
@@ -747,7 +777,7 @@ def _path_fingerprint(path: Path) -> str | None:
     """Hash one regular file or directory tree without following links."""
     if not _path_exists(path):
         return None
-    mode = path.lstat().st_mode
+    mode = _lstat(path).st_mode
     if is_link_or_reparse(path, mode):
         raise OSError(f"cannot fingerprint unsafe path: {path}")
     digest = hashlib.sha256()
@@ -763,11 +793,11 @@ def _path_fingerprint(path: Path) -> str | None:
     pending = [path]
     while pending:
         directory = pending.pop()
-        with os.scandir(directory) as children:
+        with os.scandir(_windows_extended_path(directory)) as children:
             for child in children:
-                child_path = Path(child.path)
+                child_path = directory / child.name
                 relative = child_path.relative_to(path).as_posix()
-                child_mode = child_path.lstat().st_mode
+                child_mode = child.stat(follow_symlinks=False).st_mode
                 if is_link_or_reparse(child_path, child_mode):
                     raise OSError(f"cannot fingerprint unsafe path: {child_path}")
                 if stat.S_ISDIR(child_mode):
@@ -794,7 +824,7 @@ def _path_fingerprint(path: Path) -> str | None:
 
 def _read_generation(dest: Path) -> str | None:
     path = dest / ".session-sync-generation"
-    if not path.exists():
+    if not _path_exists(path):
         return None
     with open_regular_no_follow(path) as stream:
         raw = stream.read(129)
@@ -826,7 +856,7 @@ def _write_generation_epoch(dest: Path, value: str) -> None:
         _unlink_replace_target(path)
         _durable_replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        _unlink_replace_target(temporary)
 
 
 def _recover_active_transactions(replacement_root: Path, dest: Path) -> None:
@@ -894,7 +924,7 @@ def _recover_active_transactions(replacement_root: Path, dest: Path) -> None:
                 if had_destination:
                     backup_exists = backup_parent is not None and _path_exists(backup)
                     if backup_exists:
-                        backup_mode = backup.lstat().st_mode
+                        backup_mode = _lstat(backup).st_mode
                         if is_link_or_reparse(backup, backup_mode):
                             raise OSError(f"unsafe rollback backup: {backup}")
                         _remove_path_checked(destination)
@@ -949,31 +979,19 @@ def _replace_selected_sessions(
             snapshot_item: tuple[Path, Path, Path] | None = None
             provenance_item: tuple[Path, Path, Path] | None = None
             if (
-                src_session.is_dir()
-                and not src_session.is_symlink()
+                _is_real_directory(src_session)
                 and _session_needs_replace(
                     src_session,
                     dest / "session-state" / sid,
                 )
             ):
                 staged_session = staged_root / "session-state" / sid
-                staged_session.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(
+                session_count, session_bytes = _copy_session_tree(
                     src_session,
                     staged_session,
-                    symlinks=True,
-                    ignore=_ignore_session_entries,
                 )
-                for path in staged_session.rglob("*"):
-                    if path.is_symlink():
-                        path.unlink()
-                files = [
-                    path
-                    for path in staged_session.rglob("*")
-                    if path.is_file() and not path.is_symlink()
-                ]
-                copied += len(files)
-                nbytes += sum(path.stat().st_size for path in files)
+                copied += session_count
+                nbytes += session_bytes
                 session_item = (
                     staged_session,
                     dest / "session-state" / sid,
@@ -988,14 +1006,14 @@ def _replace_selected_sessions(
                 candidate_order, candidate_fingerprint, receipt_payload = (
                     candidate_lineage
                 )
-                if not src_session.is_dir() or src_session.is_symlink():
+                if not _is_real_directory(src_session):
                     raise OSError(f"rescue session source is unavailable: {src_session}")
                 snapshot_dest = rescue_snapshot_path(
                     dest,
                     sid,
                     receipt_payload["capture_id"],
                 )
-                if snapshot_dest.exists() or snapshot_dest.is_symlink():
+                if _path_exists(snapshot_dest):
                     if (
                         existing_rescue_snapshot_path(
                             dest,
@@ -1021,28 +1039,23 @@ def _replace_selected_sessions(
                         sid,
                         receipt_payload["capture_id"],
                     )
-                    staged_snapshot.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copytree(
+                    snapshot_count, snapshot_bytes = _copy_session_tree(
                         src_session,
                         staged_snapshot,
-                        symlinks=True,
-                        ignore=_ignore_session_entries,
                     )
-                    for path in staged_snapshot.rglob("*"):
-                        if path.is_symlink():
-                            path.unlink()
-                    shutil.copy2(
+                    snapshot_provenance = (
+                        staged_snapshot / RESCUE_SNAPSHOT_PROVENANCE
+                    )
+                    _copy_replace(
                         src_provenance,
-                        staged_snapshot / RESCUE_SNAPSHOT_PROVENANCE,
+                        snapshot_provenance,
                     )
-                    snapshot_files = [
-                        path
-                        for path in staged_snapshot.rglob("*")
-                        if path.is_file() and not path.is_symlink()
-                    ]
-                    copied += len(snapshot_files)
-                    nbytes += sum(
-                        path.stat().st_size for path in snapshot_files
+                    copied += snapshot_count + 1
+                    nbytes += (
+                        snapshot_bytes
+                        + os.stat(
+                            _windows_extended_path(snapshot_provenance)
+                        ).st_size
                     )
                     snapshot_item = (
                         staged_snapshot,
@@ -1099,10 +1112,10 @@ def _replace_selected_sessions(
                     / ".session-sync-rescue-high-water"
                     / f"{sid}.json"
                 )
-                staged_receipt.parent.mkdir(parents=True, exist_ok=True)
-                staged_receipt.write_text(
-                    json.dumps(receipt_payload, sort_keys=True) + "\n",
-                    encoding="utf-8",
+                _ensure_real_directory(staged_receipt.parent)
+                _write_bytes_fsync(
+                    staged_receipt,
+                    (json.dumps(receipt_payload, sort_keys=True) + "\n").encode(),
                 )
                 if not _same_file_content(staged_receipt, receipt_dest):
                     receipt_item = (
@@ -1113,15 +1126,16 @@ def _replace_selected_sessions(
                         / f"{sid}.json",
                     )
             if (
-                src_provenance.is_file()
-                and not src_provenance.is_symlink()
+                _is_real_file(src_provenance)
                 and not _same_file_content(src_provenance, dst_provenance)
             ):
                 staged_provenance = staged_root / "provenance" / f"{sid}.json"
-                staged_provenance.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_provenance, staged_provenance)
+                _ensure_real_directory(staged_provenance.parent)
+                _copy_replace(src_provenance, staged_provenance)
                 copied += 1
-                nbytes += staged_provenance.stat().st_size
+                nbytes += os.stat(
+                    _windows_extended_path(staged_provenance)
+                ).st_size
                 provenance_item = (
                     staged_provenance,
                     dst_provenance,
@@ -1140,8 +1154,7 @@ def _replace_selected_sessions(
                 items.append(receipt_item)
         if items:
             staged_generation = staged_root / ".session-sync-generation"
-            staged_generation.parent.mkdir(parents=True, exist_ok=True)
-            staged_generation.write_text(transaction.name, encoding="ascii")
+            _write_bytes_fsync(staged_generation, transaction.name.encode("ascii"))
             items.append(
                 (
                     staged_generation,
@@ -1186,7 +1199,7 @@ def _replace_selected_sessions(
             try:
                 _remove_path_checked(destination)
                 if had_destination and _path_exists(backup):
-                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    _ensure_real_directory(destination.parent)
                     _durable_replace(backup, destination)
                 elif had_destination:
                     raise OSError(f"missing rollback backup: {backup}")
@@ -1220,21 +1233,42 @@ def _replace_selected_sessions(
 
 def _remove_tree_checked(path: Path, *, allow_nonempty: bool = False) -> None:
     """Remove read-only-aware replacement state; failure is a push failure."""
-    if not path.exists():
+    if not _path_exists(path):
         return
-    mode = path.lstat().st_mode
+    mode = _lstat(path).st_mode
     if is_link_or_reparse(path, mode) or not stat.S_ISDIR(mode):
         raise OSError(f"refusing recursive removal of unsafe path: {path}")
     if allow_nonempty:
         try:
-            path.rmdir()
+            _rmdir_replace_target(path)
         except OSError:
-            if any(path.iterdir()):
-                return
+            with os.scandir(_windows_extended_path(path)) as entries:
+                if next(entries, None) is not None:
+                    return
             raise
         return
-    if not sessions.force_rmtree(path) or path.exists():
-        raise OSError(f"cannot remove replacement state: {path}")
+    directories = [path]
+    pending = [path]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(_windows_extended_path(directory)) as scan:
+            entries = [
+                (entry.name, entry.stat(follow_symlinks=False).st_mode)
+                for entry in scan
+            ]
+        for name, child_mode in entries:
+            child = directory / name
+            if is_link_or_reparse(child, child_mode):
+                raise OSError(f"refusing recursive removal of unsafe path: {child}")
+            if stat.S_ISDIR(child_mode):
+                directories.append(child)
+                pending.append(child)
+            elif stat.S_ISREG(child_mode):
+                _unlink_replace_target(child)
+            else:
+                raise OSError(f"refusing recursive removal of special path: {child}")
+    for directory in reversed(directories):
+        _rmdir_replace_target(directory)
 
 
 def _parse_iso(ts: str) -> datetime | None:
