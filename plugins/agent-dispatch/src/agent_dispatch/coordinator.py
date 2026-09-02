@@ -376,6 +376,7 @@ class ResumeBody(BaseModel):
     wake: bool = True
     message: str | None = None
     adopt_session: bool = False
+    reuse_session: bool = False
     expected_owner_session_id: str | None = None
     expected_generation: int | None = None
 
@@ -1306,6 +1307,7 @@ def create_app(
                 wake_requested=body.wake,
                 wake_message=message,
                 adopt_owner_session_id=adopt_owner_session_id,
+                reuse_session=body.reuse_session,
                 expected_owner_session_id=body.expected_owner_session_id,
                 expected_generation=body.expected_generation,
             ),

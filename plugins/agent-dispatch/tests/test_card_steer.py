@@ -347,7 +347,7 @@ def test_submit_steer_not_owner_gated(q):
     assert task.awaiting_steer is False
 
 
-def test_submit_steer_reembodies_suspended_headless_owner(q):
+def test_submit_steer_requests_resume_of_suspended_headless_owner(q):
     t = q.create("review PR 42")
     reservation, _ = q.reserve_spawn(t.id)
     q.record_spawn(
@@ -376,10 +376,8 @@ def test_submit_steer_reembodies_suspended_headless_owner(q):
     assert task.resume_requested is True
     assert q.get_reservation(reservation.key).state == "spawned"
     assert q.list_wakes(t.id) == []
-    q.release_suspended(t.id, "fleet-owner", reason="body stopped")
-    q.claim_one("replacement", task_id=t.id)
-    q.start(t.id, "replacement")
-    steers = q.take_steer(t.id, "replacement", all_pending=True)
+    q.resume(t.id, "fleet-owner", reuse_session=True)
+    steers = q.take_steer(t.id, "fleet-owner", all_pending=True)
     assert [steer["fields"] for steer in steers] == [
         {"decision": "continue"},
         {"detail": "use option B"},

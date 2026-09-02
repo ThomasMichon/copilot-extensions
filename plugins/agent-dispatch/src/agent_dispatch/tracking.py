@@ -216,6 +216,8 @@ def session_activity(session: dict[str, Any] | None) -> str | None:
         return "STALLED"
     if liveness == "active" or turn_state == "running":
         return "ACTIVE"
+    if liveness == "idle" or turn_state == "idle":
+        return "IDLE"
     if status in {"starting", "running"} and liveness not in {"idle", "stalled"}:
         return "ACTIVE"
     return None

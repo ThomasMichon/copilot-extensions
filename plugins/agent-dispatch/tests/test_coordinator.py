@@ -424,7 +424,8 @@ def test_activity_over_http(api):
         f"/tasks/{tid}/activity",
         json={"activity": "IDLE", "reservation_key": key},
     )
-    assert invalid.status_code == 409
+    assert invalid.status_code == 200
+    assert invalid.json()["activity"] == "IDLE"
 
 
 def test_goal_and_progress_log_over_http(api):

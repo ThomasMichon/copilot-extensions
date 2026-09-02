@@ -673,6 +673,14 @@ lagging reconcile) is never treated as death, so recovery cannot double-spawn a
 live body. `--headless-agent AGENT` names the agent-bridge agent
 (default `task-worker`).
 
+For local headless bodies, a settled ACP turn is an implicit suspension
+boundary. The supervisor publishes `IDLE`, suspends the task, and uses
+`agent-bridge stop` so the Copilot process releases capacity while the ACP
+session, task owner, worktree, and reservation remain durable. A later steer or
+Resume sends the next turn to that same session id and returns the cold
+reservation to `spawned`; it does not release the task for a new embodiment.
+Confirmed session loss still follows the ordinary liveness recovery path.
+
 CLI:
 
 ```

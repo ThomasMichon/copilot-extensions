@@ -180,6 +180,45 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     assert result.returncode == 0
 
 
+def test_stop_worker_preserves_session(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge.stop_worker("session-1") is True
+    assert calls["cmd"] == ["/usr/bin/agent-bridge", "stop", "session-1"]
+
+
+def test_resume_worker_sends_to_existing_session(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        calls["input"] = kwargs.get("input")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge.resume_worker("session-1", "continue") is True
+    assert calls["cmd"] == [
+        "/usr/bin/agent-bridge",
+        "send",
+        "session-1",
+        "--prompt-file",
+        "-",
+        "--no-wait",
+    ]
+    assert calls["input"] == "continue"
+
+
 # -- steer-owner resume ------------------------------------------------------
 
 

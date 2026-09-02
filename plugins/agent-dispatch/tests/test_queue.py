@@ -680,7 +680,7 @@ def test_set_activity_rejects_unknown_value(q):
     reservation, _ = q.reserve_spawn(t.id)
     q.record_spawn(reservation.key, session_handle="local-body:s1")
     with pytest.raises(TaskError, match="invalid task activity"):
-        q.set_activity(t.id, "IDLE", reservation_key=reservation.key)
+        q.set_activity(t.id, "BUSY", reservation_key=reservation.key)
 
 
 def test_set_activity_cannot_restore_activity_on_suspended_task(q):
@@ -692,7 +692,7 @@ def test_set_activity_cannot_restore_activity_on_suspended_task(q):
     q.set_activity(t.id, "ACTIVE", reservation_key=reservation.key)
     q.suspend(t.id, "w1", reason="waiting")
 
-    with pytest.raises(TaskError, match="non-null activity on suspended task"):
+    with pytest.raises(TaskError, match="active activity on suspended task"):
         q.set_activity(t.id, "STALLED", reservation_key=reservation.key)
 
     dormant = q.get(t.id)
