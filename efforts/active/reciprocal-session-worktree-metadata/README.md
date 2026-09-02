@@ -168,7 +168,7 @@ Public-safe transcription of the operator request:
 - [x] Let a resumed session read its exact projection and receive a concise
       re-binding/controller recovery pointer when needed.
 - [ ] Let Picker and JSON consumers distinguish **bound here**, **controlled
-      from elsewhere**, **handed off**, and **ambiguous**.
+      from elsewhere**, **handed off**, **terminal**, and **ambiguous**.
 - [ ] Add worktree-centric and lineage-centric data surfaces suitable for
       visualization without transcript parsing, CWD joins, or enumeration of
       the live session-state root.
