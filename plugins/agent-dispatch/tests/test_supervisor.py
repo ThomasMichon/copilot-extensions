@@ -1276,7 +1276,8 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     monkeypatch.setattr(bridge, "spawn_worker", fake_spawn_worker)
     monkeypatch.setattr(
         embody, "autopilot_worker_prompt",
-        lambda task_id, *, worker_id, route="", repo=None, all_repos=False: (
+        lambda task_id, *, worker_id, route="", repo=None, all_repos=False,
+        explicit_worker_identity=False: (
             f"SEED::{task_id}"
         ),
     )

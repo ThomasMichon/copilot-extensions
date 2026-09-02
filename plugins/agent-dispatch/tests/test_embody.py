@@ -41,6 +41,25 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     assert "agent-dispatch abandon abc123 --duplicate-of" in prompt
 
 
+def test_headless_autopilot_prompt_uses_explicit_worker_identity():
+    prompt = embody.autopilot_worker_prompt(
+        "abc123",
+        worker_id="headless-1234",
+        all_repos=True,
+        explicit_worker_identity=True,
+    )
+    assert (
+        "agent-dispatch claim --task abc123 --evaluation "
+        "--worker headless-1234 --all-repos"
+    ) in prompt
+    assert "agent-dispatch start abc123 headless-1234" in prompt
+    assert "agent-dispatch steer take abc123 headless-1234 --all" in prompt
+    assert "agent-dispatch progress abc123 headless-1234" in prompt
+    assert "agent-dispatch complete abc123 headless-1234" in prompt
+    assert "agent-dispatch yield abc123 headless-1234 --note <why>" in prompt
+    assert "--exclude-self worktree" not in prompt
+
+
 def test_autopilot_prompt_threads_shared_moniker_route():
     """A --shared route stamps the stable moniker onto every worker command --
     a label, never a raw endpoint (no URL is ever baked in)."""
