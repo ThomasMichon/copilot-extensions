@@ -1,0 +1,32 @@
+{
+  "schema": "copilot-extensions.progressive-context-baselines",
+  "version": 1,
+  "tokenEstimate": "ceil(unicodeCharacters / 4)",
+  "canaryShape": "PCD_CANARY_<GUIDE_ID>_<48 lowercase hex>",
+  "baselines": {
+    "current-full-inline": {
+      "coordinates": {
+        "deferralLevel": "F0",
+        "referenceRepresentation": "none",
+        "emphasis": "inline",
+        "assembly": "flat-fragments"
+      },
+      "unicodeCharacters": 5907,
+      "utf8Bytes": 5907,
+      "estimatedTokens": 1477,
+      "sha256": "39758b0a054cfa580eb6e8cba2b9d37766dad5f43c43fd654289a22f02dcb7b3"
+    },
+    "current-concise-kernel": {
+      "coordinates": {
+        "deferralLevel": "F2",
+        "referenceRepresentation": "backtick-repository-relative",
+        "emphasis": "conditional",
+        "assembly": "flat-fragments"
+      },
+      "unicodeCharacters": 4061,
+      "utf8Bytes": 4061,
+      "estimatedTokens": 1016,
+      "sha256": "ceb4c2d9a9123c7b30a6ffa1a19d28cc592e0195d3312f89b40ecd1548eee9af"
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "schema": "copilot-extensions.progressive-context-corpus",
+  "version": 1,
+  "contributors": [
+    {
+      "owner": "synthetic-publication",
+      "class": "safety-publication",
+      "criticalRuleIds": ["PUB-1"],
+      "criticalKernel": "[owner: synthetic-publication@1.0.0] Do not publish, upload, or send content until publication eligibility is known. When a task publishes externally, load the owned publication checks before acting.",
+      "guides": [
+        {
+          "id": "publication-checks",
+          "applicabilityCueId": "PUBLISH-EXTERNAL",
+          "path": "guides/publication-checks.md",
+          "applicability": "the task would publish or transmit material externally",
+          "body": "{{CANARY}}\nConfirm that the material is synthetic or explicitly public, that the destination is approved by the routing owner, and that no secret, private identifier, or raw transcript is present. If any check is unresolved, refuse publication."
+        }
+      ]
+    },
+    {
+      "owner": "synthetic-contribution-boundary",
+      "class": "contribution-boundary",
+      "criticalRuleIds": ["CONTRIB-1"],
+      "criticalKernel": "[owner: synthetic-contribution-boundary@1.0.0] Route reusable organization-neutral capability work to the generic upstream, organization-specific policy to its internal owner, and personal state to a private home. Load the destination guide when classification is ambiguous.",
+      "guides": [
+        {
+          "id": "contribution-destinations",
+          "applicabilityCueId": "MIXED-CONTRIBUTION",
+          "path": "guides/contribution-destinations.md",
+          "applicability": "a proposed change mixes generic capability with personal or organization-specific policy",
+          "body": "{{CANARY}}\nSeparate generic mechanism from adopter policy. The generic mechanism may be contributed upstream only after personal paths, private state, and organization-specific examples are removed. Refuse to publish material whose purpose changes when those assumptions are removed."
+        }
+      ]
+    },
+    {
+      "owner": "synthetic-continuity",
+      "class": "continuity",
+      "criticalRuleIds": ["CONT-1"],
+      "criticalKernel": "[owner: synthetic-continuity@1.0.0] A handoff or context boundary is progress, not completion. Continue until the active objective's completion gate, a required confirmation, or a real blocker. Load the handoff procedure when session responsibility must transfer.",
+      "guides": [
+        {
+          "id": "handoff-procedure",
+          "applicabilityCueId": "RESPONSIBILITY-TRANSFER",
+          "path": "guides/handoff-procedure.md",
+          "applicability": "the active objective must continue in another session or reconstructed generation",
+          "body": "{{CANARY}}\nPreserve the original objective, remaining ordered work, decisions, failures, in-flight state, and separate handoff and parent completion gates. The successor begins substantive work after pickup; the predecessor stops competing."
+        }
+      ]
+    },
+    {
+      "owner": "synthetic-destination-routing",
+      "class": "ownership-routing",
+      "criticalRuleIds": ["ROUTE-1"],
+      "criticalKernel": "[owner: synthetic-destination-routing@1.0.0] Resolve the declared destination and its owner before mutation. Do not substitute a same-named repository, command, or service. Load the destination matrix for cross-boundary or ambiguous routing.",
+      "guides": [
+        {
+          "id": "destination-matrix",
+          "applicabilityCueId": "CROSS-BOUNDARY-MUTATION",
+          "path": "guides/destination-matrix.md",
+          "applicability": "execution must cross a repository, machine, or service boundary whose scoped identity controls mutation",
+          "body": "{{CANARY}}\nUse the destination declared by the owning configuration, verify its scoped identity, and preserve the destination's review gate. A failed identity or reachability check stops the mutation; it never authorizes ambient fallback."
+        }
+      ]
+    },
+    {
+      "owner": "synthetic-runtime-readiness",
+      "class": "runtime-readiness",
+      "criticalRuleIds": ["READY-1"],
+      "criticalKernel": "[owner: synthetic-runtime-readiness@1.0.0] Absence of an affirmative READY signal means NOT READY. Do not invoke the capability while it is not ready. Load runtime diagnostics only when the task requires recovery after the prescribed restart.",
+      "guides": [
+        {
+          "id": "runtime-diagnostics",
+          "applicabilityCueId": "NOT-READY-AFTER-RESTART",
+          "path": "guides/runtime-diagnostics.md",
+          "applicability": "the capability remains NOT READY after the prescribed restart",
+          "body": "{{CANARY}}\nInspect the owned readiness status and exact installer diagnostic. Report the first missing prerequisite or incomplete version slot. Do not fabricate readiness, copy files into a runtime, or switch to an unrelated same-named command."
+        }
+      ]
+    },
+    {
+      "owner": "synthetic-environment-grounding",
+      "class": "environment-grounding",
+      "criticalRuleIds": ["ENV-1"],
+      "criticalKernel": "[owner: synthetic-environment-grounding@1.0.0] Treat the session payload cwd and trusted repository configuration as the grounding authority. Never infer environment identity from a repository basename. Load environment details only when the task depends on a declared environment boundary.",
+      "guides": [
+        {
+          "id": "environment-details",
+          "applicabilityCueId": "ENVIRONMENT-TOPOLOGY",
+          "path": "guides/environment-details.md",
+          "applicability": "the task depends on environment topology or a repository-specific capability marker",
+          "body": "{{CANARY}}\nResolve paths canonically beneath the trusted root, reject symlink or parent traversal escape, and use only configuration keys delegated by the capability owner. Missing grounding fails closed for mutation."
+        }
+      ]
+    },
+    {
+      "owner": "synthetic-command-discovery",
+      "class": "command-discovery",
+      "criticalRuleIds": ["CMD-1"],
+      "criticalKernel": "[owner: synthetic-command-discovery@1.0.0] Invoke the exact attributable argv from the session command catalog. Do not search PATH or substitute a same-named command. Load the command reference only when arguments beyond the critical action are needed.",
+      "guides": [
+        {
+          "id": "command-reference",
+          "applicabilityCueId": "NON-KERNEL-COMMAND",
+          "path": "guides/command-reference.md",
+          "applicability": "the task needs a non-kernel command action or option",
+          "body": "{{CANARY}}\nAppend only documented arguments to the catalog argv. Read operations may inspect status and structured output. Mutations require the destination owner's readiness, identity, and review checks to have succeeded first."
+        }
+      ]
+    },
+    {
+      "owner": "synthetic-capability-procedure",
+      "class": "capability-procedure",
+      "criticalRuleIds": ["CAP-1"],
+      "criticalKernel": "[owner: synthetic-capability-procedure@1.0.0] Use the capability only for its declared generic purpose and keep safety, routing, and completion decisions with their owners. Load the detailed procedure when the requested operation enters this capability's execution flow.",
+      "guides": [
+        {
+          "id": "capability-procedure",
+          "applicabilityCueId": "CAPABILITY-EXECUTION",
+          "path": "guides/capability-procedure.md",
+          "applicability": "the task requests the capability's multi-step execution flow",
+          "body": "{{CANARY}}\nPerform one bounded read, one validated mutation, and one objective confirmation in that order. Stop on the first failed prerequisite. Do not broaden the task or reinterpret another owner's policy."
+        }
+      ]
+    }
+  ]
+}
