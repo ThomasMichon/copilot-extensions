@@ -370,8 +370,36 @@ function Clear-OrphanedDtsshProxies {
             Stop-GuardedProcessTree ([int]$proxy.ProcessId)
             Write-Log "reaped orphaned dtssh proxy process tree (root pid $($proxy.ProcessId))"
         }
+
+        foreach ($helper in @($processes | Where-Object { $_.Name -eq 'devtunnel.exe' })) {
+            $parent = $byId[[int]$helper.ParentProcessId]
+            if ($parent -and $parent.CreationDate -le $helper.CreationDate) {
+                continue
+            }
+            if (($now - $helper.CreationDate).TotalSeconds -lt $OrphanProxyGraceSec) {
+                continue
+            }
+
+            $current = Get-CimInstance Win32_Process `
+                -Filter "ProcessId=$($helper.ProcessId)" -ErrorAction SilentlyContinue
+            $currentParent = if ($current) {
+                Get-CimInstance Win32_Process `
+                    -Filter "ProcessId=$($current.ParentProcessId)" -ErrorAction SilentlyContinue
+            }
+            if (
+                -not $current -or
+                $current.CreationDate -ne $helper.CreationDate -or
+                $current.ExecutablePath -ne $helper.ExecutablePath -or
+                ($currentParent -and $currentParent.CreationDate -le $current.CreationDate)
+            ) {
+                continue
+            }
+
+            Stop-Process -Id ([int]$helper.ProcessId) -Force -ErrorAction SilentlyContinue
+            Write-Log "reaped orphaned devtunnel helper (pid $($helper.ProcessId))"
+        }
     } catch {
-        Write-Log "orphaned dtssh proxy reap failed: $_" 'WARN'
+        Write-Log "orphaned dtssh process reap failed: $_" 'WARN'
     }
 }
 
