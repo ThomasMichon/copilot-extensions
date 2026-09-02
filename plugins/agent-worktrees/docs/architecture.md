@@ -451,6 +451,17 @@ rebuilt with `--fix`; restored trees remain read-only even when their hints
 validate. Unsupported newer schemas and incomplete/overflowed, ambiguous,
 foreign, colliding, or newer projection state are never rewritten.
 
+When `sessionStart` cannot establish an authoritative binding from the launch
+binding, payload cwd, or mux ancestry, the existing registration context
+producer reads only that exact session's projection. `session-recovery` exposes
+the same bounded machine-readable report. Each projected relation must match a
+current authoritative record and its role-specific revision vector before it
+can produce a pointer. The result distinguishes bound-here, bound-elsewhere,
+handed-off, local/remote controller, terminal controller, ambiguous, foreign,
+stale, newer, invalid, and unsupported states. Recovery context never binds or
+mutates: it tells the session what to verify and which explicit action is
+appropriate.
+
 The resident session reconciler repairs missed sidecar writes through a
 separate fixed-budget queue. It acts only after a fresh mux catalog proves the
 child worktree has no mux and exact session-lock reads prove no bound Copilot is
