@@ -53,7 +53,7 @@ def test_dtssh_dry_run_uses_status(tmp_path, monkeypatch):
     assert "-SkipLogin" not in captured["command"]
 
 
-def test_dtssh_apply_uses_idempotent_install_without_login(tmp_path, monkeypatch):
+def test_dtssh_apply_updates_existing_binary_without_login(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     captured = {}
     calls = []
@@ -89,7 +89,7 @@ def test_dtssh_apply_uses_idempotent_install_without_login(tmp_path, monkeypatch
 
     assert result["ok"] is True
     assert result["applied"] is True
-    assert any("install" in command for command in calls)
+    assert any("update" in command for command in calls)
     assert any("-SkipLogin" in command for command in calls)
     assert result["healthy"] is True
 
