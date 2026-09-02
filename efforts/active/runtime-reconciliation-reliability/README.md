@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial plan, implementation, and completion PRs
 - **Created:** 2026-09-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** installation-cells `provenance-carried-end-to-end` and
   plugin-services `launch-time-version-reconciliation`
 - **Sub-issues:** #1591 · #1592 · #1593
@@ -59,32 +59,32 @@ runtimes match their enabled payloads, and close all three issues with evidence.
 
 ### Phase 1 — Diagnose the registered-runtime paths
 
-- [ ] Trace installer-readiness discovery and invocation for Agent Index,
+- [x] Trace installer-readiness discovery and invocation for Agent Index,
   Agent Machines, and Agent Containers from enabled payload metadata to the
   selected plugin-owned command.
-- [ ] Identify why Agent Index and Agent Machines lose installation provenance
+- [x] Identify why Agent Index and Agent Machines lose installation provenance
   or select a legacy mutation path, and determine the narrow shared seam that
   preserves fail-closed behavior for genuinely unattributed calls.
-- [ ] Reproduce the Agent Containers package installation with the smallest
+- [x] Reproduce the Agent Containers package installation with the smallest
   plugin-owned invocation and capture the suppressed package-manager failure.
 
 ### Phase 2 — Repair attributable reconciliation
 
-- [ ] Route Agent Index reconciliation through its attributable, plugin-owned
+- [x] Route Agent Index reconciliation through its attributable, plugin-owned
   installer path without relaxing legacy-entrypoint governance.
-- [ ] Route Agent Machines reconciliation through its attributable,
+- [x] Route Agent Machines reconciliation through its attributable,
   plugin-owned installer path without relaxing legacy-entrypoint governance.
-- [ ] Add focused reference and Windows/POSIX adapter coverage for the
+- [x] Add focused reference and Windows/POSIX adapter coverage for the
   registered-runtime provenance contract.
 
 ### Phase 3 — Repair Agent Containers installation reporting
 
-- [ ] Preserve and surface bounded package-manager stderr and the failing
+- [x] Preserve and surface bounded package-manager stderr and the failing
   command context through the Agent Containers installer and unified
   reconciliation summary.
-- [ ] Fix the underlying package, dependency, platform, or version-slot defect
+- [x] Fix the underlying package, dependency, platform, or version-slot defect
   that prevents the enabled Agent Containers payload from installing.
-- [ ] Add regression coverage for both the real failure and actionable error
+- [x] Add regression coverage for both the real failure and actionable error
   propagation without leaking credentials or unbounded output.
 
 ### Phase 4 — Publish, deploy, and close
@@ -128,3 +128,18 @@ suite is green.
 - Created a focused public effort for #1591, #1592, and #1593.
 - Kept provenance fail-closed semantics and actionable installer diagnostics as
   explicit acceptance requirements.
+
+### 2026-09-01 — Diagnosis and implementation
+
+- Traced Agent Index and Agent Machines failures to Agent Worktrees invoking
+  their installers with a foreign ambient installation context. Their legacy
+  probes correctly discarded that context and blocked the unattributed
+  mutation.
+- Selected a shared correction: derive each installation-cell-aware plugin's
+  deterministic active receipt, inspect its namespaced runtime, validate the
+  receipt only before mutation, and execute every adapter with caller payload
+  roots, Python paths, and foreign contexts removed.
+- Reproduced Agent Containers on Windows ARM64: optional Paramiko selected a
+  cryptography source build whose OpenSSL dependency could not build. Moved
+  Paramiko to a `provider-exec` extra and made both installers fall back to the
+  base CLI while retaining a redacted, bounded package-manager tail.
