@@ -4,9 +4,10 @@
   gives agents a durable, browsable, **claimable task queue** so many agents
   coordinate work under one shared identity, instead of racing through the
   version-control remote or minting an account per agent.
-- **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
+- **Scope:** branch (a per-plugin vision under the
+  [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-08-31
+- **Last revised:** 2026-09-02
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -156,11 +157,9 @@ reusable **templates** — a recipe is **not a command you run**, it is a
 template leaves open: the target repo, the change-review technology, the issue
 backend, the actual machine and account names. Three archetypes are first-class:
 
-1. **reviewer** — for a given change (a pull request, a branch diff), loop until
-   the change is merged or abandoned: review, post feedback or approve, suspend on
-   a verdict, resume when the change updates or the reviewer must own the merge.
-   The reviewer always has the full target-repo source (a local checkout,
-   container, or codespace) and acts through the repo's own review/merge tools.
+1. **reviewer** — a cooperative, verdict-bearing loop that carries one target
+   change to merge or deliberate abandonment. Its deeper contract lives in the
+   [reviewer-loop child vision](reviewer/README.md).
 2. **conflict-resolution** — for a change some *other* system opened but nobody is
    driving, take the last mile: check out the branch, rebase, resolve conflicts,
    answer review/build state, suspend while updates settle, resume on the next
@@ -765,6 +764,8 @@ does **not** quietly undo it.
 
 - Parent vision: [agent-fabric](../../agent-fabric/README.md) — §Concepts/
   *agent-dispatch — the delegation layer*.
+- Child leaf: [reviewer loops](reviewer/README.md) — the cooperative reviewer
+  archetype's identity, verdict, reuse, and reliability contract.
 - Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer this
   layer's cross-machine reach rides on.
 - Consumer: [agent-logger](../agent-logger/README.md) — the **chronicler**, a
@@ -775,6 +776,9 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-09-02** — Promoted this vision from leaf to branch and moved the
+  reviewer archetype's cooperative identity, session-reuse, verdict, declarative
+  adoption, and bounded-reliability intent into the reviewer child vision.
 - **2026-08-31** — Added *terminal-worktree-reclamation* and
   *allocator-reclaims-what-it-creates*: terminal task settlement must not leave
   supervisor-created worktrees registered indefinitely. The producer decides
