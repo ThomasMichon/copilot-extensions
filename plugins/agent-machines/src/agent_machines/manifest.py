@@ -269,6 +269,31 @@ def load_package(
     for mod in modules:
         if not isinstance(mod, dict) or not mod.get("name"):
             raise ManifestError(f"{path}: each module must be a mapping with a 'name'")
+        invocation = mod.get("invocation")
+        if invocation is None:
+            continue
+        valid = (
+            isinstance(invocation, dict)
+            and isinstance(invocation.get("plugin"), str)
+            and invocation["plugin"].count("@") == 1
+            and isinstance(invocation.get("command"), str)
+            and bool(invocation["command"].strip())
+            and all(
+                key not in invocation or isinstance(invocation[key], list)
+                for key in (
+                    "arguments",
+                    "dry_run_arguments",
+                    "apply_arguments",
+                    "platforms",
+                )
+            )
+        )
+        if not valid:
+            raise ManifestError(
+                f"{path}: module {mod.get('name')!r} invocation requires "
+                "plugin '<name>@<marketplace>', command, and list-valued "
+                "arguments/dry_run_arguments/apply_arguments/platforms"
+            )
 
     resources = raw.get("resources") or []
     if not isinstance(resources, list):

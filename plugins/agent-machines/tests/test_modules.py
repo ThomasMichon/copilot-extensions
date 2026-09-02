@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -109,3 +110,159 @@ def test_non_utf8_module_output_does_not_crash(tmp_path):
     assert result.returncode == 0
     assert result.ok
     assert "ok" in (result.stdout_tail or "")
+
+
+def _provider_package(tmp_path: Path):
+    data = {
+        "schema_version": 3,
+        "package": "acme/provider",
+        "gate": ["*"],
+        "manage": {},
+        "modules": [
+            {
+                "name": "ssh-host",
+                "invocation": {
+                    "plugin": "agent-ssh@copilot-extensions",
+                    "command": "agent-ssh",
+                    "platforms": ["windows"],
+                    "arguments": ["restore-host", "--transport", "dtssh"],
+                    "dry_run_arguments": ["--dry-run"],
+                    "apply_arguments": ["--apply"],
+                },
+            }
+        ],
+    }
+    return load_package(
+        write_package(tmp_path / "acme", "provider.yaml", data),
+        source_repo="acme",
+    )
+
+
+def test_payload_provider_invocation_uses_attributed_shim(
+    tmp_path, monkeypatch
+):
+    pkg = _provider_package(tmp_path)
+    payload = tmp_path / "payload"
+    shim = payload / "bin" / "agent-ssh.ps1"
+    shim.parent.mkdir(parents=True)
+    shim.write_text("", encoding="utf-8")
+    (payload / "payload-invocation.json").write_text(
+        '{"version": 1, "command": "agent-ssh"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        modules,
+        "resolve_active_plugins",
+        lambda: SimpleNamespace(
+            active={
+                "agent-ssh@copilot-extensions": SimpleNamespace(root=payload)
+            }
+        ),
+    )
+    monkeypatch.setattr(modules.shutil, "which", lambda _name: "pwsh")
+    captured = {}
+
+    def run(command, **kwargs):
+        captured.update(command=command, kwargs=kwargs)
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(modules.subprocess, "run", run)
+
+    result = modules.run_module(
+        pkg,
+        pkg.modules[0],
+        "windows",
+        dry_run=True,
+    )
+
+    assert result.ok
+    assert result.command[-1] == "--dry-run"
+    assert captured["kwargs"]["env"]["COPILOT_PLUGIN_ROOT"] == str(payload)
+    assert str(shim) in captured["command"]
+
+
+def test_payload_provider_honors_commands_output_dir_and_cmd_shim(
+    tmp_path, monkeypatch
+):
+    pkg = _provider_package(tmp_path)
+    payload = tmp_path / "payload"
+    shim = payload / "bin" / "payload" / "agent-ssh.cmd"
+    shim.parent.mkdir(parents=True)
+    shim.write_text("", encoding="utf-8")
+    (payload / "payload-invocation.json").write_text(
+        (
+            '{"version": 1, "plugin": "agent-ssh", '
+            '"commands": [{"command": "agent-ssh", "module": "agent_ssh", '
+            '"purpose": "restore"}], "outputDir": "bin/payload", '
+            '"windowsCatalogShim": "cmd"}'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        modules,
+        "resolve_active_plugins",
+        lambda: SimpleNamespace(
+            active={
+                "agent-ssh@copilot-extensions": SimpleNamespace(root=payload)
+            }
+        ),
+    )
+    monkeypatch.setenv("COMSPEC", "cmd.exe")
+    monkeypatch.setattr(
+        modules.subprocess,
+        "run",
+        lambda command, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        ),
+    )
+
+    result = modules.run_module(
+        pkg,
+        pkg.modules[0],
+        "windows",
+        dry_run=True,
+    )
+
+    assert result.command[:4] == ["cmd.exe", "/d", "/c", str(shim)]
+
+
+def test_payload_provider_missing_is_failure(tmp_path, monkeypatch):
+    pkg = _provider_package(tmp_path)
+    monkeypatch.setattr(
+        modules,
+        "resolve_active_plugins",
+        lambda: SimpleNamespace(active={}),
+    )
+
+    result = modules.run_module(
+        pkg,
+        pkg.modules[0],
+        "windows",
+        dry_run=True,
+    )
+
+    assert result.returncode == 127
+    assert not result.ok
+    assert "required active plugin is unavailable" in result.stderr_tail
+
+
+def test_invalid_payload_provider_invocation_rejected(tmp_path):
+    data = {
+        "schema_version": 3,
+        "package": "acme/provider",
+        "manage": {},
+        "modules": [
+            {
+                "name": "ssh-host",
+                "invocation": {
+                    "plugin": "agent-ssh",
+                    "command": "agent-ssh",
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(ManifestError, match="invocation requires"):
+        load_package(write_package(tmp_path / "acme", "provider.yaml", data))

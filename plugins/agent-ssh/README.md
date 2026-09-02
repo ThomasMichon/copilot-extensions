@@ -22,6 +22,20 @@ The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
 
+`restore-host` exposes transport-owned host setup to declarative orchestrators
+without requiring them to know installed payload paths:
+
+```powershell
+agent-ssh restore-host --transport dtssh --alias example-host --port 2222 --dry-run
+agent-ssh restore-host --transport dtssh --alias example-host --port 2222 --apply
+```
+
+The default/dry-run path executes the dtssh host status contract without
+mutation. `--apply` invokes the transport's idempotent installer with
+interactive login disabled; authentication remains an external prerequisite
+and is never captured. Use `--json` for structured command, output, and result
+data.
+
 `mesh-status [--json]` is a fail-open view of a calling repository's
 `machines.yaml`. In addition to SSH readiness and environments, it shows the
 optional static machine metadata shared with agent-worktrees and agent-bridge:
