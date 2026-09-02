@@ -108,6 +108,20 @@ def test_dtssh_restore_rejects_unsupported_platform(monkeypatch):
     assert "only on Windows" in result["error"]
 
 
+def test_unknown_transport_is_reported_before_platform(monkeypatch):
+    monkeypatch.setattr(host_restore.platform, "system", lambda: "Linux")
+
+    result = host_restore.restore_host(
+        "unknown",
+        "example-host",
+        2222,
+        apply=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "unsupported host transport: unknown"
+
+
 def test_dtssh_restore_blocks_without_login(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     monkeypatch.setattr(

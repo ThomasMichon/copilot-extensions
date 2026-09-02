@@ -176,11 +176,12 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _cmd_restore_host(args: argparse.Namespace) -> int:
+    apply = False if args.dry_run else args.apply
     result = host_restore.restore_host(
         args.transport,
         args.alias,
         args.port,
-        apply=args.apply,
+        apply=apply,
     )
     return host_restore.emit_result(result, json_output=args.json)
 

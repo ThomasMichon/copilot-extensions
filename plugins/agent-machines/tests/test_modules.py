@@ -262,3 +262,27 @@ def test_invalid_payload_provider_invocation_rejected(tmp_path):
 
     with pytest.raises(ManifestError, match="invocation requires"):
         load_package(write_package(tmp_path / "acme", "provider.yaml", data))
+
+
+@pytest.mark.parametrize(
+    "identity",
+    ["@copilot-extensions", "agent-ssh@", "agent ssh@copilot-extensions"],
+)
+def test_invalid_payload_provider_plugin_identity_rejected(tmp_path, identity):
+    data = {
+        "schema_version": 3,
+        "package": "acme/provider",
+        "manage": {},
+        "modules": [
+            {
+                "name": "ssh-host",
+                "invocation": {
+                    "plugin": identity,
+                    "command": "agent-ssh",
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(ManifestError, match="invocation requires"):
+        load_package(write_package(tmp_path / "acme", "provider.yaml", data))

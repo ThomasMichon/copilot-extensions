@@ -272,10 +272,24 @@ def load_package(
         invocation = mod.get("invocation")
         if invocation is None:
             continue
+        plugin_identity = (
+            invocation.get("plugin") if isinstance(invocation, dict) else None
+        )
+        plugin_parts = (
+            plugin_identity.split("@")
+            if isinstance(plugin_identity, str)
+            else []
+        )
         valid = (
             isinstance(invocation, dict)
-            and isinstance(invocation.get("plugin"), str)
-            and invocation["plugin"].count("@") == 1
+            and len(plugin_parts) == 2
+            and all(
+                part
+                and part == part.strip()
+                and not any(char.isspace() for char in part)
+                and "\0" not in part
+                for part in plugin_parts
+            )
             and isinstance(invocation.get("command"), str)
             and bool(invocation["command"].strip())
             and all(

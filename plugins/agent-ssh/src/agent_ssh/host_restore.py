@@ -116,15 +116,6 @@ def restore_host(
     *,
     apply: bool,
 ) -> dict[str, Any]:
-    if platform.system() != "Windows":
-        return {
-            "ok": False,
-            "transport": transport,
-            "alias": alias,
-            "port": port,
-            "applied": False,
-            "error": "dtssh host restoration is supported only on Windows",
-        }
     if transport != "dtssh":
         return {
             "ok": False,
@@ -133,6 +124,15 @@ def restore_host(
             "port": port,
             "applied": False,
             "error": f"unsupported host transport: {transport}",
+        }
+    if platform.system() != "Windows":
+        return {
+            "ok": False,
+            "transport": transport,
+            "alias": alias,
+            "port": port,
+            "applied": False,
+            "error": "dtssh host restoration is supported only on Windows",
         }
     logged_in, login_error = _login_status()
     if not logged_in:
