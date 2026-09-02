@@ -65,6 +65,8 @@ non-empty aggregate after proof.
 
 Aggregates above 8 KB are atomically written to
 `~/.copilot/session-state/<sessionId>/files/startup-context-<cwd-digest>.md`.
+The complete spill remains bounded to 128 KiB so broad composed marketplaces
+can participate without turning the session-state file into an unbounded sink.
 The 96-bit SHA-256 prefix keys the spill to the same canonical CWD used by the
 rendezvous without exposing that path in the filename or exceeding common
 Windows path limits. Every hook then returns the same compact critical kernel:

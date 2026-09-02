@@ -29,7 +29,7 @@ import session_context_conformance as conformance
 
 SCHEMA = "copilot-extensions.session-context-contributors"
 MAX_INPUT_BYTES = 64 * 1024
-MAX_AGGREGATE_BYTES = 64 * 1024
+MAX_AGGREGATE_BYTES = 128 * 1024
 MAX_INLINE_CONTEXT_BYTES = 8 * 1024
 AGGREGATE_HEADROOM_BYTES = 4 * 1024
 MAX_CONTRIBUTORS = 128
