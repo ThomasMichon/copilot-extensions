@@ -108,7 +108,12 @@ def _legacy_moves(repo_path: Path, repo_name: str) -> list[tuple[Path, Path]]:
     return moves
 
 
-def inspect_repo_layout(repo_path: Path, repo_name: str, machine: str) -> LayoutReport:
+def inspect_repo_layout(
+    repo_path: Path,
+    repo_name: str,
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> LayoutReport:
     repo_path = repo_path.expanduser().absolute()
     root = repo_path / discover.MACHINE_STATE_ROOT
     legacy = repo_path / discover.LEGACY_MACHINE_STATE_DIR
@@ -142,7 +147,12 @@ def inspect_repo_layout(repo_path: Path, repo_name: str, machine: str) -> Layout
                 f"{legacy} is ignored because {root} exists; finish or revert the migration",
             ))
         try:
-            packages = discover.packages_in_repo(repo_path, repo_name, machine)
+            packages = discover.packages_in_repo(
+                repo_path,
+                repo_name,
+                machine,
+                accepted_machines=accepted_machines,
+            )
         except ManifestError as exc:
             findings.append(LayoutFinding("error", "invalid-layout", str(exc)))
             packages = []
@@ -160,7 +170,12 @@ def inspect_repo_layout(repo_path: Path, repo_name: str, machine: str) -> Layout
 
     if legacy.is_dir():
         try:
-            packages = discover.packages_in_repo(repo_path, repo_name, machine)
+            packages = discover.packages_in_repo(
+                repo_path,
+                repo_name,
+                machine,
+                accepted_machines=accepted_machines,
+            )
         except ManifestError as exc:
             return LayoutReport(
                 repo_name,
@@ -282,10 +297,11 @@ def inspect_layouts(
     repo: str | None = None,
     registry: dict | None = None,
     projects: dict | None = None,
+    accepted_machines: tuple[str, ...] | None = None,
 ) -> list[LayoutReport]:
     if repo:
         name, path = resolve_repo(repo, registry, projects)
-        return [inspect_repo_layout(path, name, machine)]
+        return [inspect_repo_layout(path, name, machine, accepted_machines)]
 
     reports: list[LayoutReport] = []
     for candidate in _adopted_repos(registry, projects):
@@ -308,7 +324,9 @@ def inspect_layouts(
                 )],
             ))
             continue
-        reports.append(inspect_repo_layout(path, name, machine))
+        reports.append(
+            inspect_repo_layout(path, name, machine, accepted_machines)
+        )
     return reports
 
 

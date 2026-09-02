@@ -488,13 +488,20 @@ def _validate_canonical_root(root: Path) -> None:
         )
 
 
-def _machine_package_dir(root: Path, machine: str) -> Path | None:
+def _machine_package_dir(
+    root: Path,
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> Path | None:
     machines_dir = root / MACHINES_PACKAGES_DIR
     if not machines_dir.is_dir():
         return None
+    accepted = {
+        name.casefold() for name in (accepted_machines or (machine,))
+    }
     matches = sorted(
         child for child in machines_dir.iterdir()
-        if child.is_dir() and child.name.casefold() == machine.casefold()
+        if child.is_dir() and child.name.casefold() in accepted
     )
     if len(matches) > 1:
         names = ", ".join(str(path) for path in matches)
@@ -504,7 +511,11 @@ def _machine_package_dir(root: Path, machine: str) -> Path | None:
     return matches[0] if matches else None
 
 
-def package_files_in_repo(repo_path: Path, machine: str) -> list[Path]:
+def package_files_in_repo(
+    repo_path: Path,
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[Path]:
     """Resolve canonical package files, with a bounded legacy fallback.
 
     ``.agent-machines`` is authoritative whenever it exists. Adopters migrate
@@ -515,7 +526,7 @@ def package_files_in_repo(repo_path: Path, machine: str) -> list[Path]:
     if root.is_dir():
         _validate_canonical_root(root)
         files = _yaml_files(root / ALL_PACKAGES_DIR)
-        machine_dir = _machine_package_dir(root, machine)
+        machine_dir = _machine_package_dir(root, machine, accepted_machines)
         if machine_dir is not None:
             files.extend(_yaml_files(machine_dir))
         return files
@@ -527,20 +538,21 @@ def packages_in_repo(
     repo_name: str,
     machine: str,
     source_anchor: Path | None = None,
+    accepted_machines: tuple[str, ...] | None = None,
 ) -> list[RequirementPackage]:
     """Load and gate-filter the requirement packages carried by ``repo_path``."""
     out: list[RequirementPackage] = []
     names: dict[str, Path] = {}
     canonical = (repo_path / MACHINE_STATE_ROOT).is_dir()
     machine_root = repo_path / MACHINE_STATE_ROOT / MACHINES_PACKAGES_DIR
-    for pkg_file in package_files_in_repo(repo_path, machine):
+    for pkg_file in package_files_in_repo(repo_path, machine, accepted_machines):
         pkg = load_package(
             pkg_file,
             source_repo=repo_name,
             source_anchor=source_anchor or repo_path,
         )
         machine_scoped = canonical and pkg_file.parent.parent == machine_root
-        applies = pkg.applies_to(machine)
+        applies = pkg.applies_to(machine, accepted_machines)
         if machine_scoped and not applies:
             raise ManifestError(
                 f"{pkg_file}: package gate excludes its containing machine "
@@ -565,6 +577,7 @@ def discover(
     registry: dict | None = None,
     projects: dict | None = None,
     require_enable: bool = False,
+    accepted_machines: tuple[str, ...] | None = None,
 ) -> list[DiscoveredRepo]:
     """Return the adopted projects on this machine that contribute packages.
 
@@ -588,7 +601,12 @@ def discover(
                     f"supplemental repo {name!r} required by {owners} is unavailable at {path}"
                 )
             continue
-        pkgs = packages_in_repo(path, name, machine)
+        pkgs = packages_in_repo(
+            path,
+            name,
+            machine,
+            accepted_machines=accepted_machines,
+        )
         if not pkgs:
             continue
         enabled = repo_enables_agent_machines(path)
@@ -598,10 +616,19 @@ def discover(
     return found
 
 
-def _main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI glue
-    machine = current_machine()
-    repos = discover(machine)
-    print(f"machine: {machine}  platform: {current_platform()}")
+def _main(
+    argv: list[str] | None = None,
+    *,
+    machine: str | None = None,
+    accepted_machines: tuple[str, ...] | None = None,
+    raw_machine: str | None = None,
+) -> int:  # pragma: no cover - thin CLI glue
+    machine = machine or current_machine()
+    repos = discover(machine, accepted_machines=accepted_machines)
+    label = machine
+    if raw_machine and raw_machine.casefold() != machine.casefold():
+        label = f"{machine} (raw: {raw_machine})"
+    print(f"machine: {label}  platform: {current_platform()}")
     if not repos:
         print("no requirement packages discovered "
               "(no adopted projects or declared supplemental repositories carry "
