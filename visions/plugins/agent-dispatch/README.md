@@ -86,6 +86,9 @@ liveness of what it started. Like the coordinator it does **only** its own job �
 scheduling, emitting, evaluating, spawning, and keeping those alive — and it is
 reached over the fabric's secured mesh, never a public listener. The coordinator
 answers *what work exists*; the supervisor answers *what is running it here*.
+When a locally embodied headless task becomes terminal, the supervisor
+terminally reaps that exact ACP session before releasing its spawn reservation;
+a completed task never leaves an unowned process behind.
 
 ### Worker identity — the worktree
 A worker's durable identity is the **worktree it occupies** (the same identity
