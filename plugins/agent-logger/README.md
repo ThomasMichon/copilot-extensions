@@ -85,7 +85,12 @@ optional background-chronicling core with its session-source + log-sink seams.
    capture, while missing/invalid event streams are rejected visibly. Rescue
    capture-ID fingerprints remain as compact durable tombstones after provider
    retention, and checkpoint rewrites are size/record bounded before atomic
-   replacement. Venue pushes remain isolated, but any target failure makes the
+   replacement. A rescued `agent-worktrees.json` sidecar is accepted only as
+   bounded schema-v1 data whose session ID matches its enclosing directory; it
+   remains inert restored evidence at the destination. Invalid or newer
+   sidecars are omitted without discarding the session, and every rescued
+   session receives a restored-origin marker. Venue pushes remain isolated, but
+   any target failure makes the
    final command nonzero. Rescue destination pruning is not yet wired to
    `sync.retention_days`.
 4. For takeover, use `ramp-up-session`; it delegates the transcript-heavy read

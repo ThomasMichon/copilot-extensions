@@ -14,7 +14,9 @@
   [#1671](https://github.com/ThomasMichon/copilot-extensions/issues/1671)
   (controller relations) ·
   [#1681](https://github.com/ThomasMichon/copilot-extensions/issues/1681)
-  (bounded controller lineage reconciliation)
+  (bounded controller lineage reconciliation) ·
+  [#1688](https://github.com/ThomasMichon/copilot-extensions/issues/1688)
+  (restricted rescue portability)
 
 ## Guiding Intent
 
@@ -270,3 +272,6 @@ Adopt the authority and schema model in [`design.md`](design.md):
   one-shot suitable for optional low-duty scheduling. Current and permanently
   blocked revisions quiesce; live or unknown-liveness candidates remain
   report-only and retry later.
+- Phase 5 began under #1688 by extending restricted container rescue and
+  agent-logger rescue ingestion to preserve the dedicated session-root
+  projection as bounded, schema-checked, session-ID-matched restored evidence.

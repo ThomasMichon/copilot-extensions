@@ -134,7 +134,11 @@ evidence, and a session's provider-recorded repository assignment cannot change
 between accepted captures without an explicit checkpoint reset. Repo policy
 reuses the normal session-sync exact classification and `fail_closed`
 semantics; rescued workspace/origin claims cannot opt themselves into the
-corpus. Rescue bytes are copied as data only and are never restored or executed.
+corpus. The reciprocal `agent-worktrees.json` sidecar is preserved only when it
+is bounded schema-v1 JSON for the enclosing session ID. It remains restored
+evidence rather than an authoritative local binding; every rescued session gets
+a `rescued-origin.json` marker even when the provider had no origin sidecar.
+Rescue bytes are copied as data only and are never restored or executed.
 
 Verbose output reports ordering and rejection reasons. Removing
 `$AGENT_LOGGER_HOME/rescue-sync/checkpoint.json` resets ingest ordering without

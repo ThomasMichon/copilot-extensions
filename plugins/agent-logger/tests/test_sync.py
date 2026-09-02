@@ -50,14 +50,19 @@ def test_build_target_unknown_raises() -> None:
 
 def test_local_target_push_excludes_lock_and_writes_meta(tmp_path: Path) -> None:
     src = _make_source(tmp_path)
+    projection = src / "session-state" / "abc-123" / "agent-worktrees.json"
+    projection.write_bytes(b"{opaque-future-or-malformed-projection")
     dest_root = tmp_path / "dest"
     target = LocalTarget({"path": str(dest_root)})
 
     result = target.push(src, "m1")
     assert result.ok
-    assert result.file_count == 2  # events.jsonl + workspace.yaml, not .lock
+    assert result.file_count == 3
     machine_dir = dest_root / "m1"
     assert (machine_dir / "session-state" / "abc-123" / "events.jsonl").is_file()
+    assert (
+        machine_dir / "session-state" / "abc-123" / "agent-worktrees.json"
+    ).read_bytes() == projection.read_bytes()
     assert not (machine_dir / "session-state" / "abc-123" / ".lock").exists()
     assert not (machine_dir / "session-state" / "abc-123" / "LOCK").exists()
     assert (machine_dir / "sync-meta.json").is_file()
