@@ -13,6 +13,30 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PLUGIN / "src"
 
 
+def test_installer_readiness_uses_supported_update_arguments() -> None:
+    manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
+    readiness = json.loads(
+        (PLUGIN / "installer-readiness.json").read_text(encoding="utf-8")
+    )
+    runtime_module = next(
+        (
+            module
+            for module in readiness["modules"]
+            if module["id"] == "agent-index/runtime"
+        ),
+        None,
+    )
+    assert runtime_module is not None, (
+        "installer-readiness must declare agent-index/runtime"
+    )
+    installer = runtime_module["installer"]
+
+    assert "zeroDowntimeUpdate" not in manifest
+    assert installer["windows"]["arguments"] == ["update"]
+    assert installer["linux"]["arguments"] == ["update"]
+    assert installer["wsl"]["arguments"] == ["update"]
+
+
 def test_runtime_gates_serialize_provisioning() -> None:
     posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "runtime-gate.ps1").read_text(

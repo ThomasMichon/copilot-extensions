@@ -154,3 +154,8 @@ suite is green.
   mutation authority while restoring version comparison against the
   authoritative legacy runtime until explicit cell migration publishes an
   activation.
+- The first governed Agent Index deployment then exposed stale
+  `zeroDowntimeUpdate` metadata that appended an installer parameter the
+  current installer no longer accepts. Removed the stale capability flag so
+  reconciliation uses the exact `update` arguments declared by the plugin's
+  installer-readiness contract.
