@@ -2,12 +2,9 @@
 setlocal
 
 set "PYTHONHOME="
-where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (
-    set "_PSHOST=pwsh"
-) else (
-    set "_PSHOST=powershell"
-)
+set "_PSHOST="
+for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
+if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 set "RUNTIME_DIR=%USERPROFILE%\.agent-worktrees"
 

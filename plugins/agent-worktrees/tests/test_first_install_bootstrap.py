@@ -54,7 +54,8 @@ def test_windows_binstub_resolves_complete_slots_and_serializes_provision() -> N
     assert "resolve-runtime.ps1" in ps1
     assert "System.Threading.Mutex" in ps1
     assert 'agent-worktrees.ps1" %*' in cmd
-    assert "powershell" in cmd
+    assert "%SystemRoot%\\System32\\where.exe" in cmd
+    assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in cmd
 
 
 def test_posix_binstub_resolves_only_active_or_complete_slots() -> None:
@@ -129,6 +130,8 @@ def test_generated_project_binstubs_use_shared_three_tier_resolvers() -> None:
 
     assert 'source "\\$_root/bin/resolve-runtime.sh"' in sh
     assert "resolve-runtime.ps1" in ps1
+    assert "%SystemRoot%\\System32\\where.exe" in ps1
+    assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in ps1
     assert "last-known-good" not in sh.split("deploy_binstub() {", 1)[1].split(
         "deploy_global_config()", 1
     )[0]
@@ -137,9 +140,81 @@ def test_generated_project_binstubs_use_shared_three_tier_resolvers() -> None:
 def test_launch_session_cmd_preserves_windows_powershell_fallback() -> None:
     cmd = (PLUGIN / "bin" / "launch-session.cmd").read_text(encoding="utf-8")
 
-    assert "where pwsh" in cmd
-    assert 'set "_PSHOST=powershell"' in cmd
+    assert "%SystemRoot%\\System32\\where.exe" in cmd
+    assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in cmd
     assert '"%_PSHOST%"' in cmd
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cmd regression")
+def test_windows_binstub_survives_overlong_path(tmp_path: Path) -> None:
+    cmd = tmp_path / "agent-worktrees.cmd"
+    shutil.copyfile(PLUGIN / "bin" / "agent-worktrees.cmd", cmd)
+    (tmp_path / "agent-worktrees.ps1").write_text(
+        "Write-Output ($args -join '|')\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PATH"] = ";".join([r"C:\missing"] * 1000)
+
+    proc = subprocess.run(
+        [os.environ["ComSpec"], "/d", "/c", str(cmd), "path-overflow"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "path-overflow"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cmd regression")
+def test_windows_binstub_discovers_pwsh_by_absolute_path(tmp_path: Path) -> None:
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh is unavailable")
+    cmd = tmp_path / "agent-worktrees.cmd"
+    shutil.copyfile(PLUGIN / "bin" / "agent-worktrees.cmd", cmd)
+    (tmp_path / "agent-worktrees.ps1").write_text(
+        "Write-Output ($args -join '|')\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PATH"] = str(Path(pwsh).parent)
+
+    proc = subprocess.run(
+        [os.environ["ComSpec"], "/d", "/c", str(cmd), "pwsh-discovery"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "pwsh-discovery"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows cmd regression")
+def test_launch_session_cmd_survives_overlong_path(tmp_path: Path) -> None:
+    cmd = tmp_path / "launch-session.cmd"
+    shutil.copyfile(PLUGIN / "bin" / "launch-session.cmd", cmd)
+    runtime_bin = tmp_path / ".agent-worktrees" / "bin"
+    runtime_bin.mkdir(parents=True)
+    (runtime_bin / "launch-session.ps1").write_text(
+        "Write-Output ($args -join '|')\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["USERPROFILE"] = str(tmp_path)
+    env["PATH"] = ";".join([r"C:\missing"] * 1000)
+
+    proc = subprocess.run(
+        [os.environ["ComSpec"], "/d", "/c", str(cmd), "path-overflow"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "path-overflow"
 
 
 def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
