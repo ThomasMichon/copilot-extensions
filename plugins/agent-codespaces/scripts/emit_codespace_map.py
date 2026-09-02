@@ -31,7 +31,7 @@ import sys
 
 
 def _emit_empty() -> None:
-    print("{}")
+    sys.stdout.write("{}")
     raise SystemExit(0)
 
 
@@ -77,9 +77,16 @@ def _codespace_delegated(related: list[dict]) -> list[dict]:
         if (entry.get("delegate") or "").strip() != "agent-codespaces":
             continue
         locus = entry.get("locus") or {}
+        preferred = (locus.get("preferred") or "local").strip()
+        preferred_kind = preferred.split(":", 1)[0].lower()
+        if preferred_kind != "codespace":
+            continue
         cs = locus.get("codespace") or {}
         rows.append({
             "name": entry.get("name", "?"),
+            "role": (entry.get("role") or "").strip(),
+            "locus": preferred_kind,
+            "delegate": (entry.get("delegate") or "").strip(),
             "summary": (entry.get("summary") or "").strip(),
             "vessel": cs.get("repo", ""),
             "workspace_folder": cs.get("workspace_folder", ""),
@@ -114,27 +121,42 @@ def _render(rows: list[dict]) -> str:
 
 
 def _render_aggregate(rows: list[dict], version: str) -> str:
-    names = [str(row.get("name") or "?") for row in rows]
-    shown = names[:3]
-    label = ", ".join(f"`{name}`" for name in shown)
-    if len(names) > len(shown):
-        label += f", +{len(names) - len(shown)} more"
-    context = (
+    prefix = (
         f"[owner: agent-codespaces@{version}]\n"
-        f"CodeSpace-delegated repos ({len(names)}): {label}. They have no local "
-        "checkout: resolve the exact venue with `agent-worktrees related resolve "
-        "<name>` and dispatch through the exact agent-bridge catalog command. "
-        "Use the `agent-codespaces` skill for lifecycle details."
+        "CodeSpace routes (delegate=agent-codespaces): "
     )
-    if len(context.encode("utf-8")) > 384:
-        context = (
-            f"[owner: agent-codespaces@{version}]\n"
-            f"{len(names)} related repos require CodeSpace delegation and have no "
-            "local checkout. Resolve each with `agent-worktrees related resolve "
-            "<name>` and use the exact agent-bridge catalog command. Load the "
-            "`agent-codespaces` skill for details."
+    suffix = (
+        "\nNo local checkout; resolve with "
+        "`agent-worktrees related resolve <name>`."
+    )
+    entries = []
+    for index, row in enumerate(rows):
+        entry = (
+            f"{row.get('name') or '?'}("
+            f"role={row.get('role') or '-'},"
+            f"locus={row.get('locus') or '-'})"
         )
-    return context
+        remaining = len(rows) - index - 1
+        label = "; ".join([*entries, entry])
+        if remaining:
+            label += f"; +{remaining} more"
+        candidate = f"{prefix}{label}.{suffix}"
+        if len(_serialize_context(candidate).encode("utf-8")) > 384:
+            break
+        entries.append(entry)
+    omitted = len(rows) - len(entries)
+    label = "; ".join(entries)
+    if omitted:
+        label += (f"; +{omitted} more" if label else f"+{omitted} more")
+    return f"{prefix}{label}.{suffix}"
+
+
+def _serialize_context(context: str) -> str:
+    return json.dumps(
+        {"additionalContext": context},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def main() -> None:
@@ -158,9 +180,9 @@ def main() -> None:
     if "--aggregate" in sys.argv[1:]:
         manifest = Path(__file__).resolve().parents[1] / "plugin.json"
         version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
-        print(json.dumps({"additionalContext": _render_aggregate(rows, version)}))
+        sys.stdout.write(_serialize_context(_render_aggregate(rows, version)))
     else:
-        print(json.dumps({"additionalContext": _render(rows)}))
+        sys.stdout.write(_serialize_context(_render(rows)))
 
 
 if __name__ == "__main__":

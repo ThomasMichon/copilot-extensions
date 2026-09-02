@@ -105,11 +105,17 @@ def render_registry_context(
     )
     if pair.paired and pair.sibling and not pair.error:
         sibling = pair.sibling
+        writable = (
+            bool(sibling.path)
+            and _clean(sibling.kind, "worktree") == "worktree"
+            and _clean(sibling.status, "unknown") in {"active", "ready"}
+        )
         pairing = (
             " Pair: "
             f"role={_clean(sibling.role)}; "
             f"kind={_clean(sibling.kind)}; "
             f"status={_clean(sibling.status, 'unknown')}; "
+            f"writable={'true' if writable else 'false'}; "
             f"path={_clean(sibling.path)}."
         )
     else:

@@ -117,7 +117,8 @@ def test_context_includes_pair_and_bounded_related_topology(
     )
 
     assert "role=harness; kind=worktree; status=active" in context
-    assert f"status=ready; path={sibling}" in context
+    assert "status=ready; writable=true" in context
+    assert f"writable=true; path={sibling}" in context
     assert "primary=application" in context
     assert "remote-tool(role=tooling,locus=machine:builder" in context
     assert "cloud-docs(role=docs,locus=codespace" in context
