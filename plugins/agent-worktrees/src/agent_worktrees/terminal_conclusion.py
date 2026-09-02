@@ -9,7 +9,6 @@ and re-checks liveness plus its idle grace before removing anything.
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -17,11 +16,6 @@ from typing import Any
 from . import finalize, git_ops, sessions, tracking
 
 DISPOSABLE_CLI_POLICY = "disposable-cli"
-
-_MARKETPLACE_MARKER = "_agentWorktreesMarketplaceOverrides"
-_KNOWLEDGE_MARKER = "_agentWorktreesKnowledgePluginOverlay"
-_GENERATED_OVERLAY = ".github/copilot/settings.local.json"
-
 
 def _normalized(path: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
@@ -35,46 +29,6 @@ def _session_is_live(record: tracking.WorktreeRecord) -> str | None:
     if any(_normalized(path) == worktree_path for path in context.active_sessions):
         return "live-session"
     return None
-
-
-def _managed_overlay_is_disposable(path: Path) -> bool:
-    """Whether a generated local settings file is wholly marker-owned."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return False
-    if not isinstance(data, dict):
-        return False
-
-    marketplace = data.get(_MARKETPLACE_MARKER)
-    knowledge = data.get(_KNOWLEDGE_MARKER)
-    if marketplace is not None and knowledge is not None:
-        return False
-    if isinstance(marketplace, dict):
-        managed = marketplace.get("marketplaces")
-        return (
-            marketplace.get("version") == 1
-            and isinstance(managed, dict)
-            and set(data) <= {_MARKETPLACE_MARKER, "extraKnownMarketplaces"}
-            and data.get("extraKnownMarketplaces", {}) == managed
-        )
-    if isinstance(knowledge, dict):
-        marketplaces = knowledge.get("marketplaces")
-        enabled = knowledge.get("enabledPlugins")
-        return (
-            knowledge.get("version") == 1
-            and isinstance(marketplaces, dict)
-            and isinstance(enabled, dict)
-            and set(data)
-            <= {
-                _KNOWLEDGE_MARKER,
-                "extraKnownMarketplaces",
-                "enabledPlugins",
-            }
-            and data.get("extraKnownMarketplaces", {}) == marketplaces
-            and data.get("enabledPlugins", {}) == enabled
-        )
-    return False
 
 
 def _dirty_entries(worktree_path: Path) -> list[tuple[str, str]]:
@@ -99,21 +53,6 @@ def _dirty_entries(worktree_path: Path) -> list[tuple[str, str]]:
             raise RuntimeError("could not parse worker checkout status")
         entries.append((raw[:2], raw[3:]))
     return entries
-
-
-def _disposable_dirty_entries(
-    worktree_path: Path, entries: list[tuple[str, str]]
-) -> tuple[bool, list[str]]:
-    untracked: list[str] = []
-    for status, relative in entries:
-        if relative != _GENERATED_OVERLAY:
-            return False, []
-        overlay = worktree_path / relative
-        if not overlay.is_file() or not _managed_overlay_is_disposable(overlay):
-            return False, []
-        if status == "??":
-            untracked.append(relative)
-    return True, untracked
 
 
 def _save_session_conclusion(
