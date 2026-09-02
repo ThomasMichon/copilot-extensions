@@ -445,6 +445,40 @@ silently orphans a half-finished CodeSpace, an un-merged cross-repo branch, or a
 bridge session left mid-flight. (Effort: `resource-obligation-settlement`;
 umbrella dotfiles#1081; parent `git-ref-resource-leases`.)
 
+### Coordination readiness — identity before ownership
+
+Before a worktree or provider creates an outbound claim, lease, owner-linked
+child, or externally hosted resource, agent-worktrees resolves the qualified
+owner project's durable coordination identity. `coordination-readiness` emits a
+version-1 JSON result with `ready`, a stable `code`, bounded `state_root`
+metadata, and actionable `error` text. A project that requires external state
+returns `knowledge_binding_required` when no knowledge repository is bound and
+`state_root_resolution_failed` when the bound/owner project cannot be resolved.
+Normal self-hosted projects remain ready.
+
+The check precedes claim-ledger writes, handoff reservations, pending `run`
+claims, child subprocesses, source preparation, Git worktree creation, Git-ref
+lease I/O, and CodeSpace claim/transport work. A lease-origin override cannot
+bypass required binding: new acquisition accepts it only when it identifies the
+bound state repository, whose checkout continues to provide account-scoped Git
+authentication.
+
+The boundary is acquisition-only. Claim/lease inspection and teardown remain
+available, and an existing lease can renew or release through its original
+explicit/carried origin during a later binding outage. agent-codespaces consumes
+the preflight only when an agent-worktrees owner reference participates;
+agent-bridge forwards that reference for Session-Host dispatch. Missing, older,
+malformed, unversioned, or incompatible optional peers preserve standalone
+provider behavior; only a compatible explicit rejection blocks. Direct
+agent-containers fleet admission remains provider-local and independent.
+An embedding lease acquisition reports the versioned rejection on exit `5`;
+agent-codespaces carries a compatible provider rejection as exit `78`, which
+agent-bridge turns into a distinct `codespace_coordination_rejected`
+failed-session event before establishing the Session-Host transport.
+
+The reusable contract is documented in
+[`state-root-bound coordination`](patterns/state-root-coordination.md).
+
 ### Disposition — the lien on each outbound claim
 Every outbound resource in a worktree's claim ledger
 (`agent_worktrees.tracking.ResourceClaim`) carries a **disposition** — the three

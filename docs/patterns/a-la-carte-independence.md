@@ -55,6 +55,17 @@ absolute-command manifest is the only seam that survives. Two rules keep it clea
 declared surface (its CLI, its service endpoint, its resolver), never by poking the
 sibling's runtime files or assuming its internal layout.
 
+**Version optional authorization contracts.** A provider may ask an optional
+sibling whether an owner is authorized to create shared coordination state.
+Missing commands, malformed/unversioned responses, and unknown versions behave
+as an absent peer; only an explicit rejection from a compatible version blocks
+provider work. The owner project is passed explicitly across the process
+boundary, and the check precedes local ownership and external provider side
+effects. A compatible rejection exits agent-codespaces with `78`; agent-bridge
+treats that value as a bounced dispatch rather than a degradable bookkeeping
+error. See
+[`state-root-bound coordination`](state-root-coordination.md).
+
 **Optional session-context composition.** `context-injection` is an optional
 coordinator, not a prerequisite for any contributor. Each context-producing
 plugin retains a payload-relative standalone path. Its producer wrapper uses
@@ -79,3 +90,5 @@ whose absence would break everyone.
   (communication paths, provider-manifest registry)
 - Hygiene contract:
   [`drop-in-registry-hygiene.md`](drop-in-registry-hygiene.md)
+- Coordination authorization:
+  [`state-root-coordination.md`](state-root-coordination.md)

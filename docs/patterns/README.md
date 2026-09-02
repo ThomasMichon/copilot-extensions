@@ -190,6 +190,14 @@ core of the principles above; a reviewer checks a change against these.
   baked into the primitive's owner. A layer must not draw a higher layer's
   orchestration concern inward. (Serves *Vision agent-fabric
   §Behaviors/handoff-orchestrated-above-primitives*.)
+- **Durable coordination identity precedes ownership.** When a project requires
+  an external state root, every claim/lease/resource producer resolves the
+  qualified owner's versioned coordination readiness before its first mutation
+  or external side effect. Known compatible rejection fails closed; teardown
+  and read-only inspection remain available; optional peers degrade only when
+  absent or incompatible. See
+  [`state-root-coordination.md`](state-root-coordination.md). (Serves *Vision
+  agent-fabric* resource claims, leasing, and accountability.)
 - **Lifecycle logging is durable, fail-silent, parity-equal, and joinable.**
   High-level worktree/session lifecycle events go through the single
   `activity.log_event` writer (or its `activity-log` binstub) into the durable,
@@ -239,6 +247,7 @@ the exemplars, and the vision it serves):
 | [install-vs-adopt-boundary](install-vs-adopt-boundary.md) | Which lifecycle verb may mutate what — `install`/`update` is machine-local (schema-migrate + warn), while each explicit `register`/`adopt` command owns only its documented repo and/or user-state integration scope |
 | [config-schema-migration](config-schema-migration.md) | How a machine-local YAML config gains an explicit `schema_version` + scripted `vN -> vN+1` migrate-by-rewrite (the vendored `config-migrate` primitive), applied lazily on read + eagerly on install/update, with a fixture-guarded backward-compat window |
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the provider-manifest registry pattern |
+| [state-root-coordination](state-root-coordination.md) | How claim/lease/resource producers resolve a qualified owner's versioned durable coordination identity before side effects, while teardown stays available and optional peers degrade by compatible contract |
 | [drop-in-registry-hygiene](drop-in-registry-hygiene.md) | How cross-plugin `*.d` registries keep routine sweeps non-blocking while making malformed, missing, disabled, ambiguous, duplicate, and stale contributions visible and safely cleanable through consumer-owned doctor commands |
 | [runtime-self-provisioning](runtime-self-provisioning.md) | How a plugin provisions its own runtime with no manual step and **no dependency on a sibling launcher** — the layered bootstrap (self-provisioning binstub → sessionStart auto-stamp → skill-driven readiness self-check) + toolchain self-acquisition (vendored uv, pip-index bridge), reaching confined envs (Copilot app, cloud agent) |
 | [installer-readiness-modules](installer-readiness-modules.md) | How enabled machine-gated plugins publish attributable installer/readiness modules (or an explicit decline), how discovery joins settings to installation-cell provenance without cache/PATH assumptions, and how strict graph validation produces an execution-free deterministic plan |
