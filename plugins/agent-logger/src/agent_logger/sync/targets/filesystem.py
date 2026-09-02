@@ -28,6 +28,7 @@ from agent_logger.sync.meta import write_sync_meta
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
     RESCUE_SNAPSHOT_PROVENANCE,
+    _windows_extended_path,
     existing_rescue_snapshot_path,
     is_link_or_reparse,
     open_regular_no_follow,
@@ -36,7 +37,7 @@ from agent_logger.sync.provenance import (
 from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
 
 #: Files never copied to a destination (session lock sidecars, temp files).
-_EXCLUDE_NAMES = frozenset({".lock"})
+_EXCLUDE_NAMES = frozenset({".lock", "lock"})
 
 #: Top-level session-index files kept alongside the ``session-state`` tree when
 #: no repo allowlist narrows the scope. Everything else under the source (the
@@ -48,14 +49,19 @@ _SESSION_INDEX_NAMES = frozenset(
 _MAX_TRANSACTION_MANIFEST_BYTES = 16 * 1024 * 1024
 
 
-def _windows_extended_path(path: Path) -> str:
-    """Return a Win32 extended path so temporary names may cross MAX_PATH."""
-    raw = os.path.abspath(os.fspath(path))
-    if os.name != "nt" or raw.startswith("\\\\?\\"):
-        return raw
-    if raw.startswith("\\\\"):
-        return f"\\\\?\\UNC\\{raw[2:]}"
-    return f"\\\\?\\{raw}"
+def _is_excluded_name(name: str) -> bool:
+    return name.casefold() in _EXCLUDE_NAMES
+
+
+def _is_windows_sharing_violation(exc: OSError) -> bool:
+    return (
+        os.name == "nt"
+        and getattr(exc, "winerror", None) in {32, 33}
+    )
+
+
+class _LockedSourceFile(OSError):
+    pass
 
 
 def _unlink_replace_target(path: Path) -> None:
@@ -240,13 +246,23 @@ def _copy_replace(src: Path, dst: Path) -> None:
     temporary = dst.with_name(f".{dst.name}.{uuid.uuid4().hex}.tmp")
     temporary_io = _windows_extended_path(temporary)
     try:
-        with open_regular_no_follow(src) as source:
+        try:
+            source = open_regular_no_follow(src)
+        except OSError as exc:
+            if _is_windows_sharing_violation(exc):
+                raise _LockedSourceFile(str(src)) from exc
+            raise
+        with source:
             with open(temporary_io, "xb") as target:
                 shutil.copyfileobj(source, target, length=1024 * 1024)
                 target.flush()
                 os.fsync(target.fileno())
         try:
-            shutil.copystat(src, temporary_io, follow_symlinks=False)
+            shutil.copystat(
+                _windows_extended_path(src),
+                temporary_io,
+                follow_symlinks=False,
+            )
         except OSError:
             pass
         _unlink_replace_target(dst)
@@ -258,13 +274,13 @@ def _copy_replace(src: Path, dst: Path) -> None:
 def _needs_copy(src: Path, dst: Path) -> bool:
     """Copy if the destination is missing, a different size, or older."""
     try:
-        mode = dst.lstat().st_mode
+        mode = _lstat(dst).st_mode
         if is_link_or_reparse(dst, mode) or not stat.S_ISREG(mode):
             return True
-        d = dst.stat()
+        d = os.stat(_windows_extended_path(dst))
     except OSError:
         return True
-    s = src.stat()
+    s = os.stat(_windows_extended_path(src))
     return s.st_size != d.st_size or s.st_mtime > d.st_mtime + 1e-6
 
 
@@ -416,12 +432,12 @@ def _ignore_session_entries(directory: str, names: list[str]) -> list[str]:
     for name in names:
         path = Path(directory) / name
         try:
-            mode = path.lstat().st_mode
+            mode = _lstat(path).st_mode
         except OSError:
             ignored.append(name)
             continue
         if (
-            name in _EXCLUDE_NAMES
+            (_is_excluded_name(name) and stat.S_ISREG(mode))
             or is_link_or_reparse(path, mode)
             or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode))
         ):
@@ -431,7 +447,15 @@ def _ignore_session_entries(directory: str, names: list[str]) -> list[str]:
 
 def _path_exists(path: Path) -> bool:
     """Return true for normal paths and dangling symlinks."""
-    return path.exists() or path.is_symlink()
+    return os.path.lexists(_windows_extended_path(path))
+
+
+def _lstat(path: Path) -> os.stat_result:
+    return os.stat(_windows_extended_path(path), follow_symlinks=False)
+
+
+def _mkdir(path: Path) -> None:
+    os.mkdir(_windows_extended_path(path))
 
 
 def _anchored_path(path: Path) -> Path:
@@ -443,16 +467,16 @@ def _ensure_real_directory(path: Path) -> Path:
     """Create a directory only through real directory components."""
     absolute = _anchored_path(path)
     current = Path(absolute.anchor)
-    anchor_mode = current.lstat().st_mode
+    anchor_mode = _lstat(current).st_mode
     if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
         raise OSError(f"destination directory is unsafe: {current}")
     for part in absolute.parts[1:]:
         current /= part
         try:
-            mode = current.lstat().st_mode
+            mode = _lstat(current).st_mode
         except FileNotFoundError:
-            current.mkdir()
-            mode = current.lstat().st_mode
+            _mkdir(current)
+            mode = _lstat(current).st_mode
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"destination directory is unsafe: {current}")
     return absolute
@@ -463,7 +487,7 @@ def _existing_real_directory(path: Path) -> Path | None:
     absolute = _anchored_path(path)
     current = Path(absolute.anchor)
     try:
-        anchor_mode = current.lstat().st_mode
+        anchor_mode = _lstat(current).st_mode
     except FileNotFoundError:
         return None
     if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
@@ -471,7 +495,7 @@ def _existing_real_directory(path: Path) -> Path | None:
     for part in absolute.parts[1:]:
         current /= part
         try:
-            mode = current.lstat().st_mode
+            mode = _lstat(current).st_mode
         except FileNotFoundError:
             return None
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
@@ -508,10 +532,10 @@ def _ensure_relative_directory(root: Path, relative: Path) -> Path:
             continue
         current /= part
         try:
-            mode = current.lstat().st_mode
+            mode = _lstat(current).st_mode
         except FileNotFoundError:
-            current.mkdir()
-            mode = current.lstat().st_mode
+            _mkdir(current)
+            mode = _lstat(current).st_mode
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
             raise OSError(f"destination directory is unsafe: {current}")
     try:
@@ -533,7 +557,7 @@ def _existing_relative_directory(root: Path, relative: Path) -> Path | None:
             continue
         current /= part
         try:
-            mode = current.lstat().st_mode
+            mode = _lstat(current).st_mode
         except FileNotFoundError:
             return None
         if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
@@ -576,7 +600,7 @@ def _session_files(root: Path, *, source: bool) -> dict[Path, Path]:
                 if stat.S_ISDIR(mode):
                     pending.append(path)
                 elif stat.S_ISREG(mode):
-                    if not source or path.name not in _EXCLUDE_NAMES:
+                    if not source or not _is_excluded_name(path.name):
                         files[relative] = path
                 elif not source:
                     raise OSError(f"unsafe session destination member: {path}")
@@ -588,10 +612,10 @@ def _iter_regular_source_files(root: Path):
     pending = [root]
     while pending:
         directory = pending.pop()
-        with os.scandir(directory) as entries:
+        with os.scandir(_windows_extended_path(directory)) as entries:
             for entry in entries:
-                path = Path(entry.path)
-                mode = path.lstat().st_mode
+                path = directory / entry.name
+                mode = entry.stat(follow_symlinks=False).st_mode
                 if is_link_or_reparse(path, mode):
                     continue
                 if stat.S_ISDIR(mode):
@@ -1336,6 +1360,7 @@ class FilesystemTarget(Target):
 
         copied = 0
         nbytes = 0
+        locked_paths: list[Path] = []
         if include_sessions is not None:
             lock_file = dest / ".session-sync-rescue.lock"
             try:
@@ -1366,7 +1391,7 @@ class FilesystemTarget(Target):
         try:
             source_files = _iter_regular_source_files(source)
             for src_file in source_files:
-                if src_file.name in _EXCLUDE_NAMES:
+                if _is_excluded_name(src_file.name):
                     continue
                 rel = src_file.relative_to(source)
                 if not _included(rel, include_sessions):
@@ -1389,17 +1414,31 @@ class FilesystemTarget(Target):
                         # so it succeeds regardless of the file's own mode.
                         _copy_replace(src_file, dst_file)
                     except OSError as exc:
-                        return PushResult(ok=False, detail=f"copy failed: {exc}")
+                        if isinstance(exc, _LockedSourceFile):
+                            locked_paths.append(rel)
+                            continue
+                        return PushResult(
+                            ok=False,
+                            detail=f"copy failed for {rel}: {exc}",
+                        )
                     copied += 1
-                    nbytes += src_file.stat().st_size
+                    nbytes += os.stat(_windows_extended_path(src_file)).st_size
         except OSError as exc:
             return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
 
         session_count = _count_sessions(dest)
-        write_sync_meta(dest, machine, self.name, "ok", session_count)
+        status = "partial" if locked_paths else "ok"
+        write_sync_meta(dest, machine, self.name, status, session_count)
+        detail = f"-> {dest}"
+        if locked_paths:
+            examples = ", ".join(str(path) for path in locked_paths[:3])
+            detail += (
+                f" (skipped {len(locked_paths)} locked file(s), will retry: "
+                f"{examples})"
+            )
         return PushResult(
             ok=True,
-            detail=f"-> {dest}",
+            detail=detail,
             file_count=copied,
             byte_count=nbytes,
         )

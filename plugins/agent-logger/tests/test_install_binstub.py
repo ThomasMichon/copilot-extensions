@@ -191,6 +191,23 @@ def test_installers_preserve_payload_delegating_auxiliary_wrappers() -> None:
     )[1].split("function Register-SyncTask", 1)[0]
 
 
+def test_windows_update_rebinds_existing_sync_task_runtime() -> None:
+    install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
+    update_binding = install_ps1.split(
+        "function Update-SyncTaskBinding", 1
+    )[1].split("function Deploy-SelfProvisioningBinstub", 1)[0]
+    update_action = install_ps1.split("'update' {", 1)[1].split(
+        "'uninstall' {", 1
+    )[0]
+
+    assert "Set-ScheduledTask" in update_binding
+    assert "$action = New-SyncTaskAction" in update_binding
+    assert "-Action $action" in update_binding
+    assert "no provisioned runtime" in update_binding
+    assert "-Trigger" not in update_binding
+    assert "Update-SyncTaskBinding" in update_action
+
+
 def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
     install_sh = _INSTALL_SH.read_text(encoding="utf-8")
     publisher = install_sh.split("publish_payload_snapshot() {", 1)[1].split(
