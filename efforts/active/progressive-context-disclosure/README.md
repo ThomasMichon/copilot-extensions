@@ -354,3 +354,24 @@ enforcement before migrating the complete contributor stack.
   and no WSL distribution, so it cannot produce Tier-E evidence. Next gate:
   run Tier-P containment in a disposable venue, then run three independent
   fresh sessions for each surviving primary cell.
+
+### 2026-09-02 - Cross-platform Tier-P green; Tier-E blocked at agent-bridge
+
+- Added and merged the Windows Server Core Tier-P arm in #1664. The complete
+  frozen inventory and 3,080-cell render matrix passed in a cloud-hosted Windows
+  container under Windows PowerShell 5.1 and Python 3.12.
+- Exercising the Windows-hosted Linux Docker arm exposed three runner defects:
+  absent-container cleanup terminated a fresh run, embedded in-container Python
+  source and JSON were corrupted by Windows argv quoting, and helper-scoped
+  native exit state was misread. The fixes merged through #1717 and #1719; the
+  combined driver bug is recorded and closed as #1725.
+- The Linux container then passed the same Tier-P fixture and reached the real
+  Tier-E registration/drive boundary. No behavioral verdict was produced:
+  agent-bridge new-session creation returned transport `INVALID` after the host
+  runtime update left a live dynamic-port daemon drained behind a stale
+  published route.
+- The agent-bridge lifecycle defect is tracked in #1724. Stop repairing that
+  shared host inline: the owning fix must make update/start converge to one
+  healthy, published, accepting endpoint. Rerun the fresh ACP cell only after
+  that tracked fix lands; the current `INVALID` runs do not eliminate any
+  progressive-context variant.
