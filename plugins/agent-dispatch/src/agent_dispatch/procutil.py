@@ -21,7 +21,9 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -37,8 +39,12 @@ __all__ = [
     "no_window_kwargs",
     "relocate_off_payload",
     "resolve_runtime_python",
-    "run_background_capture",
     "run_agent_worktrees_capture",
+    "run_background_capture",
+    "run_ssh_capture",
+    "run_ssh_command",
+    "ssh_subprocess_kwargs",
+    "terminate_ssh_process_tree",
     "runtime_root",
     "windowless_python",
 ]
@@ -193,6 +199,122 @@ def run_background_capture(
         )
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def ssh_subprocess_kwargs() -> dict[str, object]:
+    """Contain SSH and ProxyCommand descendants in an invisible console."""
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        return {
+            "creationflags": subprocess.CREATE_NEW_CONSOLE,
+            "startupinfo": startupinfo,
+        }
+    return {"start_new_session": True}
+
+
+def _signal_ssh_process(proc: subprocess.Popen[object], method: str) -> None:
+    try:
+        getattr(proc, method)()
+    except OSError:
+        pass
+
+
+def terminate_ssh_process_tree(
+    proc: subprocess.Popen[object],
+    *,
+    grace: float = 5.0,
+) -> None:
+    """Terminate an SSH root and the ProxyCommand descendants it spawned."""
+    if proc.poll() is not None:
+        return
+    pid = getattr(proc, "pid", None)
+    if not isinstance(pid, int) or pid <= 0:
+        _signal_ssh_process(proc, "terminate")
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            _signal_ssh_process(proc, "kill")
+        return
+    if sys.platform == "win32":
+        try:
+            subprocess.run(  # noqa: S603, S607
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except OSError:
+            _signal_ssh_process(proc, "kill")
+    else:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except OSError:
+            _signal_ssh_process(proc, "kill")
+    try:
+        proc.wait(timeout=grace)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    if sys.platform != "win32":
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except OSError:
+            _signal_ssh_process(proc, "kill")
+    else:
+        _signal_ssh_process(proc, "kill")
+    try:
+        proc.wait(timeout=2.0)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def run_ssh_capture(
+    argv: Sequence[str | os.PathLike[str]],
+    *,
+    timeout: float,
+    input: str | None = None,
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a captured SSH process tree without visible ProxyCommand windows."""
+    try:
+        return run_ssh_command(argv, timeout=timeout, input=input)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def run_ssh_command(
+    argv: Sequence[str | os.PathLike[str]],
+    *,
+    timeout: float | None,
+    input: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run SSH with captured text output and tree-safe timeout cleanup."""
+    args = [os.fspath(arg) for arg in argv]
+    proc = subprocess.Popen(  # noqa: S603 -- fixed SSH argv
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+        text=True,
+        **ssh_subprocess_kwargs(),
+    )
+    try:
+        stdout, stderr = proc.communicate(input=input, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        terminate_ssh_process_tree(proc)
+        raise subprocess.TimeoutExpired(
+            args,
+            timeout,
+            output=exc.output,
+            stderr=exc.stderr,
+        ) from exc
+    except KeyboardInterrupt:
+        terminate_ssh_process_tree(proc)
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 
 def runtime_root() -> Path:

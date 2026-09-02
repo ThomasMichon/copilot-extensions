@@ -243,7 +243,7 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
             stderr="",
         )
 
-    monkeypatch.setattr(tracking, "run_background_capture", fake_run)
+    monkeypatch.setattr(tracking, "run_ssh_capture", fake_run)
 
     got = tracking.resolve_live_session("wt-x", machine="emancipation-cube")
     assert got == {"session_id": "s-remote", "worktree_id": "wt-x"}

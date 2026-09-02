@@ -30,7 +30,7 @@ import subprocess
 from pathlib import Path
 
 from .config import producer_capability
-from .procutil import no_window_kwargs
+from .procutil import run_ssh_command
 
 
 class RemoteDispatchUnavailable(RuntimeError):
@@ -254,14 +254,10 @@ def dispatch_to_remote(
     # key fails fast instead of hanging on a password prompt. Lowercased so a
     # display-cased name still matches its lowercase `Host` block.
     cmd = [exe, "-o", "BatchMode=yes", _ssh_alias(machine), remote_cmd]
-    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+    return run_ssh_command(
         cmd,
         input=stdin,
-        check=False,
-        capture_output=True,
-        text=True,
         timeout=timeout,
-        **no_window_kwargs(),
     )
 
 
@@ -354,13 +350,9 @@ def browse_remote(
     remote_cmd = " ".join(shlex.quote(a) for a in argv)
     cmd = [exe, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
            _ssh_alias(machine), remote_cmd]
-    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
+    return run_ssh_command(
         cmd,
-        check=False,
-        capture_output=True,
-        text=True,
         timeout=timeout,
-        **no_window_kwargs(),
     )
 
 

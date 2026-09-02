@@ -22,7 +22,11 @@ import shlex
 import shutil
 import subprocess
 
-from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
+from .procutil import (
+    agent_worktrees_launch_prefix,
+    no_window_kwargs,
+    run_ssh_command,
+)
 
 DEFAULT_DRIVER = "agent-dispatch"
 
@@ -517,10 +521,7 @@ def spawn_fleet_embodied_worker(
     # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.
     cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
-    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        cmd, check=False, capture_output=True, text=True, timeout=timeout,
-        **no_window_kwargs(),
-    )
+    return run_ssh_command(cmd, timeout=timeout)
 
 
 DEFAULT_HEADLESS_AGENT = "task-worker"
@@ -586,10 +587,7 @@ def spawn_fleet_headless_worker(
     # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.
     cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
-    return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-        cmd, check=False, capture_output=True, text=True, timeout=timeout,
-        **no_window_kwargs(),
-    )
+    return run_ssh_command(cmd, timeout=timeout)
 
 
 def remote_registered_agent_names(host: str, *, timeout: float = 15.0) -> set[str] | None:
@@ -613,10 +611,7 @@ def remote_registered_agent_names(host: str, *, timeout: float = 15.0) -> set[st
     # fast instead of hanging on a password prompt.
     cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
-            cmd, check=False, capture_output=True, text=True, timeout=timeout,
-            **no_window_kwargs(),
-        )
+        proc = run_ssh_command(cmd, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         return None
     if proc.returncode != 0:
@@ -734,10 +729,8 @@ def fleet_body_verdict(
         host.strip().lower(), remote,
     ]
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            cmd, check=False, capture_output=True, text=True,
-            timeout=timeout if timeout is not None else 8.0,
-            **no_window_kwargs(),
+        proc = run_ssh_command(
+            cmd, timeout=timeout if timeout is not None else 8.0
         )
     except (subprocess.TimeoutExpired, OSError):
         return tracking.UNKNOWN
@@ -752,7 +745,7 @@ def stop_fleet_body(
     if ssh is None:
         return False
     remote = f"agent-bridge end {shlex.quote(session_id)}"
-    completed = subprocess.run(  # noqa: S603 -- fixed argv + SSH alias
+    completed = run_ssh_command(
         [
             ssh,
             "-o",
@@ -762,11 +755,7 @@ def stop_fleet_body(
             host.strip().lower(),
             remote,
         ],
-        check=False,
-        capture_output=True,
-        text=True,
         timeout=timeout,
-        **no_window_kwargs(),
     )
     return completed.returncode == 0
 
@@ -786,13 +775,9 @@ def fleet_body_activity(
         host.strip().lower(), remote,
     ]
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+        proc = run_ssh_command(
             cmd,
-            check=False,
-            capture_output=True,
-            text=True,
             timeout=timeout if timeout is not None else 8.0,
-            **no_window_kwargs(),
         )
     except (subprocess.TimeoutExpired, OSError):
         return None

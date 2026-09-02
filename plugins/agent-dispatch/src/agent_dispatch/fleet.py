@@ -38,7 +38,7 @@ import uuid
 from collections.abc import Callable, Sequence
 
 from . import embody
-from .procutil import no_window_kwargs
+from .procutil import run_ssh_command
 
 log = logging.getLogger("agent-dispatch.fleet")
 
@@ -94,14 +94,7 @@ def _host_has_command(host: str, command: str, *, timeout: float = 8.0) -> bool:
         _ssh_alias(host), f"command -v {command}",
     ]
     try:
-        result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            **no_window_kwargs(),
-        )
+        result = run_ssh_command(cmd, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return False
     return result.returncode == 0
