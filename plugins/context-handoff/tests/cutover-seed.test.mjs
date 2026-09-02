@@ -32,6 +32,12 @@ test("task seed is a bounded ASCII three-part locator", () => {
   assert.ok(!seed.includes("\n"));
   assert.ok(!/[^\x00-\x7F]/.test(seed));
   assert.doesNotMatch(seed, /node -e|handoff-cli/);
+
+  const directLead = buildCutoverSeed(
+    "task", "task-42", "Task: Fix parser | preserve contract",
+  );
+  assert.equal(directLead.split(" | ").length, 3);
+  assert.match(directLead, /^Task: Fix parser preserve contract \| Resume:/);
 });
 
 test("file seed carries one short opaque recovery locator", () => {

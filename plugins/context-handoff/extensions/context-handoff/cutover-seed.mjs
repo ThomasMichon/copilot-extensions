@@ -18,11 +18,16 @@ function exactAsciiSingleLine(value) {
   return text;
 }
 
-export function leadFrom(title) {
-  const normalized = asciiSingleLine(title)
-    .replace(/^(?:continue|task)\s*:\s*/i, "")
+function seedField(value) {
+  return asciiSingleLine(value)
     .replace(/\|/g, " ")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function leadFrom(title) {
+  const normalized = seedField(title)
+    .replace(/^(?:continue|task)\s*:\s*/i, "")
     .slice(0, 72)
     .trim();
   return `Task: ${normalized || "Continue the current work"}`;
@@ -84,7 +89,7 @@ export function buildCutoverSeed(
 ) {
   const locator = recoveryLocatorFor(kind, id);
   const recommendation = "Resume: /consume-handoff to take over";
-  let taskLead = asciiSingleLine(lead) || leadFrom("");
+  let taskLead = seedField(lead) || leadFrom("");
   let seed =
     `${taskLead} | ${recommendation} | Recovery: context-handoff ${locator}`;
   if (seed.length > MAX_CUTOVER_SEED_LENGTH) {
