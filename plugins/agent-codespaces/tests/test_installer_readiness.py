@@ -79,12 +79,20 @@ def test_runtime_prerequisite_failure_is_not_configuration_empty(capsys):
 
 def test_payload_command_uses_read_only_health_surfaces(monkeypatch, capsys):
     reports = _provider_reports()
+    merged_reports = []
     monkeypatch.setattr(cli, "_gh_auth_preflight", lambda: [])
     monkeypatch.setattr(cli, "scan_config_providers", lambda: reports)
-    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.setattr(
+        cli,
+        "load_merged_config",
+        lambda *, provider_reports: (
+            merged_reports.append(provider_reports) or CodespacesConfig()
+        ),
+    )
     monkeypatch.setattr(cli, "load_adopted_repos", lambda: [])
 
     assert cli._cmd_installer_readiness() == 0
+    assert merged_reports == [reports]
     assert json.loads(capsys.readouterr().out)["state"] == "configuration-empty"
 
 
@@ -94,7 +102,9 @@ def test_adopted_standard_repo_without_supplemental_config_is_ready(
     reports = _provider_reports()
     monkeypatch.setattr(cli, "_gh_auth_preflight", lambda: [])
     monkeypatch.setattr(cli, "scan_config_providers", lambda: reports)
-    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.setattr(
+        cli, "load_merged_config", lambda **_: CodespacesConfig(),
+    )
     monkeypatch.setattr(
         cli,
         "load_adopted_repos",
@@ -117,7 +127,7 @@ def test_malformed_supplemental_config_still_fails(monkeypatch, capsys):
     )
     monkeypatch.setattr(cli, "_gh_auth_preflight", lambda: [])
     monkeypatch.setattr(cli, "scan_config_providers", lambda: reports)
-    monkeypatch.setattr(cli, "load_merged_config", lambda: merged)
+    monkeypatch.setattr(cli, "load_merged_config", lambda **_: merged)
     monkeypatch.setattr(cli, "load_adopted_repos", lambda: [])
 
     assert cli._cmd_installer_readiness() == 1
@@ -137,7 +147,9 @@ def test_active_plugin_declaration_finding_fails_readiness(monkeypatch, capsys):
     reports = _provider_reports(plugin_findings=(finding,))
     monkeypatch.setattr(cli, "_gh_auth_preflight", lambda: [])
     monkeypatch.setattr(cli, "scan_config_providers", lambda: reports)
-    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.setattr(
+        cli, "load_merged_config", lambda **_: CodespacesConfig(),
+    )
     monkeypatch.setattr(cli, "load_adopted_repos", lambda: [])
 
     assert cli._cmd_installer_readiness() == 1
@@ -168,7 +180,7 @@ def test_stale_pointer_for_active_declaration_does_not_block_readiness(
     monkeypatch.setattr(
         cli,
         "load_merged_config",
-        lambda: CodespacesConfig(source_paths=[Path("plugin-config")]),
+        lambda **_: CodespacesConfig(source_paths=[Path("plugin-config")]),
     )
     monkeypatch.setattr(cli, "load_adopted_repos", lambda: [])
 

@@ -2011,7 +2011,11 @@ def _parse_repo_config(raw: dict[str, Any], repo_dir: Path | None = None) -> Rep
     )
 
 
-def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
+def load_merged_config(
+    include_cwd: bool = True,
+    *,
+    provider_reports: ConfigProviderReports | None = None,
+) -> CodespacesConfig:
     """Load and merge CodeSpace config from all adopted repos.
 
     Reads each repo's config (``.agent-codespaces/config.yaml``, or legacy
@@ -2060,7 +2064,7 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
         if raw is None:
             continue
         sources.append((raw, config_dir, repo_root))
-    provider_reports = scan_config_providers()
+    provider_reports = provider_reports or scan_config_providers()
     _warn_active_plugin_config_findings(provider_reports.active_plugins)
     _warn_config_dropin_findings(provider_reports.config_d)
     for contribution in provider_reports.active_configs:

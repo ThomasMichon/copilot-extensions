@@ -4258,7 +4258,7 @@ def _cmd_installer_readiness() -> int:
 
     auth_findings = _gh_auth_preflight()
     provider_reports = scan_config_providers()
-    merged = load_merged_config()
+    merged = load_merged_config(provider_reports=provider_reports)
     authoritative_owners = {
         contribution.owner
         for contribution in provider_reports.active_plugins.active_configs
