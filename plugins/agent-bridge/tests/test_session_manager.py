@@ -79,6 +79,26 @@ def test_active_tool_prevents_at_rest_projection() -> None:
     assert session.is_at_rest() is False
 
 
+def test_nested_tool_does_not_prevent_at_rest_projection() -> None:
+    session = Session(
+        "sid",
+        "name",
+        SpawnTarget(type="local", cwd="/tmp/x"),
+    )
+    session.status = SessionStatus.RUNNING
+    session.event_log = EventLog()
+    session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+    session.event_log.append(
+        "tool_call_start",
+        {
+            "tool_call_id": "tool-1",
+            "name": "nested",
+            "agent_id": "sub-1",
+        },
+    )
+    assert session.is_at_rest() is True
+
+
 def _mock_agent_proc():
     """Create a mock AgentProcess with a mock subprocess."""
     proc = MagicMock()

@@ -767,7 +767,7 @@ class Session:
         return (
             self.event_log.telemetry_conversation_state
             in {"end-turn", "cancelled"}
-            and self.event_log.active_tool_call() is None
+            and self.event_log.active_tool_call(include_nested=False) is None
         )
 
     def public_state(self) -> tuple[SessionStatus, bool, str | None]:
