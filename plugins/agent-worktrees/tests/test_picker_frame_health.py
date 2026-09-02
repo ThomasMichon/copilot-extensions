@@ -6,7 +6,10 @@ import threading
 
 import pytest
 
-from agent_worktrees.picker_tui.frame_health import FrameHealthReporter
+from agent_worktrees.picker_tui.frame_health import (
+    FrameHealthReporter,
+    append_launch_event,
+)
 
 
 def test_frame_health_reports_only_threshold_gaps(tmp_path, monkeypatch):
@@ -101,3 +104,16 @@ def test_launch_trace_only_tick_does_not_read_clock(tmp_path, monkeypatch):
     )
 
     reporter.tick(frame=1, debug="loading", busy=None)
+
+
+def test_append_launch_event_writes_checkpoint(tmp_path, monkeypatch):
+    path = tmp_path / "picker-launches.jsonl"
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_TRACE", str(path))
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_ID", "demo-456")
+
+    append_launch_event("textual_app_start", live=True)
+
+    event = json.loads(path.read_text())
+    assert event["event"] == "textual_app_start"
+    assert event["launch_id"] == "demo-456"
+    assert event["live"] is True

@@ -117,6 +117,7 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
         assert "picker-launches.jsonl" in content
         assert "binstub_start" in content
         assert "timestamp_local" not in content
+        assert "launch-session" in content
         assert "--project" in content
         assert "agent-worktrees.exe" not in content
 
@@ -225,6 +226,8 @@ def test_posix_binstub_launch_trace_uses_portable_date(monkeypatch, tmp_path: Pa
     assert "picker-launches.jsonl" in content
     assert "$RANDOM-$(date +%s)" in content
     assert "date -u +%Y-%m-%dT%H:%M:%SZ" in content
+    assert "if [[ $# -eq 0 ]]" in content
+    assert "launch-session.sh" in content
     assert "%N" not in content
 
 
