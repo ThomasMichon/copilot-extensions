@@ -263,7 +263,7 @@ def do_status(cfg: Config) -> int:
     if not latest.supported:
         print("latest_sync:    (target does not expose status)")
     elif latest.error:
-        print(f"latest_sync:    unreadable ({latest.error})")
+        print(f"latest_sync:    unreadable ({_status_text(latest.error)})")
     elif latest.metadata is None:
         print("latest_sync:    (none)")
     else:

@@ -17,7 +17,12 @@ from typing import Iterable
 SYNC_VERSION = "1.0.0"
 MAX_DEFERRED_FILE_SAMPLES = 10
 MAX_DEFERRED_PATH_CHARS = 512
+MAX_META_FIELD_CHARS = 256
 MAX_SYNC_META_BYTES = 64 * 1024
+
+
+def _bounded_text(value: str) -> str:
+    return str(value)[:MAX_META_FIELD_CHARS]
 
 
 def write_sync_meta(
@@ -33,11 +38,11 @@ def write_sync_meta(
     deferred = [str(path) for path in deferred_files]
     meta = json.dumps(
         {
-            "machine_id": machine,
+            "machine_id": _bounded_text(machine),
             "last_sync_utc": now_utc,
             "sync_version": SYNC_VERSION,
-            "transport": transport,
-            "status": status,
+            "transport": _bounded_text(transport),
+            "status": _bounded_text(status),
             "session_count": session_count,
             "deferred_file_count": len(deferred),
             "deferred_files": [
@@ -56,7 +61,10 @@ def write_sync_meta(
     except OSError:
         pass
     finally:
-        tmp.unlink(missing_ok=True)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def read_sync_meta(dest: Path) -> dict | None:

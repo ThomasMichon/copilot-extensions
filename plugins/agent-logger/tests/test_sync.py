@@ -715,9 +715,9 @@ def test_sync_meta_bounds_deferred_file_samples(tmp_path: Path) -> None:
     deferred = [f"path-{index}-{'x' * 600}" for index in range(20)]
     meta.write_sync_meta(
         tmp_path,
-        "machine",
-        "local",
-        "partial",
+        "m" * 1000,
+        "t" * 1000,
+        "s" * 1000,
         12,
         deferred_files=deferred,
     )
@@ -725,6 +725,9 @@ def test_sync_meta_bounds_deferred_file_samples(tmp_path: Path) -> None:
     payload = meta.read_sync_meta(tmp_path)
 
     assert payload is not None
+    assert len(payload["machine_id"]) == meta.MAX_META_FIELD_CHARS
+    assert len(payload["transport"]) == meta.MAX_META_FIELD_CHARS
+    assert len(payload["status"]) == meta.MAX_META_FIELD_CHARS
     assert payload["deferred_file_count"] == 20
     assert len(payload["deferred_files"]) == meta.MAX_DEFERRED_FILE_SAMPLES
     assert all(
@@ -807,6 +810,32 @@ def test_status_handles_malformed_and_control_metadata(
     assert "\u001b" not in output
     assert "sessions:       (unknown)" in output
     assert "(invalid deferred_files metadata)" in output
+
+
+def test_status_sanitizes_unreadable_metadata_error(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path / "home", _make_source(tmp_path), tmp_path / "dest")
+    monkeypatch.setattr(engine, "_machine", lambda _cfg: "machine")
+
+    class InvalidStatusTarget:
+        def describe(self) -> str:
+            return "invalid"
+
+        def sync_status(self, _machine):
+            from agent_logger.sync.targets.base import SyncStatus
+
+            return SyncStatus(supported=True, error="bad\u001b[31m\nmetadata")
+
+    monkeypatch.setattr(engine, "build_target", lambda *_args: InvalidStatusTarget())
+
+    assert engine.do_status(cfg) == 0
+
+    output = capsys.readouterr().out
+    assert "unreadable (bad[31mmetadata)" in output
+    assert "\u001b" not in output
 
 
 def test_engine_run_sync_local(tmp_path: Path) -> None:
