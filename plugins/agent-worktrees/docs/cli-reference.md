@@ -248,6 +248,16 @@ form of the bar's teal `CONVO` block). Centralized in
 `git_ops.refine_state_with_session` so the bar and the picker can never drift
 apart. Without `--classify`, records carry no `state` key.
 
+Every row carries an additive `reciprocal_relation` object for presentation.
+Its `binding` and `control` axes preserve the difference between an
+authoritative bound session and a separate controller, while `state` provides a
+compact summary: `bound-here`, `controlled-elsewhere`, `handed-off`, `terminal`,
+`ambiguous`, or the no-relation baseline `unbound`. `actions` contains a
+`navigate-worktree` target only when one active controller identity is
+unambiguous. Unknown, restored-stale, unsupported, incomplete, or conflicting
+evidence reports `ambiguous` with no action. These fields never alter the
+record's head, liveness, occupancy, or resume target.
+
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment
 for the worktree's asserted head session, or `null`. A never-assigned row omits

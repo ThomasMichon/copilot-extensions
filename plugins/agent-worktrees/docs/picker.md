@@ -117,6 +117,11 @@ with `Tab`:
   block** (`WIP`, `DIRTY`, `UNUSED`, `CONVO 💬N`, `FINAL`, `ORPHAN`) with an
   `↑ahead`/`↓behind` sync tag. Same vocabulary as the status bar and
   [worktree-lifecycle.md § states](worktree-lifecycle.md#worktree-states). The
+  `RELATION` column independently summarizes reciprocal session metadata as
+  `BOUND`, `CONTROL`, `HANDOFF`, `TERM`, or `AMBIG`; the legacy ANSI Picker
+  appends the same tag to each worktree label. This presentation never changes
+  the git/lifecycle state block or which session is authoritative for resume.
+  The
   `LIVE` column distinguishes an attached (`●N`) or detached (`○`) terminal
   multiplexer, a live Copilot process without a mux (`PROC`), and stale PID-lock
   residue without a live process (`LOCK`).
@@ -170,7 +175,10 @@ session.
 ### Per-worktree actions
 `Enter` on a row opens its sub-menu — resume, plus context actions such as
 **Jump to host** for a bridge/system row (navigates to the owning machine tab and
-highlights the worktree by its stable id).
+highlights the worktree by its stable id). A worktree with one validated,
+unambiguous controller target also offers **Go to controller**. That action
+navigates to the exact loaded local or remote worktree row; it never rebinds the
+child or substitutes the controller for the child's resume target.
 
 Installed plugins can **contribute their own actions** onto this sub-menu (e.g. a
 bridge's "Send message", a dispatcher's "Dispatch task here") via a
