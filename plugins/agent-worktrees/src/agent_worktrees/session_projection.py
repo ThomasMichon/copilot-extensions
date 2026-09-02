@@ -526,11 +526,7 @@ def _sync_relation(
             encoded = _encode(updated)
             _atomic_replace(target, temp_dir, encoded)
         return "written"
-    except (
-        MissingSessionTree,
-        RestoredProjectionReadOnly,
-        UnsupportedProjectionVersion,
-    ):
+    except ProjectionError:
         return "blocked"
     except Exception:
         return "deferred"
