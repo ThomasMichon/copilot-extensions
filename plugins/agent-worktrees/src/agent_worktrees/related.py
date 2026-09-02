@@ -55,6 +55,7 @@ loaders.
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -183,6 +184,10 @@ class RelatedEntry:
     # ``.agent-worktrees/`` -- still resolves against that repo, not the harness
     # base. ``None`` for a plain single-anchor read; never serialized.
     origin_anchor: str | None = None
+    # Effective graft source, populated alongside ``origin_anchor`` and never
+    # serialized to related.yaml. Empty means the entry bypassed grafting.
+    origin_layer: str = ""
+    origin_plugin: str = ""
 
 
 @dataclass
@@ -621,7 +626,45 @@ INSTALLED_PLUGINS_ENV = "AGENT_WORKTREES_INSTALLED_PLUGINS_DIR"
 
 
 class _PluginContributionAnchor(str):
-    """Path marker preserving plugin provenance through graft ordering."""
+    """Path marker preserving plugin identity through graft ordering."""
+
+    plugin_name: str
+
+    def __new__(
+        cls, value: str, plugin_name: str = "",
+    ) -> "_PluginContributionAnchor":
+        marker = super().__new__(cls, value)
+        marker.plugin_name = plugin_name
+        return marker
+
+
+def _plugin_manifest_name(plugin_root: Path) -> str:
+    """Read a plugin's declared identity, or return empty when unverifiable."""
+    for manifest in (
+        plugin_root / "plugin.json",
+        plugin_root / ".claude-plugin" / "plugin.json",
+    ):
+        try:
+            raw = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(raw, dict):
+            name = str(raw.get("name") or "").strip()
+            if name:
+                return name
+    return ""
+
+
+def entry_provenance(entry: RelatedEntry) -> dict[str, str]:
+    """Return safe effective-source metadata without exposing local paths."""
+    if entry.origin_layer == "plugin":
+        return {
+            "layer": "plugin",
+            "plugin": entry.origin_plugin or "unknown",
+        }
+    if entry.origin_layer == "repository":
+        return {"layer": "repository"}
+    return {"layer": "unknown"}
 
 
 def installed_plugins_root() -> Path:
@@ -661,7 +704,7 @@ def _filesystem_plugin_related_anchors(base: Path) -> list[str]:
         except OSError:
             continue
     return [
-        _PluginContributionAnchor(path)
+        _PluginContributionAnchor(path, _plugin_manifest_name(Path(path)))
         for path in sorted(found, key=os.path.normcase)
     ]
 
@@ -698,16 +741,16 @@ def installed_plugin_related_anchors(
         return []
     if report.authority is ScanAuthority.INDETERMINATE:
         return []
-    found: set[str] = set()
+    found: dict[str, str] = {}
     for plugin in report.active.values():
         for selected in plugin.live_roots:
             try:
                 if related_path(selected.root).is_file():
-                    found.add(str(selected.root))
+                    found[str(selected.root)] = plugin.name
             except OSError:
                 continue
     return [
-        _PluginContributionAnchor(path)
+        _PluginContributionAnchor(path, found[path])
         for path in sorted(found, key=os.path.normcase)
     ]
 
@@ -757,10 +800,29 @@ def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:
     merged = RelatedConfig()
     for anchor in anchors:
         rc = read_related(anchor)
-        if rc.primary and not _is_installed_plugin_anchor(anchor):
+        plugin_anchor = _is_installed_plugin_anchor(anchor)
+        if rc.primary and not plugin_anchor:
             merged.primary = rc.primary
         for name, entry in rc.related.items():
-            entry.origin_anchor = str(anchor)
+            origin = (
+                anchor
+                if isinstance(anchor, _PluginContributionAnchor)
+                else (
+                    _PluginContributionAnchor(
+                        str(anchor),
+                        _plugin_manifest_name(Path(str(anchor))),
+                    )
+                    if plugin_anchor
+                    else str(anchor)
+                )
+            )
+            entry.origin_anchor = origin
+            entry.origin_layer = "plugin" if plugin_anchor else "repository"
+            entry.origin_plugin = (
+                origin.plugin_name
+                if isinstance(origin, _PluginContributionAnchor)
+                else ""
+            )
             merged.related[name] = entry
     return merged
 

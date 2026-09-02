@@ -16401,6 +16401,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                         "doc": e.doc, "delegate": e.delegate,
                         "ownership": related.effective_ownership(e),
                         "owner": e.owner,
+                        "provenance": related.entry_provenance(e),
                         "locus": {
                             "preferred": e.locus.preferred,
                             "machines": e.locus.machines,
@@ -16443,6 +16444,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 "ownership": related.effective_ownership(e),
                 "ownership_explicit": e.ownership,
                 "owner": e.owner,
+                "provenance": related.entry_provenance(e),
                 "locus": {
                     "preferred": e.locus.preferred,
                     "machines": e.locus.machines,
@@ -16468,7 +16470,17 @@ def cmd_related_dispatch(argv: list[str]) -> int:
               + (f"  codespace={e.locus.codespace}" if e.locus.codespace else "")
               + (f"  container={e.locus.container}" if e.locus.container else ""))
         print(f"  delegate: {e.delegate or '-'}")
-        print(f"  doc:      {related.doc_abs_path(anchor, e)}")
+        provenance = related.entry_provenance(e)
+        source = provenance["layer"]
+        if provenance.get("plugin"):
+            source += f" ({provenance['plugin']})"
+        print(f"  provenance: {source}")
+        doc = (
+            e.doc or f"{related.RELATED_DOCS_DIRNAME}/{e.name}.md"
+            if provenance["layer"] == "plugin"
+            else str(related.doc_abs_path(anchor, e))
+        )
+        print(f"  doc:      {doc}")
         if reg is None:
             output.warn(f"'{name}' is not in the repos registry "
                         f"(add it with: repos add {name} <path> --class <class>)")

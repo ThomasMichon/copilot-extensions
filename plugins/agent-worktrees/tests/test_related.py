@@ -131,17 +131,28 @@ def test_grafted_list_role_filter(tmp_path: Path):
 # Installed-plugin config-graft: plugins contribute related entries by install
 # ---------------------------------------------------------------------------
 
-def _make_installed_plugin(root: Path, marketplace: str, name: str,
-                           cfg: RelatedConfig, *, manifest: str = "plugin.json"):
+def _make_installed_plugin(
+    root: Path,
+    marketplace: str,
+    name: str,
+    cfg: RelatedConfig,
+    *,
+    manifest: str = "plugin.json",
+    manifest_name: str | None = None,
+):
     """Create a fake installed plugin under root/<marketplace>/<name>/."""
     plugin_dir = root / marketplace / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     if manifest == "plugin.json":
-        (plugin_dir / "plugin.json").write_text("{}", encoding="utf-8")
+        _write_json(
+            plugin_dir / "plugin.json",
+            {"name": manifest_name or name},
+        )
     elif manifest == ".claude-plugin":
-        (plugin_dir / ".claude-plugin").mkdir(exist_ok=True)
-        (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
-            "{}", encoding="utf-8")
+        _write_json(
+            plugin_dir / ".claude-plugin" / "plugin.json",
+            {"name": manifest_name or name},
+        )
     # else: no manifest (negative case)
     _write_related(plugin_dir, cfg)
     return plugin_dir
@@ -304,9 +315,14 @@ def test_plugin_related_anchors_use_effective_active_local_plugins(
         },
     )
 
-    assert related.installed_plugin_related_anchors(home=tmp_path) == [
-        str(enabled)
-    ]
+    anchors = related.installed_plugin_related_anchors(home=tmp_path)
+    assert anchors == [str(enabled)]
+    entry = related.get_related_grafted(anchors, "enabled")
+    assert entry is not None
+    assert related.entry_provenance(entry) == {
+        "layer": "plugin",
+        "plugin": "enabled-harness",
+    }
     assert str(disabled) not in related.installed_plugin_related_anchors(
         home=tmp_path
     )
@@ -483,8 +499,15 @@ def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
     assert set(merged.related) == {"example-web", "vessel"}
     assert merged.related["example-web"].summary == "from knowledge"   # user overrides plugin
     assert merged.related["example-web"].origin_anchor == str(knowledge)
+    assert related.entry_provenance(merged.related["example-web"]) == {
+        "layer": "repository",
+    }
     # plugin-only entry is contributed purely by being installed
     assert merged.related["vessel"].origin_anchor == str(plugin)
+    assert related.entry_provenance(merged.related["vessel"]) == {
+        "layer": "plugin",
+        "plugin": "example-web-harness",
+    }
     # a plugin's primary is NEVER adopted; the base primary stands
     assert merged.primary == "base-primary"
 
@@ -503,6 +526,93 @@ def test_grafted_plugin_only_entry_resolves_when_no_user_config(
     # merely installing the plugin makes example-web resolvable
     e = related.get_related_grafted([str(plugin), base], "example-web")
     assert e is not None and e.delegate == "agent-codespaces"
+
+
+@pytest.mark.parametrize("manifest", ["plugin.json", ".claude-plugin"])
+def test_plugin_provenance_prefers_declared_manifest_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest: str,
+):
+    root = tmp_path / "installed-plugins"
+    plugin = _make_installed_plugin(
+        root,
+        "example-marketplace",
+        "cached-payload-1.2.3",
+        RelatedConfig(related={
+            "example-web": RelatedEntry(name="example-web", role="product")
+        }),
+        manifest=manifest,
+        manifest_name="example-web-harness",
+    )
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
+
+    entry = related.get_related_grafted([str(plugin)], "example-web")
+
+    assert entry is not None
+    assert related.entry_provenance(entry) == {
+        "layer": "plugin",
+        "plugin": "example-web-harness",
+    }
+
+
+@pytest.mark.parametrize("manifest_content", ["{not json", "{}"])
+def test_plugin_provenance_is_unknown_without_declared_manifest_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    manifest_content: str,
+):
+    root = tmp_path / "installed-plugins"
+    plugin = _make_installed_plugin(
+        root,
+        "example-marketplace",
+        "unverified-cache-directory",
+        RelatedConfig(related={
+            "example-web": RelatedEntry(name="example-web", role="product")
+        }),
+    )
+    (plugin / "plugin.json").write_text(manifest_content, encoding="utf-8")
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
+
+    entry = related.get_related_grafted([str(plugin)], "example-web")
+
+    assert entry is not None
+    assert related.entry_provenance(entry) == {
+        "layer": "plugin",
+        "plugin": "unknown",
+    }
+
+
+def test_related_show_reports_plugin_provenance_without_local_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd,
+):
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+
+    root = tmp_path / "installed-plugins"
+    plugin = _make_installed_plugin(
+        root, "example-marketplace", "example-web-harness",
+        RelatedConfig(related={
+            "example-web": RelatedEntry(name="example-web", role="product")
+        }),
+    )
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(root))
+    base = tmp_path / "harness"
+    _write_related(base, RelatedConfig())
+
+    assert run([
+        "show", "example-web", "--repo", str(base), "--json",
+    ]) == 0
+    rendered = capfd.readouterr().out
+    payload = json.loads(rendered)
+    assert payload["provenance"] == {
+        "layer": "plugin",
+        "plugin": "example-web-harness",
+    }
+    assert str(plugin) not in rendered
+
+    assert run(["show", "example-web", "--repo", str(base)]) == 0
+    rendered = capfd.readouterr().out
+    assert "provenance: plugin (example-web-harness)" in rendered
+    assert "doc:      related/example-web.md" in rendered
+    assert str(plugin) not in rendered
 
 
 # ---------------------------------------------------------------------------
