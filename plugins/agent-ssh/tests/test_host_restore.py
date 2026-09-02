@@ -94,6 +94,46 @@ def test_dtssh_apply_uses_idempotent_install_without_login(tmp_path, monkeypatch
     assert result["healthy"] is True
 
 
+def test_dtssh_restore_launches_helpers_without_windows(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(kwargs)
+        if "user" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"status": "Logged in"}',
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "dtssh host healthy\nwatchdog running\n"
+                "tunnel example: 1 host connection(s)"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(host_restore.subprocess, "run", run)
+    monkeypatch.setattr(
+        host_restore,
+        "no_window_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
+
+    result = host_restore.restore_host(
+        "dtssh",
+        "example-host",
+        2222,
+        apply=True,
+    )
+
+    assert result["ok"] is True
+    assert calls
+    assert all(call["creationflags"] == 0x08000000 for call in calls)
+
+
 def test_dtssh_restore_rejects_unsupported_platform(monkeypatch):
     monkeypatch.setattr(host_restore.platform, "system", lambda: "Linux")
 

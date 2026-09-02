@@ -150,8 +150,14 @@ function Assert-Login {
 }
 
 function Get-HostProcess {
+    $aliasPattern = [regex]::Escape($Alias)
+    $portPattern = [regex]::Escape("$Port")
     Get-CimInstance Win32_Process -Filter "Name='dtssh.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match '\bhost\b' }
+        Where-Object {
+            $_.CommandLine -match '\bhost\b' -and
+            $_.CommandLine -match "(?:^|\s)--alias(?:\s+|=)`"?$aliasPattern(?:`"|\s|$)" -and
+            $_.CommandLine -match "(?:^|\s)--port(?:\s+|=)`"?$portPattern(?:`"|\s|$)"
+        }
 }
 
 function Install-Shortcut {

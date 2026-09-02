@@ -279,8 +279,55 @@ function Get-HostConnections {
 # ── dtssh host process management ────────────────────────────────────────
 
 function Get-RunningHostProc {
+    $aliasPattern = [regex]::Escape($Alias)
+    $portPattern = [regex]::Escape("$Port")
     Get-CimInstance Win32_Process -Filter "Name='dtssh.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match '\bhost\b' } | Select-Object -First 1
+        Where-Object {
+            $_.CommandLine -match '\bhost\b' -and
+            $_.CommandLine -match "(?:^|\s)--alias(?:\s+|=)`"?$aliasPattern(?:`"|\s|$)" -and
+            $_.CommandLine -match "(?:^|\s)--port(?:\s+|=)`"?$portPattern(?:`"|\s|$)"
+        } | Select-Object -First 1
+}
+
+function Stop-DedicatedSshdTree {
+    param([int]$RootPid)
+
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $byId = @{}
+    $children = @{}
+    foreach ($proc in $processes) { $byId[[int]$proc.ProcessId] = $proc }
+    foreach ($proc in $processes) {
+        $parent = [int]$proc.ParentProcessId
+        $parentProc = $byId[$parent]
+        if ($parentProc -and $proc.CreationDate -lt $parentProc.CreationDate) {
+            continue
+        }
+        if (-not $children.ContainsKey($parent)) { $children[$parent] = @() }
+        $children[$parent] = @($children[$parent]) + $proc
+    }
+
+    $queue = [System.Collections.Generic.Queue[int]]::new()
+    $queue.Enqueue($RootPid)
+    $seen = [System.Collections.Generic.HashSet[int]]::new()
+    $ordered = [System.Collections.Generic.List[int]]::new()
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        if (-not $seen.Add($current)) { continue }
+        $ordered.Add($current)
+        foreach ($child in @($children[$current])) {
+            $queue.Enqueue([int]$child.ProcessId)
+        }
+    }
+
+    for ($i = $ordered.Count - 1; $i -ge 0; $i--) {
+        $targetPid = $ordered[$i]
+        $expected = $byId[$targetPid]
+        $current = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -ErrorAction SilentlyContinue
+        if (-not $expected -or -not $current -or $current.CreationDate -ne $expected.CreationDate) {
+            continue
+        }
+        Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Clear-DedicatedSshd {
@@ -294,8 +341,8 @@ function Clear-DedicatedSshd {
         foreach ($spid in @($listeners.OwningProcess | Sort-Object -Unique | Where-Object { $_ })) {
             $sp = Get-Process -Id $spid -ErrorAction SilentlyContinue
             if ($sp -and $sp.Name -eq 'sshd') {
-                Stop-Process -Id $spid -Force -ErrorAction SilentlyContinue
-                Write-Log "reaped orphaned dedicated sshd (pid $spid) on :$Port"
+                Stop-DedicatedSshdTree $spid
+                Write-Log "reaped dedicated sshd process tree (root pid $spid) on :$Port"
             }
         }
     } catch { Write-Log "sshd reap failed: $_" 'WARN' }

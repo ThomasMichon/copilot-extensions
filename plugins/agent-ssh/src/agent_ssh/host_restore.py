@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 
 def _payload_root() -> Path:
     configured = os.environ.get("COPILOT_PLUGIN_ROOT")
@@ -77,6 +79,7 @@ def _login_status() -> tuple[bool, str]:
             errors="replace",
             timeout=30,
             check=False,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"cannot inspect Dev Tunnel login: {exc}"
@@ -155,6 +158,7 @@ def restore_host(
             errors="replace",
             timeout=900,
             check=False,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         return {
@@ -185,6 +189,7 @@ def restore_host(
                     errors="replace",
                     timeout=120,
                     check=False,
+                    **no_window_kwargs(),
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 return {
