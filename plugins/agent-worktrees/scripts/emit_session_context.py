@@ -14,6 +14,10 @@ from pathlib import Path
 
 
 MAX_CONTEXT_BYTES = 1_600
+DEADLINE_SECONDS = 8.5
+AWAIT_TIMEOUT_SECONDS = 8.0
+MACHINE_TIMEOUT_SECONDS = 4.0
+CONDUCT_TIMEOUT_SECONDS = 6.0
 _DISPLAY_ORDER = (
     "marketplace",
     "binding",
@@ -174,32 +178,37 @@ def main() -> int:
         return 0
 
     scripts = root / "scripts"
-    deadline = time.monotonic() + 3.5
+    deadline = time.monotonic() + DEADLINE_SECONDS
     jobs = {
         "marketplace": (
             scripts / "marketplace-overrides",
             payload,
             ("--await-context",),
-            3.4,
+            AWAIT_TIMEOUT_SECONDS,
         ),
         "binding": (
             scripts / "register-session",
             payload,
             ("--await-context",),
-            3.4,
+            AWAIT_TIMEOUT_SECONDS,
         ),
-        "machine": (scripts / "session-machine", payload, (), 1.0),
+        "machine": (
+            scripts / "session-machine",
+            payload,
+            (),
+            MACHINE_TIMEOUT_SECONDS,
+        ),
         "conduct": (
             scripts / "session-conduct",
             payload,
             ("--aggregate",),
-            2.0,
+            CONDUCT_TIMEOUT_SECONDS,
         ),
         "nudge": (
             scripts / "register-nudge",
             payload,
             ("--await-context",),
-            3.4,
+            AWAIT_TIMEOUT_SECONDS,
         ),
     }
     with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
