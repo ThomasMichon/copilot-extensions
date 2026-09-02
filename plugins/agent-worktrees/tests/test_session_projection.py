@@ -177,6 +177,8 @@ def test_relation_cap_never_evicts_bound_relation():
                 "project": "example",
                 "worktree_id": f"controller-{index:03d}",
                 "role": "controller",
+                "relation_revision": index,
+                "relation_state": "finalized",
             }
             for index in range(session_projection.MAX_RELATIONS)
         ],
@@ -209,6 +211,46 @@ def test_relation_cap_never_evicts_bound_relation():
     merged_extra = session_projection._merge_relation(merged_again, extra)
     assert merged_extra["overflow"] is True
     assert merged_extra["omitted_relations"] == 2
+    retained_ids = {
+        relation["worktree_id"] for relation in merged_extra["relations"]
+    }
+    assert "controller-000" not in retained_ids
+    assert "controller-extra" in retained_ids
+
+
+def test_relations_are_serialized_by_revision_then_identity():
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [
+            {
+                "project": "example",
+                "worktree_id": "later",
+                "role": "controller",
+                "relation_revision": 9,
+            },
+            {
+                "project": "example",
+                "worktree_id": "earlier",
+                "role": "controller",
+                "relation_revision": 2,
+            },
+        ],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    update = {
+        "project": "example",
+        "worktree_id": "middle",
+        "role": "controller",
+        "relation_revision": 5,
+    }
+
+    merged = session_projection._merge_relation(projection, update)
+
+    assert [
+        relation["worktree_id"] for relation in merged["relations"]
+    ] == ["earlier", "middle", "later"]
 
 
 def test_non_object_relation_is_rejected(tmp_path, monkeypatch):

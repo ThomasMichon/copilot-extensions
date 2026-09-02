@@ -168,6 +168,24 @@ def _relation_key(relation: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def _relation_revision(relation: dict[str, Any]) -> int:
+    value = relation.get("relation_revision", 0)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _relation_sort_key(
+    relation: dict[str, Any],
+) -> tuple[int, tuple[str, str, str]]:
+    return (_relation_revision(relation), _relation_key(relation))
+
+
+def _protected_relation(relation: dict[str, Any]) -> bool:
+    if relation.get("role") == "bound":
+        return True
+    state = relation.get("lifecycle_state") or relation.get("relation_state")
+    return state not in {"handed-off", "concluded", "ended", "finalized", "terminal"}
+
+
 def _merge_relation(
     projection: dict[str, Any],
     relation: dict[str, Any],
@@ -194,7 +212,7 @@ def _merge_relation(
         if isinstance(item, dict) and _relation_key(item) != relation_key
     ]
     relations.append(relation)
-    relations.sort(key=_relation_key)
+    relations.sort(key=_relation_sort_key)
     prior_omitted = projection.get("omitted_relations", 0)
     if not isinstance(prior_omitted, int) or prior_omitted < 0:
         prior_omitted = 0
@@ -205,12 +223,23 @@ def _merge_relation(
         else max(prior_omitted, newly_omitted)
     )
     if newly_omitted:
-        protected = [item for item in relations if item.get("role") == "bound"]
-        others = [item for item in relations if item.get("role") != "bound"]
-        protected = protected[:MAX_RELATIONS]
-        remaining = MAX_RELATIONS - len(protected)
-        relations = protected + (others[-remaining:] if remaining else [])
-        relations.sort(key=_relation_key)
+        bound = [item for item in relations if item.get("role") == "bound"]
+        nonterminal = [
+            item for item in relations
+            if item.get("role") != "bound" and _protected_relation(item)
+        ]
+        terminal = [item for item in relations if not _protected_relation(item)]
+        for group in (bound, nonterminal, terminal):
+            group.sort(key=_relation_sort_key)
+        retained = bound[-MAX_RELATIONS:]
+        remaining = MAX_RELATIONS - len(retained)
+        if remaining:
+            retained = retained + nonterminal[-remaining:]
+            remaining = MAX_RELATIONS - len(retained)
+        if remaining:
+            retained = retained + terminal[-remaining:]
+        relations = retained
+        relations.sort(key=_relation_sort_key)
     result = dict(projection)
     result.update({
         "version": SCHEMA_VERSION,
