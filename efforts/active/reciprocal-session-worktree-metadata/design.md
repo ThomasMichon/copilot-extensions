@@ -86,7 +86,8 @@ Illustrative schema:
       }
     }
   ],
-  "overflow": false
+  "overflow": false,
+  "omitted_relations": 0
 }
 ```
 
@@ -100,8 +101,8 @@ The exact schema is a Phase 1 decision, but these constraints are binding:
   nonterminal controller relations win retention; oldest terminal/finalized
   controller relations are evicted by authoritative revision. If protected
   relations alone exceed the cap, the writer sets `overflow: true`, preserves
-  the newest representable subset, and leaves the complete truth in the
-  worktree records.
+  the newest representable subset, records the excluded count in
+  `omitted_relations`, and leaves the complete truth in the worktree records.
 - Raw handoff capabilities, credentials, prompts, transcript text, and
   unrestricted command arguments are never stored.
 - Portable identity is separated from machine-local hints. Absolute paths, PIDs,
