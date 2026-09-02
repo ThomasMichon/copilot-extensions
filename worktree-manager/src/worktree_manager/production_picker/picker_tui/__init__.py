@@ -118,12 +118,10 @@ def run_tui_picker(
     try:
         if redirect:
             sys.__stdout__ = sys.stderr
-        app = PickerApp(
-            source,
-            live=live,
-            mock_mode=mock_mode,
-            after_first_refresh=after_first_refresh,
-        )
+        app_kwargs = {"live": live, "mock_mode": mock_mode}
+        if after_first_refresh is not None:
+            app_kwargs["after_first_refresh"] = after_first_refresh
+        app = PickerApp(source, **app_kwargs)
         from .frame_health import append_launch_event
 
         append_launch_event("textual_app_start", live=live)
