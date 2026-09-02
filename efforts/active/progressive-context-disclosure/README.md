@@ -119,17 +119,17 @@ prompts the primary context channel.
 
 ### Phase 1 - Baseline and representative corpus
 
-- [ ] Inventory every current suite-owned context contributor by owner,
+- [x] Inventory every current suite-owned context contributor by owner,
   purpose, emitted bytes/tokens, volatility, criticality hypothesis, existing
   guide references, and task applicability.
-- [ ] Select a synthetic but representative corpus covering safety policy,
+- [x] Select a synthetic but representative corpus covering safety policy,
   contribution boundaries, continuity, routing, readiness, environment
   grounding, command discovery, and capability-specific procedures.
-- [ ] Define observable tasks that need no guide, exactly one guide, several
+- [x] Define observable tasks that need no guide, exactly one guide, several
   guides, conflicting guidance, and an unavailable or unsafe guide.
-- [ ] Record the current full-inline and current concise-kernel baselines before
+- [x] Record the current full-inline and current concise-kernel baselines before
   testing new deferral variants.
-- [ ] Freeze a counts-only evidence schema and literal-mode rubric before
+- [x] Freeze a counts-only evidence schema and literal-mode rubric before
   running behavioral comparisons.
 
 ### Phase 2 - Deferral and reference experiments
@@ -309,3 +309,21 @@ enforcement before migrating the complete contributor stack.
   complete-stack migration.
 - Next gate: begin Phase 1 under #1615 with the contributor inventory, frozen
   synthetic corpus, baseline, and evidence schema.
+
+### 2026-09-02 - Phase 1 fixture frozen
+
+- Inventoried all 21 declared suite context contributors across 15 plugins from
+  their complete `session-context.json` contracts. Recorded counts-only
+  PowerShell observations from one fixed source-worktree payload, including the
+  two contributors that were legitimately inapplicable in that repository.
+- Froze an eight-owner synthetic corpus and eleven observable tasks under
+  `tools/clean-room/scenarios/progressive-context-disclosure-baseline/`.
+  Synthetic guides carry deterministic high-entropy canary shapes; no private
+  ambient context or raw run output is tracked.
+- Froze the F0-F4 deferral, seven reference-representation, four emphasis, and
+  four assembly axes with three-session primary and second-model replication.
+- Added a counts-only evidence schema and literal-mode rubric. The Tier-P
+  verifier rejects contributor drift, ordinary path escape, task/corpus drift,
+  content-bearing evidence fields, and repeated baseline-render drift.
+- Next gate: land this frozen Phase 1 fixture before implementing or running the
+  Phase 2 behavioral matrix.

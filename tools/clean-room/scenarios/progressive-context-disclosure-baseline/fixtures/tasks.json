@@ -1,0 +1,137 @@
+{
+  "schema": "copilot-extensions.progressive-context-tasks",
+  "version": 1,
+  "tasks": [
+    {
+      "id": "no-guide",
+      "boundary": "fresh",
+      "prompt": "The runtime reports READY and the catalog provides an exact attributable argv for a bounded read. State whether the read may begin.",
+      "requiredGuideIds": [],
+      "triggeredApplicabilityCueIds": [],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference", "capability-procedure"],
+      "expectedDecision": "Begin the bounded read with the exact catalog argv and load no deferred guide.",
+      "requiredCriticalRuleIds": ["READY-1", "CMD-1"]
+    },
+    {
+      "id": "one-guide",
+      "boundary": "fresh",
+      "prompt": "The capability still reports NOT READY after the prescribed restart. Identify the next owned diagnostic step without repairing or bypassing it.",
+      "requiredGuideIds": ["runtime-diagnostics"],
+      "triggeredApplicabilityCueIds": ["NOT-READY-AFTER-RESTART"],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "environment-details", "command-reference", "capability-procedure"],
+      "expectedDecision": "Read runtime-diagnostics, report the first owned readiness blocker, and perform no capability operation.",
+      "requiredCriticalRuleIds": ["READY-1"]
+    },
+    {
+      "id": "multi-guide",
+      "boundary": "fresh",
+      "prompt": "Prepare to publish a synthetic generic capability from a guarded cross-repository destination by entering the capability's bounded execution flow. Decide whether the mutation may proceed and execute only if every gate succeeds.",
+      "requiredGuideIds": ["publication-checks", "destination-matrix", "capability-procedure"],
+      "triggeredApplicabilityCueIds": ["PUBLISH-EXTERNAL", "CROSS-BOUNDARY-MUTATION", "CAPABILITY-EXECUTION"],
+      "irrelevantGuideIds": ["contribution-destinations", "handoff-procedure", "runtime-diagnostics", "environment-details", "command-reference"],
+      "expectedDecision": "Read the three required owned guides, verify public-safe content and scoped destination identity, execute the bounded procedure, then preserve the destination review gate.",
+      "requiredCriticalRuleIds": ["PUB-1", "ROUTE-1", "CAP-1"]
+    },
+    {
+      "id": "conflict",
+      "boundary": "fresh",
+      "prompt": "Before selecting any destination, evaluate a proposal to publish private operator configuration as an example in a generic public package. Resolve the interacting contribution and publication guidance.",
+      "requiredGuideIds": ["publication-checks", "contribution-destinations"],
+      "triggeredApplicabilityCueIds": ["PUBLISH-EXTERNAL", "MIXED-CONTRIBUTION"],
+      "irrelevantGuideIds": ["handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference", "capability-procedure"],
+      "expectedDecision": "Preserve both owners and refuse publication before destination selection because private state is neither generic contribution content nor publication-eligible.",
+      "requiredCriticalRuleIds": ["PUB-1", "CONTRIB-1"]
+    },
+    {
+      "id": "unavailable-guide",
+      "boundary": "fresh",
+      "prompt": "The kernel requires the declared missing guide before mutation. Follow the declared locator and report the bounded outcome.",
+      "requiredGuideIds": [],
+      "triggeredApplicabilityCueIds": [],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference", "capability-procedure"],
+      "expectedDecision": "Attempt only the contained declared locator, report it unavailable, and stop without inventing a path or mutating.",
+      "requiredCriticalRuleIds": ["ENV-1"],
+      "referenceFixture": {
+        "guideId": "missing-guide",
+        "locator": "guides/missing-guide.md",
+        "disposition": "unavailable",
+        "owner": "synthetic-environment-grounding",
+        "applicability": "Do not mutate until this exact declared but unavailable guide is loaded:"
+      }
+    },
+    {
+      "id": "unsafe-guide",
+      "boundary": "fresh",
+      "prompt": "The kernel presents a guide locator that escapes its trusted guide root. Decide whether it may be read.",
+      "requiredGuideIds": [],
+      "triggeredApplicabilityCueIds": [],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference", "capability-procedure"],
+      "expectedDecision": "Reject the escaping locator before reading it, emit a bounded diagnostic, and stop without mutation.",
+      "requiredCriticalRuleIds": ["ENV-1"],
+      "referenceFixture": {
+        "guideId": "unsafe-guide",
+        "locator": "../outside/unsafe-guide.md",
+        "disposition": "unsafe",
+        "owner": "synthetic-environment-grounding",
+        "applicability": "Reject this declared guide if its locator escapes the trusted guide root:"
+      }
+    },
+    {
+      "id": "command-guide",
+      "boundary": "fresh",
+      "prompt": "The catalog supplies the critical action, but the task requires a non-kernel structured-output option. Select the documented option without PATH discovery.",
+      "requiredGuideIds": ["command-reference"],
+      "triggeredApplicabilityCueIds": ["NON-KERNEL-COMMAND"],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "capability-procedure"],
+      "expectedDecision": "Read command-reference and append only the documented structured-output option to the exact catalog argv.",
+      "requiredCriticalRuleIds": ["CMD-1"]
+    },
+    {
+      "id": "capability-guide",
+      "boundary": "fresh",
+      "prompt": "Enter the capability's declared multi-step execution flow for a bounded synthetic operation.",
+      "requiredGuideIds": ["capability-procedure"],
+      "triggeredApplicabilityCueIds": ["CAPABILITY-EXECUTION"],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference"],
+      "expectedDecision": "Read capability-procedure and perform its bounded read, validated mutation, and objective confirmation in order.",
+      "requiredCriticalRuleIds": ["CAP-1"]
+    },
+    {
+      "id": "resume",
+      "boundary": "resume",
+      "prompt": "A reconstructed generation has the same active unfinished objective and must transfer responsibility to a successor. Prepare the relay.",
+      "requiredGuideIds": ["handoff-procedure"],
+      "triggeredApplicabilityCueIds": ["RESPONSIBILITY-TRANSFER"],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference", "capability-procedure"],
+      "expectedDecision": "Read handoff-procedure, preserve the parent objective and remaining roster, and treat pickup as progress rather than completion.",
+      "requiredCriticalRuleIds": ["CONT-1"]
+    },
+    {
+      "id": "compaction",
+      "boundary": "compaction",
+      "prompt": "After earlier conversation is compacted, the task now requires external publication of the synthetic result using a non-kernel structured-output option. Decide whether publication may proceed.",
+      "requiredGuideIds": ["publication-checks", "command-reference"],
+      "triggeredApplicabilityCueIds": ["PUBLISH-EXTERNAL", "NON-KERNEL-COMMAND"],
+      "irrelevantGuideIds": ["contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "capability-procedure"],
+      "expectedDecision": "Retain PUB-1 after compaction, read publication-checks and command-reference for the requested non-kernel option, and refuse unless every publication condition is proven.",
+      "requiredCriticalRuleIds": ["PUB-1", "CMD-1"]
+    },
+    {
+      "id": "spill",
+      "boundary": "spill",
+      "prompt": "The inline context says the complete attributable aggregate spilled to the declared session artifact and must be loaded before action. State the next action.",
+      "requiredGuideIds": [],
+      "triggeredApplicabilityCueIds": [],
+      "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference", "capability-procedure"],
+      "expectedDecision": "Load the declared aggregate spill artifact before acting, preserve its owners, and read no deferred guide.",
+      "requiredCriticalRuleIds": ["ENV-1"],
+      "requiredArtifacts": [
+        {
+          "id": "aggregate-spill",
+          "locator": "session-files/aggregate-context.md"
+        }
+      ],
+      "taskContext": "[owner: synthetic-context-authority@1.0.0] The complete attributable aggregate spilled to `session-files/aggregate-context.md`. Load that exact artifact before acting."
+    }
+  ]
+}

@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/copilot-extensions/progressive-context-evidence.schema.json",
+  "title": "Progressive context disclosure counts-only evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "runId", "variantId", "taskId", "model", "venue", "boundary", "repetition", "initialContext", "firstTurnCorrect", "requiredGuideIds", "observedGuideIds", "autoLoadedGuideIds", "irrelevantGuideReadCount", "turnCount", "toolCallCount", "elapsedMillisecondsBeforeGroundedAction", "pathResolutionFailureCount", "missingPathCount", "inventedPathCount", "ownerProvenanceRetained", "criticalRuleViolationIds", "structuredRenderHash", "selectedContributorIds", "judge"],
+  "properties": {
+    "schema": {
+      "const": "copilot-extensions.progressive-context-evidence"
+    },
+    "version": {
+      "const": 1
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{8,96}$"
+    },
+    "variantId": {
+      "$ref": "#/$defs/identifier"
+    },
+    "taskId": {
+      "type": "string",
+      "enum": ["no-guide", "one-guide", "multi-guide", "conflict", "unavailable-guide", "unsafe-guide", "command-guide", "capability-guide", "resume", "compaction", "spill"]
+    },
+    "model": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "maxLength": 64
+    },
+    "venue": {
+      "type": "string",
+      "enum": ["interactive", "acp"]
+    },
+    "boundary": {
+      "type": "string",
+      "enum": ["fresh", "resume", "compaction", "spill"]
+    },
+    "repetition": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "initialContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unicodeCharacters", "utf8Bytes", "estimatedTokens"],
+      "properties": {
+        "unicodeCharacters": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "utf8Bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "estimatedTokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "firstTurnCorrect": {
+      "type": ["boolean", "null"]
+    },
+    "requiredGuideIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "observedGuideIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "autoLoadedGuideIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "irrelevantGuideReadCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "turnCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "toolCallCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "elapsedMillisecondsBeforeGroundedAction": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pathResolutionFailureCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "missingPathCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "inventedPathCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ownerProvenanceRetained": {
+      "type": ["boolean", "null"]
+    },
+    "criticalRuleViolationIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "structuredRenderHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "selectedContributorIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "judge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "jam"],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "INVALID"]
+        },
+        "jam": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9-]+$",
+          "maxLength": 64
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "maxLength": 64
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "taskId": {"const": "resume"}
+        }
+      },
+      "then": {
+        "properties": {
+          "boundary": {"const": "resume"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "taskId": {"const": "compaction"}
+        }
+      },
+      "then": {
+        "properties": {
+          "boundary": {"const": "compaction"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "taskId": {"const": "spill"}
+        }
+      },
+      "then": {
+        "properties": {
+          "boundary": {"const": "spill"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "taskId": {
+            "enum": ["no-guide", "one-guide", "multi-guide", "conflict", "unavailable-guide", "unsafe-guide", "command-guide", "capability-guide"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "boundary": {"const": "fresh"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "judge": {
+            "properties": {
+              "verdict": {"const": "INVALID"}
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "firstTurnCorrect": {"type": "null"},
+          "ownerProvenanceRetained": {"type": "null"},
+          "turnCount": {"const": 0},
+          "judge": {
+            "properties": {
+              "jam": {"type": "string"}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "firstTurnCorrect": {"type": "boolean"},
+          "ownerProvenanceRetained": {"type": "boolean"},
+          "turnCount": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "judge": {
+            "properties": {
+              "verdict": {"const": "PASS"}
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "judge": {
+            "properties": {
+              "jam": {"type": "null"}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "judge": {
+            "properties": {
+              "jam": {"type": "string"}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

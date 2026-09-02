@@ -1,0 +1,34 @@
+{
+  "schema": "copilot-extensions.progressive-context-experiment",
+  "version": 1,
+  "frozenBeforeBehavioralRuns": true,
+  "baselineIds": ["current-full-inline", "current-concise-kernel"],
+  "taskIds": ["no-guide", "one-guide", "multi-guide", "conflict", "unavailable-guide", "unsafe-guide", "command-guide", "capability-guide", "resume", "compaction", "spill"],
+  "primaryFreshTaskIds": ["no-guide", "one-guide", "multi-guide", "conflict", "unavailable-guide", "unsafe-guide", "command-guide", "capability-guide"],
+  "axes": {
+    "deferralLevel": ["F0", "F1", "F2", "F3", "F4"],
+    "referenceRepresentation": ["markdown-link", "backtick-repository-relative", "backtick-payload-relative", "backtick-absolute-contained", "bare-labeled-path", "html-comment-locator", "structured-reference"],
+    "emphasis": ["optional", "conditional", "imperative", "safety-gated"],
+    "assembly": ["flat-fragments", "flat-with-index", "semantic-zones", "hierarchical-fragments"]
+  },
+  "selectionOrder": [
+    "Tier-P rendering and containment for every variant",
+    "Three fresh calibration sessions for every surviving primary variant and fresh task cell",
+    "Immediate elimination on any critical-rule, required-grounding, path, provenance, or literal-mode failure; transport-invalid runs are rerun and never eliminate a variant",
+    "Median and observed range comparison for non-critical measures",
+    "Three sessions per finalist task on a distinct supported model",
+    "Resume, compaction, and spill boundary confirmation plus the ACP venue for finalists"
+  ],
+  "replication": {
+    "primaryFreshSessionsPerCell": 3,
+    "finalistSessionsPerSecondModel": 3,
+    "aggregate": "unanimous-correctness",
+    "nonCriticalSummary": ["median", "minimum", "maximum"]
+  },
+  "boundaries": ["fresh", "resume", "compaction", "spill"],
+  "venues": ["interactive", "acp"],
+  "independentJudge": "copilot-extensions-harness:clean-room-judge",
+  "behavioralCanaries": "per-run random 192-bit values materialized outside the read-only scenario fixture mount",
+  "literalModeRubric": "../expected.md",
+  "evidenceSchema": "evidence.schema.json"
+}
