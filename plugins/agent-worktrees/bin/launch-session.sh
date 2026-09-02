@@ -432,7 +432,10 @@ start_update_stage
 
 setup_log INFO 'Calling agent_worktrees resolve'
 launch_trace resolve_start
-JSON=$("$PYTHON" -m agent_worktrees resolve "$@")
+resolve_args=(-m agent_worktrees)
+[[ -n "$LAUNCH_PROJECT" ]] && resolve_args+=(--project "$LAUNCH_PROJECT")
+resolve_args+=(resolve "$@")
+JSON=$("$PYTHON" "${resolve_args[@]}")
 RC=$?
 if [[ $RC -ne 0 ]]; then
     setup_log ERROR "agent_worktrees resolve failed (exit $RC)"

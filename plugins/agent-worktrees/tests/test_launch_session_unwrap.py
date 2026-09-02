@@ -100,14 +100,16 @@ def test_powershell_launcher_contains_unwrap():
     assert "$plan = $plan.launch" in text
 
 
-def test_launchers_pass_project_to_post_exit():
-    """Bare resume runs from HOME, so post-exit must carry project context."""
+def test_launchers_pass_project_to_resolve_and_post_exit():
+    """Bare launches run from HOME, so every CLI call must carry project context."""
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
     assert "$script:LaunchProject = $env:WORKTREE_PROJECT" in ps
-    assert "@('--project', $script:LaunchProject)" in ps
+    assert "$resolveArgs += @('--project', $script:LaunchProject)" in ps
+    assert "$postArgs += @('--project', $script:LaunchProject)" in ps
     assert "Invoke-AwPostExit $plan.worktree_id" in ps
     assert 'LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"' in sh
+    assert 'resolve_args+=(--project "$LAUNCH_PROJECT")' in sh
     assert 'post_args+=(--project "$LAUNCH_PROJECT")' in sh
     assert 'run_post_exit "$WORKTREE_ID"' in sh
 
