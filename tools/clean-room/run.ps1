@@ -574,7 +574,10 @@ function Invoke-ContainerPython(
     $encoded = [Convert]::ToBase64String(
         [System.Text.Encoding]::UTF8.GetBytes($Script)
     )
-    $bootstrap = 'import base64,sys;exec(base64.b64decode(sys.argv[1]))'
+    $bootstrap = (
+        'import base64,sys;payload=sys.argv.pop(1);' +
+        'exec(base64.b64decode(payload))'
+    )
     & docker exec $Container python3 -c $bootstrap $encoded @Arguments
 }
 
