@@ -609,15 +609,19 @@ function Invoke-DriveWithTimeout(
     [string]$Agent,
     [string]$PromptFile,
     [int]$TimeoutSec,
-    [string]$Model
+    [string]$Model,
+    [string]$SessionIdPath,
+    [string]$SessionsPath,
+    [string]$SessionResolver
 ) {
     $t0 = Get-Date
     $job = Start-Job -ScriptBlock {
-        param($a, $pf, $model)
+        param($a, $pf, $model, $sessionIdPath)
         $createArgs = @(
             'create', $a, '--prompt-file', $pf, '--expand', 'all', '--no-color'
         )
         if ($model) { $createArgs += @('--model', $model) }
+        $createArgs += @('--session-id-file', $sessionIdPath)
         try {
             $text = (& agent-bridge @createArgs 2>&1 | Out-String)
             $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
@@ -629,7 +633,7 @@ function Invoke-DriveWithTimeout(
             transcript = $text
             exit_code = [int]$exitCode
         }
-    } -ArgumentList $Agent, $PromptFile, $Model
+    } -ArgumentList $Agent, $PromptFile, $Model, $SessionIdPath
     $timedOut = $false
     if ($TimeoutSec -gt 0) {
         if (-not (Wait-Job $job -Timeout $TimeoutSec)) { $timedOut = $true }
@@ -654,24 +658,45 @@ function Invoke-DriveWithTimeout(
         $out += "`n[clean-room] TIMED OUT after ${TimeoutSec}s -- driven agent did not complete its turn.`n"
     }
     Remove-Job $job -Force -ErrorAction SilentlyContinue
+    $afterSessions = (& agent-bridge --json sessions 2>$null | Out-String).Trim()
+    if (-not $afterSessions) { $afterSessions = '[]' }
+    [IO.File]::WriteAllText(
+        $SessionsPath,
+        $afterSessions,
+        [Text.UTF8Encoding]::new($false)
+    )
+    $sessionId = ''
     $usageModel = ''
-    $sessionsJson = (& agent-bridge --json sessions 2>$null | Out-String)
-    if ($sessionsJson.Trim()) {
+    $sessionResolution = 'resolver-unavailable'
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $python) {
+        $python = Get-Command python3 -ErrorAction SilentlyContinue
+    }
+    if ($python -and (Test-Path -LiteralPath $SessionResolver)) {
         try {
-            $usageModel = @(
-                $sessionsJson | ConvertFrom-Json |
-                    Where-Object { $_.agent_name -eq $Agent } |
-                    Sort-Object updated_at -Descending
-            )[0].usage_model
+            $resolvedText = (& $python.Source $SessionResolver `
+                --session-id-file $SessionIdPath `
+                --sessions $SessionsPath `
+                --agent $Agent | Out-String).Trim()
+            $resolved = $resolvedText | ConvertFrom-Json
+            $sessionId = [string]$resolved.session_id
+            $usageModel = [string]$resolved.model
+            $sessionResolution = [string]$resolved.reason
         } catch {
+            $sessionId = ''
             $usageModel = ''
+            $sessionResolution = 'resolver-failed'
         }
     }
+    Remove-Item -Force -ErrorAction SilentlyContinue `
+        $SessionIdPath, $SessionsPath
     return @{
         transcript = $out
         duration_s = [int]((Get-Date) - $t0).TotalSeconds
         timed_out = $timedOut
         exit_code = $exitCode
+        session_id = $sessionId
+        session_resolution = $sessionResolution
         model = [string]$usageModel
     }
 }
@@ -963,6 +988,7 @@ print(digest.hexdigest()[:16])
     Remove-Item -Force -ErrorAction SilentlyContinue `
         (Join-Path $evalDir 'drive-runs.json')
     $runRecords = @()
+    $sessionResolver = Join-Path $Here 'resolve_drive_session.py'
     for ($n = 1; $n -le $runCount; $n++) {
         $runDir = if ($runCount -eq 1) { $evalDir } else { $d = Join-Path $evalDir "run-$n"; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d }
         $transcriptPath = Join-Path $runDir 'transcript.txt'
@@ -973,19 +999,26 @@ print(digest.hexdigest()[:16])
             $transcriptPath, $structuredPath, $turnPath, $turnsPath
         Write-Host "   -- run $n/$runCount --" -ForegroundColor DarkGray
         Invoke-EndAgentSessions $DriveAgent
-        $drv = Invoke-DriveWithTimeout `
-            $DriveAgent $promptTxt $perTurnTimeout $acpModel
+        $provenanceDir = Join-Path (
+            [IO.Path]::GetTempPath()
+        ) ("clean-room-drive-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Force -Path $provenanceDir | Out-Null
+        $sessionIdPath = Join-Path $provenanceDir 'created-session-id'
+        $sessionsPath = Join-Path $provenanceDir 'sessions.json'
+        try {
+            $drv = Invoke-DriveWithTimeout `
+                $DriveAgent $promptTxt $perTurnTimeout $acpModel `
+                $sessionIdPath $sessionsPath $sessionResolver
+        }
+        finally {
+            Remove-Item -LiteralPath $provenanceDir -Recurse -Force `
+                -ErrorAction SilentlyContinue
+        }
         Set-Content -Path $transcriptPath -Value $drv.transcript -Encoding utf8
         $turnEvidence = [System.Collections.Generic.List[string]]::new()
         try {
-            $sessionRows = (& agent-bridge --json sessions 2>$null | Out-String |
-                ConvertFrom-Json)
-            $sessionRow = @($sessionRows) |
-                Where-Object { $_.agent_name -eq $DriveAgent } |
-                Sort-Object updated_at -Descending |
-                Select-Object -First 1
-            if ($sessionRow -and $sessionRow.session_id) {
-                $snapshotText = (& agent-bridge --json result $sessionRow.session_id 2>$null |
+            if ($drv.session_id) {
+                $snapshotText = (& agent-bridge --json result $drv.session_id 2>$null |
                     Out-String).Trim()
                 if ($snapshotText) {
                     Set-Content -Path $structuredPath -Value $snapshotText -Encoding utf8
@@ -994,7 +1027,7 @@ print(digest.hexdigest()[:16])
                     $seenTurnRefs = @{}
                     if ($detailRef) {
                         $latestDetailText = (& agent-bridge --json result `
-                            $sessionRow.session_id --expand $detailRef 2>$null |
+                            $drv.session_id --expand $detailRef 2>$null |
                             Out-String).Trim()
                         if ($latestDetailText) {
                             Set-Content -Path $turnPath `
@@ -1016,7 +1049,7 @@ print(digest.hexdigest()[:16])
                         }
                         try {
                             $detailText = (& agent-bridge --json result `
-                                $sessionRow.session_id `
+                                $drv.session_id `
                                 --expand $item.detail_ref 2>$null |
                                 Out-String).Trim()
                             if (-not $detailText) { continue }
@@ -1054,11 +1087,16 @@ print(digest.hexdigest()[:16])
             duration_s = $drv.duration_s
             timed_out  = $drv.timed_out
             exit_code  = $drv.exit_code
+            session_id = if ($drv.session_id) { $drv.session_id } else { $null }
+            session_resolution = $drv.session_resolution
             model      = $drv.model
         }
         $tag = if ($drv.timed_out) { " -- TIMED OUT" } else { '' }
         if ($drv.exit_code -ne 0) { $tag += " -- EXIT $($drv.exit_code)" }
         if ($drv.model) { $tag += " -- MODEL $($drv.model)" }
+        if ($drv.session_resolution -ne 'resolved') {
+            $tag += " -- SESSION $($drv.session_resolution)"
+        }
         $col = if ($drv.timed_out) { 'Yellow' } else { 'DarkGray' }
         Write-Host "      transcript -> $transcriptPath  ($($drv.duration_s)s)$tag" -ForegroundColor $col
     }

@@ -193,6 +193,12 @@ configuration for that fresh session and records `requested_model` in
 `eval-run.json`. A transcript that reports a model fallback is transport-invalid
 evidence, not proof of a second-model replication.
 
+Each drive also passes `agent-bridge create --session-id-file` and resolves
+`usage_model` plus structured results only from that exact create-owned session.
+Missing, malformed, absent, or duplicate session provenance is transport
+`INVALID`; the runner never chooses the newest same-agent session from a broad
+listing.
+
 The optional invalid-evidence pair names a scenario-local Python writer and a
 contained results-relative output. On setup-gate, ACP registration,
 fingerprinting, driver-exit, timeout, or model-selection failure, the runner or
@@ -285,7 +291,7 @@ adding an `eval/` subtree and a sibling **`cr-eval.json`**:
     ├── prompt.txt         # the exact seed (literal-mode framing + stated purpose)
     ├── transcript.txt     # human-readable driven-agent transcript
     ├── turns.jsonl        # structured per-turn record (tool calls, outputs) when available
-    ├── drive-runs.json    # per-run exit code, timeout, duration, and applied model
+    ├── drive-runs.json    # per-run create-owned session, exit, timeout, duration, model
     ├── structured-result.json # agent-bridge bounded result snapshot when available
     ├── turn-detail.json   # expanded structured latest turn (prompt + exact tool calls)
     ├── literal-mode.txt   # the exact injected instruction block

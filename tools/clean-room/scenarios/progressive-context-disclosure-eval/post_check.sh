@@ -31,6 +31,7 @@ count = value["transcriptCount"]
 timed_out = value["timedOut"]
 fallbacks = value["modelFallbackMarkerCount"]
 exit_code = value["driverExitCode"]
+session_resolution = value["sessionResolution"]
 requested = value["requestedModel"]
 actual = value["actualModel"]
 if (
@@ -38,13 +39,14 @@ if (
     or not isinstance(timed_out, bool)
     or not isinstance(fallbacks, int)
     or not isinstance(exit_code, int)
+    or not isinstance(session_resolution, str)
     or not isinstance(requested, str)
     or not isinstance(actual, str)
 ):
     raise SystemExit(1)
 print(
     f"{count}\t{str(timed_out).lower()}\t{fallbacks}\t"
-    f"{exit_code}\t{requested}\t{actual}"
+    f"{exit_code}\t{session_resolution}\t{requested}\t{actual}"
 )
 PY
     )"
@@ -54,16 +56,18 @@ PY
         timed_out=true
         model_fallbacks=0
         driver_exit=127
+        session_resolution="resolver-failed"
         requested_model=""
         actual_model=""
     else
         IFS=$'\t' read -r \
             transcript_count timed_out model_fallbacks driver_exit \
-            requested_model actual_model \
+            session_resolution requested_model actual_model \
             <<<"$observation_values"
     fi
     if [ "$transcript_count" -eq 0 ] || [ "$timed_out" = true ] ||
         [ "$model_fallbacks" -gt 0 ] || [ "$driver_exit" -ne 0 ] ||
+        [ "$session_resolution" != resolved ] ||
         [ -z "$actual_model" ] ||
         { [ "$requested_model" != auto ] &&
           [ "$actual_model" != "$requested_model" ]; }; then

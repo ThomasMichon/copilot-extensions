@@ -119,7 +119,16 @@ blocks, and tool call summaries.
 # ...or read the first prompt from a file (or '-' for stdin) -- robust for
 # multi-line / quote-heavy dispatch prompts (no argv mangling)
 <agent-bridge catalog argv[0]> create <agent-name> --prompt-file ./dispatch.md --no-wait
+
+# Orchestration seam: atomically capture the exact session this create owns
+<agent-bridge catalog argv[0]> create <agent-name> --prompt-file ./dispatch.md \
+  --session-id-file ./created-session-id
 ```
+
+`--session-id-file` is written immediately after the fresh session is created
+and before the first prompt is streamed. Use it when a caller must bind later
+status, model, or result reads to this exact create rather than selecting a
+same-agent session from a broad listing.
 
 `create` always spawns a fresh session, bypassing caller reuse. For agents
 that allow only **one session at a time** — CodeSpaces share a single

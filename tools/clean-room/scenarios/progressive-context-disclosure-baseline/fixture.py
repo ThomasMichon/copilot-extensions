@@ -1259,6 +1259,7 @@ def observation(
     timed_out = "[clean-room] TIMED OUT" in text
     driver_exit_code: int | None = None
     actual_model = ""
+    session_resolution = ""
     drive_runs = results / "eval" / "drive-runs.json"
     if drive_runs.is_file():
         runs = json.loads(drive_runs.read_text(encoding="utf-8"))
@@ -1271,6 +1272,9 @@ def observation(
                 model = current.get("model")
                 if isinstance(model, str):
                     actual_model = model
+                resolution = current.get("session_resolution")
+                if isinstance(resolution, str):
+                    session_resolution = resolution
     value = {
         "schema": "copilot-extensions.progressive-context-observation",
         "version": 1,
@@ -1296,6 +1300,7 @@ def observation(
             )
         ),
         "driverExitCode": driver_exit_code,
+        "sessionResolution": session_resolution,
         "requestedModel": run_metadata["model"],
         "actualModel": actual_model,
         "timedOut": timed_out,
@@ -1463,6 +1468,8 @@ def evidence_record(
     if verdict == "PASS":
         if observed_run["driverExitCode"] != 0:
             raise ValueError("PASS evidence requires a successful ACP driver")
+        if observed_run["sessionResolution"] != "resolved":
+            raise ValueError("PASS evidence requires exact ACP session provenance")
         if not actual_model:
             raise ValueError("PASS evidence requires an observed ACP model")
         if requested_model != "auto" and actual_model != requested_model:

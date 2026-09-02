@@ -3150,6 +3150,22 @@ def _cmd_create(args: argparse.Namespace) -> None:
         )
         sys.exit(1)
 
+    session_id_file = getattr(args, "session_id_file", None)
+    if session_id_file:
+        try:
+            _write_session_id_file(session_id_file, session_id)
+        except OSError as exc:
+            try:
+                client.end_session(session_id, force=True)
+            except Exception:
+                pass
+            print(
+                f"[FAIL] Could not write --session-id-file "
+                f"{session_id_file!r}: {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     prompt = _resolve_prompt(args, required=False)
     if not prompt:
         ident = _connection_identity(client, session_id)
@@ -3164,6 +3180,23 @@ def _cmd_create(args: argparse.Namespace) -> None:
         return
 
     _submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
+
+
+def _write_session_id_file(path_value: str, session_id: str) -> None:
+    """Atomically publish the exact session created by this CLI process."""
+    from pathlib import Path
+
+    path = Path(path_value).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(session_id + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
 
 
 def _mark_resume_if_behind(
@@ -5156,6 +5189,12 @@ def build_parser() -> argparse.ArgumentParser:
              "--model in ACP mode, so the bridge applies it per-session via "
              "session/set_config_option, at highest precedence over the daemon "
              "default. Omit to keep the daemon's default model.",
+    )
+    create_p.add_argument(
+        "--session-id-file", dest="session_id_file", default=None,
+        metavar="PATH",
+        help="Atomically write this process's exact created session id before "
+             "streaming the first turn.",
     )
     create_p.add_argument(
         "--effort", dest="effort", default=None, metavar="EFFORT",

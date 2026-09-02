@@ -309,6 +309,8 @@ def test_clean_room_runner_binds_requested_acp_model() -> None:
         assert "requested_model" in source
         assert "drive-runs.json" in source
         assert "exit_code" in source
+        assert "session_resolution" in source
+        assert "resolve_drive_session.py" in source
         assert "invalid_evidence_writer" in source
     assert "??" not in powershell
     assert 'docker ps -aq --filter "name=^/${Container}$"' in powershell
@@ -316,6 +318,8 @@ def test_clean_room_runner_binds_requested_acp_model() -> None:
     assert "payload=sys.argv.pop(1)" in powershell
     assert "base64.b64decode(v).decode()" in powershell
     assert "$script:ContainerPythonSucceeded" in powershell
+    assert "[IO.Path]::GetTempPath()" in powershell
+    assert "clean-room-drive.XXXXXX" in shell
 
 
 def test_evidence_separates_eager_loading_and_validates_invalid_records(
@@ -360,6 +364,8 @@ def test_evidence_separates_eager_loading_and_validates_invalid_records(
                     "duration_s": 1,
                     "timed_out": False,
                     "exit_code": 0,
+                    "session_id": "session-new",
+                    "session_resolution": "resolved",
                     "model": "calibration-model",
                 }
             ]

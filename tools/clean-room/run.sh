@@ -399,10 +399,12 @@ _timeout_bin() { command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/nu
 # so a hung agent is a FAIL, not an infinite wait. Echoes the transcript; sets
 # DRIVE_TIMED_OUT (0/1), DRIVE_DURATION (seconds), DRIVE_EXIT_CODE, and
 # DRIVE_MODEL (the bridge session's recorded usage_model).
-drive_with_timeout() {  # <agent> <prompt_file> <timeout_sec> [model]
-    local agent="$1" pf="$2" tmo="$3" model="${4:-}" t0 out rc tb
+drive_with_timeout() {  # <agent> <prompt> <timeout> <model> <sid-file> <sessions> <resolver>
+    local agent="$1" pf="$2" tmo="$3" model="${4:-}"
+    local session_id_file="$5" sessions="$6" resolver="$7" t0 out rc tb
     local cmd=(agent-bridge create "$agent" --prompt-file "$pf" --expand all --no-color)
     [ -z "$model" ] || cmd+=(--model "$model")
+    cmd+=(--session-id-file "$session_id_file")
     t0=$(date +%s); DRIVE_TIMED_OUT=0; tb="$(_timeout_bin)"
     if [ "${tmo:-0}" -gt 0 ] 2>/dev/null && [ -n "$tb" ]; then
         out="$("$tb" "${tmo}s" "${cmd[@]}" 2>&1)"; rc=$?
@@ -414,25 +416,18 @@ drive_with_timeout() {  # <agent> <prompt_file> <timeout_sec> [model]
         out="$("${cmd[@]}" 2>&1)"; rc=$?
     fi
     DRIVE_EXIT_CODE="$rc"
-    DRIVE_MODEL="$(
-        agent-bridge --json sessions 2>/dev/null |
-            "$(_py)" -c '
-import json
-import sys
-
-agent = sys.argv[1]
-try:
-    sessions = json.load(sys.stdin)
-except Exception:
-    sessions = []
-matches = [
-    session for session in sessions
-    if session.get("agent_name") == agent
-]
-matches.sort(key=lambda session: str(session.get("updated_at") or ""), reverse=True)
-print(str(matches[0].get("usage_model") or "") if matches else "")
-' "$agent"
-    )" || DRIVE_MODEL=""
+    agent-bridge --json sessions >"$sessions" 2>/dev/null ||
+        printf '[]' >"$sessions"
+    local resolved
+    resolved="$(
+        "$(_py)" "$resolver" \
+            --session-id-file "$session_id_file" \
+            --sessions "$sessions" --agent "$agent" --format pipe \
+            2>/dev/null
+    )" || resolved="||resolver-failed"
+    IFS='|' read -r DRIVE_SESSION_ID DRIVE_MODEL DRIVE_SESSION_RESOLUTION \
+        <<<"$resolved"
+    rm -f "$session_id_file" "$sessions"
     DRIVE_DURATION=$(( $(date +%s) - t0 ))
     printf '%s' "$out"
 }
@@ -691,6 +686,7 @@ print(digest.hexdigest()[:16])
     echo "== eval: driving '$DRIVE_AGENT' x$RUN_COUNT (fresh session; literal-mode + stated purpose) =="
     [ "${PER_TURN:-0}" -gt 0 ] 2>/dev/null && echo "   per-turn timeout: ${PER_TURN}s"
     local prompt_txt="$eval_dir/prompt.txt" recs="$eval_dir/.runrecords"
+    local session_resolver="$HERE/resolve_drive_session.py"
     : > "$recs"
     rm -f \
         "$eval_dir/transcript.txt" \
@@ -717,20 +713,22 @@ print(digest.hexdigest()[:16])
         rm -f "$transcript" "$structured" "$turn_detail" "$turns_jsonl"
         echo "   -- run $n/$RUN_COUNT --"
         end_agent_sessions "$DRIVE_AGENT"
+        local provenance_dir
+        provenance_dir="$(
+            mktemp -d "${TMPDIR:-/tmp}/clean-room-drive.XXXXXX"
+        )" || {
+            echo "eval: could not create host-only provenance directory" >&2
+            return 1
+        }
+        local session_id_file="$provenance_dir/created-session-id"
+        local sessions_file="$provenance_dir/sessions.json"
         drive_with_timeout \
             "$DRIVE_AGENT" "$prompt_txt" "${PER_TURN:-0}" "$ACP_MODEL" \
+            "$session_id_file" "$sessions_file" "$session_resolver" \
             > "$transcript"
+        rm -rf -- "$provenance_dir"
         local session_id detail_ref
-        session_id="$(
-            agent-bridge --json sessions 2>/dev/null |
-            "$(_py)" -c 'import json,sys
-agent=sys.argv[1]
-try: rows=json.load(sys.stdin)
-except Exception: rows=[]
-matches=[row for row in rows if row.get("agent_name")==agent]
-matches.sort(key=lambda row: str(row.get("updated_at") or ""), reverse=True)
-print(matches[0].get("session_id","") if matches else "", end="")' "$DRIVE_AGENT"
-        )"
+        session_id="$DRIVE_SESSION_ID"
         if [ -n "$session_id" ] &&
            agent-bridge --json result "$session_id" >"$structured" 2>/dev/null; then
             : >"$turns_jsonl"
@@ -776,13 +774,16 @@ for item in ((value.get("incremental") or {}).get("items") or []):
         [ -f "$structured" ] && structured_rel="${structured#"$RESULTS"/}"
         [ -f "$turn_detail" ] && turn_rel="${turn_detail#"$RESULTS"/}"
         [ -f "$turns_jsonl" ] && turns_rel="${turns_jsonl#"$RESULTS"/}"
-        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
             "$n" "$rel" "$DRIVE_DURATION" "$DRIVE_TIMED_OUT" \
             "$DRIVE_EXIT_CODE" "$DRIVE_MODEL" \
+            "$DRIVE_SESSION_ID" "$DRIVE_SESSION_RESOLUTION" \
             "$structured_rel" "$turn_rel" "$turns_rel" >> "$recs"
         tag=""; [ "$DRIVE_TIMED_OUT" = 1 ] && tag=" -- TIMED OUT"
         [ "$DRIVE_EXIT_CODE" = 0 ] || tag="$tag -- EXIT $DRIVE_EXIT_CODE"
         [ -z "$DRIVE_MODEL" ] || tag="$tag -- MODEL $DRIVE_MODEL"
+        [ "$DRIVE_SESSION_RESOLUTION" = resolved ] ||
+            tag="$tag -- SESSION $DRIVE_SESSION_RESOLUTION"
         echo "      transcript -> $transcript  (${DRIVE_DURATION}s)$tag"
     done
 
@@ -797,6 +798,7 @@ for line in open(sys.argv[1], encoding="utf-8"):
         continue
     (
         n, transcript, duration, timed_out, exit_code, model,
+        session_id, session_resolution,
         structured_result, turn_detail, turns,
     ) = line.split("|")
     runs.append({
@@ -806,6 +808,8 @@ for line in open(sys.argv[1], encoding="utf-8"):
         "timed_out": timed_out == "1",
         "exit_code": int(exit_code),
         "model": model,
+        "session_id": session_id or None,
+        "session_resolution": session_resolution,
         "structured_result": structured_result or None,
         "turn_detail": turn_detail or None,
         "turns": turns or None,
@@ -846,6 +850,7 @@ if os.path.exists(recs_path):
             continue
         (
             n, transcript, dur, timed, exit_code, model,
+            session_id, session_resolution,
             structured, turn_detail, turns,
         ) = line.split("|")
         runs.append({
@@ -855,6 +860,8 @@ if os.path.exists(recs_path):
             "turns": turns or None,
             "duration_s": int(dur), "timed_out": timed == "1",
             "exit_code": int(exit_code), "model": model,
+            "session_id": session_id or None,
+            "session_resolution": session_resolution,
         })
 e = os.environ
 tierp = e["CR_TIERP"]
