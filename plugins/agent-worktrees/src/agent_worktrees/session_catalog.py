@@ -340,7 +340,8 @@ class ResidentSessionReconciler:
                         )],
                     )
                     self._insert_session(record.sessions, entry)
-                    tracking._next_lifecycle_revision(record)
+                    tracking._next_lifecycle_revision(
+                        record, observation["session_id"])
                     result["registered"] = 1
                     changed = True
                 else:
@@ -358,7 +359,8 @@ class ResidentSessionReconciler:
                             source="reconciled",
                         )
                         if activation_added:
-                            tracking._next_lifecycle_revision(record)
+                            tracking._next_lifecycle_revision(
+                                record, observation["session_id"])
                         result["pids"] = 1
                         changed = True
                 if (protected_head is not None

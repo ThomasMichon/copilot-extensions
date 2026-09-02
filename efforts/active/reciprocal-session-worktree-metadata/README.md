@@ -4,12 +4,13 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase worktrees landed serially to `main`
 - **Created:** 2026-09-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** vision-extending for
   [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
   - reciprocal session projections and controller-aware recovery
 - **Umbrella issue:** [#1635](https://github.com/ThomasMichon/copilot-extensions/issues/1635)
-- **Sub-issues:** _To be carved by implementation phase._
+- **Sub-issues:** [#1643](https://github.com/ThomasMichon/copilot-extensions/issues/1643)
+  (bound-session projection core)
 
 ## Guiding Intent
 
@@ -85,24 +86,25 @@ Public-safe transcription of the operator request:
 ## Plan
 
 ### Phase 1 - Intent, vocabulary, and ownership
-- [ ] Land the vision extension defining reciprocal session projections and
+- [x] Land the vision extension defining reciprocal session projections and
       controller relationships as distinct from session binding.
-- [ ] Extend the session-state-access pattern with exact-ID projection reads,
+- [x] Extend the session-state-access pattern with exact-ID projection reads,
       bounded projection writes, and restored-state trust rules.
-- [ ] Finalize the schema and invariants in [`design.md`](design.md), including
+- [x] Finalize the schema and invariants in [`design.md`](design.md), including
       authority, cardinality, revision, privacy, and size limits.
-- [ ] Select the stable project identity used in synchronized projections and
+- [x] Select the stable project identity used in synchronized projections and
       define cross-machine/session collision semantics before implementation.
 
 ### Phase 2 - Projection writer and lifecycle coverage
-- [ ] Add one atomic writer for the versioned session-state projection.
-- [ ] Update projections at session register/bind/end, head transitions,
-      handoff open/link/conclusion, and controller assignment changes.
-- [ ] Preserve fail-open behavior: a projection write failure must not block
+- [x] Add one atomic writer for the versioned session-state projection.
+- [x] Update bound-session projections at session register/bind/end, head
+      transitions, and handoff open/link/conclusion.
+- [ ] Update projections for controller assignment changes in Phase 3.
+- [x] Preserve fail-open behavior: a projection write failure must not block
       session launch, handoff, source-control, or worktree lifecycle.
 - [ ] Refuse writes into session trees identified as restored/foreign until
       current local session provenance is established.
-- [ ] Never merge down or replace an unsupported newer projection schema.
+- [x] Never merge down or replace an unsupported newer projection schema.
 - [ ] Add POSIX and Windows containment, permissions, symlink/reparse, and
       atomic-replacement tests, including case-folding, extended paths, and
       short-name aliases.
@@ -220,3 +222,14 @@ Adopt the authority and schema model in [`design.md`](design.md):
   subtree to a dedicated session-root sidecar, keyed lineage per worktree
   relation, made restored-state refusal and newer-schema preservation writer
   invariants, and added explicit agent-logger/agent-containers integration.
+- The reviewed design landed through #1638. Phase 1 is complete and the effort
+  is Active; implementation begins with the bounded projection writer and
+  bound-session lifecycle wiring.
+- Opened #1643 and implemented its initial projection core: exact-session
+  containment, a dedicated cross-process sidecar lock, external atomic staging,
+  deterministic bounded JSON, semantic no-op suppression, newer-schema refusal,
+  fail-open lifecycle flushing, and bound-session handoff lineage.
+- Focused review replaced worktree-global projection fan-out with per-session
+  relation revisions and narrow dirty sets, made stale-writer ordering
+  monotonic, preserved overflow evidence, bounded every read, rebuilt corrupt
+  same-version projections, and covered non-head handoff predecessors.

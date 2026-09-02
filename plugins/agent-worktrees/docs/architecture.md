@@ -309,6 +309,10 @@ integers allocated under the record lock determine ordering:
   asserted act, never inferred from liveness.**
 - **`SessionEntry.successor` / `predecessor`** — the durable **two-way chain**, so
   the lineage of sessions in a worktree is traversable in both directions.
+- **`SessionEntry.relation_revision`** — the last lifecycle revision that
+  changed this session's own binding, conclusion, head role, or lineage. It lets
+  reciprocal session projections reject stale out-of-order writers without
+  rewriting every historical session whenever an unrelated relation changes.
 - **`handoffs[]` / `handoff_counter`** — an incrementing ledger of handoff
   intents. Each entry has a stable external token, one predecessor, and an
   eventual exact successor. A new session can claim only the token it was given;
@@ -355,6 +359,30 @@ sessionStart. It resolves by payload cwd, then by exact previously registered
 session id across projects, and closes the latest open activation interval. It
 does **not** conclude the session or move the head: an exited session remains
 resumable until an explicit lifecycle transition says otherwise.
+
+### Reciprocal bound-session projection
+
+Each session with a changed bound relation receives a versioned
+`agent-worktrees.json` sidecar in its exact Copilot session-state directory.
+The sidecar is a **rebuildable projection**, not another lifecycle authority. It
+contains the project/worktree identity, per-session relation revision, asserted
+lifecycle state, head role/revision, and predecessor/successor lineage already
+owned by the worktree record.
+
+Lifecycle changes mark only the sessions whose relation changed. After the
+authoritative YAML record is persisted, `save_record` flushes those exact
+session IDs through a sidecar-scoped cross-process lock and atomic replacement.
+An unrelated historical session is not rewritten when another session starts
+or hands off, which keeps hook cost and synchronized-session churn bounded by
+the changed relations rather than by worktree age.
+
+Projection persistence is fail-open: a missing session directory, unsafe
+link/reparse target, restored rescue marker, corrupt path, lock failure, or I/O
+error cannot roll back the authoritative lifecycle operation. Corrupt
+same-version JSON can be rebuilt from the record; an unsupported newer schema
+is preserved untouched. Reads are capped before allocation, writes are
+deterministic and skip semantic no-ops, POSIX files are private, and temporary
+staging lives outside synchronized session directories.
 
 Beyond the head bookkeeping, `register_session` also **re-seeds this session's
 mux status-bar updater** (`_spawn_status_updater` → a detached
