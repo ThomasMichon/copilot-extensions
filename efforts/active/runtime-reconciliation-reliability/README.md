@@ -143,3 +143,14 @@ suite is green.
   cryptography source build whose OpenSSL dependency could not build. Moved
   Paramiko to a `provider-exec` extra and made both installers fall back to the
   base CLI while retaining a redacted, bounded package-manager tail.
+
+### 2026-09-02 — Deployment follow-up
+
+- The first post-merge unified update proved the Agent Containers fallback and
+  advanced its active runtime to `0.1.2-dev109`.
+- The repaired provenance handoff allowed Agent Machines to install, but the
+  next preview still reported `runtime-missing`: reconciliation had mistaken
+  the receipt's plugin cell for an activated runtime root. Kept the receipt as
+  mutation authority while restoring version comparison against the
+  authoritative legacy runtime until explicit cell migration publishes an
+  activation.

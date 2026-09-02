@@ -165,8 +165,8 @@ def _home() -> Path:
 
 
 def _same_path(left: Path, right: Path) -> bool:
-    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
-        os.path.abspath(right)
+    return os.path.normcase(os.path.realpath(left)) == os.path.normcase(
+        os.path.realpath(right)
     )
 
 
@@ -1239,7 +1239,7 @@ def build_plan(
             scope, name, machine, gate, gate_present=gate_present
         ):
             try:
-                candidate = runtime_installation_candidate(name, pdir)
+                runtime_installation_candidate(name, pdir)
             except ValueError as error:
                 diagnostics.append({
                     "service": name,
@@ -1248,21 +1248,11 @@ def build_plan(
                     "message": str(error),
                 })
                 continue
-            if candidate is not None:
-                _receipt, selected_root = candidate
-                context_selected = True
-            else:
-                selected_root = runtime_dir(name)
-                context_selected = False
-            rdep = runtime_deployed_version(
-                name,
-                root=selected_root if context_selected else None,
-            )
-            rrun = (
-                None
-                if context_selected
-                else runtime_running_version(name)
-            )
+            # A receipt authorizes the legacy installer; it does not activate
+            # the installation cell. Until explicit migration publishes an
+            # activation, the conventional runtime remains authoritative.
+            rdep = runtime_deployed_version(name)
+            rrun = runtime_running_version(name)
             # Prefer the *running* version when a live service reports one, so a
             # daemon that lags its installed plugin is healed even though the
             # on-disk manifest already matches the payload (dotfiles #533). No

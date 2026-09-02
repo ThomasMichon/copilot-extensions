@@ -13362,12 +13362,10 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
         return "payload-only"
 
     try:
-        candidate = reconcile.runtime_installation_candidate(
-            name, pdir
-        )
+        reconcile.runtime_installation_candidate(name, pdir)
     except ValueError as error:
         return f"installation context invalid: {error}"
-    runtime_root = candidate[1] if candidate is not None else reconcile.runtime_dir(name)
+    runtime_root = reconcile.runtime_dir(name)
     pver = reconcile.payload_version(pdir)
     dver = reconcile.runtime_deployed_version(name, root=runtime_root)
     if not force and pver and dver and reconcile._versions_equal(dver, pver):
