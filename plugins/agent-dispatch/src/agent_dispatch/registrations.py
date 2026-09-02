@@ -59,6 +59,58 @@ class RegistrationError(ValueError):
     """Raised when a registration's kind or spec is malformed."""
 
 
+def _validate_disposable_cli_labels(spec: dict) -> None:
+    values = spec.get("disposable_cli_labels")
+    if values is None:
+        return
+    if not isinstance(values, list) or not values or not all(
+        isinstance(value, str) and value for value in values
+    ):
+        raise RegistrationError(
+            "'disposable_cli_labels' must be a non-empty list of labels"
+        )
+    labels = spec.get("labels") or []
+    if not isinstance(labels, list) or not all(
+        isinstance(value, str) and value for value in labels
+    ):
+        raise RegistrationError(
+            "a disposable CLI policy requires a valid 'labels' list"
+        )
+    watched = set(labels)
+    disposable = set(values)
+    if stray := disposable - watched:
+        raise RegistrationError(
+            f"disposable CLI labels {sorted(stray)} are not watched by this lane"
+        )
+
+    fleet = spec.get("fleet") or {}
+    if not isinstance(fleet, dict):
+        raise RegistrationError("'fleet' must be a JSON object")
+    if fleet.get("pool"):
+        raise RegistrationError(
+            "disposable CLI conclusion is supported only for local worker bodies"
+        )
+    backend = spec.get("embody_backend") or "headless"
+    headless_labels = spec.get("headless_labels") or []
+    cli_overrides = spec.get("cli_labels") or []
+    for key, routed in (
+        ("headless_labels", headless_labels),
+        ("cli_labels", cli_overrides),
+    ):
+        if not isinstance(routed, list) or not all(
+            isinstance(value, str) and value for value in routed
+        ):
+            raise RegistrationError(f"'{key}' must be a list of labels")
+    if backend == "cli":
+        cli_labels = watched - set(headless_labels)
+    else:
+        cli_labels = set(cli_overrides)
+    if non_cli := disposable - cli_labels:
+        raise RegistrationError(
+            f"disposable CLI labels {sorted(non_cli)} are not routed to CLI bodies"
+        )
+
+
 def _schedule_entry(spec: dict, *, strict: bool) -> dict:
     """The single schedule entry a schedule registration carries.
 
@@ -124,6 +176,7 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "supervised-lane registration needs a 'repo' (the lane) or "
                 "'all_repos': true"
             )
+        _validate_disposable_cli_labels(spec)
     elif kind == RegistrationKind.SCHEDULE:
         # A schedule is a self-run emitter: it needs an id (its dedup namespace,
         # 'sched:<id>:<epoch>') and a lane to emit into.
@@ -169,6 +222,7 @@ def validate_registration(kind: str, spec: dict) -> None:
             raise RegistrationError(
                 "evaluator 'evaluator_ref' must be a non-empty string"
             )
+        _validate_disposable_cli_labels(spec)
 
 
 def _scope_key(kind: str, spec: dict) -> str:

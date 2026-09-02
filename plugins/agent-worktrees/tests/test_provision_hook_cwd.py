@@ -22,6 +22,11 @@ def test_every_hook_leaves_payload_cwd_before_running_script():
     for hook in _hooks():
         powershell = str(hook["powershell"])
         bash = str(hook["bash"])
+        if "invoke-context-contributor" in powershell:
+            assert "invoke-context-contributor.ps1" in powershell
+            assert "invoke-context-contributor.sh" in bash
+            assert hook["timeoutSec"] >= 30
+            continue
         assert "$env:USERPROFILE" in powershell
         assert "-ErrorAction Stop" in powershell
         assert "GetPathRoot" in powershell
@@ -36,14 +41,15 @@ def test_every_hook_leaves_payload_cwd_before_running_script():
         assert bash_detach < bash_script
 
 
-def test_session_conduct_has_a_cold_start_budget():
+def test_context_contributors_have_a_cold_start_budget():
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
-    hook = next(
+    contributors = [
         item
         for item in hooks["hooks"]["sessionStart"]
-        if "session-conduct" in str(item)
-    )
-    assert hook["timeoutSec"] >= 30
+        if "invoke-context-contributor" in str(item)
+    ]
+    assert contributors
+    assert all(item["timeoutSec"] >= 30 for item in contributors)
 
 
 def test_detached_provision_worker_runs_from_home():

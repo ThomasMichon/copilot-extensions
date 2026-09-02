@@ -420,7 +420,10 @@ class TestResumeDecisionOption:
     def _decide(self, **kw):
         import types
         from agent_worktrees.picker_tui.engine import PickerScreen
-        stub = types.SimpleNamespace(src=types.SimpleNamespace(LOCAL=("m", "e")))
+        stub = types.SimpleNamespace(
+            src=types.SimpleNamespace(LOCAL=("m", "e")),
+            _src_local=lambda: ("m", "e"),
+        )
         rec = {"raw": {"id": "wtX"}, "id4": "wtX", "machine": "m",
                "env": "e", "title": "t"}
         return PickerScreen._resume_decision(stub, rec, **kw)

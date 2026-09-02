@@ -54,7 +54,15 @@ _KNOWN_KEYS = frozenset(
         "spec",
     }
 )
-_KNOWN_BODY_KEYS = frozenset({"type", "agent", "headless_labels", "cli_labels"})
+_KNOWN_BODY_KEYS = frozenset(
+    {
+        "type",
+        "agent",
+        "headless_labels",
+        "cli_labels",
+        "disposable_cli_labels",
+    }
+)
 _KNOWN_FLEET_KEYS = frozenset({"pool", "origin", "headless"})
 _KNOWN_FILTER_KEYS = frozenset({"permit", "reject"})
 
@@ -93,6 +101,7 @@ class Body:
     agent: str = "task-worker"
     headless_labels: tuple[str, ...] = ()
     cli_labels: tuple[str, ...] = ()
+    disposable_cli_labels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -239,6 +248,8 @@ class ProfileDeclaration:
             # Headless-default lane (the default): --cli-label opts a subset out to CLI.
             for label in self.body.cli_labels:
                 args += ["--cli-label", label]
+        for label in self.body.disposable_cli_labels:
+            args += ["--disposable-cli-label", label]
         if self.body.type == "headless" or self.body.headless_labels or self.fleet.headless:
             args += ["--headless-agent", self.body.agent]
         if self.evaluator:
@@ -363,6 +374,10 @@ def _load_body(data: object) -> Body:
         agent=agent,
         headless_labels=_as_str_tuple(data.get("headless_labels"), key="body.headless_labels"),
         cli_labels=_as_str_tuple(data.get("cli_labels"), key="body.cli_labels"),
+        disposable_cli_labels=_as_str_tuple(
+            data.get("disposable_cli_labels"),
+            key="body.disposable_cli_labels",
+        ),
     )
 
 
@@ -573,6 +588,28 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
             raise RegistrarError(
                 f"body.cli_labels {sorted(stray)} are not in labels "
                 f"{sorted(decl.labels)} -- a cli label must also be watched"
+            )
+    if decl.body.disposable_cli_labels:
+        watched = set(decl.labels)
+        disposable = set(decl.body.disposable_cli_labels)
+        if stray := disposable - watched:
+            raise RegistrarError(
+                f"body.disposable_cli_labels {sorted(stray)} are not in labels "
+                f"{sorted(decl.labels)} -- a disposable CLI label must be watched"
+            )
+        if decl.fleet.enabled:
+            raise RegistrarError(
+                "body.disposable_cli_labels are supported only for local "
+                "worker bodies"
+            )
+        if decl.body.type == "embody":
+            cli_labels = watched - set(decl.body.headless_labels)
+        else:
+            cli_labels = set(decl.body.cli_labels)
+        if non_cli := disposable - cli_labels:
+            raise RegistrarError(
+                f"body.disposable_cli_labels {sorted(non_cli)} are not routed "
+                "to CLI bodies"
             )
     return decl
 

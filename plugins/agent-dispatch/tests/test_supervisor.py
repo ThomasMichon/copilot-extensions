@@ -8,6 +8,7 @@ double-spawned.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 
 import pytest
@@ -59,6 +60,7 @@ class QueueBackedClient:
         state=None,
         repo=None,
         label=None,
+        conclusion_state=None,
         resume_requested=None,
         limit=200,
     ):
@@ -68,6 +70,7 @@ class QueueBackedClient:
             state=states,
             repo=repo,
             label=label,
+            conclusion_state=conclusion_state,
             resume_requested=resume_requested,
             limit=limit,
         )
@@ -86,8 +89,22 @@ class QueueBackedClient:
     def record_cold(self, key):
         return asdict(self._q.record_cold(key))
 
-    def settle_spawn(self, key, *, detail=None):
-        return asdict(self._q.settle_spawn(key, detail=detail))
+    def settle_spawn(
+        self,
+        key,
+        *,
+        detail=None,
+        conclusion_state=None,
+        conclusion_detail=None,
+    ):
+        return asdict(
+            self._q.settle_spawn(
+                key,
+                detail=detail,
+                conclusion_state=conclusion_state,
+                conclusion_detail=conclusion_detail,
+            )
+        )
 
     def heartbeat(self, task_id, worker_id):
         return asdict(self._q.heartbeat(task_id, worker_id))
@@ -224,6 +241,7 @@ def test_suspended_local_headless_body_is_cooled(q, client):
         repo=TEST_REPO,
         labels=["review"],
         local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+        local_body_verdict_fn=lambda _session_id: "live",
     )
 
     assert sup.cool_dormant_bodies() == 1
@@ -259,6 +277,7 @@ def test_cli_suspensions_do_not_consume_headless_cooling_budget(q, client):
         repo=TEST_REPO,
         labels=["review"],
         local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+        local_body_verdict_fn=lambda _session_id: "live",
     )
 
     assert sup.cool_dormant_bodies() == 1
@@ -288,6 +307,7 @@ def test_blocking_card_cools_body_and_frees_process_capacity(q, client):
         labels=["review"],
         max_concurrent=1,
         local_cold_fn=lambda session_id: stopped.append(session_id) or True,
+        local_body_verdict_fn=lambda _session_id: "live",
     )
 
     assert sup.poll_once() == [runnable.id]
@@ -426,6 +446,311 @@ def test_supervisor_settles_terminal_cold_reservation(q, client):
 
     assert sup.reconcile() == 1
     assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+
+
+def test_terminal_conclusion_uses_exact_reservation_identity(q, client):
+    task = q.create("review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-exact",
+        worktree="worktree-exact",
+    )
+    q.claim_one(
+        "host-a/worktree-exact",
+        task_id=task.id,
+        machine="host-a",
+        worktree="worktree-exact",
+    )
+    q.start(task.id, "host-a/worktree-exact")
+    q.complete(
+        task.id,
+        "host-a/worktree-exact",
+        result_ref="review:complete",
+    )
+    calls = []
+
+    def conclude(worktree, session):
+        calls.append((worktree, session))
+        return {"action": "primed", "reason": "managed-gc-candidate"}
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        disposable_cli_labels=["review"],
+        conclusion_fn=conclude,
+    )
+
+    assert sup.reconcile() == 1
+    assert calls == [("worktree-exact", "session-exact")]
+    settled = q.get_reservation(reservation.key)
+    assert settled.state == SpawnState.SETTLED
+    assert "terminal conclusion primed" in (settled.detail or "")
+    assert settled.conclusion_state == "complete"
+
+
+def test_terminal_refresh_does_not_replace_exact_reserved_session(q, client):
+    task = q.create("review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="original-session",
+        worktree="worktree-exact",
+    )
+    q.claim_one("host-a/worktree-exact", task_id=task.id)
+    q.start(task.id, "host-a/worktree-exact")
+    q.complete(task.id, "host-a/worktree-exact")
+    calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        liveness_fn=lambda *_args: {
+            "session_id": "successor-session",
+            "worktree_id": "worktree-exact",
+        },
+        conclusion_fn=lambda *args: calls.append(args) or {
+            "action": "skipped",
+            "reason": "session-mismatch",
+        },
+    )
+
+    assert sup.reconcile() == 1
+    assert calls == [("worktree-exact", "original-session")]
+    settled = q.get_reservation(reservation.key)
+    assert settled.session_handle == "original-session"
+    assert settled.conclusion_state == "held"
+
+
+def test_terminal_refresh_uses_durable_owner_session_for_mux_placeholder(
+    q,
+    client,
+):
+    task = q.create("review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="wt-worktree-exact",
+        worktree="worktree-exact",
+    )
+    q.claim_one("host-a/worktree-exact", task_id=task.id)
+    q.start(
+        task.id,
+        "host-a/worktree-exact",
+        owner_session_id="owner-session-exact",
+    )
+    q.complete(task.id, "host-a/worktree-exact")
+    calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        liveness_fn=lambda *_args: None,
+        conclusion_fn=lambda *args: calls.append(args) or {
+            "action": "primed",
+            "reason": "managed-gc-candidate",
+        },
+    )
+
+    assert sup.reconcile() == 1
+    assert calls == [("worktree-exact", "owner-session-exact")]
+    settled = q.get_reservation(reservation.key)
+    assert settled.session_handle == "owner-session-exact"
+    assert settled.conclusion_state == "complete"
+
+
+def test_terminal_conclusion_is_opt_in_only(q, client):
+    task = q.create("ordinary", labels=["ordinary"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-exact",
+        worktree="worktree-exact",
+    )
+    q.claim_one("host-a/worktree-exact", task_id=task.id)
+    q.start(task.id, "host-a/worktree-exact")
+    q.complete(task.id, "host-a/worktree-exact")
+    calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        conclusion_fn=lambda *args: calls.append(args) or {"action": "primed"},
+    )
+
+    assert sup.reconcile() == 1
+    assert calls == []
+
+
+def test_terminal_conclusion_is_terminal_only(q, client):
+    task = q.create("still working", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-exact",
+        worktree="worktree-exact",
+    )
+    calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        conclusion_fn=lambda *args: calls.append(args) or {"action": "primed"},
+    )
+
+    assert sup.reconcile() == 0
+    assert calls == []
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+
+
+def test_terminal_conclusion_failure_does_not_block_settlement(q, client):
+    task = q.create("review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-exact",
+        worktree="worktree-exact",
+    )
+    q.claim_one("host-a/worktree-exact", task_id=task.id)
+    q.start(task.id, "host-a/worktree-exact")
+    q.complete(task.id, "host-a/worktree-exact")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        conclusion_fn=lambda *_args: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    assert sup.reconcile() == 1
+    settled = q.get_reservation(reservation.key)
+    assert settled.state == SpawnState.SETTLED
+    assert "terminal conclusion failed (boom)" in (settled.detail or "")
+    assert settled.conclusion_state == "pending"
+
+
+def test_terminal_conclusion_reconcile_is_idempotent(q, client):
+    task = q.create("review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-exact",
+        worktree="worktree-exact",
+    )
+    q.claim_one("host-a/worktree-exact", task_id=task.id)
+    q.start(task.id, "host-a/worktree-exact")
+    q.complete(task.id, "host-a/worktree-exact")
+    calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        conclusion_fn=lambda *args: calls.append(args) or {"action": "primed"},
+    )
+
+    assert sup.reconcile() == 1
+    assert sup.reconcile() == 0
+    assert len(calls) == 1
+
+
+def test_live_terminal_conclusion_retries_after_settlement(q, client):
+    task = q.create("review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-exact",
+        worktree="worktree-exact",
+    )
+    q.claim_one("host-a/worktree-exact", task_id=task.id)
+    q.start(task.id, "host-a/worktree-exact")
+    q.complete(task.id, "host-a/worktree-exact")
+    outcomes = iter(
+        [
+            {"action": "skipped", "reason": "live-session"},
+            {"action": "primed", "reason": "managed-gc-candidate"},
+        ]
+    )
+    calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        conclusion_fn=lambda *args: calls.append(args) or next(outcomes),
+        liveness_fn=lambda *_args: None,
+    )
+
+    assert sup.reconcile() == 1
+    pending = q.get_reservation(reservation.key)
+    assert pending.state == SpawnState.SETTLED
+    assert pending.conclusion_state == "pending"
+    q.settle_spawn(
+        reservation.key,
+        conclusion_state="pending",
+        conclusion_detail=json.dumps(
+            {
+                "action": "skipped",
+                "reason": "live-session",
+                "attempts": 1,
+                "next_attempt_at": 0,
+            }
+        ),
+    )
+    assert sup.reconcile() == 0
+    complete = q.get_reservation(reservation.key)
+    assert complete.conclusion_state == "complete"
+    assert len(calls) == 2
+
+
+def test_terminal_conclusion_retries_are_bounded(q, client):
+    task = q.create("review", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-exact",
+        worktree="worktree-exact",
+    )
+    q.claim_one("host-a/worktree-exact", task_id=task.id)
+    q.start(task.id, "host-a/worktree-exact")
+    q.complete(task.id, "host-a/worktree-exact")
+    calls = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        conclusion_fn=lambda *args: calls.append(args) or {
+            "action": "skipped",
+            "reason": "live-session",
+        },
+        liveness_fn=lambda *_args: None,
+    )
+
+    assert sup.reconcile() == 1
+    for attempt in range(1, 12):
+        q.settle_spawn(
+            reservation.key,
+            conclusion_state="pending",
+            conclusion_detail=json.dumps(
+                {
+                    "action": "skipped",
+                    "reason": "live-session",
+                    "attempts": attempt,
+                    "next_attempt_at": 0,
+                }
+            ),
+        )
+        assert sup.reconcile() == 0
+
+    held = q.get_reservation(reservation.key)
+    assert held.conclusion_state == "held"
+    assert len(calls) == 12
 
 
 def test_requeued_task_is_not_double_spawned(q, client):

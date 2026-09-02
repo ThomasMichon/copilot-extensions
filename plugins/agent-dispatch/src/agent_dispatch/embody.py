@@ -87,6 +87,10 @@ class EmbodyUnavailable(RuntimeError):
     """Raised when the ``agent-worktrees`` CLI is not available on this host."""
 
 
+class DisposableConclusionError(RuntimeError):
+    """Raised when safe terminal conclusion cannot be executed."""
+
+
 def _agent_worktrees_launch_prefix() -> list[str] | None:
     """Resolve an argv prefix that runs the ``agent-worktrees`` CLI **without**
     routing through a Windows ``.cmd``/``.bat`` shim.
@@ -113,6 +117,67 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
 def embody_available() -> bool:
     """True if the ``agent-worktrees`` CLI can be launched on this host."""
     return _agent_worktrees_launch_prefix() is not None
+
+
+def conclude_disposable_worker(
+    worktree: str,
+    session: str | None,
+    *,
+    owner: str = DEFAULT_DRIVER,
+    timeout: float = 30.0,
+) -> dict:
+    """Safely prime one exact terminal CLI worker through agent-worktrees.
+
+    The local/remote ground layer receives the reservation's recorded worktree
+    and session identities verbatim. It decides whether the dead checkout is
+    disposable and returns a structured prime/skip result; removal remains the
+    managed garbage collector's job.
+    """
+    args = [
+        "conclude-disposable",
+        "--worktree",
+        worktree,
+        "--policy",
+        "disposable-cli",
+        "--owner",
+        owner,
+        "--json",
+    ]
+    if session:
+        args += ["--session", session]
+
+    prefix = _agent_worktrees_launch_prefix()
+    if prefix is None:
+        raise DisposableConclusionError(
+            "agent-worktrees CLI not found on this host"
+        )
+    result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+        [*prefix, *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except (TypeError, ValueError) as exc:
+        raise DisposableConclusionError(
+            (result.stderr or "").strip()[:300]
+            or "agent-worktrees returned invalid terminal conclusion output"
+        ) from exc
+    if result.returncode != 0 or not isinstance(payload, dict) or payload.get("error"):
+        detail = (
+            payload.get("error")
+            if isinstance(payload, dict)
+            else None
+        )
+        raise DisposableConclusionError(
+            str(detail or (result.stderr or "").strip() or "terminal conclusion failed")[
+                :300
+            ]
+        )
+    return payload
 
 
 def autopilot_worker_prompt(

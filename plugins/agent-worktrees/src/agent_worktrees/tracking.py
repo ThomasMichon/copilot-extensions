@@ -3170,7 +3170,15 @@ class _RecordLock:
         # exclusion).
         self._plock = _path_write_lock(self._yaml_path)
         if self._blocking:
-            self._plock.acquire()
+            acquired = (
+                self._plock.acquire(timeout=max(0.0, self._timeout))
+                if self._require_sidecar
+                else self._plock.acquire()
+            )
+            if not acquired:
+                raise TimeoutError(
+                    f"timed out acquiring in-process lock {self._yaml_path}"
+                )
             self._plock_held = True
         elif self._plock.acquire(blocking=False):
             self._plock_held = True
