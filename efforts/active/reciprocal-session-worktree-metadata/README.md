@@ -18,7 +18,9 @@
   [#1688](https://github.com/ThomasMichon/copilot-extensions/issues/1688)
   (restricted rescue portability) ·
   [#1692](https://github.com/ThomasMichon/copilot-extensions/issues/1692)
-  (backfill and restored-hint validation)
+  (backfill and restored-hint validation) ·
+  [#1695](https://github.com/ThomasMichon/copilot-extensions/issues/1695)
+  (validated session recovery pointers)
 
 ## Guiding Intent
 
@@ -110,7 +112,7 @@ Public-safe transcription of the operator request:
 - [x] Update projections for controller assignment changes in Phase 3.
 - [x] Preserve fail-open behavior: a projection write failure must not block
       session launch, handoff, source-control, or worktree lifecycle.
-- [ ] Refuse writes into session trees identified as restored/foreign until
+- [x] Refuse writes into session trees identified as restored/foreign until
       current local session provenance is established.
 - [x] Never merge down or replace an unsupported newer projection schema.
 - [ ] Add POSIX and Windows containment, permissions, symlink/reparse, and
@@ -143,9 +145,9 @@ Public-safe transcription of the operator request:
       provides sufficient convergence.
 
 ### Phase 5 - Backfill, synchronization, and portability
-- [ ] Extend explicit backfill/doctoring to create missing projections and
+- [x] Extend explicit backfill/doctoring to create missing projections and
       reconcile legacy controller relationships.
-- [ ] Treat synchronized or restored projections as hints until current local
+- [x] Treat synchronized or restored projections as hints until current local
       project/worktree identity and revisions are validated.
 - [x] Preserve projections through session-state synchronization without
       requiring the synchronizer to understand agent-worktrees internals.
@@ -157,7 +159,7 @@ Public-safe transcription of the operator request:
 - [x] Avoid semantic no-op rewrites and stage atomic temporary files outside
       synchronized session directories so late lineage repair does not create
       perpetual recopy churn.
-- [ ] Implement the Phase 1 collision behavior when the same synchronized
+- [x] Implement the Phase 1 collision behavior when the same synchronized
       session appears on more than one machine or project.
 
 ### Phase 6 - Recovery and presentation
@@ -196,9 +198,9 @@ Public-safe transcription of the operator request:
 - [x] Active or mux-attached worktrees are never automatically repointed.
 - [x] Inactive unambiguous records converge under fixed per-tick budgets.
 - [x] Hot worktree reads never enumerate the session-state root.
-- [ ] A restored projection cannot override a newer authoritative worktree
+- [x] A restored projection cannot override a newer authoritative worktree
       revision or silently bind a foreign project.
-- [ ] Session-state synchronization preserves metadata and enables grouping by
+- [x] Session-state synchronization preserves metadata and enables grouping by
       stable worktree identity after restore.
 - [ ] A concluded controller with no successor yields an explicit terminal
       finding rather than an invented recovery target.
@@ -285,3 +287,16 @@ Adopt the authority and schema model in [`design.md`](design.md):
 - Opened #1692 for the next Phase 5 slice: explicit backfill/doctoring,
   authoritative restored-hint validation, and collision-safe handling of the
   same synchronized session across machines or projects.
+- Phase 5 backfill and restored-hint validation landed through #1694.
+  `backfill-sessions` and `doctor` now migrate legacy controller authority and
+  inspect exact session projections under a fixed relation budget. Local
+  missing or stale projections can be repaired under record and sidecar locks;
+  restored, incomplete, foreign, ambiguous, colliding, and newer state remains
+  report-only.
+- Restored controller hints now resolve only after exact session identity, a
+  unique canonical bound project/worktree, and authoritative relation/head
+  revisions match. Duplicate bound authorities are rejected before any repair,
+  while one controller session may still legitimately project several child
+  worktrees.
+- Opened #1695 and began Phase 6 with validated recovery pointers for resumed
+  sessions and machine-readable recovery/presentation states.
