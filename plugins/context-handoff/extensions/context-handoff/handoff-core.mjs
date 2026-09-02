@@ -21,9 +21,8 @@ import {
   openSync, closeSync, statSync, readdirSync,
 } from "node:fs";
 import { join, basename, dirname } from "node:path";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
 import {
   CONTINUATION_DIRECTIVE,
   leadFrom,
@@ -38,62 +37,180 @@ export const HANDOFF_CLI_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   "handoff-cli.mjs",
 );
-let runCliSequence = 0;
+const PLUGIN_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const INSTALLATION_ROOT = dirname(PLUGIN_ROOT);
+const CANONICAL_REPOSITORY =
+  "https://github.com/ThomasMichon/copilot-extensions";
+const RUNTIME_PROVISION_TIMEOUT_MS = 180000;
 
 // --- cross-platform system-CLI invocation ---------------------------------
-// On Windows the agent-worktrees / agent-dispatch binstubs are `.cmd` files,
-// which Node's execFileSync CANNOT spawn directly (no shell -> ENOENT). On
-// win32 write a short machine-local batch transport: percent sequences are
-// doubled before batch parsing, and CR/LF/NUL are rejected before source is
-// written. The script is deleted after execution. Elsewhere execFileSync is
-// exact + injection-safe. Every system-CLI call MUST go through runCli.
-export function quoteWinArg(s) {
-  let value = String(s);
-  if (/[\r\n\0]/.test(value)) {
-    throw new Error("Windows CLI arguments must not contain CR, LF, or NUL");
+// Windows invokes the payload PowerShell shims directly so arguments never
+// pass through cmd.exe source parsing. Every system-CLI call goes through here.
+
+function resolveSystemCliDescriptor(bin) {
+  const layouts = {
+    "agent-worktrees": {
+      relative:
+        process.platform === "win32"
+          ? join("bin", "payload", "agent-worktrees.ps1")
+          : join("bin", "payload", "agent-worktrees"),
+      module: "agent_worktrees",
+      runtimeRoot: ".agent-worktrees",
+      payloadRootEnv: "AGENT_WORKTREES_PAYLOAD_ROOT",
+    },
+    "agent-dispatch": {
+      relative:
+        process.platform === "win32"
+          ? join("bin", "agent-dispatch.ps1")
+          : join("bin", "agent-dispatch"),
+      module: "agent_dispatch",
+      runtimeRoot: ".agent-dispatch",
+      payloadRootEnv: null,
+    },
+  };
+  const layout = layouts[bin];
+  if (!layout) return { path: bin, pluginRoot: null };
+
+  const siblingRoot = join(INSTALLATION_ROOT, bin);
+  const manifestPath = join(siblingRoot, "plugin.json");
+  const commandPath = join(siblingRoot, layout.relative);
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+  } catch {
+    throw new Error(`${bin} payload is unavailable in this installation`);
   }
-  value = value.replace(/%/g, "%%");
-  value = value.replace(/(\\*)"/g, '$1$1\\"');
-  value = value.replace(/(\\+)$/g, "$1$1");
-  return `"${value}"`;
+  if (
+    manifest?.name !== bin
+    || manifest?.repository !== CANONICAL_REPOSITORY
+    || !existsSync(commandPath)
+  ) {
+    throw new Error(`${bin} payload provenance or command path is invalid`);
+  }
+  return {
+    path: commandPath,
+    pluginRoot: siblingRoot,
+    module: layout.module,
+    runtimeRoot: layout.runtimeRoot,
+    payloadRootEnv: layout.payloadRootEnv,
+  };
 }
+
+export function resolveSystemCli(bin) {
+  return resolveSystemCliDescriptor(bin).path;
+}
+
+function windowsPowerShell() {
+  return join(
+    process.env.SystemRoot || "C:\\Windows",
+    "System32", "WindowsPowerShell", "v1.0", "powershell.exe",
+  );
+}
+
+function resolveRuntimePython(resolved, env, cwd, timeout) {
+  const resolve = process.platform === "win32"
+    ? () => {
+      const script = [
+        "$ErrorActionPreference='Stop'",
+        `$env:AGENT_RT_ROOT=Join-Path $env:USERPROFILE '${resolved.runtimeRoot}'`,
+        ". (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\\resolve-runtime.ps1')",
+        "if ($AgentRtPy) {[Console]::Out.Write($AgentRtPy)}",
+      ].join("; ");
+      return execFileSync(
+        windowsPowerShell(),
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        { cwd, timeout, env, encoding: "utf-8" },
+      ).trim();
+    }
+    : () => execFileSync("sh", ["-c", [
+      `AGENT_RT_ROOT="$HOME/${resolved.runtimeRoot}"`,
+      "export AGENT_RT_ROOT",
+      '. "$COPILOT_PLUGIN_ROOT/scripts/resolve-runtime.sh"',
+      'printf %s "${AGENT_RT_PY:-}"',
+    ].join("; ")], {
+      cwd, timeout, env, encoding: "utf-8",
+    }).trim();
+  let python = resolve();
+  if (!python) {
+    const provisionBin = process.platform === "win32"
+      ? windowsPowerShell()
+      : resolved.path;
+    const provisionArgs = process.platform === "win32"
+      ? [
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", resolved.path,
+        "--help",
+      ]
+      : ["--help"];
+    execFileSync(provisionBin, provisionArgs, {
+      cwd,
+      timeout: Math.max(timeout, RUNTIME_PROVISION_TIMEOUT_MS),
+      env,
+      encoding: "utf-8",
+      stdio: "ignore",
+    });
+    python = resolve();
+  }
+  if (!python || !existsSync(python)) {
+    throw new Error("payload runtime provisioning did not produce Python");
+  }
+  return python;
+}
+
+export function isolatedPythonArgs(module, args) {
+  return ["-I", "-X", "utf8", "-m", module, ...args];
+}
+
+export function runtimeEnvironment(baseEnv, pluginRoot) {
+  const env = {
+    ...baseEnv,
+    COPILOT_PLUGIN_ROOT: pluginRoot,
+    PYTHONUTF8: "1",
+  };
+  delete env.PYTHONHOME;
+  delete env.PYTHONPATH;
+  return env;
+}
+
 export function runCli(bin, args, opts = {}) {
   const { cwd, timeout = 15000, ...extra } = opts;
-  if (process.platform === "win32") {
-    const dir = join(
-      homedir(), ".copilot", "context-handoff", "runcli",
+  const resolved = resolveSystemCliDescriptor(bin);
+  const resolvedBin = resolved.path;
+  const env = resolved.pluginRoot
+    ? runtimeEnvironment(
+      { ...process.env, ...extra.env },
+      resolved.pluginRoot,
+    )
+    : extra.env;
+  const childOptions = { ...extra, env };
+  if (resolved.pluginRoot) {
+    const python = resolveRuntimePython(
+      resolved, env, cwd, timeout,
     );
-    mkdirSync(dir, { recursive: true });
-    const script = join(
-      dir,
-      `invoke-${process.pid}-${Date.now()}-${runCliSequence++}.cmd`,
-    );
-    const command = [
-      "\uFEFF@echo off",
-      `${quoteWinArg(bin)} ${args.map(quoteWinArg).join(" ")}`,
-      "exit /b %errorlevel%",
-      "",
-    ].join("\r\n");
-    try {
-      writeFileSync(script, command, "utf8");
-      return execFileSync(
-        process.env.ComSpec || "cmd.exe",
-        ["/d", "/s", "/c", script],
-        { ...extra, cwd, timeout, encoding: "utf-8" },
-      );
-    } finally {
-      try { unlinkSync(script); } catch { /* best-effort cleanup */ }
+    if (resolved.payloadRootEnv) {
+      env[resolved.payloadRootEnv] = resolved.pluginRoot;
     }
+    return execFileSync(
+      python,
+      isolatedPythonArgs(resolved.module, args),
+      {
+      ...childOptions, cwd, timeout, encoding: "utf-8",
+      },
+    );
   }
-  return execFileSync(bin, args, {
-    ...extra, cwd, timeout, encoding: "utf-8",
+  return execFileSync(resolvedBin, args, {
+    ...childOptions, cwd, timeout, encoding: "utf-8",
   });
 }
 
 // True if an agent-dispatch coordinator answers a health probe.
 export function agentDispatchAvailable() {
   try {
-    execSync("agent-dispatch health", { timeout: 5000, stdio: "ignore" });
+    runCli("agent-dispatch", ["health"], {
+      timeout: 5000,
+      stdio: "ignore",
+    });
     return true;
   } catch {
     return false;

@@ -15,16 +15,18 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import {
   encodeHandoffPayload, decodeHandoffPayload, buildSeedForStored,
-  safePathSegment, quoteWinArg, agentWorktreesGet, handoffDirFor,
+  safePathSegment, agentWorktreesGet, handoffDirFor,
   runCli,
   agentWorktreesGetResult, consumeFileHandoffOnce, writeJsonAtomic,
-  currentMuxSession, sessionBindingForSession, manualFallbackInstructions,
+  currentMuxSession, resolveSystemCli, sessionBindingForSession, manualFallbackInstructions,
   prepareTaskCutoverCheckpoint, completeHandoffLifecycle,
   consumeDispatchHandoffTask,
   makeHandoffMetadata,
   runHandoffCutover,
   buildResumePrompt,
   normalizeHandoffTitle,
+  isolatedPythonArgs,
+  runtimeEnvironment,
   HANDOFF_META_PREFIX,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import {
@@ -34,6 +36,9 @@ import {
 import {
   AGENT_WORKTREES_QUERY_TIMEOUT_MS,
 } from "../extensions/context-handoff/cli-timeouts.mjs";
+import {
+  buildCutoverSeed,
+} from "../extensions/context-handoff/cutover-seed.mjs";
 
 test("encode/decode round-trips metadata + text", () => {
   const meta = { kind: "context-handoff", id: "handoff-sid1", title: "Fix X", oldPane: "%3" };
@@ -114,14 +119,37 @@ test("safePathSegment sanitizes and caps", () => {
   assert.equal(safePathSegment("x".repeat(300)).length, 160);
 });
 
-test("quoteWinArg emits batch-safe literal arguments", () => {
-  assert.equal(quoteWinArg("plain"), '"plain"');
-  assert.equal(quoteWinArg("has space"), '"has space"');
-  assert.equal(quoteWinArg('a"b'), '"a\\"b"');
-  assert.equal(quoteWinArg("it's literal"), `"it's literal"`);
-  assert.equal(quoteWinArg("Task %PATH%"), '"Task %%PATH%%"');
-  assert.throws(() => quoteWinArg("line1\r\nline2"), /CR, LF, or NUL/);
-  assert.throws(() => quoteWinArg("bad\0arg"), /CR, LF, or NUL/);
+test("system CLI resolution stays inside the owning marketplace installation", () => {
+  const worktrees = resolveSystemCli("agent-worktrees");
+  const dispatch = resolveSystemCli("agent-dispatch");
+  const pluginsRoot = join(import.meta.dirname, "..", "..");
+  assert.ok(worktrees.startsWith(join(pluginsRoot, "agent-worktrees")));
+  assert.ok(dispatch.startsWith(join(pluginsRoot, "agent-dispatch")));
+  assert.doesNotMatch(worktrees, /odsp-web-harness/);
+  assert.doesNotMatch(dispatch, /odsp-web-harness/);
+});
+
+test("runtime invocation isolates imports and forces UTF-8", () => {
+  assert.deepEqual(
+    isolatedPythonArgs("agent_worktrees", ["get", "worktree-dir"]),
+    [
+      "-I", "-X", "utf8", "-m", "agent_worktrees",
+      "get", "worktree-dir",
+    ],
+  );
+  assert.deepEqual(
+    runtimeEnvironment({
+      KEEP: "yes",
+      PYTHONHOME: "unsafe-home",
+      PYTHONPATH: "unsafe-path",
+      PYTHONUTF8: "0",
+    }, "C:\\plugins\\agent-worktrees"),
+    {
+      KEEP: "yes",
+      COPILOT_PLUGIN_ROOT: "C:\\plugins\\agent-worktrees",
+      PYTHONUTF8: "1",
+    },
+  );
 });
 
 test("handoff titles are normalized to one line at entry", () => {
@@ -131,27 +159,28 @@ test("handoff titles are normalized to one line at entry", () => {
   );
 });
 
-test("Windows runCli preserves percent-delimited title and seed", {
+test("Windows runCli preserves quotes and batch metacharacters", {
   skip: process.platform !== "win32",
 }, () => {
-  const dir = mkdtempSync(join(process.cwd(), ".test-percent-args-"));
+  const dir = mkdtempSync(join(process.cwd(), ".test-win-args-"));
   try {
     const capture = join(dir, "capture.mjs");
-    const shim = join(dir, "capture.cmd");
     const output = join(dir, "args.json");
+    const seed = buildCutoverSeed(
+      "task",
+      "task-1",
+      'Task: preserve %PATH% "title" & echo not-a-command',
+    );
     writeFileSync(
       capture,
       "import { writeFileSync } from 'node:fs';" +
         "writeFileSync(process.env.ARGS_OUT," +
         "JSON.stringify(process.argv.slice(2)));",
     );
-    writeFileSync(
-      shim,
-      `@echo off\r\nnode "${capture}" %*\r\n`,
-    );
-    runCli(shim, [
-      "Task: preserve %PATH% title",
-      "Seed contains %PATH% exactly",
+    runCli(process.execPath, [
+      capture,
+      'Task: preserve %PATH% "title" & echo not-a-command',
+      seed,
     ], {
       cwd: dir,
       timeout: 5000,
@@ -159,30 +188,9 @@ test("Windows runCli preserves percent-delimited title and seed", {
     });
 
     assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), [
-      "Task: preserve %PATH% title",
-      "Seed contains %PATH% exactly",
+      'Task: preserve %PATH% "title" & echo not-a-command',
+      seed,
     ]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("Windows runCli rejects batch-source injection", {
-  skip: process.platform !== "win32",
-}, () => {
-  const dir = mkdtempSync(join(process.cwd(), ".test-cmd-injection-"));
-  try {
-    const shim = join(dir, "capture.cmd");
-    const output = join(dir, "called");
-    writeFileSync(shim, `@echo off\r\necho called>"${output}"\r\n`);
-    assert.throws(
-      () => runCli(shim, ["safe\r\nwhoami"], {
-        cwd: dir,
-        timeout: 5000,
-      }),
-      /CR, LF, or NUL/,
-    );
-    assert.equal(existsSync(output), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
