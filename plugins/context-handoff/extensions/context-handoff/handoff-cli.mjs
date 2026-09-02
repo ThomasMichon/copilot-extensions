@@ -241,6 +241,12 @@ function cmdConsume(args) {
     );
     process.exit(2);
   }
+  if (deferComplete && !taskId) {
+    process.stderr.write(
+      "handoff-cli consume: --defer-complete is only valid with a task target\n",
+    );
+    process.exit(2);
+  }
   const consumed = taskId
     ? consumeDispatchHandoffTask(
         cwd,

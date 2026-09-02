@@ -50,6 +50,22 @@ test("consume requires exactly one recovery target", () => {
   );
   assert.equal(ambiguous.status, 2);
   assert.match(ambiguous.stderr, /exactly one of --locator/);
+
+  const deferredFile = spawnSync(
+    process.execPath,
+    [
+      cli,
+      "consume",
+      "--session-id",
+      "successor-session",
+      "--locator",
+      "file:handoff-1",
+      "--defer-complete",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(deferredFile.status, 2);
+  assert.match(deferredFile.stderr, /only valid with a task target/);
 });
 
 test("extension and CLI delegate lifecycle behavior to the same core", () => {
