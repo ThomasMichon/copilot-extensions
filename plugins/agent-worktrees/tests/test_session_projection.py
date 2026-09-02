@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -7,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_worktrees import __main__ as cli
 from agent_worktrees import session_projection, sessions, tracking
 
 
@@ -292,6 +294,30 @@ def test_restored_hint_rejects_malformed_overflow_fields(
     assert validation["status"] == "restored-invalid"
 
 
+def test_restored_hint_reports_unreadable_authority(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+
+    validation = session_projection.validate_restored_hint(
+        "session-a",
+        projection,
+        record_loader=lambda project, worktree_id: (
+            (_ for _ in ()).throw(OSError("unreadable"))
+        ),
+    )
+
+    assert validation["status"] == "restored-unreadable"
+
+
 def test_backfill_repairs_stale_secondary_revision(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
@@ -475,6 +501,294 @@ def test_projection_backfill_preserves_duplicate_bound_authority(
     ]
     assert report["repaired"] == 0
     assert not (session_dir / session_projection.SIDECAR_NAME).exists()
+
+
+def test_recovery_report_points_to_validated_bound_worktree(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    report = session_projection.recovery_report(
+        "session-a",
+        cwd="/tmp/other",
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert report["status"] == "bound-elsewhere"
+    assert report["recommended_action"] == "verify-and-bind"
+    assert report["primary"]["worktree_id"] == "wt-a"
+    assert "projection did not change the binding" in (
+        session_projection.render_recovery_context(report)
+    )
+
+
+def test_recovery_report_surfaces_handoff_successor(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    record.sessions[0].state = "handed-off"
+    record.sessions[0].successor = "session-b"
+    record.sessions.append(
+        tracking.SessionEntry("session-b", "2026-01-02T00:00:00")
+    )
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    report = session_projection.recovery_report(
+        "session-a",
+        cwd="/tmp/other",
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert report["status"] == "handed-off"
+    assert report["primary"]["successor_session_id"] == "session-b"
+    assert "session-b" in session_projection.render_recovery_context(report)
+
+
+def test_recovery_report_keeps_concluded_session_terminal(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    record.sessions[0].state = "concluded"
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    report = session_projection.recovery_report(
+        "session-a",
+        cwd="/tmp/other",
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert report["status"] == "concluded"
+    assert report["recommended_action"] == "none"
+    assert "no successor recovery action" in (
+        session_projection.render_recovery_context(report)
+    )
+
+
+def test_recovery_report_does_not_guess_unresolved_handoff_successor(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    record.sessions[0].state = "handed-off"
+    record.sessions[0].successor = "missing-session"
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    report = session_projection.recovery_report(
+        "session-a",
+        cwd="/tmp/other",
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert report["status"] == "handoff-unresolved"
+    assert report["recommended_action"] == "inspect"
+    context = session_projection.render_recovery_context(report)
+    assert "no terminal successor was selected" in context
+    assert "missing-session" in context
+
+
+def test_recovery_report_distinguishes_remote_controller(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch, "controller")
+    record = _record(tmp_tracking_dir, "bound")
+    record.machine = "remote"
+    record.controllers = [
+        tracking.ControllerRelation(
+            kind="session",
+            source="explicit",
+            relation_revision=1,
+            created_at="2026-01-01T00:00:00",
+            controller_session_id="controller",
+        )
+    ]
+    record.controller_revision = 1
+    projection = {
+        "version": 1,
+        "session_id": "controller",
+        "relations": [
+            session_projection.controller_relation(record, "controller")
+        ],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    report = session_projection.recovery_report(
+        "controller",
+        record_loader=lambda project, worktree_id: record,
+        local_machine="local",
+    )
+
+    assert report["status"] == "controlled-remote"
+    assert report["recommended_action"] == "inspect-controllers"
+    assert "remote/example/wt-a" in (
+        session_projection.render_recovery_context(report)
+    )
+
+
+def test_recovery_report_uses_configured_machine_identity(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch, "controller")
+    record = _record(tmp_tracking_dir, "bound")
+    record.machine = "configured"
+    record.controllers = [
+        tracking.ControllerRelation(
+            kind="session",
+            source="explicit",
+            relation_revision=1,
+            created_at="2026-01-01T00:00:00",
+            controller_session_id="controller",
+        )
+    ]
+    record.controller_revision = 1
+    projection = {
+        "version": 1,
+        "session_id": "controller",
+        "relations": [
+            session_projection.controller_relation(record, "controller")
+        ],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        session_projection,
+        "_configured_machine",
+        lambda project: "configured",
+    )
+
+    report = session_projection.recovery_report(
+        "controller",
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert report["status"] == "controlled-elsewhere"
+
+
+def test_session_recovery_command_emits_context(monkeypatch, capsys):
+    monkeypatch.setattr(
+        session_projection,
+        "recovery_report",
+        lambda session_id, cwd=None: {
+            "session_id": session_id,
+            "status": "ambiguous",
+            "restored": True,
+            "relations": [],
+            "recommended_action": "inspect",
+        },
+    )
+
+    result = cli.cmd_session_recovery(
+        argparse.Namespace(
+            session_id="session-a",
+            cwd="/tmp/other",
+            stdin=False,
+            emit_context=True,
+            json=False,
+        )
+    )
+
+    assert result == 0
+    output = json.loads(capsys.readouterr().out)
+    assert "cannot be used automatically" in output["additionalContext"]
+
+
+@pytest.mark.parametrize("status", ["unsupported", "invalid"])
+def test_recovery_context_surfaces_unreadable_projection(status):
+    report = {
+        "session_id": "session-a",
+        "status": status,
+        "restored": False,
+        "relations": [],
+        "recommended_action": "inspect",
+    }
+
+    context = session_projection.render_recovery_context(report)
+
+    assert status in context
+    assert "no binding was changed" in context
+
+
+def test_recovery_report_fails_open_when_authority_loader_raises(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    report = session_projection.recovery_report(
+        "session-a",
+        record_loader=lambda project, worktree_id: (
+            (_ for _ in ()).throw(OSError("unreadable"))
+        ),
+    )
+
+    assert report["status"] == "unreadable"
+    assert report["recommended_action"] == "inspect"
+    assert "cannot be used automatically" in (
+        session_projection.render_recovery_context(report)
+    )
 
 
 @pytest.mark.parametrize("session_id", ["../escape", "a/b", r"a\b", ".", ".."])

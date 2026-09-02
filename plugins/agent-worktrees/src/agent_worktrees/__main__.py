@@ -18383,6 +18383,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (the default; accepted for consistency)")
 
+    sp = sub.add_parser(
+        "session-recovery",
+        help="Inspect one exact session projection for validated recovery guidance",
+    )
+    sp.add_argument("--session-id", default=None,
+                    help="Exact Copilot session id (read from --stdin or "
+                         "COPILOT_AGENT_SESSION_ID when omitted)")
+    sp.add_argument("--cwd", default=None,
+                    help="Current session cwd for bound-here comparison")
+    sp.add_argument("--stdin", action="store_true",
+                    help="Read the Copilot sessionStart JSON payload from stdin")
+    sp.add_argument("--emit-context", action="store_true",
+                    help="Emit bounded sessionStart additionalContext")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (the default; accepted for consistency)")
+
     # bind-session -- the agent explicitly declares its worktree (self-identifying)
     sp = sub.add_parser(
         "bind-session",
@@ -18833,6 +18849,20 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         if candidate and _activate_project_for_worktree_id(candidate):
             wt_id = candidate
     if not wt_id:
+        if getattr(args, "emit_context", False):
+            from . import session_projection
+
+            report = session_projection.recovery_report(
+                session_id,
+                cwd=cwd,
+            )
+            message = session_projection.render_recovery_context(report)
+            print(
+                json.dumps(
+                    {"additionalContext": message} if message else {},
+                    separators=(",", ":"),
+                )
+            )
         return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
     if not cfg.active_project():
         _activate_project_for_worktree_id(wt_id)
@@ -19004,6 +19034,37 @@ def cmd_session_binding(args: argparse.Namespace) -> int:
         ),
     }
     _json_output(result)
+    return 0
+
+
+def cmd_session_recovery(args: argparse.Namespace) -> int:
+    """Inspect one exact session projection without changing authoritative state."""
+    from . import session_projection
+
+    session_id = getattr(args, "session_id", None)
+    cwd = getattr(args, "cwd", None)
+    if getattr(args, "stdin", False):
+        payload = _read_hook_stdin()
+        if payload:
+            session_id = session_id or payload.get("sessionId")
+            cwd = cwd or payload.get("cwd")
+    session_id = session_id or os.environ.get("COPILOT_AGENT_SESSION_ID")
+    if not isinstance(session_id, str) or not session_id:
+        if getattr(args, "emit_context", False):
+            print("{}")
+            return 0
+        return _json_error("an exact session id is required", exit_code=2)
+    report = session_projection.recovery_report(session_id, cwd=cwd)
+    if getattr(args, "emit_context", False):
+        message = session_projection.render_recovery_context(report)
+        print(
+            json.dumps(
+                {"additionalContext": message} if message else {},
+                separators=(",", ":"),
+            )
+        )
+        return 0
+    _json_output(report)
     return 0
 
 
@@ -20844,6 +20905,7 @@ COMMAND_MAP = {
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
     "session-binding": cmd_session_binding,
+    "session-recovery": cmd_session_recovery,
     "bind-session": cmd_bind_session,
     "bind-nudge": cmd_bind_nudge,
     "history-digest": cmd_history_digest,
@@ -21192,6 +21254,7 @@ _NO_PROJECT_COMMANDS = {
     "picker", "doctor", "reap-shells", "status-updater", "status-monitor",
     "reconcile-sessions", "status-monitor-restart", "restart",
     "register-session", "deregister-session", "session-binding",
+    "session-recovery",
     "installer-readiness",
     "bind-session",
     "bind-nudge",
