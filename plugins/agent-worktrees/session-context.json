@@ -7,7 +7,7 @@
       "id": "aggregate-context",
       "pure": true,
       "order": 100,
-      "timeoutSeconds": 4,
+      "timeoutSeconds": 10,
       "maxBytes": 1600,
       "bash": [
         "scripts/emit-session-context.sh"
