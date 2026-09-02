@@ -152,6 +152,7 @@ class SessionEntry:
     predecessor: str | None = None
     pane_id: str | None = None
     activations: list[SessionActivation] = field(default_factory=list)
+    relation_revision: int = 0
 
 
 @dataclass
@@ -1094,6 +1095,10 @@ def load_record(path: Path) -> WorktreeRecord:
                         predecessor=str(pred) if pred else None,
                         pane_id=str(pane) if pane else None,
                         activations=activations,
+                        relation_revision=_bounded_nonnegative_int(
+                            entry.get("relation_revision", 0),
+                            field="session relation_revision",
+                        ),
                     ))
 
     # Parse PR records -- the multi-PR ``prs:`` list (preferred) or a legacy
@@ -1701,6 +1706,10 @@ def _save_record_unlocked(
                 **({"predecessor": s.predecessor} if s.predecessor else {}),
                 **({"pane_id": s.pane_id} if s.pane_id else {}),
                 **(
+                    {"relation_revision": s.relation_revision}
+                    if s.relation_revision else {}
+                ),
+                **(
                     {"activations": [
                         {
                             "ordinal": activation.ordinal,
@@ -1751,6 +1760,20 @@ def save_record(
             path,
             preserve_handoff_reservations=preserve_handoff_reservations,
         )
+    dirty_sessions = getattr(record, "_session_projection_dirty", set())
+    if dirty_sessions:
+        remaining = set(dirty_sessions)
+        try:
+            from . import session_projection
+
+            for session_id in sorted(dirty_sessions):
+                outcome = session_projection.sync_bound(record, session_id)
+                if outcome in {"written", "current", "blocked"}:
+                    remaining.discard(session_id)
+        except Exception:
+            pass
+        finally:
+            record._session_projection_dirty = remaining
 
 
 def list_records(
@@ -2309,12 +2332,23 @@ class SessionLifecycleError(ValueError):
     """Raised when an asserted session transition names an unknown session."""
 
 
-def _next_lifecycle_revision(record: WorktreeRecord) -> int:
+def _next_lifecycle_revision(
+    record: WorktreeRecord,
+    *session_ids: str,
+) -> int:
     highest = max(
         (transition.revision for transition in record.head_transitions),
         default=0,
     )
     record.lifecycle_revision = max(record.lifecycle_revision, highest) + 1
+    dirty = set(getattr(record, "_session_projection_dirty", set()))
+    for session_id in session_ids:
+        entry = record.session_entry(session_id)
+        if entry is None:
+            continue
+        entry.relation_revision = record.lifecycle_revision
+        dirty.add(session_id)
+    record._session_projection_dirty = dirty
     return record.lifecycle_revision
 
 
@@ -2325,14 +2359,21 @@ def _append_head_transition(
     reason: str,
     handoff_ordinal: int | None = None,
     at: str | None = None,
+    related_session_ids: tuple[str, ...] = (),
 ) -> HeadTransition:
     if session_id is not None and record.session_entry(session_id) is None:
         raise SessionLifecycleError(
             f"session {session_id} is not tracked on worktree "
             f"{record.worktree_id}"
         )
+    prior_head = record.resolved_head_session
+    affected = tuple(dict.fromkeys(
+        session
+        for session in (prior_head, session_id, *related_session_ids)
+        if session is not None
+    ))
     transition = HeadTransition(
-        revision=_next_lifecycle_revision(record),
+        revision=_next_lifecycle_revision(record, *affected),
         session_id=session_id,
         reason=reason,
         at=at or _now_iso(),
@@ -2422,7 +2463,7 @@ def open_handoff(
         opened_at=opened_at or _now_iso(),
     )
     record.handoffs.append(handoff)
-    _next_lifecycle_revision(record)
+    _next_lifecycle_revision(record, predecessor_id)
     if save:
         save_record(record)
     return handoff
@@ -2508,6 +2549,7 @@ def link_handoff(
         reason="handoff-linked",
         handoff_ordinal=handoff.ordinal,
         at=handoff.linked_at,
+        related_session_ids=(predecessor.session_id,),
     )
     if save:
         save_record(record)
@@ -2592,7 +2634,7 @@ def conclude_session(
             handoff_ordinal=pending.ordinal if pending else None,
         )
     elif prior_state != state:
-        _next_lifecycle_revision(record)
+        _next_lifecycle_revision(record, session_id)
     if save:
         save_record(record)
 
@@ -2641,6 +2683,7 @@ def link_succession(
         _ensure_head_ledger(record)
         _append_head_transition(
             record, successor_id, reason="succession-linked",
+            related_session_ids=(pred.session_id,),
         )
     if save:
         save_record(record)
@@ -3495,7 +3538,7 @@ def register_session(
                         )
                     except SessionLifecycleError:
                         if activation_added:
-                            _next_lifecycle_revision(record)
+                            _next_lifecycle_revision(record, session_id)
                         save_record(record)
                         raise
                 elif (
@@ -3511,7 +3554,7 @@ def register_session(
                         record, session_id, reason="rebind", at=event_at,
                     )
                 elif activation_added:
-                    _next_lifecycle_revision(record)
+                    _next_lifecycle_revision(record, session_id)
                 save_record(record)
                 return
 
@@ -3533,7 +3576,7 @@ def register_session(
             )],
         )
         record.sessions.append(new_entry)
-        _next_lifecycle_revision(record)
+        _next_lifecycle_revision(record, session_id)
         # A successor claims one exact, previously opened handoff token. Merely
         # starting another session never steals the head.
         if handoff_token:
@@ -3585,6 +3628,6 @@ def deregister_session(
                     source=source,
                 )
                 if changed:
-                    _next_lifecycle_revision(record)
+                    _next_lifecycle_revision(record, session_id)
                     save_record(record)
                 return
