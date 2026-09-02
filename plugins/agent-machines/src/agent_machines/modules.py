@@ -161,6 +161,7 @@ def _payload_invocation_command(
         not isinstance(output_dir, str)
         or not output_dir
         or output_path.is_absolute()
+        or re.match(r"^[A-Za-z]:", output_dir) is not None
         or ".." in output_path.parts
     ):
         raise RuntimeError(f"plugin {source} has an invalid payload outputDir")

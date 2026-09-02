@@ -306,3 +306,32 @@ def test_payload_provider_command_path_traversal_rejected(tmp_path):
 
     with pytest.raises(ManifestError, match="invocation requires"):
         load_package(write_package(tmp_path / "acme", "provider.yaml", data))
+
+
+def test_payload_provider_rejects_drive_relative_output_dir(
+    tmp_path, monkeypatch
+):
+    pkg = _provider_package(tmp_path)
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "payload-invocation.json").write_text(
+        '{"version": 1, "command": "agent-ssh", "outputDir": "C:escape"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        modules,
+        "_active_plugins",
+        lambda: {
+            "agent-ssh@copilot-extensions": SimpleNamespace(root=payload)
+        },
+    )
+
+    result = modules.run_module(
+        pkg,
+        pkg.modules[0],
+        "windows",
+        dry_run=True,
+    )
+
+    assert result.returncode == 127
+    assert "invalid payload outputDir" in result.stderr_tail

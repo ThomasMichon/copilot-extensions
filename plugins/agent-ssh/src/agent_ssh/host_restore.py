@@ -166,7 +166,11 @@ def restore_host(
             "error": str(exc),
         }
     output = f"{proc.stdout}\n{proc.stderr}"
-    healthy = proc.returncode == 0 and _healthy_status(output) if not apply else False
+    healthy = (
+        proc.returncode == 0 and _healthy_status(output)
+        if not apply
+        else False
+    )
     status_command = None
     status_proc = None
     if apply and proc.returncode == 0:
