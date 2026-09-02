@@ -303,12 +303,16 @@ directories into host-owned state:
 
 - `events.jsonl`
 - `workspace.yaml`, `origin.json`, and `context.json` when present
+- `agent-worktrees.json` when it is bounded schema-v1 JSON for the enclosing
+  session ID
 - `checkpoints/index.md` when present
 
 `files/`, rewind snapshots, research, unknown session members, workspaces,
 source roots, settings, databases, credentials, and arbitrary home files are
-never copied. Each allowlisted member is opened by a host-supplied helper executed with the
-image's Node interpreter. The interpreter is resolved to an absolute path
+never copied. The reciprocal sidecar remains inert evidence and does not make a
+restored worktree relation authoritative. Each allowlisted member is opened by
+a host-supplied helper executed with the image's Node interpreter. The
+interpreter is resolved to an absolute path
 whose canonical target is outside the actual inspected tmpfs/mount/home
 surfaces; helper launch fails unless Docker reports `ReadonlyRootfs: true`.
 Bash liveness probes use the same

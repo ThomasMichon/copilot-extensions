@@ -25,8 +25,14 @@ ALLOWED_MEMBERS = (
     "workspace.yaml",
     "origin.json",
     "context.json",
+    "agent-worktrees.json",
     "checkpoints/index.md",
 )
+AGENT_WORKTREES_PROJECTION = "agent-worktrees.json"
+AGENT_WORKTREES_SCHEMA_VERSION = 1
+MAX_AGENT_WORKTREES_BYTES = 128 * 1024
+MAX_AGENT_WORKTREES_JSON_DEPTH = 64
+SOFT_OPTIONAL_MEMBERS = {AGENT_WORKTREES_PROJECTION}
 
 _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -164,6 +170,17 @@ def _hash_regular(path: Path, expected_size: int) -> str:
     return digest.hexdigest()
 
 
+def _require_regular_size(path: Path, expected_size: int) -> None:
+    mode = lstat_kind(path)
+    if is_link_or_reparse(path, mode) or not stat.S_ISREG(mode):
+        raise RescueSourceError(f"not a regular file: {path}")
+    actual_size = path.lstat().st_size
+    if actual_size != expected_size:
+        raise RescueSourceError(
+            f"size mismatch for {path}: expected {expected_size}, got {actual_size}"
+        )
+
+
 def _validate_events_jsonl(path: Path) -> None:
     """Stream-validate that each nonblank UTF-8 JSONL record is an object."""
     try:
@@ -191,6 +208,56 @@ def _validate_events_jsonl(path: Path) -> None:
                         )
     except UnicodeDecodeError as exc:
         raise RescueSourceError("events.jsonl is not valid UTF-8") from exc
+
+
+def _validate_agent_worktrees_projection(path: Path, session_id: str) -> None:
+    try:
+        payload = json.loads(
+            read_regular(path, max_bytes=MAX_AGENT_WORKTREES_BYTES).decode("utf-8")
+        )
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise RescueSourceError("agent-worktrees.json is not valid UTF-8 JSON") from exc
+    if not isinstance(payload, dict):
+        raise RescueSourceError("agent-worktrees.json must be a JSON object")
+    version = payload.get("version")
+    if (
+        isinstance(version, bool)
+        or not isinstance(version, int)
+        or version < 1
+    ):
+        raise RescueSourceError(
+            "agent-worktrees.json has an unsupported schema version"
+        )
+    if payload.get("session_id") != session_id:
+        raise RescueSourceError(
+            "agent-worktrees.json session_id does not match its directory"
+        )
+    if _json_depth_exceeds(payload, MAX_AGENT_WORKTREES_JSON_DEPTH):
+        raise RescueSourceError("agent-worktrees.json exceeds the nesting limit")
+    if version > AGENT_WORKTREES_SCHEMA_VERSION:
+        return
+    relations = payload.get("relations")
+    tombstones = payload.get("relation_tombstones", [])
+    if (
+        not isinstance(relations, list)
+        or any(not isinstance(item, dict) for item in relations)
+        or not isinstance(tombstones, list)
+        or any(not isinstance(item, dict) for item in tombstones)
+    ):
+        raise RescueSourceError("agent-worktrees.json has an invalid schema")
+
+
+def _json_depth_exceeds(value: object, maximum: int) -> bool:
+    pending = [(value, 1)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > maximum:
+            return True
+        if isinstance(current, dict):
+            pending.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            pending.extend((item, depth + 1) for item in current)
+    return False
 
 
 def safe_component(value: str) -> str:
@@ -315,6 +382,7 @@ def parse_capture(
         f"{SUPPORTED_PROVIDER}|{venue_id(target_prefix, container)}|{capture_id}"
     )
     incomplete: dict[str, list[str]] = {}
+    warnings: list[str] = []
     excluded_allowlisted = excluded.get("allowlisted", [])
     missing_events = excluded.get("missing_events", [])
     if not isinstance(excluded_allowlisted, list):
@@ -334,9 +402,11 @@ def parse_capture(
             not isinstance(reason, str) or not reason.strip()
         ):
             raise RescueSourceError("metadata excluded.allowlisted reason is invalid")
-        incomplete.setdefault(session_id, []).append(
-            f"{member}: {reason or 'excluded'}"
-        )
+        detail = f"{member}: {reason or 'excluded'}"
+        if member in SOFT_OPTIONAL_MEMBERS:
+            warnings.append(f"{session_id}: ignored optional {detail}")
+        else:
+            incomplete.setdefault(session_id, []).append(detail)
     for session in missing_events:
         session_id = _canonical_session_id(session)
         incomplete.setdefault(session_id, []).append("events.jsonl: missing")
@@ -355,7 +425,6 @@ def parse_capture(
 
     parsed: list[RescuedSession] = []
     rejected_sessions: list[str] = []
-    warnings: list[str] = []
     declared_total = 0
     sessions_root = capture_dir / "sessions"
     require_directory(sessions_root, "sessions root")
@@ -402,13 +471,52 @@ def parse_capture(
                 size, digest = validated_members[relative]
                 path = session_dir / Path(relative)
                 _validate_member_parents(path, session_dir, f"{session_id}/{relative}")
-                actual_digest = _hash_regular(path, size)
+                if (
+                    relative == AGENT_WORKTREES_PROJECTION
+                    and size > MAX_AGENT_WORKTREES_BYTES
+                ):
+                    try:
+                        _require_regular_size(path, size)
+                    except RescueSourceError as exc:
+                        if "not a regular file" not in str(exc):
+                            raise
+                        warnings.append(
+                            f"{session_id}: ignored optional {relative}: {exc}"
+                        )
+                        continue
+                    warnings.append(
+                        f"{session_id}: ignored optional {relative}: "
+                        f"exceeds {MAX_AGENT_WORKTREES_BYTES} bytes"
+                    )
+                    continue
+                try:
+                    actual_digest = _hash_regular(path, size)
+                except RescueSourceError as exc:
+                    if (
+                        relative not in SOFT_OPTIONAL_MEMBERS
+                        or "not a regular file" not in str(exc)
+                    ):
+                        raise
+                    warnings.append(
+                        f"{session_id}: ignored optional {relative}: {exc}"
+                    )
+                    continue
                 if actual_digest != digest:
                     raise RescueSourceError(
                         f"hash mismatch for {session_id}/{relative}"
                     )
-                if relative == "events.jsonl":
-                    _validate_events_jsonl(path)
+                try:
+                    if relative == "events.jsonl":
+                        _validate_events_jsonl(path)
+                    elif relative == AGENT_WORKTREES_PROJECTION:
+                        _validate_agent_worktrees_projection(path, session_id)
+                except RescueSourceError as exc:
+                    if relative not in SOFT_OPTIONAL_MEMBERS:
+                        raise
+                    warnings.append(
+                        f"{session_id}: ignored optional {relative}: {exc}"
+                    )
+                    continue
                 members.append(Member(relative, path, size, digest))
         except RescueSourceError as exc:
             rejected_sessions.append(f"{session_id}: {exc}")

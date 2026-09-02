@@ -40,9 +40,14 @@ ALLOWLISTED_MEMBERS = (
     "workspace.yaml",
     "origin.json",
     "context.json",
+    "agent-worktrees.json",
     "checkpoints/index.md",
 )
 HIGH_GROWTH_ROOTS = {"files", "rewind-file-snapshots", "research"}
+AGENT_WORKTREES_PROJECTION = "agent-worktrees.json"
+AGENT_WORKTREES_SCHEMA_VERSION = 1
+MAX_AGENT_WORKTREES_BYTES = 128 * 1024
+MAX_AGENT_WORKTREES_JSON_DEPTH = 64
 _SESSION_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
     r"[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -140,6 +145,58 @@ def _capture_size(path: Path) -> int:
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
         pass
     return 0
+
+
+def _projection_validation_error(path: Path, session_id: str) -> str | None:
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(MAX_AGENT_WORKTREES_BYTES + 1)
+    except OSError:
+        return "unreadable_projection"
+    if len(raw) > MAX_AGENT_WORKTREES_BYTES:
+        return "oversize"
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return "invalid_projection_json"
+    if not isinstance(payload, dict):
+        return "invalid_projection_schema"
+    version = payload.get("version")
+    if (
+        isinstance(version, bool)
+        or not isinstance(version, int)
+        or version < 1
+    ):
+        return "unsupported_projection_schema"
+    if payload.get("session_id") != session_id:
+        return "projection_session_id_mismatch"
+    if _json_depth_exceeds(payload, MAX_AGENT_WORKTREES_JSON_DEPTH):
+        return "invalid_projection_schema"
+    if version > AGENT_WORKTREES_SCHEMA_VERSION:
+        return None
+    relations = payload.get("relations")
+    tombstones = payload.get("relation_tombstones", [])
+    if (
+        not isinstance(relations, list)
+        or any(not isinstance(item, dict) for item in relations)
+        or not isinstance(tombstones, list)
+        or any(not isinstance(item, dict) for item in tombstones)
+    ):
+        return "invalid_projection_schema"
+    return None
+
+
+def _json_depth_exceeds(value: object, maximum: int) -> bool:
+    pending = [(value, 1)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > maximum:
+            return True
+        if isinstance(current, dict):
+            pending.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            pending.extend((item, depth + 1) for item in current)
+    return False
 
 
 def _newest_verified(base: Path) -> dict | None:
@@ -515,6 +572,11 @@ def _capture_locked(
             for relative in ALLOWLISTED_MEMBERS:
                 destination = session_dir / relative
                 ensure_private_dir(destination.parent)
+                member_limit = (
+                    min(config.rescue.max_member_bytes, MAX_AGENT_WORKTREES_BYTES)
+                    if relative == AGENT_WORKTREES_PROJECTION
+                    else config.rescue.max_member_bytes
+                )
                 result = _stream_member(
                     container_instance,
                     user,
@@ -523,10 +585,26 @@ def _capture_locked(
                     session_id,
                     relative,
                     destination,
-                    max_bytes=config.rescue.max_member_bytes,
+                    max_bytes=member_limit,
                     deadline=deadline,
                 )
                 if result.status == "captured":
+                    if relative == AGENT_WORKTREES_PROJECTION:
+                        projection_error = _projection_validation_error(
+                            destination,
+                            session_id,
+                        )
+                        if projection_error is not None:
+                            destination.unlink(missing_ok=True)
+                            excluded["allowlisted"].append(
+                                _excluded_member(
+                                    session_id,
+                                    relative,
+                                    projection_error,
+                                    result.size,
+                                )
+                            )
+                            continue
                     if total_bytes + result.size > config.rescue.max_capture_bytes:
                         destination.unlink(missing_ok=True)
                         excluded["allowlisted"].append(

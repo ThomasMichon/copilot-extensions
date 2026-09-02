@@ -22,6 +22,21 @@ from agent_containers.config import ContainersConfig, FleetConfig, RescueConfig
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
 
 
+def _deep_projection() -> bytes:
+    nested: object = 0
+    for _ in range(70):
+        nested = [nested]
+    return json.dumps(
+        {
+            "version": 1,
+            "session_id": SESSION_ID,
+            "relations": [{"nested": nested}],
+            "overflow": False,
+            "omitted_relations": 0,
+        }
+    ).encode()
+
+
 class _FakeProcess:
     def __init__(self, payload: bytes, control: bytes, returncode: int = 0):
         self.stdout = io.BytesIO(payload)
@@ -125,6 +140,7 @@ def _patch_inventory(monkeypatch) -> None:
         lambda *_args, **_kwargs: [
             ("events.jsonl", "f"),
             ("workspace.yaml", "f"),
+            ("agent-worktrees.json", "f"),
             ("files", "d"),
             ("files/large.bin", "f"),
             ("rewind-file-snapshots", "d"),
@@ -385,6 +401,15 @@ def test_allowlisted_manifest_hashes_and_publishes_atomically(
     payloads = {
         "events.jsonl": b'{"type":"user.message"}\n',
         "workspace.yaml": b"cwd: /workspace\n",
+        "agent-worktrees.json": json.dumps(
+            {
+                "version": 1,
+                "session_id": SESSION_ID,
+                "relations": [],
+                "overflow": False,
+                "omitted_relations": 0,
+            }
+        ).encode(),
     }
     _patch_capture_root(monkeypatch, tmp_path)
     _patch_inventory(monkeypatch)
@@ -417,6 +442,9 @@ def test_allowlisted_manifest_hashes_and_publishes_atomically(
     ).hexdigest()
     assert members["workspace.yaml"]["sha256"] == hashlib.sha256(
         payloads["workspace.yaml"]
+    ).hexdigest()
+    assert members["agent-worktrees.json"]["sha256"] == hashlib.sha256(
+        payloads["agent-worktrees.json"]
     ).hexdigest()
     assert metadata["excluded"] == {
         "unknown_session_entries": 1,
@@ -453,6 +481,9 @@ def test_allowlisted_manifest_hashes_and_publishes_atomically(
     assert published == metadata
     evidence_root = capture / "sessions" / SESSION_ID
     assert (evidence_root / "events.jsonl").read_bytes() == payloads["events.jsonl"]
+    assert (evidence_root / "agent-worktrees.json").read_bytes() == payloads[
+        "agent-worktrees.json"
+    ]
     for forbidden in (
         "files",
         "research",
@@ -697,7 +728,7 @@ def test_irregular_and_oversize_members_are_partial_not_fatal(
                 destination.stat().st_size,
                 digest,
             )
-        if relative == "context.json":
+        if relative == "agent-worktrees.json":
             return rescue_protocol.StreamResult("excluded", reason="symlink")
         return rescue_protocol.StreamResult("missing", reason="missing")
 
@@ -719,8 +750,194 @@ def test_irregular_and_oversize_members_are_partial_not_fatal(
         for item in metadata["excluded"]["allowlisted"]
     } == {
         ("events.jsonl", "oversize"),
-        ("context.json", "symlink"),
+        ("agent-worktrees.json", "symlink"),
     }
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        (b"{", "invalid_projection_json"),
+        (_deep_projection(), "invalid_projection_schema"),
+        (b" " * (128 * 1024 + 1), "oversize"),
+        (
+            json.dumps(
+                {
+                    "version": 1,
+                    "session_id": "22222222-2222-4222-8222-222222222222",
+                    "relations": [],
+                    "overflow": False,
+                    "omitted_relations": 0,
+                }
+            ).encode(),
+            "projection_session_id_mismatch",
+        ),
+    ],
+    ids=[
+        "malformed",
+        "nested-schema",
+        "oversize",
+        "session-mismatch",
+    ],
+)
+def test_invalid_agent_worktrees_projection_is_excluded(
+    monkeypatch,
+    tmp_path,
+    payload,
+    reason,
+):
+    config, fleet = _configured()
+    _patch_capture_root(monkeypatch, tmp_path)
+    _patch_inventory(monkeypatch)
+
+    def stream(
+        _container,
+        _user,
+        _node_path,
+        _home,
+        _session,
+        relative,
+        destination,
+        **_kwargs,
+    ):
+        if relative == "events.jsonl":
+            content = b'{"type":"user.message"}\n'
+        elif relative == "agent-worktrees.json":
+            content = payload
+        else:
+            return rescue_protocol.StreamResult("missing", reason="missing")
+        destination.write_bytes(content)
+        return rescue_protocol.StreamResult(
+            "captured",
+            len(content),
+            hashlib.sha256(content).hexdigest(),
+        )
+
+    monkeypatch.setattr(rescue, "_stream_member", stream)
+
+    metadata = rescue.capture_restricted_sessions(
+        config,
+        fleet,
+        container="sandbox-1",
+        container_instance="instance-a",
+        user="agent",
+    )
+
+    assert metadata["completeness"] == "partial"
+    assert metadata["sessions"][SESSION_ID]["members"].keys() == {"events.jsonl"}
+    assert metadata["excluded"]["allowlisted"] == [
+        {
+            "session_id": SESSION_ID,
+            "member": "agent-worktrees.json",
+            "reason": reason,
+            "bytes": len(payload),
+        }
+    ]
+
+
+def test_future_agent_worktrees_projection_is_preserved(
+    monkeypatch,
+    tmp_path,
+):
+    config, fleet = _configured()
+    _patch_capture_root(monkeypatch, tmp_path)
+    _patch_inventory(monkeypatch)
+    projection = json.dumps(
+        {
+            "version": 2,
+            "session_id": SESSION_ID,
+            "future": {"shape": "opaque"},
+        }
+    ).encode()
+
+    def stream(
+        _container,
+        _user,
+        _node_path,
+        _home,
+        _session,
+        relative,
+        destination,
+        **_kwargs,
+    ):
+        if relative == "events.jsonl":
+            content = b'{"type":"user.message"}\n'
+        elif relative == "agent-worktrees.json":
+            content = projection
+        else:
+            return rescue_protocol.StreamResult("missing", reason="missing")
+        destination.write_bytes(content)
+        return rescue_protocol.StreamResult(
+            "captured",
+            len(content),
+            hashlib.sha256(content).hexdigest(),
+        )
+
+    monkeypatch.setattr(rescue, "_stream_member", stream)
+
+    metadata = rescue.capture_restricted_sessions(
+        config,
+        fleet,
+        container="sandbox-1",
+        container_instance="instance-a",
+        user="agent",
+    )
+
+    assert metadata["completeness"] == "complete"
+    capture = rescue.RESCUE_ROOT / "sandbox-1" / metadata["capture_id"]
+    assert (
+        capture / "sessions" / SESSION_ID / "agent-worktrees.json"
+    ).read_bytes() == projection
+
+
+def test_canonical_tolerant_v1_projection_is_preserved(
+    monkeypatch,
+    tmp_path,
+):
+    config, fleet = _configured()
+    _patch_capture_root(monkeypatch, tmp_path)
+    _patch_inventory(monkeypatch)
+    projection = json.dumps(
+        {
+            "version": 1,
+            "session_id": SESSION_ID,
+            "relations": [{"worktree_id": str(index)} for index in range(129)],
+        }
+    ).encode()
+
+    def stream(
+        _container,
+        _user,
+        _node_path,
+        _home,
+        _session,
+        relative,
+        destination,
+        **_kwargs,
+    ):
+        if relative == "events.jsonl":
+            content = b'{"type":"user.message"}\n'
+        elif relative == "agent-worktrees.json":
+            content = projection
+        else:
+            return rescue_protocol.StreamResult("missing", reason="missing")
+        destination.write_bytes(content)
+        return rescue_protocol.StreamResult(
+            "captured",
+            len(content),
+            hashlib.sha256(content).hexdigest(),
+        )
+
+    monkeypatch.setattr(rescue, "_stream_member", stream)
+    metadata = rescue.capture_restricted_sessions(
+        config,
+        fleet,
+        container="sandbox-1",
+        container_instance="instance-a",
+        user="agent",
+    )
+
+    assert "agent-worktrees.json" in metadata["sessions"][SESSION_ID]["members"]
 
 
 def test_failed_latest_status_retains_verified_fallback(monkeypatch, tmp_path):
