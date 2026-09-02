@@ -252,6 +252,33 @@ platform-appropriate publication primitive described above.
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.
 
+An operative plugin adapter holds one cell-root provisioning lock across the
+entire snapshot, slot reservation, venv/package build, completion, cutover, and
+deploy-manifest publication transaction. Receipt primitives retain their own
+short locks, but releasing those locks never permits a second caller to mutate
+the same supposedly immutable slot during the build. First-use dispatch,
+session-start bootstrap, and direct management calls enter through that same
+outer lock. Payload snapshot publication stages into a uniquely owned sibling
+below `snapshotsRoot`, copies the complete payload there, and atomically renames
+that directory into the final version path before publishing provenance. A
+temporary ownership marker remains until provenance publication and validation
+complete. Retry may remove only a marker-proven final directory that still has
+no provenance sidecar; a pre-existing, unowned, malformed, or conflicting
+snapshot is never deleted or replaced.
+
+After a successful plugin-level cutover, the adapter atomically republishes
+`deploy-manifest.json` schema 4. Its `source` object records the most recently
+reconciled payload provenance that bootstrap uses to decide whether a newly
+loaded payload requires a forward update. Its `runtime` object independently
+records the selected interpreter kind, version, slot path, interpreter path, and
+the payload that selected it. A full provision advances both source provenance
+and runtime selection. A marker-only historical rollback preserves `source`
+while changing only `runtime`, so the next bootstrap does not silently reverse
+the explicit rollback; a later different payload provenance still triggers
+forward reconciliation. Missing, malformed, cross-cell, path-inconsistent, or
+marker-inconsistent manifest data fails closed. A failed compare-and-swap does
+not replace the manifest.
+
 The same three runners expose explicit `slot-complete`,
 `slot-completion-validate`, and `slot-cutover` transactions. Completion captures
 strict build evidence into an immutable owned-slot receipt without selecting the
@@ -265,6 +292,28 @@ rollback pointer. An already-current target is idempotent. Cutover changes the
 versioned-runtime tier-1 selection inside the cell; `activated: false` means it
 does not publish `installation-activation.json`. It does not mutate launchers,
 services, manifests, payloads, or plugin application state.
+
+Payload-invocation manifest version 2 is additive and leaves version 1
+generation unchanged. Version 2 replaces `runtimeRoot` with
+`legacyRuntimeRoot` and declares
+`installationContext: "legacy" | "required"`. The generator accepts
+`required` only for a runtime-bearing core `agent-*` identity present in this
+suite's canonical marketplace; source provenance may still name an independent
+marketplace carrying that same identity. Payload-only and unrelated identities
+are rejected even when their manifests advertise commands, tools, runtimes, or
+services.
+
+Agent Machines is the first operative `required` adopter. Its payload dispatcher
+uses legacy resolution unchanged when authoritative policy is absent or false.
+It selects a cell root only from an active validated Agent Machines activation,
+propagates that canonical context to the runtime, and never falls back to legacy
+after requested-only, malformed, foreign-environment, maintenance, orphaned, or
+generation-stale evidence. First-use and bootstrap reconciliation may build,
+publish immutable completion, and cut over only inside an already-active cell;
+neither path creates activation. Its fixed-identity `slot-cutover` installer
+adapter supplies exact payload, marketplace, plugin, generation, and
+current-marker expectations for forward update or explicit historical rollback.
+Repair/release and uninstall remain separate lifecycle boundaries.
 
 ### Installation-mode governance
 
@@ -1411,6 +1460,10 @@ version drifts** from the payload.
   plugin's canonical installer (`init.*`, or `install.* install`) **in the
   background** — the atomic versioned-venv swap keeps concurrent use safe, and
   backgrounding keeps session start non-blocking.
+- A namespaced Agent Machines cell uses the schema-4 distinction defined above:
+  bootstrap compares the loaded payload only with reconciled `source`
+  provenance, validates `runtime` against the cell-local marker/interpreter, and
+  does not treat an intentionally selected historical runtime as payload drift.
 - A separate `sessionStart` command hook runs
   `scripts/emit-command-catalog.{ps1,sh}` from `COPILOT_PLUGIN_ROOT` and emits
   exact payload-local `argv` plus `availability`. It never snapshots dynamic

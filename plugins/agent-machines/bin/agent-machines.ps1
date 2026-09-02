@@ -2,7 +2,6 @@
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $_command = 'agent-machines'
-$_module = 'agent_machines'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 if ($env:COPILOT_PLUGIN_ROOT) {
@@ -37,88 +36,7 @@ if (
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
-$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-machines'
-$_resolver = Join-Path $_payloadRoot 'scripts\resolve-runtime.ps1'
-function Resolve-PayloadRuntime {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) {
-        $env:AGENT_RT_ROOT = $_runtimeRoot
-        . $_resolver
-    }
-    return $AgentRtPy
-}
-
-$_py = Resolve-PayloadRuntime
-if ($_py) {
-    & $_py -m $_module @args
-    exit $LASTEXITCODE
-}
-if (Test-Path "env:AGENT_MACHINES_NO_SELFPROVISION") {
-    [Console]::Error.WriteLine("[$_command] runtime not provisioned (AGENT_MACHINES_NO_SELFPROVISION set).")
-    exit 1
-}
-
-if (-not (Test-Path -LiteralPath $_runtimeRoot)) {
-    New-Item -ItemType Directory -Path $_runtimeRoot -Force | Out-Null
-}
-$_lockPath = Join-Path $_runtimeRoot '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open(
-            $_lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
-        )
-    } catch {
-        Start-Sleep -Milliseconds 200
-    }
-}
-
-$_provisionedPy = $null
-$_provisionRc = 0
-try {
-    $_provisionedPy = Resolve-PayloadRuntime
-    if (-not $_provisionedPy) {
-$_installer = Join-Path $_payloadRoot 'scripts\init.ps1'
-if (-not (Test-Path -LiteralPath $_installer)) {
-    [Console]::Error.WriteLine("[$_command] payload installer not found: $_installer")
-    exit 127
-}
-
-[Console]::Error.WriteLine("[$_command] runtime not provisioned -- provisioning from the owning payload.")
-[Console]::Error.WriteLine("::agent-provisioning:: plugin=$_command eta_seconds=120 reason=first-use")
-$_host = Get-Command pwsh -ErrorAction SilentlyContinue
-$_hostExe = if ($_host) { $_host.Source } else { 'powershell.exe' }
-& $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_installer stamp 2>&1 |
-    ForEach-Object { [Console]::Error.WriteLine($_) }
-$_provisionRc = $LASTEXITCODE
-
-        if ($_provisionRc -eq 0) {
-            $_snapshot = ''
-            try { $_snapshot = ([IO.File]::ReadAllText((Join-Path $_runtimeRoot 'payload-dir'))).Trim() } catch {}
-            $_snapshotInstaller = if ($_snapshot) { Join-Path $_snapshot 'scripts\init.ps1' } else { '' }
-            if (-not ($_snapshotInstaller -and (Test-Path -LiteralPath $_snapshotInstaller))) {
-                [Console]::Error.WriteLine("[$_command] stamped snapshot installer not found: $_snapshotInstaller")
-                $_provisionRc = 127
-            } else {
-                & $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_snapshotInstaller provision 2>&1 |
-                    ForEach-Object { [Console]::Error.WriteLine($_) }
-                $_provisionRc = $LASTEXITCODE
-            }
-        }
-        if ($_provisionRc -eq 0) {
-            $_provisionedPy = Resolve-PayloadRuntime
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
-}
-if ($_provisionRc -ne 0) { exit $_provisionRc }
-if ($_provisionedPy) {
-    & $_provisionedPy -m $_module @args
-    exit $LASTEXITCODE
-}
-[Console]::Error.WriteLine("[$_command] provisioning completed without a resolvable runtime.")
-exit 1
+$env:AGENT_MACHINES_PAYLOAD_ROOT = $_payloadRoot
+$_payloadDispatcher = Join-Path $_payloadRoot 'scripts\invoke-payload-runtime.ps1'
+& $_payloadDispatcher @args
+exit $LASTEXITCODE

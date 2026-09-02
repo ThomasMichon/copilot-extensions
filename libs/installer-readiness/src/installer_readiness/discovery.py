@@ -235,10 +235,33 @@ def _payload_commands(root: Path) -> tuple[dict[str, Path], str]:
     data = _object(_strict_json(path), "payload invocation manifest")
     if data.get("schema") != "copilot-extensions.payload-invocation":
         raise _ContractProblem("payload invocation manifest has unsupported schema/version")
-    _version(data.get("version"), 1, "payload invocation version")
-    runtime_root = data.get("runtimeRoot")
+    manifest_version = data.get("version")
+    if (
+        not isinstance(manifest_version, int)
+        or isinstance(manifest_version, bool)
+        or manifest_version not in {1, 2}
+    ):
+        raise _ContractProblem("payload invocation version must be integer 1 or 2")
+    runtime_root_field = (
+        "runtimeRoot" if manifest_version == 1 else "legacyRuntimeRoot"
+    )
+    runtime_root = data.get(runtime_root_field)
     if not isinstance(runtime_root, str) or not _RUNTIME_ROOT.fullmatch(runtime_root):
-        raise _ContractProblem("payload invocation runtimeRoot is invalid")
+        raise _ContractProblem(
+            f"payload invocation {runtime_root_field} is invalid"
+        )
+    if manifest_version == 1:
+        if "legacyRuntimeRoot" in data or "installationContext" in data:
+            raise _ContractProblem(
+                "payload invocation version 1 cannot declare installation context"
+            )
+    elif (
+        "runtimeRoot" in data
+        or data.get("installationContext") not in {"legacy", "required"}
+    ):
+        raise _ContractProblem(
+            "payload invocation version 2 installation context is invalid"
+        )
     no_self_provision = data.get("noSelfProvisionEnv")
     if (
         not isinstance(no_self_provision, str)

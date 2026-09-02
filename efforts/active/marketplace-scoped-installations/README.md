@@ -206,10 +206,21 @@ because they provide tools or services.
       bind snapshot provenance to the exact installer payload root/version,
       bypass legacy mutation, and reserve or validate only the payload version's
       empty owned slot.
+      - [x] Make Agent Machines the command-only operative exemplar: payload
+        invocation and bootstrap accept only an already-active validated cell,
+        namespaced first use/update publish owned build completion and cut over
+        cell-local runtime markers, and fixed-identity cutover supports historical
+        rollback without legacy fallback.
+      - [ ] Add ownership-checked Agent Machines repair/release and uninstall.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
-  simultaneous marketplace cells in disposable clean-room environments before
-  broad rollout. Do not activate or use either exemplar namespaced on a
-  persistent machine.
+    simultaneous marketplace cells in disposable clean-room environments before
+    broad rollout. Do not activate or use either exemplar namespaced on a
+    persistent machine.
+    - [x] Add a deterministic cross-platform Tier-P Agent Machines scenario for
+      two cells, isolated update/rollback, blocked governance states, and
+      unrelated/payload-only eligibility negatives.
+    - [ ] Run the Agent Machines scenario in disposable Linux and Windows
+      clean-room arms.
 
 ### Phase 4 — Runtime and state rollout
 
@@ -788,3 +799,44 @@ See [`design.md`](design.md).
 - Added validation gates for persistent-host non-activation, clean-room-only
   lifecycle proof, and negative scope coverage before the operative exemplar
   work continues.
+
+### 2026-08-31 — Command-only Agent Machines operative exemplar
+
+- Added payload-invocation schema v2 as an additive contract: v1 generation
+  remains unchanged, while required installation context is blocking and
+  limited to runtime-bearing core suite identities.
+- Converted Agent Machines payload commands to a fixed-identity dispatcher.
+  Absent/false policy remains legacy; active validated context selects the
+  cell; requested-only, invalid, foreign, maintenance, orphaned, and stale
+  evidence fails without legacy fallback.
+- Added active-cell-only first-use and bootstrap reconciliation through
+  snapshot provenance, slot ownership, build completion, and marker CAS.
+  Neither path activates a cell. Added the explicit slot-cutover adapter needed
+  for historical rollback.
+- Added the cross-platform Tier-P dual-cell scenario, including isolated update
+  and rollback plus unrelated/payload-only eligibility negatives. Service
+  conversion, repair/release, uninstall, migration, and broad rollout remain.
+- The Linux clean-room arm passed the source and eligibility phases, then
+  stopped at the explicit `toolchain-uv` gate because the box could not fetch
+  PyYAML (`HandshakeFailure`) and no `CR_UV_INDEX` was configured. This host's
+  Docker engine is Linux-only, so the Windows-container arm was not run. The
+  cross-platform scenario-run checklist remains open.
+
+### 2026-09-01 — Agent Machines operative review hardening
+
+- Moved the Agent Machines cell-root provisioning lock into the complete
+  `cell-provision` transaction, so detached bootstrap, first-use dispatch, and
+  direct callers cannot concurrently mutate one immutable runtime slot.
+- Made plugin-level `slot-cutover` share that lock and atomically republish the
+  deploy manifest; failed compare-and-swap leaves the prior manifest unchanged.
+- Added POSIX/PowerShell transaction-serialization and rollback-manifest
+  assertions. The Linux clean-room lock/eligibility stage passed; the complete
+  lifecycle still stops at the already-recorded `toolchain-uv` PyYAML fetch
+  gate because this host has no governed Python index configured.
+- Split schema-4 deploy manifests into reconciled payload provenance and active
+  runtime selection. Historical rollback now preserves the payload provenance
+  bootstrap has already reconciled, while a later different payload still
+  triggers forward update.
+- Staged cell snapshot copy in an owned temporary sibling and made retry reclaim
+  only marker-proven, still-unproven publications. POSIX and PowerShell tests
+  cover injected interruption, retry, and preservation of unowned final state.

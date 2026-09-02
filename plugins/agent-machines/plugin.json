@@ -1,7 +1,7 @@
 {
   "name": "agent-machines",
   "description": "Portable restore-machinestate for Copilot CLI. Converges the current machine to desired state declared in in-repo requirement packages -- Copilot settings first, then applications, services, and custom modules. The engine is generic; sensitive OS-mutating modules and per-machine data stay in each harness repo. Machine-scoped union restore with a seven-disposition model (enforce/ensure-present/capture-only/ignore/exclude/prune/prerequisite-check) and a conflict validator.",
-  "version": "0.1.0-dev77",
+  "version": "0.1.0-dev78",
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
   "hooks": "hooks.json",
