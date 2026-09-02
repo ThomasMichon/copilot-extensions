@@ -28,11 +28,11 @@ from agent_logger.sync.meta import write_sync_meta
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
     RESCUE_SNAPSHOT_PROVENANCE,
-    _windows_extended_path,
     existing_rescue_snapshot_path,
     is_link_or_reparse,
     open_regular_no_follow,
     rescue_snapshot_path,
+    windows_extended_path as _windows_extended_path,
 )
 from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
 
@@ -642,13 +642,17 @@ def _iter_regular_source_files(root: Path):
 def _copy_session_tree(source: Path, destination: Path) -> tuple[int, int]:
     """Copy one session tree without following links or relying on MAX_PATH."""
     _ensure_real_directory(destination)
+    parents: dict[Path, Path] = {Path("."): destination}
     copied = 0
     nbytes = 0
     for src_file in _iter_regular_source_files(source):
         if _is_excluded_name(src_file.name):
             continue
         relative = src_file.relative_to(source)
-        parent = _ensure_relative_directory(destination, relative.parent)
+        parent = parents.get(relative.parent)
+        if parent is None:
+            parent = _ensure_relative_directory(destination, relative.parent)
+            parents[relative.parent] = parent
         _copy_replace(src_file, parent / relative.name)
         copied += 1
         nbytes += os.stat(_windows_extended_path(src_file)).st_size

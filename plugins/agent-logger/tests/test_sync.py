@@ -126,13 +126,13 @@ def test_windows_extended_path_formats_drive_and_unc_paths() -> None:
     unc = Path(r"\\server\share\session.json")
     extended = Path(r"\\?\C:\example\session.json")
 
-    assert provenance._windows_extended_path(drive) == (
+    assert provenance.windows_extended_path(drive) == (
         r"\\?\C:\example\session.json"
     )
-    assert provenance._windows_extended_path(unc) == (
+    assert provenance.windows_extended_path(unc) == (
         r"\\?\UNC\server\share\session.json"
     )
-    assert provenance._windows_extended_path(extended) == str(extended)
+    assert provenance.windows_extended_path(extended) == str(extended)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH regression")

@@ -37,7 +37,7 @@ _OPTIONAL_TEXT = {
 }
 
 
-def _windows_extended_path(path: Path) -> str:
+def windows_extended_path(path: Path) -> str:
     """Return a Win32 extended path for filesystem operations."""
     raw = os.path.abspath(os.fspath(path))
     if os.name != "nt" or raw.startswith("\\\\?\\"):
@@ -45,6 +45,9 @@ def _windows_extended_path(path: Path) -> str:
     if raw.startswith("\\\\"):
         return f"\\\\?\\UNC\\{raw[2:]}"
     return f"\\\\?\\{raw}"
+
+
+_windows_extended_path = windows_extended_path
 
 
 def _lstat(path: Path) -> os.stat_result:

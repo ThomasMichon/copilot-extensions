@@ -49,7 +49,6 @@ from agent_logger.segmenter.collate import read_workspace
 from agent_logger.sync.origin import read_origin_sidecar
 from agent_logger.sync.provenance import (
     RESCUE_SNAPSHOT_PROVENANCE,
-    _windows_extended_path,
     existing_real_directory,
     existing_rescue_snapshot_path,
     is_link_or_reparse,
@@ -57,6 +56,7 @@ from agent_logger.sync.provenance import (
     read_provenance,
     read_provenance_file,
     rescue_snapshot_path,
+    windows_extended_path as _windows_extended_path,
 )
 
 # The settle window: never claim a session whose synced state changed within
