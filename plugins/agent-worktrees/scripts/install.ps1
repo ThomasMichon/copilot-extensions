@@ -1515,6 +1515,11 @@ set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\.agent-worktrees\logs\picker-lau
 if not exist "%USERPROFILE%\.agent-worktrees\logs" mkdir "%USERPROFILE%\.agent-worktrees\logs" >nul 2>&1
 (>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"$ProjectName"}) 2>nul
 set "AGENT_WORKTREES_BINSTUB_TRACED=1"
+if "%~1"=="" (
+  set "WORKTREE_PROJECT=$ProjectName"
+  call "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd"
+  exit /b %ERRORLEVEL%
+)
 rem Context resolves from CWD / --project (git-like); the binstub names its
 rem project via --project, not an ambient env var.
 where pwsh >nul 2>&1
@@ -1545,6 +1550,17 @@ if (-not $env:AGENT_WORKTREES_BINSTUB_TRACED) {
         $_awEvent = [ordered]@{ event = 'binstub_start'; timestamp = $env:AGENT_WORKTREES_BINSTUB_STARTED; launch_id = $env:AGENT_WORKTREES_LAUNCH_ID; project = '%%PROJECT%%' }
         [IO.File]::AppendAllText($env:AGENT_WORKTREES_LAUNCH_TRACE, ($_awEvent | ConvertTo-Json -Compress) + [Environment]::NewLine)
     } catch {}
+}
+if ($args.Count -eq 0) {
+    $_savedProj = $env:WORKTREE_PROJECT
+    $env:WORKTREE_PROJECT = '%%PROJECT%%'
+    try {
+        & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.ps1"
+        $_rc = $LASTEXITCODE
+    } finally {
+        if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }
+    }
+    exit $_rc
 }
 # Context resolves from CWD / --project (git-like). This .ps1 runs in-process in
 # the caller's session, so it names its project via --project (not an ambient

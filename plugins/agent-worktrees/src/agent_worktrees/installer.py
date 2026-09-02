@@ -710,6 +710,11 @@ def _project_binstub_specs(
             'set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\\.agent-worktrees\\logs\\picker-launches.jsonl"',
             'if not exist "%USERPROFILE%\\.agent-worktrees\\logs" mkdir "%USERPROFILE%\\.agent-worktrees\\logs" >nul 2>&1',
             f'(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {{"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"{project}"}}) 2>nul',
+            'if "%~1"=="" (',
+            f'  set "WORKTREE_PROJECT={project}"',
+            '  call "%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd"',
+            "  exit /b %ERRORLEVEL%",
+            ")",
             "rem This attributable project entry point is pinned to its owning payload.",
             f'"{cmd_path}" --project {project} %*',
             "exit /b %ERRORLEVEL%",
@@ -725,6 +730,17 @@ def _project_binstub_specs(
             f"    $_awEvent = [ordered]@{{ event = 'binstub_start'; timestamp = $env:AGENT_WORKTREES_BINSTUB_STARTED; launch_id = $env:AGENT_WORKTREES_LAUNCH_ID; project = '{ps1_project}' }}",
             "    [IO.File]::AppendAllText($env:AGENT_WORKTREES_LAUNCH_TRACE, ($_awEvent | ConvertTo-Json -Compress) + [Environment]::NewLine)",
             "} catch {}",
+            "if ($args.Count -eq 0) {",
+            "    $_savedProj = $env:WORKTREE_PROJECT",
+            f"    $env:WORKTREE_PROJECT = '{ps1_project}'",
+            "    try {",
+            "        & \"$env:USERPROFILE\\.agent-worktrees\\bin\\launch-session.ps1\"",
+            "        $_rc = $LASTEXITCODE",
+            "    } finally {",
+            "        if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }",
+            "    }",
+            "    exit $_rc",
+            "}",
             "# This attributable project entry point is pinned to its owning payload.",
             f"& '{ps1_path}' --project '{ps1_project}' @args",
             "exit $LASTEXITCODE",
@@ -742,6 +758,10 @@ def _project_binstub_specs(
         "export AGENT_WORKTREES_LAUNCH_TRACE=\"$HOME/.agent-worktrees/logs/picker-launches.jsonl\"\n"
         "mkdir -p \"$(dirname \"$AGENT_WORKTREES_LAUNCH_TRACE\")\" 2>/dev/null || true\n"
         f"printf '%s\\n' '{{\"event\":\"binstub_start\",\"timestamp\":\"'\"$AGENT_WORKTREES_BINSTUB_STARTED\"'\",\"launch_id\":\"'\"$AGENT_WORKTREES_LAUNCH_ID\"'\",\"project\":\"{project}\"}}' >>\"$AGENT_WORKTREES_LAUNCH_TRACE\" 2>/dev/null || true\n"
+        "if [[ $# -eq 0 ]]; then\n"
+        f"  export WORKTREE_PROJECT={shlex.quote(project)}\n"
+        "  exec \"$HOME/.agent-worktrees/bin/launch-session.sh\"\n"
+        "fi\n"
         "# This attributable project entry point is pinned to its owning payload.\n"
         f"exec {shlex.quote(str(payload_cmd))} --project "
         f"{shlex.quote(project)} \"$@\"\n"

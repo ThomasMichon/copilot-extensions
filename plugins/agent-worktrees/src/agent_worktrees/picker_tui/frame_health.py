@@ -18,6 +18,39 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _launch_trace_path() -> Path | None:
+    raw = os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE", "").strip()
+    if not raw or raw.lower() in ("0", "false", "no", "off"):
+        return None
+    if raw.lower() in ("1", "true", "yes", "on"):
+        return (
+            Path.home()
+            / ".agent-worktrees"
+            / "logs"
+            / "picker-launches.jsonl"
+        )
+    return Path(raw).expanduser()
+
+
+def append_launch_event(event: str, **fields) -> None:
+    """Append one pre-render launch checkpoint. Best-effort and fail-silent."""
+    path = _launch_trace_path()
+    if path is None:
+        return
+    payload = {
+        "timestamp": _timestamp(),
+        "event": event,
+        "launch_id": os.environ.get("AGENT_WORKTREES_LAUNCH_ID", ""),
+        **fields,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    except OSError:
+        return
+
+
 class FrameHealthReporter:
     """Enqueue timer gaps on the UI thread and persist them on a writer thread."""
 
@@ -46,29 +79,19 @@ class FrameHealthReporter:
         health_raw = os.environ.get(
             "AGENT_WORKTREES_PICKER_FRAME_HEALTH", ""
         ).strip()
-        trace_raw = os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE", "").strip()
+        trace_path = _launch_trace_path()
         health_enabled = bool(
             health_raw
             and health_raw.lower() not in ("0", "false", "no", "off")
         )
-        trace_enabled = bool(
-            trace_raw
-            and trace_raw.lower() not in ("0", "false", "no", "off")
-        )
+        trace_enabled = trace_path is not None
         if not health_enabled and not trace_enabled:
             return None
         truthy = ("1", "true", "yes", "on")
         if health_enabled and health_raw.lower() not in truthy:
             path = Path(health_raw).expanduser()
         elif trace_enabled:
-            path = (
-                Path.home()
-                / ".agent-worktrees"
-                / "logs"
-                / "picker-launches.jsonl"
-                if trace_raw.lower() in truthy
-                else Path(trace_raw).expanduser()
-            )
+            path = trace_path
         else:
             path = (
                 Path.home()
