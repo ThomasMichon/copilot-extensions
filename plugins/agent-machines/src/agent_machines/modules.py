@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -126,6 +127,8 @@ def _payload_invocation_command(
 ) -> tuple[list[str], dict[str, str]]:
     source = str(invocation["plugin"])
     command_name = str(invocation["command"])
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", command_name) is None:
+        raise RuntimeError(f"invalid payload command id: {command_name!r}")
     active = _active_plugins().get(source)
     if active is None:
         raise RuntimeError(f"required active plugin is unavailable: {source}")
@@ -191,6 +194,10 @@ def _payload_invocation_command(
     else:
         shim = payload / output_path / command_name
         command = [str(shim)]
+    try:
+        shim.resolve().relative_to(payload)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"payload command escapes plugin root: {shim}") from exc
     if not shim.is_file():
         raise RuntimeError(f"payload command shim is unavailable: {shim}")
     env = dict(os.environ)

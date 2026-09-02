@@ -16,6 +16,7 @@ the engine unions resolved packages across repos (see ``discover``/``reconcile``
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,7 @@ DISPOSITIONS = (
 )
 
 PLUGIN_ACTIVATION_GROUP = "copilot.settings.plugin-activation"
+PAYLOAD_COMMAND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 #: The stack-critical plugins/marketplaces the bootstrap-floor assertion protects
 #: (a package may add to, but never remove from, the union of these).
@@ -291,7 +293,7 @@ def load_package(
                 for part in plugin_parts
             )
             and isinstance(invocation.get("command"), str)
-            and bool(invocation["command"].strip())
+            and PAYLOAD_COMMAND_ID.fullmatch(invocation["command"]) is not None
             and all(
                 key not in invocation or isinstance(invocation[key], list)
                 for key in (

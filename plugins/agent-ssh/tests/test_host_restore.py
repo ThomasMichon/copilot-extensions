@@ -145,6 +145,37 @@ def test_dtssh_restore_blocks_without_login(tmp_path, monkeypatch):
     assert result["blocked"] == "authentication"
 
 
+def test_nonzero_status_is_never_healthy(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    def run(command, **kwargs):
+        if "user" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"status": "Logged in"}',
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=1,
+            stdout="host running\nwatchdog running\n"
+            "tunnel example: 1 host connection(s)",
+            stderr="status failed",
+        )
+
+    monkeypatch.setattr(host_restore.subprocess, "run", run)
+
+    result = host_restore.restore_host(
+        "dtssh",
+        "example-host",
+        2222,
+        apply=False,
+    )
+
+    assert result["ok"] is False
+    assert result["healthy"] is False
+    assert result["would_change"] is True
+
+
 def test_payload_root_uses_runtime_marker(tmp_path, monkeypatch):
     home = tmp_path / "home"
     payload = tmp_path / "payload"
