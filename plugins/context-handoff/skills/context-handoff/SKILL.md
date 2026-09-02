@@ -185,8 +185,8 @@ the baton and take over.
 > **Recovery locator completion semantics.** A task-backed recovery locator
 > passed to payload-local `handoff-cli.mjs consume --locator task:<id>`
 > automatically defers completion, matching canonical `/consume-handoff`. The
-> successor later runs `agent-dispatch complete <id>` only when it reaches the
-> handoff completion gate. <!-- marketplace-isolation: allow handoff-seed-startup -->
+> successor later runs `agent-dispatch complete <id>` only when it reaches the <!-- marketplace-isolation: allow handoff-seed-startup -->
+> handoff completion gate.
 > Explicit `consume --task-id <id>` without `--defer-complete` remains the
 > lower-level complete-on-pickup form, but a generated successor seed never asks
 > for it. Finishing the predecessor's latest phase is not sufficient when the
