@@ -44,6 +44,15 @@ class PushResult:
     byte_count: int = 0
 
 
+@dataclass
+class SyncStatus:
+    """Latest persisted result exposed by a sync target."""
+
+    supported: bool
+    metadata: dict | None = None
+    error: str = ""
+
+
 def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
     """Build rsync include/exclude args restricting the transfer to session data.
 
@@ -135,6 +144,10 @@ class Target(ABC):
         Targets that cannot prune (e.g. push-only remotes) return ``0``.
         """
         return 0
+
+    def sync_status(self, machine: str) -> SyncStatus:
+        """Return the latest persisted sync result when the target exposes one."""
+        return SyncStatus(supported=False)
 
     def push_archives(self, archive_root: Path, machine: str) -> PushResult:
         """Publish the compressed archive store under ``{machine}/archived/``.

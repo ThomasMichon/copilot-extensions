@@ -106,6 +106,10 @@ def test_local_target_push_defers_locked_files(monkeypatch, tmp_path: Path) -> N
     ).is_file()
     metadata = json.loads((machine_dir / "sync-meta.json").read_text())
     assert metadata["status"] == "partial"
+    assert metadata["deferred_file_count"] == 1
+    assert metadata["deferred_files"] == [
+        str(Path("session-state") / "abc-123" / "events.jsonl")
+    ]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows sharing violation behavior")
@@ -703,6 +707,135 @@ def _cfg(home: Path, source: Path, dest: Path) -> Config:
     data["sync"]["source"] = str(source)
     data["sync"]["targets"]["local"]["path"] = str(dest)
     return Config(data, home)
+
+
+def test_sync_meta_bounds_deferred_file_samples(tmp_path: Path) -> None:
+    from agent_logger.sync import meta
+
+    deferred = [f"path-{index}-{'x' * 600}" for index in range(20)]
+    meta.write_sync_meta(
+        tmp_path,
+        "m" * 1000,
+        "t" * 1000,
+        "s" * 1000,
+        12,
+        deferred_files=deferred,
+    )
+
+    payload = meta.read_sync_meta(tmp_path)
+
+    assert payload is not None
+    assert len(payload["machine_id"]) == meta.MAX_META_FIELD_CHARS
+    assert len(payload["transport"]) == meta.MAX_META_FIELD_CHARS
+    assert len(payload["status"]) == meta.MAX_META_FIELD_CHARS
+    assert payload["deferred_file_count"] == 20
+    assert len(payload["deferred_files"]) == meta.MAX_DEFERRED_FILE_SAMPLES
+    assert all(
+        len(path) <= meta.MAX_DEFERRED_PATH_CHARS
+        for path in payload["deferred_files"]
+    )
+
+
+def test_status_prints_latest_partial_sync(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    machine_root = dest / "machine"
+    meta.write_sync_meta(
+        machine_root,
+        "machine",
+        "local",
+        "partial",
+        12,
+        deferred_files=["session-state/one/locked.db"],
+    )
+    cfg = _cfg(tmp_path / "home", source, dest)
+    monkeypatch.setattr(engine, "_machine", lambda _cfg: "machine")
+
+    assert engine.do_status(cfg) == 0
+
+    output = capsys.readouterr().out
+    assert "latest_status:  partial" in output
+    assert "sessions:       12" in output
+    assert "deferred_files: 1" in output
+    assert "session-state/one/locked.db" in output
+
+
+def test_status_distinguishes_missing_sync_metadata(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path / "home", _make_source(tmp_path), tmp_path / "dest")
+    monkeypatch.setattr(engine, "_machine", lambda _cfg: "machine")
+
+    assert engine.do_status(cfg) == 0
+
+    assert "latest_sync:    (none)" in capsys.readouterr().out
+
+
+def test_status_handles_malformed_and_control_metadata(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    dest = tmp_path / "dest"
+    machine_root = dest / "machine"
+    machine_root.mkdir(parents=True)
+    (machine_root / "sync-meta.json").write_text(
+        json.dumps(
+            {
+                "last_sync_utc": {"invalid": True},
+                "status": "partial\u001b[31m",
+                "session_count": [],
+                "deferred_file_count": 2,
+                "deferred_files": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = _cfg(tmp_path / "home", _make_source(tmp_path), dest)
+    monkeypatch.setattr(engine, "_machine", lambda _cfg: "machine")
+
+    assert engine.do_status(cfg) == 0
+
+    output = capsys.readouterr().out
+    assert "latest_sync:    (unknown)" in output
+    assert "latest_status:  partial[31m" in output
+    assert "\u001b" not in output
+    assert "sessions:       (unknown)" in output
+    assert "(invalid deferred_files metadata)" in output
+
+
+def test_status_sanitizes_unreadable_metadata_error(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path / "home", _make_source(tmp_path), tmp_path / "dest")
+    monkeypatch.setattr(engine, "_machine", lambda _cfg: "machine")
+
+    class InvalidStatusTarget:
+        def describe(self) -> str:
+            return "invalid"
+
+        def sync_status(self, _machine):
+            from agent_logger.sync.targets.base import SyncStatus
+
+            return SyncStatus(supported=True, error="bad\u001b[31m\nmetadata")
+
+    monkeypatch.setattr(engine, "build_target", lambda *_args: InvalidStatusTarget())
+
+    assert engine.do_status(cfg) == 0
+
+    output = capsys.readouterr().out
+    assert "unreadable (bad[31mmetadata)" in output
+    assert "\u001b" not in output
 
 
 def test_engine_run_sync_local(tmp_path: Path) -> None:
