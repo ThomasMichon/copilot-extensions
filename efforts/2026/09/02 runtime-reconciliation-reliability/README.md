@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial plan, implementation, and completion PRs
 - **Created:** 2026-09-01
-- **Status:** Active
+- **Status:** Done
 - **Vision:** installation-cells `provenance-carried-end-to-end` and
   plugin-services `launch-time-version-reconciliation`
 - **Sub-issues:** #1591 · #1592 · #1593
@@ -89,27 +89,27 @@ runtimes match their enabled payloads, and close all three issues with evidence.
 
 ### Phase 4 — Publish, deploy, and close
 
-- [ ] Bump every changed plugin and catalog version consistently and land all
+- [x] Bump every changed plugin and catalog version consistently and land all
   implementation through reviewed PRs.
-- [ ] Run the unified update flow after merge and verify Agent Index, Agent
+- [x] Run the unified update flow after merge and verify Agent Index, Agent
   Machines, and Agent Containers reconcile successfully to their enabled
   payload versions.
-- [ ] Close #1591, #1592, and #1593 with merged and deployed evidence, then
+- [x] Close #1591, #1592, and #1593 with merged and deployed evidence, then
   archive this effort in a completion-only PR.
 
 ## Validation Plan
 
-- [ ] Installer-readiness planning selects attributable plugin-owned commands
+- [x] Installer-readiness planning selects attributable plugin-owned commands
   for Agent Index and Agent Machines on Windows and POSIX.
-- [ ] Direct legacy or unattributed mutation attempts remain
+- [x] Direct legacy or unattributed mutation attempts remain
   `provenance-blocked` and create no installation-owned state.
-- [ ] Agent Containers package-install failures report the bounded underlying
+- [x] Agent Containers package-install failures report the bounded underlying
   package-manager diagnostic through both direct and unified update paths.
-- [ ] Targeted plugin suites and installer-readiness tests pass.
-- [ ] `ruff check --select F,E9`, install-contract, version-consistency,
+- [x] Targeted plugin suites and installer-readiness tests pass.
+- [x] `ruff check --select F,E9`, install-contract, version-consistency,
   version-bump, payload-generation, and installation-context synchronization
   gates pass for the changed surfaces.
-- [ ] A post-merge unified update advances all three active runtimes to the
+- [x] A post-merge unified update advances all three active runtimes to the
   enabled payload versions with no issue-specific reconciliation failures.
 
 ## Proposal
@@ -159,3 +159,13 @@ suite is green.
   current installer no longer accepts. Removed the stale capability flag so
   reconciliation uses the exact `update` arguments declared by the plugin's
   installer-readiness contract.
+
+### 2026-09-02 — Completed
+
+- Merged #1648, #1654, and #1658.
+- Deployed Agent Index `0.1.0-dev115`, Agent Machines `0.1.0-dev80`, and Agent
+  Containers `0.1.2-dev109`; the active Agent Worktrees runtime also advanced
+  beyond the repaired `1.5.3-dev713` release.
+- Confirmed both the normal enabled-plugin plan and the focused Agent Index
+  plan return `continue` with no runtime updates or provenance diagnostics.
+- Closed #1591, #1592, and #1593 with deployment evidence.
