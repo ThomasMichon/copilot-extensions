@@ -582,6 +582,13 @@ that already shares one bounded reviewer fleet with another producer may add
 that producer's labels through `pool.additional_labels`; duplicates are removed
 and the loop still expands to one pool with one process cap.
 
+Optional top-level `filters` place the whole loop on one or more machines: the
+source, evaluator, and worker pool inherit the same `machine` constraint.
+`pool.filters` remains the worker-specific filter surface and may narrow that
+placement further; permit values are intersected, reject values are combined,
+and an impossible composition is rejected instead of creating a loop with no
+runnable worker.
+
 ```bash
 agent-dispatch reviewer-loop setup .agent-dispatch/registrar/reviewer-loop.json
 agent-dispatch reviewer-loop inspect .agent-dispatch/registrar/reviewer-loop.json

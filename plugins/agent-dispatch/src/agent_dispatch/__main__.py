@@ -2710,6 +2710,18 @@ def _cmd_reviewer_loop(args: argparse.Namespace) -> int:
             raise ValueError(
                 f"reviewer loop is disabled by override on {source['id']!r}"
             )
+        from .registrar_reconcile import runs_on_machine
+
+        _path, declarations, _owner = _reviewer_loop_declarations(args)
+        source_declaration = next(
+            declaration
+            for declaration in declarations
+            if declaration.kind == RegistrationKind.EMITTER
+        )
+        if not runs_on_machine(source_declaration, machine):
+            raise ValueError(
+                f"reviewer loop source is inactive on machine {machine!r}"
+            )
         with _client(args) as side_load_client:
             return _emit(
                 emitter.run_side_load(
