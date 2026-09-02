@@ -37,6 +37,7 @@ def test_cold_start_budgets_fit_declared_engine_timeout() -> None:
     assert MODULE.SNAPSHOT_WAIT_SECONDS < MODULE.DEADLINE_SECONDS
     assert MODULE.MACHINE_TIMEOUT_SECONDS >= 8
     assert MODULE.CONDUCT_TIMEOUT_SECONDS >= 8
+    assert MODULE.SNAPSHOT_TIMESTAMP_SKEW_MS <= 5_000
 
 
 def test_snapshot_reader_loads_windows_and_posix_formats(
@@ -86,6 +87,127 @@ def test_snapshot_reader_loads_windows_and_posix_formats(
     }
 
 
+def test_snapshot_reader_accepts_nearby_sibling_hook_timestamp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps(
+        {
+            "sessionId": "session-sibling-hook",
+            "cwd": str(tmp_path),
+            "source": "new",
+            "timestamp": 10_000,
+        }
+    ).encode()
+    sibling_payload = json.dumps(
+        {
+            "sessionId": "session-sibling-hook",
+            "cwd": str(tmp_path),
+            "source": "new",
+            "timestamp": 12_500,
+        }
+    ).encode()
+    sibling_key = MODULE._launch_keys(sibling_payload, "1.2.3")[0]
+    root = tmp_path / "snapshots"
+    root.mkdir()
+    monkeypatch.setattr(MODULE, "_snapshot_root", lambda: root)
+    (root / f"register-session-{sibling_key}.json").write_text(
+        json.dumps(
+            {
+                "launchKey": sibling_key,
+                "output": json.dumps({"additionalContext": "binding"}),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    snapshots = MODULE._await_snapshots(
+        payload,
+        "1.2.3",
+        deadline=time.monotonic() + 1,
+    )
+
+    assert snapshots["register-session"] == "binding"
+    assert not (root / f"register-session-{sibling_key}.json").exists()
+
+
+def test_snapshot_reader_accepts_early_coarsely_timed_sibling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch_seconds = time.time()
+    payload = json.dumps(
+        {
+            "sessionId": "session-early-sibling",
+            "cwd": str(tmp_path),
+            "source": "new",
+            "timestamp": int(launch_seconds * 1000),
+        }
+    ).encode()
+    launch_key = MODULE._launch_keys(payload, "1.2.3")[0]
+    root = tmp_path / "snapshots"
+    root.mkdir()
+    monkeypatch.setattr(MODULE, "_snapshot_root", lambda: root)
+    snapshot = root / f"register-session-{launch_key}.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "launchKey": launch_key,
+                "output": json.dumps({"additionalContext": "binding"}),
+            }
+        ),
+        encoding="utf-8",
+    )
+    coarse_mtime = int(
+        launch_seconds
+        - (MODULE.SNAPSHOT_TIMESTAMP_SKEW_MS / 1000)
+        - 1
+    )
+    os.utime(snapshot, (coarse_mtime, coarse_mtime))
+
+    snapshots = MODULE._await_snapshots(
+        payload,
+        "1.2.3",
+        deadline=time.monotonic() + 1,
+    )
+
+    assert snapshots["register-session"] == "binding"
+
+
+def test_snapshot_reader_ignores_stale_or_missing_snapshot_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(MODULE, "_snapshot_root", lambda: missing)
+    assert MODULE._read_snapshot("register-session", ("key",)) is None
+
+    root = tmp_path / "snapshots"
+    root.mkdir()
+    monkeypatch.setattr(MODULE, "_snapshot_root", lambda: root)
+    snapshot = root / "register-session-key.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "launchKey": "key",
+                "output": json.dumps({"additionalContext": "stale"}),
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.utime(snapshot, (1, 1))
+
+    assert (
+        MODULE._read_snapshot(
+            "register-session",
+            ("key",),
+            min_mtime=time.time() - 1,
+        )
+        is None
+    )
+    assert snapshot.exists()
+
+
 def test_binding_snapshot_can_use_the_full_collector_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -96,9 +218,17 @@ def test_binding_snapshot_can_use_the_full_collector_deadline(
         "sleep",
         lambda seconds: current.__setitem__(0, current[0] + seconds),
     )
-    monkeypatch.setattr(MODULE, "_launch_keys", lambda *_args: ("key",))
+    monkeypatch.setattr(
+        MODULE,
+        "_launch_keys",
+        lambda *_args, **_kwargs: ("key",),
+    )
 
-    def fake_read(name: str, _keys: tuple[str, ...]) -> str | None:
+    def fake_read(
+        name: str,
+        _keys: tuple[str, ...],
+        **_kwargs: object,
+    ) -> str | None:
         if name == "register-session" and current[0] >= 4:
             return "binding"
         return None
