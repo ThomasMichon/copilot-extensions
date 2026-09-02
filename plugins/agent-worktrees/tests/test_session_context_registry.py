@@ -118,6 +118,7 @@ def test_context_includes_pair_and_bounded_related_topology(
 
     assert "role=harness; kind=worktree; status=active" in context
     assert "status=ready; writable=true" in context
+    assert "Pair: role=knowledge; id=wt-state" in context
     assert f"writable=true; path={sibling}" in context
     assert "primary=application" in context
     assert "remote-tool(role=tooling,locus=machine:builder" in context
@@ -184,7 +185,7 @@ def test_knowledge_checkout_is_writable_but_harness_sibling_is_not(
     )
 
     assert "role=knowledge; kind=worktree; status=active; writable=true" in context
-    assert "Pair: role=harness; kind=worktree; status=active; writable=false" in context
+    assert "Pair: role=harness; id=wt-control; kind=worktree; status=active; writable=false" in context
 
 
 def test_anchor_pair_does_not_change_current_worktree_kind(
@@ -247,7 +248,7 @@ def test_anchor_pair_does_not_change_current_worktree_kind(
     )
 
     assert "role=harness; kind=worktree; status=active; writable=true" in context
-    assert "Pair: role=knowledge; kind=anchor; status=ready; writable=false" in context
+    assert "Pair: role=knowledge; id=[main]; kind=anchor; status=ready; writable=false" in context
 
 
 def test_context_fails_closed_when_state_and_pair_are_unavailable(

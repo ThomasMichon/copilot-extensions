@@ -125,6 +125,7 @@ def render_registry_context(
         pairing = (
             " Pair: "
             f"role={_clean(sibling.role)}; "
+            f"id={_clean(sibling.worktree_id)}; "
             f"kind={_clean(sibling.kind)}; "
             f"status={_clean(sibling.status, 'unknown')}; "
             f"writable={'true' if writable else 'false'}; "

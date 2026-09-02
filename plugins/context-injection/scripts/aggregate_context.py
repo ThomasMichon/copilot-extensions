@@ -42,7 +42,7 @@ COMMAND_CATALOG_BUDGET_BYTES = 32 * 1024
 MAX_STACK_FINGERPRINT_FILE_BYTES = 1024 * 1024
 SPILL_INDEX_ENTRY_BYTES = 320
 SPILL_INDEX_SUMMARY_BYTES = 96
-SPILL_INDEX_REFERENCE_COUNT = 2
+SPILL_INDEX_REFERENCE_COUNT = 1
 ADOPTION_SCHEMA = "copilot-extensions.context-injection"
 ADOPTION_CONFIG = Path(".context-injection/config.yaml")
 MAX_ADOPTION_CONFIG_BYTES = 4096
@@ -121,7 +121,10 @@ def _fragment_identity(fragment: str, source: str) -> str:
 
 def _fragment_index_entry(fragment: str, source: str) -> str:
     lines = fragment.splitlines()
-    header = _fragment_identity(fragment, source)
+    identity = _fragment_identity(fragment, source)
+    header = identity.removeprefix(
+        "[context-contributor: "
+    ).removesuffix("]")
     body_lines = [
         line.strip()
         for line in lines[1:]
@@ -149,7 +152,7 @@ def _fragment_index_entry(fragment: str, source: str) -> str:
         *path_references,
         *quoted_references,
     ]:
-        reference = reference.split("; ", 1)[0].rstrip(".,;:")
+        reference = reference.split("; ", 1)[0].rstrip(".,;:").strip("`")
         if reference not in references:
             references.append(reference)
         if len(references) >= SPILL_INDEX_REFERENCE_COUNT:
@@ -158,7 +161,9 @@ def _fragment_index_entry(fragment: str, source: str) -> str:
     if references:
         entry += " refs=" + ", ".join(f"`{reference}`" for reference in references)
     remaining = SPILL_INDEX_ENTRY_BYTES - len(entry.encode("utf-8"))
-    if remaining > len(" summary=...".encode("utf-8")):
+    if (
+        not references or summary.startswith("CodeSpace routes")
+    ) and remaining > len(" summary=...".encode("utf-8")):
         entry += " summary=" + _bounded_text(
             summary,
             remaining - len(" summary=".encode("utf-8")),
