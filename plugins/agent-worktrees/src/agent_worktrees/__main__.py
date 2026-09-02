@@ -18461,8 +18461,16 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Worktree ID (alternative to --worktree-dir)")
     sp.add_argument("--session-id", default=None,
                     help="Predecessor session ID (default: COPILOT_AGENT_SESSION_ID)")
-    sub.add_parser("backfill-sessions",
-                   help="Populate empty session registries from session-state data")
+    sp = sub.add_parser(
+        "backfill-sessions",
+        help="Populate session registries and reciprocal metadata from records",
+    )
+    sp.add_argument(
+        "--projection-budget",
+        type=int,
+        default=256,
+        help="Maximum exact session projection relations to inspect (default: 256)",
+    )
 
     # list-sessions -- enumerate a worktree's Copilot sessions as JSON
     sp = sub.add_parser(
@@ -18653,6 +18661,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "registered).")
     sp.add_argument("--json", action="store_true",
                     help="Emit the health report as JSON.")
+    sp.add_argument(
+        "--projection-budget",
+        type=int,
+        default=256,
+        help="Maximum exact session projection relations to inspect (default: 256)",
+    )
 
     return parser
 
@@ -19487,7 +19501,80 @@ def _capture_session_title(worktree_id: str, session_id: str) -> bool:
     return False
 
 
-def _run_backfill(tracking_path: Path) -> dict:
+def _run_reciprocal_backfill(
+    records: list[tracking.WorktreeRecord],
+    *,
+    apply: bool,
+    projection_budget: int,
+) -> dict:
+    """Audit or repair legacy controllers and exact session projections."""
+    from . import session_projection
+
+    controller_items = []
+    for record in records:
+        try:
+            candidates = tracking.derive_legacy_controller_relations(record)
+        except tracking.ControllerRelationError as exc:
+            controller_items.append({
+                "worktree_id": record.worktree_id,
+                "status": "blocked",
+                "detail": str(exc),
+                "relations": 0,
+                "repaired": False,
+            })
+            continue
+        if not candidates:
+            continue
+        repaired = False
+        status = "candidate"
+        if apply:
+            try:
+                persisted = tracking.backfill_legacy_controller_relations(record)
+                repaired = bool(persisted)
+                status = "repaired" if repaired else "current"
+            except tracking.ControllerRelationError as exc:
+                status = "blocked"
+                controller_items.append({
+                    "worktree_id": record.worktree_id,
+                    "status": status,
+                    "detail": str(exc),
+                    "relations": len(candidates),
+                    "repaired": False,
+                })
+                continue
+        controller_items.append({
+            "worktree_id": record.worktree_id,
+            "status": status,
+            "relations": len(candidates),
+            "controller_session_ids": sorted({
+                relation.controller_session_id
+                for relation in candidates
+                if relation.controller_session_id
+            }),
+            "repaired": repaired,
+        })
+
+    projections = session_projection.backfill_relations(
+        records,
+        apply=apply,
+        budget=projection_budget,
+    )
+    return {
+        "legacy_controllers": {
+            "candidates": len(controller_items),
+            "repaired": sum(bool(item["repaired"]) for item in controller_items),
+            "blocked": sum(item["status"] == "blocked" for item in controller_items),
+            "items": controller_items,
+        },
+        "projections": projections,
+    }
+
+
+def _run_backfill(
+    tracking_path: Path,
+    *,
+    projection_budget: int = 256,
+) -> dict:
     """Registry + title backfill core (shared by ``backfill-sessions`` and
     ``doctor``). Writes discovered session ids into empty registries and fills
     missing titles from the newest session's summary. Returns counts."""
@@ -19533,12 +19620,18 @@ def _run_backfill(tracking_path: Path) -> dict:
                 tracking.save_record(rec)
                 titled += 1
 
+    reciprocal = _run_reciprocal_backfill(
+        records,
+        apply=True,
+        projection_budget=projection_budget,
+    )
     return {
         "scanned": len(need_backfill),
         "sessions": sum(len(v) for v in discovered.values()),
         "worktrees": len(discovered),
         "registry": sess_updated,
         "titles": titled,
+        "reciprocal_metadata": reciprocal,
     }
 
 
@@ -19558,13 +19651,25 @@ def cmd_backfill_sessions(args: argparse.Namespace) -> int:
          when every record already has session data -- e.g. after an earlier
          sessions-only backfill that left titles null.
     """
-    r = _run_backfill(cfg.tracking_dir())
+    r = _run_backfill(
+        cfg.tracking_dir(),
+        projection_budget=getattr(args, "projection_budget", 256),
+    )
     if r["scanned"]:
         print(f"Scanning session-state for {r['scanned']} worktree(s)...")
     print(
         f"Backfilled {r['sessions']} session(s) across "
         f"{r['worktrees']} worktree(s); "
         f"{r['registry']} registry + {r['titles']} title record(s) updated"
+    )
+    reciprocal = r["reciprocal_metadata"]
+    controllers = reciprocal["legacy_controllers"]
+    projections = reciprocal["projections"]
+    print(
+        f"Reciprocal metadata: {controllers['repaired']} legacy controller "
+        f"record(s) + {projections['repaired']} projection relation(s) repaired; "
+        f"{projections['report_only']} report-only, "
+        f"{projections['remaining']} deferred by budget"
     )
     return 0
 
@@ -19591,6 +19696,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     apply = getattr(args, "fix", False)
     do_gc = getattr(args, "gc_sessions", False)
     json_mode = getattr(args, "json", False)
+    projection_budget = getattr(args, "projection_budget", 256)
 
     try:
         proj_name = cfg.project_name()
@@ -19614,6 +19720,25 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     orphaned_fixed = 0
     stale_heads: list[str] = []
     stale_heads_fixed = 0
+    reciprocal = {
+        "legacy_controllers": {
+            "candidates": 0,
+            "repaired": 0,
+            "blocked": 0,
+            "items": [],
+        },
+        "projections": {
+            "budget": max(0, projection_budget),
+            "candidates": 0,
+            "checked": 0,
+            "remaining": 0,
+            "repairable": 0,
+            "repaired": 0,
+            "report_only": 0,
+            "status_counts": {},
+            "items": [],
+        },
+    }
 
     if proj_name:
         tracking_dir = cfg.tracking_dir()
@@ -19626,7 +19751,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
         # 2. Registry + title backfill.
         if apply:
-            backfill = _run_backfill(tracking_dir)
+            backfill = _run_backfill(
+                tracking_dir,
+                projection_budget=projection_budget,
+            )
+            reciprocal = backfill.pop("reciprocal_metadata")
         else:
             recs = tracking.list_records(tracking_dir)
             need = [r for r in recs if not r.sessions]
@@ -19640,6 +19769,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     [r for r in recs if not (r.title and r.title != "null")]
                 ),
             }
+            reciprocal = _run_reciprocal_backfill(
+                recs,
+                apply=False,
+                projection_budget=projection_budget,
+            )
 
         records = tracking.list_records(tracking_dir)
 
@@ -19732,6 +19866,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             ],
         },
         "backfill": backfill,
+        "reciprocal_metadata": reciprocal,
         "head_cache": {
             "found": len(stale_heads),
             "fixed": stale_heads_fixed,
@@ -19790,6 +19925,34 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
     else:
         print(f"  \u2022 Backfill candidates: {bf['worktrees']} worktree(s) "
               f"w/ discoverable sessions, {bf['titles']} missing title(s)")
+
+    reciprocal = report.get("reciprocal_metadata", {})
+    controllers = reciprocal.get("legacy_controllers", {})
+    projections = reciprocal.get("projections", {})
+    controller_candidates = controllers.get("candidates", 0)
+    projection_repairable = projections.get("repairable", 0)
+    projection_repaired = projections.get("repaired", 0)
+    projection_report_only = projections.get("report_only", 0)
+    projection_remaining = projections.get("remaining", 0)
+    if applied:
+        print(
+            f"  {chk} Reciprocal metadata: "
+            f"{controllers.get('repaired', 0)} legacy controller record(s), "
+            f"{projection_repaired} projection relation(s) repaired; "
+            f"{projection_report_only} report-only"
+        )
+    else:
+        print(
+            f"  \u2022 Reciprocal metadata candidates: "
+            f"{controller_candidates} legacy controller record(s), "
+            f"{projection_repairable} projection relation(s) repairable, "
+            f"{projection_report_only} report-only"
+        )
+    if projection_remaining:
+        print(
+            f"      {projection_remaining} projection relation(s) remain "
+            "outside this run's budget"
+        )
 
     hc = report.get("head_cache", {"found": 0, "fixed": 0, "ids": []})
     if hc["found"]:

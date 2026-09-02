@@ -83,6 +83,27 @@ def test_semantic_noop_does_not_replace_projection(
     assert sidecar.stat().st_mtime_ns == first_stat.st_mtime_ns
 
 
+def test_delayed_writer_cannot_roll_back_secondary_revision():
+    existing = {
+        "project": "example",
+        "worktree_id": "wt-a",
+        "role": "bound",
+        "relation_revision": 1,
+        "head_revision": 2,
+    }
+    delayed = dict(existing)
+    delayed["head_revision"] = 1
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [existing],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+
+    assert session_projection._merge_relation(projection, delayed) is projection
+
+
 def test_handoff_projects_per_worktree_lineage(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
@@ -130,6 +151,231 @@ def test_rescue_ingest_marker_is_read_only(
 
     assert not (session_dir / session_projection.SIDECAR_NAME).exists()
     assert session_projection.sync_bound(record, "session-a") == "blocked"
+
+
+def test_explicit_backfill_repairs_missing_local_projection(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=True,
+        budget=1,
+    )
+
+    assert report["checked"] == 1
+    assert report["repaired"] == 1
+    assert report["remaining"] == 0
+    assert report["items"][0]["status"] == "repaired"
+    assert (session_dir / session_projection.SIDECAR_NAME).is_file()
+
+
+def test_explicit_backfill_keeps_valid_restored_projection_report_only(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    expected = session_projection.bound_relation(record, "session-a")
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [expected],
+            "overflow": False,
+            "omitted_relations": 0,
+        }),
+        encoding="utf-8",
+    )
+    (session_dir / "rescued-origin.json").write_text("{}", encoding="utf-8")
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=True,
+        budget=1,
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert report["repaired"] == 0
+    assert report["items"][0]["status"] == "restored-current"
+    assert report["items"][0]["repairable"] is False
+    assert report["report_only"] == 1
+
+
+def test_restored_hint_rejects_multiple_bound_projects(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    first = session_projection.bound_relation(record, "session-a")
+    second = dict(first)
+    second["project"] = "other"
+    second["worktree_id"] = "other-wt"
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [first, second],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+    (session_dir / "rescued-origin.json").write_text("{}", encoding="utf-8")
+
+    validation = session_projection.validate_restored_hint(
+        "session-a",
+        projection,
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert validation["status"] == "restored-ambiguous"
+
+
+def test_restored_hint_rejects_incomplete_projection(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": True,
+        "omitted_relations": 1,
+    }
+
+    validation = session_projection.validate_restored_hint(
+        "session-a",
+        projection,
+        record_loader=lambda project, worktree_id: record,
+    )
+
+    assert validation["status"] == "restored-incomplete"
+
+
+def test_backfill_repairs_stale_secondary_revision(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    record.head_revision = 2
+    tracking.save_record(record, tmp_tracking_dir / "wt-a.yaml")
+    expected = session_projection.bound_relation(record, "session-a")
+    stale = dict(expected)
+    stale["head_revision"] = 1
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [stale],
+            "overflow": False,
+            "omitted_relations": 0,
+        }),
+        encoding="utf-8",
+    )
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=True,
+        budget=1,
+    )
+
+    assert report["items"][0]["status"] == "repaired"
+    assert session_projection.read("session-a")["relations"][0] == expected
+
+
+def test_backfill_preserves_newer_relation_tombstone(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [],
+            "relation_tombstones": [{
+                "project": "example",
+                "worktree_id": "wt-a",
+                "role": "bound",
+                "relation_revision": 2,
+            }],
+            "overflow": False,
+            "omitted_relations": 0,
+        }),
+        encoding="utf-8",
+    )
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=True,
+        budget=1,
+    )
+
+    assert report["items"][0]["status"] == "newer-state"
+    assert report["items"][0]["repaired"] is False
+    assert session_projection.read("session-a")["relations"] == []
+
+
+def test_backfill_revalidates_collision_under_projection_lock(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    collision = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [{
+            "project": "other",
+            "worktree_id": "other-wt",
+            "role": "bound",
+            "relation_revision": 1,
+            "head_revision": 0,
+        }],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    reads = iter([None, collision])
+    monkeypatch.setattr(session_projection, "read", lambda session_id: next(reads))
+    monkeypatch.setattr(
+        session_projection,
+        "_atomic_replace",
+        lambda *args: pytest.fail("collision must not be overwritten"),
+    )
+
+    item = session_projection.audit_relation(
+        record,
+        "session-a",
+        role="bound",
+        apply=True,
+    )
+
+    assert item["status"] == "collision"
+    assert item["repaired"] is False
+
+
+def test_projection_backfill_budget_is_bounded(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch, "session-a")
+    _session_root(tmp_path, monkeypatch, "session-b")
+    record = _record(tmp_tracking_dir)
+    record.sessions.append(
+        tracking.SessionEntry("session-b", "2026-01-02T00:00:00")
+    )
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=False,
+        budget=1,
+    )
+
+    assert report["candidates"] == 2
+    assert report["checked"] == 1
+    assert report["remaining"] == 1
 
 
 @pytest.mark.parametrize("session_id", ["../escape", "a/b", r"a\b", ".", ".."])
