@@ -185,7 +185,10 @@ function Start-HostLauncher {
     if ($User) { $args += @('-User', $User) }
     # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
     # handoff and can flash a console (windows-launch-hardening #786).
-    Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', 'pwsh') + $args) -WindowStyle Hidden
+    Start-Process -FilePath 'conhost.exe' `
+        -ArgumentList (@('--headless', 'pwsh') + $args) `
+        -WorkingDirectory $InstallDir `
+        -WindowStyle Hidden
     Start-Sleep -Seconds 8
     if (Get-HostProcess) { Write-Host "dtssh host started for $Alias on port $Port" } else { Write-Warning "dtssh host did not stay running; check $InstallDir\dtssh-host.log" }
 }
