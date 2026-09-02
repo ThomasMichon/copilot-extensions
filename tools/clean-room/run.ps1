@@ -488,7 +488,10 @@ function Invoke-Down {
 # a `cleanroom` manifest and *is* the provider CLI the daemon shells out to.
 function Invoke-BridgeRegister {
     Ensure-Container
-    $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) {
+        $py = Get-Command python3 -ErrorAction SilentlyContinue
+    }
     if (-not $py) { throw "python not found on PATH (needed to register the agent-bridge provider)" }
     $bridgeArgs = @('--acp-command', $script:AcpCommand)
     if ($script:AcpCwd) { $bridgeArgs += @('--acp-cwd', $script:AcpCwd) }
@@ -508,7 +511,10 @@ function Invoke-BridgeRegister {
     Write-Host "drive it:  agent-bridge create $DriveAgent `"<prompt>`"" -ForegroundColor Green
 }
 function Invoke-BridgeUnregister([string]$ContainerId = '') {
-    $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) {
+        $py = Get-Command python3 -ErrorAction SilentlyContinue
+    }
     if (-not $py) { throw "python not found on PATH" }
     if (-not $ContainerId) { $ContainerId = $script:BridgeContainerId }
     if (-not $ContainerId) {
@@ -544,7 +550,8 @@ function Invoke-EndAgentSessions([string]$Agent) {
 function Get-Sha256Short([string]$Text) {
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes(($Text ?? ''))
+        $value = if ($null -eq $Text) { '' } else { $Text }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
         return -join ($sha.ComputeHash($bytes)[0..7] | ForEach-Object { $_.ToString('x2') })
     } finally { $sha.Dispose() }
 }

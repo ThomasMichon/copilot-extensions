@@ -1,6 +1,6 @@
 {
   "name": "progressive-context-disclosure-baseline",
-  "description": "Tier-P fixture gate for progressive session-context disclosure. It proves that the current suite contributor inventory is complete, the representative synthetic corpus and observable task set are internally consistent, guide locators are contained, baseline rendering is deterministic, all F0-F4 by seven-reference by four-emphasis Phase 2 flat/index cells render deterministically, and the behavioral evidence contract is counts-only before any Tier-E comparison is run.",
+  "description": "Cross-platform Tier-P fixture gate for progressive session-context disclosure. It proves that the current suite contributor inventory is complete, the representative synthetic corpus and observable task set are internally consistent, guide locators are contained, baseline rendering is deterministic, all F0-F4 by seven-reference by four-emphasis Phase 2 flat/index cells render deterministically, and the behavioral evidence contract is counts-only before any Tier-E comparison is run.",
   "tier": "P",
   "family": "F1",
   "image": "base",
