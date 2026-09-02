@@ -90,9 +90,7 @@ $policyPresent = (
         if (
             -not $policyPresent -and
             [string]$status.policy.state -ceq 'missing' -and
-            [string]$status.policy.reason -ceq 'policy-default-false' -and
-            $null -eq $status.legacy.tombstone -and
-            [string]$status.legacy.disposition -ceq 'active'
+            [string]$status.policy.reason -ceq 'policy-default-false'
         ) {
             $simplePolicyLegacy = $true
         }

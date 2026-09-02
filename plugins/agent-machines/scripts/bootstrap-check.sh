@@ -106,8 +106,6 @@ PolicyPath="$ProfileHome/.copilot-extensions/installation-mode.json"
     policyReason="$(jsonValue "$(jsonPath policy reason)" || true)"
     if [ "$policyState" = missing ] &&
        [ "$policyReason" = policy-default-false ] &&
-       [ -z "$(jsonValue "$(jsonPath legacy tombstone)" || true)" ] &&
-       [ "$(jsonValue "$(jsonPath legacy disposition)" || true)" = active ] &&
        [ ! -e "$PolicyPath" ] && [ ! -L "$PolicyPath" ]; then
       simplePolicyLegacy=1
     elif [ "$policyState" = valid ]; then
