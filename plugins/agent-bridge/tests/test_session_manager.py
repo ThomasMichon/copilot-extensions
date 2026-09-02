@@ -2100,6 +2100,34 @@ class TestResumeSession:
     """Session resume from STOPPED state."""
 
     @pytest.mark.asyncio
+    async def test_start_session_preserves_existing_provider_override_provenance(
+        self, session_manager, _patch_spawn, _patch_acp
+    ) -> None:
+        target = SpawnTarget(
+            type="local",
+            cwd="/workspaces/example",
+            env={"REQUEST_OVERRIDE": "kept"},
+            copilot_args=["--request-flag"],
+            venue={
+                "kind": "provider",
+                "_agent_bridge_request_overrides": {
+                    "env": {"REQUEST_OVERRIDE": "kept"},
+                    "copilot_args": ["--request-flag"],
+                },
+            },
+        )
+
+        session = await session_manager.start_session(
+            target,
+            agent_name="provider:example",
+        )
+
+        assert session.target.venue["_agent_bridge_request_overrides"] == {
+            "env": {"REQUEST_OVERRIDE": "kept"},
+            "copilot_args": ["--request-flag"],
+        }
+
+    @pytest.mark.asyncio
     async def test_resume_stopped_session(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:
@@ -2138,6 +2166,207 @@ class TestResumeSession:
         assert resumed.status == SessionStatus.IDLE
         # Reattach path: the running child is adopted, so no fresh-child replay.
         mock_acp_client.load_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resume_refreshes_stopped_provider_target(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(
+            spawn_target,
+            agent_name="codespace:example",
+        )
+        await session_manager.stop_session(session.session_id)
+        session.target = SpawnTarget(
+            type="command",
+            cwd="/workspaces/example",
+            project="example",
+            worktree_id="wt-1",
+            caller_worktree="caller-wt",
+            caller_owner_ref="owner/ref",
+            env={
+                "PROVIDER_DEFAULT": "old",
+                "REQUEST_OVERRIDE": "kept",
+            },
+            copilot_args=[
+                "--additional-mcp-config",
+                "@old-provider.json",
+                "--additional-mcp-config",
+                "@request.json",
+            ],
+            codespace={"name": "old", "repo": "example"},
+            venue={
+                "kind": "codespace",
+                "revision": "old",
+                "_agent_bridge_request_overrides": {
+                    "env": {"REQUEST_OVERRIDE": "kept"},
+                    "copilot_args": [
+                        "--additional-mcp-config",
+                        "@request.json",
+                    ],
+                },
+            },
+        )
+        session_manager._db.update_session_target(
+            session.session_id,
+            session.target.to_json(),
+            session.target.cwd,
+        )
+        refreshed = SpawnTarget(
+            type="ssh",
+            host="new-host",
+            cwd="/provider/default",
+            project="provider-project",
+            env={"PROVIDER_DEFAULT": "new"},
+            copilot_args=[
+                "--additional-mcp-config",
+                "@new-provider.json",
+            ],
+            venue={"kind": "codespace", "revision": "new"},
+        )
+        resolver = MagicMock()
+        resolver.resolve_async = AsyncMock(return_value=refreshed)
+        session_manager.set_resolver(resolver)
+
+        with patch.object(
+            session_manager,
+            "_try_reattach_live_host",
+            AsyncMock(return_value=False),
+        ):
+            resumed = await session_manager.resume_session(session.session_id)
+
+        resolver.resolve_async.assert_awaited_once_with("codespace:example")
+        assert resumed.target.type == "ssh"
+        assert resumed.target.host == "new-host"
+        assert resumed.target.venue == {
+            "kind": "codespace",
+            "revision": "new",
+            "_agent_bridge_request_overrides": {
+                "env": {"REQUEST_OVERRIDE": "kept"},
+                "copilot_args": [
+                    "--additional-mcp-config",
+                    "@request.json",
+                ],
+            },
+        }
+        assert resumed.target.cwd == "/workspaces/example"
+        assert resumed.target.project == "example"
+        assert resumed.target.worktree_id == "wt-1"
+        assert resumed.target.caller_worktree == "caller-wt"
+        assert resumed.target.caller_owner_ref == "owner/ref"
+        assert resumed.target.env == {
+            "PROVIDER_DEFAULT": "new",
+            "REQUEST_OVERRIDE": "kept",
+        }
+        assert resumed.target.copilot_args == [
+            "--additional-mcp-config",
+            "@new-provider.json",
+            "--additional-mcp-config",
+            "@request.json",
+        ]
+        persisted = SpawnTarget.from_json(
+            session_manager._db.get_session(session.session_id)["target_json"]
+        )
+        assert persisted.host == "new-host"
+        assert persisted.venue == resumed.target.venue
+
+    @pytest.mark.asyncio
+    async def test_resume_does_not_refresh_surviving_provider_host(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        session = await session_manager.start_session(
+            spawn_target,
+            agent_name="codespace:example",
+        )
+        await session_manager.stop_session(session.session_id)
+        session.target = SpawnTarget(
+            type="command",
+            codespace={"name": "existing", "repo": "example"},
+        )
+        resolver = MagicMock()
+        resolver.resolve_async = AsyncMock()
+        session_manager.set_resolver(resolver)
+
+        async def _fake_reattach(sess):
+            sess.client = mock_acp_client
+            sess.status = SessionStatus.IDLE
+            return True
+
+        with patch.object(
+            session_manager,
+            "_try_reattach_live_host",
+            AsyncMock(side_effect=_fake_reattach),
+        ):
+            await session_manager.resume_session(session.session_id)
+
+        resolver.resolve_async.assert_not_awaited()
+        assert session.target.codespace["name"] == "existing"
+
+    @pytest.mark.asyncio
+    async def test_resume_provider_refresh_failure_keeps_session_stopped(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(
+            spawn_target,
+            agent_name="codespace:example",
+        )
+        await session_manager.stop_session(session.session_id)
+        session.target = SpawnTarget(
+            type="command",
+            codespace={"name": "stale", "repo": "example"},
+            venue={
+                "_agent_bridge_request_overrides": {
+                    "env": {},
+                    "copilot_args": [],
+                },
+            },
+        )
+        resolver = MagicMock()
+        resolver.resolve_async = AsyncMock(
+            side_effect=RuntimeError("provider unavailable")
+        )
+        session_manager.set_resolver(resolver)
+
+        with patch.object(
+            session_manager,
+            "_try_reattach_live_host",
+            AsyncMock(return_value=False),
+        ):
+            with pytest.raises(
+                RuntimeError,
+                match="Current provider target could not be resolved",
+            ):
+                await session_manager.resume_session(session.session_id)
+
+        assert session.status == SessionStatus.STOPPED
+        assert session.target.codespace["name"] == "stale"
+
+    @pytest.mark.asyncio
+    async def test_resume_legacy_provider_target_requires_recreate(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(
+            spawn_target,
+            agent_name="codespace:example",
+        )
+        await session_manager.stop_session(session.session_id)
+        session.target = SpawnTarget(
+            type="command",
+            codespace={"name": "legacy", "repo": "example"},
+        )
+        resolver = MagicMock()
+        resolver.resolve_async = AsyncMock()
+        session_manager.set_resolver(resolver)
+
+        with patch.object(
+            session_manager,
+            "_try_reattach_live_host",
+            AsyncMock(return_value=False),
+        ):
+            with pytest.raises(RuntimeError, match="recreate the session"):
+                await session_manager.resume_session(session.session_id)
+
+        resolver.resolve_async.assert_not_awaited()
+        assert session.status == SessionStatus.STOPPED
 
     @pytest.mark.asyncio
     async def test_resume_rejects_non_stopped(

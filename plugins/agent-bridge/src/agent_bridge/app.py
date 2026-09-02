@@ -345,6 +345,7 @@ async def lifespan(app: FastAPI):
     mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
     app.state.resolver = AgentResolver({}, {})
+    mgr.set_resolver(app.state.resolver)
     app.state.ready = False
     app.state.readiness_error = None
     app.state.readiness_exception = None
@@ -437,6 +438,7 @@ async def lifespan(app: FastAPI):
                     else daemon_resolver(cfg)
                 )
                 app.state.resolver = resolver
+                mgr.set_resolver(resolver)
                 app.state.topology_ready = True
 
                 if resolver.agents or resolver.machines:

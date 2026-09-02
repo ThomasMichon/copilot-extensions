@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 7
+HTTP_PROTOCOL_VERSION = 8
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -52,6 +52,10 @@ RESULT_SNAPSHOT_PROTOCOL_VERSION = 6
 # First version that projects represented interactive sessions through the
 # bounded result snapshot shape.
 REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION = 7
+
+# First version that reports provider-target refresh failures consistently
+# across direct session and worktree resume surfaces.
+PROVIDER_TARGET_REFRESH_PROTOCOL_VERSION = 8
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.
