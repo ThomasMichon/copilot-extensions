@@ -47,7 +47,15 @@ def q(tmp_path):
 
 
 def test_validate_accepts_each_kind():
-    validate_registration(RegistrationKind.SUPERVISED_LANE, {"repo": TEST_REPO})
+    validate_registration(
+        RegistrationKind.SUPERVISED_LANE,
+        {
+            "repo": TEST_REPO,
+            "labels": ["review"],
+            "embody_backend": "cli",
+            "disposable_cli_labels": ["review"],
+        },
+    )
     validate_registration(RegistrationKind.SUPERVISED_LANE, {"all_repos": True})
     validate_registration(RegistrationKind.SCHEDULE, {"id": "nightly", "repo": TEST_REPO})
     validate_registration(RegistrationKind.EMITTER, {"url": "http://x"})
@@ -88,6 +96,36 @@ def test_validate_accepts_each_kind():
          "non-empty list of objects"),
         (RegistrationKind.SCHEDULE, {"schedules": [], "id": "x", "repo": "r"},
          "non-empty list of objects"),
+        (
+            RegistrationKind.SUPERVISED_LANE,
+            {
+                "repo": TEST_REPO,
+                "labels": ["review"],
+                "disposable_cli_labels": ["review"],
+            },
+            "not routed to CLI",
+        ),
+        (
+            RegistrationKind.SUPERVISED_LANE,
+            {
+                "repo": TEST_REPO,
+                "labels": ["review"],
+                "embody_backend": "cli",
+                "disposable_cli_labels": ["other"],
+            },
+            "not watched",
+        ),
+        (
+            RegistrationKind.SUPERVISED_LANE,
+            {
+                "repo": TEST_REPO,
+                "labels": ["review"],
+                "embody_backend": "cli",
+                "fleet": {"pool": ["host-a"]},
+                "disposable_cli_labels": ["review"],
+            },
+            "only for local worker bodies",
+        ),
     ],
 )
 def test_validate_rejects_malformed(kind, spec, needle):
@@ -271,11 +309,13 @@ def _parse(argv):
 def test_cli_register_parses_lane_flags():
     args = _parse(
         ["supervise", "register", "--repo", TEST_REPO, "--label", "x",
+         "--embody-backend", "cli", "--disposable-cli-label", "x",
          "--max-concurrent", "2"]
     )
     assert args.supervise_command == "register"
     assert args.repo == TEST_REPO
     assert args.label == ["x"]
+    assert args.disposable_cli_label == ["x"]
     assert args.max_concurrent == 2
 
 
@@ -289,11 +329,14 @@ def test_cli_build_spec_from_lane_flags():
 
     args = _parse(
         ["supervise", "register", "--all-repos", "--label", "code-review",
+         "--embody-backend", "cli",
+         "--disposable-cli-label", "code-review",
          "--max-attempts", "5"]
     )
     spec = _build_registration_spec(args)
     assert spec["all_repos"] is True
     assert spec["labels"] == ["code-review"]
+    assert spec["disposable_cli_labels"] == ["code-review"]
     assert spec["max_attempts"] == 5
 
 

@@ -79,6 +79,25 @@ def test_settle_releases_for_a_fresh_attempt(q):
     assert r2.key == spawn_key(t.id, 2)
 
 
+def test_settle_is_idempotent_and_can_record_late_detail(q):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(reservation.key)
+
+    q.settle_spawn(reservation.key, detail="task completed")
+    updated = q.settle_spawn(
+        reservation.key,
+        detail="task completed; terminal conclusion primed",
+        conclusion_state="complete",
+        conclusion_detail='{"action":"primed"}',
+    )
+
+    assert updated.state == SpawnState.SETTLED
+    assert updated.detail == "task completed; terminal conclusion primed"
+    assert updated.conclusion_state == "complete"
+    assert updated.conclusion_detail == '{"action":"primed"}'
+
+
 def test_fail_releases_for_a_fresh_attempt(q):
     t = q.create("work")
     r1, _ = q.reserve_spawn(t.id)
@@ -307,6 +326,17 @@ def test_http_reserve_record_list(api):
     assert len(listed) == 1
     got = api.get(f"/spawn-reservations/{key}").json()
     assert got["key"] == key
+    settled = api.post(
+        f"/spawn-reservations/{key}/settle",
+        json={
+            "detail": "task completed",
+            "conclusion_state": "pending",
+            "conclusion_detail": '{"reason":"live-session"}',
+        },
+    )
+    assert settled.status_code == 200
+    assert settled.json()["conclusion_state"] == "pending"
+    assert settled.json()["conclusion_detail"] == '{"reason":"live-session"}'
 
 
 def test_http_reserve_unknown_task_404(api):

@@ -446,6 +446,8 @@ class RecordSpawnBody(BaseModel):
 
 class ReservationDetailBody(BaseModel):
     detail: str | None = None
+    conclusion_state: str | None = None
+    conclusion_detail: str | None = None
 
 
 class RearmSpawnBody(BaseModel):
@@ -1501,7 +1503,14 @@ def create_app(
 
     @app.post("/spawn-reservations/{key}/settle")
     def settle_spawn(key: str, body: ReservationDetailBody) -> dict:
-        result = _reservation_guard(lambda: queue.settle_spawn(key, detail=body.detail))
+        result = _reservation_guard(
+            lambda: queue.settle_spawn(
+                key,
+                detail=body.detail,
+                conclusion_state=body.conclusion_state,
+                conclusion_detail=body.conclusion_detail,
+            )
+        )
         bus.publish({"type": "spawn.settled", "reservation": result})
         return result
 
@@ -1527,6 +1536,7 @@ def create_app(
         state: str | None = None,
         repo: str | None = None,
         label: str | None = None,
+        conclusion_state: str | None = None,
         resume_requested: bool | None = None,
         limit: int = 200,
     ) -> list[dict]:
@@ -1540,6 +1550,7 @@ def create_app(
                 state=states,
                 repo=repo,
                 label=label,
+                conclusion_state=conclusion_state,
                 resume_requested=resume_requested,
                 limit=limit,
             )

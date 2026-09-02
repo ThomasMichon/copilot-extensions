@@ -152,6 +152,7 @@ continue to work unchanged.
 | `list-sessions` | List Copilot sessions with interface/origin metadata, append-only activation intervals, resolved head revision, numbered handoffs, and any bound profile-assignment metadata (JSON); `--worktree <id>` scopes to one worktree and `--all-projects` enumerates every adopted project |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
+| `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable CLI worker. Requires `--policy disposable-cli` and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean commit-free branch may advance with `git reset --keep`, then the command marks the record managed/final for a later conservative managed-GC pass. It never deletes the worktree itself. |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
 | `session-lock` | Write/remove a session-state lattice lock beside Copilot's session state (bridge/mux liveness marker) |
 | `status-segment` | Print a styled status-bar segment for the worktree at the cwd (for a tmux/psmux status line) |

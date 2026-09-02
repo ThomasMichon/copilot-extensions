@@ -106,6 +106,43 @@ def test_bad_body_type_rejected():
         load_declaration({"name": "x", "body": {"type": "sidecar"}})
 
 
+def test_disposable_cli_label_must_be_watched_and_cli_routed():
+    with pytest.raises(RegistrarError, match="not in labels"):
+        load_declaration(
+            {
+                "name": "x",
+                "labels": ["review"],
+                "body": {
+                    "type": "embody",
+                    "disposable_cli_labels": ["other"],
+                },
+            }
+        )
+    with pytest.raises(RegistrarError, match="not routed"):
+        load_declaration(
+            {
+                "name": "x",
+                "labels": ["review"],
+                "body": {
+                    "type": "headless",
+                    "disposable_cli_labels": ["review"],
+                },
+            }
+        )
+    with pytest.raises(RegistrarError, match="only for local"):
+        load_declaration(
+            {
+                "name": "x",
+                "labels": ["review"],
+                "fleet": {"pool": ["host-a"]},
+                "body": {
+                    "type": "embody",
+                    "disposable_cli_labels": ["review"],
+                },
+            }
+        )
+
+
 def test_concurrency_must_be_positive():
     with pytest.raises(RegistrarError, match="concurrency"):
         load_declaration({"name": "x", "concurrency": 0})
@@ -187,6 +224,21 @@ def test_supervise_args_embody_body_has_no_headless_label():
     assert _flag_val(args, "--embody-backend") == "cli"
     assert "--headless-label" not in args
     assert "--headless-agent" not in args
+
+
+def test_supervise_args_emit_disposable_cli_label():
+    declaration = load_declaration(
+        {
+            "name": "reviewers",
+            "labels": ["review"],
+            "body": {
+                "type": "embody",
+                "disposable_cli_labels": ["review"],
+            },
+        }
+    )
+    args = declaration.to_supervise_args()
+    assert _flag_val(args, "--disposable-cli-label") == "review"
 
 
 def test_supervise_args_lane_scoped():

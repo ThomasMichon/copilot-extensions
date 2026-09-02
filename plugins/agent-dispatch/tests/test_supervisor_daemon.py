@@ -177,6 +177,19 @@ def test_build_command_threads_embody_backend_and_cli_labels():
     assert cmd[cmd.index("--cli-label") + 1] == "x"
 
 
+def test_build_command_threads_disposable_cli_labels():
+    reg = _reg("b", spec={
+        "all_repos": True,
+        "labels": ["review"],
+        "max_concurrent": 1,
+        "embody_backend": "cli",
+        "disposable_cli_labels": ["review"],
+        "interval": 30.0,
+    })
+    cmd = build_command(reg, python="PY")
+    assert cmd[cmd.index("--disposable-cli-label") + 1] == "review"
+
+
 def test_build_command_headless_default_emits_no_backend_flag():
     """A default (headless) lane spec carries no embody_backend/cli_labels, so the
     argv omits those flags -- headless is the default the command already assumes."""

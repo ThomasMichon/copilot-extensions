@@ -389,6 +389,50 @@ numbered handoff when the brief is stored, then the successor claims that exact
 token through `bind-session`; `link-succession` remains the explicit form for a
 caller that already holds both ids.
 
+**Safe terminal worker interface — `conclude-disposable`.** A higher layer that
+explicitly owns a disposable CLI worker class can conclude the exact recorded
+allocation without gaining a direct deletion primitive:
+
+```bash
+agent-worktrees conclude-disposable \
+    --worktree <exact-id> \
+    --session <exact-session-id> \
+    --policy disposable-cli \
+    --owner <allocator> \
+    --json
+```
+
+The command accepts only an exact worktree id and the explicit
+`disposable-cli` policy. It first preserves any live mux or bound Copilot
+session. Once the worker is gone, it requires the supplied session to match the
+worktree's asserted lifecycle head when one exists. Preservation gates run
+before that exact session is concluded, so a skipped worktree remains fully
+resumable. The checkout is then inspected under the shared worktree lifecycle
+lock. The short acquisition wait is separate
+from the stale-lock age, so contention skips rather than breaking a healthy
+longer-running lifecycle operation. Pending handoffs, follow-ups, resource
+obligations, pairs, open pull requests, branch drift, arbitrary dirty paths,
+and local commits all produce structured skip reasons and remain untouched,
+including generated overlays. A clean commit-free branch may advance with
+`git reset --keep` to the locally available canonical default branch.
+Repository resolution uses the record and the legacy/default fallback; a truly
+unknown repository is held. If the checkout directory is
+already absent, any surviving local branch is still compared with its configured
+upstream and preserved when it contains unique commits.
+
+A successful conclusion converts the record to a managed, final CLI worker and
+returns. It does not call `remove-system`, remove the worktree, or bypass
+liveness/grace checks. The existing managed-worktree sweep is the later
+deletion authority: it independently re-checks final/unused state, live
+session/mux/attachment, follow-up, activity knowledge, and idle grace. CLI
+embodiment and final managed removal share the repository lifecycle fence. The
+final decision holds the record lock only for its metadata recheck, then uses
+non-forced Git removal so a concurrently dirtied checkout is preserved. Lock
+wait diagnostics use stderr and therefore never corrupt JSON command output.
+Managed removal resolves each record's own repository and retains the tracking
+record if Git worktree or branch removal fails, so cleanup remains retryable
+rather than converting a failed removal into an invisible orphan.
+
 **Cross-layer read interface — `agent-worktrees head-session`.** Because a
 higher layer (agent-bridge, context-handoff) runs in its *own* venv and cannot
 import `tracking.py`, the ground layer exposes its head derivation as a

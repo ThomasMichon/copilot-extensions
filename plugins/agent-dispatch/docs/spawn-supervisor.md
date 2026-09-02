@@ -9,7 +9,10 @@ Status: **in progress** — the spawn-reservation primitive, the supervisor loop
 (spawn-at-most-once), the liveness-gated lease heartbeat, **confirmed-gone
 auto-recovery** (local CLI worktree bodies, local headless bodies, and headless
 fleet bodies), **nudge-before-recover**, reactive turn-end polling, and **fleet
-dispatch (a health-gated remote embody pool, Model C)** are built. The
+dispatch (a health-gated remote embody pool, Model C)** are built. Label-scoped
+**disposable CLI conclusion** is also built: a registration may opt selected
+CLI worker classes into safe terminal session conclusion and managed-worktree
+GC priming without deleting the worktree directly. The
 backlog-catch-up policy, authenticated container transport, per-host fleet
 concurrency caps, and load-aware pool selection land in follow-up slices.
 Public trackers: [#44](https://github.com/ThomasMichon/copilot-extensions/issues/44)
@@ -60,7 +63,7 @@ that guarantees **exactly one embody spawn per (task, attempt)**.
   |-------------|----------------------------------------------------------------|
   | `reserving` | this spawner owns the (task, attempt) spawn; embody not yet confirmed launched. A restart reconciles a reservation stuck here. |
   | `spawned`   | embody launched; the session/worktree handle is recorded.      |
-  | `settled`   | the reserved attempt reached a terminal outcome; no more spawning. |
+  | `settled`   | the reserved attempt reached a terminal outcome; no more spawning. Optional `conclusion_state` / structured `conclusion_detail` keep post-settlement disposable-worktree priming retryable and visible. |
   | `failed`    | spawn failed or was lost; a fresh attempt may now be reserved.  |
   | `rearmed`   | a failed attempt was retired by an audited operator rearm; preserved for history but excluded from the dead-letter count. |
 
@@ -83,7 +86,7 @@ atomic-under-concurrency guarantee with no new locking. HTTP surface:
 POST /spawn-reservations               {task_id, reserved_by} -> {reserved, reservation}
 POST /spawn-reservations/{key}/spawned  {session_handle, worktree}
 POST /spawn-reservations/{key}/fail     {detail}
-POST /spawn-reservations/{key}/settle   {detail}
+POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/tasks/{task_id}/rearm {permitted, reason, min_failures}
 GET  /spawn-reservations                ?task_id&state&limit
 GET  /spawn-reservations/{key}
@@ -123,7 +126,13 @@ double-spawned. Each cycle:
 
 1. **reconcile** — settle `spawned` reservations whose task reached a **terminal**
    state (`completed`/`abandoned`). This is the *only* automatic release, and only
-   for a provably-finished task, so it can never free a still-running spawn.
+   for a provably-finished task, so it can never free a still-running spawn. For
+   labels explicitly opted into `--disposable-cli-label`, settlement releases
+   the reservation first and durably marks conclusion pending, then asks
+   agent-worktrees to conclude the exact recorded session/worktree and prime a
+   safe checkout for managed GC. A live worker or operational failure remains
+   pending for a later reconcile; a preservation decision is held visibly.
+   Neither outcome blocks settlement.
 2. **poll** — for each eligible queued task (in the lane, due, matching the
    optional **label opt-in**), up to `--max-concurrent` in-flight: `reserve_spawn`
    → if reserved, spawn embody → `record_spawn` (or `fail_spawn` on error, which
@@ -141,7 +150,8 @@ agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
     [--max-concurrent N] [--max-attempts N] [--no-heartbeat] \
     [--no-reactive] [--reactive-interval S] \
     [--embody-backend headless|cli] [--cli-label L ...] \
-    [--headless-label L ...] [--headless-agent AGENT] [--interval S] [--once]
+    [--headless-label L ...] [--disposable-cli-label L ...] \
+    [--headless-agent AGENT] [--interval S] [--once]
 agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
 agent-dispatch reservations rearm <task> --permit --reason "transport repaired" \
@@ -179,7 +189,8 @@ agent-dispatch supervise register [--kind KIND] [--id ID] [--spec JSON|@FILE] \
     # supervised-lane convenience flags (when --spec is omitted):
     [--repo R | --all-repos] [--label L ...] [--max-concurrent N] \
     [--max-attempts N] [--label-max-attempts LABEL=N ...] \
-    [--headless-label L ...] [--headless-agent AGENT] [--evaluator SPEC] \
+    [--headless-label L ...] [--disposable-cli-label L ...] \
+    [--headless-agent AGENT] [--evaluator SPEC] \
     [--interval S]
 agent-dispatch supervise status <id>
 agent-dispatch supervise list [--kind KIND] [--machine M] [--env E] [--active]
@@ -475,6 +486,56 @@ cannot be handed to a locally-spawned worker (it would bake a raw,
 possibly-dynamic endpoint into the body); route by the default local
 coordinator, `--shared`, or fleet mode (`--pool`/`--origin`, which routes by
 machine alias).
+
+### Disposable CLI conclusion (built) — opt-in priming, conservative deletion
+
+An attachable CLI worker may be disposable for a declared task class even
+though arbitrary CLI sessions are not. A lane opts in selected labels with
+`--disposable-cli-label LABEL`, or a registrar declaration uses
+`body.disposable_cli_labels`. Each disposable label must also be watched by the
+lane and routed to a local CLI body; headless and fleet labels cannot opt in
+because the durable reservation records the exact session/worktree but not a
+remote host identity.
+
+On terminal task settlement the supervisor uses only the spawn reservation's
+recorded `session_handle` and `worktree`. It never infers an allocation by
+branch name or age. When the initial session handle is the known
+`wt-<worktree>` mux placeholder, the supervisor upgrades it from the task's
+durably captured `owner_session_id` (or a matching live-session observation)
+before settlement; an already-exact handle is never replaced by a successor.
+The reservation is settled first so its process slot is released even if
+conclusion fails. The supervisor then invokes:
+
+```bash
+agent-worktrees conclude-disposable \
+    --worktree <exact-id> \
+    --session <exact-session-id> \
+    --policy disposable-cli \
+    --owner agent-dispatch \
+    --json
+```
+
+The ground layer preserves any live mux/bound session, follow-up or resource
+obligation, open pull request, branch drift, arbitrary dirty path, or local
+commit. It also preserves a different or unresolved asserted lifecycle head
+rather than making a clean checkout GC-eligible around a resumable session.
+Dirty generated overlays are preserved under the same rule as other dirty work;
+a clean, commit-free branch may advance with `git reset --keep` to the locally
+available canonical default branch. A safe result concludes the exact recorded session,
+marks the checkout as a managed final CLI worker, and returns; it does **not**
+remove the worktree. The existing managed sweep remains the only deletion
+authority and re-checks liveness plus its idle grace on a later pass under the
+same lifecycle fence used by CLI embodiment. Final Git removal is non-forced,
+runs after the short record recheck lock is released, and retains the tracking
+record whenever Git refuses removal.
+
+A safe preservation decision (`dirty-work`, `local-commits`,
+`session-mismatch`, and related reasons) is a structured held outcome, not an
+error. `live-session` / `live-mux` and operational failures remain durably pending and
+retry with exponential backoff. Each cycle processes a bounded batch; after
+twelve failed conclusion attempts (a teardown window of roughly 40 minutes at
+the bounded cadence) the reservation becomes visibly held instead of hot-looping
+forever. A primed or held outcome is idempotent and does not run again.
 
 ### Lease heartbeat (built) — the live-worker safety net
 

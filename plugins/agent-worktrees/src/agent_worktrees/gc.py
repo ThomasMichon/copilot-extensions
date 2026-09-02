@@ -203,7 +203,9 @@ def classify_managed_worktree(
     if has_live_session:
         return ManagedVerdict(worktree_id, "skip", "live-session")
 
-    is_final = status in _FINAL_STATUSES or git_state in _FINAL_STATES
+    # A terminal tracking status is necessary context, not permission to
+    # override fresh Git evidence. Dirty/ahead work always wins preservation.
+    is_final = git_state in _FINAL_STATES
     is_unused = git_state == "unused"
     if not (is_final or is_unused):
         return ManagedVerdict(worktree_id, "skip", "not-final-or-unused")

@@ -2892,6 +2892,13 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     cli = [label for label in (getattr(args, "cli_label", None) or []) if label]
     if cli:
         spec["cli_labels"] = cli
+    disposable_cli = [
+        label
+        for label in (getattr(args, "disposable_cli_label", None) or [])
+        if label
+    ]
+    if disposable_cli:
+        spec["disposable_cli_labels"] = disposable_cli
     if getattr(args, "headless_agent", None):
         spec["headless_agent"] = args.headless_agent
     if getattr(args, "evaluator", None):
@@ -3240,6 +3247,11 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     cli_labels = [
         label for label in (getattr(args, "cli_label", None) or []) if label
     ]
+    disposable_cli_labels = [
+        label
+        for label in (getattr(args, "disposable_cli_label", None) or [])
+        if label
+    ]
     capacity_gate = None
     redrive_fn = None
     if pool:
@@ -3257,6 +3269,13 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         # Fleet bodies are headless by default too (the `--headless` flag remains an
         # explicit force); only `--embody-backend cli` makes fleet bodies CLI.
         fleet_headless = bool(getattr(args, "headless", False)) or backend != "cli"
+        if disposable_cli_labels:
+            print(
+                "agent-dispatch supervise: --disposable-cli-label is supported "
+                "only for local worker bodies.",
+                file=sys.stderr,
+            )
+            return 2
         fleet = FleetSpawner(
             pool,
             origin=origin,
@@ -3305,6 +3324,27 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             route=route,
             all_repos=all_repos,
         )
+        watched = set(args.label or [])
+        disposable = set(disposable_cli_labels)
+        if disposable - watched:
+            print(
+                "agent-dispatch supervise: every --disposable-cli-label must "
+                "also be watched by --label.",
+                file=sys.stderr,
+            )
+            return 2
+        cli_routed = (
+            watched - set(headless_labels)
+            if backend == "cli"
+            else set(cli_labels)
+        )
+        if disposable - cli_routed:
+            print(
+                "agent-dispatch supervise: every --disposable-cli-label must "
+                "be routed to a CLI body.",
+                file=sys.stderr,
+            )
+            return 2
         if backend == "cli":
             # CLI-default lane: headless is the per-label opt-in.
             default_spawn, overrides = embody_spawn, {
@@ -3381,6 +3421,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             publish_activity=True,
             reactive=not getattr(args, "no_reactive", False),
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
+            disposable_cli_labels=disposable_cli_labels,
             capacity_gate=capacity_gate,
             evaluator=evaluator,
             redrive_fn=redrive_fn,
@@ -4991,6 +5032,14 @@ def build_parser() -> argparse.ArgumentParser:
              "(non-pool) mode only.",
     )
     p.add_argument(
+        "--disposable-cli-label",
+        action="append",
+        metavar="LABEL",
+        help="on terminal settlement, conclude the exact recorded CLI session "
+             "for this label and prime its clean worktree for conservative "
+             "managed GC (repeatable; label-scoped opt-in only)",
+    )
+    p.add_argument(
         "--headless-agent", default="task-worker", metavar="AGENT",
         help="agent-bridge agent name used for headless embody bodies "
              "(default: task-worker)",
@@ -5103,6 +5152,13 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--cli-label", action="append", metavar="LABEL",
                     help="force tasks carrying this label to a CLI autopilot instead "
                          "of the default headless body (repeatable)")
+    rp.add_argument(
+        "--disposable-cli-label",
+        action="append",
+        metavar="LABEL",
+        help="on terminal settlement, conclude this label's exact CLI session "
+             "and prime its clean worktree for managed GC (repeatable)",
+    )
     rp.add_argument("--headless-agent", metavar="AGENT",
                     help="agent-bridge agent name for headless embody bodies")
     rp.add_argument("--evaluator", metavar="SPEC",

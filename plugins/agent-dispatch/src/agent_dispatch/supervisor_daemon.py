@@ -109,12 +109,18 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "embody_backend": "headless",
             "headless_labels": [],
             "cli_labels": [],
+            "disposable_cli_labels": [],
             "headless_agent": "task-worker",
         }
         for key, value in defaults.items():
             if spec.get(key) is None:
                 spec[key] = value
-        for key in ("labels", "headless_labels", "cli_labels"):
+        for key in (
+            "labels",
+            "headless_labels",
+            "cli_labels",
+            "disposable_cli_labels",
+        ):
             spec[key] = sorted(set(spec.get(key) or []))
         for key in ("interval", "reactive_interval"):
             try:
@@ -250,6 +256,8 @@ def _lane_flags(spec: dict) -> list[str]:
         argv += ["--headless-label", str(label)]
     for label in spec.get("cli_labels", []) or []:
         argv += ["--cli-label", str(label)]
+    for label in spec.get("disposable_cli_labels", []) or []:
+        argv += ["--disposable-cli-label", str(label)]
     # Fleet dispatch: fan bodies across a pool of remote hosts, each driving the
     # origin task back over SSH. Mirrors ``ProfileDeclaration.to_supervise_args``;
     # emitted from spec["fleet"] (which declaration_to_spec now carries). Absent for

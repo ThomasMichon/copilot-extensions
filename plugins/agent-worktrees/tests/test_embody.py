@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 import pytest
 
@@ -115,7 +116,12 @@ def _ns(**kw):
 
 def _stub_config(monkeypatch):
     class _Cfg:
-        pass
+        repos = {}
+        default_repo = type(
+            "Repo",
+            (),
+            {"worktree_root": str(Path.home() / "test-worktrees")},
+        )()
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
     monkeypatch.setattr(
         m,
@@ -262,6 +268,20 @@ class TestCmdEmbody:
         monkeypatch.setattr(
             m, "_create_worktree_core",
             lambda c, **k: {"worktree": {"id": "fresh-1", "path": "/w/fresh-1"}},
+        )
+        monkeypatch.setattr(
+            m.tracking,
+            "load_record",
+            lambda _path: type(
+                "Rec",
+                (),
+                {"worktree_path": "/w/fresh-1", "repo": None},
+            )(),
+        )
+        monkeypatch.setattr(
+            m.cfg,
+            "tracking_dir",
+            lambda: Path.home() / "tracking",
         )
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         monkeypatch.setattr(
