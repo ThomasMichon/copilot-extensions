@@ -33,6 +33,8 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "[int]$IdleSessionReapThreshold = 8" in text
     assert "function Get-DedicatedSshdSessionPressure" in text
     assert "function Stop-DedicatedSshdTree" in text
+    assert "if ($RootPid -le 0) { return }" in text
+    assert "if ($children.ContainsKey($current))" in text
     assert "$current.CreationDate -ne $expected.CreationDate" in text
     assert "Stop-Process -Id $targetPid" in text
     assert "reaped dedicated sshd process tree" in text

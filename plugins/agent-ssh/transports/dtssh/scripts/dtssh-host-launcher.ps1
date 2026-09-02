@@ -281,16 +281,21 @@ function Get-HostConnections {
 function Get-RunningHostProc {
     $aliasPattern = [regex]::Escape($Alias)
     $portPattern = [regex]::Escape("$Port")
-    Get-CimInstance Win32_Process -Filter "Name='dtssh.exe'" -ErrorAction SilentlyContinue |
+    $hosts = @(Get-CimInstance Win32_Process -Filter "Name='dtssh.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match '\bhost\b' })
+    $exact = @($hosts |
         Where-Object {
-            $_.CommandLine -match '\bhost\b' -and
             $_.CommandLine -match "(?:^|\s)--alias(?:\s+|=)`"?$aliasPattern(?:`"|\s|$)" -and
             $_.CommandLine -match "(?:^|\s)--port(?:\s+|=)`"?$portPattern(?:`"|\s|$)"
-        } | Select-Object -First 1
+        })
+    if ($exact.Count -gt 0) { return $exact | Select-Object -First 1 }
+    if ($hosts.Count -eq 1) { return $hosts[0] }
+    return $null
 }
 
 function Stop-DedicatedSshdTree {
     param([int]$RootPid)
+    if ($RootPid -le 0) { return }
 
     $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $byId = @{}
@@ -314,8 +319,10 @@ function Stop-DedicatedSshdTree {
         $current = $queue.Dequeue()
         if (-not $seen.Add($current)) { continue }
         $ordered.Add($current)
-        foreach ($child in @($children[$current])) {
-            $queue.Enqueue([int]$child.ProcessId)
+        if ($children.ContainsKey($current)) {
+            foreach ($child in $children[$current]) {
+                $queue.Enqueue([int]$child.ProcessId)
+            }
         }
     }
 

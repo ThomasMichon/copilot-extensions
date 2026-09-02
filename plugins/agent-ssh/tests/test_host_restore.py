@@ -94,7 +94,9 @@ def test_dtssh_apply_uses_idempotent_install_without_login(tmp_path, monkeypatch
     assert result["healthy"] is True
 
 
-def test_dtssh_restore_launches_helpers_without_windows(tmp_path, monkeypatch):
+def test_dtssh_restore_launches_helpers_without_console_windows(
+    tmp_path, monkeypatch
+):
     _setup(tmp_path, monkeypatch)
     calls = []
 
