@@ -9,7 +9,7 @@
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
 - **Umbrella issue:** #1418
-- **Sub-issues:** #1455 · #1507
+- **Sub-issues:** #1455 · #1507 · #1529 · #1627
 
 ## Guiding Intent
 
@@ -58,6 +58,12 @@ fleet, topology, or operating environment.
 
 - [ ] Specify versioned machine, capability, dependency, scope, and desired-state
   contracts with strict validation and forward-compatible extension seams.
+- [ ] Define one canonical machine identity plus a deterministic accepted-alias
+  set derived from portable topology fields, with raw-host fallback and
+  fail-closed ambiguity detection (#1529).
+- [ ] Define an attributable provider invocation reference for requirement
+  modules so one plugin can own restoration behavior without package authors
+  embedding installed payload paths or ambiguous PATH commands (#1627).
 - [ ] Distinguish portable declarations from discovered facts and generated
   projections.
 - [x] Resolve supplemental package repositories from generic project
@@ -70,6 +76,10 @@ fleet, topology, or operating environment.
 
 - [ ] Derive agent rosters, service requirements, connectivity expectations,
   and status views from the validated resource graph.
+- [ ] Resolve machine topology once per command, use the topology key as the
+  canonical identity, and use key/hostname/alias/display-name values only as
+  accepted match identities for gates, per-machine overlays, and machine
+  package directories (#1529).
 - [ ] Make every projection reproducible and attributable to its source
   declaration and resource module.
 - [ ] Eliminate independently authored shadow inventories after parity is
@@ -96,6 +106,12 @@ fleet, topology, or operating environment.
   installed inventory (#1507).
 - [ ] Give each resource module plan, apply, verify, and report operations with
   explicit privilege and restart boundaries.
+- [ ] Resolve provider-backed module invocations through payload-attributable
+  plugin command metadata, preserving dry-run/apply separation and optional
+  sibling independence (#1627).
+- [ ] Let agent-ssh expose transport-host plan/status/apply behavior through its
+  own command and transport metadata; agent-machines remains the optional
+  declarative orchestrator rather than learning dtssh internals (#1627).
 - [ ] Order actions from declared dependencies and preserve idempotence across
   interrupted or repeated runs.
 - [ ] Fail loudly on unsupported platforms, unavailable prerequisites, and
@@ -113,6 +129,11 @@ fleet, topology, or operating environment.
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown
   resource types fail before mutation.
+- [ ] Raw host, topology key, hostname, alias, and display-name inputs resolve
+  to one canonical machine and one deterministic accepted-alias set; ambiguous
+  cross-entry identities fail before package loading (#1529).
+- [ ] Gates, per-machine overlays, and machine-scoped directories accept any
+  resolved identity while canonical plan/drift output remains stable (#1529).
 - [x] Harness-only, harness-plus-supplemental, duplicate-adoption, unresolved
   relationship, and cross-repository conflict fixtures prove #1418.
 - [ ] Repeated projection from the same declarations produces byte-stable
@@ -135,6 +156,10 @@ fleet, topology, or operating environment.
   a no-op.
 - [ ] Platform-specific modules share the same resource lifecycle and expose
   honest unsupported states.
+- [ ] An agent-ssh dtssh-host provider fixture proves healthy no-op, absent
+  dry-run, idempotent apply, missing authentication, unavailable provider,
+  unsupported platform, and repeated no-op behavior without hardcoded payload
+  paths (#1627).
 
 ## Proposal
 
@@ -191,3 +216,13 @@ behavioral parity is demonstrated.
 - Added schema-v3 `ensure-absent` for exact source-qualified user activation
   keys with package-union conflict detection, bootstrap protection, dry-run
   reporting, backup-before-write apply, and idempotent reconciliation (#1507).
+
+### 2026-09-01 - Canonical identity and transport restoration
+
+- Added #1529 for canonical machine identity with topology-derived aliases.
+- Added #1627 for a payload-attributable provider invocation contract, with
+  agent-ssh owning transport-host restoration and agent-machines remaining the
+  optional declarative orchestrator.
+- Selected a staged implementation: land identity resolution first, then add
+  the generic provider invocation seam and the agent-ssh dtssh-host command
+  before any private machine declaration depends on it.
