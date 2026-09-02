@@ -2,13 +2,12 @@
 
 Most repos need no config: agent-codespaces derives machine/location defaults,
 the ``/workspaces/<basename>`` checkout, and the git-credential relay by
-convention. Supplementary, CodeSpace-specific config lives **in the adopting
-repo** at the canonical ``.agent-codespaces/config.yaml`` (aligned with the
-sibling ``agent-*`` plugins), with the legacy repo-root ``codespaces.yaml`` still
-read as a back-compat fallback. The runtime directory (``~/.agent-codespaces/``)
-holds only the adoption manifest (``adopted-repos.yaml``) -- a list of repo
-paths. On every start/reload the service reads each repo's config live and
-merges in memory; a CLI run inside a repo also auto-discovers that repo's config.
+convention. Supplementary, CodeSpace-specific config can live **in the adopting
+repo** at the canonical ``.agent-codespaces/config.yaml`` or be exposed by an
+active plugin's ``codespaceConfig`` manifest declaration. The legacy repo-root
+``codespaces.yaml`` and user-level ``config.d`` providers remain compatibility
+inputs. Provider declarations merge below adopted-repo and current-repo config.
+On every start/reload the service reads each source live and merges in memory.
 """
 
 from __future__ import annotations
@@ -80,16 +79,12 @@ NO_SUPPLEMENTAL_CONFIG_ADVISORY = (
     "one only for supplementary CodeSpace-specific config."
 )
 
-# ── User-level drop-in config providers (config.d) ──────────────────────────
-# A harness plugin can make its shipped CodeSpace *target* config discoverable
-# WITHOUT a control-plane repo and WITHOUT writing into any repo: it drops a small
-# **pointer** file into ``~/.agent-codespaces/config.d/`` naming its config.yaml.
-# agent-codespaces reads each pointer, loads the referenced config, and merges it
-# at the LOWEST precedence (a provider default -- any adopted-repo / cwd config
-# still overrides). This keeps the provider edge one-way and dependency-free: the
-# plugin ships a default and points at it in place; agent-codespaces discovers it
-# dynamically; neither writes into the other's repo, and a plugin update keeps the
-# pointed config live (no stale copy).
+# ── Supplementary config providers ──────────────────────────────────────────
+# An active plugin can expose its shipped CodeSpace target config directly from
+# plugin.json. Legacy/operator config.d entries remain supported, but are not
+# required authority for active plugin payloads.
+PLUGIN_CONFIG_MANIFEST_FIELD = "codespaceConfig"
+PLUGIN_CONFIG_REGISTRY_NAME = "plugin-manifests"
 CONFIG_D_DIR_NAME = "config.d"
 CONFIG_D_REGISTRY_NAME = "config.d"
 CONFIG_D_POINTER_SCHEMA_VERSION = 1
@@ -166,7 +161,7 @@ class ConfigDropinRegistryReport:
                     item["owner"] = decision.value.owner
             entries.append(item)
         return {
-            "registry": CONFIG_D_REGISTRY_NAME,
+            "registry": self.snapshot.registry,
             "authority": self.authority.value,
             "active_entries": [
                 contribution.to_dict() for contribution in self.active_configs
@@ -176,12 +171,38 @@ class ConfigDropinRegistryReport:
         }
 
 
+@dataclass(frozen=True)
+class ConfigProviderReports:
+    """Active-plugin and compatibility config-provider diagnostics."""
+
+    active_plugins: ConfigDropinRegistryReport
+    config_d: ConfigDropinRegistryReport
+
+    @property
+    def active_configs(self) -> list[ConfigDropin]:
+        """Return provider configs in precedence order."""
+        return [
+            *self.active_plugins.active_configs,
+            *self.config_d.active_configs,
+        ]
+
+    @property
+    def findings(self) -> tuple[Finding, ...]:
+        """Return exhaustive findings from both provider surfaces."""
+        return (
+            *self.active_plugins.findings,
+            *self.config_d.findings,
+        )
+
+
 # Config loading is normally one-shot, but a daemon can reload it while a
 # registry entry is transiently unreadable. Keep only the last selected value
 # per entry, and clear it on an authoritative absent scan.
 _CONFIG_D_LAST_KNOWN: dict[str, ConfigDropin] = {}
 _CONFIG_D_LAST_KNOWN_ROOT: Path | None = None
 _CONFIG_D_WARNING_TRACKER = WarningTracker()
+_PLUGIN_CONFIG_LAST_KNOWN: dict[str, ConfigDropin] = {}
+_PLUGIN_CONFIG_WARNING_TRACKER = WarningTracker()
 
 
 def config_d_dir() -> Path:
@@ -499,6 +520,259 @@ def _validate_dropin_config(raw: object) -> str | None:
     if "provision" in raw:
         return _validate_dropin_provision(raw["provision"], location="provision")
     return None
+
+
+def _plugin_config_remedy(source: str, manifest: Path) -> str:
+    """Return the report-only remedy for one manifest declaration."""
+    return (
+        f"Fix or remove {PLUGIN_CONFIG_MANIFEST_FIELD} in {manifest} for "
+        f"{source}, then update or re-enable that plugin."
+    )
+
+
+def _plugin_config_finding(
+    source: str,
+    manifest: Path,
+    reason: str,
+    *,
+    status: str = "inactive",
+    target: Path | str | None = None,
+    detail: str | None = None,
+) -> Finding:
+    """Create an exact active-plugin declaration finding."""
+    return Finding(
+        registry=PLUGIN_CONFIG_REGISTRY_NAME,
+        entry=str(manifest),
+        status=status,
+        reason=reason,
+        target=str(target) if target is not None else None,
+        owner=source,
+        remedy=_plugin_config_remedy(source, manifest),
+        detail=detail,
+    )
+
+
+def _active_plugin_config_decision(
+    active: ActivePlugin,
+) -> EntryDecision[ConfigDropin] | None:
+    """Read and validate one active plugin's optional config declaration."""
+    manifest = active.root / "plugin.json"
+    try:
+        info = manifest.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return EntryDecision.indeterminate(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "entry-indeterminate",
+                status="indeterminate",
+                detail=f"plugin manifest could not be inspected: {exc}",
+            )
+        )
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or _is_reparse(info)
+    ):
+        return EntryDecision.inactive(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "invalid-entry",
+                detail="plugin.json must be a regular non-reparse file",
+            )
+        )
+    try:
+        raw_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        return EntryDecision.inactive(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "invalid-entry",
+                detail=f"plugin.json is not valid UTF-8: {exc}",
+            )
+        )
+    except json.JSONDecodeError as exc:
+        return EntryDecision.inactive(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "invalid-entry",
+                detail=f"plugin.json is not valid JSON: {exc}",
+            )
+        )
+    except OSError as exc:
+        return EntryDecision.indeterminate(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "entry-indeterminate",
+                status="indeterminate",
+                detail=f"plugin.json could not be read: {exc}",
+            )
+        )
+    if not isinstance(raw_manifest, dict):
+        return EntryDecision.inactive(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "invalid-entry",
+                detail="plugin.json must contain a JSON object",
+            )
+        )
+    if PLUGIN_CONFIG_MANIFEST_FIELD not in raw_manifest:
+        return None
+
+    declared = raw_manifest.get(PLUGIN_CONFIG_MANIFEST_FIELD)
+    if not isinstance(declared, str) or not declared.strip():
+        return EntryDecision.inactive(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "invalid-entry",
+                target=str(declared),
+                detail=f"{PLUGIN_CONFIG_MANIFEST_FIELD} must be a non-empty relative path",
+            )
+        )
+    relative = Path(declared.strip())
+    if relative.is_absolute():
+        return EntryDecision.inactive(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "identity-mismatch",
+                target=relative,
+                detail=f"{PLUGIN_CONFIG_MANIFEST_FIELD} must be relative to the plugin root",
+            )
+        )
+    target = active.root / relative
+    canonical_target, verdict = _regular_target(
+        manifest,
+        target,
+        entry_class="active-plugin",
+        owner=active.source,
+    )
+    if verdict is not None:
+        finding = verdict.findings[0]
+        replacement = _plugin_config_finding(
+            active.source,
+            manifest,
+            finding.reason,
+            status=finding.status,
+            target=target,
+            detail=finding.detail,
+        )
+        if verdict.status is EntryStatus.INDETERMINATE:
+            return EntryDecision.indeterminate(replacement)
+        return EntryDecision.inactive(replacement)
+    canonical_target = cast(Path, canonical_target)
+    try:
+        canonical_target.relative_to(active.root)
+    except ValueError:
+        return EntryDecision.inactive(
+            _plugin_config_finding(
+                active.source,
+                manifest,
+                "identity-mismatch",
+                target=canonical_target,
+                detail="declared config escapes the identity-verified plugin root",
+            )
+        )
+
+    validated = _validated_config_target(
+        manifest,
+        canonical_target,
+        entry_class="active-plugin",
+        owner=active.source,
+    )
+    if validated.status in (EntryStatus.ACTIVE, EntryStatus.ACTIVE_WITH_ADVISORY):
+        contribution = cast(ConfigDropin, validated.value)
+        return EntryDecision.active(replace(contribution, entry=manifest))
+    finding = validated.findings[0]
+    replacement = _plugin_config_finding(
+        active.source,
+        manifest,
+        finding.reason,
+        status=finding.status,
+        target=canonical_target,
+        detail=finding.detail,
+    )
+    if validated.status is EntryStatus.INDETERMINATE:
+        return EntryDecision.indeterminate(replacement)
+    return EntryDecision.inactive(replacement)
+
+
+def scan_active_plugin_config_registry(
+    *,
+    previous: dict[str, ConfigDropin] | None = None,
+) -> ConfigDropinRegistryReport:
+    """Resolve supplementary configs declared by currently active plugins."""
+    global _PLUGIN_CONFIG_LAST_KNOWN
+
+    activation = resolve_active_plugins()
+    decisions: dict[str, EntryDecision[ConfigDropin]] = {}
+    entry_classes: dict[str, str] = {}
+    findings: list[Finding] = []
+
+    for source, activation_decision in sorted(activation.decisions.items()):
+        if activation_decision.status is EntryStatus.INDETERMINATE:
+            manifest = (
+                activation_decision.value.root / "plugin.json"
+                if activation_decision.value is not None
+                else Path(f"<active-plugin:{source}>")
+            )
+            decision = EntryDecision.indeterminate(
+                _plugin_config_finding(
+                    source,
+                    manifest,
+                    "entry-indeterminate",
+                    status="indeterminate",
+                    detail="plugin activation could not be determined authoritatively",
+                )
+            )
+        elif activation_decision.status is EntryStatus.INACTIVE:
+            continue
+        else:
+            active = cast(ActivePlugin, activation_decision.value)
+            decision = _active_plugin_config_decision(active)
+            if decision is None:
+                continue
+        decisions[source] = decision
+        entry_classes[source] = "active-plugin"
+        findings.extend(decision.findings)
+
+    if activation.authority is ScanAuthority.INDETERMINATE:
+        findings.append(Finding(
+            registry=PLUGIN_CONFIG_REGISTRY_NAME,
+            entry=PLUGIN_CONFIG_REGISTRY_NAME,
+            status="indeterminate",
+            reason="registry-indeterminate",
+            remedy=(
+                "Restore readable plugin activation settings and payload roots, "
+                "then run `agent-codespaces doctor` again; current declarations "
+                "are retained."
+            ),
+            detail="active plugins could not be enumerated authoritatively",
+        ))
+
+    snapshot = ScanSnapshot(
+        registry=PLUGIN_CONFIG_REGISTRY_NAME,
+        authority=activation.authority,
+        decisions=decisions,
+        findings=tuple(findings),
+    )
+    prior = dict(_PLUGIN_CONFIG_LAST_KNOWN if previous is None else previous)
+    active_entries = snapshot.reconcile(prior)
+    if previous is None:
+        _PLUGIN_CONFIG_LAST_KNOWN = dict(active_entries)
+    return ConfigDropinRegistryReport(
+        snapshot=snapshot,
+        active_entries=active_entries,
+        entry_classes=entry_classes,
+    )
 
 
 def _legacy_target(entry: Path, text: str) -> Path | None:
@@ -908,6 +1182,93 @@ def scan_config_dropin_registry(
         active_entries=active_entries,
         entry_classes=entry_classes,
     )
+
+
+def _shadow_config_d_with_active_plugins(
+    report: ConfigDropinRegistryReport,
+    active_plugins: ConfigDropinRegistryReport,
+) -> ConfigDropinRegistryReport:
+    """Make valid active-plugin declarations authoritative over old pointers."""
+    authoritative = {
+        contribution.owner
+        for contribution in active_plugins.active_configs
+        if contribution.owner
+    }
+    if not authoritative:
+        return report
+
+    active_entries = dict(report.active_entries)
+    decisions = dict(report.snapshot.decisions)
+    findings = list(report.findings)
+    for key, contribution in tuple(active_entries.items()):
+        if contribution.owner not in authoritative:
+            continue
+        active_entries.pop(key)
+        superseded = _config_d_finding(
+            contribution.entry,
+            "superseded",
+            status="active-with-advisory",
+            target=contribution.target,
+            entry_class=contribution.entry_class,
+            owner=contribution.owner,
+            detail=(
+                f"{contribution.owner} now declares "
+                f"{PLUGIN_CONFIG_MANIFEST_FIELD} in its active plugin.json; "
+                "this compatibility pointer is ignored"
+            ),
+        )
+        decisions[key] = EntryDecision.advisory(contribution, superseded)
+        findings = [finding for finding in findings if finding.entry != key]
+        findings.append(superseded)
+    snapshot = ScanSnapshot(
+        registry=report.snapshot.registry,
+        authority=report.snapshot.authority,
+        decisions=decisions,
+        findings=tuple(findings),
+    )
+    return ConfigDropinRegistryReport(
+        snapshot=snapshot,
+        active_entries=active_entries,
+        entry_classes=report.entry_classes,
+    )
+
+
+def scan_config_providers() -> ConfigProviderReports:
+    """Scan active plugin declarations and compatibility config.d entries."""
+    active_plugins = scan_active_plugin_config_registry()
+    config_d = _shadow_config_d_with_active_plugins(
+        scan_config_dropin_registry(),
+        active_plugins,
+    )
+    return ConfigProviderReports(
+        active_plugins=active_plugins,
+        config_d=config_d,
+    )
+
+
+def _warn_active_plugin_config_findings(
+    report: ConfigDropinRegistryReport,
+) -> None:
+    """Emit bounded declaration findings during config loading."""
+    batch = _PLUGIN_CONFIG_WARNING_TRACKER.select(report.findings)
+    for finding in batch.emitted:
+        target = f" target={finding.target}" if finding.target else ""
+        log.warning(
+            "%s plugin=%s manifest=%s reason=%s%s; "
+            "run `agent-codespaces doctor`",
+            PLUGIN_CONFIG_REGISTRY_NAME,
+            finding.owner or "unknown",
+            finding.entry,
+            finding.reason,
+            target,
+        )
+    if batch.suppressed:
+        log.warning(
+            "%s: %d additional findings suppressed; "
+            "run `agent-codespaces doctor`",
+            PLUGIN_CONFIG_REGISTRY_NAME,
+            batch.suppressed,
+        )
 
 
 def _warn_config_dropin_findings(report: ConfigDropinRegistryReport) -> None:
@@ -1650,7 +2011,11 @@ def _parse_repo_config(raw: dict[str, Any], repo_dir: Path | None = None) -> Rep
     )
 
 
-def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
+def load_merged_config(
+    include_cwd: bool = True,
+    *,
+    provider_reports: ConfigProviderReports | None = None,
+) -> CodespacesConfig:
     """Load and merge CodeSpace config from all adopted repos.
 
     Reads each repo's config (``.agent-codespaces/config.yaml``, or legacy
@@ -1678,10 +2043,10 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
     connection_owner_set = False
 
     # Ordered list of (raw_config, config_dir, source_path) to merge; order =
-    # precedence. Adopted repos + cwd first, then USER-LEVEL drop-in providers
-    # (config.d) LAST so an adopted-repo / cwd config always wins on conflicts.
-    # The drop-in seam makes a plugin-shipped target config discoverable with NO
-    # control-plane repo (the golden-path config-provider seam).
+    # precedence. Adopted repos + cwd first, then active plugin declarations,
+    # then compatibility config.d providers. All provider config is a default
+    # below repository-owned config; active payload declarations outrank stale
+    # user-level pointers for the same provider.
     sources: list[tuple[dict[str, Any], Path, Path]] = []
     for repo_root in roots:
         # E1e knowledge overlay (config-graft, #947): read the config from the
@@ -1699,11 +2064,12 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
         if raw is None:
             continue
         sources.append((raw, config_dir, repo_root))
-    dropin_report = scan_config_dropin_registry()
-    _warn_config_dropin_findings(dropin_report)
-    for contribution in dropin_report.active_configs:
-        # The registry classifier already read and structurally validated this
-        # target. Re-use its exact result so runtime and doctor cannot diverge.
+    provider_reports = provider_reports or scan_config_providers()
+    _warn_active_plugin_config_findings(provider_reports.active_plugins)
+    _warn_config_dropin_findings(provider_reports.config_d)
+    for contribution in provider_reports.active_configs:
+        # The provider classifiers already read and structurally validated each
+        # target. Re-use their exact results so runtime and doctor cannot diverge.
         sources.append((
             contribution.raw_config,
             contribution.target.parent,

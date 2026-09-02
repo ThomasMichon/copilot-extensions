@@ -50,7 +50,7 @@ from .config import (
     repo_config_path,
     repo_has_config,
     save_adopted_repos,
-    scan_config_dropin_registry,
+    scan_config_providers,
     validate_config,
 )
 from .connect import (
@@ -2810,14 +2810,14 @@ def _require_codespace_scope(op: str) -> int | None:
 
 
 def _cmd_doctor(*, json_output: bool = False) -> int:
-    """Check gh auth and exhaustively report config.d registry hygiene.
+    """Check gh auth and exhaustively report config-provider hygiene.
 
     Read-only and available even without ``gh``. Exit behavior remains nonzero
-    for auth failures and now also reports stale/invalid config.d entries.
+    for auth failures and config-provider declaration findings.
     """
     auth_findings = _gh_auth_preflight()
-    config_report = scan_config_dropin_registry()
-    has_findings = bool(auth_findings or config_report.findings)
+    provider_reports = scan_config_providers()
+    has_findings = bool(auth_findings or provider_reports.findings)
 
     if json_output:
         print(json.dumps({
@@ -2825,7 +2825,8 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
                "ok": not auth_findings,
                "findings": auth_findings,
             },
-            "config_d": config_report.to_dict(),
+            "plugin_manifests": provider_reports.active_plugins.to_dict(),
+            "config_d": provider_reports.config_d.to_dict(),
         }, indent=2, sort_keys=True))
         return 1 if has_findings else 0
 
@@ -2838,6 +2839,30 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
         for finding in auth_findings:
             print(f"  - {finding}", file=sys.stderr)
 
+    plugin_report = provider_reports.active_plugins
+    print(f"[plugin-manifests] authority: {plugin_report.authority.value}")
+    if plugin_report.active_configs:
+        print("[plugin-manifests] active declarations:")
+        for contribution in plugin_report.active_configs:
+            print(
+                f"  - {contribution.owner}: {contribution.entry} -> "
+                f"{contribution.target}"
+            )
+    if not plugin_report.findings:
+        print("[OK] active plugin config declarations have no findings.")
+    else:
+        print("[plugin-manifests] declaration finding(s):", file=sys.stderr)
+        for finding in plugin_report.findings:
+            target = f" target={finding.target}" if finding.target else ""
+            detail = f" ({finding.detail})" if finding.detail else ""
+            print(
+                f"  - {finding.owner}: {finding.entry}: "
+                f"{finding.reason}{target}{detail}\n"
+                f"    Remedy: {finding.remedy}",
+                file=sys.stderr,
+            )
+
+    config_report = provider_reports.config_d
     print(f"[config.d] authority: {config_report.authority.value}")
     if config_report.active_configs:
         print("[config.d] active entries:")
@@ -4232,15 +4257,38 @@ def _cmd_installer_readiness() -> int:
     from .installer_readiness import emit, evaluate
 
     auth_findings = _gh_auth_preflight()
-    config_report = scan_config_dropin_registry()
-    merged = load_merged_config()
+    provider_reports = scan_config_providers()
+    merged = load_merged_config(provider_reports=provider_reports)
+    authoritative_owners = {
+        contribution.owner
+        for contribution in provider_reports.active_plugins.active_configs
+        if contribution.owner
+    }
+
+    def render_finding(finding) -> str:
+        return (
+            f"{finding.owner or finding.entry}: {finding.entry}: "
+            f"{finding.reason}; target: {finding.target or 'none'}; "
+            f"remedy: {finding.remedy}"
+        )
+
     registry_findings = [
-        f"{finding.entry}: {finding.reason}; remedy: {finding.remedy}"
-        for finding in config_report.findings
+        render_finding(finding)
+        for finding in provider_reports.active_plugins.findings
+    ]
+    registry_findings.extend(
+        render_finding(finding)
+        for finding in provider_reports.config_d.findings
+        if finding.owner not in authoritative_owners
+    )
+    registry_advisories = [
+        render_finding(finding)
+        for finding in provider_reports.config_d.findings
+        if finding.owner in authoritative_owners
     ]
     configured = bool(
         load_adopted_repos()
-        or config_report.active_configs
+        or provider_reports.active_configs
         or merged.source_paths
     )
     config_issues = validate_config(merged)
@@ -4253,6 +4301,7 @@ def _cmd_installer_readiness() -> int:
         evaluate(
             auth_findings=auth_findings,
             registry_findings=registry_findings,
+            registry_advisories=registry_advisories,
             config_issues=config_issues,
             configured=configured,
         )

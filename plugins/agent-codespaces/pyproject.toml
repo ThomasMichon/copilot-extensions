@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-codespaces"
-version = "0.4.0-dev102"
+version = "0.4.0-dev103"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -43,7 +43,7 @@ agent-procutil = { path = "libs/agent-procutil" }
 # config.d (module ``dropin_registry``).
 agent-dropin-registry = { path = "libs/dropin-registry" }
 # Effective global-or-adopted-project plugin eligibility and identity-verified
-# roots for attributed config.d pointers (module ``plugin_activation``).
+# roots for active manifest declarations and attributed compatibility pointers.
 agent-plugin-activation = { path = "libs/plugin-activation" }
 
 [project.scripts]

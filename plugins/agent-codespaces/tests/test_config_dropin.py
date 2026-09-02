@@ -1,9 +1,9 @@
-"""Tests for the user-level drop-in config providers (~/.agent-codespaces/config.d/).
+"""Tests for active-plugin and user-level supplementary config providers.
 
-A harness plugin makes its shipped CodeSpace target config discoverable with NO
-control-plane repo by dropping a *pointer* into config.d/. agent-codespaces
-resolves the pointer, loads the config, and merges it at the LOWEST precedence
-(an adopted-repo / cwd config still wins).
+An active plugin can declare its shipped CodeSpace target config directly in
+plugin.json with no control-plane repo or config.d pointer. Compatibility
+config.d inputs remain supported. All provider config merges at the lowest
+precedence, below adopted-repo and current-working-directory config.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from dropin_registry import (
     EntryStatus,
     Finding,
     ScanAuthority,
+    ScanSnapshot,
     WarningTracker,
 )
 from plugin_activation import ActivationReport, ActivePlugin
@@ -30,6 +31,7 @@ from agent_codespaces.config import (
     AdoptedRepo,
     ConfigDropin,
     ConfigDropinRegistryReport,
+    ConfigProviderReports,
 )
 
 _SAMPLE_CONFIG = """\
@@ -73,6 +75,26 @@ def _active_report(source: str, root: Path) -> ActivationReport:
     )
 
 
+def _declared_plugin(
+    tmp_path: Path,
+    *,
+    source: str = "sample-harness@example-marketplace",
+    declaration: object = "references/agent-codespaces/config.yaml",
+    config_body: str | None = _SAMPLE_CONFIG,
+) -> tuple[str, Path, Path]:
+    root = tmp_path / "plugin"
+    target = root / "references" / "agent-codespaces" / "config.yaml"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "plugin.json").write_text(json.dumps({
+        "name": source.split("@")[0],
+        cfg.PLUGIN_CONFIG_MANIFEST_FIELD: declaration,
+    }), "utf-8")
+    if config_body is not None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(config_body, "utf-8")
+    return source, root, target
+
+
 def _managed_entry(
     d: Path,
     *,
@@ -101,6 +123,204 @@ def _scan(
     monkeypatch.setattr(cfg, "config_d_dir", lambda: d)
     monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: report)
     return cfg.scan_config_dropin_registry(previous=previous)
+
+
+def test_active_plugin_manifest_config_needs_no_pointer_or_adopted_repo(
+    tmp_path, monkeypatch
+):
+    source, root, target = _declared_plugin(tmp_path)
+    d = tmp_path / "config.d"
+    monkeypatch.setattr(cfg, "config_d_dir", lambda: d)
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    merged = cfg.load_merged_config(include_cwd=False)
+
+    assert merged.repos[_REPO_KEY].workspace_repo == "example-app"
+    assert merged.credentials.ado_host == "ado.example.com"
+    assert merged.source_paths == [target.resolve().parent]
+
+
+def test_adopted_and_cwd_configs_override_active_plugin_default(
+    tmp_path, monkeypatch
+):
+    source, root, _target = _declared_plugin(tmp_path)
+    adopted = tmp_path / "adopted"
+    adopted_config = adopted / cfg.CANONICAL_CONFIG_REL
+    adopted_config.parent.mkdir(parents=True)
+    adopted_config.write_text(
+        f"repos:\n  {_REPO_KEY}:\n    machine_type: ADOPTED\n",
+        "utf-8",
+    )
+    cwd = tmp_path / "cwd"
+    cwd_config = cwd / cfg.CANONICAL_CONFIG_REL
+    cwd_config.parent.mkdir(parents=True)
+    cwd_config.write_text(
+        f"repos:\n  {_REPO_KEY}:\n    machine_type: CWD\n",
+        "utf-8",
+    )
+    monkeypatch.setattr(cfg, "config_d_dir", lambda: tmp_path / "config.d")
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [AdoptedRepo(path=adopted)])
+    monkeypatch.setattr(cfg, "cwd_repo_root", lambda: cwd)
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    adopted_wins = cfg.load_merged_config(include_cwd=True)
+    assert adopted_wins.repos[_REPO_KEY].machine_type == "ADOPTED"
+
+    monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
+    cwd_wins = cfg.load_merged_config(include_cwd=True)
+    assert cwd_wins.repos[_REPO_KEY].machine_type == "CWD"
+
+
+def test_stale_config_d_pointer_cannot_suppress_active_declaration(
+    tmp_path, monkeypatch
+):
+    source, root, target = _declared_plugin(tmp_path)
+    d = _config_d(tmp_path, monkeypatch)
+    stale = _managed_entry(
+        d,
+        source=source,
+        root=root,
+        target=tmp_path / "missing" / "config.yaml",
+    )
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    reports = cfg.scan_config_providers()
+    assert [item.target for item in reports.active_configs] == [target.resolve()]
+    assert any(
+        finding.entry == str(stale) and finding.reason == "missing-target"
+        for finding in reports.config_d.findings
+    )
+    assert _REPO_KEY in cfg.load_merged_config(include_cwd=False).repos
+
+
+def test_valid_compatibility_pointer_is_reported_but_not_merged_twice(
+    tmp_path, monkeypatch
+):
+    source, root, target = _declared_plugin(tmp_path)
+    d = _config_d(tmp_path, monkeypatch)
+    pointer = _managed_entry(d, source=source, root=root, target=target)
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    reports = cfg.scan_config_providers()
+
+    assert [item.target for item in reports.active_configs] == [target.resolve()]
+    assert any(
+        finding.entry == str(pointer) and finding.reason == "superseded"
+        for finding in reports.config_d.findings
+    )
+
+
+def test_disabled_plugin_manifest_declaration_is_ignored(tmp_path, monkeypatch):
+    _source, _root, _target = _declared_plugin(tmp_path)
+    monkeypatch.setattr(
+        cfg,
+        "resolve_active_plugins",
+        lambda: ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    report = cfg.scan_active_plugin_config_registry()
+
+    assert not report.active_configs
+    assert not report.findings
+
+
+@pytest.mark.parametrize(
+    ("declaration", "config_body", "reason", "detail"),
+    [
+        ("../outside.yaml", _SAMPLE_CONFIG, "identity-mismatch", None),
+        ("references/agent-codespaces/missing.yaml", None, "missing-target", None),
+        ([], None, "invalid-entry", "must be a non-empty relative path"),
+        (
+            "references/agent-codespaces/config.yaml",
+            "repos: [invalid]",
+            "invalid-entry",
+            "repos must be a mapping",
+        ),
+    ],
+)
+def test_invalid_active_plugin_declarations_are_diagnosed(
+    tmp_path, monkeypatch, declaration, config_body, reason, detail
+):
+    source, root, _target = _declared_plugin(
+        tmp_path,
+        declaration=declaration,
+        config_body=config_body,
+    )
+    if (
+        isinstance(declaration, str)
+        and declaration.startswith("..")
+        and config_body is not None
+    ):
+        (root.parent / "outside.yaml").write_text(config_body, "utf-8")
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    report = cfg.scan_active_plugin_config_registry()
+
+    assert not report.active_configs
+    assert report.findings[0].owner == source
+    assert report.findings[0].entry == str(root / "plugin.json")
+    assert report.findings[0].reason == reason
+    if detail:
+        assert detail in report.findings[0].detail
+
+
+def test_invalid_active_declaration_does_not_suppress_valid_peer(
+    tmp_path, monkeypatch
+):
+    bad_source, bad_root, _ = _declared_plugin(
+        tmp_path / "bad",
+        source="bad-provider@example-marketplace",
+        config_body="repos: [invalid]",
+    )
+    good_source, good_root, good_target = _declared_plugin(
+        tmp_path / "good",
+        source="good-provider@example-marketplace",
+    )
+    report = ActivationReport(
+        authority=ScanAuthority.COMPLETE,
+        decisions={
+            bad_source: _active_report(bad_source, bad_root).decisions[bad_source],
+            good_source: _active_report(good_source, good_root).decisions[good_source],
+        },
+    )
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: report)
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    providers = cfg.scan_active_plugin_config_registry()
+
+    assert [item.target for item in providers.active_configs] == [
+        good_target.resolve()
+    ]
+    assert providers.findings[0].owner == bad_source
+    assert providers.findings[0].reason == "invalid-entry"
+
+
+def test_indeterminate_plugin_activation_retains_last_known_declaration(
+    tmp_path, monkeypatch
+):
+    source, root, target = _declared_plugin(tmp_path)
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    first = cfg.scan_active_plugin_config_registry(previous={})
+
+    monkeypatch.setattr(
+        cfg,
+        "resolve_active_plugins",
+        lambda: ActivationReport(ScanAuthority.INDETERMINATE, {}),
+    )
+    retained = cfg.scan_active_plugin_config_registry(
+        previous=dict(first.active_entries)
+    )
+
+    assert [item.target for item in retained.active_configs] == [target.resolve()]
+    assert retained.findings[0].reason == "registry-indeterminate"
 
 
 def test_discover_resolves_pointer(tmp_path, monkeypatch):
@@ -831,7 +1051,20 @@ def test_doctor_human_and_json_report_same_config_findings(
     report = _scan(
         d, monkeypatch, ActivationReport(ScanAuthority.COMPLETE, {})
     )
-    monkeypatch.setattr(main, "scan_config_dropin_registry", lambda: report)
+    plugin_report = ConfigDropinRegistryReport(
+        snapshot=ScanSnapshot(
+            registry=cfg.PLUGIN_CONFIG_REGISTRY_NAME,
+            authority=ScanAuthority.COMPLETE,
+            decisions={},
+            findings=(),
+        ),
+        active_entries={},
+    )
+    reports = ConfigProviderReports(
+        active_plugins=plugin_report,
+        config_d=report,
+    )
+    monkeypatch.setattr(main, "scan_config_providers", lambda: reports)
     monkeypatch.setattr(main, "_gh_auth_preflight", lambda: ["gh auth missing scope"])
 
     assert main._cmd_doctor() == 1
@@ -841,11 +1074,40 @@ def test_doctor_human_and_json_report_same_config_findings(
     assert main.main(["doctor", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["gh"]["findings"] == ["gh auth missing scope"]
+    assert payload["plugin_manifests"]["registry"] == "plugin-manifests"
+    assert payload["plugin_manifests"]["authority"] == "complete"
+    assert payload["config_d"]["registry"] == "config.d"
     assert payload["config_d"]["authority"] == "complete"
     assert [finding["reason"] for finding in payload["config_d"]["findings"]] == [
         "invalid-entry"
     ]
     assert payload["config_d"]["findings"][0]["remedy"]
+
+
+def test_doctor_exposes_active_plugin_declaration_identity_path_and_reason(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_codespaces import __main__ as main
+
+    source, root, _target = _declared_plugin(tmp_path, config_body=None)
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "config_d_dir", lambda: tmp_path / "config.d")
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+    reports = cfg.scan_config_providers()
+    monkeypatch.setattr(main, "scan_config_providers", lambda: reports)
+    monkeypatch.setattr(main, "_gh_auth_preflight", lambda: [])
+
+    assert main._cmd_doctor(json_output=True) == 1
+    payload = json.loads(capsys.readouterr().out)
+    finding = payload["plugin_manifests"]["findings"][0]
+    assert finding["owner"] == source
+    assert finding["entry"] == str(root / "plugin.json")
+    assert finding["reason"] == "missing-target"
+    assert Path(finding["target"]).parts[-3:] == (
+        "references",
+        "agent-codespaces",
+        "config.yaml",
+    )
 
 
 @pytest.mark.parametrize(
