@@ -27,6 +27,14 @@ setup_log() {
     printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" >> "$SETUP_LOG" 2>/dev/null || true
 }
 
+launch_trace() {
+    local event="$1" path="${AGENT_WORKTREES_LAUNCH_TRACE:-}"
+    [[ -n "$path" ]] || return 0
+    case "${path,,}" in 0|false|no|off) return 0 ;; esac
+    mkdir -p "$(dirname "$path")" 2>/dev/null || true
+    printf '%s\n' '{"timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","event":"'"$event"'","launch_id":"'"${AGENT_WORKTREES_LAUNCH_ID:-}"'","project":"'"${LAUNCH_PROJECT:-}"'"}' >>"$path" 2>/dev/null || true
+}
+
 # Launch-status line: always logged, and ALSO echoed to the terminal (stderr,
 # to stay clear of any stdout capture / ACP channel) during an interactive
 # launch so the operator understands what the otherwise-silent post-Picker /
@@ -56,6 +64,7 @@ ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/d
 
 setup_log INFO 'launch-session.sh starting'
 LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
+launch_trace launcher_start
 
 # Runtime resolution (junction-free, marker-only). Prefer the `current-version`
 # marker -> versions/<ver>/bin/python; fall back to the newest slot only -- the
@@ -422,6 +431,7 @@ start_update_stage
 # ── Resolve launch plan via Python ────────────────────────────────────────
 
 setup_log INFO 'Calling agent_worktrees resolve'
+launch_trace resolve_start
 JSON=$("$PYTHON" -m agent_worktrees resolve "$@")
 RC=$?
 if [[ $RC -ne 0 ]]; then

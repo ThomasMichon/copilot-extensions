@@ -45,6 +45,25 @@ function Write-SetupLog {
     try { Add-Content -Path $script:SetupLog -Value $line -ErrorAction SilentlyContinue } catch {}
 }
 
+function Write-LaunchTrace {
+    param([string]$Event)
+    $path = $env:AGENT_WORKTREES_LAUNCH_TRACE
+    if (-not $path -or $path -match '^(?i:0|false|no|off)$') { return }
+    try {
+        $record = [ordered]@{
+            timestamp = [DateTime]::UtcNow.ToString('o')
+            event = $Event
+            launch_id = $env:AGENT_WORKTREES_LAUNCH_ID
+            project = $script:LaunchProject
+        }
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+        [IO.File]::AppendAllText(
+            $path,
+            ($record | ConvertTo-Json -Compress) + [Environment]::NewLine
+        )
+    } catch {}
+}
+
 # Launch-status line: always logged, and ALSO echoed to the console during an
 # interactive launch so the operator understands what the (otherwise silent)
 # post-Picker/pre-mux pause is waiting on -- the staged update join + apply,
@@ -95,6 +114,7 @@ try {
 } catch {}
 
 Write-SetupLog 'launch-session.ps1 starting'
+Write-LaunchTrace 'launcher_start'
 
 # --recovery: bypass worktree resolution entirely, go straight to setup script
 # --no-update: skip pre-launch self-update (propagated via WORKTREE_NO_UPDATE)
@@ -515,6 +535,7 @@ $script:StageJob = Start-UpdateStage
 
 $resolveArgs = @('-m', 'agent_worktrees', 'resolve') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
+Write-LaunchTrace 'resolve_start'
 
 $jsonOutput = & $VenvPython @resolveArgs
 

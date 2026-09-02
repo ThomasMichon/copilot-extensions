@@ -114,6 +114,9 @@ def run_tui_picker(source=None, live=False, mock_mode=None):
         if redirect:
             sys.__stdout__ = sys.stderr
         app = PickerApp(source, live=live, mock_mode=mock_mode)
+        from .frame_health import append_launch_event
+
+        append_launch_event("textual_app_start", live=live)
         app.run()
     except Exception as exc:
         # The launcher sends the picker's stderr straight to the terminal and
