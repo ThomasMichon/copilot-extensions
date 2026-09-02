@@ -911,6 +911,10 @@ def build_represented_result_snapshot(
     elif latest_stop_reason and str(latest_stop_reason).lower().startswith("cancel"):
         attention.reason = "represented cancellation evidence is incomplete"
 
+    at_rest = (
+        registration.get("turn_state") == "idle"
+        and event_log.active_tool_call() is None
+    )
     return DelegatedResultSnapshot(
         identity=ResultIdentity(
             logical_delegate_kind="worktree" if worktree_id else "session",
@@ -931,7 +935,8 @@ def build_represented_result_snapshot(
         ),
         state=ResultCurrentState(
             session_status=str(registration.get("status") or "live"),
-            liveness=registration.get("liveness"),
+            at_rest=at_rest,
+            liveness=None if at_rest else registration.get("liveness"),
             context_pct=None,
             usage_model=None,
             attention=attention,
