@@ -88,20 +88,6 @@ PROFILE_HOME="$(profile_home)" || {
 POLICY="$PROFILE_HOME/.copilot-extensions/installation-mode.json"
 POLICY_PRESENT=0
 [[ -e "$POLICY" || -L "$POLICY" ]] && POLICY_PRESENT=1
-PROVENANCE_BOUNDARY=0
-case "${PAYLOAD_ROOT//\\//}" in
-    */.copilot/installed-plugins/*/*) PROVENANCE_BOUNDARY=1 ;;
-esac
-if [[ "$PROVENANCE_BOUNDARY" == 0 ]]; then
-    PROBE_ROOT="$PAYLOAD_ROOT"
-    while [[ "$PROBE_ROOT" != "/" ]]; do
-        if [[ -f "$PROBE_ROOT/.github/plugin/marketplace.json" ]]; then
-            PROVENANCE_BOUNDARY=1
-            break
-        fi
-        PROBE_ROOT="$(dirname -- "$PROBE_ROOT")"
-    done
-fi
 RUNTIME_ROOT="$LEGACY_ROOT"
 CONTEXT=""
 MARKETPLACE_ID=""
@@ -139,13 +125,19 @@ DESIRED_MODE=legacy
     SIMPLE_POLICY_LEGACY=0
     if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
           "$POLICY_PRESENT" == 0 &&
-          "$PROVENANCE_BOUNDARY" == 0 &&
-          "$RESOLUTION_STATUS" == provenance-blocked ]]; then
+          "$RESOLUTION_STATUS" == provenance-blocked &&
+          "$(json_get "$RESOLUTION" "$(json_path policy state)" 2>/dev/null || true)" == missing &&
+          "$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)" == false &&
+          "$(json_get "$RESOLUTION" "$(json_path policy reason)" 2>/dev/null || true)" == policy-default-false &&
+          -z "$(json_get "$RESOLUTION" "$(json_path legacy tombstone)" 2>/dev/null || true)" &&
+          "$(json_get "$RESOLUTION" "$(json_path legacy disposition)" 2>/dev/null || true)" == active ]]; then
         SIMPLE_POLICY_LEGACY=1
     elif [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
           "$RESOLUTION_STATUS" == provenance-blocked &&
           "$(json_get "$RESOLUTION" "$(json_path policy state)" 2>/dev/null || true)" == valid &&
-          "$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)" == false ]]; then
+          "$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)" == false &&
+          -z "$(json_get "$RESOLUTION" "$(json_path legacy tombstone)" 2>/dev/null || true)" &&
+          "$(json_get "$RESOLUTION" "$(json_path legacy disposition)" 2>/dev/null || true)" == active ]]; then
         MARKETPLACES_PATH="$(json_path installationMode marketplaces)"
         MARKETPLACES_TYPE="$(json_type "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)"
         if [[ -z "$MARKETPLACES_TYPE" ]] ||

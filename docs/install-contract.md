@@ -655,7 +655,7 @@ Implementations may add a more specific stable invalid-evidence reason, such as
 | Any | Tombstone exists but its activation is missing, unreadable, mismatched, or foreign | `orphaned-transfer`; no legacy or namespaced mutation and never resume legacy |
 | Any | Activation/tombstone environment differs from the current exact environment tuple | `foreign-environment`; fail closed |
 | Any | Observed activation, namespace, or install generation changed | `revalidation-required`; restart resolution |
-| Any | Marketplace provenance is unresolved or ambiguous | `provenance-blocked`; do not create or migrate a cell |
+| Any | Marketplace provenance is unresolved or ambiguous | `provenance-blocked`; do not create or migrate a cell. When policy is genuinely missing/default-false and the legacy root is active with no ownership tombstone, `probe-legacy` may authorize only that legacy root's bootstrap or maintenance. |
 | Malformed or invalid supported-v1 policy | Pinned actual root can be validated | `invalid`; retain that root for diagnosis, but block mutation except the explicitly defined repair path |
 | Higher unsupported policy version | Valid active namespaced activation | `invalid`; keep pinned namespaced runtime and doctor/repair available, but block policy-changing operations |
 | Higher unsupported policy version | No valid activation | `invalid`; create or migrate nothing |
@@ -695,12 +695,15 @@ The primitive exposes two read-only actions:
 
 `probe-legacy` refuses valid namespaced activation, every valid legacy
 tombstone, clean namespaced pre-activation, maintenance, invalid or foreign
-evidence, orphaned transfer, generation revalidation, unresolved provenance,
-deactivation-required state, and any other unsafe state. It permits a ready
-authoritative legacy runtime and `migration-required`, because legacy remains
-authoritative until the explicit two-lock migration transaction publishes
-activation and tombstone ownership. Neither action creates, modifies, or clears
-any file or directory.
+evidence, orphaned transfer, generation revalidation, deactivation-required
+state, and any other unsafe state. Unresolved provenance remains fail-closed
+for cell creation and migration; the sole legacy-mutation exception is a
+genuinely missing/default-false policy with an active, untombstoned legacy
+root, because no namespaced ownership has been requested or published. It also
+permits a ready authoritative legacy runtime and `migration-required`, because
+legacy remains authoritative until the explicit two-lock migration transaction
+publishes activation and tombstone ownership. Neither action creates, modifies,
+or clears any file or directory.
 
 #### Maintenance contract
 

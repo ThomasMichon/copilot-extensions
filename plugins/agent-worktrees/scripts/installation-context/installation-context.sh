@@ -4567,6 +4567,15 @@ run_status_action() {
         probe_reason=legacy-owned-by-other-cell
     elif [[ "$status" == ready && "$reason" == activation-required ]]; then
         probe_reason=namespaced-requested
+    elif [[ "$status" == provenance-blocked &&
+            "$POLICY_STATE" == missing &&
+            "$POLICY_ENABLED" == false &&
+            "$POLICY_REASON" == policy-default-false &&
+            -z "$LEGACY_TOMBSTONE_PATH" &&
+            "$LEGACY_DISPOSITION" == active ]]; then
+        allow_mutation=true
+        probe_reason=legacy-active
+        exit_code=0
     elif [[ "$status" == migration-required ]]; then
         allow_mutation=true
         probe_reason=migration-required
