@@ -177,7 +177,12 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   compatibility catalog, plugin-root compatibility aliases, incomplete-payload
   failure-open behavior, oversized-catalog fallback, and cross-platform kernel
   and catalog semantics; Node tests cover thresholds, configuration, successor
-  seeds, storage, and guidance.
+  seeds, storage, prompt-before-session candidate association, retry-safe
+  acknowledgement/takeover, payload-local extension-free CLI parity, exact
+  plugin-root resolution, and guidance. The identity-free
+  `context-handoff-eval` clean-room fixture has a deterministic self-test and an
+  opt-in Tier-E run that emits seed/token, turn/tool, timing, fidelity, and
+  lifecycle metrics.
 - **efforts:** payload-only policy-producer tests covering exact repository
   adoption, authoritative payload cwd, Git/config containment, malformed input,
   symlink/reparse rejection, contaminated Git environments, manifest-derived

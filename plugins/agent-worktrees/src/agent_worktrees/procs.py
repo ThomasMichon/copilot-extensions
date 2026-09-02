@@ -23,6 +23,7 @@ __all__ = [
     "processes_with_cwd_under",
     "terminate_processes_under",
     "terminate_pid",
+    "terminate_pid_if_identity",
 ]
 
 
@@ -107,6 +108,14 @@ def _win_kernel32():
     k32.ReadProcessMemory.restype = wintypes.BOOL
     k32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
     k32.TerminateProcess.restype = wintypes.BOOL
+    k32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
+    k32.GetProcessTimes.restype = wintypes.BOOL
     k32.QueryFullProcessImageNameW.argtypes = [
         wintypes.HANDLE, wintypes.DWORD,
         wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
@@ -218,6 +227,115 @@ def _terminate_windows(k32, pid: int) -> bool:
         return bool(k32.TerminateProcess(handle, 1))
     finally:
         k32.CloseHandle(handle)
+
+
+def _windows_start_time_from_handle(k32, handle) -> str | None:
+    import ctypes
+    from ctypes import wintypes
+
+    created = wintypes.FILETIME()
+    exited = wintypes.FILETIME()
+    kernel = wintypes.FILETIME()
+    user = wintypes.FILETIME()
+    if not k32.GetProcessTimes(
+        handle,
+        ctypes.byref(created),
+        ctypes.byref(exited),
+        ctypes.byref(kernel),
+        ctypes.byref(user),
+    ):
+        return None
+    return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+
+
+def _terminate_windows_if_identity(
+    pid: int, expected_start_time: str
+) -> dict:
+    k32 = _win_kernel32()
+    handle = k32.OpenProcess(
+        _PROCESS_QUERY_LIMITED_INFORMATION | _PROCESS_TERMINATE,
+        False,
+        pid,
+    )
+    if not handle:
+        return {
+            "killed": False, "identity_verified": False,
+            "method": "windows-handle-unavailable",
+        }
+    try:
+        current = _windows_start_time_from_handle(k32, handle)
+        if current != str(expected_start_time):
+            return {
+                "killed": False, "identity_verified": False,
+                "method": "windows-handle-identity-mismatch",
+            }
+        return {
+            "killed": bool(k32.TerminateProcess(handle, 1)),
+            "identity_verified": True,
+            "method": "windows-verified-handle",
+        }
+    finally:
+        k32.CloseHandle(handle)
+
+
+def _terminate_posix_if_identity(
+    pid: int, expected_start_time: str
+) -> dict:
+    import signal
+
+    pidfd_open = getattr(os, "pidfd_open", None)
+    pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+    if not callable(pidfd_open) or not callable(pidfd_send_signal):
+        return {
+            "killed": False, "identity_verified": False,
+            "method": "pidfd-unavailable",
+        }
+    try:
+        fd = pidfd_open(pid, 0)
+    except OSError:
+        return {
+            "killed": False, "identity_verified": False,
+            "method": "pidfd-open-failed",
+        }
+    try:
+        from . import locks
+
+        if locks.process_start_time(pid) != str(expected_start_time):
+            return {
+                "killed": False, "identity_verified": False,
+                "method": "pidfd-identity-mismatch",
+            }
+        try:
+            pidfd_send_signal(fd, signal.SIGTERM)
+        except OSError:
+            return {
+                "killed": False, "identity_verified": True,
+                "method": "pidfd-signal-failed",
+            }
+        return {
+            "killed": True, "identity_verified": True,
+            "method": "pidfd",
+        }
+    finally:
+        os.close(fd)
+
+
+def terminate_pid_if_identity(pid: int, expected_start_time: str | None) -> dict:
+    """Terminate only through an OS object bound to the verified process.
+
+    Windows verifies creation time and calls ``TerminateProcess`` through the
+    same open handle. POSIX opens a pidfd, verifies the expected ``/proc`` start
+    token, then signals through that pidfd. If either atomic identity mechanism
+    is unavailable, this verified path fails closed.
+    """
+    if pid <= 0 or not expected_start_time:
+        return {
+            "killed": False, "identity_verified": False,
+            "method": "identity-unavailable",
+        }
+    if platform.system() == "Windows":
+        return _terminate_windows_if_identity(pid, str(expected_start_time))
+    return _terminate_posix_if_identity(pid, str(expected_start_time))
 
 
 # ---------------------------------------------------------------------------
