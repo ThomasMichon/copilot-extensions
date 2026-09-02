@@ -21,6 +21,23 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def test_cold_start_budgets_fit_declared_engine_timeout() -> None:
+    declaration = json.loads(
+        (PLUGIN / "session-context.json").read_text(encoding="utf-8")
+    )
+    contributor = next(
+        item
+        for item in declaration["contributors"]
+        if item["id"] == "aggregate-context"
+    )
+    engine_timeout = contributor["timeoutSeconds"]
+
+    assert MODULE.DEADLINE_SECONDS <= engine_timeout
+    assert MODULE.AWAIT_TIMEOUT_SECONDS < MODULE.DEADLINE_SECONDS
+    assert MODULE.MACHINE_TIMEOUT_SECONDS >= 4
+    assert MODULE.CONDUCT_TIMEOUT_SECONDS >= 6
+
+
 def test_compose_prioritizes_binding_and_conduct_within_budget() -> None:
     fragments = {
         "marketplace": "marketplace-" + ("x" * 500),
