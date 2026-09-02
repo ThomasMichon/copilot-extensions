@@ -55,6 +55,7 @@ def test_normal_start_publishes_bound_port_before_resolver_init(
     app.state.supersession_client_factory = lambda _ep: SimpleNamespace(
         drain=lambda **_kwargs: {"drained": True},
         shutdown=lambda: {"shutting_down": True},
+        undrain=lambda: {"draining": False},
     )
 
     with TestClient(app) as client:
