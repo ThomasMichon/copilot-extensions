@@ -7,7 +7,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from . import sessions
 
@@ -18,6 +18,7 @@ MAX_RELATIONS = 128
 MAX_RELATION_TOMBSTONES = 128
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 SyncOutcome = Literal["written", "current", "blocked", "deferred"]
+RecordLoader = Callable[[str, str], Any | None]
 
 
 class ProjectionError(ValueError):
@@ -261,6 +262,166 @@ def controller_relation(
     }
 
 
+def _safe_identity_token(value: object) -> bool:
+    return bool(
+        isinstance(value, str)
+        and value
+        and value not in {".", ".."}
+        and "/" not in value
+        and "\\" not in value
+        and "\x00" not in value
+    )
+
+
+def _default_record_loader(project: str, worktree_id: str) -> Any | None:
+    if not _safe_identity_token(project) or not _safe_identity_token(worktree_id):
+        return None
+    try:
+        from . import config as cfg
+        from . import tracking
+
+        tracking_dir = cfg.project_dir(project) / "worktrees"
+        path = tracking_dir / f"{worktree_id}.yaml"
+        if path.parent != tracking_dir or not path.is_file():
+            return None
+        return tracking.load_record(path)
+    except Exception:
+        return None
+
+
+def _known_relation(relation: dict[str, Any]) -> dict[str, Any]:
+    role = relation.get("role")
+    keys = {
+        "project",
+        "worktree_id",
+        "role",
+        "relation_revision",
+    }
+    if role == "bound":
+        keys.update({
+            "head_revision",
+            "is_head",
+            "lifecycle_state",
+            "lineage",
+        })
+    elif role == "controller":
+        keys.update({
+            "controller_revision",
+            "controller_kind",
+            "controller_source",
+            "controller_ref",
+            "controller_session_id",
+            "relation_state",
+            "created_at",
+            "ended_at",
+        })
+    return {key: relation.get(key) for key in keys}
+
+
+def validate_restored_hint(
+    session_id: str,
+    projection: dict[str, Any] | None = None,
+    *,
+    record_loader: RecordLoader = _default_record_loader,
+) -> dict[str, Any]:
+    """Validate one restored projection's unique bound identity against records."""
+    if projection is None:
+        projection = read(session_id)
+    if projection is None:
+        return {"status": "restored-missing-projection"}
+    overflow = projection.get("overflow", False)
+    omitted = projection.get("omitted_relations", 0)
+    if (
+        not isinstance(overflow, bool)
+        or type(omitted) is not int
+        or omitted < 0
+    ):
+        return {"status": "restored-invalid"}
+    if overflow or omitted:
+        return {"status": "restored-incomplete"}
+    bound = [
+        relation
+        for relation in projection.get("relations", [])
+        if isinstance(relation, dict) and relation.get("role") == "bound"
+    ]
+    if not bound:
+        return {"status": "restored-unbound"}
+    if len(bound) != 1:
+        return {"status": "restored-ambiguous"}
+    relation = bound[0]
+    project = relation.get("project")
+    worktree_id = relation.get("worktree_id")
+    if not _safe_identity_token(project) or not _safe_identity_token(worktree_id):
+        return {"status": "restored-invalid-identity"}
+    record = record_loader(str(project), str(worktree_id))
+    if record is None:
+        return {
+            "status": "restored-foreign",
+            "project": project,
+            "worktree_id": worktree_id,
+        }
+    expected = bound_relation(record, session_id)
+    if expected is None:
+        return {
+            "status": "restored-collision",
+            "project": project,
+            "worktree_id": worktree_id,
+        }
+    projected_relation_revision = relation.get("relation_revision")
+    projected_head_revision = relation.get("head_revision")
+    if not isinstance(projected_relation_revision, int) or not isinstance(
+        projected_head_revision, int
+    ):
+        return {"status": "restored-invalid-revision"}
+    expected_relation_revision = expected["relation_revision"]
+    expected_head_revision = expected["head_revision"]
+    if (
+        projected_relation_revision < expected_relation_revision
+        and projected_head_revision <= expected_head_revision
+    ) or (
+        projected_relation_revision <= expected_relation_revision
+        and projected_head_revision < expected_head_revision
+    ):
+        return {
+            "status": "restored-stale",
+            "project": project,
+            "worktree_id": worktree_id,
+        }
+    if (
+        projected_relation_revision > expected_relation_revision
+        and projected_head_revision >= expected_head_revision
+    ) or (
+        projected_relation_revision >= expected_relation_revision
+        and projected_head_revision > expected_head_revision
+    ):
+        return {
+            "status": "restored-newer",
+            "project": project,
+            "worktree_id": worktree_id,
+        }
+    if (
+        projected_relation_revision != expected_relation_revision
+        or projected_head_revision != expected_head_revision
+    ):
+        return {
+            "status": "restored-collision",
+            "project": project,
+            "worktree_id": worktree_id,
+        }
+    if _known_relation(relation) != _known_relation(expected):
+        return {
+            "status": "restored-collision",
+            "project": project,
+            "worktree_id": worktree_id,
+        }
+    return {
+        "status": "restored-validated",
+        "project": project,
+        "worktree_id": worktree_id,
+        "record": record,
+    }
+
+
 def _relation_key(relation: dict[str, Any]) -> tuple[str, str, str]:
     return (
         str(relation.get("project") or ""),
@@ -321,6 +482,15 @@ def _merge_relation(
         None,
     )
     if existing is not None:
+        existing_vector = _revision_vector(existing)
+        incoming_vector = _revision_vector(relation)
+        if existing_vector is not None and incoming_vector is not None:
+            ordering = _compare_revision_vectors(
+                existing_vector,
+                incoming_vector,
+            )
+            if ordering in {"newer", "collision"}:
+                return projection
         existing_revision = existing.get("relation_revision", 0)
         if (
             isinstance(existing_revision, int)
@@ -564,3 +734,382 @@ def sync_controller(
         remove_missing=True,
         blocking=blocking,
     )
+
+
+def _revision_vector(
+    relation: dict[str, Any],
+) -> tuple[int, int] | None:
+    role = relation.get("role")
+    secondary_key = (
+        "head_revision" if role == "bound" else "controller_revision"
+    )
+    primary = relation.get("relation_revision")
+    secondary = relation.get(secondary_key)
+    if (
+        not isinstance(primary, int)
+        or primary < 0
+        or not isinstance(secondary, int)
+        or secondary < 0
+    ):
+        return None
+    return primary, secondary
+
+
+def _compare_revision_vectors(
+    current: tuple[int, int],
+    expected: tuple[int, int],
+) -> Literal["current", "stale", "newer", "collision"]:
+    if current == expected:
+        return "current"
+    if all(left <= right for left, right in zip(current, expected)):
+        return "stale"
+    if all(left >= right for left, right in zip(current, expected)):
+        return "newer"
+    return "collision"
+
+
+def _audit_item(
+    record: Any,
+    session_id: str,
+    role: Literal["bound", "controller"],
+) -> dict[str, Any]:
+    return {
+        "project": record.repo,
+        "worktree_id": record.worktree_id,
+        "session_id": session_id,
+        "role": role,
+        "status": "current",
+        "repairable": False,
+        "repaired": False,
+        "restored": False,
+    }
+
+
+def _classify_relation(
+    record: Any,
+    session_id: str,
+    *,
+    role: Literal["bound", "controller"],
+    projection: dict[str, Any] | None,
+    restored: bool,
+    record_loader: RecordLoader,
+) -> dict[str, Any]:
+    item = _audit_item(record, session_id, role)
+    item["restored"] = restored
+    expected = (
+        bound_relation(record, session_id)
+        if role == "bound"
+        else controller_relation(record, session_id)
+    )
+    if expected is None:
+        item["status"] = "missing-authority"
+        return item
+    if restored:
+        validation = validate_restored_hint(
+            session_id,
+            projection,
+            record_loader=record_loader,
+        )
+        if validation["status"] != "restored-validated":
+            item["status"] = validation["status"]
+            return item
+    if projection is None:
+        item["status"] = (
+            "restored-missing-projection" if restored else "missing"
+        )
+        item["repairable"] = not restored
+        return item
+    overflow = projection.get("overflow", False)
+    omitted = projection.get("omitted_relations", 0)
+    if (
+        not isinstance(overflow, bool)
+        or type(omitted) is not int
+        or omitted < 0
+    ):
+        item["status"] = "restored-invalid" if restored else "invalid"
+        return item
+    if overflow or omitted:
+        item["status"] = "restored-incomplete" if restored else "incomplete"
+        return item
+
+    relation_key = _relation_key(expected)
+    relations = [
+        relation
+        for relation in projection.get("relations", [])
+        if isinstance(relation, dict)
+        and _relation_key(relation) == relation_key
+    ]
+    if len(relations) > 1:
+        item["status"] = "restored-ambiguous" if restored else "ambiguous"
+        return item
+    if not relations:
+        tombstones = [
+            tombstone
+            for tombstone in projection.get("relation_tombstones", [])
+            if isinstance(tombstone, dict)
+            and _relation_key(tombstone) == relation_key
+        ]
+        if len(tombstones) > 1:
+            item["status"] = "restored-ambiguous" if restored else "ambiguous"
+            return item
+        if tombstones:
+            tombstone_revision = _relation_revision(tombstones[0])
+            expected_revision = _relation_revision(expected)
+            if tombstone_revision > expected_revision:
+                item["status"] = (
+                    "restored-newer" if restored else "newer-state"
+                )
+                return item
+            if tombstone_revision == expected_revision:
+                item["status"] = (
+                    "restored-collision" if restored else "collision"
+                )
+                return item
+            item["status"] = "restored-stale" if restored else "stale"
+            item["repairable"] = not restored
+            return item
+        if role == "bound":
+            other_bound = [
+                relation
+                for relation in projection.get("relations", [])
+                if isinstance(relation, dict)
+                and relation.get("role") == "bound"
+            ]
+            if other_bound:
+                item["status"] = (
+                    "restored-collision" if restored else "collision"
+                )
+                return item
+        item["status"] = "restored-missing-relation" if restored else "missing"
+        item["repairable"] = not restored
+        return item
+
+    current = relations[0]
+    current_vector = _revision_vector(current)
+    expected_vector = _revision_vector(expected)
+    if current_vector is None or expected_vector is None:
+        item["status"] = "restored-invalid" if restored else "invalid"
+        item["repairable"] = not restored
+        return item
+    revision_status = _compare_revision_vectors(
+        current_vector,
+        expected_vector,
+    )
+    if revision_status == "newer":
+        item["status"] = "restored-newer" if restored else "newer-state"
+        return item
+    if revision_status == "collision":
+        item["status"] = "restored-collision" if restored else "collision"
+        return item
+    if revision_status == "stale":
+        item["status"] = "restored-stale" if restored else "stale"
+        item["repairable"] = not restored
+        return item
+    if _known_relation(current) != _known_relation(expected):
+        item["status"] = "restored-collision" if restored else "collision"
+        return item
+    item["status"] = "restored-current" if restored else "current"
+    return item
+
+
+def _repair_relation(
+    record: Any,
+    session_id: str,
+    *,
+    role: Literal["bound", "controller"],
+    record_loader: RecordLoader,
+) -> dict[str, Any]:
+    try:
+        from . import tracking
+
+        record_path = record.yaml_path
+        with tracking._RecordLock(record_path, require_sidecar=True):
+            if not record_path.is_file():
+                item = _audit_item(record, session_id, role)
+                item["status"] = "missing-authority"
+                return item
+            authoritative = tracking.load_record(record_path)
+            target, lock_base, temp_dir = _session_paths(
+                session_id,
+                writing=True,
+            )
+            with tracking._RecordLock(
+                lock_base,
+                blocking=True,
+                require_sidecar=True,
+            ):
+                try:
+                    current = read(session_id) or _empty_projection(session_id)
+                except UnsupportedProjectionVersion:
+                    item = _audit_item(record, session_id, role)
+                    item["status"] = "newer-schema"
+                    return item
+                except ProjectionError:
+                    try:
+                        current = _read_recoverable(session_id)
+                    except UnsupportedProjectionVersion:
+                        item = _audit_item(record, session_id, role)
+                        item["status"] = "newer-schema"
+                        return item
+                    except ProjectionError:
+                        current = _empty_projection(session_id)
+
+                locked = _classify_relation(
+                    authoritative,
+                    session_id,
+                    role=role,
+                    projection=current,
+                    restored=False,
+                    record_loader=record_loader,
+                )
+                if not locked["repairable"]:
+                    return locked
+                expected = (
+                    bound_relation(authoritative, session_id)
+                    if role == "bound"
+                    else controller_relation(authoritative, session_id)
+                )
+                if expected is None:
+                    locked["status"] = "missing-authority"
+                    locked["repairable"] = False
+                    return locked
+                updated = _merge_relation(current, expected)
+                final = _classify_relation(
+                    authoritative,
+                    session_id,
+                    role=role,
+                    projection=updated,
+                    restored=False,
+                    record_loader=record_loader,
+                )
+                if final["status"] != "current":
+                    return final
+                if updated != current:
+                    _atomic_replace(target, temp_dir, _encode(updated))
+                final["status"] = "repaired"
+                final["repairable"] = True
+                final["repaired"] = True
+                return final
+    except ProjectionError:
+        item = _audit_item(record, session_id, role)
+        item["status"] = "repair-blocked"
+        return item
+    except Exception:
+        item = _audit_item(record, session_id, role)
+        item["status"] = "repair-deferred"
+        return item
+
+
+def audit_relation(
+    record: Any,
+    session_id: str,
+    *,
+    role: Literal["bound", "controller"],
+    apply: bool = False,
+    record_loader: RecordLoader = _default_record_loader,
+) -> dict[str, Any]:
+    """Inspect and optionally repair one exact authoritative projection relation."""
+    item = _audit_item(record, session_id, role)
+    restored = False
+    try:
+        restored = is_restored(session_id)
+        projection = read(session_id)
+    except MissingSessionTree:
+        item["status"] = "missing-session-tree"
+        return item
+    except UnsupportedProjectionVersion:
+        item["status"] = "newer-schema"
+        return item
+    except ProjectionError:
+        if restored:
+            item["status"] = "restored-invalid"
+            return item
+        projection = None
+    item = _classify_relation(
+        record,
+        session_id,
+        role=role,
+        projection=projection,
+        restored=restored,
+        record_loader=record_loader,
+    )
+    if apply and item["repairable"]:
+        return _repair_relation(
+            record,
+            session_id,
+            role=role,
+            record_loader=record_loader,
+        )
+    return item
+
+
+def backfill_relations(
+    records: list[Any],
+    *,
+    apply: bool = False,
+    budget: int = 256,
+    record_loader: RecordLoader = _default_record_loader,
+) -> dict[str, Any]:
+    """Bounded explicit audit/backfill for known session projection relations."""
+    candidates: list[tuple[Any, str, Literal["bound", "controller"]]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    bound_owners: dict[str, set[tuple[str, str]]] = {}
+    for record in sorted(records, key=lambda item: item.worktree_id):
+        for entry in record.sessions or ():
+            key = (record.repo, record.worktree_id, entry.session_id, "bound")
+            bound_owners.setdefault(entry.session_id, set()).add(
+                (record.repo, record.worktree_id)
+            )
+            if key not in seen:
+                seen.add(key)
+                candidates.append((record, entry.session_id, "bound"))
+        for relation in record.controllers:
+            if not relation.controller_session_id:
+                continue
+            key = (
+                record.repo,
+                record.worktree_id,
+                relation.controller_session_id,
+                "controller",
+            )
+            if key not in seen:
+                seen.add(key)
+                candidates.append(
+                    (record, relation.controller_session_id, "controller")
+                )
+    limit = max(0, budget)
+    items = []
+    for record, session_id, role in candidates[:limit]:
+        if role == "bound" and len(bound_owners.get(session_id, set())) > 1:
+            item = _audit_item(record, session_id, role)
+            item["status"] = "ambiguous-authority"
+            items.append(item)
+            continue
+        items.append(
+            audit_relation(
+                record,
+                session_id,
+                role=role,
+                apply=apply,
+                record_loader=record_loader,
+            )
+        )
+    status_counts: dict[str, int] = {}
+    for item in items:
+        status = str(item["status"])
+        status_counts[status] = status_counts.get(status, 0) + 1
+    return {
+        "budget": limit,
+        "candidates": len(candidates),
+        "checked": len(items),
+        "remaining": max(0, len(candidates) - len(items)),
+        "repairable": sum(bool(item["repairable"]) for item in items),
+        "repaired": sum(bool(item["repaired"]) for item in items),
+        "report_only": sum(
+            item["status"] not in {"current", "repaired"}
+            and not item["repairable"]
+            for item in items
+        ),
+        "status_counts": status_counts,
+        "items": items,
+    }

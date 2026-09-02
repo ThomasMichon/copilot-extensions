@@ -406,7 +406,10 @@ already receive. A qualified `owner_ref` is preferred, a same-worktree
 supplies the exact session or stands alone for a caller outside any worktree.
 Legacy records retain their existing creation fields without deriving or
 persisting controller relations during ordinary reads or saves; explicit
-backfill owns that later migration. The legacy fields remain present for older
+`backfill-sessions` or `doctor --fix` owns that later migration under the
+record lock. The migration derives only from the existing `owner_ref`,
+`caller_worktree`, and `parent_session` authority, leaves opaque or invalid
+controller metadata report-only, and retains the legacy fields for older
 readers.
 An empty controller model emits no new YAML and therefore preserves the legacy
 common-case bytes.
@@ -434,8 +437,19 @@ liveness, or the asserted head. Those surfaces also carry derived
 `controller_findings`: an exact controller session follows only explicit
 successor and handoff links to a unique active terminal session. Forks, cycles,
 missing records or session trees, concluded controllers without successors,
-restored projections, unsupported schemas, and remote controllers remain
-explicit findings rather than guessed targets.
+unsupported schemas, and remote controllers remain explicit findings rather
+than guessed targets. A restored projection is usable only as a read-only hint:
+its exact session ID, unique bound project/worktree identity, relation revision,
+head revision, and known bound fields must match the current authoritative
+record. Foreign, stale, newer, colliding, or multiply-bound restored state stays
+an explicit report-only finding.
+
+The explicit `backfill-sessions` and `doctor` paths also audit known bound and
+controller relations by exact session ID. A per-run projection budget bounds
+the work. Local missing, stale, or corrupt same-version projections can be
+rebuilt with `--fix`; restored trees remain read-only even when their hints
+validate. Unsupported newer schemas and incomplete/overflowed, ambiguous,
+foreign, colliding, or newer projection state are never rewritten.
 
 The resident session reconciler repairs missed sidecar writes through a
 separate fixed-budget queue. It acts only after a fresh mux catalog proves the
