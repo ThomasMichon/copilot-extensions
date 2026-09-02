@@ -31,6 +31,9 @@ from agent_logger.sync.rescue_validation import (
 from agent_logger.sync.targets import PushResult, Target
 
 _MAX_PROVENANCE_INPUT_BYTES = 1024 * 1024
+_RESTORED_ORIGIN = (
+    b'{"schema_version":1,"source":"agent-containers-rescue"}\n'
+)
 
 
 def metadata_value(session: RescuedSession, member: str) -> dict[str, Any]:
@@ -80,6 +83,21 @@ def build_provenance(session: RescuedSession) -> dict[str, Any]:
         ),
         None,
     )
+    members = {
+        (
+            "rescued-origin.json"
+            if member.relative == "origin.json"
+            else member.relative
+        ): {"bytes": member.size, "sha256": member.sha256}
+        for member in session.members
+    }
+    members.setdefault(
+        "rescued-origin.json",
+        {
+            "bytes": len(_RESTORED_ORIGIN),
+            "sha256": hashlib.sha256(_RESTORED_ORIGIN).hexdigest(),
+        },
+    )
     payload: dict[str, Any] = {
         "schema_version": PROVENANCE_SCHEMA_VERSION,
         "session_id": session.session_id,
@@ -95,14 +113,7 @@ def build_provenance(session: RescuedSession) -> dict[str, Any]:
         "billing_scope": "unknown",
         "repository": repository,
         "source_repo": source_repo,
-        "members": {
-            (
-                "rescued-origin.json"
-                if member.relative == "origin.json"
-                else member.relative
-            ): {"bytes": member.size, "sha256": member.sha256}
-            for member in session.members
-        },
+        "members": members,
     }
     optional = {
         "interface": _normalized_label(origin.get("interface"), workspace.get("interface")),
@@ -189,6 +200,23 @@ def _write_provenance(path: Path, payload: dict[str, Any]) -> None:
         raise RescueSourceError(f"cannot write provenance {path}: {exc}") from exc
 
 
+def _write_restored_origin(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "wb", closefd=False) as stream:
+                stream.write(_RESTORED_ORIGIN)
+                stream.flush()
+                os.fsync(stream.fileno())
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise RescueSourceError(
+            f"cannot write restored-origin marker {path}: {exc}"
+        ) from exc
+
+
 def _stage_root(cfg: Config) -> Path:
     root = cfg.home / "rescue-sync" / "staging"
     try:
@@ -216,6 +244,7 @@ def push_venue(
         projection = Path(tmp)
         for session in selected:
             session_dest = projection / "session-state" / session.session_id
+            has_origin = False
             for member in session.members:
                 relative = (
                     "rescued-origin.json"
@@ -223,6 +252,9 @@ def push_venue(
                     else member.relative
                 )
                 _copy_member(member, session_dest / relative)
+                has_origin = has_origin or member.relative == "origin.json"
+            if not has_origin:
+                _write_restored_origin(session_dest / "rescued-origin.json")
             _write_provenance(
                 projection / "provenance" / f"{session.session_id}.json",
                 build_provenance(session),

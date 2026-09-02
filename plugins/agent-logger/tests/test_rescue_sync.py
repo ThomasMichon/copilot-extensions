@@ -27,6 +27,44 @@ from agent_logger.sync.targets import filesystem
 SESSION_ID = "11111111-2222-4333-8444-555555555555"
 
 
+def _agent_worktrees_projection(session_id: str = SESSION_ID) -> bytes:
+    return (
+        json.dumps(
+            {
+                "version": 1,
+                "session_id": session_id,
+                "relations": [
+                    {
+                        "project": "example/repo",
+                        "worktree_id": "worktree-a",
+                        "role": "bound",
+                        "relation_revision": 1,
+                    }
+                ],
+                "overflow": False,
+                "omitted_relations": 0,
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode()
+
+
+def _deep_agent_worktrees_projection() -> bytes:
+    nested: object = 0
+    for _ in range(70):
+        nested = [nested]
+    return json.dumps(
+        {
+            "version": 1,
+            "session_id": SESSION_ID,
+            "relations": [{"nested": nested}],
+            "overflow": False,
+            "omitted_relations": 0,
+        }
+    ).encode()
+
+
 def _cfg(
     tmp_path: Path,
     *,
@@ -120,7 +158,12 @@ def _destination(tmp_path: Path) -> Path:
 
 def test_complete_capture_is_projected_with_generic_provenance(tmp_path: Path) -> None:
     root = tmp_path / "rescues"
-    capture = _write_capture(root, "100-a")
+    projection = _agent_worktrees_projection()
+    capture = _write_capture(
+        root,
+        "100-a",
+        extra_members={"agent-worktrees.json": projection},
+    )
     (root / ".capture-sandbox-1.lock").write_text("ignored", encoding="utf-8")
     (capture.parent / "status.json").write_text("{}", encoding="utf-8")
     (capture / ".pin-active.json").write_text("{}", encoding="utf-8")
@@ -138,6 +181,9 @@ def test_complete_capture_is_projected_with_generic_provenance(tmp_path: Path) -
     assert (
         destination / "session-state" / SESSION_ID / "rescued-origin.json"
     ).is_file()
+    assert (
+        destination / "session-state" / SESSION_ID / "agent-worktrees.json"
+    ).read_bytes() == projection
     provenance = json.loads(
         (destination / "provenance" / f"{SESSION_ID}.json").read_text(
             encoding="utf-8"
@@ -160,6 +206,7 @@ def test_complete_capture_is_projected_with_generic_provenance(tmp_path: Path) -
     assert provenance["model"] == "example-model"
     assert provenance["billing_scope"] == "unknown"
     assert "rescued-origin.json" in provenance["members"]
+    assert "agent-worktrees.json" in provenance["members"]
     assert "origin.json" not in provenance["members"]
     assert "tokens" not in provenance
     assert "cost" not in provenance
@@ -344,6 +391,141 @@ def test_member_size_or_hash_mismatch_is_rejected(tmp_path: Path, field: str) ->
         assert summary.rejected_captures == 1
     else:
         assert summary.rejected_sessions == 1
+
+
+@pytest.mark.parametrize(
+    ("projection", "message"),
+    [
+        (b"{", "not valid UTF-8 JSON"),
+        (
+            _agent_worktrees_projection(
+                "22222222-3333-4444-8555-666666666666"
+            ),
+            "session_id does not match",
+        ),
+        (
+            _deep_agent_worktrees_projection(),
+            "nesting limit",
+        ),
+    ],
+    ids=["malformed", "session-mismatch", "nested-schema"],
+)
+def test_invalid_agent_worktrees_projection_is_ignored(
+    tmp_path: Path,
+    projection: bytes,
+    message: str,
+) -> None:
+    root = tmp_path / "rescues"
+    _write_capture(
+        root,
+        "100-a",
+        extra_members={"agent-worktrees.json": projection},
+    )
+
+    summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=[root])
+
+    assert summary.accepted == 1
+    assert summary.rejected_sessions == 0
+    assert any(message in detail for detail in summary.details)
+    destination = _destination(tmp_path) / "session-state" / SESSION_ID
+    assert (destination / "events.jsonl").is_file()
+    assert not (destination / "agent-worktrees.json").exists()
+    assert (destination / "rescued-origin.json").is_file()
+
+
+def test_future_agent_worktrees_projection_is_preserved(tmp_path: Path) -> None:
+    root = tmp_path / "rescues"
+    projection = json.dumps(
+        {
+            "version": 2,
+            "session_id": SESSION_ID,
+            "future": {"shape": "opaque"},
+        }
+    ).encode()
+    _write_capture(
+        root,
+        "100-a",
+        extra_members={"agent-worktrees.json": projection},
+    )
+
+    summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=[root])
+
+    assert summary.accepted == 1
+    destination = _destination(tmp_path) / "session-state" / SESSION_ID
+    assert (destination / "agent-worktrees.json").read_bytes() == projection
+    assert (destination / "rescued-origin.json").is_file()
+
+
+def test_canonical_tolerant_v1_projection_is_preserved(tmp_path: Path) -> None:
+    root = tmp_path / "rescues"
+    projection = json.dumps(
+        {
+            "version": 1,
+            "session_id": SESSION_ID,
+            "relations": [{"worktree_id": str(index)} for index in range(129)],
+        }
+    ).encode()
+    _write_capture(
+        root,
+        "100-a",
+        extra_members={"agent-worktrees.json": projection},
+    )
+
+    summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=[root])
+
+    assert summary.accepted == 1
+    destination = _destination(tmp_path) / "session-state" / SESSION_ID
+    assert (destination / "agent-worktrees.json").read_bytes() == projection
+
+
+def test_oversized_agent_worktrees_projection_is_ignored(tmp_path: Path) -> None:
+    root = tmp_path / "rescues"
+    projection = b" " * (128 * 1024 + 1)
+    _write_capture(
+        root,
+        "100-a",
+        extra_members={"agent-worktrees.json": projection},
+    )
+
+    summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=[root])
+
+    assert summary.accepted == 1
+    assert summary.rejected_sessions == 0
+    assert any("exceeds 131072 bytes" in detail for detail in summary.details)
+    destination = _destination(tmp_path) / "session-state" / SESSION_ID
+    assert (destination / "events.jsonl").is_file()
+    assert not (destination / "agent-worktrees.json").exists()
+
+
+def test_excluded_agent_worktrees_projection_does_not_reject_session(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "rescues"
+    capture = _write_capture(root, "100-a")
+    metadata_path = capture / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["completeness"] = "partial"
+    metadata["excluded"] = {
+        "allowlisted": [
+            {
+                "session_id": SESSION_ID,
+                "member": "agent-worktrees.json",
+                "reason": "invalid_projection_json",
+                "bytes": 1,
+            }
+        ],
+        "missing_events": [],
+    }
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=[root])
+
+    assert summary.accepted == 1
+    assert summary.rejected_sessions == 0
+    assert any("ignored optional" in detail for detail in summary.details)
+    assert (
+        _destination(tmp_path) / "session-state" / SESSION_ID / "events.jsonl"
+    ).is_file()
 
 
 def test_capture_total_size_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -595,6 +777,7 @@ def test_newer_projection_removes_stale_optional_members(tmp_path: Path) -> None
         "200-b",
         events=b'{"value":"new"}\n',
         origin=None,
+        extra_members={"agent-worktrees.json": _agent_worktrees_projection()},
     )
     assert rescue.push_rescues(
         cfg, rescue_roots=[older_root, newer_root]
@@ -602,7 +785,8 @@ def test_newer_projection_removes_stale_optional_members(tmp_path: Path) -> None
 
     assert (destination / "events.jsonl").read_bytes() == b'{"value":"new"}\n'
     assert not (destination / "context.json").exists()
-    assert not (destination / "rescued-origin.json").exists()
+    assert (destination / "rescued-origin.json").exists()
+    assert (destination / "agent-worktrees.json").exists()
     assert not (destination / "checkpoints").exists()
 
 
@@ -1004,6 +1188,67 @@ def test_symlink_and_special_member_are_rejected(tmp_path: Path) -> None:
     summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=roots)
     assert summary.accepted == 0
     assert summary.rejected_sessions == len(roots)
+
+
+def test_symlinked_agent_worktrees_projection_is_ignored(tmp_path: Path) -> None:
+    root = tmp_path / "rescues"
+    projection = _agent_worktrees_projection()
+    capture = _write_capture(
+        root,
+        "100-a",
+        extra_members={"agent-worktrees.json": projection},
+    )
+    sidecar = capture / "sessions" / SESSION_ID / "agent-worktrees.json"
+    outside = tmp_path / "outside-agent-worktrees.json"
+    outside.write_bytes(projection)
+    sidecar.unlink()
+    try:
+        sidecar.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=[root])
+
+    assert summary.accepted == 1
+    assert summary.rejected_sessions == 0
+    assert any("not a regular file" in detail for detail in summary.details)
+    destination = _destination(tmp_path) / "session-state" / SESSION_ID
+    assert (destination / "events.jsonl").is_file()
+    assert not (destination / "agent-worktrees.json").exists()
+
+
+def test_oversized_symlinked_agent_worktrees_projection_is_ignored(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "rescues"
+    projection = _agent_worktrees_projection()
+    capture = _write_capture(
+        root,
+        "100-a",
+        extra_members={"agent-worktrees.json": projection},
+    )
+    sidecar = capture / "sessions" / SESSION_ID / "agent-worktrees.json"
+    outside = tmp_path / "outside-oversized-agent-worktrees.json"
+    outside.write_bytes(projection)
+    sidecar.unlink()
+    try:
+        sidecar.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    metadata_path = capture / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    member = metadata["sessions"][SESSION_ID]["members"]["agent-worktrees.json"]
+    metadata["total_bytes"] += 128 * 1024 + 1 - member["bytes"]
+    member["bytes"] = 128 * 1024 + 1
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    summary = rescue.push_rescues(_cfg(tmp_path), rescue_roots=[root])
+
+    assert summary.accepted == 1
+    assert summary.rejected_sessions == 0
+    destination = _destination(tmp_path) / "session-state" / SESSION_ID
+    assert (destination / "events.jsonl").is_file()
+    assert not (destination / "agent-worktrees.json").exists()
 
 
 def test_rescue_repo_allowlist_is_always_fail_closed(tmp_path: Path) -> None:
