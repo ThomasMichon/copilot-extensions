@@ -1271,6 +1271,60 @@ def _resolve_adoption_defaults_from_registry(
     return out
 
 
+def peek_base_repo(project: str | None = None) -> bool | None:
+    """Read only the layers that can define ``base_repo``.
+
+    This is the pre-Picker fast path: unlike :func:`load_config`, it never
+    resolves knowledge overlays, related-repo PR policy, profiles, or other
+    settings. ``None`` means the shallow read was inconclusive and the caller
+    must fall back to the full loader.
+    """
+    try:
+        machine_path = default_config_path()
+        global_raw = _load_yaml_safe(global_config_path())
+        machine_raw = _load_yaml_safe(machine_path)
+        name = (
+            project
+            or machine_raw.get("repo_name")
+            or global_raw.get("repo_name")
+            or _project_name_safe()
+        )
+        if not name:
+            return None
+        dropins = _load_config_d(
+            machine_path.parent / "config.d",
+            project_name=str(name),
+            warn=False,
+        )
+        if dropins:
+            machine_raw = _deep_merge(dropins, machine_raw)
+        platform_name = (
+            machine_raw.get("platform")
+            or global_raw.get("platform")
+            or detect_platform()
+        )
+        machine_repos = machine_raw.get("repos") or {}
+        machine_repo = (
+            machine_repos.get(name) or {}
+            if isinstance(machine_repos, dict)
+            else {}
+        )
+        if not isinstance(machine_repo, dict):
+            machine_repo = {}
+        anchor = machine_repo.get("anchor") or _resolve_anchor_from_registry(
+            name, platform_name
+        )
+        inrepo = _load_inrepo_config(anchor) if anchor else {}
+        merged = _deep_merge(inrepo, machine_repo)
+        for key, value in _resolve_adoption_defaults_from_registry(
+            name, platform_name
+        ).items():
+            merged.setdefault(key, value)
+        return bool(merged.get("base_repo", False))
+    except Exception:
+        return None
+
+
 def _build_repo_config(
     data: dict[str, Any], anchor: str, worktree_root: str
 ) -> RepoConfig:

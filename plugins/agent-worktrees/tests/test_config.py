@@ -1225,6 +1225,44 @@ def test_adoption_defaults_resolved_from_registries(monkeypatch):
     assert out == {"default_branch": "main", "base_repo": True}
 
 
+def test_peek_base_repo_applies_machine_override(monkeypatch, tmp_path):
+    machine = tmp_path / "machine.yaml"
+    global_path = tmp_path / "global.yaml"
+    machine.write_text(
+        "repo_name: proj\nrepos:\n  proj:\n    base_repo: false\n",
+        encoding="utf-8",
+    )
+    global_path.write_text("", encoding="utf-8")
+    anchor = tmp_path / "repo"
+    anchor.mkdir()
+    monkeypatch.setattr(cfg, "default_config_path", lambda: machine)
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(
+        cfg, "_resolve_anchor_from_registry", lambda _name, _platform: str(anchor)
+    )
+    monkeypatch.setattr(
+        cfg,
+        "_resolve_adoption_defaults_from_registry",
+        lambda _name, _platform: {"base_repo": True},
+    )
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+
+    assert cfg.peek_base_repo() is False
+
+
+def test_peek_base_repo_returns_none_when_project_is_unknown(monkeypatch, tmp_path):
+    machine = tmp_path / "machine.yaml"
+    global_path = tmp_path / "global.yaml"
+    machine.write_text("", encoding="utf-8")
+    global_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cfg, "default_config_path", lambda: machine)
+    monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
+    monkeypatch.setattr(cfg, "_project_name_safe", lambda: "")
+
+    assert cfg.peek_base_repo() is None
+
+
 def test_load_config_fills_branch_and_base_repo_from_registry(
     tmp_path: Path, monkeypatch
 ):

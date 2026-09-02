@@ -2343,6 +2343,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     id + path WITHOUT launching Copilot or a mux session -- then resume later
     with ``--json --worktree-id <id>``.
     """
+    from .picker_tui.frame_health import append_launch_event
+
+    append_launch_event("resolve_handler_start")
     use_json = getattr(args, "json", False)
     use_base = getattr(args, "base", False)
     use_new = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
@@ -2407,11 +2410,22 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # monorepo) can still back an agent-bridge ACP agent without writing any
         # config into the repo. Any config/lookup failure falls through to the
         # normal worktree flow unchanged.
-        try:
-            _base_cfg = cfg.load_config()
-            _is_base_repo = _base_cfg.default_repo.base_repo
-        except Exception:
+        ordinary_picker = not any((
+            use_json,
+            use_base,
+            use_new,
+            requested_machine,
+            getattr(args, "worktree_id", None),
+        ))
+        base_hint = cfg.peek_base_repo() if ordinary_picker else None
+        if base_hint is False:
             _base_cfg, _is_base_repo = None, False
+        else:
+            try:
+                _base_cfg = cfg.load_config()
+                _is_base_repo = _base_cfg.default_repo.base_repo
+            except Exception:
+                _base_cfg, _is_base_repo = None, False
         if _is_base_repo and _base_cfg is not None and not requested_machine:
             base_profile = _resolve_profile(_base_cfg, args)
             return _resolve_base_repo(_base_cfg, args, profile=base_profile)
@@ -2700,6 +2714,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             threading.Thread(target=_heal_bg, name="heal-anchor", daemon=True).start()
             picker_root = _start_picker_monitor_root()
             try:
+                append_launch_event("picker_dispatch_start")
                 return _run_new_picker(None, args)
             finally:
                 if picker_root is not None:

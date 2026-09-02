@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import sys
+from argparse import Namespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -50,6 +52,51 @@ def test_picker_init_skips_pivot_scan(monkeypatch):
     screen = eng.PickerScreen(Src(), live=True)
     kinds = [d["kind"] for d in screen.pivots]
     assert "worktrees" in kinds
+
+
+def test_interactive_resolve_skips_full_config_for_non_base_repo(
+    monkeypatch, tmp_path
+):
+    from agent_worktrees import __main__ as main
+    from agent_worktrees import config as cfg
+    from agent_worktrees import picker_tui
+
+    monkeypatch.setattr(cfg, "peek_base_repo", lambda: False)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("ordinary Picker must not load full config before paint")
+        ),
+    )
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(picker_tui, "new_picker_enabled", lambda: True)
+    monkeypatch.setattr(main, "_new_picker_blocked_by_ssh", lambda: False)
+    monkeypatch.setattr(main, "_start_picker_monitor_root", lambda: None)
+    monkeypatch.setattr(main, "_run_new_picker", lambda _config, _args: 0)
+    monkeypatch.setattr(
+        main.sys,
+        "stdin",
+        SimpleNamespace(isatty=lambda: True),
+    )
+    monkeypatch.setattr(
+        main.threading,
+        "Thread",
+        lambda **_kwargs: type("Thread", (), {"start": lambda self: None})(),
+    )
+    args = Namespace(
+        json=False,
+        base=False,
+        new_worktree=False,
+        auto=False,
+        machine=None,
+        worktree_id=None,
+        no_mux=False,
+        no_resume=False,
+    )
+
+    assert main.cmd_resolve(args) == 0
 
 
 def test_skeleton_does_not_touch_src_local():
