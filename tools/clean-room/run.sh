@@ -397,19 +397,42 @@ _timeout_bin() { command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/nu
 # Drive one agent turn with a wall-clock timeout. `agent-bridge create` has no
 # --reply-timeout, so bound it host-side: on timeout, note it and append a marker
 # so a hung agent is a FAIL, not an infinite wait. Echoes the transcript; sets
-# DRIVE_TIMED_OUT (0/1) and DRIVE_DURATION (seconds).
-drive_with_timeout() {  # <agent> <prompt_file> <timeout_sec>
-    local agent="$1" pf="$2" tmo="$3" t0 out rc tb
+# DRIVE_TIMED_OUT (0/1), DRIVE_DURATION (seconds), DRIVE_EXIT_CODE, and
+# DRIVE_MODEL (the bridge session's recorded usage_model).
+drive_with_timeout() {  # <agent> <prompt_file> <timeout_sec> [model]
+    local agent="$1" pf="$2" tmo="$3" model="${4:-}" t0 out rc tb
+    local cmd=(agent-bridge create "$agent" --prompt-file "$pf" --expand all --no-color)
+    [ -z "$model" ] || cmd+=(--model "$model")
     t0=$(date +%s); DRIVE_TIMED_OUT=0; tb="$(_timeout_bin)"
     if [ "${tmo:-0}" -gt 0 ] 2>/dev/null && [ -n "$tb" ]; then
-        out="$("$tb" "${tmo}s" agent-bridge create "$agent" --prompt-file "$pf" --expand all --no-color 2>&1)"; rc=$?
+        out="$("$tb" "${tmo}s" "${cmd[@]}" 2>&1)"; rc=$?
         if [ "$rc" -eq 124 ]; then
             DRIVE_TIMED_OUT=1
             out="$out"$'\n'"[clean-room] TIMED OUT after ${tmo}s -- driven agent did not complete its turn."
         fi
     else
-        out="$(agent-bridge create "$agent" --prompt-file "$pf" --expand all --no-color 2>&1)"; rc=$?
+        out="$("${cmd[@]}" 2>&1)"; rc=$?
     fi
+    DRIVE_EXIT_CODE="$rc"
+    DRIVE_MODEL="$(
+        agent-bridge --json sessions 2>/dev/null |
+            "$(_py)" -c '
+import json
+import sys
+
+agent = sys.argv[1]
+try:
+    sessions = json.load(sys.stdin)
+except Exception:
+    sessions = []
+matches = [
+    session for session in sessions
+    if session.get("agent_name") == agent
+]
+matches.sort(key=lambda session: str(session.get("updated_at") or ""), reverse=True)
+print(str(matches[0].get("usage_model") or "") if matches else "")
+' "$agent"
+    )" || DRIVE_MODEL=""
     DRIVE_DURATION=$(( $(date +%s) - t0 ))
     printf '%s' "$out"
 }
@@ -457,6 +480,9 @@ fingerprint_dirs = [
 ]
 acp_cwd = str(ev.get("acp_cwd") or "")
 acp_cwd_file = str(ev.get("acp_cwd_file") or "")
+model = str(ev.get("model") or "")
+invalid_writer = str(ev.get("invalid_evidence_writer") or "")
+invalid_output = str(ev.get("invalid_evidence_output") or "")
 for acp_dir in acp_dirs:
     if (
         not acp_dir.startswith("/")
@@ -485,18 +511,41 @@ if acp_cwd_file and (
     raise ValueError("eval.acp_cwd_file must be an absolute in-container POSIX path")
 if acp_cwd and acp_cwd_file:
     raise ValueError("eval.acp_cwd and eval.acp_cwd_file are mutually exclusive")
+if model and (
+    len(model) > 64
+    or not model[0].isalnum()
+    or any(not (character.isalnum() or character in "._-") for character in model)
+):
+    raise ValueError("eval.model must be a portable model identifier")
+if invalid_writer and (
+    "/" in invalid_writer
+    or "\\" in invalid_writer
+    or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" for character in invalid_writer)
+):
+    raise ValueError("eval.invalid_evidence_writer must be a scenario-local file name")
+if invalid_output and (
+    invalid_output.startswith("/")
+    or "\\" in invalid_output
+    or any(part in {"", ".", ".."} for part in invalid_output.split("/"))
+    or any(character in invalid_output for character in "\0\r\n\t")
+):
+    raise ValueError("eval.invalid_evidence_output must be a contained results-relative path")
+if bool(invalid_writer) != bool(invalid_output):
+    raise ValueError("eval invalid evidence writer and output must be declared together")
 for k, v in (("tier", m.get("tier", "")), ("setup_rel", setup_rel), ("run_count", run_count),
              ("per_turn", per_turn), ("aggregate", aggregate), ("post_check", post_check),
              ("tierp", tierp), ("family", m.get("family", "")), ("prompt_hash", prompt_hash),
              ("acp_dirs", json.dumps(acp_dirs, separators=(",", ":"))),
              ("fingerprint_dirs", json.dumps(fingerprint_dirs, separators=(",", ":"))),
              ("acp_cwd", acp_cwd),
-             ("acp_cwd_file", acp_cwd_file)):
+             ("acp_cwd_file", acp_cwd_file), ("model", model),
+             ("invalid_writer", invalid_writer),
+             ("invalid_output", invalid_output)):
     print(f"{k}\t{v}")
 PY
 )" || { echo "eval: failed to parse manifest.json" >&2; exit 2; }
 
-    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS_JSON="[]" FINGERPRINT_DIRS_JSON="[]" ACP_CWD="" ACP_CWD_FILE=""
+    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS_JSON="[]" FINGERPRINT_DIRS_JSON="[]" ACP_CWD="" ACP_CWD_FILE="" ACP_MODEL="" INVALID_WRITER="" INVALID_OUTPUT=""
     local _k _v
     while IFS=$'\t' read -r _k _v; do
         case "$_k" in
@@ -506,20 +555,38 @@ PY
             acp_dirs) ACP_DIRS_JSON="$_v" ;; acp_cwd) ACP_CWD="$_v" ;;
             fingerprint_dirs) FINGERPRINT_DIRS_JSON="$_v" ;;
             acp_cwd_file) ACP_CWD_FILE="$_v" ;;
+            model) ACP_MODEL="$_v" ;;
+            invalid_writer) INVALID_WRITER="$_v" ;;
+            invalid_output) INVALID_OUTPUT="$_v" ;;
         esac
     done <<< "$parsed"
     if [ "${RUNS_OVERRIDE:-0}" -gt 0 ] 2>/dev/null; then RUN_COUNT="$RUNS_OVERRIDE"; fi
     [ "$TIER" = E ] || echo "warn: scenario '$SCENARIO_NAME' is tier '$TIER', not 'E' -- eval expects a Tier-E scenario." >&2
     [ -f "$SCENARIO_DIR/$SETUP_REL" ] || { echo "eval: setup driver '$SETUP_REL' not found in scenario dir" >&2; exit 2; }
+    write_scenario_invalid() {
+        local jam="$1"
+        [ -n "$INVALID_WRITER" ] || return 0
+        docker exec "$CONTAINER" python3 \
+            "/home/operator/scenario/$INVALID_WRITER" \
+            --manifest /home/operator/scenario/manifest.json \
+            --output "/home/operator/out/$INVALID_OUTPUT" \
+            --jam "$jam" >/dev/null ||
+            echo "warn: could not write scenario INVALID evidence" >&2
+    }
 
     # --- 1) start box + 2) establish starting state ---------------------------
     start_container
     echo "== eval: establishing starting state ($SETUP_REL) =="
     docker exec "$CONTAINER" /bin/bash -lc \
-        "bash /home/operator/scenario/$SETUP_REL; rc=\$?; cp -r \$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit \$rc" \
-        || echo "warn: setup driver exited non-zero -- the starting state may be incomplete (see cr-report.json)."
+        "bash /home/operator/scenario/$SETUP_REL; rc=\$?; cp -r \$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit \$rc"
+    local setup_rc=$?
     if [ -f "$RESULTS/cr-report.json" ]; then
         cp "$RESULTS/cr-report.json" "$eval_dir/setup-report.json"
+    fi
+    if [ "$setup_rc" -ne 0 ]; then
+        write_scenario_invalid scenario-fixture
+        echo "eval: setup driver exited $setup_rc -- refusing to drive an agent from an invalid starting state (see cr-report.json)" >&2
+        return "$setup_rc"
     fi
 
     # Build the driven-agent ACP command after setup so a scenario whose
@@ -538,6 +605,7 @@ if not cwd.is_dir():
 print(cwd)
 ' "$ACP_CWD_FILE")" || {
             echo "eval: could not resolve a valid cwd from '$ACP_CWD_FILE'" >&2
+            write_scenario_invalid scenario-fixture
             exit 2
         }
     fi
@@ -558,6 +626,7 @@ for value in json.loads(sys.argv[1]):
     if [ "${SKIP_TIER_P:-0}" != 1 ] && [ -n "$TIERP" ]; then
         echo "== eval: Tier-P precondition ($TIERP) =="
         if ! docker exec "$CONTAINER" /bin/bash -lc "$TIERP" >/dev/null 2>&1; then
+            write_scenario_invalid scenario-fixture
             echo "eval: Tier-P precondition '$TIERP' failed -- refusing to spend an eval on a broken CLI surface. Fix the plugin's *-solo Tier-P scenario first, or pass --skip-tier-p-gate to force." >&2
             exit 1
         fi
@@ -566,6 +635,7 @@ for value in json.loads(sys.argv[1]):
 
     # --- 3) register the box as a bridge agent -------------------------------
     if ! do_bridge_register; then
+        write_scenario_invalid scenario-transport-gap
         echo "eval: could not register $CONTAINER with agent-bridge" >&2
         exit 1
     fi
@@ -607,10 +677,12 @@ for index, root in enumerate(roots):
             digest.update(path.read_bytes())
 print(digest.hexdigest()[:16])
 ' "$docs_dirs_json")" || {
+        write_scenario_invalid scenario-transport-gap
         echo "eval: could not fingerprint the evaluated plugin payloads" >&2
         exit 1
     }
     [[ "$docs_hash" =~ ^[0-9a-f]{16}$ ]] || {
+        write_scenario_invalid scenario-transport-gap
         echo "eval: evaluated plugin payload fingerprint is invalid" >&2
         exit 1
     }
@@ -626,12 +698,39 @@ print(digest.hexdigest()[:16])
         transcript="$run_dir/transcript.txt"
         echo "   -- run $n/$RUN_COUNT --"
         end_agent_sessions "$DRIVE_AGENT"
-        drive_with_timeout "$DRIVE_AGENT" "$prompt_txt" "${PER_TURN:-0}" > "$transcript"
+        drive_with_timeout \
+            "$DRIVE_AGENT" "$prompt_txt" "${PER_TURN:-0}" "$ACP_MODEL" \
+            > "$transcript"
         rel="${transcript#"$RESULTS"/}"
-        printf '%s|%s|%s|%s\n' "$n" "$rel" "$DRIVE_DURATION" "$DRIVE_TIMED_OUT" >> "$recs"
+        printf '%s|%s|%s|%s|%s|%s\n' \
+            "$n" "$rel" "$DRIVE_DURATION" "$DRIVE_TIMED_OUT" \
+            "$DRIVE_EXIT_CODE" "$DRIVE_MODEL" >> "$recs"
         tag=""; [ "$DRIVE_TIMED_OUT" = 1 ] && tag=" -- TIMED OUT"
+        [ "$DRIVE_EXIT_CODE" = 0 ] || tag="$tag -- EXIT $DRIVE_EXIT_CODE"
+        [ -z "$DRIVE_MODEL" ] || tag="$tag -- MODEL $DRIVE_MODEL"
         echo "      transcript -> $transcript  (${DRIVE_DURATION}s)$tag"
     done
+
+    "$(_py)" - "$recs" > "$eval_dir/drive-runs.json" <<'PY'
+import json
+import sys
+
+runs = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.rstrip("\n")
+    if not line:
+        continue
+    n, transcript, duration, timed_out, exit_code, model = line.split("|")
+    runs.append({
+        "n": int(n),
+        "transcript": transcript,
+        "duration_s": int(duration),
+        "timed_out": timed_out == "1",
+        "exit_code": int(exit_code),
+        "model": model,
+    })
+json.dump(runs, sys.stdout, indent=2)
+PY
 
     # --- 6) optional programmatic post-check (ground-truth evidence) ---------
     if [ -n "$POST_CHECK" ] && [ -f "$SCENARIO_DIR/$POST_CHECK" ]; then
@@ -652,6 +751,7 @@ print(digest.hexdigest()[:16])
     CR_SCENARIO_NAME="$SCENARIO_NAME" CR_FAMILY="$FAMILY" CR_IMAGE="$IMAGE" CR_RUN_COUNT="$RUN_COUNT" \
     CR_AGG="$AGG" CR_COPILOT_VER="$copilot_ver" CR_PROMPT_HASH="$PROMPT_HASH" CR_DOCS_HASH="$docs_hash" \
     CR_ACP_DIRS_JSON="$ACP_DIRS_JSON" CR_FINGERPRINT_DIRS_JSON="$docs_dirs_json" \
+    CR_REQUESTED_MODEL="$ACP_MODEL" \
     CR_PER_TURN="${PER_TURN:-0}" CR_TIERP="$TIERP" CR_SKIP_TIER_P="${SKIP_TIER_P:-0}" \
     CR_BRIDGE_CLEANUP_ERROR="$bridge_cleanup_error" \
     "$(_py)" - "$recs" > "$eval_dir/eval-run.json" <<'PY'
@@ -663,8 +763,12 @@ if os.path.exists(recs_path):
         line = line.rstrip("\n")
         if not line:
             continue
-        n, transcript, dur, timed = line.split("|")
-        runs.append({"n": int(n), "transcript": transcript, "duration_s": int(dur), "timed_out": timed == "1"})
+        n, transcript, dur, timed, exit_code, model = line.split("|")
+        runs.append({
+            "n": int(n), "transcript": transcript,
+            "duration_s": int(dur), "timed_out": timed == "1",
+            "exit_code": int(exit_code), "model": model,
+        })
 e = os.environ
 tierp = e["CR_TIERP"]
 tierp_field = f"{tierp} (SKIPPED)" if e["CR_SKIP_TIER_P"] == "1" and tierp else tierp
@@ -675,6 +779,7 @@ meta = {
     "copilot_version": e["CR_COPILOT_VER"], "prompt_hash": e["CR_PROMPT_HASH"], "docs_hash": e["CR_DOCS_HASH"],
     "acp_plugin_dirs": json.loads(e["CR_ACP_DIRS_JSON"]),
     "payload_fingerprint_dirs": json.loads(e["CR_FINGERPRINT_DIRS_JSON"]),
+    "requested_model": e["CR_REQUESTED_MODEL"],
     "per_turn_timeout_s": int(e["CR_PER_TURN"]),
     "tier_p_precondition": tierp_field,
     "bridge_cleanup_error": e["CR_BRIDGE_CLEANUP_ERROR"],

@@ -156,6 +156,9 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
   // acp_plugin_dirs adds headless plugin payloads; each entry must be an
   // absolute in-container POSIX path and is shell-quoted by the runner.
   "eval": {
+    "model": "auto",
+    "invalid_evidence_writer": "write-invalid.py",
+    "invalid_evidence_output": "eval/scenario-evidence.json",
     "acp_cwd_file": "/home/operator/worktree-path",
     "acp_plugin_dirs": ["/home/operator/.copilot/installed-plugins/example"],
     "payload_fingerprint_dirs": ["/home/operator/live-marketplace/plugins"]
@@ -183,6 +186,18 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
   "post_check": "post_check.sh"
 }
 ```
+
+`eval.model` is optional. When present, both runners pass it to
+`agent-bridge create --model`, which applies the advertised ACP model
+configuration for that fresh session and records `requested_model` in
+`eval-run.json`. A transcript that reports a model fallback is transport-invalid
+evidence, not proof of a second-model replication.
+
+The optional invalid-evidence pair names a scenario-local Python writer and a
+contained results-relative output. On setup-gate, ACP registration,
+fingerprinting, driver-exit, timeout, or model-selection failure, the runner or
+post-check can invoke that writer to persist the scenario's zero-turn `INVALID`
+record instead of losing the failed cell.
 
 Each running clean-room container has its own provider registration record,
 bound to that container's immutable Docker ID. Concurrent evaluations therefore
@@ -264,6 +279,7 @@ adding an `eval/` subtree and a sibling **`cr-eval.json`**:
     ├── prompt.txt         # the exact seed (literal-mode framing + stated purpose)
     ├── transcript.txt     # human-readable driven-agent transcript
     ├── turns.jsonl        # structured per-turn record (tool calls, outputs) when available
+    ├── drive-runs.json    # per-run exit code, timeout, duration, and applied model
     ├── literal-mode.txt   # the exact injected instruction block
     └── cr-eval.json       # the judge verdict + run metadata (below)
 ```

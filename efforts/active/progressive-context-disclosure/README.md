@@ -134,7 +134,7 @@ prompts the primary context channel.
 
 ### Phase 2 - Deferral and reference experiments
 
-- [ ] Implement the experiment matrix in
+- [x] Implement the experiment matrix in
   [`experiments.md`](experiments.md) without changing production authoring
   rules.
 - [ ] Compare full inline, critical kernel plus one index, critical kernel plus
@@ -327,3 +327,30 @@ enforcement before migrating the complete contributor stack.
   content-bearing evidence fields, and repeated baseline-render drift.
 - Next gate: land this frozen Phase 1 fixture before implementing or running the
   Phase 2 behavioral matrix.
+
+### 2026-09-02 - Phase 2 experiment runner implemented
+
+- Added deterministic F0-F4 rendering for all seven reference
+  representations, all four emphasis levels, and the two Phase 2 assembly
+  alternatives: flat owner fragments and flat fragments with a generated
+  index. The frozen F0 and F2 baseline wording and hashes remain authoritative
+  in both stable-canary and per-run-canary modes.
+- Froze the 3,080-cell Phase 2 render digest. Tier-P validation now catches
+  renderer drift, duplicate negative-control stimuli, and divergence between
+  deterministic and canary-mode rendering before an agent run.
+- Added isolated run materialization with fresh 192-bit guide canaries,
+  readable repository-relative and payload-relative guides, owner and global
+  indexes, spill artifacts, a synthetic session-start context plugin, and
+  byte-for-byte re-render verification outside the read-only fixture mount.
+- Added the runnable `progressive-context-disclosure-eval` ACP scenario plus
+  one-cell scenario generation, counts-only observation, eager-load separation,
+  evidence writing/validation, and zero-turn `INVALID` records for setup,
+  timeout, driver, model-selection, or transport jams. The runner records the
+  native ACP exit code and applied model before evidence can pass.
+- Fresh and spill cells are runnable. Resume and compaction cells fail closed at
+  configuration time until the clean-room runner performs those actual session
+  transitions; a fresh session cannot be relabeled as boundary evidence.
+- No behavioral variant has been selected. This host still has no Docker engine
+  and no WSL distribution, so it cannot produce Tier-E evidence. Next gate:
+  run Tier-P containment in a disposable venue, then run three independent
+  fresh sessions for each surviving primary cell.
