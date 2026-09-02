@@ -84,6 +84,11 @@ def run_tui_picker(
     (no side effects). It never turns on implicitly -- see
     ``engine._resolve_mock_mode``.
 
+    ``after_first_refresh`` is an optional no-argument housekeeping callback.
+    The screen starts it on a daemon worker only after Textual completes its
+    first refresh. It must not mutate Textual widgets; UI changes still belong
+    on the app thread via ``call_from_thread``.
+
     Launch-channel handling: this runs inside ``resolve``, whose **stdout
     (fd 1) is captured by the launcher for the JSON plan**. Textual's driver
     renders to ``sys.__stdout__`` -- so when stdout is captured (not a TTY) but
