@@ -114,10 +114,12 @@ class FrameHealthReporter:
         })
 
     def tick(self, *, frame: int, debug: str, busy: str | None) -> None:
+        if not self.report_gaps:
+            return
         now = time.monotonic()
         previous = self._last_tick
         self._last_tick = now
-        if not self.report_gaps or previous is None:
+        if previous is None:
             return
         gap = now - previous
         if gap < self.threshold_seconds:

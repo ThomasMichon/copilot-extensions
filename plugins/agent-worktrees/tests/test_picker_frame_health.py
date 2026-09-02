@@ -88,3 +88,16 @@ def test_truthy_launch_trace_values_use_standard_history(monkeypatch, value):
 
     assert reporter is not None
     assert reporter.path.name == "picker-launches.jsonl"
+
+
+def test_launch_trace_only_tick_does_not_read_clock(tmp_path, monkeypatch):
+    reporter = FrameHealthReporter(
+        tmp_path / "picker-launches.jsonl",
+        report_gaps=False,
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.picker_tui.frame_health.time.monotonic",
+        lambda: (_ for _ in ()).throw(AssertionError("clock read")),
+    )
+
+    reporter.tick(frame=1, debug="loading", busy=None)
