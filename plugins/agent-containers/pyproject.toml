@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-containers"
-version = "0.1.2-dev107"
+version = "0.1.2-dev109"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,6 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
-    "paramiko>=4.0.0",
     "agent-ssh-manager",
     "agent-credential-relay",
     "agent-config-migrate",
@@ -44,6 +43,9 @@ target-version = "py310"
 line-length = 99
 
 [project.optional-dependencies]
+provider-exec = [
+    "paramiko>=4.0.0",
+]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

@@ -15,6 +15,7 @@ set -euo pipefail
 _ok()   { printf '  [OK]   %s\n' "$1"; }
 _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
+_warn() { printf '  [WARN] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
 
 FORCE=0
@@ -456,6 +457,35 @@ else
 fi
 
 # -- 3. Install the package into the venv ------------------------------
+PACKAGE_STATUS=0
+PACKAGE_TAIL=''
+run_bounded_package_command() {
+    local log_path
+    log_path=$(mktemp -t agent-containers-install.XXXXXX) || {
+        PACKAGE_STATUS=1
+        PACKAGE_TAIL='could not create a temporary package-manager log'
+        return 0
+    }
+    PACKAGE_STATUS=0
+    "$@" >"$log_path" 2>&1 || PACKAGE_STATUS=$?
+    PACKAGE_TAIL=''
+    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
+        PACKAGE_TAIL=$(tail -n 40 "$log_path" | sed -E \
+            -e 's#(https?://)[^/@[:space:]]+@#\1***@#Ig' \
+            -e 's#((token|password|secret)=)[^&[:space:]]+#\1***#Ig')
+    fi
+    rm -f -- "$log_path"
+    return 0
+}
+
+print_package_diagnostics() {
+    if [[ -n "$PACKAGE_TAIL" ]]; then
+        while IFS= read -r line; do
+            _warn "package-manager: $line"
+        done <<< "$PACKAGE_TAIL"
+    fi
+}
+
 if [[ "$HAVE_UV" -eq 1 ]]; then
     # credential-relay first (vendored lib), force-reinstalled so local code
     # changes propagate even without a version bump; then agent-containers.
@@ -463,27 +493,40 @@ if [[ "$HAVE_UV" -eq 1 ]]; then
         _fail "credential-relay source not found at $CRED_RELAY_DIR"
         exit 1
     fi
-    if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet 2>/dev/null; then
+    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-credential-relay "$CRED_RELAY_DIR" --quiet
+    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
         _fail 'credential-relay install failed'
+        print_package_diagnostics
         exit 1
     fi
     if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
         _fail "config-migrate source not found at $CFG_MIGRATE_DIR"
         exit 1
     fi
-    if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet 2>/dev/null; then
+    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet
+    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
         _fail 'config-migrate install failed'
+        print_package_diagnostics
         exit 1
     fi
-    if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
-        _fail 'Failed to install agent-containers package into venv'
-        exit 1
+    run_bounded_package_command uv pip install --python "$VENV_PYTHON" "${PLUGIN_DIR}[provider-exec]" --quiet
+    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
+        _warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
+        print_package_diagnostics
+        run_bounded_package_command uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet
     fi
 else
-    if ! "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null; then
-        _fail 'Failed to install agent-containers package into venv'
-        exit 1
+    run_bounded_package_command "$VENV_PYTHON" -m pip install --quiet "${PLUGIN_DIR}[provider-exec]"
+    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
+        _warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
+        print_package_diagnostics
+        run_bounded_package_command "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR"
     fi
+fi
+if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
+    _fail 'Failed to install agent-containers package into venv'
+    print_package_diagnostics
+    exit 1
 fi
 _ok 'Package installed: agent-containers'
 

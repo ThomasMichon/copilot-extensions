@@ -13362,17 +13362,22 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
         return "payload-only"
 
     try:
-        runtime_root, context_selected = reconcile._selected_runtime_root(name, pdir)
+        candidate = reconcile.runtime_installation_candidate(
+            name, pdir
+        )
     except ValueError as error:
         return f"installation context invalid: {error}"
+    runtime_root = candidate[1] if candidate is not None else reconcile.runtime_dir(name)
     pver = reconcile.payload_version(pdir)
     dver = reconcile.runtime_deployed_version(name, root=runtime_root)
-    if context_selected:
-        if pver and dver and reconcile._versions_equal(dver, pver):
-            return "SKIPPED (current)"
-        return "SKIPPED (context runtime is read-only)"
     if not force and pver and dver and reconcile._versions_equal(dver, pver):
         return "SKIPPED (current)"
+    try:
+        child_environment, _governed_root = reconcile.runtime_installer_environment(
+            name, pdir
+        )
+    except ValueError as error:
+        return f"installation context invalid: {error}"
 
     # Resolve the runtime installer with the SAME preference the launch-path
     # reconciler uses (``reconcile.runtime_installer_argv``): prefer
@@ -13412,9 +13417,6 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
 
     output.header(f"Reconciling Runtime: {name}"
                   + (" (forced)" if force else ""))
-    child_environment = os.environ.copy()
-    child_environment.pop("COPILOT_PLUGIN_ROOT", None)
-    child_environment.pop("PYTHONPATH", None)
     try:
         r = subprocess.run(
             argv,

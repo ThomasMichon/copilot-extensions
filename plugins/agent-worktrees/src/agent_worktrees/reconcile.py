@@ -24,10 +24,10 @@ nature via a ``runtimeScope`` field in its ``plugin.json``:
 Runtime reconciliation is **local and version-keyed**: it compares the
 installed payload version (``plugin.json``) against the deployed runtime
 version (normally ``~/.<plugin>/deploy-manifest.json`` -> ``source.version``)
-and only acts on drift, so a re-launch with no version change does ~no work. An
-explicit, validated installation context may redirect this inspection to a
-namespaced plugin root, but that path remains read-only until activation
-governance and context-aware installers land. The marketplace **payload**
+and only acts on drift, so a re-launch with no version change does ~no work.
+For installation-cell-aware plugins, reconciliation validates the active
+plugin-specific receipt, inspects that namespaced root, and supplies the same
+receipt to the installer. The marketplace **payload**
 install/refresh (``copilot plugin install/update``, a network pull that also
 holds the Windows payload dir open) is **off by default** and emitted only when
 a caller opts in via ``include_payload_refresh`` -- the Picker/operator "update
@@ -78,6 +78,11 @@ CORE_MARKETPLACE_ID = (
 SELF_PLUGIN = "agent-worktrees"
 CACHE_NAME = "plugin-reconcile-cache.json"
 VALID_SCOPES = ("universal", "machine-gated", "none")
+_RUNTIME_ENV_UNSET = (
+    "COPILOT_EXTENSIONS_CONTEXT",
+    "COPILOT_PLUGIN_ROOT",
+    "PYTHONPATH",
+)
 
 # Candidate locations for the Copilot CLI executable when a bare ``copilot`` is
 # not resolvable on PATH. We never *install* Copilot: on WSL the Windows Copilot
@@ -157,6 +162,12 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 def _home() -> Path:
     """Home directory (indirection point for tests)."""
     return Path.home()
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
+        os.path.abspath(right)
+    )
 
 
 def _copilot_home() -> Path:
@@ -526,18 +537,17 @@ def _selected_runtime_root(
     self_dir = core_installed_payload_dir(SELF_PLUGIN)
     if self_dir is not None and self_dir not in helper_candidates:
         helper_candidates.append(self_dir)
+    helper_name = (
+        "installation-context.ps1"
+        if os.name == "nt"
+        else "installation_context.py"
+    )
     helper = next(
         (
-            candidate
-            / "scripts"
-            / "installation-context"
-            / "installation_context.py"
+            candidate / "scripts" / "installation-context" / helper_name
             for candidate in helper_candidates
             if (
-                candidate
-                / "scripts"
-                / "installation-context"
-                / "installation_context.py"
+                candidate / "scripts" / "installation-context" / helper_name
             ).is_file()
         ),
         None,
@@ -554,21 +564,38 @@ def _selected_runtime_root(
             f"COPILOT_EXTENSIONS_CONTEXT is not in the durable receipt layout: "
             f"{pointer}"
         ) from error
-    command = [
-        sys.executable,
-        str(helper),
-        "resolve",
-        "--context",
-        str(pointer),
-        "--plugin-id",
-        target_name,
-        "--durable-home",
-        str(durable_home),
-    ]
-    if target_name == name:
-        command.extend(["--payload-root", str(plugin_dir)])
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if shell is None:
+            raise ValueError(
+                "PowerShell is required to validate installation context"
+            )
+        command = [
+            shell, "-NoProfile", "-File", str(helper), "resolve",
+            "-Context", str(pointer),
+            "-PluginId", target_name,
+            "-DurableHome", str(durable_home),
+        ]
+        if target_name == name:
+            command.extend(["-PayloadRoot", str(plugin_dir)])
+        else:
+            command.extend(["-ExpectedCellRoot", str(expected_cell_root)])
     else:
-        command.extend(["--expected-cell-root", str(expected_cell_root)])
+        command = [
+            sys.executable,
+            str(helper),
+            "resolve",
+            "--context",
+            str(pointer),
+            "--plugin-id",
+            target_name,
+            "--durable-home",
+            str(durable_home),
+        ]
+        if target_name == name:
+            command.extend(["--payload-root", str(plugin_dir)])
+        else:
+            command.extend(["--expected-cell-root", str(expected_cell_root)])
     child_environment = os.environ.copy()
     child_environment.pop("COPILOT_PLUGIN_ROOT", None)
     child_environment.pop("PYTHONPATH", None)
@@ -606,6 +633,149 @@ def _selected_runtime_root(
     if target_name != name:
         return runtime_dir(name, home), False
     return root, True
+
+
+def runtime_installation_context(
+    plugin_name: str,
+    plugin_dir: Path,
+) -> tuple[Path, Path] | None:
+    """Return the validated active core receipt and plugin root.
+
+    A plugin without the vendored installation-context library remains a
+    legacy runtime. Once the library is present, reconciliation fails closed
+    when its active receipt is missing or invalid.
+    """
+    candidate = runtime_installation_candidate(plugin_name, plugin_dir)
+    if candidate is None:
+        return None
+    receipt, plugin_root = candidate
+
+    child_environment = os.environ.copy()
+    for key in _RUNTIME_ENV_UNSET:
+        child_environment.pop(key, None)
+    if os.name == "nt":
+        helper = (
+            plugin_dir
+            / "scripts"
+            / "installation-context"
+            / "installation-context.ps1"
+        )
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if shell is None:
+            raise ValueError(
+                f"PowerShell is required to validate installation context for {plugin_name}"
+            )
+        command = [
+            shell, "-NoProfile", "-File", str(helper), "validate",
+            "-Context", str(receipt),
+            "-ExpectedMarketplaceId", CORE_MARKETPLACE_ID,
+            "-ExpectedPluginId", plugin_name,
+            "-ExpectedPayloadRoot", str(plugin_dir),
+            "-DurableHome", str(_home() / ".copilot-extensions"),
+        ]
+    else:
+        helper = (
+            plugin_dir
+            / "scripts"
+            / "installation-context"
+            / "installation_context.py"
+        )
+        command = [
+            sys.executable, str(helper), "validate",
+            "--context", str(receipt),
+            "--expected-marketplace-id", CORE_MARKETPLACE_ID,
+            "--expected-plugin-id", plugin_name,
+            "--expected-payload-root", str(plugin_dir),
+            "--durable-home", str(_home() / ".copilot-extensions"),
+        ]
+    try:
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=child_environment,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(
+            f"installation-context validator could not run for {plugin_name}: {error}"
+        ) from error
+    if process.returncode:
+        detail = process.stderr.strip() or process.stdout.strip() or "validation failed"
+        raise ValueError(
+            f"active installation receipt is invalid for {plugin_name}: {detail}"
+        )
+    try:
+        result = json.loads(process.stdout)
+        validated_root = Path(result["pluginRoot"])
+        validated_receipt = Path(result["installReceipt"])
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise ValueError(
+            f"installation-context validator returned invalid output for {plugin_name}"
+        ) from error
+    if not _same_path(validated_receipt, receipt):
+        raise ValueError(
+            f"installation-context validator selected an unexpected receipt for {plugin_name}"
+        )
+    if not _same_path(validated_root, plugin_root):
+        raise ValueError(
+            f"installation-context validator selected an unexpected root for {plugin_name}"
+        )
+    return receipt, plugin_root
+
+
+def runtime_installation_candidate(
+    plugin_name: str,
+    plugin_dir: Path,
+) -> tuple[Path, Path] | None:
+    """Return the deterministic governed receipt/root without validating it."""
+    helper_dir = plugin_dir / "scripts" / "installation-context"
+    helper_py = helper_dir / "installation_context.py"
+    helper_ps1 = helper_dir / "installation-context.ps1"
+    if not helper_py.is_file() and not helper_ps1.is_file():
+        return None
+    required_helper = (
+        helper_ps1
+        if os.name == "nt"
+        else helper_py
+    )
+    if not required_helper.is_file():
+        raise ValueError(
+            f"platform installation-context helper is missing for {plugin_name}"
+        )
+    receipt = (
+        _home()
+        / ".copilot-extensions"
+        / "marketplaces"
+        / CORE_MARKETPLACE_ID
+        / "plugins"
+        / plugin_name
+        / "install.json"
+    )
+    if not receipt.is_file():
+        raise ValueError(
+            f"active installation receipt is missing for {plugin_name}: {receipt}"
+        )
+    return receipt, receipt.parent
+
+
+def runtime_installer_environment(
+    plugin_name: str,
+    plugin_dir: Path,
+    *,
+    base: dict[str, str] | None = None,
+) -> tuple[dict[str, str], Path | None]:
+    """Build a clean installer environment and return its governed runtime root."""
+    child_environment = dict(os.environ if base is None else base)
+    for key in _RUNTIME_ENV_UNSET:
+        child_environment.pop(key, None)
+    context = runtime_installation_context(plugin_name, plugin_dir)
+    if context is None:
+        return child_environment, None
+    receipt, plugin_root = context
+    child_environment["COPILOT_EXTENSIONS_CONTEXT"] = str(receipt)
+    return child_environment, plugin_root
 
 
 # Hook shims deployed to ``~/.agent-worktrees/bin/`` by install.ps1's
@@ -1017,91 +1187,6 @@ def build_plan(
     gate_present = gate_manifest_present(repo_dir)
     updates: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
-    try:
-        explicit_context = _explicit_context_target()
-    except ValueError as error:
-        return {
-            "action": "continue",
-            "machine": machine,
-            "diagnostics": [{
-                "service": "*",
-                "phase": "runtime",
-                "reason": "installation-context-invalid",
-                "message": str(error),
-            }],
-        }
-    validated_context: tuple[str, Path] | None = None
-    if explicit_context is not None:
-        _pointer, target_name = explicit_context
-        if not target_name.startswith("agent-"):
-            explicit_context = None
-        else:
-            target_dir = core_installed_payload_dir(target_name)
-            if target_dir is None:
-                return {
-                    "action": "continue",
-                    "machine": machine,
-                    "diagnostics": [{
-                        "service": target_name,
-                        "phase": "runtime",
-                        "reason": "installation-context-payload-missing",
-                        "message": (
-                            "the explicitly selected context cannot be validated "
-                            "because its plugin payload is not installed"
-                        ),
-                    }],
-                }
-            target_eligibility = installation_cell_eligibility(
-                target_name,
-                target_dir,
-            )
-            if target_eligibility is False:
-                explicit_context = None
-            elif target_eligibility is None:
-                return {
-                    "action": "continue",
-                    "machine": machine,
-                    "diagnostics": [{
-                        "service": target_name,
-                        "phase": "runtime",
-                        "reason": "installation-context-invalid",
-                        "message": (
-                            "installation-cell eligibility is indeterminate "
-                            f"for {target_name}"
-                        ),
-                    }],
-                }
-    if explicit_context is not None:
-        target_name = explicit_context[1]
-        target_dir = core_installed_payload_dir(target_name)
-        assert target_dir is not None
-        try:
-            selected_root, context_selected = _selected_runtime_root(
-                target_name, target_dir
-            )
-        except ValueError as error:
-            return {
-                "action": "continue",
-                "machine": machine,
-                "diagnostics": [{
-                    "service": target_name,
-                    "phase": "runtime",
-                    "reason": "installation-context-invalid",
-                    "message": str(error),
-                }],
-            }
-        if not context_selected:
-            return {
-                "action": "continue",
-                "machine": machine,
-                "diagnostics": [{
-                    "service": target_name,
-                    "phase": "runtime",
-                    "reason": "installation-context-invalid",
-                    "message": "validated context did not select its named plugin",
-                }],
-            }
-        validated_context = (target_name, selected_root)
 
     for name in names:
         entry: dict[str, Any] = plugins_cache.setdefault(name, {})
@@ -1129,12 +1214,6 @@ def build_plan(
 
         pver = payload_version(pdir)
         entry["payload_version"] = pver
-        if validated_context is not None and validated_context[0] == name:
-            selected_root = validated_context[1]
-            context_selected = True
-        else:
-            selected_root = runtime_dir(name)
-            context_selected = False
 
         # Throttled payload refresh (network / MARKETPLACE PULL). Same rule as
         # payload-missing above: the Picker/operator update flow owns it; the
@@ -1159,6 +1238,22 @@ def build_plan(
         if scope != "none" and runtime_allowed(
             scope, name, machine, gate, gate_present=gate_present
         ):
+            try:
+                candidate = runtime_installation_candidate(name, pdir)
+            except ValueError as error:
+                diagnostics.append({
+                    "service": name,
+                    "phase": "runtime",
+                    "reason": "installation-context-invalid",
+                    "message": str(error),
+                })
+                continue
+            if candidate is not None:
+                _receipt, selected_root = candidate
+                context_selected = True
+            else:
+                selected_root = runtime_dir(name)
+                context_selected = False
             rdep = runtime_deployed_version(
                 name,
                 root=selected_root if context_selected else None,
@@ -1174,24 +1269,6 @@ def build_plan(
             # running-version.json (or a dead pid) -> fall back to on-disk.
             rver = rrun if rrun is not None else rdep
             if pver is None or not _versions_equal(rver, pver):
-                if context_selected:
-                    diagnostics.append({
-                        "service": name,
-                        "phase": "runtime",
-                        "reason": (
-                            "context-runtime-missing"
-                            if rver is None
-                            else "context-runtime-version-drift"
-                        ),
-                        "from_version": rver,
-                        "to_version": pver,
-                        "runtime_root": str(selected_root),
-                        "message": (
-                            "namespaced runtime inspection is read-only until "
-                            "activation governance and context-aware installers land"
-                        ),
-                    })
-                    continue
                 # Monotonic guard (#1366): never redeploy a payload that is
                 # strictly OLDER than the running/deployed build -- doing so would
                 # REVERT a newer local `source: local` deploy toward a stale /
@@ -1202,6 +1279,18 @@ def build_plan(
                     continue
                 built = runtime_installer_argv(pdir)
                 if built is not None:
+                    try:
+                        runtime_env, _governed_root = runtime_installer_environment(
+                            name, pdir
+                        )
+                    except ValueError as error:
+                        diagnostics.append({
+                            "service": name,
+                            "phase": "runtime",
+                            "reason": "installation-context-invalid",
+                            "message": str(error),
+                        })
+                        continue
                     cmd, argv = built
                     if rver is None:
                         reason = "runtime-missing"
@@ -1219,6 +1308,12 @@ def build_plan(
                         "scope": scope,
                         "command": cmd,
                         "argv": argv,
+                        "environment": {
+                            key: runtime_env[key]
+                            for key in ("COPILOT_EXTENSIONS_CONTEXT",)
+                            if key in runtime_env
+                        },
+                        "unset_environment": list(_RUNTIME_ENV_UNSET),
                     })
 
     if save:
@@ -1266,10 +1361,12 @@ def apply_plan(
     """
     _log = log or (lambda _m: None)
 
-    def _default_runner(argv: Sequence[str]) -> int:
+    def _default_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
         child_environment = os.environ.copy()
-        child_environment.pop("COPILOT_PLUGIN_ROOT", None)
-        child_environment.pop("PYTHONPATH", None)
+        for key in update.get("unset_environment", _RUNTIME_ENV_UNSET):
+            child_environment.pop(str(key), None)
+        for key, value in update.get("environment", {}).items():
+            child_environment[str(key)] = str(value)
         proc = subprocess.run(  # noqa: S603 -- argv from our own plan builder
             list(argv),
             stdout=subprocess.PIPE,
@@ -1282,7 +1379,27 @@ def apply_plan(
                 _log(f"    {line}")
         return proc.returncode
 
-    run = runner or _default_runner
+    def _custom_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
+        assert runner is not None
+        keys = {
+            str(key)
+            for key in update.get("unset_environment", _RUNTIME_ENV_UNSET)
+        }
+        keys.update(str(key) for key in update.get("environment", {}))
+        saved = {key: os.environ.get(key) for key in keys}
+        try:
+            for key in update.get("unset_environment", _RUNTIME_ENV_UNSET):
+                os.environ.pop(str(key), None)
+            for key, value in update.get("environment", {}).items():
+                os.environ[str(key)] = str(value)
+            return runner(argv)
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
     executed: list[dict[str, Any]] = []
     final_action = "continue"
 
@@ -1319,7 +1436,11 @@ def apply_plan(
                 argv[0] = copilot
             _log(f"provision: {service} [{upd.get('reason', '?')}] -> {' '.join(argv)}")
             try:
-                rc = run(argv)
+                rc = (
+                    _custom_runner(argv, upd)
+                    if runner is not None
+                    else _default_runner(argv, upd)
+                )
             except Exception as exc:  # never raise from a background provision
                 _log(f"provision: step FAILED for {service}: {exc}")
                 executed.append({

@@ -138,7 +138,16 @@ def test_runtime_install_strips_caller_payload_environment(monkeypatch):
     )
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/caller/payload")
     monkeypatch.setenv("PYTHONPATH", "/caller/python")
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(Path.cwd() / "caller" / "install.json"),
+    )
     monkeypatch.setenv("RECONCILE_KEEP", "present")
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_installation_context",
+        lambda name, pdir: None,
+    )
     captured: dict = {}
 
     def fake_run(argv, **kwargs):
@@ -157,7 +166,49 @@ def test_runtime_install_strips_caller_payload_environment(monkeypatch):
 
     assert "COPILOT_PLUGIN_ROOT" not in captured["env"]
     assert "PYTHONPATH" not in captured["env"]
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in captured["env"]
     assert captured["env"]["RECONCILE_KEEP"] == "present"
+
+
+@pytest.mark.parametrize("plugin_name", ["agent-index", "agent-machines"])
+def test_runtime_install_uses_matching_validated_context(
+    monkeypatch, plugin_name
+):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=[plugin_name],
+        scopes={plugin_name: "universal"},
+        deployed={plugin_name: "0.1.0"},
+        payload={plugin_name: "0.2.0"},
+    )
+    receipt = Path.cwd() / "cells" / plugin_name / "install.json"
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_installation_context",
+        lambda name, pdir: (receipt, receipt.parent),
+    )
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(Path.cwd() / "foreign" / "install.json"),
+    )
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["env"] = kwargs["env"]
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    real_exists = Path.exists
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda self: True if str(self).endswith("install.sh") else real_exists(self),
+    )
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert captured["env"]["COPILOT_EXTENSIONS_CONTEXT"] == str(receipt)
 
 
 def test_current_runtime_is_skipped_without_force(monkeypatch):
@@ -188,7 +239,7 @@ def test_force_reinstalls_even_when_current(monkeypatch):
     assert "agent-codespaces" in _installed_names(calls)
 
 
-def test_selected_context_never_runs_legacy_installer(monkeypatch):
+def test_invalid_context_never_runs_installer(monkeypatch):
     _install_config(monkeypatch)
     _stub_reconcile(
         monkeypatch,
@@ -199,8 +250,8 @@ def test_selected_context_never_runs_legacy_installer(monkeypatch):
     )
     monkeypatch.setattr(
         reconcile,
-        "_selected_runtime_root",
-        lambda name, pdir: (Path("/cell/plugins") / name, True),
+        "runtime_installation_context",
+        lambda name, pdir: (_ for _ in ()).throw(ValueError("invalid receipt")),
     )
     calls = _capture_installers(monkeypatch)
 

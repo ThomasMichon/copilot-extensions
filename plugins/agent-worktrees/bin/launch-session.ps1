@@ -449,7 +449,32 @@ function Invoke-UpdateApply {
                 $rest = @()
                 if ($rargv.Count -gt 1) { $rest = $rargv[1..($rargv.Count - 1)] }
                 Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
-                & $exe @rest 2>&1 | ForEach-Object { Write-SetupLog "reconcile: $_" }
+                $savedEnvironment = @{}
+                if ($u.PSObject.Properties['unset_environment']) {
+                    foreach ($key in @($u.unset_environment | Where-Object { $_ })) {
+                        $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+                        [Environment]::SetEnvironmentVariable($key, $null, 'Process')
+                    }
+                }
+                if ($u.PSObject.Properties['environment'] -and $u.environment) {
+                    foreach ($property in @($u.environment.PSObject.Properties)) {
+                        if (-not $savedEnvironment.ContainsKey($property.Name)) {
+                            $savedEnvironment[$property.Name] = [Environment]::GetEnvironmentVariable($property.Name, 'Process')
+                        }
+                        [Environment]::SetEnvironmentVariable(
+                            $property.Name, [string]$property.Value, 'Process'
+                        )
+                    }
+                }
+                try {
+                    & $exe @rest 2>&1 | ForEach-Object { Write-SetupLog "reconcile: $_" }
+                } finally {
+                    foreach ($entry in $savedEnvironment.GetEnumerator()) {
+                        [Environment]::SetEnvironmentVariable(
+                            $entry.Key, $entry.Value, 'Process'
+                        )
+                    }
+                }
             }
         }
     }
