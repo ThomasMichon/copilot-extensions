@@ -82,13 +82,24 @@ def render_registry_context(
 
     resolved_state = state_root.resolve_state_root(config, cwd=cwd)
     pair = state_root.resolve_pair(config, cwd=cwd)
+    current_kind = _clean(
+        getattr(pair.current, "kind", "") if pair.current else "",
+        "worktree",
+    )
+    checkout_writable = (
+        bool(getattr(record, "worktree_path", cwd))
+        and current_kind == "worktree"
+        and _clean(getattr(record, "status", ""), "unknown")
+        in {"active", "ready"}
+    )
     checkout = (
         "Checkout: "
         f"repo={_clean(getattr(record, 'repo', ''))}; "
         f"id={_clean(getattr(record, 'worktree_id', ''))}; "
         f"role={_clean(getattr(record, 'pair_role', ''), 'unpaired')}; "
-        f"kind={_clean(getattr(record, 'pair_kind', ''), 'worktree')}; "
+        f"kind={current_kind}; "
         f"status={_clean(getattr(record, 'status', ''), 'unknown')}; "
+        f"writable={'true' if checkout_writable else 'false'}; "
         f"path={_clean(getattr(record, 'worktree_path', cwd))}."
     )
     if mux_session or pane_id:
@@ -105,11 +116,18 @@ def render_registry_context(
     )
     if pair.paired and pair.sibling and not pair.error:
         sibling = pair.sibling
+        writable = (
+            _clean(sibling.role) == "knowledge"
+            and bool(sibling.path)
+            and _clean(sibling.kind, "worktree") == "worktree"
+            and _clean(sibling.status, "unknown") in {"active", "ready"}
+        )
         pairing = (
             " Pair: "
             f"role={_clean(sibling.role)}; "
             f"kind={_clean(sibling.kind)}; "
             f"status={_clean(sibling.status, 'unknown')}; "
+            f"writable={'true' if writable else 'false'}; "
             f"path={_clean(sibling.path)}."
         )
     else:
