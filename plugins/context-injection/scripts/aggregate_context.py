@@ -132,9 +132,16 @@ def _fragment_index_entry(fragment: str, source: str) -> str:
         and not line.startswith("[owner:")
         and not line.startswith("[producer-owner:")
     ]
+    raw_summary = (
+        body_lines[0] if body_lines else "Complete owned context is deferred."
+    )
     summary = _bounded_text(
-        body_lines[0] if body_lines else "Complete owned context is deferred.",
-        SPILL_INDEX_SUMMARY_BYTES,
+        raw_summary,
+        (
+            SPILL_INDEX_ENTRY_BYTES
+            if raw_summary.startswith("CodeSpace routes")
+            else SPILL_INDEX_SUMMARY_BYTES
+        ),
     )
     references = []
     explicit_references = []
