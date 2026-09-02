@@ -264,6 +264,18 @@ def _services(plan: dict, phase: str | None = None) -> set[str]:
     return {u["service"] for u in ups}
 
 
+def test_same_path_resolves_symlink_alias(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
+
+    assert reconcile._same_path(alias, target)
+
+
 # ---------------------------------------------------------------------------
 # read_enabled_plugins
 # ---------------------------------------------------------------------------
@@ -542,7 +554,7 @@ def test_payload_refresh_suppressed_by_default(env):
 # Explicit installation-context manifest selection
 # ---------------------------------------------------------------------------
 
-def test_context_selected_current_runtime_avoids_legacy_reinstall(
+def test_governed_current_legacy_runtime_avoids_reinstall(
     env, monkeypatch
 ):
     env.write_settings({f"agent-index@{MKT}": True})
@@ -550,6 +562,7 @@ def test_context_selected_current_runtime_avoids_legacy_reinstall(
     _context, plugin_root = env.select_context(
         "agent-index", payload, "2.0.0", "2.0.0"
     )
+    env.deploy_runtime("agent-index", "2.0.0")
     child_environments = []
     original_run = reconcile.subprocess.run
 
@@ -566,29 +579,32 @@ def test_context_selected_current_runtime_avoids_legacy_reinstall(
     assert plan["action"] == "continue"
     assert _services(plan, phase="runtime") == set()
     assert plan.get("diagnostics") is None
-    assert not (env.home / ".agent-index").exists()
+    assert (env.home / ".agent-index" / "deploy-manifest.json").is_file()
     assert (plugin_root / "deploy-manifest.json").is_file()
     assert child_environments == []
 
 
-def test_context_selected_drift_runs_namespaced_installer(env):
+def test_governed_reconcile_compares_authoritative_legacy_runtime(env):
     env.write_settings({f"agent-index@{MKT}": True})
     payload = env.install_payload("agent-index", "2.0.0", scope="universal")
     context, plugin_root = env.select_context(
-        "agent-index", payload, "2.0.0", "1.0.0"
+        "agent-index", payload, "2.0.0", "2.0.0"
     )
-    env.deploy_runtime("agent-index", "2.0.0")
+    env.deploy_runtime("agent-index", "1.0.0")
 
     plan = reconcile.build_plan(
         env.repo, machine="m1", cache={}, save=False
     )
 
-    assert plan["action"] == "reconcile"
+    assert plan["action"] == "reconcile", plan
     assert _services(plan, phase="runtime") == {"agent-index"}
     update = next(u for u in plan["updates"] if u["phase"] == "runtime")
     assert update["environment"]["COPILOT_EXTENSIONS_CONTEXT"] == str(context)
     assert "COPILOT_PLUGIN_ROOT" in update["unset_environment"]
     assert plugin_root.is_dir()
+    candidate = reconcile.runtime_installation_candidate("agent-index", payload)
+    assert candidate == (context, plugin_root)
+    assert update["from_version"] == "1.0.0"
 
 
 def test_payload_only_context_is_ignored_by_agent_runtime_reconcile(env):
@@ -799,6 +815,8 @@ def test_explicit_context_preserves_governed_reconcile_for_other_plugins(
     env.select_context("agent-index", selected, "2.0.0", "2.0.0")
     other = env.install_payload("agent-machines", "2.0.0", scope="universal")
     env.select_context("agent-machines", other, "2.0.0", "1.0.0")
+    env.deploy_runtime("agent-index", "2.0.0")
+    env.deploy_runtime("agent-machines", "1.0.0")
     monkeypatch.setenv(
         "COPILOT_EXTENSIONS_CONTEXT",
         str(
