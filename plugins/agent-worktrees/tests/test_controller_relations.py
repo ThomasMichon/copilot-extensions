@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as cli
+from agent_worktrees import controller_lineage
 from agent_worktrees import session_projection, sessions, tracking
 from agent_worktrees.picker_tui import derive
 
@@ -863,3 +864,241 @@ def test_picker_passes_controllers_without_deriving_active_or_resume() -> None:
     assert row["active"] is False
     assert row["last_session_id"] is None
     assert row["state"] != "ACTIVE"
+
+
+def test_controller_lineage_follows_explicit_successors(tmp_path: Path) -> None:
+    controller = _record(
+        tmp_path,
+        "parent",
+        sessions_list=[
+            tracking.SessionEntry(
+                "first",
+                "2026-01-01T00:00:00",
+                state="handed-off",
+                successor="second",
+            ),
+            tracking.SessionEntry(
+                "second",
+                "2026-01-02T00:00:00",
+                predecessor="first",
+            ),
+        ],
+    )
+    child = tracking.WorktreeRecord(
+        worktree_id="child",
+        branch="worktree/child",
+        worktree_path="/tmp/child",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        controllers=[
+            tracking.ControllerRelation(
+                kind="session",
+                source="explicit",
+                relation_revision=1,
+                created_at="2026-01-01T00:00:00",
+                controller_ref="host/example/parent#first",
+                controller_session_id="first",
+            )
+        ],
+    )
+
+    findings = controller_lineage.controller_findings(
+        child,
+        record_loader=lambda project, worktree_id: controller,
+        local_machine="host",
+    )
+
+    assert findings[0]["status"] == "resolved"
+    assert findings[0]["terminal_session_id"] == "second"
+    assert findings[0]["lineage"] == ["first", "second"]
+
+
+def test_controller_lineage_reports_forks_and_cycles(tmp_path: Path) -> None:
+    controller = _record(
+        tmp_path,
+        "parent",
+        sessions_list=[
+            tracking.SessionEntry(
+                "first",
+                "2026-01-01T00:00:00",
+                state="handed-off",
+                successor="second",
+            ),
+            tracking.SessionEntry(
+                "second",
+                "2026-01-02T00:00:00",
+                state="handed-off",
+                successor="first",
+            ),
+            tracking.SessionEntry("third", "2026-01-03T00:00:00"),
+        ],
+    )
+    controller.handoffs = [
+        tracking.SessionHandoff(
+            ordinal=1,
+            token="fork",
+            predecessor="first",
+            state="linked",
+            opened_at="2026-01-01T00:00:00",
+            successor="third",
+        )
+    ]
+
+    fork = controller_lineage.resolve_terminal_session(controller, "first")
+    assert fork["status"] == "ambiguous"
+    assert fork["successors"] == ["second", "third"]
+
+    controller.handoffs = []
+    cycle = controller_lineage.resolve_terminal_session(controller, "first")
+    assert cycle["status"] == "cycle"
+    assert cycle["terminal_session_id"] is None
+
+
+def test_controller_lineage_reports_restored_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _session_root(tmp_path, monkeypatch, "controller-session")
+    (root / "controller-session" / "rescued-origin.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    child = tracking.WorktreeRecord(
+        worktree_id="child",
+        branch="worktree/child",
+        worktree_path="/tmp/child",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        controllers=[
+            tracking.ControllerRelation(
+                kind="session",
+                source="explicit",
+                relation_revision=1,
+                created_at="2026-01-01T00:00:00",
+                controller_session_id="controller-session",
+            )
+        ],
+    )
+
+    findings = controller_lineage.controller_findings(
+        child,
+        local_machine="host",
+    )
+
+    assert findings[0]["status"] == "restored-foreign"
+    assert findings[0]["terminal_session_id"] is None
+
+
+def test_controller_lineage_reports_missing_session_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "session-state"
+    root.mkdir()
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: root)
+    child = tracking.WorktreeRecord(
+        worktree_id="child",
+        branch="worktree/child",
+        worktree_path="/tmp/child",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        controllers=[
+            tracking.ControllerRelation(
+                kind="session",
+                source="explicit",
+                relation_revision=1,
+                created_at="2026-01-01T00:00:00",
+                controller_session_id="missing-session",
+            )
+        ],
+    )
+
+    findings = controller_lineage.controller_findings(
+        child,
+        local_machine="host",
+    )
+
+    assert findings[0]["status"] == "missing-session-tree"
+
+
+def test_remote_controller_is_not_reported_as_resolved() -> None:
+    child = tracking.WorktreeRecord(
+        worktree_id="child",
+        branch="worktree/child",
+        worktree_path="/tmp/child",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        controllers=[
+            tracking.ControllerRelation(
+                kind="session",
+                source="explicit",
+                relation_revision=1,
+                created_at="2026-01-01T00:00:00",
+                controller_ref="remote/example/parent#controller-session",
+                controller_session_id="controller-session",
+            )
+        ],
+    )
+
+    findings = controller_lineage.controller_findings(
+        child,
+        local_machine="host",
+    )
+
+    assert findings[0]["status"] == "remote"
+    assert findings[0]["terminal_session_id"] is None
+    assert findings[0]["remote_session_id"] == "controller-session"
+
+
+def test_picker_passes_controller_findings_without_affecting_state() -> None:
+    finding = {
+        "status": "resolved",
+        "terminal_session_id": "successor",
+        "controller_worktree_id": "parent",
+    }
+    row = derive.norm(
+        {
+            "id": "child",
+            "branch": "worktree/child",
+            "path": "/tmp/child",
+            "repo": "example",
+            "status": "complete",
+            "state": "clean",
+            "started_at": "2026-01-01T00:00:00",
+            "controller_findings": [finding],
+        },
+        "host",
+        "windows",
+    )
+
+    assert row["controller_findings"] == [finding]
+    assert row["active"] is False
+    assert row["last_session_id"] is None

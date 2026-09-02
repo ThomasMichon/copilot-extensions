@@ -129,6 +129,7 @@ def test_rescue_ingest_marker_is_read_only(
     tracking.set_head_session(record, "session-a")
 
     assert not (session_dir / session_projection.SIDECAR_NAME).exists()
+    assert session_projection.sync_bound(record, "session-a") == "blocked"
 
 
 @pytest.mark.parametrize("session_id", ["../escape", "a/b", r"a\b", ".", ".."])

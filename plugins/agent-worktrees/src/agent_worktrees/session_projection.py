@@ -28,6 +28,14 @@ class UnsupportedProjectionVersion(ProjectionError):
     """The projection was written by a newer incompatible implementation."""
 
 
+class RestoredProjectionReadOnly(ProjectionError):
+    """The session tree was restored and is not writable local provenance."""
+
+
+class MissingSessionTree(ProjectionError):
+    """The exact local session-state root or session directory is absent."""
+
+
 def _is_reparse(path: Path) -> bool:
     try:
         info = path.lstat()
@@ -58,13 +66,19 @@ def _session_paths(
     if not _valid_session_id(session_id):
         raise ProjectionError(f"invalid session id {session_id!r}")
     root = sessions._session_state_dir()
-    if not root.is_dir() or _is_reparse(root):
+    if not root.is_dir():
+        raise MissingSessionTree(f"missing session-state root: {root}")
+    if _is_reparse(root):
         raise ProjectionError(f"unsafe or missing session-state root: {root}")
     session_dir = root / session_id
-    if not session_dir.is_dir() or _is_reparse(session_dir):
+    if not session_dir.is_dir():
+        raise MissingSessionTree(f"missing session directory: {session_dir}")
+    if _is_reparse(session_dir):
         raise ProjectionError(f"unsafe or missing session directory: {session_dir}")
     if writing and (session_dir / "rescued-origin.json").exists():
-        raise ProjectionError(f"restored session is read-only: {session_id}")
+        raise RestoredProjectionReadOnly(
+            f"restored session is read-only: {session_id}"
+        )
     target = session_dir / SIDECAR_NAME
     if target.exists():
         if _is_reparse(target) or not target.is_file():
@@ -93,6 +107,12 @@ def _empty_projection(session_id: str) -> dict[str, Any]:
         "overflow": False,
         "omitted_relations": 0,
     }
+
+
+def is_restored(session_id: str) -> bool:
+    """Whether an exact session tree carries restored-origin provenance."""
+    target, _lock_base, _temp_dir = _session_paths(session_id)
+    return (target.parent / "rescued-origin.json").exists()
 
 
 def read(session_id: str) -> dict[str, Any] | None:
@@ -465,12 +485,19 @@ def _sync_relation(
     relation: dict[str, Any] | None,
     role: str,
     remove_missing: bool,
+    blocking: bool,
 ) -> SyncOutcome:
     try:
         target, lock_base, temp_dir = _session_paths(session_id, writing=True)
         from . import tracking
 
-        with tracking._RecordLock(lock_base, require_sidecar=True):
+        with tracking._RecordLock(
+            lock_base,
+            blocking=blocking,
+            require_sidecar=True,
+        ) as lock:
+            if not lock.acquired:
+                return "deferred"
             try:
                 current = read(session_id) or _empty_projection(session_id)
             except UnsupportedProjectionVersion:
@@ -499,11 +526,22 @@ def _sync_relation(
             encoded = _encode(updated)
             _atomic_replace(target, temp_dir, encoded)
         return "written"
+    except (
+        MissingSessionTree,
+        RestoredProjectionReadOnly,
+        UnsupportedProjectionVersion,
+    ):
+        return "blocked"
     except Exception:
         return "deferred"
 
 
-def sync_bound(record: Any, session_id: str) -> SyncOutcome:
+def sync_bound(
+    record: Any,
+    session_id: str,
+    *,
+    blocking: bool = True,
+) -> SyncOutcome:
     """Best-effort projection of one bound session after record persistence."""
     return _sync_relation(
         record,
@@ -511,10 +549,16 @@ def sync_bound(record: Any, session_id: str) -> SyncOutcome:
         relation=bound_relation(record, session_id),
         role="bound",
         remove_missing=False,
+        blocking=blocking,
     )
 
 
-def sync_controller(record: Any, session_id: str) -> SyncOutcome:
+def sync_controller(
+    record: Any,
+    session_id: str,
+    *,
+    blocking: bool = True,
+) -> SyncOutcome:
     """Upsert or retract one exact controller-session projection relation."""
     return _sync_relation(
         record,
@@ -522,4 +566,5 @@ def sync_controller(record: Any, session_id: str) -> SyncOutcome:
         relation=controller_relation(record, session_id),
         role="controller",
         remove_missing=True,
+        blocking=blocking,
     )
