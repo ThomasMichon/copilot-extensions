@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -65,8 +66,11 @@ def verify(root: Path) -> int:
         "\n" not in seed,
         seed.count(" | ") == 2,
         "/consume-handoff" in seed,
-        "Recovery: context-handoff file:" in seed,
-        "node -e" not in recovery,
+        re.fullmatch(
+            r"Recovery: context-handoff file:[A-Za-z0-9._-]+",
+            recovery,
+        )
+        is not None,
         "handoff-eval-predecessor" in seed,
         CANARY in payload,
         save.get("id") == "handoff-eval-predecessor",

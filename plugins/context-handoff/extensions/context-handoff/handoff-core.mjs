@@ -1429,7 +1429,8 @@ export function manualFallbackInstructions(stored, seed) {
     "task/file and worktree handoff pointer remain available.\n\n" +
     "Copy only the following short locator prompt into the successor session. " +
     "If `/consume-handoff` is unavailable, the successor should use the " +
-    "context-handoff payload-local CLI with the Recovery locator:\n\n" +
+    "context-handoff payload-local CLI and pass only the trailing `task:<id>` " +
+    "or `file:<id>` token to `consume --locator`:\n\n" +
     "```text\n" +
     `${seed}\n` +
     "```"

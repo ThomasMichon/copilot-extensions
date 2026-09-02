@@ -312,7 +312,8 @@ test("manual fallback clearly delimits the exact copyable seed", () => {
       seed,
     );
     assert.match(text, /Copy only the following short locator prompt/);
-    assert.match(text, /payload-local CLI with the Recovery locator/);
+    assert.match(text, /pass only the trailing `task:<id>` or `file:<id>` token/);
+    assert.match(text, /`consume --locator`/);
     assert.match(text, /```text/);
     assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
