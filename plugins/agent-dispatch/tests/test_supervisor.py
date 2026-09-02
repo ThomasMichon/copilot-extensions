@@ -116,6 +116,23 @@ class QueueBackedClient:
             )
         )
 
+    def bind_owner_session(
+        self,
+        task_id,
+        worker_id,
+        owner_session_id,
+        *,
+        expected_generation=None,
+    ):
+        return asdict(
+            self._q.bind_owner_session(
+                task_id,
+                worker_id,
+                owner_session_id,
+                expected_generation=expected_generation,
+            )
+        )
+
     def yield_task(self, task_id, worker_id, *, note=None, exclude=None):
         return asdict(self._q.yield_task(task_id, worker_id, note=note, exclude=exclude))
 
@@ -411,6 +428,29 @@ def test_idle_headless_turn_auto_suspends_and_cools(q, client):
     assert current.activity == "IDLE"
     assert q.get_reservation(reservation.key).state == SpawnState.COLD
     assert stopped == ["review-session"]
+
+
+def test_supervisor_binds_headless_owner_to_bridge_session(q, client):
+    task = q.create("review turn", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:review-session"
+    )
+    claimed = q.claim_one("headless-owner", task_id=task.id)
+    assert claimed is not None
+    q.start(task.id, "headless-owner")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_activity_fn=lambda _session_id: "ACTIVE",
+        local_body_verdict_fn=lambda _session_id: "live",
+    )
+
+    assert sup.bind_headless_owner_sessions() == 1
+    assert q.get(task.id).owner_session_id == "review-session"
+    assert sup.bind_headless_owner_sessions() == 0
 
 
 def test_failed_cold_stop_keeps_live_process_capacity(q, client):

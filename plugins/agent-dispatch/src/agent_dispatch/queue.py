@@ -3512,6 +3512,60 @@ class TaskQueue:
             conn.execute("COMMIT")
         return result  # type: ignore[return-value]
 
+    def bind_owner_session(
+        self,
+        task_id: str,
+        worker_id: str,
+        owner_session_id: str,
+        *,
+        expected_generation: int | None = None,
+        now: float | None = None,
+    ) -> Task:
+        """Bind a held headless task to its exact bridge session identity."""
+        if not owner_session_id:
+            raise TaskError("owner session id must be non-empty")
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status not in Status.HELD:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"cannot bind owner session on a {task.status!r} task"
+                )
+            if task.owner != worker_id:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
+                )
+            if expected_generation is not None and task.generation != expected_generation:
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} ownership incarnation changed")
+            if task.owner_session_id not in {None, owner_session_id}:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} already bound to another owner session"
+                )
+            conn.execute(
+                "UPDATE tasks SET owner_session_id=?, updated_at=? WHERE id=?",
+                (owner_session_id, ts, task_id),
+            )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=worker_id,
+                note=f"owner session bound ({owner_session_id})",
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
+
     def set_activity(
         self,
         task_id: str,

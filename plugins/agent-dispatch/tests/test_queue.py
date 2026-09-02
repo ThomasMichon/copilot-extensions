@@ -683,6 +683,27 @@ def test_set_activity_rejects_unknown_value(q):
         q.set_activity(t.id, "BUSY", reservation_key=reservation.key)
 
 
+def test_bind_owner_session_is_owner_and_generation_fenced(q):
+    task = q.create("headless")
+    claimed = q.claim_one("headless-owner", task_id=task.id)
+    assert claimed is not None
+    started = q.start(task.id, "headless-owner")
+    bound = q.bind_owner_session(
+        task.id,
+        "headless-owner",
+        "bridge-session",
+        expected_generation=started.generation,
+    )
+    assert bound.owner_session_id == "bridge-session"
+    with pytest.raises(TaskError, match="another owner session"):
+        q.bind_owner_session(
+            task.id,
+            "headless-owner",
+            "other-session",
+            expected_generation=started.generation,
+        )
+
+
 def test_set_activity_cannot_restore_activity_on_suspended_task(q):
     t = q.create("dormant")
     reservation, _ = q.reserve_spawn(t.id)

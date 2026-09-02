@@ -255,6 +255,24 @@ def test_resume_steered_owner_queues_work_prompt(monkeypatch):
     assert "agent-dispatch steer take task-42 --all" in calls["kwargs"]["input"]
 
 
+def test_resume_steered_headless_owner_uses_exact_session(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge,
+        "resume_worker",
+        lambda session_id, prompt, **kwargs: (
+            calls.update(session_id=session_id, prompt=prompt) or True
+        ),
+    )
+    assert bridge.resume_steered_owner(
+        "headless-owner",
+        "task-42",
+        owner_session_id="bridge-session",
+    )
+    assert calls["session_id"] == "bridge-session"
+    assert "task-42" in calls["prompt"]
+
+
 def test_resume_steered_owner_degrades_when_bridge_unavailable(monkeypatch):
     monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
     monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")

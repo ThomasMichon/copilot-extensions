@@ -315,14 +315,14 @@ def resume_steered_owner(
     if not owner_session_id:
         return False
     machine, separator, worktree = owner.partition("/")
-    if not separator or not machine or not worktree:
-        return False
     prompt = message or (
         f"The operator answered your card on task {task_id}. Resume, run "
         f"`agent-dispatch steer take {task_id} --all` to read every pending "
         f"answer, and continue "
         f"toward your goal."
     )
+    if not separator or not machine or not worktree:
+        return resume_worker(owner_session_id, prompt, timeout=timeout)
     bridge_argv = [
         "agent-bridge",
         "send",
