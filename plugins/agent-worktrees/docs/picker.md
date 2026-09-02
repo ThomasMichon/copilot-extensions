@@ -406,9 +406,10 @@ Full key reference: [config-reference.md](config-reference.md).
 
 Every generated project binstub appends a `binstub_start` record to
 `~/.agent-worktrees/logs/picker-launches.jsonl`. The Picker appends
-`textual_first_refresh` after Textual completes its first terminal refresh, with
-the same `launch_id`. These always-on records provide historical blank-window
-timings without enabling verbose diagnostics.
+`launcher_start`, `resolve_start`, `resolve_handler_start`,
+`picker_dispatch_start`, `textual_app_start`, and `textual_first_refresh` as the
+launch advances, all with the same `launch_id`. These always-on records provide
+historical blank-window timings without enabling verbose diagnostics.
 
 Set `AGENT_WORKTREES_PICKER_FRAME_HEALTH=1` before launching a project Picker
 to add event-loop gaps of 500 ms or more to the same launch trace. The timer
