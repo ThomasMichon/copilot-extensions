@@ -290,6 +290,7 @@ FleetActivityFn = Callable[[str, str], str | None]
 #: Injectable so tests drive verdicts deterministically.
 LocalBodyVerdictFn = Callable[[str], str]
 LocalBodyActivityFn = Callable[[str], str | None]
+LocalEndFn = Callable[[str], bool]
 LocalResumeFn = Callable[[str, str], bool]
 
 #: Prefix stamped on the reservation ``session_handle`` of a headless fleet body,
@@ -373,6 +374,12 @@ def _default_local_cold(bridge_session_id: str) -> bool:
     from . import bridge
 
     return bridge.stop_worker(bridge_session_id)
+
+
+def _default_local_end(bridge_session_id: str) -> bool:
+    from . import bridge
+
+    return bridge.end_worker(bridge_session_id)
 
 
 def _default_local_resume(bridge_session_id: str, prompt: str) -> bool:
@@ -583,6 +590,7 @@ class Supervisor:
         local_body_verdict_fn: LocalBodyVerdictFn | None = None,
         local_body_activity_fn: LocalBodyActivityFn | None = None,
         local_cold_fn: LocalColdFn | None = None,
+        local_end_fn: LocalEndFn | None = None,
         local_resume_fn: LocalResumeFn | None = None,
         fleet_cold_fn: FleetColdFn | None = None,
         nudge_fn: NudgeFn | None = None,
@@ -648,6 +656,7 @@ class Supervisor:
             local_body_activity_fn or _default_local_body_activity
         )
         self.local_cold_fn = local_cold_fn or _default_local_cold
+        self.local_end_fn = local_end_fn or _default_local_end
         self.local_resume_fn = local_resume_fn or _default_local_resume
         self.fleet_cold_fn = fleet_cold_fn or _default_fleet_cold
         self._cooled_reservations: set[str] = set()
@@ -1185,6 +1194,25 @@ class Supervisor:
             except DispatchError:
                 continue  # task vanished; leave the reservation for a human
             if task.get("status") in _TERMINAL:
+                local_sid = _parse_local_body_handle(res.get("session_handle"))
+                if local_sid is not None and res.get("state") != SpawnState.SETTLED:
+                    try:
+                        verdict = self.local_body_verdict_fn(local_sid)
+                    except Exception:
+                        verdict = _tracking().UNKNOWN
+                    if verdict == _tracking().UNKNOWN:
+                        continue
+                    try:
+                        ended = self.local_end_fn(local_sid)
+                    except Exception:
+                        log.exception(
+                            "failed to end terminal local body %s for task %s",
+                            local_sid,
+                            task.get("id"),
+                        )
+                        continue
+                    if not ended:
+                        continue
                 detail = self._completion_detail(task)
                 policy_applies = bool(
                     self.disposable_cli_labels.intersection(
