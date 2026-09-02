@@ -523,7 +523,7 @@ def test_local_machine_falls_back_to_identity(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_SUPERVISE_MACHINE", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
     monkeypatch.setattr(
-        "agent_dispatch.identity.resolve_identity", lambda: ("anomalous-potato", "wt-1")
+        "agent_dispatch.identity.resolve_machine", lambda: "anomalous-potato"
     )
     assert remote_dispatch.local_machine() == "anomalous-potato"
 
@@ -531,7 +531,7 @@ def test_local_machine_falls_back_to_identity(monkeypatch, tmp_path):
 def test_local_machine_falls_back_to_host_node_name(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_SUPERVISE_MACHINE", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
-    monkeypatch.setattr("agent_dispatch.identity.resolve_identity", lambda: (None, None))
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: None)
     monkeypatch.setattr("platform.node", lambda: "Anomalous-Potato")
     assert remote_dispatch.local_machine() == "anomalous-potato"
 
@@ -539,6 +539,6 @@ def test_local_machine_falls_back_to_host_node_name(monkeypatch, tmp_path):
 def test_local_machine_none_when_nothing_resolves(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_SUPERVISE_MACHINE", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
-    monkeypatch.setattr("agent_dispatch.identity.resolve_identity", lambda: (None, None))
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: None)
     monkeypatch.setattr("platform.node", lambda: "")
     assert remote_dispatch.local_machine() is None

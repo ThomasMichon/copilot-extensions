@@ -1736,7 +1736,7 @@ def test_inbox_scopes_cross_lane_to_this_machine(monkeypatch, capsys):
     ]
     fake = _FakeClient(tasks)
     monkeypatch.setattr(__main__, "_client", lambda args: fake)
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("host-a", "wt-1"))
+    monkeypatch.setattr(identity, "resolve_machine", lambda: "host-a")
 
     args = build_parser().parse_args(["inbox"])
     rc = args.func(args)
@@ -1755,7 +1755,7 @@ def test_inbox_requires_a_machine(monkeypatch, capsys):
     from agent_dispatch import __main__, identity
 
     monkeypatch.setattr(__main__, "_client", lambda args: _FakeClient([]))
-    monkeypatch.setattr(identity, "resolve_identity", lambda: (None, None))
+    monkeypatch.setattr(identity, "resolve_machine", lambda: None)
 
     args = build_parser().parse_args(["inbox"])
     assert args.func(args) == 2
@@ -1781,7 +1781,7 @@ def test_inbox_awaiting_steer_surfaces_proposed_plus_awaiting(monkeypatch, capsy
     ]
     fake = _FakeClient(tasks)
     monkeypatch.setattr(__main__, "_client", lambda args: fake)
-    monkeypatch.setattr(identity, "resolve_identity", lambda: ("host-a", "wt-1"))
+    monkeypatch.setattr(identity, "resolve_machine", lambda: "host-a")
 
     args = build_parser().parse_args(["inbox", "--awaiting-steer"])
     assert args.func(args) == 0
