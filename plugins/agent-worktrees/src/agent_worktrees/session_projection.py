@@ -353,7 +353,14 @@ def validate_restored_hint(
     worktree_id = relation.get("worktree_id")
     if not _safe_identity_token(project) or not _safe_identity_token(worktree_id):
         return {"status": "restored-invalid-identity"}
-    record = record_loader(str(project), str(worktree_id))
+    try:
+        record = record_loader(str(project), str(worktree_id))
+    except Exception:
+        return {
+            "status": "restored-unreadable",
+            "project": project,
+            "worktree_id": worktree_id,
+        }
     if record is None:
         return {
             "status": "restored-foreign",
@@ -1226,7 +1233,16 @@ def recovery_report(
                 "worktree_id": worktree_id,
             })
             continue
-        record = record_loader(str(project), str(worktree_id))
+        try:
+            record = record_loader(str(project), str(worktree_id))
+        except Exception:
+            validated.append({
+                "status": "unreadable",
+                "role": role,
+                "project": project,
+                "worktree_id": worktree_id,
+            })
+            continue
         if record is None:
             validated.append({
                 "status": "foreign",

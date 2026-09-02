@@ -294,6 +294,30 @@ def test_restored_hint_rejects_malformed_overflow_fields(
     assert validation["status"] == "restored-invalid"
 
 
+def test_restored_hint_reports_unreadable_authority(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+
+    validation = session_projection.validate_restored_hint(
+        "session-a",
+        projection,
+        record_loader=lambda project, worktree_id: (
+            (_ for _ in ()).throw(OSError("unreadable"))
+        ),
+    )
+
+    assert validation["status"] == "restored-unreadable"
+
+
 def test_backfill_repairs_stale_secondary_revision(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
@@ -734,6 +758,37 @@ def test_recovery_context_surfaces_unreadable_projection(status):
 
     assert status in context
     assert "no binding was changed" in context
+
+
+def test_recovery_report_fails_open_when_authority_loader_raises(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [session_projection.bound_relation(record, "session-a")],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    report = session_projection.recovery_report(
+        "session-a",
+        record_loader=lambda project, worktree_id: (
+            (_ for _ in ()).throw(OSError("unreadable"))
+        ),
+    )
+
+    assert report["status"] == "unreadable"
+    assert report["recommended_action"] == "inspect"
+    assert "cannot be used automatically" in (
+        session_projection.render_recovery_context(report)
+    )
 
 
 @pytest.mark.parametrize("session_id", ["../escape", "a/b", r"a\b", ".", ".."])
