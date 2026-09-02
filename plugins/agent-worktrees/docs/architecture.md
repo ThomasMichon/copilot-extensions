@@ -448,8 +448,8 @@ The explicit `backfill-sessions` and `doctor` paths also audit known bound and
 controller relations by exact session ID. A per-run projection budget bounds
 the work. Local missing, stale, or corrupt same-version projections can be
 rebuilt with `--fix`; restored trees remain read-only even when their hints
-validate. Unsupported newer schemas and ambiguous, foreign, colliding, or newer
-projection state are never rewritten.
+validate. Unsupported newer schemas and incomplete/overflowed, ambiguous,
+foreign, colliding, or newer projection state are never rewritten.
 
 The resident session reconciler repairs missed sidecar writes through a
 separate fixed-budget queue. It acts only after a fresh mux catalog proves the

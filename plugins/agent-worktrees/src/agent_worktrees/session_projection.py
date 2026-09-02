@@ -814,6 +814,14 @@ def _classify_relation(
         )
         item["repairable"] = not restored
         return item
+    overflow = projection.get("overflow", False)
+    omitted = projection.get("omitted_relations", 0)
+    if not isinstance(overflow, bool) or not isinstance(omitted, int) or omitted < 0:
+        item["status"] = "restored-invalid" if restored else "invalid"
+        return item
+    if overflow or omitted:
+        item["status"] = "restored-incomplete" if restored else "incomplete"
+        return item
 
     relation_key = _relation_key(expected)
     relations = [

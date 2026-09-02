@@ -320,6 +320,32 @@ def test_backfill_preserves_newer_relation_tombstone(
     assert session_projection.read("session-a")["relations"] == []
 
 
+def test_backfill_preserves_incomplete_local_projection(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    original = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [],
+        "overflow": True,
+        "omitted_relations": 1,
+    }
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    sidecar.write_text(json.dumps(original), encoding="utf-8")
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=True,
+        budget=1,
+    )
+
+    assert report["items"][0]["status"] == "incomplete"
+    assert report["items"][0]["repaired"] is False
+    assert session_projection.read("session-a") == original
+
+
 def test_backfill_revalidates_collision_under_projection_lock(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
