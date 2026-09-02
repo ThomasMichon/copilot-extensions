@@ -351,3 +351,20 @@ for binding, succession, head, title, and verified retirement.
   drive, write fresh turn JSONL instead of appending, and omit missing capture
   artifacts from run metadata. Fixture regressions prove failed fresh capture
   cannot score stale structured evidence.
+
+### 2026-09-02 — Architecture and hardening consolidation
+- Reconciled the shipped lifecycle against the root architecture, plugin
+  reality documentation, Agent Fabric vision, and patterns invariants. This is
+  documentation of landed behavior rather than a new vision extension.
+- Added a focused handoff lifecycle pattern covering persist-first storage,
+  bounded locator seeds, prompt-before-session candidate association,
+  successor-acknowledged takeover, checkpointed retry, identity-prevalidated mux
+  retirement, and creation-bound orphan reaping.
+- Corrected the stale Windows batch-transport description. Sibling commands are
+  resolved within the same provenance-checked marketplace installation cell;
+  their authoritative resolver locates/provisions the runtime, and exact argv
+  runs through isolated UTF-8 Python with import-path overrides removed.
+- Made explicit that active efforts and knowledge repositories enrich the
+  continuation shape but do not own handoff storage or lifecycle.
+- Recorded ThomasMichon/copilot-extensions#1729 as the public coordination
+  issue for this architecture documentation pass.

@@ -190,6 +190,32 @@ core of the principles above; a reviewer checks a change against these.
   baked into the primitive's owner. A layer must not draw a higher layer's
   orchestration concern inward. (Serves *Vision agent-fabric
   §Behaviors/handoff-orchestrated-above-primitives*.)
+- **Handoff takeover is successor-acknowledged and predecessor-preserving.**
+  Persist the baton before launch; candidate startup never moves the head;
+  explicit successor consumption checkpoints and acknowledges before
+  succession/head/title changes; predecessor retirement is last and requires
+  the originally observed process creation identity. A failed or unacknowledged
+  successor leaves the predecessor and stored baton recoverable. (Serves
+  *Vision agent-fabric §Features/delegate-and-hand-off*; see
+  [`context-handoff-lifecycle.md`](context-handoff-lifecycle.md).)
+- **A handoff seed is a locator, never the baton.** The full-fidelity
+  continuation has exactly one durable home. The startup seed is bounded,
+  single-line, and carries only a task lead, the canonical consume action, and
+  one exact recovery command. Shell quoting, terminal limits, or process argv
+  must never become the storage channel. (Serves *Vision agent-fabric
+  §Behaviors/context-pressure-is-a-continuity-signal*; see
+  [`context-handoff-lifecycle.md`](context-handoff-lifecycle.md).)
+- **Cross-plugin payload argv remains data.** A payload-only orchestrator
+  resolves a sibling command only inside its own provenance-checked marketplace
+  installation cell. If it must enter the sibling's runtime directly, it uses
+  that payload's authoritative runtime resolver, then launches exact argv
+  without ambient `PATH` choosing the payload/runtime, shell source
+  interpolation of user-controlled arguments, shell-to-native re-serialization,
+  cwd/PYTHONPATH import shadowing, or locale-dependent text encoding. First-use
+  provisioning has a separate installation-sized timeout.
+  (Serves *Vision plugin-services/installation-cells* and
+  *agent-fabric/delegate-and-hand-off*; see
+  [`context-handoff-lifecycle.md`](context-handoff-lifecycle.md).)
 - **Durable coordination identity precedes ownership.** When a project requires
   an external state root, every claim/lease/resource producer resolves the
   qualified owner's versioned coordination readiness before its first mutation
@@ -241,6 +267,7 @@ the exemplars, and the vision it serves):
 |---------|---------|
 | [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
 | [context-injection](context-injection.md) | How repositories, plugins, skills, and operator policy retain clear ownership while plugin-owned ambient guidance is injected as a concise, gated `sessionStart` context kernel with fail-open behavior, static safety fallback, cross-platform parity, and non-executing budget inventory |
+| [context-handoff-lifecycle](context-handoff-lifecycle.md) | How a stored continuation becomes a successor-owned session without losing prompt fidelity, moving the head early, trusting a reused PID, depending on effort/knowledge state, or crossing an ambient/lossy command boundary |
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Platform-native always-on supervision (Windows Scheduled Task / systemd user unit) and its lifecycle verbs |
