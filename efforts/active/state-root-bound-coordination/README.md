@@ -11,7 +11,9 @@
 - **Sub-issues:** [#1517](https://github.com/ThomasMichon/copilot-extensions/issues/1517)
   (provider preflight);
   [#1518](https://github.com/ThomasMichon/copilot-extensions/issues/1518)
-  (lease acquisition)
+  (lease acquisition);
+  [#1602](https://github.com/ThomasMichon/copilot-extensions/issues/1602)
+  (claim-handoff acceptance gate, transferred)
 - **Authorship:** AI-assisted; reviewed and directed by the repository owner.
 
 ## Guiding Intent
@@ -99,17 +101,17 @@ usable.
   `knowledge_binding_required`, and other state-root resolution failures.
 - [x] Add failing tests for unbound and unresolved stateless configurations,
   bound knowledge repositories, and self-hosted repositories.
-- [ ] Prove rejected operations leave worktree records, handoff registries,
+- [x] Prove rejected operations leave worktree records, handoff registries,
   Git refs, subprocesses, and provider calls untouched.
 
 ### Phase 2 - Gate agent-worktrees claim and lease producers
 - [x] Gate `claims add`, including every supported kind and `--owner-ref`,
   before record mutation or cross-machine deferral.
 - [x] Gate claim handoff offers before reservations are persisted.
-- [ ] Gate claim handoff acceptance before consumer-side claims or resource
-  ownership change; a rejected consumer leaves the source authoritative.
-  The current runtime has no acceptance surface; land this gate with the
-  acceptance implementation rather than speculating one in advance.
+- [x] Deferred to `#1602`: Gate claim handoff acceptance before consumer-side
+  claims or resource ownership change; a rejected consumer leaves the source
+  authoritative. The current runtime has no acceptance surface; the gate will
+  land with that implementation rather than speculating one in advance.
 - [x] Gate `run` and automatic parent-child worktree ownership before child
   launch, Git worktree creation, or reciprocal claim writes.
 - [x] Gate lease acquisition before store resolution or network I/O. For a
@@ -119,10 +121,10 @@ usable.
   the original store origin (or a provider carries it in its existing lease
   receipt), even if current binding resolution later fails. Update remediation
   text so it never advertises an override that acquisition will reject.
-- [ ] Make a rejected post-creation `claims add` name the binding remediation;
+- [x] Make a rejected post-creation `claims add` name the binding remediation;
   once binding is repaired, the same existing resource must be recordable
   without loss.
-- [ ] Keep read-only claim and lease inspection available with explicit
+- [x] Keep read-only claim and lease inspection available with explicit
   readiness metadata.
 
 ### Phase 3 - Preflight optional provider integrations
@@ -133,12 +135,12 @@ usable.
 - [x] Version the preflight response. Treat unknown-command, malformed,
   unversioned, or incompatible responses as an absent optional peer; reserve
   fail-closed behavior for an explicit compatible binding rejection.
-- [ ] Prove direct agent-containers fleet leasing remains an independent local
+- [x] Prove direct agent-containers fleet leasing remains an independent local
   provider mechanism while agent-worktrees-owned container creation is blocked
   at the run/owner boundary.
 
 ### Phase 4 - Publish and deploy
-- [ ] Update `docs/architecture.md` and add or extend the focused pattern
+- [x] Update `docs/architecture.md` and add or extend the focused pattern
   documentation for the state-root coordination invariant and provider
   integration boundary.
 - [ ] Bump every changed plugin version and pass version/install contracts.
@@ -148,35 +150,41 @@ usable.
 
 ## Validation Plan
 
-- [ ] Unbound stateless anchors and linked/system worktrees reject every
+Checked rows below are backed by focused source tests and merged CI unless they
+explicitly say installed runtime. The checked `Deferred to` rows are resolved by
+transfer under the effort lifecycle; they are not claims that the absent
+acceptance feature was implemented.
+
+- [x] Unbound stateless anchors and linked/system worktrees reject every
   supported `claims add` kind with nonzero structured
   `knowledge_binding_required` output.
-- [ ] `--owner-ref`, cross-project, and cross-machine paths cannot bypass the
+- [x] `--owner-ref`, cross-project, and cross-machine paths cannot bypass the
   gate.
 - [x] Rejected `run`, child creation, handoff offer, and lease operations
   perform no local mutation, subprocess launch, Git worktree creation, remote
   ref read, or remote ref write.
-- [ ] Handoff acceptance by an unready consumer fails atomically and leaves the
-  source authoritative.
-- [ ] An already-existing resource rejected before binding can be claimed
+- [x] Deferred to `#1602`: Handoff acceptance by an unready consumer fails
+  atomically and leaves the source authoritative.
+- [x] An already-existing resource rejected before binding can be claimed
   successfully after binding is completed.
-- [ ] A bound knowledge repository enables claims and routes lease state
+- [x] A bound knowledge repository enables claims and routes lease state
   through its configured origin and account context.
-- [ ] A lease acquired while the state root is usable remains renewable and
+- [x] A lease acquired while the state root is usable remains renewable and
   releasable through its original explicit/carried store origin after that root
   becomes temporarily unresolvable.
-- [ ] A normal self-hosted repository remains backward compatible.
-- [ ] agent-codespaces stops before provider work on a definitive binding
+- [x] A normal self-hosted repository remains backward compatible.
+- [x] agent-codespaces stops before provider work on a definitive binding
   rejection and degrades safely when agent-worktrees is genuinely absent.
-- [ ] An agent-worktrees version older than the preflight contract degrades as
+- [x] An agent-worktrees version older than the preflight contract degrades as
   an absent optional peer instead of blocking provider work.
 - [ ] A bound-but-unresolvable state root produces its distinct resolution
   diagnostic, not `knowledge_binding_required`, on the installed runtime.
 - [x] Operator-initiated owner-less worktree/session creation remains available
   in an unbound harness so the operator can complete knowledge binding; only
   creation that would establish ownership or a claim is gated.
-- [ ] agent-containers remains independently installable and its provider-local
-  lease behavior is unchanged.
+- [x] agent-containers provider-local lease behavior is unchanged.
+- [ ] agent-containers remains independently installable (covered by the final
+  install-contract gate).
 - [ ] Focused suites, changed-plugin suites, lint, install-contract, generated
   payload, and version-consistency gates pass.
 
@@ -198,9 +206,9 @@ agent-worktrees-owned operation, preserving the suite's a-la-carte invariant.
 - Filed [#1513](https://github.com/ThomasMichon/copilot-extensions/issues/1513)
   as the public coordination token.
 - Filed [#1517](https://github.com/ThomasMichon/copilot-extensions/issues/1517)
-  for Git lease acquisition and
+  for provider preflight and
   [#1518](https://github.com/ThomasMichon/copilot-extensions/issues/1518) for
-  provider preflight.
+  Git lease acquisition.
 - Extended the agent-fabric vision in the proposal with the durable
   coordination-identity prerequisite and fail-open teardown boundary.
 - Reconciled scope with `worktree-finality-and-obligations`: this effort owns
@@ -254,3 +262,14 @@ agent-worktrees-owned operation, preserving the suite's a-la-carte invariant.
   pending ownership or subprocess launch, and owner-linked worktree creation
   rejects before source preparation, directory creation, reciprocal claims, or
   Git worktree creation. Owner-less/system bootstrap creation remains available.
+- Run/child gate PR [#1600](https://github.com/ThomasMichon/copilot-extensions/pull/1600)
+  merged with an approval recommendation.
+- Filed [#1602](https://github.com/ThomasMichon/copilot-extensions/issues/1602)
+  to carry the acceptance gate with the future claim-handoff acceptance
+  implementation; no acceptance surface exists in the current runtime.
+- Published the reusable state-root coordination pattern and updated current
+  architecture plus the à-la-carte optional-peer boundary.
+- Verified agent-containers' provider-local lease path remains uncoupled from
+  agent-worktrees readiness (`python tools/run-plugin-tests.py agent-containers
+  -k lease`: `38` tests passed); the ownership gate applies only when an
+  agent-worktrees owner/run boundary participates.
