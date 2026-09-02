@@ -16,7 +16,9 @@
   [#1681](https://github.com/ThomasMichon/copilot-extensions/issues/1681)
   (bounded controller lineage reconciliation) ·
   [#1688](https://github.com/ThomasMichon/copilot-extensions/issues/1688)
-  (restricted rescue portability)
+  (restricted rescue portability) ·
+  [#1692](https://github.com/ThomasMichon/copilot-extensions/issues/1692)
+  (backfill and restored-hint validation)
 
 ## Guiding Intent
 
@@ -145,14 +147,14 @@ Public-safe transcription of the operator request:
       reconcile legacy controller relationships.
 - [ ] Treat synchronized or restored projections as hints until current local
       project/worktree identity and revisions are validated.
-- [ ] Preserve projections through session-state synchronization without
+- [x] Preserve projections through session-state synchronization without
       requiring the synchronizer to understand agent-worktrees internals.
-- [ ] Verify agent-logger synchronization includes the dedicated session-root
+- [x] Verify agent-logger synchronization includes the dedicated session-root
       sidecar and does not require it to live in the agent-writable `files/`
       subtree.
-- [ ] Add the projection to restricted session-state rescue allowlists and
+- [x] Add the projection to restricted session-state rescue allowlists and
       prove it survives an export/import cycle.
-- [ ] Avoid semantic no-op rewrites and stage atomic temporary files outside
+- [x] Avoid semantic no-op rewrites and stage atomic temporary files outside
       synchronized session directories so late lineage repair does not create
       perpetual recopy churn.
 - [ ] Implement the Phase 1 collision behavior when the same synchronized
@@ -275,3 +277,11 @@ Adopt the authority and schema model in [`design.md`](design.md):
 - Phase 5 began under #1688 by extending restricted container rescue and
   agent-logger rescue ingestion to preserve the dedicated session-root
   projection as bounded, schema-checked, session-ID-matched restored evidence.
+- Rescue and synchronization portability landed through #1691. Ordinary
+  session sync carries the sidecar opaquely; restricted rescue validates it at
+  both boundaries, preserves bounded future schemas, omits invalid optional
+  copies without losing transcripts, and marks every imported session as
+  restored evidence.
+- Opened #1692 for the next Phase 5 slice: explicit backfill/doctoring,
+  authoritative restored-hint validation, and collision-safe handling of the
+  same synchronized session across machines or projects.
