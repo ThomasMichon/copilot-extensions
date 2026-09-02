@@ -359,3 +359,15 @@ ownership.
   [#1588](https://github.com/ThomasMichon/copilot-extensions/pull/1588).
 - Archived the completed focused effort and transferred the delegation program's
   next independent reader slice to #1450.
+
+### 2026-09-01 — Phase 1B attention-wait proposal
+
+- Claimed #1450 and carved the focused
+  [`agent-bridge-attention-waits`](../agent-bridge-attention-waits/README.md)
+  stretch.
+- Selected a deterministic earliest-boundary attention projection over the
+  existing event, succession, and bounded-result authorities, retaining the
+  HTTP or CLI invocation itself as the wake channel and adding only the narrow
+  permission correlation needed for an answerable live request.
+- Kept terminal-event emission with #22, handoff creation with #112, and durable
+  contract registration and writer fencing with #1460/#1468.
