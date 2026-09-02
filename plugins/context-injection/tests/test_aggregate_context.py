@@ -1461,6 +1461,15 @@ def test_windows_contributors_receive_process_start_grace() -> None:
     assert AGGREGATE_CONTEXT.PROCESS_START_GRACE_SECONDS == 5
 
 
+def test_aggregate_file_budget_supports_broad_plugin_stacks() -> None:
+    assert AGGREGATE_CONTEXT.MAX_AGGREGATE_BYTES == 128 * 1024
+    assert (
+        AGGREGATE_CONTEXT.MAX_AGGREGATE_BYTES
+        - AGGREGATE_CONTEXT.AGGREGATE_HEADROOM_BYTES
+        >= 120 * 1024
+    )
+
+
 def _run(
     tmp_path: Path,
     plugins: list[tuple[str, Path]],
@@ -1759,17 +1768,25 @@ def test_checks_every_declared_hook_file(tmp_path: Path) -> None:
 
 def test_rejects_declared_context_over_budget(tmp_path: Path) -> None:
     sources = tmp_path / "sources"
-    plugin = _plugin(sources, "mkt", "a-large", context="LARGE")
-    declaration_path = plugin / "session-context.json"
-    declaration = json.loads(declaration_path.read_text(encoding="utf-8"))
-    declaration["contributors"][0]["maxBytes"] = 64 * 1024
-    declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
+    plugins = [
+        _plugin(sources, "mkt", name, context="LARGE")
+        for name in ("a-large", "b-large")
+    ]
+    for plugin in plugins:
+        declaration_path = plugin / "session-context.json"
+        declaration = json.loads(declaration_path.read_text(encoding="utf-8"))
+        declaration["contributors"][0]["maxBytes"] = 64 * 1024
+        declaration_path.write_text(json.dumps(declaration), encoding="utf-8")
     aggregator = tmp_path / "aggregator"
     _copy_plugin(aggregator)
 
     result = _run(
         tmp_path,
-        [("a-large", plugin), ("context-injection", aggregator)],
+        [
+            ("a-large", plugins[0]),
+            ("b-large", plugins[1]),
+            ("context-injection", aggregator),
+        ],
     )
 
     assert json.loads(result.stdout) == {}
