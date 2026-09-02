@@ -224,3 +224,15 @@ def test_login_preflight_uses_dtssh_sibling_devtunnel(tmp_path, monkeypatch):
     assert logged_in is True
     assert error == ""
     assert captured["command"][0] == str(devtunnel)
+
+
+def test_dtssh_launcher_uses_stable_install_working_directory():
+    script = (
+        host_restore.Path(__file__).parents[1]
+        / "transports"
+        / "dtssh"
+        / "scripts"
+        / "install-host.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert "-WorkingDirectory $InstallDir" in script
