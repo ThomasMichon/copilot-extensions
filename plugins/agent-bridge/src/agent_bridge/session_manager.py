@@ -770,13 +770,14 @@ class Session:
             and self.event_log.active_tool_call() is None
         )
 
-    def public_status(self) -> SessionStatus:
-        """Return lifecycle status projected from the durable event tail."""
-        return SessionStatus.IDLE if self.is_at_rest() else self.status
-
-    def public_liveness(self) -> str | None:
-        """Return turn liveness consistent with the projected public status."""
-        return None if self.is_at_rest() else self.liveness_state()
+    def public_state(self) -> tuple[SessionStatus, bool, str | None]:
+        """Return a consistent status, at-rest, and liveness projection."""
+        at_rest = self.is_at_rest()
+        return (
+            SessionStatus.IDLE if at_rest else self.status,
+            at_rest,
+            None if at_rest else self.liveness_state(),
+        )
 
 
 class SessionManager:

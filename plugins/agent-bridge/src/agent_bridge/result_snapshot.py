@@ -593,6 +593,7 @@ def build_owned_result_snapshot(
     )
     attention = _attention(session, pending_input, latest_stop_reason)
 
+    public_status, at_rest, liveness = session.public_state()
     return DelegatedResultSnapshot(
         identity=ResultIdentity(
             logical_delegate_kind="worktree" if worktree_id else "session",
@@ -608,9 +609,9 @@ def build_owned_result_snapshot(
             event_retention="durable",
         ),
         state=ResultCurrentState(
-            session_status=session.public_status(),
-            at_rest=session.is_at_rest(),
-            liveness=session.public_liveness(),
+            session_status=public_status,
+            at_rest=at_rest,
+            liveness=liveness,
             context_pct=session.context_pct,
             usage_model=session.usage_model,
             attention=attention,
@@ -913,7 +914,7 @@ def build_represented_result_snapshot(
 
     at_rest = (
         registration.get("turn_state") == "idle"
-        and event_log.active_tool_call() is None
+        and event_log.active_tool_call(include_nested=False) is None
     )
     return DelegatedResultSnapshot(
         identity=ResultIdentity(
