@@ -24,7 +24,7 @@ def test_installers_fall_back_and_preserve_bounded_diagnostics() -> None:
     powershell = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
     posix = (PLUGIN / "scripts" / "init.sh").read_text(encoding="utf-8")
 
-    assert "$PluginDir[provider-exec]" in powershell
+    assert "${PluginDir}[provider-exec]" in powershell
     assert "function Write-Warn" in powershell
     assert "Get-Content -LiteralPath $logPath -Tail 40" in powershell
     assert "falling back to the base package" in powershell

@@ -694,7 +694,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     }
     $providerResult = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
         'pip', 'install', '--python', $VenvPython,
-        "$PluginDir[provider-exec]", '--quiet'
+        "${PluginDir}[provider-exec]", '--quiet'
     )
     if ($providerResult.Code -eq 0) {
         $pkgResult = 0
@@ -709,7 +709,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     }
 } else {
     $providerResult = Invoke-BoundedPackageCommand -Executable $VenvPython -Arguments @(
-        '-m', 'pip', 'install', '--quiet', "$PluginDir[provider-exec]"
+        '-m', 'pip', 'install', '--quiet', "${PluginDir}[provider-exec]"
     )
     if ($providerResult.Code -eq 0) {
         $pkgResult = 0
