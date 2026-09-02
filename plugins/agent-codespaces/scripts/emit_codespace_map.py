@@ -191,4 +191,4 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception:
-        print("{}")
+        sys.stdout.write("{}")

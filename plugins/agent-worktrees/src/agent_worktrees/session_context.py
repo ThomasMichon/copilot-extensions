@@ -82,6 +82,12 @@ def render_registry_context(
 
     resolved_state = state_root.resolve_state_root(config, cwd=cwd)
     pair = state_root.resolve_pair(config, cwd=cwd)
+    checkout_writable = (
+        bool(getattr(record, "worktree_path", cwd))
+        and _clean(getattr(record, "pair_kind", ""), "worktree") == "worktree"
+        and _clean(getattr(record, "status", ""), "unknown")
+        in {"active", "ready"}
+    )
     checkout = (
         "Checkout: "
         f"repo={_clean(getattr(record, 'repo', ''))}; "
@@ -89,6 +95,7 @@ def render_registry_context(
         f"role={_clean(getattr(record, 'pair_role', ''), 'unpaired')}; "
         f"kind={_clean(getattr(record, 'pair_kind', ''), 'worktree')}; "
         f"status={_clean(getattr(record, 'status', ''), 'unknown')}; "
+        f"writable={'true' if checkout_writable else 'false'}; "
         f"path={_clean(getattr(record, 'worktree_path', cwd))}."
     )
     if mux_session or pane_id:
@@ -106,7 +113,8 @@ def render_registry_context(
     if pair.paired and pair.sibling and not pair.error:
         sibling = pair.sibling
         writable = (
-            bool(sibling.path)
+            _clean(sibling.role) == "knowledge"
+            and bool(sibling.path)
             and _clean(sibling.kind, "worktree") == "worktree"
             and _clean(sibling.status, "unknown") in {"active", "ready"}
         )

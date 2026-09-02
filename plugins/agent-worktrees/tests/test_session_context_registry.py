@@ -10,11 +10,11 @@ from agent_worktrees import session_context
 from agent_worktrees import state_root
 
 
-def _record(path: Path) -> SimpleNamespace:
+def _record(path: Path, role: str = "harness") -> SimpleNamespace:
     return SimpleNamespace(
         repo="control",
         worktree_id="wt-control",
-        pair_role="harness",
+        pair_role=role,
         pair_kind="worktree",
         status="active",
         worktree_path=str(path),
@@ -127,6 +127,64 @@ def test_context_includes_pair_and_bounded_related_topology(
     assert "`agent-worktrees related list`" in context
     assert "`agent-worktrees related resolve <name>`" in context
     assert len(context.encode("utf-8")) <= session_context.MAX_TOPOLOGY_BYTES
+
+
+def test_knowledge_checkout_is_writable_but_harness_sibling_is_not(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    knowledge = tmp_path / "knowledge"
+    harness = tmp_path / "harness"
+    knowledge.mkdir()
+    harness.mkdir()
+    monkeypatch.setattr(
+        session_context.state_root,
+        "resolve_state_root",
+        lambda *_a, **_k: state_root.StateRoot(
+            str(knowledge),
+            "knowledge_repo",
+            "state",
+            True,
+            True,
+            True,
+        ),
+    )
+    monkeypatch.setattr(
+        session_context.state_root,
+        "resolve_pair",
+        lambda *_a, **_k: state_root.StatePair(
+            paired=True,
+            pair_id="pair-1",
+            current=state_root.PairCheckout(
+                role="knowledge",
+                path=str(knowledge),
+                repo="state",
+                worktree_id="wt-state",
+                status="active",
+            ),
+            sibling=state_root.PairCheckout(
+                role="harness",
+                path=str(harness),
+                repo="control",
+                worktree_id="wt-control",
+                status="active",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        session_context,
+        "_related_summary",
+        lambda *_a: ("application", ""),
+    )
+
+    context = session_context.render_registry_context(
+        SimpleNamespace(),
+        _record(knowledge, "knowledge"),
+        cwd=str(knowledge),
+    )
+
+    assert "role=knowledge; kind=worktree; status=active; writable=true" in context
+    assert "Pair: role=harness; kind=worktree; status=active; writable=false" in context
 
 
 def test_context_fails_closed_when_state_and_pair_are_unavailable(
