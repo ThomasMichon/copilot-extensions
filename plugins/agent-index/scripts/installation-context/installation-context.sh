@@ -3472,7 +3472,7 @@ CURRENT_WSL_DISTRO_TYPE=null
 CURRENT_HOST=""
 
 resolve_current_environment() {
-    local uid passwd_entry="" home_path=""
+    local uid passwd_entry home_path
     [[ -n "$CURRENT_PROFILE_HOME" ]] && return 0
     CURRENT_PLATFORM=posix
     CURRENT_HOST="$(normalized_short_host)"
@@ -3483,18 +3483,11 @@ resolve_current_environment() {
     if [[ -z "$passwd_entry" && -r /etc/passwd ]]; then
         passwd_entry="$(LC_ALL=C awk -F: -v uid="$uid" '$3 == uid { print; exit }' /etc/passwd)"
     fi
-    if [[ -n "$passwd_entry" ]]; then
-        home_path="$(printf '%s' "$passwd_entry" | LC_ALL=C cut -d: -f6)"
-    elif command -v dscl >/dev/null 2>&1; then
-        # macOS ships no `getent` and keeps local accounts in Directory Services
-        # rather than /etc/passwd (which lists only system accounts), so both
-        # lookups above come back empty for a normal user. Ask the directory for
-        # the home directly instead of failing.
-        home_path="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null |
-            LC_ALL=C sed -n 's/^NFSHomeDirectory: //p')"
-    fi
+    [[ -n "$passwd_entry" ]] ||
+        fail "Cannot determine the current account home from the passwd database."
+    home_path="$(printf '%s' "$passwd_entry" | LC_ALL=C cut -d: -f6)"
     [[ -n "$home_path" ]] ||
-        fail "Cannot determine the current account home from the account database."
+        fail "Cannot determine the current account home from the passwd database."
     CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"
     CURRENT_WSL_DISTRO="${WSL_DISTRO_NAME:-}"
     if [[ -n "$CURRENT_WSL_DISTRO" ]]; then
