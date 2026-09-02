@@ -1803,9 +1803,9 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         return _browse_peer(args, "inbox")
     machine = args.machine
     if not machine:
-        from .identity import resolve_identity
+        from .identity import resolve_machine
 
-        machine = resolve_identity()[0]
+        machine = resolve_machine()
     if not machine:
         print(
             "agent-dispatch: could not resolve this machine — pass --machine "

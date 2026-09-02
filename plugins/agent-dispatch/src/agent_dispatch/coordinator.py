@@ -219,9 +219,9 @@ def _reap_orphans(queue: TaskQueue, grace: float) -> int:
     via a worker thread. Returns the reaped count.
     """
     from . import tracking
-    from .identity import resolve_identity
+    from .identity import resolve_machine
 
-    machine = resolve_identity()[0]
+    machine = resolve_machine()
     if not machine:
         return 0
     live = tracking.live_worktrees()

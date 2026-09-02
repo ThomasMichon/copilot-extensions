@@ -39,16 +39,53 @@ def _aw_get(key: str) -> str | None:
     return value or None
 
 
+def _aw_owner_ref() -> tuple[str | None, bool]:
+    """Return owner-ref and whether legacy fallback is safe.
+
+    A missing process result includes timeouts. Retrying two more shell probes
+    under the same contention would only extend the stall, so fallback is
+    reserved for a command that actually returned.
+    """
+    result = run_agent_worktrees_capture("get", "owner-ref", timeout=15)
+    if result is None:
+        return None, False
+    if result.returncode != 0:
+        return None, True
+    return result.stdout.strip() or None, True
+
+
+def _identity_from_owner_ref(owner_ref: str) -> tuple[str, str] | None:
+    """Parse ``machine/project/worktree[#session]`` from agent-worktrees."""
+    identity = owner_ref.split("#", 1)[0]
+    parts = identity.split("/")
+    worktree = "/".join(parts[2:]) if len(parts) >= 3 else ""
+    if len(parts) < 3 or not parts[0] or not parts[1] or not worktree:
+        return None
+    return parts[0], worktree
+
+
 def resolve_identity() -> tuple[str | None, str | None]:
     """Resolve the caller's ``(machine, worktree)`` from CWD via agent-worktrees.
 
     Either element may be ``None`` when agent-worktrees is absent or the caller
     isn't inside a worktree -- callers then supply the value explicitly.
     """
+    owner_ref, fallback_allowed = _aw_owner_ref()
+    if owner_ref and (resolved := _identity_from_owner_ref(owner_ref)):
+        return resolved
+    if not fallback_allowed:
+        return None, None
+
+    # Compatibility with agent-worktrees versions that predate owner-ref.
     machine = _aw_get("machine")
     wt_dir = _aw_get("worktree-dir")
     worktree = os.path.basename(wt_dir.rstrip("/\\")) if wt_dir else None
     return (machine, worktree)
+
+
+def resolve_machine() -> str | None:
+    """Resolve only the caller's machine without probing worktree-dir."""
+    return _aw_get("machine")
 
 
 def aw_set_summary(summary: str) -> bool:
