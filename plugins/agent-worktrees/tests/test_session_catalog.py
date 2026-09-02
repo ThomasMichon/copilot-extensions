@@ -9,6 +9,7 @@ from conftest import make_session_dir
 from agent_worktrees import config as cfg
 from agent_worktrees import installer
 from agent_worktrees import session_catalog
+from agent_worktrees import session_projection
 from agent_worktrees import sessions
 from agent_worktrees import tracking
 
@@ -306,3 +307,100 @@ def test_record_cursor_counts_non_yaml_entries_toward_budget(
     reconciler.step()
 
     assert reconciler._record_iter is not None
+
+
+def test_dark_record_repairs_projection_with_fixed_budget(
+    tmp_path, monkeypatch
+):
+    rec = _record(
+        "wt-a",
+        str(tmp_path / "wt-a"),
+        sessions_list=[
+            tracking.SessionEntry("session-a", "2026-06-01T10:00:00"),
+            tracking.SessionEntry("session-b", "2026-06-02T10:00:00"),
+        ],
+        head="session-b",
+    )
+    _tracking_dir, state_dir = _wire(tmp_path, monkeypatch, [rec])
+    for session_id in ("session-a", "session-b"):
+        make_session_dir(state_dir, session_id, rec.worktree_path)
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: False)
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8,
+        session_budget=1,
+        projection_budget=1,
+    )
+    reconciler.observe_mux(set())
+    first = reconciler.step()
+    second = reconciler.step()
+
+    assert first["projection_checked"] == 1
+    assert second["projection_checked"] == 1
+    assert first["projection_written"] + second["projection_written"] == 2
+    for session_id in ("session-a", "session-b"):
+        projection = session_projection.read(session_id)
+        assert projection is not None
+        assert projection["relations"][0]["worktree_id"] == "wt-a"
+    assert reconciler.step()["projection_checked"] == 0
+
+
+def test_live_record_projection_repair_is_report_only(
+    tmp_path, monkeypatch
+):
+    rec = _record(
+        "wt-a",
+        str(tmp_path / "wt-a"),
+        sessions_list=[
+            tracking.SessionEntry("session-a", "2026-06-01T10:00:00"),
+        ],
+        head="session-a",
+    )
+    _tracking_dir, state_dir = _wire(tmp_path, monkeypatch, [rec])
+    make_session_dir(state_dir, "session-a", rec.worktree_path)
+    monkeypatch.setattr(sessions, "worktree_has_live_session", lambda record: True)
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=8,
+        session_budget=1,
+        projection_budget=1,
+    )
+    reconciler.observe_mux(set())
+    report = reconciler.step()
+
+    assert report["projection_live_conflicts"] == 1
+    assert session_projection.read("session-a") is None
+
+
+def test_ref_only_controller_does_not_suppress_later_projection() -> None:
+    rec = _record("wt-a", "/tmp/wt-a", sessions_list=[])
+    rec.controllers = [
+        tracking.ControllerRelation(
+            kind="worktree",
+            source="explicit",
+            relation_revision=1,
+            created_at="2026-06-01T10:00:00",
+            controller_ref="host/test/parent",
+        ),
+        tracking.ControllerRelation(
+            kind="session",
+            source="explicit",
+            relation_revision=2,
+            created_at="2026-06-02T10:00:00",
+            controller_session_id="session-b",
+        ),
+    ]
+    rec.controller_revision = 2
+    reconciler = session_catalog.ResidentSessionReconciler(
+        projection_budget=4
+    )
+
+    reconciler._queue_projection_repairs(
+        "project-a",
+        Path("wt-a.yaml"),
+        rec,
+    )
+
+    assert ("project-a", "session-b", "controller") in (
+        reconciler._projection_queue
+    )

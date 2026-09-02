@@ -613,6 +613,18 @@ def _controller_metadata(
     ]
 
 
+def _controller_findings(
+    rec: tracking.WorktreeRecord,
+) -> list[dict[str, object]]:
+    """Derived terminal-controller findings shared by JSON surfaces."""
+    from . import controller_lineage
+
+    try:
+        return controller_lineage.controller_findings(rec)
+    except Exception:
+        return []
+
+
 def _worktree_to_dict(
     rec: tracking.WorktreeRecord,
     *,
@@ -701,6 +713,7 @@ def _worktree_to_dict(
     if rec.controllers or rec.controller_revision:
         d["controller_revision"] = rec.controller_revision
         d["controllers"] = _controller_metadata(rec)
+        d["controller_findings"] = _controller_findings(rec)
     # resource-claims: expose the backward owner link + forward outbound claim
     # list so the ledger view (and consumers like `run`) can read a worktree's
     # full claim set. Emitted only when present, keeping the envelope lean.
@@ -7396,6 +7409,34 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     bits.append("spawned current monitor" if r.get("spawned")
                 else "spawn failed")
     print("status-monitor: " + ", ".join(bits))
+    return 0
+
+
+def cmd_reconcile_sessions(args: argparse.Namespace) -> int:
+    """Run one bounded record/session/projection reconciliation pass."""
+    import shutil
+    from . import session_catalog
+
+    reconciler = session_catalog.ResidentSessionReconciler(
+        record_budget=args.record_budget,
+        session_budget=args.session_budget,
+        projection_budget=args.projection_budget,
+    )
+    mux = (
+        "psmux"
+        if shutil.which("psmux")
+        else ("tmux" if shutil.which("tmux") else None)
+    )
+    mux_bin = (shutil.which(mux) or mux) if mux else None
+    if mux_bin is None:
+        reconciler.observe_mux(set())
+    else:
+        live = _monitor_list_sessions(mux_bin)
+        if live is not None:
+            reconciler.observe_mux(set(live))
+    report = reconciler.step()
+    report["mux_observed"] = reconciler.has_mux_observation
+    _json_output(report)
     return 0
 
 
@@ -14356,6 +14397,7 @@ _WORKTREE_VERBS = {
     "status-context": "status-context",
     "status-updater": "status-updater",
     "status-monitor": "status-monitor",
+    "reconcile-sessions": "reconcile-sessions",
     "push": "push-changes",
     "push-changes": "push-changes",
     "create-pr": "create-pr",
@@ -17474,6 +17516,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--interval", type=int, default=15,
                    help="Sweep cadence in seconds (min 2)")
+    p = sub.add_parser(
+        "reconcile-sessions",
+        help="Run one bounded record/session/projection reconciliation pass",
+    )
+    p.add_argument("--record-budget", type=int, default=16)
+    p.add_argument("--session-budget", type=int, default=32)
+    p.add_argument("--projection-budget", type=int, default=16)
     # status-monitor-restart (auto-update cutover seam: reap+respawn the monitor)
     sub.add_parser(
         "status-monitor-restart",
@@ -19855,6 +19904,7 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     handoffs: list[dict] = []
     controller_revision = 0
     controllers: list[dict[str, object]] = []
+    controller_findings: list[dict[str, object]] = []
     for rec in records:
         for s in sessions.list_worktree_sessions(rec):
             row = dict(s)
@@ -19905,6 +19955,7 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
         ]
         controller_revision = records[0].controller_revision
         controllers = _controller_metadata(records[0])
+        controller_findings = _controller_findings(records[0])
 
     _json_output({
         "sessions": list(by_session.values()),
@@ -19913,6 +19964,7 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
         "handoffs": handoffs,
         "controller_revision": controller_revision,
         "controllers": controllers,
+        "controller_findings": controller_findings,
     })
     return 0
 
@@ -20032,6 +20084,7 @@ def cmd_head_session(args: argparse.Namespace) -> int:
             "pending_handoffs": [],
             "controller_revision": 0,
             "controllers": [],
+            "controller_findings": [],
         })
         return 0
     record = tracking.load_record(yaml_path)
@@ -20060,6 +20113,7 @@ def cmd_head_session(args: argparse.Namespace) -> int:
         "pending_handoffs": pending,
         "controller_revision": record.controller_revision,
         "controllers": _controller_metadata(record),
+        "controller_findings": _controller_findings(record),
     })
     return 0
 
@@ -20564,6 +20618,7 @@ COMMAND_MAP = {
     "status-context": cmd_status_context,
     "status-updater": cmd_status_updater,
     "status-monitor": cmd_status_monitor,
+    "reconcile-sessions": cmd_reconcile_sessions,
     "status-monitor-restart": cmd_status_monitor_restart,
     "handoff-cutover": cmd_handoff_cutover,
     "embody": cmd_embody,
@@ -20952,7 +21007,9 @@ def _git_toplevel(path: Path | None) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
     "register", "hook", "knowledge", "reconcile-marketplaces",
-    "picker", "doctor", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart",     "restart", "register-session", "deregister-session", "session-binding",
+    "picker", "doctor", "reap-shells", "status-updater", "status-monitor",
+    "reconcile-sessions", "status-monitor-restart", "restart",
+    "register-session", "deregister-session", "session-binding",
     "installer-readiness",
     "bind-session",
     "bind-nudge",

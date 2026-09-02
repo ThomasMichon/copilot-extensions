@@ -430,9 +430,26 @@ hold the same record lock through the final save.
 Controller metadata is additive on worktree JSON rows, `head-session`, and a
 worktree-scoped `list-sessions` envelope. Picker normalization passes it through
 but does not consult it for ACTIVE classification, resume targeting, occupancy,
-liveness, or the asserted head. Automatic terminal-successor resolution and
-controller-driven repair remain Phase 4 work; Phase 3 records and projects the
-explicit relation only.
+liveness, or the asserted head. Those surfaces also carry derived
+`controller_findings`: an exact controller session follows only explicit
+successor and handoff links to a unique active terminal session. Forks, cycles,
+missing records or session trees, concluded controllers without successors,
+restored projections, unsupported schemas, and remote controllers remain
+explicit findings rather than guessed targets.
+
+The resident session reconciler repairs missed sidecar writes through a
+separate fixed-budget queue. It acts only after a fresh mux catalog proves the
+child worktree has no mux and exact session-lock reads prove no bound Copilot is
+live. Each repair takes nonblocking record and sidecar locks, reloads the record,
+and compares lifecycle, head, and controller revisions before writing. Verified
+revision triples are remembered in a bounded cache, so current or permanently
+blocked projections quiesce instead of consuming every later tick. Immediate
+lifecycle writes remain the primary path; Picker/list demand starts the same
+resident monitor before its derived data is needed, so there is no independent
+scheduled reconciler competing for ownership while the machine is otherwise
+idle. Operators that need a low-duty backstop can schedule the bounded
+`reconcile-sessions` one-shot; it shares the resident reconciler and exits after
+one configured record/session/projection budget.
 
 Beyond the head bookkeeping, `register_session` also **re-seeds this session's
 mux status-bar updater** (`_spawn_status_updater` → a detached

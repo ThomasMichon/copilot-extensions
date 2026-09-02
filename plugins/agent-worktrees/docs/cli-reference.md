@@ -155,6 +155,7 @@ continue to work unchanged.
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable CLI worker. Requires `--policy disposable-cli` and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean commit-free branch may advance with `git reset --keep`, then the command marks the record managed/final for a later conservative managed-GC pass. It never deletes the worktree itself. |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
 | `session-lock` | Write/remove a session-state lattice lock beside Copilot's session state (bridge/mux liveness marker) |
+| `reconcile-sessions` | Run one bounded record/session/projection reconciliation pass and emit machine-readable repair and conflict counts; suitable for an optional low-duty scheduled backstop |
 | `status-segment` | Print a styled status-bar segment for the worktree at the cwd (for a tmux/psmux status line) |
 | `status-context` | Print a styled left status-bar segment: machine, environment, and repo:id4 for the worktree at the cwd |
 | `status-updater` | Background loop that keeps a session's `@aw_ctx`/`@aw_seg` status vars fresh **off the paint path** (no per-render binstub spawn) |

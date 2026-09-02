@@ -129,6 +129,7 @@ def test_rescue_ingest_marker_is_read_only(
     tracking.set_head_session(record, "session-a")
 
     assert not (session_dir / session_projection.SIDECAR_NAME).exists()
+    assert session_projection.sync_bound(record, "session-a") == "blocked"
 
 
 @pytest.mark.parametrize("session_id", ["../escape", "a/b", r"a\b", ".", ".."])
@@ -139,6 +140,14 @@ def test_invalid_session_id_is_rejected(tmp_path, monkeypatch, session_id):
 
     with pytest.raises(session_projection.ProjectionError):
         session_projection.read(session_id)
+
+
+def test_invalid_session_id_blocks_projection_sync(
+    tmp_tracking_dir,
+) -> None:
+    record = _record(tmp_tracking_dir, "../escape")
+
+    assert session_projection.sync_bound(record, "../escape") == "blocked"
 
 
 def test_projection_target_symlink_is_rejected(

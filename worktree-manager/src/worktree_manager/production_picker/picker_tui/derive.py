@@ -462,6 +462,7 @@ def norm(
         # recovery actions. It is deliberately absent from state/active/resume
         # derivation: control is not binding.
         "controllers": list(w.get("controllers") or []),
+        "controller_findings": list(w.get("controller_findings") or []),
         # #4272 bridge-lock: worktree hosts a live bridge-owned Copilot per the
         # file-first bridge.lock read. Distinct from mux_live/bound_live; drives
         # the classification-absent fast-pass ACTIVE for a bare/bridge session.
