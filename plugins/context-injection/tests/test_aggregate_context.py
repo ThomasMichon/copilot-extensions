@@ -1173,7 +1173,8 @@ def test_spilled_context_retains_bounded_catalog_and_critical_kernel(
     assert catalog in kernel
     assert routing in kernel
     assert "/payload/policy.md" in kernel
-    assert "[context-contributor: deferred-7@example/details]" in kernel
+    assert "deferred-7@example/details" in kernel
+    assert "`/payload/guide-7.md`" in kernel
     assert context in next(
         (tmp_path / ".copilot" / "session-state" / "session-1" / "files").iterdir()
     ).read_text(encoding="utf-8")
@@ -1272,7 +1273,7 @@ def test_spill_kernel_is_deterministic_and_never_splits_large_catalog() -> None:
     assert first == second
     assert len(first.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
     assert oversized_catalog not in first
-    assert "[context-contributor: command-catalogs/aggregate]" in first
+    assert "command-catalogs/aggregate" in first
     assert "routing@example/context" in first
 
 
@@ -1354,7 +1355,7 @@ def test_spill_kernel_defers_large_catalog_to_keep_priority_fragment() -> None:
     assert len(kernel.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
     assert critical in kernel
     assert large_catalog not in kernel
-    assert "[context-contributor: command-catalogs/aggregate]" in kernel
+    assert "command-catalogs/aggregate" in kernel
 
 
 def test_spill_kernel_uses_actual_cost_for_large_priority_fragment() -> None:
