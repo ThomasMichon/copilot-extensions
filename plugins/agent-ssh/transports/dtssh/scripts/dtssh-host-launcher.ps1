@@ -153,6 +153,7 @@ param(
     [int]$HealthCheckSec      = 120,
     [int]$PressureCheckSec    = 5,
     [int]$SessionClassificationSec = 15,
+    [int]$OrphanProxyGraceSec = 120,
     [int]$ConsecutiveFailures = 2,
     [int]$GracePeriodSec      = 45,
     [int]$PreAuthWarnThreshold = 8,
@@ -293,7 +294,7 @@ function Get-RunningHostProc {
     return $null
 }
 
-function Stop-DedicatedSshdTree {
+function Stop-GuardedProcessTree {
     param([int]$RootPid)
     if ($RootPid -le 0) { return }
 
@@ -337,6 +338,43 @@ function Stop-DedicatedSshdTree {
     }
 }
 
+function Clear-OrphanedDtsshProxies {
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $byId = @{}
+        foreach ($proc in $processes) { $byId[[int]$proc.ProcessId] = $proc }
+
+        $now = Get-Date
+        foreach ($proxy in @($processes | Where-Object {
+            $_.Name -eq 'dtssh.exe' -and $_.CommandLine -match '\bproxy\b'
+        })) {
+            $parent = $byId[[int]$proxy.ParentProcessId]
+            if ($parent -and $parent.CreationDate -le $proxy.CreationDate) {
+                continue
+            }
+            if (($now - $proxy.CreationDate).TotalSeconds -lt $OrphanProxyGraceSec) {
+                continue
+            }
+
+            $current = Get-CimInstance Win32_Process `
+                -Filter "ProcessId=$($proxy.ProcessId)" -ErrorAction SilentlyContinue
+            if (
+                -not $current -or
+                $current.CreationDate -ne $proxy.CreationDate -or
+                $current.ExecutablePath -ne $proxy.ExecutablePath -or
+                $current.CommandLine -notmatch '\bproxy\b'
+            ) {
+                continue
+            }
+
+            Stop-GuardedProcessTree ([int]$proxy.ProcessId)
+            Write-Log "reaped orphaned dtssh proxy process tree (root pid $($proxy.ProcessId))"
+        }
+    } catch {
+        Write-Log "orphaned dtssh proxy reap failed: $_" 'WARN'
+    }
+}
+
 function Clear-DedicatedSshd {
     # dtssh spawns a dedicated child sshd on :$Port that it does NOT reap when the
     # host process dies. An orphaned listener then blocks the next start (it can't
@@ -348,7 +386,7 @@ function Clear-DedicatedSshd {
         foreach ($spid in @($listeners.OwningProcess | Sort-Object -Unique | Where-Object { $_ })) {
             $sp = Get-Process -Id $spid -ErrorAction SilentlyContinue
             if ($sp -and $sp.Name -eq 'sshd') {
-                Stop-DedicatedSshdTree $spid
+                Stop-GuardedProcessTree $spid
                 Write-Log "reaped dedicated sshd process tree (root pid $spid) on :$Port"
             }
         }
@@ -644,6 +682,7 @@ try {
         # Check local pressure frequently without querying the remote relay on
         # every pass. Released dtssh builds can leak a connection per completed
         # command, so the slower relay-health cadence cannot protect MaxStartups.
+        Clear-OrphanedDtsshProxies
         $estConns = Get-EstablishedConnCount $Port
 
         # Released dtssh builds can leak one host-side forwarded connection and
