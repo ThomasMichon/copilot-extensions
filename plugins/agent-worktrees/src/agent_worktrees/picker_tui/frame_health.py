@@ -57,10 +57,18 @@ class FrameHealthReporter:
         )
         if not health_enabled and not trace_enabled:
             return None
-        if health_enabled and health_raw.lower() not in ("1", "true", "yes", "on"):
+        truthy = ("1", "true", "yes", "on")
+        if health_enabled and health_raw.lower() not in truthy:
             path = Path(health_raw).expanduser()
         elif trace_enabled:
-            path = Path(trace_raw).expanduser()
+            path = (
+                Path.home()
+                / ".agent-worktrees"
+                / "logs"
+                / "picker-launches.jsonl"
+                if trace_raw.lower() in truthy
+                else Path(trace_raw).expanduser()
+            )
         else:
             path = (
                 Path.home()

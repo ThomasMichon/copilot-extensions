@@ -709,7 +709,7 @@ def _project_binstub_specs(
             'set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"',
             'set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\\.agent-worktrees\\logs\\picker-launches.jsonl"',
             'if not exist "%USERPROFILE%\\.agent-worktrees\\logs" mkdir "%USERPROFILE%\\.agent-worktrees\\logs" >nul 2>&1',
-            f'(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {{"event":"binstub_start","timestamp_local":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"{project}"}}) 2>nul',
+            f'(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {{"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"{project}"}}) 2>nul',
             "rem This attributable project entry point is pinned to its owning payload.",
             f'"{cmd_path}" --project {project} %*',
             "exit /b %ERRORLEVEL%",

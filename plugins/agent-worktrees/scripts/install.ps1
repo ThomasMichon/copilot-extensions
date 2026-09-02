@@ -1513,7 +1513,7 @@ set "AGENT_WORKTREES_LAUNCH_ID=$ProjectName-%RANDOM%-%RANDOM%"
 set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"
 set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\.agent-worktrees\logs\picker-launches.jsonl"
 if not exist "%USERPROFILE%\.agent-worktrees\logs" mkdir "%USERPROFILE%\.agent-worktrees\logs" >nul 2>&1
-(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {"event":"binstub_start","timestamp_local":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"$ProjectName"}) 2>nul
+(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"$ProjectName"}) 2>nul
 set "AGENT_WORKTREES_BINSTUB_TRACED=1"
 rem Context resolves from CWD / --project (git-like); the binstub names its
 rem project via --project, not an ambient env var.

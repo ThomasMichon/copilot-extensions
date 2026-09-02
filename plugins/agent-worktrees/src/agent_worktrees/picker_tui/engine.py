@@ -1830,7 +1830,7 @@ class PickerScreen(Widget):
             except Exception:
                 pass
         if self._frame_health is not None:
-            self._frame_health.close()
+            self._frame_health.close(wait=True)
         # D2: tear down any held streaming pivot channel (a ``subscribe`` stream
         # runs until close) so no ``list --stream`` child is orphaned on exit.
         for rt in getattr(self, "_pivot_runtimes", {}).values():

@@ -116,6 +116,7 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
         assert "AGENT_WORKTREES_LAUNCH_ID" in content
         assert "picker-launches.jsonl" in content
         assert "binstub_start" in content
+        assert "timestamp_local" not in content
         assert "--project" in content
         assert "agent-worktrees.exe" not in content
 

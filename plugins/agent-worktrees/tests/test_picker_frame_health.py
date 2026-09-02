@@ -77,3 +77,14 @@ def test_false_launch_trace_values_disable_reporter(monkeypatch, value):
     monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_TRACE", value)
 
     assert FrameHealthReporter.from_env() is None
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
+def test_truthy_launch_trace_values_use_standard_history(monkeypatch, value):
+    monkeypatch.delenv("AGENT_WORKTREES_PICKER_FRAME_HEALTH", raising=False)
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_TRACE", value)
+
+    reporter = FrameHealthReporter.from_env()
+
+    assert reporter is not None
+    assert reporter.path.name == "picker-launches.jsonl"
