@@ -253,3 +253,14 @@ behavioral parity is demonstrated.
   exiting as a formatting failure.
 - Full agent-machines and agent-ssh suites plus version, install-contract,
   payload-generation, and focused live dry-run checks pass.
+
+### 2026-09-01 - Provider restoration published
+
+- Merged #1637, closing #1627 and #1631 with agent-machines `0.1.0-dev80`
+  and agent-ssh `0.1.0-dev66`.
+- Deployed both runtimes and proved a private machine package can dry-run,
+  apply, and then report a healthy no-op through the source-qualified provider
+  invocation.
+- The installed proof restored the transport host, banner, watchdog, startup
+  persistence, and live tunnel connection; an end-to-end SSH command completed
+  through the restored alias.
