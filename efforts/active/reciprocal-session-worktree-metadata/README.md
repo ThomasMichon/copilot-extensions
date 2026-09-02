@@ -22,7 +22,9 @@
   [#1695](https://github.com/ThomasMichon/copilot-extensions/issues/1695)
   (validated session recovery pointers) ·
   [#1700](https://github.com/ThomasMichon/copilot-extensions/issues/1700)
-  (Picker and JSON reciprocal relation state)
+  (Picker and JSON reciprocal relation state) ·
+  [#1706](https://github.com/ThomasMichon/copilot-extensions/issues/1706)
+  (worktree and session lineage JSON surfaces)
 
 ## Guiding Intent
 
@@ -167,12 +169,12 @@ Public-safe transcription of the operator request:
 ### Phase 6 - Recovery and presentation
 - [x] Let a resumed session read its exact projection and receive a concise
       re-binding/controller recovery pointer when needed.
-- [ ] Let Picker and JSON consumers distinguish **bound here**, **controlled
+- [x] Let Picker and JSON consumers distinguish **bound here**, **controlled
       from elsewhere**, **handed off**, **terminal**, and **ambiguous**.
 - [ ] Add worktree-centric and lineage-centric data surfaces suitable for
       visualization without transcript parsing, CWD joins, or enumeration of
       the live session-state root.
-- [ ] Update agent-worktrees architecture and CLI documentation.
+- [x] Update agent-worktrees architecture and CLI documentation.
 
 ### Phase 7 - Rollout and convergence
 - [ ] Ship schema-version migration and mixed-version behavior.
@@ -313,3 +315,11 @@ Adopt the authority and schema model in [`design.md`](design.md):
 - Opened #1700 for the next Phase 6 slice: one normalized reciprocal relation
   state and validated navigation actions across worktree JSON and both Picker
   implementations.
+- Normalized reciprocal presentation landed through #1705. Worktree JSON now
+  preserves orthogonal binding/control axes plus a compact bound, controlled,
+  handed-off, terminal, ambiguous, or unbound summary. The bundled Picker, its
+  legacy ANSI fallback, and the standalone Worktree Manager show the same state;
+  exact loaded local/remote controller targets gain navigation without changing
+  liveness, occupancy, binding, or resume authority.
+- Opened #1706 for the remaining Phase 6 data slice: bounded worktree-centric
+  and session-lineage JSON surfaces suitable for visualization.
