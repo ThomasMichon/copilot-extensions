@@ -139,7 +139,11 @@ class RequirementPackage:
     source_path: Path | None = None
     source_anchor: Path | None = None
 
-    def applies_to(self, machine: str) -> bool:
+    def applies_to(
+        self,
+        machine: str,
+        accepted_machines: tuple[str, ...] | None = None,
+    ) -> bool:
         """True when this package targets ``machine`` (empty/``*`` gate = all).
 
         The gate match is **case-insensitive**: ``current_machine()`` returns
@@ -150,7 +154,9 @@ class RequirementPackage:
         """
         if not self.gate or "*" in self.gate:
             return True
-        return machine.casefold() in {g.casefold() for g in self.gate}
+        accepted = accepted_machines or (machine,)
+        names = {name.casefold() for name in accepted}
+        return bool(names & {g.casefold() for g in self.gate})
 
     def repo_root(self) -> Path | None:
         """Derive the repo root from a canonical or legacy package path."""
@@ -460,7 +466,11 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
     return out
 
 
-def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPackage:
+def resolve_for_machine(
+    pkg: RequirementPackage,
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> RequirementPackage:
     """Return a copy of ``pkg`` with its ``per-machine.<machine>`` layer applied.
 
     The per-machine block is a partial ``manage``-shaped override deep-merged onto
@@ -468,7 +478,19 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
     unchanged. This is the *layer-within-repo* step that must precede any
     cross-repo union.
     """
-    overlay = pkg.per_machine.get(machine.casefold()) or {}
+    accepted = accepted_machines or (machine,)
+    accepted_folded = {name.casefold() for name in accepted}
+    overlay_keys = [
+        key for key in pkg.per_machine
+        if key.casefold() in accepted_folded
+    ]
+    if len(overlay_keys) > 1:
+        raise ManifestError(
+            f"{pkg.source_path or pkg.name}: multiple per-machine overlays match "
+            f"{machine!r}: {', '.join(sorted(overlay_keys))}"
+        )
+    overlay = pkg.per_machine.get(overlay_keys[0]) if overlay_keys else {}
+    overlay = overlay or {}
     manage_overlay = overlay.get("manage", overlay) if isinstance(overlay, dict) else {}
     if not isinstance(manage_overlay, dict):
         manage_overlay = {}
@@ -478,17 +500,30 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
         pkg.schema_version,
         pkg.source_path or Path(pkg.name),
     )
+    modules = copy.deepcopy(pkg.modules)
+    resources = copy.deepcopy(pkg.resources)
+    for declaration in (*modules, *resources):
+        gate = declaration.get("gate")
+        if isinstance(gate, list) and "*" not in gate and (
+            accepted_folded & {
+                str(value).casefold() for value in gate if isinstance(value, str)
+            }
+        ):
+            declaration["gate"] = [machine]
+    resolved_gate = list(pkg.gate)
+    if "*" not in resolved_gate and pkg.applies_to(machine, accepted):
+        resolved_gate = [machine]
     return RequirementPackage(
         name=pkg.name,
         schema_version=pkg.schema_version,
         manage=resolved_manage,
-        gate=list(pkg.gate),
+        gate=resolved_gate,
         aliases=copy.deepcopy(pkg.aliases),
         per_machine={},
         bootstrap_floor=copy.deepcopy(pkg.bootstrap_floor),
         exclude=list(pkg.exclude),
-        modules=copy.deepcopy(pkg.modules),
-        resources=copy.deepcopy(pkg.resources),
+        modules=modules,
+        resources=resources,
         source_repo=pkg.source_repo,
         source_path=pkg.source_path,
         source_anchor=pkg.source_anchor,

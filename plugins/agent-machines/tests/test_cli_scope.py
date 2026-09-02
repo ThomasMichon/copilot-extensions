@@ -121,7 +121,11 @@ def test_reconcile_unavailable_supplement_names_exact_repo_escape(
 
 def test_reconcile_all_projects_is_explicit(monkeypatch):
     package = object()
-    monkeypatch.setattr(cli, "_collect_all_packages", lambda machine: [package])
+    monkeypatch.setattr(
+        cli,
+        "_collect_all_packages",
+        lambda machine, accepted_machines=None: [package],
+    )
 
     packages, scope = cli._collect_reconcile_packages(
         _args(all_projects=True),
@@ -210,13 +214,37 @@ def test_scope_flags_are_mutually_exclusive():
         cli.main(["plan", "--repo", "one", "--all-projects"])
 
 
+def test_explicit_repo_identity_does_not_validate_unrelated_projects(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        cli._discover,
+        "candidate_repos",
+        lambda: pytest.fail("explicit repo must not scan unrelated projects"),
+    )
+    monkeypatch.setattr(
+        cli._discover,
+        "resolve_registered_repo",
+        lambda _selector: None,
+    )
+    args = argparse.Namespace(repo=str(tmp_path), machine="fixture")
+
+    identity = cli._resolve_machine_identity(args)
+
+    assert identity.canonical == "fixture"
+
+
 def test_validate_json_preserves_findings_array(monkeypatch, capsys):
     monkeypatch.setattr(
         cli,
         "_collect_reconcile_packages",
-        lambda args, machine: ([], "repo:current"),
+        lambda args, machine, accepted_machines=None: ([], "repo:current"),
     )
-    monkeypatch.setattr(cli._reconcile, "resolve_union", lambda packages, machine: [])
+    monkeypatch.setattr(
+        cli._reconcile,
+        "resolve_union",
+        lambda packages, machine, accepted_machines=None: [],
+    )
     monkeypatch.setattr(cli._validator, "validate", lambda resolved, machine: [])
 
     rc = cli.main(["validate", "--json"])
@@ -235,9 +263,13 @@ def test_validate_human_reports_scope_with_findings(monkeypatch, capsys):
     monkeypatch.setattr(
         cli,
         "_collect_reconcile_packages",
-        lambda args, machine: ([], "repo:current"),
+        lambda args, machine, accepted_machines=None: ([], "repo:current"),
     )
-    monkeypatch.setattr(cli._reconcile, "resolve_union", lambda packages, machine: [])
+    monkeypatch.setattr(
+        cli._reconcile,
+        "resolve_union",
+        lambda packages, machine, accepted_machines=None: [],
+    )
     monkeypatch.setattr(
         cli._validator,
         "validate",

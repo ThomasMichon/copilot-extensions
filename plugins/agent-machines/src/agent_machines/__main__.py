@@ -20,6 +20,7 @@ from pathlib import Path
 
 from . import __version__
 from . import discover as _discover
+from . import identity as _identity
 from . import layout as _layout
 from . import reconcile as _reconcile
 from . import validator as _validator
@@ -27,9 +28,17 @@ from .manifest import ManifestError, RequirementPackage
 from .surfaces._common import SurfaceStateError
 
 
-def _collect_all_packages(machine: str) -> list[RequirementPackage]:
+def _collect_all_packages(
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[RequirementPackage]:
     packages: list[RequirementPackage] = []
-    for repo in _discover.discover(machine):
+    repos = (
+        _discover.discover(machine, accepted_machines=accepted_machines)
+        if accepted_machines is not None
+        else _discover.discover(machine)
+    )
+    for repo in repos:
         packages.extend(repo.packages)
     return packages
 
@@ -37,10 +46,16 @@ def _collect_all_packages(machine: str) -> list[RequirementPackage]:
 def _collect_reconcile_packages(
     args: argparse.Namespace,
     machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
 ) -> tuple[list[RequirementPackage], str]:
     """Select the package scope shared by plan, validate, and restore."""
     if getattr(args, "all_projects", False):
-        return _collect_all_packages(machine), "all-projects"
+        packages = (
+            _collect_all_packages(machine, accepted_machines)
+            if accepted_machines is not None
+            else _collect_all_packages(machine)
+        )
+        return packages, "all-projects"
     selector = getattr(args, "repo", None)
     if selector:
         candidate = _discover.resolve_registered_repo(selector)
@@ -87,6 +102,7 @@ def _collect_reconcile_packages(
                         candidate.name,
                         machine,
                         source_anchor=repo_anchor if index == 0 else candidate.path,
+                        accepted_machines=accepted_machines,
                     )
                 )
             scope_kind = "project" if len(project_repos) > 1 else "repo"
@@ -97,9 +113,40 @@ def _collect_reconcile_packages(
             repo_name,
             machine,
             source_anchor=repo_anchor,
+            accepted_machines=accepted_machines,
         ),
         f"repo:{repo_name}",
     )
+
+
+def _resolve_machine_identity(args: argparse.Namespace) -> _identity.MachineIdentity:
+    topology_repos: list[Path] = []
+    selector = getattr(args, "repo", None)
+    if selector:
+        registered = _discover.resolve_registered_repo(selector)
+        if registered is not None:
+            topology_repos.append(registered[1])
+        else:
+            candidate = Path(selector).expanduser()
+            if candidate.is_dir():
+                topology_repos.append(candidate)
+    else:
+        topology_repos.extend(
+            candidate.path for candidate in _discover.candidate_repos()
+        )
+        try:
+            topology_repos.append(_layout.resolve_cwd_repo()[1])
+        except _layout.NotGitRepositoryError:
+            pass
+    return _identity.resolve_machine(
+        getattr(args, "machine", None),
+        topology_repos=topology_repos,
+    )
+
+
+def _emit_identity_warnings(identity: _identity.MachineIdentity) -> None:
+    for warning in identity.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
@@ -108,8 +155,8 @@ def _cmd_version(_args: argparse.Namespace) -> int:
 
 
 def _cmd_discover(args: argparse.Namespace) -> int:
+    identity = _resolve_machine_identity(args)
     if args.json:
-        machine = args.machine or _discover.current_machine()
         out = [
             {
                 "repo": r.name,
@@ -117,26 +164,50 @@ def _cmd_discover(args: argparse.Namespace) -> int:
                 "enabled": r.enabled,
                 "packages": [p.name for p in r.packages],
             }
-            for r in _discover.discover(machine)
+            for r in _discover.discover(
+                identity.canonical,
+                accepted_machines=identity.accepted,
+            )
         ]
-        print(json.dumps({"machine": machine, "repos": out}, indent=2))
+        print(json.dumps({
+            "machine": identity.canonical,
+            "machine_raw": identity.raw,
+            "machine_aliases": list(identity.accepted),
+            "machine_identity_warnings": list(identity.warnings),
+            "repos": out,
+        }, indent=2))
         return 0
-    return _discover._main()
+    _emit_identity_warnings(identity)
+    return _discover._main(
+        machine=identity.canonical,
+        accepted_machines=identity.accepted,
+        raw_machine=identity.raw,
+    )
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    machine = args.machine or _discover.current_machine()
-    reports = _layout.inspect_layouts(machine, repo=args.repo)
+    identity = _resolve_machine_identity(args)
+    machine = identity.canonical
+    reports = _layout.inspect_layouts(
+        machine,
+        repo=args.repo,
+        accepted_machines=identity.accepted,
+    )
     ok = all(report.ok for report in reports)
     if args.json:
         print(json.dumps({
             "machine": machine,
+            "machine_raw": identity.raw,
+            "machine_aliases": list(identity.accepted),
+            "machine_identity_warnings": list(identity.warnings),
             "ok": ok,
             "repos": [report.to_dict() for report in reports],
         }, indent=2))
         return 0 if ok else 1
 
     print(f"doctor for {machine}")
+    for warning in identity.warnings:
+        print(f"  [advisory] machine-topology: {warning}")
     if not reports:
         print("  no adopted repos found")
         return 0
@@ -167,12 +238,25 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
-    machine = args.machine or _discover.current_machine()
-    packages, scope = _collect_reconcile_packages(args, machine)
-    plan = _reconcile.plan(packages, machine)
+    identity = _resolve_machine_identity(args)
+    _emit_identity_warnings(identity)
+    machine = identity.canonical
+    packages, scope = _collect_reconcile_packages(
+        args,
+        machine,
+        identity.accepted,
+    )
+    plan = _reconcile.plan(
+        packages,
+        machine,
+        accepted_machines=identity.accepted,
+    )
     if args.json:
         payload = _reconcile.plan_to_dict(plan)
         payload["scope"] = scope
+        payload["machine_raw"] = identity.raw
+        payload["machine_aliases"] = list(identity.accepted)
+        payload["machine_identity_warnings"] = list(identity.warnings)
         print(json.dumps(payload, indent=2))
         return 0
     print(f"plan for {machine} [{scope}]  (drift-key {plan.drift_key})")
@@ -194,9 +278,19 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
-    machine = args.machine or _discover.current_machine()
-    packages, scope = _collect_reconcile_packages(args, machine)
-    resolved = _reconcile.resolve_union(packages, machine)
+    identity = _resolve_machine_identity(args)
+    _emit_identity_warnings(identity)
+    machine = identity.canonical
+    packages, scope = _collect_reconcile_packages(
+        args,
+        machine,
+        identity.accepted,
+    )
+    resolved = _reconcile.resolve_union(
+        packages,
+        machine,
+        identity.accepted,
+    )
     findings = _validator.validate(resolved, machine)
     if args.json:
         print(json.dumps([f.__dict__ for f in findings], indent=2))
@@ -212,8 +306,13 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 def _cmd_installer_readiness(args: argparse.Namespace) -> int:
     from .installer_readiness import emit, evaluate
 
-    machine = args.machine or _discover.current_machine()
-    return emit(evaluate(_layout.inspect_layouts(machine)))
+    identity = _resolve_machine_identity(args)
+    _emit_identity_warnings(identity)
+    reports = _layout.inspect_layouts(
+        identity.canonical,
+        accepted_machines=identity.accepted,
+    )
+    return emit(evaluate(reports))
 
 
 def _fmt_val(v: object) -> str:
@@ -222,10 +321,20 @@ def _fmt_val(v: object) -> str:
 
 
 def _cmd_restore(args: argparse.Namespace) -> int:
-    machine = args.machine or _discover.current_machine()
+    identity = _resolve_machine_identity(args)
+    _emit_identity_warnings(identity)
+    machine = identity.canonical
     dry_run = not args.apply
-    packages, scope = _collect_reconcile_packages(args, machine)
-    resolved = _reconcile.resolve_union(packages, machine)
+    packages, scope = _collect_reconcile_packages(
+        args,
+        machine,
+        identity.accepted,
+    )
+    resolved = _reconcile.resolve_union(
+        packages,
+        machine,
+        identity.accepted,
+    )
     findings = _validator.validate(resolved, machine)
     if _validator.has_errors(findings):
         print("restore refused: validator reported errors:", file=sys.stderr)
@@ -240,6 +349,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             machine,
             dry_run=dry_run,
             only=args.only,
+            accepted_machines=identity.accepted,
         )
     except SurfaceStateError as exc:
         print(f"restore refused: {exc}", file=sys.stderr)
@@ -247,6 +357,9 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     if args.json:
         payload = _reconcile.restore_result_to_dict(result)
         payload["scope"] = scope
+        payload["machine_raw"] = identity.raw
+        payload["machine_aliases"] = list(identity.accepted)
+        payload["machine_identity_warnings"] = list(identity.warnings)
         print(json.dumps(payload, indent=2))
         return 0 if result.ok else 2
     header = "DRY-RUN (preview only; re-run with --apply to make changes)" if dry_run else "APPLY"

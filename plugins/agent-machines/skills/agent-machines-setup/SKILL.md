@@ -70,8 +70,12 @@ A **requirement package** is one complete YAML file under either:
   machine.
 
 Package names must be unique across the shared and selected machine folders.
-`<machine>` is the raw `platform.node()` host name (Windows `%COMPUTERNAME%`),
-matched case-insensitively rather than resolved through an external topology.
+`<machine>` is the canonical key from a matching adopted-repository
+`machines.yaml` entry. The raw `platform.node()` host name (Windows
+`%COMPUTERNAME%`) resolves through the entry key, `hostname`, `alias`, and
+`display_name`; every accepted identity matches gates, overlays, and machine
+directories case-insensitively. Ambiguous topology matches fail closed. Without
+a matching topology entry, the raw host name remains the standalone fallback.
 Multi-machine packages belong in `all/` with an explicit `gate`.
 Use a package-local `per-machine` block for partial overrides; files do not merge
 across folders. The legacy `.github/machine-state/` path is consulted only when

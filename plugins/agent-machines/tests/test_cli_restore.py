@@ -31,9 +31,13 @@ def _patch(monkeypatch, result: reconcile.RestoreResult) -> None:
     monkeypatch.setattr(
         cli,
         "_collect_reconcile_packages",
-        lambda args, machine: ([], "repo:acme"),
+        lambda args, machine, accepted_machines=None: ([], "repo:acme"),
     )
-    monkeypatch.setattr(cli._reconcile, "resolve_union", lambda packages, machine: [])
+    monkeypatch.setattr(
+        cli._reconcile,
+        "resolve_union",
+        lambda packages, machine, accepted_machines=None: [],
+    )
     monkeypatch.setattr(cli._validator, "validate", lambda resolved, *a, **k: [])
     monkeypatch.setattr(cli._reconcile, "restore", lambda *a, **k: result)
 

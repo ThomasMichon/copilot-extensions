@@ -77,6 +77,55 @@ def test_discover_combines_all_and_matching_machine_packages(tmp_path):
     assert [pkg.name for pkg in found[0].packages] == ["acme/shared", "acme/specific"]
 
 
+def test_discover_machine_directory_accepts_topology_alias(tmp_path):
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(
+        repo,
+        "specific.yaml",
+        base_package(name="acme/specific", gate=["generated-host"]),
+        machine="owner-workstation",
+    )
+    reg = _registry(srcroot, acme={"class": "worktree"})
+
+    found = discover.discover(
+        machine="owner-workstation",
+        accepted_machines=(
+            "owner-workstation",
+            "generated-host",
+            "workstation",
+        ),
+        registry=reg,
+        projects=_projects("acme"),
+    )
+
+    assert [pkg.name for pkg in found[0].packages] == ["acme/specific"]
+
+
+def test_discover_rejects_multiple_alias_machine_directories(tmp_path):
+    repo = tmp_path / "acme"
+    write_package(
+        repo,
+        "canonical.yaml",
+        base_package(name="acme/canonical", gate=["*"]),
+        machine="owner-workstation",
+    )
+    write_package(
+        repo,
+        "hostname.yaml",
+        base_package(name="acme/hostname", gate=["*"]),
+        machine="generated-host",
+    )
+
+    with pytest.raises(ManifestError, match="multiple machine directories"):
+        discover.packages_in_repo(
+            repo,
+            "acme",
+            "owner-workstation",
+            accepted_machines=("owner-workstation", "generated-host"),
+        )
+
+
 def test_machine_directory_rejects_contradictory_explicit_gate(tmp_path):
     srcroot = tmp_path / "Src"
     repo = srcroot / "acme"

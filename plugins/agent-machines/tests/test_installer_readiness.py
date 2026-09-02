@@ -50,7 +50,11 @@ def test_applicable_package_is_ready():
 
 
 def test_payload_command_is_independently_runnable(monkeypatch, capsys):
-    monkeypatch.setattr(cli._layout, "inspect_layouts", lambda _machine: [])
+    monkeypatch.setattr(
+        cli._layout,
+        "inspect_layouts",
+        lambda _machine, accepted_machines=None: [],
+    )
 
     assert cli.main(["installer-readiness", "--machine", "fixture"]) == 0
     assert json.loads(capsys.readouterr().out)["state"] == "configuration-empty"

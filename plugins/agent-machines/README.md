@@ -157,9 +157,13 @@ honored. Partial overrides of a shared package remain in that package's existing
 `per-machine` block rather than being a cross-file merge.
 Multi-machine packages belong in `all/` with an explicit `gate`.
 
-`<machine>` is the raw host name returned by `platform.node()` (on Windows,
-`%COMPUTERNAME%`), matched case-insensitively. It is not a display name from an
-external machine registry.
+`<machine>` is the canonical topology key when an adopted repository provides a
+matching `machines.yaml` entry. The raw `platform.node()` host name (Windows
+`%COMPUTERNAME%`) is matched case-insensitively against the entry key plus its
+`hostname`, `alias`, and `display_name`; all four remain accepted for package
+gates, `per-machine` overlays, nested module/resource gates, and machine
+directory selection. Ambiguous cross-entry matches fail before reconciliation.
+Without usable topology, the raw host name remains the standalone fallback.
 
 For migration, `.github/machine-state/` remains a bounded legacy fallback only
 when `.agent-machines/` is absent. Move a repo atomically: once the canonical
