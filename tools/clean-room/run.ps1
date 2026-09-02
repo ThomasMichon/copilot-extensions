@@ -565,6 +565,42 @@ function Get-Sha256Short([string]$Text) {
     } finally { $sha.Dispose() }
 }
 
+# Send Python source through a base64 argv so Windows native-command quoting
+# cannot strip quotes from an in-container `python3 -c` script.
+function Invoke-ContainerPython(
+    [Parameter(Mandatory)][string]$Script,
+    [string[]]$Arguments = @()
+) {
+    $encoded = [Convert]::ToBase64String(
+        [System.Text.Encoding]::UTF8.GetBytes($Script)
+    )
+    $encodedArguments = @(
+        foreach ($argument in $Arguments) {
+            [Convert]::ToBase64String(
+                [System.Text.Encoding]::UTF8.GetBytes([string]$argument)
+            )
+        }
+    )
+    $bootstrap = (
+        'import base64,sys;payload=sys.argv.pop(1);' +
+        'sys.argv[1:]=[base64.b64decode(v).decode() for v in sys.argv[1:]];' +
+        'exec(base64.b64decode(payload))'
+    )
+    $previousErrorAction = $ErrorActionPreference
+    $success = $false
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & docker exec $Container python3 -c `
+            $bootstrap $encoded @encodedArguments 2>&1
+        $success = $?
+        $output
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorAction
+        $script:ContainerPythonSucceeded = $success
+    }
+}
+
 # Drive one agent turn with a wall-clock timeout. `agent-bridge create` has no
 # --reply-timeout, so bound it host-side via a job: on timeout, stop the job and
 # report the partial transcript so a hung agent is a FAIL, not an infinite wait.
@@ -784,7 +820,7 @@ function Invoke-Eval {
     # Resolve and build the driven-agent command after setup. acp_cwd_file lets
     # setup publish a generated managed-worktree path without using a symlink.
     if ($acpCwdFile) {
-        $acpCwd = (& docker exec $Container python3 -c @'
+        $acpCwdScript = @'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 lines = p.read_text(encoding="utf-8").splitlines()
@@ -794,8 +830,14 @@ cwd = pathlib.Path(lines[0])
 if not cwd.is_dir():
     raise SystemExit("ACP cwd is not a directory")
 print(cwd)
-'@ $acpCwdFile | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $acpCwd) {
+'@
+        $acpCwd = (
+            Invoke-ContainerPython `
+                -Script $acpCwdScript `
+                -Arguments @($acpCwdFile) |
+                Out-String
+        ).Trim()
+        if (-not $script:ContainerPythonSucceeded -or -not $acpCwd) {
             Write-ScenarioInvalidEvidence 'scenario-fixture'
             throw "eval: could not resolve a valid cwd from '$acpCwdFile'"
         }
@@ -881,9 +923,14 @@ for index, root in enumerate(roots):
             digest.update(path.read_bytes())
 print(digest.hexdigest()[:16])
 '@
-    $docsHash = (& docker exec $Container python3 -c $docsHashScript $fingerprintDirsJson |
+    $docsHash = (Invoke-ContainerPython `
+        -Script $docsHashScript `
+        -Arguments @($fingerprintDirsJson) |
         Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or $docsHash -notmatch '^[0-9a-f]{16}$') {
+    if (
+        -not $script:ContainerPythonSucceeded -or
+        $docsHash -notmatch '^[0-9a-f]{16}$'
+    ) {
         Write-ScenarioInvalidEvidence 'scenario-transport-gap'
         throw 'eval: could not fingerprint the evaluated plugin payloads'
     }

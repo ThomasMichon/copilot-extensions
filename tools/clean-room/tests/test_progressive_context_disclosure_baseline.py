@@ -312,6 +312,10 @@ def test_clean_room_runner_binds_requested_acp_model() -> None:
         assert "invalid_evidence_writer" in source
     assert "??" not in powershell
     assert 'docker ps -aq --filter "name=^/${Container}$"' in powershell
+    assert "function Invoke-ContainerPython" in powershell
+    assert "payload=sys.argv.pop(1)" in powershell
+    assert "base64.b64decode(v).decode()" in powershell
+    assert "$script:ContainerPythonSucceeded" in powershell
 
 
 def test_evidence_separates_eager_loading_and_validates_invalid_records(
