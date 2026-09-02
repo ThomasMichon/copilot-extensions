@@ -826,7 +826,10 @@ async def resume_worktree(
         log.info("resume_worktree %s: %s; returning current state", worktree_id, exc)
         return _session_info(session)
     except ProviderTargetRefreshError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=ProviderTargetRefreshError.public_message,
+        ) from exc
     except Exception as exc:
         # Resume failed (e.g. ACP session gone). Fall back to a fresh session
         # in the same worktree so the worktree remains usable.

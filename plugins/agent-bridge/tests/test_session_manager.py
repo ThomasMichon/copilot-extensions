@@ -2331,7 +2331,10 @@ class TestResumeSession:
             "_try_reattach_live_host",
             AsyncMock(return_value=False),
         ):
-            with pytest.raises(RuntimeError, match="provider unavailable"):
+            with pytest.raises(
+                RuntimeError,
+                match="Current provider target could not be resolved",
+            ):
                 await session_manager.resume_session(session.session_id)
 
         assert session.status == SessionStatus.STOPPED

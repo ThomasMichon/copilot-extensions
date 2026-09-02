@@ -449,6 +449,11 @@ class DaemonDrainingError(Exception):
 class ProviderTargetRefreshError(RuntimeError):
     """A persisted provider target cannot be refreshed safely."""
 
+    public_message = (
+        "Provider target could not be refreshed safely; retry after repairing "
+        "provider configuration or recreate the session."
+    )
+
 
 def _workspace_key(
     agent_name: str | None,
@@ -931,8 +936,8 @@ class SessionManager:
         overrides = persisted_venue.get(_REQUEST_OVERRIDES_KEY)
         if not isinstance(overrides, dict):
             raise ProviderTargetRefreshError(
-                f"Session {session.session_id} predates provider override "
-                "provenance; recreate it to adopt the current provider target"
+                "Provider target predates override provenance; recreate the "
+                "session to adopt the current provider configuration"
             )
         request_env = overrides.get("env")
         request_copilot_args = overrides.get("copilot_args")
@@ -940,15 +945,21 @@ class SessionManager:
             request_copilot_args, list
         ):
             raise ProviderTargetRefreshError(
-                f"Session {session.session_id} has invalid provider override "
-                "provenance; recreate it to adopt the current provider target"
+                "Provider target has invalid override provenance; recreate the "
+                "session to adopt the current provider configuration"
             )
         try:
             resolved = await self._resolver.resolve_async(session.agent_name)
         except Exception as exc:
+            log.warning(
+                "Could not refresh provider target for session %s (%s)",
+                session.session_id,
+                session.agent_name,
+                exc_info=True,
+            )
             raise ProviderTargetRefreshError(
-                f"Could not refresh provider target for session "
-                f"{session.session_id}: {exc}"
+                "Current provider target could not be resolved; repair provider "
+                "configuration and retry"
             ) from exc
         refreshed = replace(
             resolved,

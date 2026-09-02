@@ -461,6 +461,24 @@ class TestSessionRoutes:
         resp = client.post("/api/v1/sessions/nonexistent/resume")
         assert resp.status_code == 404
 
+    def test_resume_provider_refresh_failure_returns_safe_502(
+        self, client, app,
+    ) -> None:
+        from agent_bridge.session_manager import ProviderTargetRefreshError
+
+        mgr = app.state.session_manager
+        with patch.object(
+            mgr,
+            "resume_session",
+            AsyncMock(
+                side_effect=ProviderTargetRefreshError("internal provider detail")
+            ),
+        ):
+            resp = client.post("/api/v1/sessions/session-1/resume")
+
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == ProviderTargetRefreshError.public_message
+
     def test_resync_nonexistent(self, client) -> None:
         resp = client.post("/api/v1/sessions/nonexistent/resync")
         assert resp.status_code == 404
@@ -1202,7 +1220,7 @@ class TestWorktreeRoutes:
         resp = client.post(f"/api/v1/worktrees/{wt_id}/resume")
 
         assert resp.status_code == 502
-        assert resp.json()["detail"] == "provider unavailable"
+        assert resp.json()["detail"] == ProviderTargetRefreshError.public_message
         mgr.start_session.assert_not_awaited()
 
     # -- Worktree-scoped session reading (proxied to agent-worktrees) ------
