@@ -15723,25 +15723,32 @@ def _related_config_source_anchors(base_anchor: str) -> list[str]:
     reuses the state-root resolver to locate the knowledge checkout). Fail-safe ->
     ``[base_anchor]``.
     """
+    from . import related as _related_mod
+
     try:
         srcs = state_root_mod.config_source_anchors(
             cfg.load_config(include_control_plane_related_pr=False),
             base_anchor=base_anchor,
         )
-        anchors = [s.anchor for s in srcs if s.anchor]
+        anchors = [
+            _related_mod.config_contribution_anchor(s.anchor, s.origin)
+            for s in srcs
+            if s.anchor
+        ]
     except Exception:
         anchors = []
     if not anchors:
-        anchors = [base_anchor]
+        anchors = [_related_mod.config_contribution_anchor(base_anchor, "harness")]
     elif os.path.abspath(anchors[0]) != os.path.abspath(base_anchor):
-        anchors.insert(0, base_anchor)
+        anchors.insert(
+            0, _related_mod.config_contribution_anchor(base_anchor, "harness")
+        )
     # Installed-plugin config-graft: plugins that ship
     # ``.agent-worktrees/related.yaml`` are the LOWEST-precedence layer, so they
     # go ahead of the base/knowledge anchors (later anchors overlay earlier ones).
     # Merely installing e.g. ``example-web-harness`` then contributes the example-web
     # CodeSpace locus, which any base/knowledge/user entry can still override.
     try:
-        from . import related as _related_mod
         existing = {_related_mod._anchor_key(a) for a in anchors}
         plugin_anchors = [
             p
@@ -16440,9 +16447,10 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 "related": [
                     {
                         "name": e.name, "role": e.role, "summary": e.summary,
-                        "doc": e.doc, "delegate": e.delegate,
+                        "doc": related.public_doc(e), "delegate": e.delegate,
                         "ownership": related.effective_ownership(e),
                         "owner": e.owner,
+                        "provenance": related.entry_provenance(e),
                         "locus": {
                             "preferred": e.locus.preferred,
                             "machines": e.locus.machines,
@@ -16481,10 +16489,11 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         if json_out:
             _json_output({
                 "name": e.name, "role": e.role, "summary": e.summary,
-                "doc": e.doc, "delegate": e.delegate,
+                "doc": related.public_doc(e), "delegate": e.delegate,
                 "ownership": related.effective_ownership(e),
                 "ownership_explicit": e.ownership,
                 "owner": e.owner,
+                "provenance": related.entry_provenance(e),
                 "locus": {
                     "preferred": e.locus.preferred,
                     "machines": e.locus.machines,
@@ -16510,7 +16519,17 @@ def cmd_related_dispatch(argv: list[str]) -> int:
               + (f"  codespace={e.locus.codespace}" if e.locus.codespace else "")
               + (f"  container={e.locus.container}" if e.locus.container else ""))
         print(f"  delegate: {e.delegate or '-'}")
-        print(f"  doc:      {related.doc_abs_path(anchor, e)}")
+        provenance = related.entry_provenance(e)
+        source = provenance["layer"]
+        if provenance.get("plugin"):
+            source += f" ({provenance['plugin']})"
+        print(f"  provenance: {source}")
+        doc = (
+            related.public_doc(e)
+            if provenance["layer"] == "plugin"
+            else str(related.doc_abs_path(anchor, e))
+        )
+        print(f"  doc:      {doc}")
         if reg is None:
             output.warn(f"'{name}' is not in the repos registry "
                         f"(add it with: repos add {name} <path> --class <class>)")
