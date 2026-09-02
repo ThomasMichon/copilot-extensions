@@ -213,6 +213,20 @@ def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     assert "--project 'demoproj'" in content
 
 
+def test_posix_binstub_launch_trace_uses_portable_date(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
+
+    specs = inst._project_binstub_specs("demoproj", repo_dir=PLUGIN)
+
+    assert len(specs) == 1
+    content = specs[0][1]
+    assert "picker-launches.jsonl" in content
+    assert "$RANDOM-$(date +%s)" in content
+    assert "date -u +%Y-%m-%dT%H:%M:%SZ" in content
+    assert "%N" not in content
+
+
 def _reg(monkeypatch, names: list[str]) -> None:
     monkeypatch.setattr(
         inst, "read_projects_registry",

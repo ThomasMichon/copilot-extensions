@@ -737,8 +737,8 @@ def _project_binstub_specs(
     sh_content = (
         "#!/usr/bin/env bash\n"
         "export PYTHONUTF8=1\n"
-        f"export AGENT_WORKTREES_LAUNCH_ID={shlex.quote(project)}-$$-$(date +%s%N)\n"
-        "export AGENT_WORKTREES_BINSTUB_STARTED=\"$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)\"\n"
+        f"export AGENT_WORKTREES_LAUNCH_ID={shlex.quote(project)}-$$-$RANDOM-$(date +%s)\n"
+        "export AGENT_WORKTREES_BINSTUB_STARTED=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\n"
         "export AGENT_WORKTREES_LAUNCH_TRACE=\"$HOME/.agent-worktrees/logs/picker-launches.jsonl\"\n"
         "mkdir -p \"$(dirname \"$AGENT_WORKTREES_LAUNCH_TRACE\")\" 2>/dev/null || true\n"
         f"printf '%s\\n' '{{\"event\":\"binstub_start\",\"timestamp\":\"'\"$AGENT_WORKTREES_BINSTUB_STARTED\"'\",\"launch_id\":\"'\"$AGENT_WORKTREES_LAUNCH_ID\"'\",\"project\":\"{project}\"}}' >>\"$AGENT_WORKTREES_LAUNCH_TRACE\" 2>/dev/null || true\n"
