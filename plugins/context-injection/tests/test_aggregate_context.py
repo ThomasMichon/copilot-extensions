@@ -1101,6 +1101,253 @@ def test_oversized_context_spills_to_session_state(
     assert len(pointer.encode("utf-8")) < 512
 
 
+def test_spilled_context_retains_bounded_catalog_and_critical_kernel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    catalog = (
+        "[context-contributor: commands@example/command-catalog]\n"
+        "## session command catalog\n\n"
+        "```json\n"
+        + json.dumps(
+            {
+                "catalogs": [
+                    {
+                        "plugin": "example",
+                        "commands": [
+                            {
+                                "argv": ["/exact/payload/bin/example"],
+                                "purpose": "Example command",
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        + "\n```"
+    )
+    routing = (
+        "[context-contributor: routing@example/aggregate-context]\n"
+        "Checkout: repo=example; id=wt-1; role=harness; path=/repo.\n"
+        "State: status=ready; path=/knowledge. "
+        "Pair: role=knowledge; status=active; path=/knowledge.\n"
+        "Related: primary=example; important=remote(role=product,"
+        "locus=codespace,delegate=agent-bridge)."
+    )
+    policy = (
+        "[context-contributor: policy@example/publication-policy]\n"
+        "Preserve publication boundaries. Read: `/payload/policy.md`"
+    )
+    deferred = [
+        (
+            300 + index,
+            f"deferred-{index}",
+            "[context-contributor: "
+            f"deferred-{index}@example/details]\n"
+            + ("detail " * 300)
+            + f"Read: `/payload/guide-{index}.md`",
+        )
+        for index in range(8)
+    ]
+    fragments = [
+        (100, "routing@example", routing),
+        (200, "command-catalogs", catalog),
+        (250, "policy@example", policy),
+        *deferred,
+    ]
+    context = "\n\n".join(fragment for _, _, fragment in sorted(fragments))
+
+    kernel = AGGREGATE_CONTEXT._spill_context(
+        "session-1",
+        str(tmp_path / "repo"),
+        context,
+        fragments,
+    )
+
+    assert kernel is not None
+    assert len(kernel.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
+    assert catalog in kernel
+    assert routing in kernel
+    assert "/payload/policy.md" in kernel
+    assert "[context-contributor: deferred-7@example/details]" in kernel
+    assert context in next(
+        (tmp_path / ".copilot" / "session-state" / "session-1" / "files").iterdir()
+    ).read_text(encoding="utf-8")
+
+
+def test_spill_kernel_is_deterministic_and_never_splits_large_catalog() -> None:
+    pointer = "[context-injection] spill at `/session/context.md`."
+    oversized_catalog = AGGREGATE_CONTEXT._catalog_fragment(
+        [
+            {
+                "source": "commands@example",
+                "plugin": "commands",
+                "payload": {"provenance": "payload-local"},
+                "commands": [
+                    {
+                        "id": "commands",
+                        "argv": ["/payload/bin/commands"],
+                        "purpose": "X"
+                        * AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES,
+                    }
+                ],
+            }
+        ]
+    )
+    fragment = (
+        "[context-contributor: routing@example/context]\n"
+        "Checkout: repo=example; path=/repo."
+    )
+    fragments = [
+        (200, "command-catalogs", oversized_catalog),
+        (100, "routing@example", fragment),
+    ]
+
+    first = AGGREGATE_CONTEXT._render_spill_kernel(pointer, fragments)
+    second = AGGREGATE_CONTEXT._render_spill_kernel(
+        pointer,
+        list(reversed(fragments)),
+    )
+
+    assert first == second
+    assert len(first.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
+    assert oversized_catalog not in first
+    assert "[context-contributor: command-catalogs/aggregate]" in first
+    assert "routing@example/context" in first
+
+
+def test_spill_kernel_extreme_budget_keeps_priority_and_roster_witness() -> None:
+    pointer = "[context-injection] spill at `/session/context.md`."
+    fragments = [
+        (
+            index,
+            f"plugin-{index}@example",
+            f"[context-contributor: plugin-{index}@example/context]\n"
+            + ("critical " if index == 0 else "detail ")
+            + ("X" * 240),
+        )
+        for index in range(60)
+    ]
+
+    kernel = AGGREGATE_CONTEXT._render_spill_kernel(pointer, fragments)
+
+    assert len(kernel.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
+    assert "## Critical contributor fragments" in kernel
+    assert "[context-contributor: plugin-0@example/context]" in kernel
+    assert "## Deferred roster continuation" in kernel
+    assert "roster-sha256=" in kernel
+    assert "remaining=" in kernel
+
+
+def test_spill_kernel_trades_index_entries_for_priority_fragment() -> None:
+    pointer = "[context-injection] spill at `/session/context.md`."
+    fragments = [
+        (
+            index,
+            f"plugin-{index}@example",
+            f"[context-contributor: plugin-{index}@example/context]\n"
+            + ("critical " if index == 0 else "detail ")
+            + ("X" * 1_000),
+        )
+        for index in range(36)
+    ]
+
+    kernel = AGGREGATE_CONTEXT._render_spill_kernel(pointer, fragments)
+
+    assert len(kernel.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
+    assert "## Critical contributor fragments" in kernel
+    assert "[context-contributor: plugin-0@example/context]" in kernel
+
+
+def test_spill_kernel_defers_large_catalog_to_keep_priority_fragment() -> None:
+    pointer = "[context-injection] spill at `/session/context.md`."
+    large_catalog = AGGREGATE_CONTEXT._catalog_fragment(
+        [
+            {
+                "source": "commands@example",
+                "plugin": "commands",
+                "payload": {"provenance": "payload-local"},
+                "commands": [
+                    {
+                        "id": "commands",
+                        "argv": ["/payload/bin/commands"],
+                        "purpose": "X" * 7_000,
+                    }
+                ],
+            }
+        ]
+    )
+    critical = (
+        "[context-contributor: routing@example/context]\n"
+        "Checkout: repo=example; path=/repo.\n"
+        + ("Y" * 500)
+    )
+
+    kernel = AGGREGATE_CONTEXT._render_spill_kernel(
+        pointer,
+        [
+            (0, "routing@example", critical),
+            (100, "command-catalogs", large_catalog),
+        ],
+    )
+
+    assert len(kernel.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
+    assert critical in kernel
+    assert large_catalog not in kernel
+    assert "[context-contributor: command-catalogs/aggregate]" in kernel
+
+
+def test_spill_kernel_uses_actual_cost_for_large_priority_fragment() -> None:
+    pointer = "[context-injection] spill at `/session/context.md`."
+    priority = (
+        "[context-contributor: priority@example/context]\n"
+        + ("P" * 6_900)
+    )
+    fragments = [
+        (0, "priority@example", priority),
+        *[
+            (
+                index + 1,
+                f"detail-{index}@example",
+                f"[context-contributor: detail-{index}@example/context]\n"
+                + ("D" * 250),
+            )
+            for index in range(20)
+        ],
+    ]
+
+    kernel = AGGREGATE_CONTEXT._render_spill_kernel(pointer, fragments)
+
+    assert len(kernel.encode("utf-8")) <= AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES
+    assert priority in kernel
+    assert "## Deferred roster continuation" in kernel
+
+
+def test_spill_kernel_fails_closed_when_priority_fragment_cannot_fit() -> None:
+    pointer = "[context-injection] spill at `/session/context.md`."
+    priority = (
+        "[context-contributor: priority@example/context]\n"
+        + ("P" * AGGREGATE_CONTEXT.MAX_INLINE_CONTEXT_BYTES)
+    )
+    lower_priority = (
+        "[context-contributor: detail@example/context]\n"
+        "This lower-priority fragment would fit."
+    )
+
+    kernel = AGGREGATE_CONTEXT._render_spill_kernel(
+        pointer,
+        [
+            (0, "priority@example", priority),
+            (100, "detail@example", lower_priority),
+        ],
+    )
+
+    assert kernel == pointer
+    assert lower_priority not in kernel
+
+
 def test_spilled_context_isolated_by_session_and_canonical_cwd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -48,10 +48,26 @@ function Get-LaunchKey([string]$InputPayload, [string]$Version) {
             [IO.Path]::GetFullPath($Cwd)
         }
         if (-not $CanonicalCwd) { return '' }
-        $TimestampText = [Convert]::ToString(
-            $Timestamp,
-            [Globalization.CultureInfo]::InvariantCulture
-        )
+        $TimestampText = if (
+            $Timestamp -is [double] -or
+            $Timestamp -is [single] -or
+            $Timestamp -is [decimal]
+        ) {
+            $Value = [double]$Timestamp
+            if ([double]::IsNaN($Value) -or [double]::IsInfinity($Value)) {
+                return ''
+            }
+            $Bits = [BitConverter]::DoubleToInt64Bits($Value)
+            'f64:' + $Bits.ToString(
+                'x16',
+                [Globalization.CultureInfo]::InvariantCulture
+            )
+        } else {
+            [Convert]::ToString(
+                $Timestamp,
+                [Globalization.CultureInfo]::InvariantCulture
+            )
+        }
         if (-not $TimestampText) { return '' }
         $Identity = @(
             $SessionId, $CanonicalCwd, $Source, $Version, $TimestampText

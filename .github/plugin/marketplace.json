@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.5-dev731"
+    "version": "1.7.5-dev732"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev707",
+      "version": "1.5.3-dev708",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -132,7 +132,7 @@
     {
       "name": "context-injection",
       "description": "Deterministic session-start context aggregation for Copilot CLI plugins. Resolves the active plugin stack, runs declared pure context contributors, and emits one final additionalContext value while affected hosts retain only the last hook result.",
-      "version": "0.1.0-dev17",
+      "version": "0.1.0-dev18",
       "source": "plugins/context-injection"
     }
   ]

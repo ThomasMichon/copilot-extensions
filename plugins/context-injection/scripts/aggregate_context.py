@@ -40,6 +40,9 @@ MAX_WORKERS = 16
 PROCESS_START_GRACE_SECONDS = 5 if os.name == "nt" else 0
 COMMAND_CATALOG_BUDGET_BYTES = 32 * 1024
 MAX_STACK_FINGERPRINT_FILE_BYTES = 1024 * 1024
+SPILL_INDEX_ENTRY_BYTES = 320
+SPILL_INDEX_SUMMARY_BYTES = 160
+SPILL_INDEX_REFERENCE_COUNT = 2
 ADOPTION_SCHEMA = "copilot-extensions.context-injection"
 ADOPTION_CONFIG = Path(".context-injection/config.yaml")
 MAX_ADOPTION_CONFIG_BYTES = 4096
@@ -96,10 +99,237 @@ def _emit_empty(message: str | None = None) -> int:
     return 0
 
 
+def _bounded_text(value: str, max_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    kept = encoded[: max(0, max_bytes - 3)].decode(
+        "utf-8",
+        errors="ignore",
+    ).rstrip()
+    return kept + "..."
+
+
+def _fragment_identity(fragment: str, source: str) -> str:
+    lines = fragment.splitlines()
+    return (
+        lines[0].strip()
+        if lines and lines[0].startswith("[context-contributor: ")
+        else f"[context-contributor: {source}/aggregate]"
+    )
+
+
+def _fragment_index_entry(fragment: str, source: str) -> str:
+    lines = fragment.splitlines()
+    header = _fragment_identity(fragment, source)
+    body_lines = [
+        line.strip()
+        for line in lines[1:]
+        if line.strip()
+        and not line.startswith("[owner:")
+        and not line.startswith("[producer-owner:")
+    ]
+    summary = _bounded_text(
+        body_lines[0] if body_lines else "Complete owned context is deferred.",
+        SPILL_INDEX_SUMMARY_BYTES,
+    )
+    references = []
+    explicit_references = []
+    for line in lines[1:]:
+        _marker, separator, reference = line.partition("Read:")
+        if separator:
+            explicit_references.append(reference.strip())
+    path_references = re.findall(
+        r"(?:[A-Za-z]:\\[^\r\n`]+|(?<![A-Za-z0-9])/[^\s`\r\n]+)",
+        fragment,
+    )
+    quoted_references = re.findall(r"`([^`\r\n]+)`", fragment)
+    for reference in [
+        *explicit_references,
+        *path_references,
+        *quoted_references,
+    ]:
+        reference = reference.split("; ", 1)[0].rstrip(".,;:")
+        if reference not in references:
+            references.append(reference)
+        if len(references) >= SPILL_INDEX_REFERENCE_COUNT:
+            break
+    entry = f"- {header}"
+    if references:
+        entry += " refs=" + ", ".join(f"`{reference}`" for reference in references)
+    remaining = SPILL_INDEX_ENTRY_BYTES - len(entry.encode("utf-8"))
+    if remaining > len(" summary=...".encode("utf-8")):
+        entry += " summary=" + _bounded_text(
+            summary,
+            remaining - len(" summary=".encode("utf-8")),
+        )
+    return _bounded_text(entry, SPILL_INDEX_ENTRY_BYTES)
+
+
+def _render_spill_kernel(
+    pointer: str,
+    fragments: list[tuple[int, str, str]],
+) -> str:
+    ordered = sorted(fragments)
+    catalogs = [
+        item
+        for item in ordered
+        for _, source, _fragment in (item,)
+        if source == "command-catalogs"
+    ]
+    candidates = [
+        item
+        for item in ordered
+        for _, source, _fragment in (item,)
+        if source != "command-catalogs"
+    ]
+    intro = (
+        f"{pointer}\n\n"
+        "[context-injection] The bounded critical kernel below is authoritative "
+        "for first-turn decisions. Read the complete spill before any action "
+        "that requires deferred details."
+    )
+
+    selected: list[tuple[int, str, str]] = []
+
+    def render(
+        full_fragments: list[tuple[int, str, str]],
+        deferred_fragments: list[tuple[int, str, str]],
+        *,
+        catalog_fragments: list[tuple[int, str, str]] | None = None,
+        footer: str = "",
+    ) -> str:
+        sections = [intro]
+        rendered_catalogs = catalogs if catalog_fragments is None else catalog_fragments
+        if rendered_catalogs:
+            sections.extend(
+                (
+                    "## Exact session command catalogs",
+                    *(fragment for _, _, fragment in rendered_catalogs),
+                )
+            )
+        if full_fragments:
+            sections.extend(
+                (
+                    "## Critical contributor fragments",
+                    *(fragment for _, _, fragment in full_fragments),
+                )
+            )
+        if deferred_fragments:
+            sections.extend(
+                (
+                    "## Deferred contributor index",
+                    "\n".join(
+                        _fragment_index_entry(fragment, source)
+                        for _, source, fragment in deferred_fragments
+                    ),
+                )
+            )
+        if footer:
+            sections.extend(("## Deferred roster continuation", footer))
+        return "\n\n".join(sections)
+
+    def render_fallback() -> str:
+        fitting_catalogs: list[tuple[int, str, str]] = []
+        selected_fragments: list[tuple[int, str, str]] = []
+        all_items = [*catalogs, *candidates]
+
+        def deferred_items(
+            catalog_items: list[tuple[int, str, str]],
+            full_items: list[tuple[int, str, str]],
+        ) -> list[tuple[int, str, str]]:
+            retained = [*catalog_items, *full_items]
+            return [item for item in all_items if item not in retained]
+
+        def roster_footer(
+            deferred: list[tuple[int, str, str]],
+            indexed_count: int,
+        ) -> str:
+            identities = "\n".join(
+                _fragment_identity(fragment, source)
+                for _, source, fragment in deferred
+            )
+            digest = hashlib.sha256(identities.encode("utf-8")).hexdigest()[:16]
+            return (
+                f"indexed={indexed_count}; total={len(deferred)}; "
+                f"remaining={len(deferred) - indexed_count}; "
+                f"roster-sha256={digest}. "
+                "The complete attributable roster is in the spill."
+            )
+
+        admission_order = [
+            *candidates[:1],
+            *catalogs,
+        ]
+        for item in admission_order:
+            if item[1] == "command-catalogs":
+                proposed_catalogs = [*fitting_catalogs, item]
+                proposed_fragments = selected_fragments
+            else:
+                proposed_catalogs = fitting_catalogs
+                proposed_fragments = [*selected_fragments, item]
+            deferred = deferred_items(proposed_catalogs, proposed_fragments)
+            rendered = render(
+                proposed_fragments,
+                [],
+                catalog_fragments=proposed_catalogs,
+                footer=roster_footer(deferred, 0) if deferred else "",
+            )
+            if len(rendered.encode("utf-8")) <= MAX_INLINE_CONTEXT_BYTES:
+                fitting_catalogs = proposed_catalogs
+                selected_fragments = proposed_fragments
+
+        if candidates and candidates[0] not in selected_fragments:
+            return pointer
+
+        deferred = deferred_items(fitting_catalogs, selected_fragments)
+        indexed: list[tuple[int, str, str]] = []
+        for fragment in deferred:
+            proposed = [*indexed, fragment]
+            remaining = len(deferred) - len(proposed)
+            rendered = render(
+                selected_fragments,
+                proposed,
+                catalog_fragments=fitting_catalogs,
+                footer=roster_footer(deferred, len(proposed)) if remaining else "",
+            )
+            if len(rendered.encode("utf-8")) <= MAX_INLINE_CONTEXT_BYTES:
+                indexed = proposed
+        remaining = len(deferred) - len(indexed)
+        return render(
+            selected_fragments,
+            indexed,
+            catalog_fragments=fitting_catalogs,
+            footer=roster_footer(deferred, len(indexed)) if remaining else "",
+        )
+
+    base = render(selected, candidates)
+    if len(base.encode("utf-8")) > MAX_INLINE_CONTEXT_BYTES:
+        return render_fallback()
+
+    for fragment in candidates:
+        proposed = [*selected, fragment]
+        deferred = [
+            candidate
+            for candidate in candidates
+            if candidate not in proposed
+        ]
+        rendered = render(proposed, deferred)
+        if len(rendered.encode("utf-8")) <= MAX_INLINE_CONTEXT_BYTES:
+            selected = proposed
+    if candidates and candidates[0] not in selected:
+        return render_fallback()
+    return render(
+        selected,
+        [fragment for fragment in candidates if fragment not in selected],
+    )
+
+
 def _spill_context(
     session_id: str,
     canonical_cwd: str,
     context: str,
+    fragments: list[tuple[int, str, str]] | None = None,
 ) -> str | None:
     if not SESSION_IDENTIFIER.fullmatch(session_id):
         return None
@@ -137,12 +367,18 @@ def _spill_context(
             target.chmod(0o600)
     except (OSError, ValueError):
         return None
-    return (
+    pointer = (
         "[context-injection] Before acting, read the complete startup context "
         f"from `{target}`. It contains authoritative policy, routing, readiness, "
         "and exact command catalogs. Until loaded, preserve worktree boundaries "
         "and do not publish or mutate external state."
     )
+    if fragments is None:
+        return pointer
+    kernel = _render_spill_kernel(pointer, fragments)
+    if len(kernel.encode("utf-8")) > MAX_INLINE_CONTEXT_BYTES:
+        return pointer
+    return kernel
 
 
 def _load_json(path: Path) -> dict | None:
@@ -1877,8 +2113,9 @@ def main() -> int:
                 )
             if not fragments:
                 return publish_empty("aggregate contributors emitted no context")
+            ordered_fragments = sorted(fragments)
             context = "\n\n".join(
-                fragment for _, _, fragment in sorted(fragments)
+                fragment for _, _, fragment in ordered_fragments
             )
             if len(context.encode("utf-8")) > MAX_AGGREGATE_BYTES:
                 return publish_empty(
@@ -1886,7 +2123,12 @@ def main() -> int:
                 )
             delivered_context = context
             if len(context.encode("utf-8")) > MAX_INLINE_CONTEXT_BYTES:
-                spilled = _spill_context(session_id, canonical_cwd, context)
+                spilled = _spill_context(
+                    session_id,
+                    canonical_cwd,
+                    context,
+                    ordered_fragments,
+                )
                 if spilled is not None:
                     delivered_context = spilled
             output = json.dumps(
