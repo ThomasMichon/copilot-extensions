@@ -37,26 +37,6 @@ $policyPresent = (
     (Test-Path -LiteralPath $policy) -or
     $null -ne (Get-Item -LiteralPath $policy -Force -ErrorAction SilentlyContinue)
 )
-$provenanceBoundary = (
-    ($payloadRoot -replace '\\', '/') -match
-        '/\.copilot/installed-plugins/[^/]+/[^/]+/?$'
-)
-if (-not $provenanceBoundary) {
-    $probeRoot = $payloadRoot
-    while ($probeRoot) {
-        if (
-            Test-Path -LiteralPath (
-                Join-Path $probeRoot '.github\plugin\marketplace.json'
-            ) -PathType Leaf
-        ) {
-            $provenanceBoundary = $true
-            break
-        }
-        $parent = Split-Path -Parent $probeRoot
-        if (-not $parent -or $parent -eq $probeRoot) { break }
-        $probeRoot = $parent
-    }
-}
 $hostExe = (Get-Process -Id $PID).Path
 if (-not $hostExe) {
     [Console]::Error.WriteLine('[agent-machines] PowerShell host executable is unavailable.')
@@ -101,8 +81,13 @@ if (-not $hostExe) {
     if (
         -not $env:COPILOT_EXTENSIONS_CONTEXT -and
         -not $policyPresent -and
-        -not $provenanceBoundary -and
-        $resolutionStatus -ceq 'provenance-blocked'
+        $resolutionStatus -ceq 'provenance-blocked' -and
+        [string]$resolution.policy.state -ceq 'missing' -and
+        $resolution.policy.enabled -is [bool] -and
+        -not $resolution.policy.enabled -and
+        [string]$resolution.policy.reason -ceq 'policy-default-false' -and
+        $null -eq $resolution.legacy.tombstone -and
+        [string]$resolution.legacy.disposition -ceq 'active'
     ) {
         $simplePolicyLegacy = $true
     }
@@ -111,7 +96,9 @@ if (-not $hostExe) {
         $resolutionStatus -ceq 'provenance-blocked' -and
         [string]$resolution.policy.state -ceq 'valid' -and
         $resolution.policy.enabled -is [bool] -and
-        -not $resolution.policy.enabled
+        -not $resolution.policy.enabled -and
+        $null -eq $resolution.legacy.tombstone -and
+        [string]$resolution.legacy.disposition -ceq 'active'
     ) {
         try {
             $policyDocument = Get-Content -LiteralPath $policy -Raw |

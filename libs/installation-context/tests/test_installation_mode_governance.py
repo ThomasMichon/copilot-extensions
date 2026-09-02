@@ -534,6 +534,30 @@ def test_python_policy_precedence_and_preactivation_semantics(tmp_path: Path) ->
     assert migration["probeReason"] == "migration-required"
 
 
+def test_missing_policy_allows_unowned_legacy_bootstrap(tmp_path: Path) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    legacy = tmp_path / "legacy"
+    profile.mkdir()
+    legacy.mkdir()
+
+    result = module.probe_legacy_entrypoint(
+        **_api_arguments(
+            layout,
+            profile,
+            legacy,
+            source_descriptor=None,
+            marketplace_key=None,
+        )
+    )
+
+    assert result["status"] == "provenance-blocked"
+    assert result["policy"]["reason"] == "policy-default-false"
+    assert result["allowMutation"] is True
+    assert result["probeReason"] == "legacy-active"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX environment fixture")
 def test_activation_validation_and_policy_invalid_preserve_actual_root(
     tmp_path: Path,

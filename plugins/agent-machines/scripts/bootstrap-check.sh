@@ -99,11 +99,18 @@ PolicyPath="$ProfileHome/.copilot-extensions/installation-mode.json"
   simplePolicyLegacy=0
   if [ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ] &&
      [ "$status" = provenance-blocked ] &&
-     [ "$(jsonValue "$(jsonPath policy state)" || true)" = valid ] &&
-     [ "$(jsonValue "$(jsonPath policy enabled)" || true)" = false ]; then
-    if [ ! -e "$PolicyPath" ] && [ ! -L "$PolicyPath" ]; then
+     [ "$(jsonValue "$(jsonPath policy enabled)" || true)" = false ] &&
+     [ -z "$(jsonValue "$(jsonPath legacy tombstone)" || true)" ] &&
+     [ "$(jsonValue "$(jsonPath legacy disposition)" || true)" = active ]; then
+    policyState="$(jsonValue "$(jsonPath policy state)" || true)"
+    policyReason="$(jsonValue "$(jsonPath policy reason)" || true)"
+    if [ "$policyState" = missing ] &&
+       [ "$policyReason" = policy-default-false ] &&
+       [ -z "$(jsonValue "$(jsonPath legacy tombstone)" || true)" ] &&
+       [ "$(jsonValue "$(jsonPath legacy disposition)" || true)" = active ] &&
+       [ ! -e "$PolicyPath" ] && [ ! -L "$PolicyPath" ]; then
       simplePolicyLegacy=1
-    else
+    elif [ "$policyState" = valid ]; then
       marketplacesPath="$(jsonPath installationMode marketplaces)"
       marketplacesType="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path="$marketplacesPath" "$PolicyPath" 2>/dev/null || true)"
       if [ -z "$marketplacesType" ] ||

@@ -82,14 +82,21 @@ $policyPresent = (
     if (
         -not $env:COPILOT_EXTENSIONS_CONTEXT -and
         [string]$status.status -ceq 'provenance-blocked' -and
-        [string]$status.policy.state -ceq 'valid' -and
         $status.policy.enabled -is [bool] -and
-        -not $status.policy.enabled
+        -not $status.policy.enabled -and
+        $null -eq $status.legacy.tombstone -and
+        [string]$status.legacy.disposition -ceq 'active'
     ) {
-        if (-not $policyPresent) {
+        if (
+            -not $policyPresent -and
+            [string]$status.policy.state -ceq 'missing' -and
+            [string]$status.policy.reason -ceq 'policy-default-false' -and
+            $null -eq $status.legacy.tombstone -and
+            [string]$status.legacy.disposition -ceq 'active'
+        ) {
             $simplePolicyLegacy = $true
         }
-        else {
+        elseif ([string]$status.policy.state -ceq 'valid') {
             try {
                 $policyDocument = Get-Content -LiteralPath $policyPath -Raw |
                     ConvertFrom-Json

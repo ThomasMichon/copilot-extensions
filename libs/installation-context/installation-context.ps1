@@ -4047,6 +4047,18 @@ function Resolve-InstallationStatus(
         elseif ($status -ceq 'ready' -and $reason -ceq 'activation-required') {
             $probeReason = 'namespaced-requested'
         }
+        elseif (
+            $status -ceq 'provenance-blocked' -and
+            [string]$policy.state -ceq 'missing' -and
+            $policy.enabled -is [bool] -and
+            -not $policy.enabled -and
+            [string]$policy.reason -ceq 'policy-default-false' -and
+            $null -eq $legacy.tombstone -and
+            [string]$legacy.disposition -ceq 'active'
+        ) {
+            $allowMutation = $true
+            $probeReason = 'legacy-active'
+        }
         elseif ($status -ceq 'migration-required') {
             $allowMutation = $true
             $probeReason = 'migration-required'
