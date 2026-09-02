@@ -396,15 +396,18 @@ revision allocated from the monotonic `controller_revision` counter. Active
 relations are protected by the bound; older ended history is displaced first.
 An explicit repair may remove a relation, but the nonzero record revision keeps
 retained legacy creation fields from recreating it on the next load.
-Malformed declared controller state is rejected rather than rewritten into an
-apparently unmigrated legacy record.
+Malformed or future declared controller state is preserved opaquely across
+ordinary saves. Valid relations remain readable, but controller mutation is
+refused until an explicit repair can replace the unsupported authority.
 
 New records derive initial controller identity from the creation metadata they
 already receive. A qualified `owner_ref` is preferred, a same-worktree
 `caller_worktree` enriches rather than duplicates it, and `parent_session`
 supplies the exact session or stands alone for a caller outside any worktree.
-Legacy records make the same deterministic derivation on load and persist it on
-their next ordinary save. The legacy fields remain present for older readers.
+Legacy records retain their existing creation fields without deriving or
+persisting controller relations during ordinary reads or saves; explicit
+backfill owns that later migration. The legacy fields remain present for older
+readers.
 An empty controller model emits no new YAML and therefore preserves the legacy
 common-case bytes.
 

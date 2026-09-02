@@ -4333,8 +4333,7 @@ def seal_worktree_identity(record: WorktreeRecord | None) -> dict:
     The per-session hooks (``register-session`` / ``deregister-session``) are
     best-effort: a dispatched or crashed session, a bare-resume cwd, or a
     startup that never fully initialized hooks can leave a worktree with an
-    empty ``sessions`` registry *and* a `
-ull`` title -- so the Picker renders
+    empty ``sessions`` registry *and* a ``null`` title -- so the Picker renders
     it as "(untitled)" with no way to tell what it was for. ``finalize`` calls
     this as a **backstop** so a finalized/pruned worktree always retains a
     human-readable title and its session linkage, independent of when
