@@ -100,6 +100,7 @@ def render_registry_context(
         f"kind={current_kind}; "
         f"status={_clean(getattr(record, 'status', ''), 'unknown')}; "
         f"writable={'true' if checkout_writable else 'false'}; "
+        "locus=local; delegate=none; "
         f"path={_clean(getattr(record, 'worktree_path', cwd))}."
     )
     if mux_session or pane_id:
@@ -122,13 +123,19 @@ def render_registry_context(
             and _clean(sibling.kind, "worktree") == "worktree"
             and _clean(sibling.status, "unknown") in {"active", "ready"}
         )
+        pair_label = (
+            "KnowledgePair"
+            if _clean(sibling.role) == "knowledge"
+            else "Pair"
+        )
         pairing = (
-            " Pair: "
+            f" {pair_label}: "
             f"role={_clean(sibling.role)}; "
             f"id={_clean(sibling.worktree_id)}; "
             f"kind={_clean(sibling.kind)}; "
             f"status={_clean(sibling.status, 'unknown')}; "
             f"writable={'true' if writable else 'false'}; "
+            "locus=local; delegate=none; "
             f"path={_clean(sibling.path)}."
         )
     else:
