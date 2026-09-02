@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass
 
 from .procutil import (
-    run_ssh_capture,
+    run_ssh_command,
     ssh_subprocess_kwargs,
     terminate_ssh_process_tree,
 )
@@ -104,9 +104,10 @@ def _ssh_capture(exe: str, alias: str, remote_cmd: str, timeout: float) -> str:
 
     Raises :class:`TunnelUnavailable` on ssh error / non-zero exit."""
     cmd = [exe, "-o", "BatchMode=yes", alias, remote_cmd]
-    proc = run_ssh_capture(cmd, timeout=timeout)
-    if proc is None:
-        raise TunnelUnavailable(f"ssh to {alias!r} failed or timed out")
+    try:
+        proc = run_ssh_command(cmd, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise TunnelUnavailable(f"ssh to {alias!r} failed: {exc}") from exc
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip() or f"exit {proc.returncode}"
         raise TunnelUnavailable(f"ssh {remote_cmd!r} on {alias!r} failed: {detail}")

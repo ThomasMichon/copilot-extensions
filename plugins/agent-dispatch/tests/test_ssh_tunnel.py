@@ -95,7 +95,7 @@ def test_resolve_peer_no_ssh_binary(monkeypatch):
         ssh_tunnel.resolve_peer_endpoint("peer-host")
 
 
-def test_ssh_capture_uses_shared_capture_helper(monkeypatch):
+def test_ssh_capture_uses_shared_command_helper(monkeypatch):
     captured = {}
 
     def fake_capture(cmd, *, timeout):
@@ -103,13 +103,30 @@ def test_ssh_capture_uses_shared_capture_helper(monkeypatch):
         captured["timeout"] = timeout
         return type("Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
 
-    monkeypatch.setattr(ssh_tunnel, "run_ssh_capture", fake_capture)
+    monkeypatch.setattr(ssh_tunnel, "run_ssh_command", fake_capture)
 
     assert ssh_tunnel._ssh_capture("ssh", "peer", "true", 3) == "ok"
     assert captured == {
         "cmd": ["ssh", "-o", "BatchMode=yes", "peer", "true"],
         "timeout": 3,
     }
+
+
+@pytest.mark.parametrize(
+    ("error", "detail"),
+    [
+        (OSError("missing config"), "missing config"),
+        (ssh_tunnel.subprocess.TimeoutExpired(["ssh"], 3), "timed out after 3 seconds"),
+    ],
+)
+def test_ssh_capture_preserves_launch_failure_detail(monkeypatch, error, detail):
+    def fake_command(_cmd, *, timeout):
+        raise error
+
+    monkeypatch.setattr(ssh_tunnel, "run_ssh_command", fake_command)
+
+    with pytest.raises(ssh_tunnel.TunnelUnavailable, match=detail):
+        ssh_tunnel._ssh_capture("ssh", "peer", "true", 3)
 
 
 # -- open_coordinator_tunnel: readiness + early-exit handling ----------------
