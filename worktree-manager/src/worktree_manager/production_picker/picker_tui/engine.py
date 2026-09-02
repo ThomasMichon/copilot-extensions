@@ -1231,6 +1231,7 @@ class PickerScreen(Widget):
         self.frame = 0
         self.t0 = 0.0
         self.load_delay = {}
+        self._frame_health = None
         # Injected data source (local / SSH / fixture). ``live`` enables the
         # async per-machine loader the source supplies via ``make_loader()``.
         self.src = source
@@ -1489,6 +1490,19 @@ class PickerScreen(Widget):
         self._poll_update_state()
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
+        self.call_after_refresh(self._record_first_refresh)
+
+    def _record_first_refresh(self):
+        if not (
+            os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH")
+            or os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE")
+        ):
+            return
+        from .frame_health import FrameHealthReporter
+
+        self._frame_health = FrameHealthReporter.from_env()
+        if self._frame_health is not None:
+            self._frame_health.start()
 
     def on_unmount(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Kill any
@@ -1509,6 +1523,8 @@ class PickerScreen(Widget):
                 provider_loader.cancel()
             except Exception:
                 pass
+        if self._frame_health is not None:
+            self._frame_health.close(wait=True)
         # D2: tear down any held streaming pivot channel (a ``subscribe`` stream
         # runs until close) so no ``list --stream`` child is orphaned on exit.
         for rt in getattr(self, "_pivot_runtimes", {}).values():
@@ -1605,6 +1621,12 @@ class PickerScreen(Widget):
 
     def _tick(self):
         self.frame += 1
+        if self._frame_health is not None:
+            self._frame_health.tick(
+                frame=self.frame,
+                debug=self.debug,
+                busy=self._busy_label,
+            )
         self.pulse = (self.frame // 5) % 2
         busy = False
         # A background action (_run_bg) drives the footer spinner: keep the tick
