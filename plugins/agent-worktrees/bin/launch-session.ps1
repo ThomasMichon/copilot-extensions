@@ -533,7 +533,11 @@ $script:StageJob = Start-UpdateStage
 # Python resolve writes JSON to stdout and UI (picker) to stderr.
 # Capture stdout only; stderr flows naturally to the terminal.
 
-$resolveArgs = @('-m', 'agent_worktrees', 'resolve') + $CopilotArgs
+$resolveArgs = @('-m', 'agent_worktrees')
+if ($script:LaunchProject) {
+    $resolveArgs += @('--project', $script:LaunchProject)
+}
+$resolveArgs += @('resolve') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 
