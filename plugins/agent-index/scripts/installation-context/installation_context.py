@@ -5545,6 +5545,16 @@ def probe_legacy_entrypoint(**arguments: Any) -> dict[str, Any]:
             if allow_mutation
             else "legacy-owned-by-other-cell"
         )
+    elif (
+        result["status"] == "provenance-blocked"
+        and result["policy"]["state"] == "missing"
+        and result["policy"]["enabled"] is False
+        and result["policy"]["reason"] == "policy-default-false"
+        and legacy["tombstone"] is None
+        and legacy["disposition"] == "active"
+    ):
+        allow_mutation = True
+        probe_reason = "legacy-active"
     elif result["status"] == "ready" and result["actualMode"] == "legacy":
         if legacy["tombstone"] is not None:
             probe_reason = "legacy-owned-by-other-cell"
