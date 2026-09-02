@@ -1096,7 +1096,9 @@ def test_oversized_context_spills_to_session_state(
     assert str(target) in pointer
     assert "private-repository" not in target.name
     assert canonical_cwd not in pointer
-    assert "Before acting, read the complete startup context" in pointer
+    assert "delivery=spill" in pointer
+    assert "complete-context=true" in pointer
+    assert f"path=`{target}`" in pointer
     assert context in target.read_text(encoding="utf-8")
     assert len(pointer.encode("utf-8")) < 512
 

@@ -68,7 +68,8 @@ Aggregates above 8 KB are atomically written to
 The 96-bit SHA-256 prefix keys the spill to the same canonical CWD used by the
 rendezvous without exposing that path in the filename or exceeding common
 Windows path limits. Every hook then returns the same compact critical kernel:
-the absolute spill instruction, exact command catalogs when they fit, complete
+an explicit `delivery=spill` marker with the absolute spill path, exact command
+catalogs when they fit, complete
 highest-priority owner fragments selected by declared order, and a bounded
 exact-excerpt index for deferred contributors. If the complete index cannot fit,
 the kernel retains a count and roster digest while the spill remains the full
