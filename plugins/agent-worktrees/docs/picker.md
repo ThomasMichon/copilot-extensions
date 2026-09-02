@@ -404,15 +404,20 @@ Full key reference: [config-reference.md](config-reference.md).
   — how cross-plugin pivots and actions work.
 ### Frame-health diagnostics
 
+Every generated project binstub appends a `binstub_start` record to
+`~/.agent-worktrees/logs/picker-launches.jsonl`. The Picker appends
+`textual_first_refresh` after Textual completes its first terminal refresh, with
+the same `launch_id`. These always-on records provide historical blank-window
+timings without enabling verbose diagnostics.
+
 Set `AGENT_WORKTREES_PICKER_FRAME_HEALTH=1` before launching a project Picker
-to record event-loop gaps of 500 ms or more in
-`~/.agent-worktrees/logs/picker-frame-health.jsonl`. The timer callback only
-enqueues bounded records; a daemon writer owns filesystem I/O. Override the
-destination by setting the variable to a path, or the threshold with
+to add event-loop gaps of 500 ms or more to the same launch trace. The timer
+callback only enqueues bounded records; a daemon writer owns filesystem I/O.
+Override the diagnostic destination by setting the variable to a path, or the threshold with
 `AGENT_WORKTREES_PICKER_FRAME_GAP_SECONDS`.
 
 Subscribe while reproducing:
 
 ```powershell
-Get-Content "$HOME\.agent-worktrees\logs\picker-frame-health.jsonl" -Wait
+Get-Content "$HOME\.agent-worktrees\logs\picker-launches.jsonl" -Wait
 ```

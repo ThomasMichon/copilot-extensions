@@ -113,6 +113,10 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
     for name in ("demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
         assert "bin\\payload\\agent-worktrees" in content
+        assert "AGENT_WORKTREES_LAUNCH_ID" in content
+        assert "picker-launches.jsonl" in content
+        assert "binstub_start" in content
+        assert "timestamp_local" not in content
         assert "--project" in content
         assert "agent-worktrees.exe" not in content
 
@@ -208,6 +212,20 @@ def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     content = ps1.read_text()
     assert "bin\\payload\\agent-worktrees.ps1" in content
     assert "--project 'demoproj'" in content
+
+
+def test_posix_binstub_launch_trace_uses_portable_date(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
+
+    specs = inst._project_binstub_specs("demoproj", repo_dir=PLUGIN)
+
+    assert len(specs) == 1
+    content = specs[0][1]
+    assert "picker-launches.jsonl" in content
+    assert "$RANDOM-$(date +%s)" in content
+    assert "date -u +%Y-%m-%dT%H:%M:%SZ" in content
+    assert "%N" not in content
 
 
 def _reg(monkeypatch, names: list[str]) -> None:

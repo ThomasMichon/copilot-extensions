@@ -1526,22 +1526,25 @@ class PickerScreen(Widget):
             # Chrome first (#1504): paint built-in tabs + empty lists, then
             # run the roster/pivot/worktree fill off the UI thread.
             self._setup_skeleton()
-            self._finish_mount()
-            # Starting the worker here still lets its first heavy import/scan
-            # contend with Textual's initial layout before the terminal flushes.
-            # Cross the actual first-refresh boundary before doing any setup I/O.
-            self.call_after_refresh(self._start_live_setup)
-            return
-        self.setup()
+        else:
+            self.setup()
         self._finish_mount()
+        # Record the completed first refresh in every Picker mode. Live data
+        # startup also waits for this boundary so it cannot contend with paint.
+        self.call_after_refresh(self._after_first_refresh)
 
-    def _start_live_setup(self):
-        if os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH"):
+    def _after_first_refresh(self):
+        if (
+            os.environ.get("AGENT_WORKTREES_PICKER_FRAME_HEALTH")
+            or os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE")
+        ):
             from .frame_health import FrameHealthReporter
 
             self._frame_health = FrameHealthReporter.from_env()
             if self._frame_health is not None:
                 self._frame_health.start()
+        if not self.live:
+            return
         threading.Thread(
             target=self._setup_live_async, name="picker-setup", daemon=True,
         ).start()
@@ -1827,7 +1830,7 @@ class PickerScreen(Widget):
             except Exception:
                 pass
         if self._frame_health is not None:
-            self._frame_health.close()
+            self._frame_health.close(wait=True)
         # D2: tear down any held streaming pivot channel (a ``subscribe`` stream
         # runs until close) so no ``list --stream`` child is orphaned on exit.
         for rt in getattr(self, "_pivot_runtimes", {}).values():
