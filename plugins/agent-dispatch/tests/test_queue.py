@@ -1304,6 +1304,35 @@ def test_list_empty_status_sequence_matches_all(q):
     assert len(q.list(status=[])) == 6
 
 
+def test_list_applies_label_filter_before_limit(q):
+    matching = q.create("matching", labels=["review"], evaluator_ref="review-lifecycle")
+    for index in range(5):
+        q.create(
+            f"newer unrelated {index}",
+            labels=["other"],
+            evaluator_ref="review-lifecycle",
+        )
+    malformed = q.create(
+        "malformed legacy labels",
+        labels=["other"],
+        evaluator_ref="review-lifecycle",
+    )
+    with sqlite3.connect(q.db_path) as conn:
+        conn.execute("UPDATE tasks SET labels = '' WHERE id = ?", (malformed.id,))
+
+    assert [
+        task.id
+        for task in q.list(
+            repo=TEST_REPO,
+            status=Status.QUEUED,
+            evaluator_ref="review-lifecycle",
+            label="review",
+            limit=1,
+        )
+    ] == [matching.id]
+    assert q.list(label="rev", limit=10) == []
+
+
 def test_sweep_spans_all_states_except_abandoned(q):
     seed = _seed_all_states(q)
     swept = {t.id for t in q.sweep()}
