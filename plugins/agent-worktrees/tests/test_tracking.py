@@ -10,6 +10,7 @@ import yaml
 from agent_worktrees.effort_focus import ActiveEffort
 from agent_worktrees.tracking import (
     ClaimRef,
+    ControllerRelation,
     ResourceClaim,
     SessionEntry,
     WorktreeRecord,
@@ -2003,6 +2004,15 @@ class TestForwardCompatContract:
             resume_count=2, title="t", status="active", completed_at=None,
             interface="cli", origin="user",
             parent_session="sess-1", caller_worktree="anomalous-potato-win-caller",
+            controller_revision=1,
+            controllers=[ControllerRelation(
+                kind="worktree",
+                source="caller-worktree",
+                controller_ref="anomalous-potato-win-caller#sess-1",
+                controller_session_id="sess-1",
+                relation_revision=1,
+                created_at="2026-07-15T00:00:00",
+            )],
             follow_up=True, summary="work left", status_note_at="2026-07-15T01:00:00",
             active_effort=ActiveEffort(
                 path="efforts/active/durable-loop/README.md",
@@ -2017,6 +2027,15 @@ class TestForwardCompatContract:
         assert r.origin == "user"
         assert r.parent_session == "sess-1"
         assert r.caller_worktree == "anomalous-potato-win-caller"
+        assert r.controller_revision == 1
+        assert r.controllers == [ControllerRelation(
+            kind="worktree",
+            source="caller-worktree",
+            controller_ref="anomalous-potato-win-caller#sess-1",
+            controller_session_id="sess-1",
+            relation_revision=1,
+            created_at="2026-07-15T00:00:00",
+        )]
         assert r.follow_up is True
         assert r.summary == "work left"
         assert r.status_note_at

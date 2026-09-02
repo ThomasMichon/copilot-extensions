@@ -458,6 +458,10 @@ def norm(
         # bare-resumed session (cwd=home) in the Active section. Distinct from
         # mux_live; drives the classification-absent fast-pass ACTIVE.
         "session_bound_live": bool(w.get("session_bound_live")),
+        # Controller metadata is passed through for future presentation and
+        # recovery actions. It is deliberately absent from state/active/resume
+        # derivation: control is not binding.
+        "controllers": list(w.get("controllers") or []),
         # #4272 bridge-lock: worktree hosts a live bridge-owned Copilot per the
         # file-first bridge.lock read. Distinct from mux_live/bound_live; drives
         # the classification-absent fast-pass ACTIVE for a bare/bridge session.
