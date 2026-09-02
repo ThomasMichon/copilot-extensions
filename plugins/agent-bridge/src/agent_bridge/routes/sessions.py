@@ -589,6 +589,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             target, agent_name=agent_name, caller_id=req.caller_id,
             mcp_servers=req.mcp_servers,
             copilot_args=req.copilot_args,
+            env_overrides=req.env,
             caller_owner_ref=req.caller_owner_ref,
             model=req.model, effort=req.effort,
             parity_fault=req.parity_fault,
