@@ -1036,6 +1036,8 @@ def test_anchor_pair_rejects_rebound_knowledge_before_resolving(
     assert "old-private" in result.error
     assert "new-private" in result.error
     assert resolved is False
+    assert result.current is not None
+    assert result.current.kind == "worktree"
 
 
 @pytest.mark.parametrize(
