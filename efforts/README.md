@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Reliable Context Handoff Cutover](active/reliable-context-handoff-cutover/README.md) | Draft | #1630 |
 | [Runtime Reconciliation Reliability](active/runtime-reconciliation-reliability/README.md) | Draft | #1591 · #1592 · #1593 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
