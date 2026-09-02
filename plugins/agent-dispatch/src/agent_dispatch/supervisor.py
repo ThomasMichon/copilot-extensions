@@ -488,6 +488,7 @@ def make_headless_spawn(
             route=route,
             repo=None if all_repos else task.get("repo"),
             all_repos=all_repos,
+            explicit_worker_identity=True,
         )
         try:
             result = bridge.spawn_worker(
