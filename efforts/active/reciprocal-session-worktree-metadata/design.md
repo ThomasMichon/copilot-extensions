@@ -141,6 +141,41 @@ bound head but a valid controller can render as **controlled elsewhere**, with
 an action that opens or focuses the controller rather than resuming the child as
 if it had its own session.
 
+### Phase 3 settled record schema
+
+Controller relations live directly on each authoritative child worktree record:
+
+- `controller_revision` is a persisted monotonic counter;
+- `controllers[]` is capped at 32 relations;
+- each relation carries `kind`, `source`, `controller_ref`,
+  `controller_session_id`, `state`, `relation_revision`, `created_at`, and
+  `ended_at`;
+- active relations are retained before ended history, and adding a 33rd active
+  relation fails instead of silently dropping authority;
+- references use the existing ClaimRef grammar and exact session IDs are
+  path-safe validated identifiers;
+- an empty model emits no YAML, while a nonzero revision with an empty relation
+  list records an explicit repair removal and prevents legacy re-derivation.
+
+Creation and legacy migration prefer `owner_ref`, fold an equivalent bare
+`caller_worktree` into that richer identity, and use `parent_session` to add the
+exact controller session. A parent session with no worktree reference remains a
+valid session-only controller. Existing creation fields remain intact for
+compatibility.
+
+Assignment, ending, and explicit repair removal are stable record mutations.
+Their ordinary form locks and reloads the complete authoritative record before
+allocating a revision, so concurrent controller changes serialize without
+rolling back unrelated fields. They advance only the controller revision and
+dirty only the exact old/new controller sessions whose projections changed.
+They never register a bound session, append a head transition, or alter
+occupancy and resume semantics.
+
+Projection removal retains a bounded per-key revision tombstone. A delayed
+upsert with an older controller revision therefore cannot recreate a relation
+that the authoritative record already removed; a later legitimate reassignment
+advances the revision and replaces the tombstone.
+
 ## Write model
 
 One agent-worktrees writer owns projection updates. Lifecycle operations submit
@@ -307,17 +342,16 @@ controller set.
 
 ## Open design decisions
 
-1. Whether controller relations live directly in each child record or in a
-   separate bounded relation journal owned by agent-worktrees.
-2. Whether the scheduled backstop belongs to the existing status-monitor
+1. Whether the scheduled backstop belongs to the existing status-monitor
    lifecycle, a platform timer, or the optional Worktree Manager.
-3. Whether 128 relations is the right default cap and whether it should be
+2. Whether 128 projection relations is the right default cap and whether it
+   should be
    configurable under an operator-owned policy.
-4. Whether a restored projection can bootstrap a missing record only after an
+3. Whether a restored projection can bootstrap a missing record only after an
    explicit operator action, or can merely propose the repair.
-5. Whether the first implementation should project only lifecycle identity, or
+4. Whether the first implementation should project only lifecycle identity, or
    also the bounded focus/handoff-memory entries already held by the worktree.
-6. Whether a remote controller action should open an existing remote session,
+5. Whether a remote controller action should open an existing remote session,
    dispatch a message, or only present a copyable machine/worktree identity when
    interactive focus is unavailable.
 

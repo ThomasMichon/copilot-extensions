@@ -10,7 +10,9 @@
   - reciprocal session projections and controller-aware recovery
 - **Umbrella issue:** [#1635](https://github.com/ThomasMichon/copilot-extensions/issues/1635)
 - **Sub-issues:** [#1643](https://github.com/ThomasMichon/copilot-extensions/issues/1643)
-  (bound-session projection core)
+  (bound-session projection core) ·
+  [#1671](https://github.com/ThomasMichon/copilot-extensions/issues/1671)
+  (controller relations)
 
 ## Guiding Intent
 
@@ -99,7 +101,7 @@ Public-safe transcription of the operator request:
 - [x] Add one atomic writer for the versioned session-state projection.
 - [x] Update bound-session projections at session register/bind/end, head
       transitions, and handoff open/link/conclusion.
-- [ ] Update projections for controller assignment changes in Phase 3.
+- [x] Update projections for controller assignment changes in Phase 3.
 - [x] Preserve fail-open behavior: a projection write failure must not block
       session launch, handoff, source-control, or worktree lifecycle.
 - [ ] Refuse writes into session trees identified as restored/foreign until
@@ -110,13 +112,16 @@ Public-safe transcription of the operator request:
       short-name aliases.
 
 ### Phase 3 - Controller relationships
-- [ ] Add a first-class controller relation distinct from a bound session.
-- [ ] Support one controller session operating multiple worktrees without
+- [x] Add a first-class controller relation distinct from a bound session.
+- [x] Support one controller session operating multiple worktrees without
       registering that session as each worktree's bound head.
-- [ ] Capture controller identity at worktree or PR-vessel creation when the
+- [x] Capture controller identity at worktree or PR-vessel creation when the
       caller is known, including callers that start outside a worktree.
-- [ ] Expose controller and terminal-successor information through
-      machine-readable worktree/session surfaces.
+- [x] Expose normalized controller information through machine-readable
+      worktree/session surfaces without changing head, liveness, occupancy, or
+      resume semantics.
+- [ ] Expose terminal-successor findings after Phase 4 adds bounded,
+      ambiguity-aware controller lineage resolution.
 
 ### Phase 4 - Bounded reconciliation
 - [ ] Extend the resident reconciler with a fixed-budget controller/head pass
@@ -233,3 +238,20 @@ Adopt the authority and schema model in [`design.md`](design.md):
   relation revisions and narrow dirty sets, made stale-writer ordering
   monotonic, preserved overflow evidence, bounded every read, rebuilt corrupt
   same-version projections, and covered non-head handoff predecessors.
+
+### 2026-09-02 - Phase 3 controller relations
+- Added a typed, bounded controller relation set to each authoritative
+  worktree record, with monotonic revisions, active/ended lifecycle, ClaimRef
+  validation, compatibility-preserving legacy derivation, and stable
+  assignment/end/removal primitives.
+- Creation now derives controller identity from its existing owner, caller
+  worktree, and parent-session metadata without registering any controller as a
+  bound session or head.
+- Exact known controller sessions receive narrow `role=controller` sidecar
+  upserts/removals. Bound and controller keys remain independent, so one
+  session can control several child worktrees while remaining bound only to its
+  own worktree.
+- Worktree JSON, `head-session`, scoped `list-sessions`, and Picker
+  normalization now carry controller metadata. Automatic controller/head
+  reconciliation and terminal-successor findings remain unimplemented for
+  Phase 4.

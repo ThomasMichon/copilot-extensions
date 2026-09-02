@@ -360,7 +360,7 @@ session id across projects, and closes the latest open activation interval. It
 does **not** conclude the session or move the head: an exited session remains
 resumable until an explicit lifecycle transition says otherwise.
 
-### Reciprocal bound-session projection
+### Reciprocal bound and controller projections
 
 Each session with a changed bound relation receives a versioned
 `agent-worktrees.json` sidecar in its exact Copilot session-state directory.
@@ -386,6 +386,53 @@ staging lives outside synchronized session directories. The writer reports
 `written`, `current`, `blocked`, or `deferred`; only deferred relations remain
 dirty for a later save retry, while a newer unsupported schema is deliberately
 blocked without repeated write attempts.
+
+Controller identity is a separate, bounded authority on `WorktreeRecord`.
+`controllers[]` holds at most 32 typed relations; each carries a worktree or
+session kind, source (`owner-ref`, `caller-worktree`, `parent-session`, or
+`explicit`), canonical ClaimRef when available, exact controller session ID
+when known, active/ended state, created/ended timestamps, and a per-relation
+revision allocated from the monotonic `controller_revision` counter. Active
+relations are protected by the bound; older ended history is displaced first.
+An explicit repair may remove a relation, but the nonzero record revision keeps
+retained legacy creation fields from recreating it on the next load.
+Malformed or future declared controller state is preserved opaquely across
+ordinary saves. Valid relations remain readable, but controller mutation is
+refused until an explicit repair can replace the unsupported authority.
+
+New records derive initial controller identity from the creation metadata they
+already receive. A qualified `owner_ref` is preferred, a same-worktree
+`caller_worktree` enriches rather than duplicates it, and `parent_session`
+supplies the exact session or stands alone for a caller outside any worktree.
+Legacy records retain their existing creation fields without deriving or
+persisting controller relations during ordinary reads or saves; explicit
+backfill owns that later migration. The legacy fields remain present for older
+readers.
+An empty controller model emits no new YAML and therefore preserves the legacy
+common-case bytes.
+
+When an exact controller session is known, only that session is marked dirty.
+After the child record persists, the writer upserts a `role=controller`
+relation into that exact session's sidecar, or retracts the relation after an
+explicit authoritative removal. The projection key includes the role, so one
+session can be bound to its own worktree while controlling several child
+worktrees without either relation replacing another. Ending a controller
+projects terminal state rather than changing binding. Removal leaves a bounded
+per-key revision tombstone in the sidecar, preventing a delayed older upsert
+from resurrecting the relation.
+
+Controller mutation helpers acquire the worktree record lock, reload the full
+authoritative record, allocate the next revision, and save that fresh object.
+This serializes concurrent controller changes without rolling back unrelated
+newer worktree state. The `save=False` form exists only for callers that already
+hold the same record lock through the final save.
+
+Controller metadata is additive on worktree JSON rows, `head-session`, and a
+worktree-scoped `list-sessions` envelope. Picker normalization passes it through
+but does not consult it for ACTIVE classification, resume targeting, occupancy,
+liveness, or the asserted head. Automatic terminal-successor resolution and
+controller-driven repair remain Phase 4 work; Phase 3 records and projects the
+explicit relation only.
 
 Beyond the head bookkeeping, `register_session` also **re-seeds this session's
 mux status-bar updater** (`_spawn_status_updater` → a detached
