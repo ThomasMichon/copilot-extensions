@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 # context-handoff-cutover/scenario.sh -- Tier-P (programmatic) F1 scenario.
 #
-# Proves the handoff-cutover ROBUSTNESS contract (GitHub issue #853) on a fresh
-# box: the live-cutover successor must NOT be able to hang indefinitely on its
-# first action. The fix makes the task-backed cutover seed BASH-FIRST -- the
-# successor's first action is a core `bash` command chain, not the
-# `consume_handoff` extension tool -- so a startup extension-reload race cannot
-# orphan it. This scenario asserts, on a freshly installed suite:
-#   (3) the shipped `cutover-seed.mjs` builds a bash-first task seed (the fix),
-#       and file/unknown-pane handoffs fall back to the tool-based seed;
-#   (4) the three CLI verbs that bash-first seed relies on actually exist;
+# Proves the compact, prompt-first handoff contract on a fresh box:
+#   (3) the shipped seed is bounded, three-part, fidelity-preserving, and records
+#       token/round-trip budgets without inlining lifecycle orchestration;
+#   (4) the consume, binding, and retire CLI verbs are real;
 #   (5) [best-effort, needs tmux] the retire verb really retires a live pane.
 #
 # Name-free / public F1. Env: CR_MARKETPLACE_REPO / CR_MARKETPLACE_NAME + the
@@ -70,6 +65,14 @@ _handoff_cli() {
     local p="$INSTALLED_ROOT/context-handoff/extensions/context-handoff/handoff-cli.mjs"
     [ -f "$p" ] && { printf '%s' "$p"; return 0; }
     p="$(ls "$HOME"/.copilot/installed-plugins/*/context-handoff/extensions/context-handoff/handoff-cli.mjs 2>/dev/null | head -n1)"
+    [ -n "$p" ] && [ -f "$p" ] && { printf '%s' "$p"; return 0; }
+    return 1
+}
+
+_handoff_core() {
+    local p="$INSTALLED_ROOT/context-handoff/extensions/context-handoff/handoff-core.mjs"
+    [ -f "$p" ] && { printf '%s' "$p"; return 0; }
+    p="$(ls "$HOME"/.copilot/installed-plugins/*/context-handoff/extensions/context-handoff/handoff-core.mjs 2>/dev/null | head -n1)"
     [ -n "$p" ] && [ -f "$p" ] && { printf '%s' "$p"; return 0; }
     return 1
 }
@@ -168,28 +171,25 @@ for b in agent-worktrees agent-dispatch; do
 done
 
 # =========================================================================
-phase 3 "seed invariant: bash-first task cutover (issue #853)"
-# The crux: the SHIPPED cutover-seed.mjs must build a bash-first task seed so the
-# successor's first action is a core `bash` chain, immune to the extension-reload
-# race that orphaned `consume_handoff` (multi-hour hangs in the field).
+phase 3 "compact seed, fidelity, and takeover budget metrics"
 _seed_mod="$(_seed_module || true)"
-if [ -z "$_seed_mod" ]; then
-    jam "repo-config" "cutover-seed.mjs not found under the installed context-handoff payload" "the plugin should ship extensions/context-handoff/cutover-seed.mjs"
+_core_mod="$(_handoff_core || true)"
+_metrics="/home/operator/out/context-handoff-efficiency.json"
+if [ -z "$_seed_mod" ] || [ -z "$_core_mod" ]; then
+    jam "repo-config" "seed/core modules not found under the installed context-handoff payload" "the plugin should ship its SDK-free seed and handoff core"
 else
     info "seed module: $_seed_mod"
-    if capture "seed-probe" -- node "$_SELF_DIR/seed-probe.mjs" "$_seed_mod"; then
-        pass "seed invariant holds: task cutover seed is BASH-FIRST; file/unknown-pane fall back to the tool seed"
+    if capture "seed-probe" -- node "$_SELF_DIR/seed-probe.mjs" \
+        "$_seed_mod" "$_core_mod" "$_metrics"; then
+        pass "compact seed, one-turn acknowledgement budget, and payload fidelity metrics passed"
+        cr_meta "handoff_efficiency_metrics" "context-handoff-efficiency.json"
     else
-        # A red here means the fix regressed: the successor's first action is the
-        # consume_handoff extension tool again (orphanable by the reload race).
-        jam "repo-config" "cutover seed is NOT bash-first (see cr-logs/seed-probe.log)" "buildCutoverSeed('task', ...) must emit the agent-dispatch/agent-worktrees shell chain, not the consume_handoff tool"
+        jam "repo-config" "context-handoff efficiency/fidelity probe failed" "see cr-logs/seed-probe.log and context-handoff-efficiency.json"
     fi
 fi
 
 # =========================================================================
-phase 4 "the bash-first seed's CLI verbs are real"
-# The bash-first seed hands the successor three verbs. Prove they exist on a
-# fresh install so the seed is executable (not pointing at phantom subcommands).
+phase 4 "consume, startup binding, and retire CLI verbs are real"
 _verb_ok() {  # <label> <bin> <args...> -- pass if the CLI recognizes the verb
     local label="$1"; shift
     local bin="$1"; shift
@@ -213,7 +213,8 @@ _verb_ok() {  # <label> <bin> <args...> -- pass if the CLI recognizes the verb
     fi
 }
 _verb_ok "consume"   agent-dispatch  consume
-_verb_ok "conclude"  agent-worktrees conclude-session
+_verb_ok "binding"   agent-worktrees session-binding
+_verb_ok "head"      agent-worktrees head-session
 # handoff-cutover exposes --retire-pane (the seed's 3rd verb). `--help` needs a
 # project context (from $HOME it prints the top-level usage), so recognize the
 # verb context-independently here -- a "could not resolve a project for
@@ -237,15 +238,15 @@ fi
 
 # =========================================================================
 phase 5 "mechanism: retire verb kills a live mux pane (best-effort)"
-# Highest-fidelity check: run the exact retire verb the bash-first seed hands the
-# successor against a REAL tmux pane and confirm the predecessor is gone. Needs
+# Highest-fidelity Tier-P mechanism check: run the retire primitive against a
+# REAL tmux pane and confirm the predecessor is gone. Needs
 # tmux; if it can't be installed on this box we INFO-skip (the fix is already
 # proven deterministically by phases 3-4) rather than fail on an env limitation.
 if ! command -v tmux >/dev/null 2>&1; then
     capture "tmux-install" -- bash -lc 'sudo apt-get update -q && sudo apt-get install -y --no-install-recommends tmux' || true
 fi
 if ! command -v tmux >/dev/null 2>&1; then
-    info "tmux unavailable (no apt/network); mechanism phase skipped -- the bash-first fix is already proven by phases 3-4"
+    info "tmux unavailable (no apt/network); mechanism phase skipped -- the compact seed/fidelity contract is already proven by phases 3-4"
 elif ! bash -lc 'command -v agent-worktrees >/dev/null'; then
     info "agent-worktrees binstub unavailable; mechanism phase skipped"
 else
@@ -269,7 +270,7 @@ else
         if [ -z "$_pane" ]; then
             info "could not stand up a tmux $_sess session; mechanism phase inconclusive (see cr-logs/mux.log)"
         else
-            info "predecessor pane $_pane in $_sess; running the seed's retire verb"
+            info "predecessor pane $_pane in $_sess; running the retire primitive"
             ( cd "$_wt_path" && capture "retire" -- agent-worktrees handoff-cutover \
                 --retire-pane "$_pane" --successor-verified --retire-reason handoff-consume \
                 --worktree-id "$_wt_id" --session-id clean-room-fake-sid ) || true
@@ -322,15 +323,16 @@ else
             fail "handoff path did not use the state-first anchor namespace: $_handoff_path"
         else
             pass "no-coordinator anchor handoff is durable and state-first discoverable"
-            _seed_path="$(printf '%s' "$_handoff_seed" | sed -n 's/.*arguments {"path":"\([^"]*\)"}.*/\1/p' | sed 's/\\\\/\//g')"
-            if [ "$_seed_path" = "$_handoff_path" ]; then
-                pass "file-backed successor seed carries the exact durable path"
+            if printf '%s' "$_handoff_seed" | grep -q \
+                'consume --handoff-id handoff-clean-room-anchor-predecessor'; then
+                pass "file-backed successor seed carries one exact CLI recovery command"
             else
-                fail "file-backed successor seed did not carry the saved path"
+                fail "file-backed successor seed did not carry the expected recovery command"
             fi
             if capture "anchor-consume-first" -- node "$_handoff_cli_path" consume \
-                --json --session-id clean-room-anchor-successor --path "$_seed_path"; then
-                pass "anchor handoff consumed once through the seed's exact path"
+                --json --session-id clean-room-anchor-successor \
+                --handoff-id handoff-clean-room-anchor-predecessor; then
+                pass "anchor handoff consumed once through the seed's exact id"
             else
                 fail "first anchor handoff consume failed"
             fi

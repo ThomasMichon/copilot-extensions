@@ -108,6 +108,7 @@ from .update_stage import cmd_stage_update, discover_plugin_dir
 _SESSION_BIND_PROJECT = "AGENT_WORKTREES_BIND_PROJECT"
 _SESSION_BIND_WORKTREE = "AGENT_WORKTREES_BIND_WORKTREE_ID"
 _SESSION_BIND_SESSION = "AGENT_WORKTREES_BIND_SESSION_ID"
+_SESSION_HANDOFF_TOKEN = "AGENT_WORKTREES_HANDOFF_TOKEN"
 
 
 def _env_get(new_name: str) -> str | None:
@@ -1340,7 +1341,6 @@ def _create_worktree_core(
         ),
         selection,
     )
-
     result["worktree"] = _worktree_to_dict(record)
     result["launch"] = {
             "action": "exec",
@@ -1793,11 +1793,51 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         require_mux_identity = bool(
             getattr(args, "require_mux_identity", False)
         )
+        expected_copilot_pid = getattr(args, "expected_copilot_pid", None)
+        expected_copilot_start = getattr(
+            args, "expected_copilot_start_time", None
+        )
+        strict_process_identity = (
+            expected_copilot_pid is not None
+            or expected_copilot_start is not None
+        )
+        binding = (
+            sessions.mux_binding_for_session(session_id)
+            if strict_process_identity and session_id
+            else None
+        )
+        process_identity_ok = True
+        process_identity_reason = None
+        if strict_process_identity:
+            if (
+                expected_copilot_pid is None
+                or not expected_copilot_start
+                or binding is None
+            ):
+                process_identity_ok = False
+                process_identity_reason = "process-identity-unavailable"
+            elif (
+                binding.get("pane_id") != retire_pane
+                or binding.get("copilot_pid") != expected_copilot_pid
+                or str(binding.get("copilot_start_time"))
+                != str(expected_copilot_start)
+            ):
+                process_identity_ok = False
+                process_identity_reason = "process-identity-mismatch"
         current_mux = (
             sessions.mux_session_for_pane(retire_pane)
             if expected_mux else None
         )
-        if require_mux_identity and not expected_mux:
+        if not process_identity_ok:
+            result = {
+                "ok": False,
+                "pane": retire_pane,
+                "gone": False,
+                "method": process_identity_reason,
+                "expected_copilot_pid": expected_copilot_pid,
+                "expected_copilot_start_time": expected_copilot_start,
+            }
+        elif require_mux_identity and not expected_mux:
             result = {
                 "ok": bool(session_id),
                 "pane": retire_pane,
@@ -1830,10 +1870,28 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         # retire a success. Skipped for the last-window guard, where the pane and
         # its session are deliberately kept alive.
         reap = {"checked": False}
-        if session_id and result.get("method") != "last-window-skip":
-            reap = reclaim.ensure_session_copilot_reaped(session_id)
+        identity_skip = result.get("method") in {
+            "process-identity-unavailable",
+            "process-identity-mismatch",
+        }
+        if (
+            session_id
+            and result.get("method") != "last-window-skip"
+            and not identity_skip
+        ):
+            if strict_process_identity:
+                reap = reclaim.ensure_session_copilot_reaped(
+                    session_id,
+                    expected_pid=expected_copilot_pid,
+                    expected_start_time=expected_copilot_start,
+                )
+            else:
+                reap = reclaim.ensure_session_copilot_reaped(session_id)
             result["copilot"] = reap
-        proc_ok = (not reap.get("checked")) or reap.get("survivors", 0) == 0
+        proc_ok = (
+            ((not reap.get("checked")) or reap.get("survivors", 0) == 0)
+            and reap.get("identity_verified", True)
+        )
         skipped_identity = result.get("method") == "identity-mismatch-skip"
         overall_ok = bool(result.get("ok")) and proc_ok
         result["ok"] = overall_ok
@@ -1975,6 +2033,9 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         ),
         selection,
     )
+    handoff_token = getattr(args, "handoff_token", None)
+    if handoff_token:
+        env[_SESSION_HANDOFF_TOKEN] = handoff_token
     # Keep the multi-word seed OUT of the pane command argv: psmux space-joins
     # that argv before CreateProcess and irreversibly splits it. mux_new_window
     # sends base64 control tokens to the platform wrapper instead; the wrapper
@@ -17424,6 +17485,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Resumed session id -- authoritative worktree fallback "
                         "when cwd is HOME (bare resume); resolves the worktree "
                         "from the session registry")
+    p.add_argument("--handoff-token", default=None,
+                   help="Pending handoff token to associate with the successor "
+                        "after its initial prompt creates a real session")
     p.add_argument("--mux-session", dest="mux_session", default=None,
                    help="Retire mode: expected mux session containing the pane; "
                         "a mismatch is treated as predecessor already gone")
@@ -17441,6 +17505,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "handoff consumer before retiring the old pane")
     p.add_argument("--retire-reason", default=None,
                    help="Retire mode: high-level reason for activity logging")
+    p.add_argument("--expected-copilot-pid", type=int, default=None,
+                   help="Retire mode: recorded predecessor Copilot pid")
+    p.add_argument("--expected-copilot-start-time", default=None,
+                   help="Retire mode: recorded predecessor process creation identity")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the resolved plan without opening a window")
     p.add_argument("--json", action="store_true",
@@ -18210,6 +18278,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Emit sessionStart additionalContext for the recovered binding")
     sp.add_argument("--handoff-token", default=None,
                     help="Exact pending handoff token this session is consuming")
+    sp.add_argument("--handoff-candidate-token", default=None,
+                    help="Pending token this newly-created session is a "
+                         "candidate to consume; associates without takeover")
 
     sp = sub.add_parser("deregister-session",
                         help="Mark a Copilot session as ended on a worktree")
@@ -18223,6 +18294,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Read the Copilot sessionEnd JSON payload from stdin")
     sp.add_argument("--launch-id", dest="launch_id", default=None,
                     help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
+
+    sp = sub.add_parser(
+        "session-binding",
+        help="Resolve one live session's authoritative mux/process binding",
+    )
+    sp.add_argument("--session-id", required=True,
+                    help="Exact Copilot session id")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (the default; accepted for consistency)")
 
     # bind-session -- the agent explicitly declares its worktree (self-identifying)
     sp = sub.add_parser(
@@ -18677,6 +18757,12 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         pane_id = pane_id or mux_binding.get("pane_id")
         pid = pid or mux_binding.get("copilot_pid")
 
+    candidate_token = (
+        getattr(args, "handoff_candidate_token", None)
+        or os.environ.get(_SESSION_HANDOFF_TOKEN)
+        or None
+    )
+    candidate_associated = False
     try:
         tracking.register_session(
             wt_id,
@@ -18687,6 +18773,19 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             source=source,
             handoff_token=getattr(args, "handoff_token", None),
         )
+        if candidate_token:
+            yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+            with tracking._RecordLock(yaml_path):
+                candidate_record = tracking.load_record(yaml_path)
+                tracking.associate_handoff_candidate(
+                    candidate_record,
+                    candidate_token,
+                    session_id,
+                    associated_at=event_at,
+                    save=False,
+                )
+                tracking.save_record(candidate_record, yaml_path)
+            candidate_associated = True
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
@@ -18783,7 +18882,35 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 f"[agent-worktrees] This Copilot session is bound to worktree "
                 f"{wt_id}; run task commands from {target_cwd}."
             )
+        if candidate_associated:
+            message += (
+                "\n[agent-worktrees] This started session is associated with "
+                f"pending handoff token {candidate_token}; the predecessor "
+                "remains head until this successor explicitly consumes and "
+                "acknowledges the handoff."
+            )
         print(json.dumps({"additionalContext": message}, separators=(",", ":")))
+    return 0
+
+
+def cmd_session_binding(args: argparse.Namespace) -> int:
+    """Expose the authoritative session-to-mux binding as bounded JSON."""
+    session_id = getattr(args, "session_id", None)
+    binding = sessions.mux_binding_for_session(session_id) if session_id else None
+    result = {
+        "found": bool(binding),
+        "session_id": session_id,
+        "worktree_id": binding.get("worktree_id") if binding else None,
+        "mux_session": binding.get("session_name") if binding else None,
+        "pane_id": binding.get("pane_id") if binding else None,
+        "pane_pid": binding.get("pane_pid") if binding else None,
+        "pane_start_time": binding.get("pane_start_time") if binding else None,
+        "copilot_pid": binding.get("copilot_pid") if binding else None,
+        "copilot_start_time": (
+            binding.get("copilot_start_time") if binding else None
+        ),
+    }
+    _json_output(result)
     return 0
 
 
@@ -18859,13 +18986,31 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             exit_code=3,
         )
 
+    handoff_token = getattr(args, "handoff_token", None)
+    candidate_before_ack = None
+    if handoff_token:
+        try:
+            before_record = tracking.load_record(
+                cfg.tracking_dir() / f"{wt_id}.yaml"
+            )
+            pending = next(
+                (
+                    item for item in before_record.handoffs
+                    if item.token == handoff_token
+                ),
+                None,
+            )
+            candidate_before_ack = pending.candidate if pending else None
+        except Exception:
+            candidate_before_ack = None
+
     try:
         tracking.register_session(
             wt_id, session_id,
             pid=getattr(args, "pid", None),
             pane_id=pane_id,
             source="bind",
-            handoff_token=getattr(args, "handoff_token", None),
+            handoff_token=handoff_token,
         )
         profile_assignment.bind(
             getattr(args, "assignment_token", None)
@@ -18921,6 +19066,11 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         "pane": pane_id,
         "bound": True,
         "head_session": head,
+        "handoff_token": handoff_token,
+        "candidate_before_ack": candidate_before_ack,
+        "candidate_acknowledged": bool(
+            handoff_token and candidate_before_ack == session_id
+        ),
     })
     return 0
 
@@ -19883,6 +20033,8 @@ def cmd_head_session(args: argparse.Namespace) -> int:
             "token": handoff.token,
             "predecessor": handoff.predecessor,
             "opened_at": handoff.opened_at,
+            "candidate": handoff.candidate,
+            "candidate_at": handoff.candidate_at,
         }
         for handoff in record.pending_handoffs
     ]
@@ -20443,6 +20595,7 @@ COMMAND_MAP = {
     "dev": cmd_dev,
     "register-session": cmd_register_session,
     "deregister-session": cmd_deregister_session,
+    "session-binding": cmd_session_binding,
     "bind-session": cmd_bind_session,
     "bind-nudge": cmd_bind_nudge,
     "history-digest": cmd_history_digest,
@@ -20788,7 +20941,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
     "register", "hook", "knowledge", "reconcile-marketplaces",
-    "picker", "doctor", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session", "deregister-session",
+    "picker", "doctor", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart",     "restart", "register-session", "deregister-session", "session-binding",
     "installer-readiness",
     "bind-session",
     "bind-nudge",

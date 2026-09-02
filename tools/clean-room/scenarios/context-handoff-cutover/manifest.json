@@ -1,6 +1,6 @@
 {
   "name": "context-handoff-cutover",
-  "description": "Tier-P F1 scenario: on a fresh box, install the live-cutover trio (agent-worktrees + agent-dispatch + context-handoff) and assert the handoff-cutover robustness contract. It verifies the bash-first task seed, the required CLI verbs, live pane retirement, and the no-coordinator adopted-anchor fallback: durable storage outside the checkout, state-first discovery, exactly-once consumption, and anchor mux cutover resolution. Name-free / public.",
+  "description": "Tier-P F1 scenario: on a fresh box, install the live-cutover trio and assert the prompt-first handoff contract. It records seed character/token cost, a one-turn/one-tool acknowledgement budget, payload round-trip fidelity, required lifecycle verbs, live pane retirement, and the no-coordinator adopted-anchor fallback. Name-free / public.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -14,6 +14,7 @@
   "expected_artifacts": [
     "~/.copilot/installed-plugins/<marketplace>/context-handoff/extensions/context-handoff/cutover-seed.mjs",
     "~/.copilot/installed-plugins/<marketplace>/context-handoff/extensions/context-handoff/handoff-cli.mjs",
+    "/home/operator/out/context-handoff-efficiency.json",
     "~/.local/bin/agent-worktrees (binstub)",
     "~/.local/bin/agent-dispatch (binstub)"
   ],
@@ -21,8 +22,8 @@
     { "n": 0, "title": "environment (fresh machine)" },
     { "n": 1, "title": "install the live-cutover trio" },
     { "n": 2, "title": "runtimes provision on first session" },
-    { "n": 3, "title": "seed invariant: bash-first task cutover (issue #853)" },
-    { "n": 4, "title": "the bash-first seed's CLI verbs are real" },
+    { "n": 3, "title": "compact seed, fidelity, and takeover budget metrics" },
+    { "n": 4, "title": "consume, startup binding, and retire CLI verbs are real" },
     { "n": 5, "title": "mechanism: retire verb kills a live mux pane (best-effort)" },
     { "n": 6, "title": "adopted anchor: no-coordinator file fallback and mux resolution" }
   ]

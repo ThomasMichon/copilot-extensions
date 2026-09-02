@@ -45,7 +45,15 @@ agent_worktrees_root="$(cd -- "$plugin_root/../agent-worktrees" 2>/dev/null && p
 agent_worktrees_manifest="$agent_worktrees_root/plugin.json"
 agent_worktrees_command="$agent_worktrees_root/bin/payload/agent-worktrees"
 agent_worktrees_installer="$agent_worktrees_root/scripts/install.sh"
-python="$(command -v python3 || command -v python || true)"
+python=""
+for candidate in python3 python; do
+    candidate_path="$(command -v "$candidate" 2>/dev/null || true)"
+    if [[ -n "$candidate_path" ]] &&
+       "$candidate_path" -c 'raise SystemExit(0)' >/dev/null 2>&1; then
+        python="$candidate_path"
+        break
+    fi
+done
 if [[ -n "$agent_worktrees_root" && -f "$agent_worktrees_manifest" &&
       -n "$python" ]]; then
     availability="unavailable"

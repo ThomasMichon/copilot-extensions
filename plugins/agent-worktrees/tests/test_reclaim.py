@@ -11,8 +11,10 @@ import argparse
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import __main__ as m
-from agent_worktrees import reclaim
+from agent_worktrees import locks, procs, reclaim
 
 
 # ── homing_of / descendants_of (pure) ──────────────────────────────────────
@@ -326,18 +328,41 @@ class TestResolveBoundCopilots:
 class TestReapBoundCopilots:
     def test_kills_target_and_copilot_children(self, monkeypatch):
         table = {
-            100: {"ppid": 1, "name": "copilot.exe"},
-            101: {"ppid": 100, "name": "copilot.exe"},   # preload child
-            102: {"ppid": 100, "name": "conhost.exe"},    # non-copilot child
+            100: {
+                "ppid": 1, "name": "copilot.exe", "start_time": "start-100",
+            },
+            101: {
+                "ppid": 100, "name": "copilot.exe", "start_time": "start-101",
+            },   # preload child
+            102: {
+                "ppid": 100, "name": "conhost.exe", "start_time": "start-102",
+            },    # non-copilot child
         }
         killed: list[int] = []
-        import agent_worktrees.procs as procs
-        monkeypatch.setattr(procs, "terminate_pid",
-                            lambda p: (killed.append(p), True)[1])
+        monkeypatch.setattr(
+            procs,
+            "terminate_pid_if_identity",
+            lambda p, start: (
+                killed.append(p),
+                {
+                    "killed": True,
+                    "identity_verified": True,
+                    "method": "test",
+                },
+            )[1],
+        )
         monkeypatch.setattr(reclaim.sessions, "_is_copilot_process",
                             lambda p: p in (100, 101))
+        monkeypatch.setattr(
+            reclaim.locks,
+            "process_start_time",
+            lambda p: {100: "start-100", 101: "start-101"}.get(p),
+        )
         out = reclaim.reap_bound_copilots(
-            [{"session_id": "s", "pid": 100, "worktree_id": "wt", "homing": "bare"}],
+            [{
+                "session_id": "s", "pid": 100, "start_time": "start-100",
+                "worktree_id": "wt", "homing": "bare",
+            }],
             table=table,
         )
         assert out[0]["killed"] is True
@@ -345,6 +370,54 @@ class TestReapBoundCopilots:
         assert 101 in killed and 100 in killed and 102 not in killed
         # child reaped before parent
         assert killed.index(101) < killed.index(100)
+
+    def test_child_identity_comes_from_original_process_snapshot(
+            self, monkeypatch):
+        table = {
+            100: {
+                "ppid": 1, "name": "copilot.exe", "start_time": "parent-start",
+            },
+            101: {
+                "ppid": 100, "name": "copilot.exe", "start_time": "old-child",
+            },
+        }
+        attempts: list[tuple[int, str | None]] = []
+
+        def terminate(pid, expected):
+            attempts.append((pid, expected))
+            return {
+                "killed": expected != "old-child",
+                "identity_verified": expected != "old-child",
+                "method": (
+                    "test-killed" if expected != "old-child"
+                    else "identity-mismatch"
+                ),
+            }
+
+        monkeypatch.setattr(procs, "terminate_pid_if_identity", terminate)
+        monkeypatch.setattr(
+            reclaim.sessions, "_is_copilot_process", lambda p: p in (100, 101)
+        )
+        monkeypatch.setattr(
+            reclaim.locks,
+            "process_start_time",
+            lambda p: "reused-child" if p == 101 else "parent-start",
+        )
+
+        out = reclaim.reap_bound_copilots(
+            [{
+                "session_id": "s",
+                "pid": 100,
+                "start_time": "parent-start",
+                "worktree_id": "wt",
+                "homing": "bare",
+            }],
+            table=table,
+        )
+
+        assert attempts[0] == (101, "old-child")
+        assert out[0]["children_killed"] == 0
+        assert out[0]["killed"] is True
 
 
 # ── cmd_reclaim control flow ───────────────────────────────────────────────
@@ -649,6 +722,63 @@ class TestEnsureSessionCopilotReaped:
         out = reclaim.ensure_session_copilot_reaped("sid", grace=0, settle=0)
         assert out["found"] == 1 and out["reaped"] == 0 and out["survivors"] == 1
 
+    def test_reused_expected_pid_is_never_reaped(self, monkeypatch):
+        monkeypatch.setattr(
+            reclaim, "resolve_bound_copilots", lambda **k: list(self._BOUND),
+        )
+        monkeypatch.setattr(
+            reclaim.locks, "process_start_time", lambda pid: "new-process",
+        )
+        monkeypatch.setattr(
+            reclaim,
+            "reap_bound_copilots",
+            lambda *a, **k: pytest.fail("must not reap a reused pid"),
+        )
+        out = reclaim.ensure_session_copilot_reaped(
+            "sid",
+            expected_pid=4242,
+            expected_start_time="old-process",
+            grace=0,
+            settle=0,
+        )
+        assert out["identity_verified"] is False
+        assert out["reaped"] == 0
+
+    def test_pid_reuse_after_initial_validation_is_not_terminated(
+        self, monkeypatch
+    ):
+        bound = [{**self._BOUND[0], "start_time": "old-process"}]
+        monkeypatch.setattr(
+            reclaim, "resolve_bound_copilots", lambda **k: list(bound),
+        )
+        starts = iter(["old-process", "new-process", "new-process"])
+        monkeypatch.setattr(
+            reclaim.locks,
+            "process_start_time",
+            lambda pid: next(starts, "new-process"),
+        )
+        monkeypatch.setattr(reclaim, "build_process_table", lambda: {})
+        monkeypatch.setattr(
+            procs,
+            "terminate_pid_if_identity",
+            lambda pid, start: {
+                "killed": False,
+                "identity_verified": False,
+                "method": "identity-mismatch",
+            },
+        )
+
+        out = reclaim.ensure_session_copilot_reaped(
+            "sid",
+            expected_pid=4242,
+            expected_start_time="old-process",
+            grace=0,
+            settle=0,
+        )
+
+        assert out["identity_verified"] is False
+        assert out["reaped"] == 0
+
     def test_settle_waits_for_slow_termination(self, monkeypatch):
         # The reap lands but the process lingers a beat before exiting -> the
         # settle poll waits it out and reports survivors == 0 (not a false alarm).
@@ -659,3 +789,112 @@ class TestEnsureSessionCopilotReaped:
         out = reclaim.ensure_session_copilot_reaped(
             "sid", grace=0, settle=1.0, poll_interval=0.01)
         assert out["found"] == 1 and out["reaped"] == 1 and out["survivors"] == 0
+
+
+class TestIdentityBoundTermination:
+    def test_windows_uses_same_verified_handle_for_termination(
+        self, monkeypatch
+    ):
+        calls = []
+
+        class Kernel:
+            def OpenProcess(self, access, inherit, pid):
+                calls.append(("open", pid))
+                return 77
+
+            def TerminateProcess(self, handle, code):
+                calls.append(("terminate", handle))
+                return True
+
+            def CloseHandle(self, handle):
+                calls.append(("close", handle))
+
+        monkeypatch.setattr(procs.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(procs, "_win_kernel32", lambda: Kernel())
+        monkeypatch.setattr(
+            procs,
+            "_windows_start_time_from_handle",
+            lambda kernel, handle: "created-1",
+        )
+
+        out = procs.terminate_pid_if_identity(123, "created-1")
+
+        assert out["killed"] is True
+        assert out["identity_verified"] is True
+        assert calls == [("open", 123), ("terminate", 77), ("close", 77)]
+
+    def test_windows_reuse_on_open_handle_refuses_termination(
+        self, monkeypatch
+    ):
+        terminated = []
+
+        class Kernel:
+            def OpenProcess(self, access, inherit, pid):
+                return 88
+
+            def TerminateProcess(self, handle, code):
+                terminated.append(handle)
+                return True
+
+            def CloseHandle(self, handle):
+                pass
+
+        monkeypatch.setattr(procs.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(procs, "_win_kernel32", lambda: Kernel())
+        monkeypatch.setattr(
+            procs,
+            "_windows_start_time_from_handle",
+            lambda kernel, handle: "reused-process",
+        )
+
+        out = procs.terminate_pid_if_identity(123, "original-process")
+
+        assert out["identity_verified"] is False
+        assert out["killed"] is False
+        assert terminated == []
+
+    def test_posix_pidfd_binds_identity_through_signal(
+        self, monkeypatch
+    ):
+        sent = []
+        closed = []
+        import signal
+
+        monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(
+            procs.os, "pidfd_open", lambda pid, flags: 9, raising=False,
+        )
+        monkeypatch.setattr(
+            signal,
+            "pidfd_send_signal",
+            lambda fd, sig: sent.append((fd, sig)),
+            raising=False,
+        )
+        monkeypatch.setattr(procs.os, "close", closed.append)
+        monkeypatch.setattr(
+            locks, "process_start_time", lambda pid: "created-2",
+        )
+
+        out = procs.terminate_pid_if_identity(456, "created-2")
+
+        assert out["method"] == "pidfd"
+        assert out["killed"] is True
+        assert sent == [(9, signal.SIGTERM)]
+        assert closed == [9]
+
+    def test_posix_without_pidfd_fails_closed(self, monkeypatch):
+        import signal
+
+        monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(procs.os, "pidfd_open", None, raising=False)
+        monkeypatch.setattr(
+            signal, "pidfd_send_signal", None, raising=False,
+        )
+
+        out = procs.terminate_pid_if_identity(456, "created-2")
+
+        assert out == {
+            "killed": False,
+            "identity_verified": False,
+            "method": "pidfd-unavailable",
+        }

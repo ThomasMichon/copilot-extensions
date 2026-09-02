@@ -261,6 +261,50 @@ class TestRegisterSessionHeadInit:
 
 
 class TestExactHandoffLedger:
+    def test_started_candidate_does_not_take_over_until_acknowledged(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "task-123")
+        tracking.register_session("wt-1", "new")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.associate_handoff_candidate(rec, "task-123", "new")
+
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        handoff = rec.handoffs[0]
+        assert handoff.candidate == "new"
+        assert handoff.state == "pending"
+        assert rec.resolved_head_session == "old"
+        assert rec.session_entry("old").state == "active"
+
+        tracking.register_session(
+            "wt-1", "new", source="bind", handoff_token="task-123"
+        )
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.handoffs[0].state == "linked"
+        assert rec.resolved_head_session == "new"
+        assert rec.session_entry("old").state == "handed-off"
+
+    def test_candidate_token_rejects_a_different_successor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "task-123")
+        tracking.register_session("wt-1", "candidate")
+        tracking.register_session("wt-1", "other")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.associate_handoff_candidate(
+            rec, "task-123", "candidate"
+        )
+        with pytest.raises(SessionLifecycleError, match="associated with candidate"):
+            tracking.register_session(
+                "wt-1", "other", source="bind", handoff_token="task-123"
+            )
+
     def test_exact_handoff_token_completes_link(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):

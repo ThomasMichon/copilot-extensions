@@ -183,6 +183,8 @@ class SessionHandoff:
     opened_at: str
     successor: str | None = None
     linked_at: str | None = None
+    candidate: str | None = None
+    candidate_at: str | None = None
 
 
 @dataclass
@@ -1921,6 +1923,11 @@ def load_record(path: Path) -> WorktreeRecord:
                 linked_at = linked_at.isoformat()
             elif linked_at in (None, "", "null"):
                 linked_at = None
+            candidate_at = raw.get("candidate_at")
+            if hasattr(candidate_at, "isoformat"):
+                candidate_at = candidate_at.isoformat()
+            elif candidate_at in (None, "", "null"):
+                candidate_at = None
             handoffs.append(SessionHandoff(
                 ordinal=ordinal,
                 token=str(raw["token"]),
@@ -1931,6 +1938,10 @@ def load_record(path: Path) -> WorktreeRecord:
                     str(raw["successor"]) if raw.get("successor") else None
                 ),
                 linked_at=str(linked_at) if linked_at else None,
+                candidate=(
+                    str(raw["candidate"]) if raw.get("candidate") else None
+                ),
+                candidate_at=str(candidate_at) if candidate_at else None,
             ))
 
     profile_assignments: list[ProfileAssignment] = []
@@ -2456,6 +2467,14 @@ def _save_record_unlocked(
                     **(
                         {"linked_at": handoff.linked_at}
                         if handoff.linked_at else {}
+                    ),
+                    **(
+                        {"candidate": handoff.candidate}
+                        if handoff.candidate else {}
+                    ),
+                    **(
+                        {"candidate_at": handoff.candidate_at}
+                        if handoff.candidate_at else {}
                     ),
                 }
                 for handoff in record.handoffs
@@ -3383,6 +3402,11 @@ def link_handoff(
         raise SessionLifecycleError(
             f"handoff token {token} is {handoff.state}, not pending"
         )
+    if handoff.candidate and handoff.candidate != successor_id:
+        raise SessionLifecycleError(
+            f"handoff token {token} is associated with candidate "
+            f"{handoff.candidate}, not {successor_id}"
+        )
     predecessor = record.session_entry(handoff.predecessor)
     if predecessor is None:
         raise SessionLifecycleError(
@@ -3425,6 +3449,54 @@ def link_handoff(
         at=handoff.linked_at,
         related_session_ids=(predecessor.session_id,),
     )
+    if save:
+        save_record(record)
+    return handoff
+
+
+def associate_handoff_candidate(
+    record: WorktreeRecord,
+    token: str,
+    session_id: str,
+    *,
+    associated_at: str | None = None,
+    save: bool = True,
+) -> SessionHandoff:
+    """Associate a started successor with a pending token without takeover."""
+    successor = record.session_entry(session_id)
+    if successor is None:
+        raise SessionLifecycleError(
+            f"candidate {session_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    handoff = next(
+        (candidate for candidate in record.handoffs if candidate.token == token),
+        None,
+    )
+    if handoff is None:
+        raise SessionLifecycleError(
+            f"handoff token {token} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    if handoff.state == "linked":
+        if handoff.successor != session_id:
+            raise SessionLifecycleError(
+                f"handoff token {token} is already linked to "
+                f"{handoff.successor}"
+            )
+        return handoff
+    if handoff.state != "pending":
+        raise SessionLifecycleError(
+            f"handoff token {token} is {handoff.state}, not pending"
+        )
+    if handoff.candidate and handoff.candidate != session_id:
+        raise SessionLifecycleError(
+            f"handoff token {token} already has candidate {handoff.candidate}"
+        )
+    if handoff.candidate != session_id:
+        handoff.candidate = session_id
+        handoff.candidate_at = associated_at or _now_iso()
+        _next_lifecycle_revision(record)
     if save:
         save_record(record)
     return handoff

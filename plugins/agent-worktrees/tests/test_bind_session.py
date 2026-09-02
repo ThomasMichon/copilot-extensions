@@ -14,6 +14,7 @@ import argparse
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import tracking
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -37,7 +38,14 @@ def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
 
 
 def _args(**kw) -> argparse.Namespace:
-    base = dict(worktree_dir=None, worktree_id=None, session_id=None, pane=None, pid=None)
+    base = dict(
+        worktree_dir=None,
+        worktree_id=None,
+        session_id=None,
+        pane=None,
+        pid=None,
+        handoff_token=None,
+    )
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -49,6 +57,30 @@ def _neutralize(monkeypatch, captured: dict) -> None:
 
 
 class TestBindSession:
+    def test_acknowledges_session_start_candidate_atomically(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-ack", "/tmp/src/wt-ack")
+        tracking.register_session("wt-ack", "old")
+        rec = load_record(tmp_tracking_dir / "wt-ack.yaml")
+        tracking.open_handoff(rec, "old", "task-123")
+        tracking.register_session("wt-ack", "new")
+        rec = load_record(tmp_tracking_dir / "wt-ack.yaml")
+        tracking.associate_handoff_candidate(rec, "task-123", "new")
+        captured: dict = {}
+        _neutralize(monkeypatch, captured)
+
+        rc = m.cmd_bind_session(_args(
+            worktree_dir="/tmp/src/wt-ack",
+            session_id="new",
+            handoff_token="task-123",
+        ))
+
+        assert rc == 0
+        assert captured["candidate_before_ack"] == "new"
+        assert captured["candidate_acknowledged"] is True
+        assert captured["head_session"] == "new"
+
     def test_binds_from_worktree_dir(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

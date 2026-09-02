@@ -164,6 +164,13 @@ class TestMuxBindingForSession:
         monkeypatch.setattr(
             "agent_worktrees.sessions.platform.system", lambda: "Windows"
         )
+        monkeypatch.setattr(
+            "agent_worktrees.locks.process_start_time",
+            lambda pid: {
+                200: "pane-created",
+                300: "copilot-created",
+            }.get(pid),
+        )
 
         class _Result:
             returncode = 0
@@ -178,7 +185,9 @@ class TestMuxBindingForSession:
             "session_name": "wt-wt-a",
             "pane_id": "%7",
             "pane_pid": 200,
+            "pane_start_time": "pane-created",
             "copilot_pid": 300,
+            "copilot_start_time": "copilot-created",
         }
 
     def test_ambiguous_pane_ancestry_fails_closed(
