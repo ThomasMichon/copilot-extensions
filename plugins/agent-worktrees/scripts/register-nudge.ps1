@@ -54,7 +54,14 @@ function Get-LaunchKey([string]$InputPayload, [string]$Version) {
             $Timestamp -isnot [ValueType]) {
             return ''
         }
-        $CanonicalCwd = if (Test-Path -LiteralPath $Cwd -PathType Container) {
+        $GitTop = if (Test-Path -LiteralPath $Cwd -PathType Container) {
+            (& git -C $Cwd rev-parse --show-toplevel 2>$null)
+        } else {
+            $null
+        }
+        $CanonicalCwd = if ($LASTEXITCODE -eq 0 -and $GitTop) {
+            ([string]$GitTop).Trim()
+        } elseif (Test-Path -LiteralPath $Cwd -PathType Container) {
             (Resolve-Path -LiteralPath $Cwd).Path
         } else {
             [IO.Path]::GetFullPath($Cwd)

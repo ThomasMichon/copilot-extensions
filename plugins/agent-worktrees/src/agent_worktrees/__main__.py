@@ -86,6 +86,7 @@ from . import (
     prune,
     reclaim,
     sessions,
+    terminal_conclusion,
     tracking,
 )
 from . import claimant as claimant_mod
@@ -2187,7 +2188,49 @@ def cmd_embody(args: argparse.Namespace) -> int:
     driver = getattr(args, "driver", None)
     if driver:
         env["AGENT_BRIDGE_DRIVEN_BY"] = driver
-    result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
+    if record is None:
+        try:
+            record = tracking.load_record(
+                cfg.tracking_dir() / f"{wt_id}.yaml"
+            )
+        except Exception:
+            return _json_error(f"Worktree record not found: {wt_id}")
+    repo = _repo_for_record(config, record)
+    if repo is None:
+        return _json_error(f"Repository not found for worktree: {record.repo}")
+    lifecycle_lock = fin.FinalizeLock(
+        Path(repo.worktree_root) / ".finalize.lock",
+        timeout=300,
+        stale_after=3600,
+    )
+    try:
+        lifecycle_lock.acquire()
+    except TimeoutError:
+        return _json_error(
+            "worktree lifecycle remained busy for five minutes",
+            exit_code=3,
+        )
+    try:
+        # A managed-GC pass may have completed while launch preflight ran.
+        # Re-check under the shared lifecycle fence before creating a process.
+        if sessions.has_mux_session(wt_id):
+            _json_output({
+                "ok": True,
+                "worktree_id": wt_id,
+                "session": sessions.mux_session_name(wt_id),
+                "work_dir": work_dir,
+                "created": False,
+                "resumed": True,
+                "new_pane": (
+                    sessions.mux_copilot_pane(wt_id)
+                    or sessions.mux_active_pane(wt_id)
+                ),
+                "note": "a live mux session already embodies this worktree",
+            })
+            return 0
+        result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
+    finally:
+        lifecycle_lock.release()
     if not result.get("ok"):
         return _json_error(
             f"failed to create session wt-{wt_id}: {result.get('error')}",
@@ -9844,10 +9887,30 @@ def cmd_reap_shells(args: argparse.Namespace) -> int:
     return 0
 
 
-def _remove_managed_worktree(rec, repo, tracking_path: Path) -> list[str]:
+def _repo_for_record(config, record):
+    """Resolve a record's repository with the legacy/default fallback."""
+    repos = getattr(config, "repos", {})
+    record_repo = getattr(record, "repo", "")
+    repo = repos.get(record_repo) if hasattr(repos, "get") else None
+    if repo is None and (
+        not record_repo or record_repo == getattr(config, "repo_name", None)
+    ):
+        try:
+            repo = config.default_repo
+        except (AttributeError, KeyError, ValueError):
+            repo = None
+    return repo
+
+
+def _remove_managed_worktree(
+    rec,
+    repo,
+    tracking_path: Path,
+) -> tuple[bool, list[str]]:
     """Tear down one managed (system/bridge) worktree: mux, git worktree,
     branch, tracking record. Mirrors ``cmd_remove_system``'s removal steps.
-    Returns any non-fatal warnings."""
+    Returns ``(removed, warnings)``. The tracking record is retained whenever
+    Git removal fails so a later managed sweep can retry."""
     warns: list[str] = []
     try:
         sessions.kill_tmux_session(rec.worktree_id)  # normally none for a reap
@@ -9855,18 +9918,49 @@ def _remove_managed_worktree(rec, repo, tracking_path: Path) -> list[str]:
         pass
     if rec.worktree_path and Path(rec.worktree_path).exists():
         try:
-            git_ops.remove_worktree(repo.anchor, rec.worktree_path)
+            removed = git_ops.git(
+                "worktree",
+                "remove",
+                rec.worktree_path,
+                cwd=repo.anchor,
+                check=False,
+            ).returncode == 0
+            if not removed:
+                warns.append("worktree remove failed")
         except Exception as exc:
             warns.append(f"worktree remove failed: {exc}")
+        if warns:
+            return False, warns
     if rec.branch:
-        git_ops.git("branch", "-D", rec.branch, cwd=repo.anchor, check=False)
+        try:
+            exists = git_ops.git(
+                "show-ref",
+                "--verify",
+                f"refs/heads/{rec.branch}",
+                cwd=repo.anchor,
+                check=False,
+            ).returncode == 0
+            if exists:
+                removed_branch = git_ops.git(
+                    "branch",
+                    "-D",
+                    rec.branch,
+                    cwd=repo.anchor,
+                    check=False,
+                ).returncode == 0
+                if not removed_branch:
+                    warns.append("branch remove failed")
+        except Exception as exc:
+            warns.append(f"branch remove failed: {exc}")
+    if warns:
+        return False, warns
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     try:
         yaml_path.unlink()
     except OSError:
         pass
     disposition_history.remove(rec.worktree_id)
-    return warns
+    return True, warns
 
 
 def sweep_managed_worktrees(*, dry_run: bool = False,
@@ -9888,7 +9982,6 @@ def sweep_managed_worktrees(*, dry_run: bool = False,
     now = time.time() if now is None else now
 
     config = cfg.load_config()
-    repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     records = tracking.list_records(tracking_path)
     managed = [r for r in records if r.kind in tracking.MANAGED_KINDS]
@@ -9903,6 +9996,12 @@ def sweep_managed_worktrees(*, dry_run: bool = False,
     active_paths = _build_active_paths(managed, session_ctx)
 
     for rec in managed:
+        repo = _repo_for_record(config, rec)
+        if repo is None:
+            result["skipped"].append(
+                {"id": rec.worktree_id, "reason": "repo-unresolved"}
+            )
+            continue
         name = sessions.mux_session_name(rec.worktree_id)
         has_live_mux = name in mux
         attached = bool(mux.get(name))
@@ -9940,13 +10039,141 @@ def sweep_managed_worktrees(*, dry_run: bool = False,
             result["removed"].append(
                 {"id": rec.worktree_id, "reason": f"would remove ({verdict.reason})"})
             continue
-        warns = _remove_managed_worktree(rec, repo, tracking_path)
+        lifecycle_lock = fin.FinalizeLock(
+            Path(repo.worktree_root) / ".finalize.lock",
+            timeout=3,
+            stale_after=3600,
+        )
+        try:
+            lifecycle_lock.acquire()
+        except TimeoutError:
+            result["skipped"].append(
+                {"id": rec.worktree_id, "reason": "lifecycle-busy"}
+            )
+            continue
+        try:
+            yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
+            if not yaml_path.is_file():
+                result["skipped"].append(
+                    {"id": rec.worktree_id, "reason": "record-missing"}
+                )
+                continue
+            current = tracking.load_record(yaml_path)
+            if current.kind not in tracking.MANAGED_KINDS:
+                result["skipped"].append(
+                    {"id": rec.worktree_id, "reason": "not-managed"}
+                )
+                continue
+
+            fresh_mux = sessions._list_mux_sessions() or {}
+            fresh_name = sessions.mux_session_name(current.worktree_id)
+            fresh_ctx = sessions.scan_sessions_fast([current])
+            fresh_active_paths = _build_active_paths([current], fresh_ctx)
+            fresh_norm = (
+                _normalize_path(current.worktree_path)
+                if current.worktree_path
+                else ""
+            )
+            if current.worktree_path and Path(current.worktree_path).exists():
+                fresh_info = git_ops.classify_worktree(
+                    current.worktree_path,
+                    current.branch,
+                    fetch=False,
+                    remote=repo.remote,
+                    default_branch=repo.default_branch,
+                    active_paths=fresh_active_paths,
+                )
+                fresh_git_state = fresh_info.state.value
+            elif current.status in ("finalized", "complete", "completed"):
+                fresh_git_state = "completed"
+            else:
+                fresh_git_state = "gone"
+            fresh_activity = sessions._mux_session_activity().get(fresh_name)
+            if fresh_activity is None:
+                fresh_activity = (
+                    _iso_epoch(current.last_resumed_at)
+                    or _iso_epoch(current.started_at)
+                )
+            fresh_idle = (
+                None if fresh_activity is None else (now - fresh_activity)
+            )
+            fresh_verdict = gc_mod.classify_managed_worktree(
+                worktree_id=current.worktree_id,
+                kind=current.kind,
+                follow_up=current.follow_up,
+                status=current.status,
+                git_state=fresh_git_state,
+                has_live_mux=fresh_name in fresh_mux,
+                attached=bool(fresh_mux.get(fresh_name)),
+                has_live_session=fresh_norm in fresh_ctx.active_sessions,
+                idle_secs=fresh_idle,
+                min_idle_secs=min_idle_secs,
+            )
+            if fresh_verdict.action == "skip":
+                result["skipped"].append(
+                    {
+                        "id": current.worktree_id,
+                        "reason": f"recheck-{fresh_verdict.reason}",
+                    }
+                )
+                continue
+            try:
+                with tracking._RecordLock(
+                    yaml_path,
+                    timeout=3,
+                    require_sidecar=True,
+                ):
+                    latest = tracking.load_record(yaml_path)
+                    if (
+                        latest.kind not in tracking.MANAGED_KINDS
+                        or latest.follow_up
+                        or latest.live_resources
+                        or latest.owner_ref
+                        or latest.is_paired
+                        or latest.pending_handoffs
+                        or latest.resolved_head_session is not None
+                        or latest.worktree_path != current.worktree_path
+                        or latest.branch != current.branch
+                        or any(
+                            pr.state in {"creating", "open"}
+                            for pr in latest.prs
+                        )
+                    ):
+                        result["skipped"].append(
+                            {
+                                "id": latest.worktree_id,
+                                "reason": "recheck-record-changed",
+                            }
+                        )
+                        continue
+            except TimeoutError:
+                result["skipped"].append(
+                    {"id": current.worktree_id, "reason": "record-lock-busy"}
+                )
+                continue
+            removed, warns = _remove_managed_worktree(
+                latest,
+                repo,
+                tracking_path,
+            )
+        finally:
+            lifecycle_lock.release()
+        if not removed:
+            result["skipped"].append(
+                {
+                    "id": rec.worktree_id,
+                    "reason": "; ".join(warns) or "removal failed",
+                }
+            )
+            continue
         try:
             activity.log_event("managed_worktree_gc",
                                worktree_id=rec.worktree_id, reason=verdict.reason)
         except Exception:
             pass
-        reason = verdict.reason + (f"; {'; '.join(warns)}" if warns else "")
+        reason = fresh_verdict.reason + (
+            f"; {'; '.join(warns)}" if warns else ""
+        )
         result["removed"].append({"id": rec.worktree_id, "reason": reason})
 
     return result
@@ -14021,6 +14248,7 @@ _WORKTREE_VERBS = {
     "claims": "claims",
     "claimant-liveness": "claimant-liveness",
     "remove-system": "remove-system",
+    "conclude-disposable": "conclude-disposable",
     "list": "list",
     "status": "status",
     "status-segment": "status-segment",
@@ -14048,6 +14276,9 @@ def _worktree_usage() -> None:
     print(
         "  remove-system <id> [--json]  "
         "Tear down a system worktree by id", file=out)
+    print(
+        "  conclude-disposable --worktree ID --policy disposable-cli --owner NAME  "
+        "Prime an exact dead CLI worker for managed GC", file=out)
     print("  list [--json]          List this project's worktrees", file=out)
     print("  status <id>            Show a worktree's git status", file=out)
     print("  push <id> [--title T]  Squash, rebase, and push to the default branch", file=out)
@@ -18088,6 +18319,42 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
 
+    # conclude-disposable -- safely prime an exact CLI worker for managed GC
+    sp = sub.add_parser(
+        "conclude-disposable",
+        help="Conclude an exact disposable CLI worker and prime it for managed GC",
+    )
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        required=True,
+        help="Exact recorded worktree id (suffix inference is not allowed)",
+    )
+    sp.add_argument(
+        "--session",
+        "--session-id",
+        dest="session_id",
+        default=None,
+        help="Exact recorded Copilot session id, when available",
+    )
+    sp.add_argument(
+        "--policy",
+        choices=[terminal_conclusion.DISPOSABLE_CLI_POLICY],
+        required=True,
+        help="Explicit discard policy authorizing generated checkout reconciliation",
+    )
+    sp.add_argument(
+        "--owner",
+        required=True,
+        help="Lifecycle owner recorded on the managed worktree",
+    )
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (the default; accepted for command-family consistency)",
+    )
+
     # link-succession -- write the two-way predecessor<->successor handoff link
     sp = sub.add_parser(
         "link-succession",
@@ -19647,6 +19914,72 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def _find_tracking_file_exact(raw_id: str) -> Path | None:
+    """Locate an exact worktree id across projects without suffix inference."""
+    if re.search(r"[/\\]|\.\.", raw_id):
+        return None
+    for tracking_dir in _all_tracking_dirs():
+        path = tracking_dir / f"{raw_id}.yaml"
+        if path.is_file():
+            return path
+    return None
+
+
+def _project_for_tracking_file(path: Path) -> str | None:
+    """Resolve the project whose machine-local tracking dir contains ``path``."""
+    names: list[str] = []
+    active = cfg.active_project()
+    if active:
+        names.append(active)
+    try:
+        names.extend(inst.read_projects_registry().get("projects", {}))
+    except Exception:
+        pass
+    for name in dict.fromkeys(names):
+        try:
+            if (cfg.project_dir(name) / "worktrees").resolve() == path.parent.resolve():
+                return name
+        except OSError:
+            continue
+    return None
+
+
+def cmd_conclude_disposable(args: argparse.Namespace) -> int:
+    """Prime one exact disposable CLI worker for conservative managed GC."""
+    raw = args.worktree_id
+    yaml_path = _find_tracking_file_exact(raw)
+    if yaml_path is None:
+        return _json_error(f"Worktree not found by exact id: {raw}")
+    project = _project_for_tracking_file(yaml_path)
+    if not project:
+        return _json_error(f"Could not resolve project for worktree: {raw}")
+    try:
+        config = cfg.load_project_config(project)
+        record = tracking.load_record(yaml_path)
+        repo = _repo_for_record(config, record)
+        if repo is None:
+            _json_output(
+                {
+                    "worktree_id": record.worktree_id,
+                    "action": "skipped",
+                    "reason": "repo-unresolved",
+                    "managed_gc_eligible": False,
+                }
+            )
+            return 0
+        result = terminal_conclusion.conclude_disposable_worktree(
+            yaml_path,
+            repo,
+            session_id=getattr(args, "session_id", None),
+            owner=args.owner,
+            policy=args.policy,
+        )
+    except Exception as exc:
+        return _json_error(str(exc))
+    _json_output(result)
+    return 0
+
+
 def cmd_link_succession(args: argparse.Namespace) -> int:
     """Write the durable two-way handoff link and move the head -- JSON out.
 
@@ -20081,6 +20414,7 @@ COMMAND_MAP = {
     "list-sessions": cmd_list_sessions,
     "head-session": cmd_head_session,
     "conclude-session": cmd_conclude_session,
+    "conclude-disposable": cmd_conclude_disposable,
     "link-succession": cmd_link_succession,
     "session-transcript": cmd_session_transcript,
     "recent-messages": cmd_recent_messages,
@@ -20422,7 +20756,8 @@ _NO_PROJECT_COMMANDS = {
     "history-digest",
     "note-handoff",
     "session-role",
-    "head-session", "conclude-session", "link-succession", "config-migrate",
+    "head-session", "conclude-session", "conclude-disposable",
+    "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",
 }

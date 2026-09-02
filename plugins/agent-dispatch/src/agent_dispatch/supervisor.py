@@ -73,6 +73,10 @@ RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
 #: deterministically.
 TurnStateFn = Callable[[str, "str | None"], "str | None"]
 
+#: Prime a terminal CLI worker for ground-layer managed GC:
+#: ``(worktree, session) -> structured outcome``.
+ConclusionFn = Callable[[str, "str | None"], dict]
+
 #: Stop a local headless bridge session while preserving it for later resume.
 LocalColdFn = Callable[[str], bool]
 
@@ -81,6 +85,13 @@ FleetColdFn = Callable[[str, str], bool]
 
 _TERMINAL = frozenset({Status.COMPLETED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
+_CONCLUSION_PENDING = "pending"
+_CONCLUSION_COMPLETE = "complete"
+_CONCLUSION_HELD = "held"
+_TRANSIENT_CONCLUSION_REASONS = frozenset({"live-mux", "live-session"})
+_CONCLUSION_MAX_ATTEMPTS = 12
+_CONCLUSION_RETRY_BASE_SECONDS = 30
+_CONCLUSION_PER_CYCLE = 10
 
 
 def _default_liveness(worktree: str, machine: str | None) -> dict | None:
@@ -230,6 +241,12 @@ def _default_turn_state(worktree: str, machine: str | None) -> str | None:
         return None
     state = session.get("turn_state")
     return state if isinstance(state, str) and state else None
+
+
+def _default_conclusion(worktree: str, session: str | None) -> dict:
+    from . import embody
+
+    return embody.conclude_disposable_worker(worktree, session)
 
 
 def _worktree_from_owner(owner: str | None) -> str | None:
@@ -551,6 +568,8 @@ class Supervisor:
         nudge_fn: NudgeFn | None = None,
         redrive_fn: RedriveFn | None = None,
         turn_state_fn: TurnStateFn | None = None,
+        disposable_cli_labels: Sequence[str] | None = None,
+        conclusion_fn: ConclusionFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
         evaluator: Any | None = None,
         evaluator_ref: str | None = None,
@@ -626,6 +645,11 @@ class Supervisor:
         self.reactive_interval = max(0.25, float(reactive_interval))
         #: Turn-state resolver used by :meth:`wait_for_turn_end`. Injectable for tests.
         self.turn_state_fn = turn_state_fn or _default_turn_state
+        #: Explicit label-scoped terminal conclusion policy. Only a terminal
+        #: task carrying one of these labels is handed to the disposable CLI
+        #: conclusion path; arbitrary CLI worktrees remain untouched.
+        self.disposable_cli_labels = set(disposable_cli_labels or ())
+        self.conclusion_fn = conclusion_fn or _default_conclusion
         #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
         #: live worker is nudged at most once per stall window, not every cycle).
         self._last_nudge: dict[str, float] = {}
@@ -709,6 +733,7 @@ class Supervisor:
         self,
         *,
         state: str,
+        conclusion_state: str | None = None,
         resume_requested: bool | None = None,
     ) -> list[dict]:
         """List reservations filtered server-side to this pool before limit."""
@@ -716,6 +741,7 @@ class Supervisor:
             return self.client.list_reservations(
                 state=state,
                 repo=self.repo,
+                conclusion_state=conclusion_state,
                 resume_requested=resume_requested,
                 limit=10000,
             )
@@ -725,6 +751,7 @@ class Supervisor:
                 state=state,
                 repo=self.repo,
                 label=label,
+                conclusion_state=conclusion_state,
                 resume_requested=resume_requested,
                 limit=10000,
             ):
@@ -890,6 +917,125 @@ class Supervisor:
             "result-ref and no progress -- held for review"
         )
 
+    def _conclude_terminal_worker(self, reservation: dict, task: dict) -> dict | None:
+        """Run the opt-in exact-identity terminal conclusion policy."""
+        if not self.disposable_cli_labels.intersection(task.get("labels") or []):
+            return None
+        worktree = reservation.get("worktree")
+        if not isinstance(worktree, str) or not worktree:
+            return {"action": "skipped", "reason": "reservation-has-no-worktree"}
+        session = reservation.get("session_handle")
+        if not isinstance(session, str) or not session:
+            session = None
+        try:
+            return self.conclusion_fn(worktree, session)
+        except Exception as exc:
+            log.exception(
+                "terminal conclusion failed for task %s reservation %s",
+                task.get("id"),
+                reservation.get("key"),
+            )
+            return {"action": "failed", "reason": str(exc)[:300]}
+
+    def _refresh_terminal_session(
+        self, reservation: dict, task: dict
+    ) -> dict:
+        """Capture an exact live session id before releasing the reservation."""
+        worktree = reservation.get("worktree")
+        if not isinstance(worktree, str) or not worktree:
+            return reservation
+        recorded_session = reservation.get("session_handle")
+        if (
+            isinstance(recorded_session, str)
+            and recorded_session
+            and recorded_session != f"wt-{worktree}"
+        ):
+            return reservation
+        durable_session = task.get("owner_session_id")
+        completed_by = _worktree_from_owner(task.get("completed_by"))
+        if (
+            isinstance(durable_session, str)
+            and durable_session
+            and (completed_by is None or completed_by == worktree)
+        ):
+            try:
+                self.client.record_spawn(
+                    reservation["key"],
+                    session_handle=durable_session,
+                    worktree=worktree,
+                )
+            except DispatchError:
+                return reservation
+            return {
+                **reservation,
+                "session_handle": durable_session,
+                "worktree": worktree,
+            }
+        try:
+            session = self.liveness_fn(worktree, None)
+        except Exception:
+            session = None
+        if not session:
+            return reservation
+        session_id = session.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return reservation
+        exact_worktree = session.get("worktree_id")
+        if not isinstance(exact_worktree, str) or not exact_worktree:
+            exact_worktree = worktree
+        try:
+            self.client.record_spawn(
+                reservation["key"],
+                session_handle=session_id,
+                worktree=exact_worktree,
+            )
+        except DispatchError:
+            return reservation
+        return {
+            **reservation,
+            "session_handle": session_id,
+            "worktree": exact_worktree,
+        }
+
+    @staticmethod
+    def _conclusion_state(outcome: dict) -> str:
+        action = str(outcome.get("action") or "")
+        reason = str(outcome.get("reason") or "")
+        if action in {"primed", "already-primed"}:
+            return _CONCLUSION_COMPLETE
+        if action == "failed" or reason in _TRANSIENT_CONCLUSION_REASONS:
+            return _CONCLUSION_PENDING
+        return _CONCLUSION_HELD
+
+    @staticmethod
+    def _append_conclusion_detail(detail: str, outcome: dict | None) -> str:
+        if outcome is None:
+            return detail
+        action = str(outcome.get("action") or "unknown")
+        reason = str(outcome.get("reason") or "")
+        suffix = f"terminal conclusion {action}"
+        if reason:
+            suffix += f" ({reason})"
+        return f"{detail}; {suffix}"
+
+    @staticmethod
+    def _conclusion_retry_meta(reservation: dict) -> tuple[int, float]:
+        raw = reservation.get("conclusion_detail")
+        if not isinstance(raw, str) or not raw:
+            return 0, 0.0
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return 0, 0.0
+        if not isinstance(payload, dict):
+            return 0, 0.0
+        try:
+            attempts = max(0, int(payload.get("attempts", 0)))
+            next_at = max(0.0, float(payload.get("next_attempt_at", 0)))
+        except (TypeError, ValueError):
+            return 0, 0.0
+        return attempts, next_at
+
     def reconcile(self) -> int:
         """Settle ``spawned`` reservations whose task reached a terminal state.
 
@@ -900,19 +1046,97 @@ class Supervisor:
         detail rather than silently accepted. Returns the number settled.
         """
         settled = 0
-        for res in self._pool_reservations(
+        reservations = self._pool_reservations(
             state=f"{SpawnState.SPAWNED},{SpawnState.COLD}"
-        ):
+        )
+        reservations.extend(
+            self._pool_reservations(
+                state=SpawnState.SETTLED,
+                conclusion_state=_CONCLUSION_PENDING,
+            )[:_CONCLUSION_PER_CYCLE]
+        )
+        now = time.time()
+        for res in reservations:
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
                 continue  # task vanished; leave the reservation for a human
             if task.get("status") in _TERMINAL:
+                detail = self._completion_detail(task)
+                policy_applies = bool(
+                    self.disposable_cli_labels.intersection(
+                        task.get("labels") or []
+                    )
+                )
+                if res.get("state") == SpawnState.SETTLED:
+                    if (
+                        not policy_applies
+                        or res.get("conclusion_state") != _CONCLUSION_PENDING
+                    ):
+                        continue
+                    prior_attempts, next_attempt_at = self._conclusion_retry_meta(res)
+                    if next_attempt_at > now:
+                        continue
+                    if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
+                        try:
+                            self.client.settle_spawn(
+                                res["key"],
+                                detail=detail,
+                                conclusion_state=_CONCLUSION_HELD,
+                                conclusion_detail=res.get("conclusion_detail"),
+                            )
+                        except DispatchError:
+                            pass
+                        continue
+                else:
+                    prior_attempts = 0
+                    if policy_applies:
+                        res = self._refresh_terminal_session(res, task)
+                    try:
+                        # Release the process slot before priming the worktree.
+                        # A durable pending marker keeps transient liveness or
+                        # command failures retryable after settlement.
+                        self.client.settle_spawn(
+                            res["key"],
+                            detail=detail,
+                            conclusion_state=(
+                                _CONCLUSION_PENDING if policy_applies else None
+                            ),
+                        )
+                        settled += 1
+                    except DispatchError:
+                        continue
+                outcome = self._conclude_terminal_worker(res, task)
+                if outcome is None:
+                    continue
+                final_detail = self._append_conclusion_detail(detail, outcome)
+                conclusion_state = self._conclusion_state(outcome)
+                conclusion_payload: dict = dict(outcome)
+                if conclusion_state == _CONCLUSION_PENDING:
+                    attempts = prior_attempts + 1
+                    conclusion_payload["attempts"] = attempts
+                    conclusion_payload["next_attempt_at"] = now + min(
+                        300,
+                        _CONCLUSION_RETRY_BASE_SECONDS * (2 ** (attempts - 1)),
+                    )
+                    if attempts >= _CONCLUSION_MAX_ATTEMPTS:
+                        conclusion_state = _CONCLUSION_HELD
                 try:
-                    self.client.settle_spawn(res["key"], detail=self._completion_detail(task))
-                    settled += 1
+                    self.client.settle_spawn(
+                        res["key"],
+                        detail=final_detail,
+                        conclusion_state=conclusion_state,
+                        conclusion_detail=json.dumps(
+                            conclusion_payload,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    )
                 except DispatchError:
-                    pass
+                    log.exception(
+                        "could not record terminal conclusion outcome for %s",
+                        res["key"],
+                    )
         return settled
 
     def hold_live_leases(self) -> int:

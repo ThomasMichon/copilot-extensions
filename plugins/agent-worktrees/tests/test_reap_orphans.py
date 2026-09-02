@@ -330,28 +330,62 @@ def test_post_exit_sweeps_orphans_when_no_record(tmp_path, monkeypatch):
 
 # ── #1069 managed (system/bridge) leak GC: sweep_managed_worktrees ────────────
 
-def _managed_sweep(records, *, dry_run=True, mux=None, activity=None, now=None):
+def _managed_sweep(
+    records,
+    *,
+    dry_run=True,
+    mux=None,
+    activity=None,
+    now=None,
+    session_scans=None,
+):
     """Invoke ``sweep_managed_worktrees`` with the fleet's I/O fully patched.
 
     Dry-run by default (no git/FS side effects). Records with a non-existent
     ``worktree_path`` resolve their git-state from ``status`` (finalized ->
     'completed'), so no real git call is needed.
     """
+    import tempfile
     import types
-    repo = types.SimpleNamespace(anchor="/tmp/anchor", remote="origin",
-                                 default_branch="main")
-    config = types.SimpleNamespace(default_repo=repo, repo_name="repo")
-    with patch("agent_worktrees.config.load_config", return_value=config), \
-         patch("agent_worktrees.config.tracking_dir", return_value=Path("/tmp")), \
-         patch("agent_worktrees.tracking.list_records", return_value=records), \
-         patch("agent_worktrees.sessions._list_mux_sessions",
-               return_value=(mux or {})), \
-         patch("agent_worktrees.sessions._mux_session_activity",
-               return_value=(activity or {})), \
-         patch("agent_worktrees.sessions.scan_sessions_fast",
-               return_value=types.SimpleNamespace(active_sessions={})), \
-         patch("agent_worktrees.__main__._build_active_paths", return_value=set()):
-        return cli.sweep_managed_worktrees(dry_run=dry_run, now=now)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        tracking_dir = root / "tracking"
+        tracking_dir.mkdir()
+        for record in records:
+            tracking.save_record(
+                record,
+                tracking_dir / f"{record.worktree_id}.yaml",
+            )
+        repo = types.SimpleNamespace(
+            anchor=str(root / "anchor"),
+            worktree_root=str(root / "worktrees"),
+            remote="origin",
+            default_branch="main",
+        )
+        config = types.SimpleNamespace(
+            default_repo=repo,
+            repo_name="repo",
+            repos={"owner/repo": repo},
+        )
+        scans = list(session_scans or [{}])
+        scan_index = 0
+
+        def _scan(_records):
+            nonlocal scan_index
+            value = scans[min(scan_index, len(scans) - 1)]
+            scan_index += 1
+            return types.SimpleNamespace(active_sessions=value)
+
+        with patch("agent_worktrees.config.load_config", return_value=config), \
+             patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
+             patch("agent_worktrees.tracking.list_records", return_value=records), \
+             patch("agent_worktrees.sessions._list_mux_sessions",
+                   return_value=(mux or {})), \
+             patch("agent_worktrees.sessions._mux_session_activity",
+                   return_value=(activity or {})), \
+             patch("agent_worktrees.sessions.scan_sessions_fast", side_effect=_scan), \
+             patch("agent_worktrees.__main__._build_active_paths", return_value=set()):
+            return cli.sweep_managed_worktrees(dry_run=dry_run, now=now)
 
 
 def _mgd(wt_id, *, kind="bridge", status="finalized", follow_up=False):
@@ -388,3 +422,40 @@ def test_managed_sweep_ignores_non_managed_records():
     # A plain session record is not managed -> never in the managed sweep.
     report = _managed_sweep([_rec("sess", status="finalized", kind="session")])
     assert report == {"removed": [], "skipped": []}
+
+
+def test_managed_sweep_retains_record_when_removal_fails():
+    with patch(
+        "agent_worktrees.__main__._remove_managed_worktree",
+        return_value=(False, ["worktree remove failed"]),
+    ):
+        report = _managed_sweep(
+            [_mgd("retry", kind="bridge")],
+            dry_run=False,
+        )
+
+    assert report["removed"] == []
+    assert report["skipped"] == [
+        {"id": "retry", "reason": "worktree remove failed"}
+    ]
+
+
+def test_managed_sweep_rechecks_live_session_before_removal():
+    rec = _mgd("resumed", kind="bridge")
+    with patch(
+        "agent_worktrees.__main__._remove_managed_worktree",
+        side_effect=AssertionError("live worktree must not be removed"),
+    ):
+        report = _managed_sweep(
+            [rec],
+            dry_run=False,
+            session_scans=[
+                {},
+                {rec.worktree_path: ["new-session"]},
+            ],
+        )
+
+    assert report["removed"] == []
+    assert report["skipped"] == [
+        {"id": "resumed", "reason": "recheck-live-session"}
+    ]

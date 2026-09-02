@@ -635,6 +635,8 @@ class SpawnReservation:
     session_handle: str | None = None
     worktree: str | None = None
     detail: str | None = None
+    conclusion_state: str | None = None
+    conclusion_detail: str | None = None
     reserved_at: float = 0.0
     updated_at: float = 0.0
 
@@ -649,6 +651,8 @@ class SpawnReservation:
             session_handle=row["session_handle"],
             worktree=row["worktree"],
             detail=row["detail"],
+            conclusion_state=row["conclusion_state"],
+            conclusion_detail=row["conclusion_detail"],
             reserved_at=row["reserved_at"],
             updated_at=row["updated_at"],
         )
@@ -1038,10 +1042,36 @@ class TaskQueue:
                 "  session_handle TEXT,"
                 "  worktree TEXT,"
                 "  detail TEXT,"
+                "  conclusion_state TEXT,"
+                "  conclusion_detail TEXT,"
                 "  reserved_at REAL NOT NULL,"
                 "  updated_at REAL NOT NULL"
                 ")"
             )
+            reservation_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(spawn_reservations)"
+                ).fetchall()
+            }
+            if "conclusion_state" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN conclusion_state TEXT"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            if "conclusion_detail" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN conclusion_detail TEXT"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_spawn_res_task "
                 "ON spawn_reservations(task_id)"
@@ -4894,6 +4924,8 @@ class TaskQueue:
         session_handle: str | None = None,
         worktree: str | None = None,
         detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
         with self._connect() as conn:
@@ -4914,7 +4946,11 @@ class TaskQueue:
                 "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
                 "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
                 "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
-                "detail = COALESCE(?, detail) WHERE key = ?",
+                "detail = COALESCE(?, detail), "
+                "conclusion_state = CASE WHEN ? IS NOT NULL THEN ? "
+                "ELSE conclusion_state END, "
+                "conclusion_detail = CASE WHEN ? IS NOT NULL THEN ? "
+                "ELSE conclusion_detail END WHERE key = ?",
                 (
                     to_state,
                     ts,
@@ -4923,6 +4959,10 @@ class TaskQueue:
                     worktree,
                     worktree,
                     detail,
+                    conclusion_state,
+                    conclusion_state,
+                    conclusion_detail,
+                    conclusion_detail,
                     key,
                 ),
             )
@@ -4986,14 +5026,28 @@ class TaskQueue:
         )
 
     def settle_spawn(
-        self, key: str, *, detail: str | None = None, now: float | None = None
+        self,
+        key: str,
+        *,
+        detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
+        now: float | None = None,
     ) -> SpawnReservation:
-        """Mark a reservation ``settled`` (its task reached a terminal outcome)."""
+        """Mark a reservation ``settled`` (its task reached a terminal outcome).
+
+        Repeating the call on an already-settled row is an idempotent detail
+        update. The supervisor uses that to release the process slot first, run
+        optional ground-layer conclusion, then record its outcome without ever
+        holding settlement hostage to cleanup.
+        """
         return self._update_reservation(
             key,
             to_state=SpawnState.SETTLED,
-            allowed_from=SpawnState.ACTIVE,
+            allowed_from=SpawnState.ACTIVE | frozenset({SpawnState.SETTLED}),
             detail=detail,
+            conclusion_state=conclusion_state,
+            conclusion_detail=conclusion_detail,
             now=now,
         )
 
@@ -5022,6 +5076,7 @@ class TaskQueue:
         state: str | Sequence[str] | None = None,
         repo: str | None = None,
         label: str | None = None,
+        conclusion_state: str | None = None,
         resume_requested: bool | None = None,
         limit: int = 200,
     ) -> list[SpawnReservation]:
@@ -5046,6 +5101,9 @@ class TaskQueue:
                 "EXISTS (SELECT 1 FROM json_each(t.labels) WHERE value = ?)"
             )
             params.append(label)
+        if conclusion_state is not None:
+            clauses.append("r.conclusion_state = ?")
+            params.append(conclusion_state)
         if resume_requested is not None:
             clauses.append("t.resume_requested = ?")
             params.append(1 if resume_requested else 0)

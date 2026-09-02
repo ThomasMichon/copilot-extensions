@@ -559,9 +559,23 @@ class DispatchClient:
             self._http.post(f"/spawn-reservations/{key}/cold")
         )
 
-    def settle_spawn(self, key: str, *, detail: str | None = None) -> dict:
+    def settle_spawn(
+        self,
+        key: str,
+        *,
+        detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
+    ) -> dict:
         return self._unwrap(
-            self._http.post(f"/spawn-reservations/{key}/settle", json={"detail": detail})
+            self._http.post(
+                f"/spawn-reservations/{key}/settle",
+                json={
+                    "detail": detail,
+                    "conclusion_state": conclusion_state,
+                    "conclusion_detail": conclusion_detail,
+                },
+            )
         )
 
     def rearm_spawn(
@@ -590,6 +604,7 @@ class DispatchClient:
         state: str | None = None,
         repo: str | None = None,
         label: str | None = None,
+        conclusion_state: str | None = None,
         resume_requested: bool | None = None,
         limit: int = 200,
     ) -> list[dict]:
@@ -602,6 +617,8 @@ class DispatchClient:
             params["repo"] = repo
         if label is not None:
             params["label"] = label
+        if conclusion_state is not None:
+            params["conclusion_state"] = conclusion_state
         if resume_requested is not None:
             params["resume_requested"] = resume_requested
         return self._unwrap(self._http.get("/spawn-reservations", params=params))
