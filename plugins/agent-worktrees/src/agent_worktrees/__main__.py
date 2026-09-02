@@ -18420,6 +18420,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (the default; accepted for consistency)")
 
+    sp = sub.add_parser(
+        "session-lineage",
+        help="Show one exact session's bounded reciprocal lineage graph (JSON)",
+    )
+    sp.add_argument("--session-id", required=True,
+                    help="Exact Copilot session id")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (the default; accepted for consistency)")
+
     # bind-session -- the agent explicitly declares its worktree (self-identifying)
     sp = sub.add_parser(
         "bind-session",
@@ -18533,6 +18542,15 @@ def build_parser() -> argparse.ArgumentParser:
                     required=True, help="Worktree ID (full or 4-char suffix)")
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
+
+    sp = sub.add_parser(
+        "worktree-lineage",
+        help="Show one worktree's authoritative bounded lineage graph (JSON)",
+    )
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
+                    required=True, help="Worktree ID (full or unique suffix)")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit JSON (the default; accepted for consistency)")
 
     # conclude-session -- assert a session's conclusion (handed-off | concluded)
     sp = sub.add_parser(
@@ -19086,6 +19104,14 @@ def cmd_session_recovery(args: argparse.Namespace) -> int:
         )
         return 0
     _json_output(report)
+    return 0
+
+
+def cmd_session_lineage(args: argparse.Namespace) -> int:
+    """Emit one exact session's reciprocal lineage without discovery scans."""
+    from . import lineage_surfaces
+
+    _json_output(lineage_surfaces.session_lineage(args.session_id))
     return 0
 
 
@@ -20382,6 +20408,18 @@ def cmd_head_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_worktree_lineage(args: argparse.Namespace) -> int:
+    """Emit one authoritative worktree's bounded session/controller graph."""
+    from . import lineage_surfaces
+
+    yaml_path = _find_tracking_file(args.worktree_id)
+    if yaml_path is None:
+        return _json_error(f"No worktree found: {args.worktree_id}")
+    record = tracking.load_record(yaml_path)
+    _json_output(lineage_surfaces.worktree_lineage(record))
+    return 0
+
+
 def cmd_conclude_session(args: argparse.Namespace) -> int:
     """Assert a session's conclusion (``handed-off`` | ``concluded``) -- JSON out.
 
@@ -20927,6 +20965,7 @@ COMMAND_MAP = {
     "deregister-session": cmd_deregister_session,
     "session-binding": cmd_session_binding,
     "session-recovery": cmd_session_recovery,
+    "session-lineage": cmd_session_lineage,
     "bind-session": cmd_bind_session,
     "bind-nudge": cmd_bind_nudge,
     "history-digest": cmd_history_digest,
@@ -20936,6 +20975,7 @@ COMMAND_MAP = {
     "doctor": cmd_doctor,
     "list-sessions": cmd_list_sessions,
     "head-session": cmd_head_session,
+    "worktree-lineage": cmd_worktree_lineage,
     "conclude-session": cmd_conclude_session,
     "conclude-disposable": cmd_conclude_disposable,
     "link-succession": cmd_link_succession,
@@ -21276,13 +21316,14 @@ _NO_PROJECT_COMMANDS = {
     "reconcile-sessions", "status-monitor-restart", "restart",
     "register-session", "deregister-session", "session-binding",
     "session-recovery",
+    "session-lineage",
     "installer-readiness",
     "bind-session",
     "bind-nudge",
     "history-digest",
     "note-handoff",
     "session-role",
-    "head-session", "conclude-session", "conclude-disposable",
+    "head-session", "worktree-lineage", "conclude-session", "conclude-disposable",
     "link-succession", "config-migrate",
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",

@@ -456,6 +456,26 @@ unknown findings are inspect-only. This object is advisory display data: it
 does not change classification, liveness, occupancy, cleanup, or resume
 authority.
 
+Two detail surfaces expose the same authority for graph and visualization
+consumers without enlarging the Picker's hot list payload:
+
+- `worktree-lineage --worktree <id> --json` renders one bounded authoritative
+  record as sessions, head transitions, handoffs, controller relations,
+  normalized reciprocal state, exact-session projection health, and a graph.
+  Explicit forks, cycles, missing referenced sessions, and concluded terminal
+  chains remain findings rather than guessed edges.
+- `session-lineage --session-id <id> --json` reads only that exact session's
+  `agent-worktrees.json`, validates each retained relation against its
+  authoritative worktree record, and preserves restored provenance, tombstones,
+  unsupported/invalid state, and projection overflow. An incomplete projection
+  is never presented as the session's complete controller set. Embedded
+  worktree summaries mark presentation unevaluated rather than reading any
+  other session projection or misclassifying missing evaluation as ambiguity.
+
+Neither command enumerates the live session-state root. Corpus-wide graphing
+continues to consume synchronized session archives or an index produced during
+synchronization.
+
 The explicit `backfill-sessions` and `doctor` paths also audit known bound and
 controller relations by exact session ID. A per-run projection budget bounds
 the work. Local missing, stale, or corrupt same-version projections can be

@@ -171,7 +171,7 @@ Public-safe transcription of the operator request:
       re-binding/controller recovery pointer when needed.
 - [x] Let Picker and JSON consumers distinguish **bound here**, **controlled
       from elsewhere**, **handed off**, **terminal**, and **ambiguous**.
-- [ ] Add worktree-centric and lineage-centric data surfaces suitable for
+- [x] Add worktree-centric and lineage-centric data surfaces suitable for
       visualization without transcript parsing, CWD joins, or enumeration of
       the live session-state root.
 - [x] Update agent-worktrees architecture and CLI documentation.
@@ -206,7 +206,7 @@ Public-safe transcription of the operator request:
       revision or silently bind a foreign project.
 - [x] Session-state synchronization preserves metadata and enables grouping by
       stable worktree identity after restore.
-- [ ] A concluded controller with no successor yields an explicit terminal
+- [x] A concluded controller with no successor yields an explicit terminal
       finding rather than an invented recovery target.
 - [x] Remote controllers produce a navigable identity/action even when the
       local Picker cannot focus their session directly.
@@ -323,3 +323,14 @@ Adopt the authority and schema model in [`design.md`](design.md):
   liveness, occupancy, binding, or resume authority.
 - Opened #1706 for the remaining Phase 6 data slice: bounded worktree-centric
   and session-lineage JSON surfaces suitable for visualization.
+- Implemented `worktree-lineage` and `session-lineage` as separate bounded JSON
+  contracts. The worktree surface preserves authoritative sessions, head
+  transitions, handoffs, controllers, normalized reciprocal presentation,
+  exact-projection health, explicit graph-integrity findings, and per-collection
+  overflow. The exact-session surface reads only the requested sidecar, validates
+  retained relations against record authority, and keeps restored evidence,
+  tombstones, missing records, invalid/newer schemas, and overflow explicit.
+- Indexed lineage traversal once per authoritative record so graph generation is
+  linear in record size plus fixed traversal budgets rather than repeatedly
+  searching long session histories. Full Windows validation passed with 3,522
+  tests, 38 skips, and the three #1649 baseline tests deliberately deselected.
