@@ -163,8 +163,9 @@ The missing capability is composition, not another bespoke reviewer.
       surfaces have merged upstream.
 - [x] Adopt the same turn-key contract in a second public repository using only
       repository-owned policy/configuration.
-- [ ] Prove discovery creates one review task for an eligible external pull
-      request and creates none for an excluded pull request.
+- [x] Prove discovery creates one review task for an eligible
+      repository-policy-selected pull request and creates none for an excluded
+      pull request.
 - [ ] Prove a task survives worker or frontend interruption, resumes from its
       durable state, and completes without duplicate review actions.
 - [x] Feed portability findings back into the generic contract before declaring
@@ -195,13 +196,13 @@ The missing capability is composition, not another bespoke reviewer.
       permissions surface a terminal/blocked outcome.
 - [ ] Self-hosted copilot-extensions proof records one eligible external review
       end to end and one excluded change producing no task.
-- [ ] Second-repository proof uses the same generic runtime and differs only in
+- [x] Second-repository proof uses the same generic runtime and differs only in
       repository-owned declaration/policy.
 - [ ] Recovery proof covers service restart, worker interruption, visible
       blocked state, atomic rearm, and continuation from durable card/progress.
 - [x] Doctor proof reports a syntactically valid declaration with no serving
       host/pointer as inactive and actionable rather than silently healthy.
-- [ ] Discovery proof shows a restart resumes from its watermark/backoff state
+- [x] Discovery proof shows a restart resumes from its watermark/backoff state
       without re-emitting tasks for already-reviewed open changes.
 
 The effort is complete only when the generic declaration/control surface is
@@ -357,3 +358,29 @@ declarative expansion follows only after that composition is proven.
   side-load path. The eligible-change proof remains gated on an eligible
   external pull request becoming available; the current open set contains only
   repository ACL members.
+
+### 2026-09-02 — Policy-selected reviews and interruption recovery
+
+- The validation repository added an explicit repository-owned label that opts
+  a maintainer-authored change into the same full reviewer loop while retaining
+  default ACL exclusion, draft/bot/closed filtering, and self-review
+  protection. An unlabeled ACL change continued to produce no task.
+- Two labeled maintainer changes each created exactly one evaluator-bound task.
+  One received a single approval and suspended on a real merge conflict. The
+  other survived a productive worker ending, requeued the same durable task
+  without a second generation, resumed in a replacement worker, posted one
+  request-changes review, recorded its exact revision marker, and suspended for
+  author updates without duplicate review actions.
+- The first proof workers exposed a Windows owner-resolution timeout between
+  two serial `agent-worktrees` probes. Merged
+  [PR 1702](https://github.com/ThomasMichon/copilot-extensions/pull/1702)
+  as `agent-dispatch` `0.1.0-dev261`: worker identity now resolves from one
+  `owner-ref` probe, does not amplify a timeout with two more probes, and keeps
+  machine-only callers on one machine lookup. A post-deploy replacement worker
+  claimed and started automatically without an explicit owner.
+- The loop remained healthy across coordinator/supervisor replacement and a
+  complete scheduled discovery interval. Already-reviewed or excluded changes
+  did not produce duplicate tasks. The final task-completion/landing observation
+  remains author-gated: the live validation changes require conflict resolution
+  or requested documentation updates before the durable tasks can resume and
+  reach terminal completion.
