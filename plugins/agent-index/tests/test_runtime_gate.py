@@ -13,12 +13,17 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PLUGIN / "src"
 
 
-def test_reconcile_update_uses_installer_declared_arguments() -> None:
+def test_installer_readiness_uses_supported_update_arguments() -> None:
     manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
     readiness = json.loads(
         (PLUGIN / "installer-readiness.json").read_text(encoding="utf-8")
     )
-    installer = readiness["modules"][0]["installer"]
+    runtime_module = next(
+        module
+        for module in readiness["modules"]
+        if module["id"] == "agent-index/runtime"
+    )
+    installer = runtime_module["installer"]
 
     assert "zeroDowntimeUpdate" not in manifest
     assert installer["windows"]["arguments"] == ["update"]
