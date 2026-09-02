@@ -975,6 +975,31 @@ def test_health_fleet_can_select_active_machine_subset(
     assert [machine["machine"] for machine in payload["machines"]] == ["active"]
 
 
+def test_health_fleet_ignores_root_metadata_and_scans_machine_dirs(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    meta.write_sync_meta(dest, "not-a-machine", "local", "ok", 1)
+    meta.write_sync_meta(dest / "machine", "machine", "local", "ok", 2)
+    cfg = _cfg(tmp_path / "home", source, dest)
+
+    assert engine.do_health(
+        cfg,
+        fleet=True,
+        machines=[],
+        max_age_hours=12,
+        partial_threshold=3,
+        json_output=True,
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert [machine["machine"] for machine in payload["machines"]] == ["machine"]
+
+
 def test_health_fleet_reports_machine_missing_metadata(
     capsys,
     tmp_path: Path,

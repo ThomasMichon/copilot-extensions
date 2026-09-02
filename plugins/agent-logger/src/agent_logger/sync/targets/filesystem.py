@@ -1530,27 +1530,26 @@ class FilesystemTarget(Target):
                     ).st_mode
                 except FileNotFoundError:
                     metadata_mode = None
-                if metadata_mode is not None and (
+                if relative.parts and metadata_mode is not None and (
                     stat.S_ISREG(metadata_mode)
                     and not is_link_or_reparse(metadata_path, metadata_mode)
                 ):
                     machine = relative.as_posix()
-                    if machine:
-                        try:
-                            metadata = read_sync_meta(directory)
-                            machines[machine] = SyncStatus(
-                                supported=True,
-                                metadata=metadata,
-                            )
-                        except OSError as exc:
-                            machines[machine] = SyncStatus(
-                                supported=True,
-                                error=str(exc),
-                            )
-                        if len(machines) > _MAX_FLEET_MACHINES:
-                            raise OSError(
-                                f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
-                            )
+                    try:
+                        metadata = read_sync_meta(directory)
+                        machines[machine] = SyncStatus(
+                            supported=True,
+                            metadata=metadata,
+                        )
+                    except OSError as exc:
+                        machines[machine] = SyncStatus(
+                            supported=True,
+                            error=str(exc),
+                        )
+                    if len(machines) > _MAX_FLEET_MACHINES:
+                        raise OSError(
+                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
+                        )
                     continue
                 if len(relative.parts) >= _MAX_FLEET_MACHINE_DEPTH:
                     continue
