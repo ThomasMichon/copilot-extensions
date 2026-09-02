@@ -608,8 +608,9 @@ def build_owned_result_snapshot(
             event_retention="durable",
         ),
         state=ResultCurrentState(
-            session_status=session.status,
-            liveness=session.liveness_state(),
+            session_status=session.public_status(),
+            at_rest=session.is_at_rest(),
+            liveness=session.public_liveness(),
             context_pct=session.context_pct,
             usage_model=session.usage_model,
             attention=attention,

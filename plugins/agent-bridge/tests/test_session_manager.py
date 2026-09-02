@@ -13,6 +13,7 @@ from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
+from agent_bridge.routes.sessions import _session_info
 from agent_bridge.session_host.host_index import HostRecord
 from agent_bridge.session_manager import (
     _STALL_AFTER_S,
@@ -38,6 +39,44 @@ def test_venue_workspace_cwd():
     assert _venue_workspace_cwd(
         SpawnTarget(type="command", venue={"workspace_folder": "  "})
     ) is None
+
+
+def test_running_session_projects_at_rest_from_terminal_event_tail() -> None:
+    session = Session(
+        "sid",
+        "name",
+        SpawnTarget(type="local", cwd="/tmp/x"),
+    )
+    session.status = SessionStatus.RUNNING
+    session.event_log = EventLog()
+    session.event_log.append("user_message", {"content": "work"})
+    assert session.is_at_rest() is False
+    session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+    assert session.is_at_rest() is True
+    info = _session_info(session)
+    assert info.status == SessionStatus.IDLE
+    assert info.at_rest is True
+    assert info.liveness is None
+    session.event_log.append("user_message", {"content": "more work"})
+    assert session.is_at_rest() is False
+    info = _session_info(session)
+    assert info.status == SessionStatus.RUNNING
+    assert info.at_rest is False
+
+
+def test_active_tool_prevents_at_rest_projection() -> None:
+    session = Session(
+        "sid",
+        "name",
+        SpawnTarget(type="local", cwd="/tmp/x"),
+    )
+    session.status = SessionStatus.RUNNING
+    session.event_log = EventLog()
+    session.event_log.append("turn_complete", {"stop_reason": "end_turn"})
+    session.event_log.append(
+        "tool_call_start", {"tool_call_id": "tool-1", "name": "shell"}
+    )
+    assert session.is_at_rest() is False
 
 
 def _mock_agent_proc():

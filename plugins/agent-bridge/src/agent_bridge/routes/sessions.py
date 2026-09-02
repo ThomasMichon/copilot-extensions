@@ -238,6 +238,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
     """Convert an internal Session to the public SessionInfo model."""
     from datetime import datetime, timezone
 
+    at_rest = s.is_at_rest()
     return SessionInfo(
         session_id=s.session_id,
         name=s.name,
@@ -251,7 +252,7 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         worktree_id=s.target.worktree_id,
         elevated=s.target.elevated,
         read_only=False,
-        status=s.status,
+        status=s.public_status(),
         pid=s.pid,
         turn_count=s.turn_count,
         context_size=s.context_size,
@@ -272,7 +273,8 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
             datetime.fromtimestamp(s.last_heartbeat_at, tz=timezone.utc).isoformat()
             if s.last_heartbeat_at else None
         ),
-        liveness=s.liveness_state(),
+        liveness=s.public_liveness(),
+        at_rest=at_rest,
     )
 
 
@@ -628,11 +630,9 @@ async def list_sessions(request: Request, status: str | None = None):
     mgr: SessionManager = request.app.state.session_manager
     status = status or None
     primary_sessions = mgr.list_sessions()
-    infos = [
-        _session_info(session)
-        for session in primary_sessions
-        if status is None or session.status.value == status
-    ]
+    infos = [_session_info(session) for session in primary_sessions]
+    if status is not None:
+        infos = [info for info in infos if info.status.value == status]
 
     # Elevated sessions live in a separate daemon/database. The primary daemon
     # remains their discovery surface after that daemon idle-exits; rows already
@@ -690,7 +690,8 @@ async def get_session_usage(session_id: str, request: Request):
             if session.last_usage_at else None
         ),
         "turn_count": session.turn_count,
-        "status": session.status.value,
+        "status": session.public_status().value,
+        "at_rest": session.is_at_rest(),
     }
 
 
@@ -728,7 +729,8 @@ async def get_session_status(
         "name": session.name,
         "agent_name": session.agent_name,
         "caller_id": session.caller_id,
-        "status": session.status.value,
+        "status": session.public_status().value,
+        "at_rest": session.is_at_rest(),
         "turn_count": session.turn_count,
         "context_pct": session.context_pct,
         "usage_model": session.usage_model,
