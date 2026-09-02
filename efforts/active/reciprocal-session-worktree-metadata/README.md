@@ -24,7 +24,9 @@
   [#1700](https://github.com/ThomasMichon/copilot-extensions/issues/1700)
   (Picker and JSON reciprocal relation state) ·
   [#1706](https://github.com/ThomasMichon/copilot-extensions/issues/1706)
-  (worktree and session lineage JSON surfaces)
+  (worktree and session lineage JSON surfaces) ·
+  [#1712](https://github.com/ThomasMichon/copilot-extensions/issues/1712)
+  (rollout hardening and convergence validation)
 
 ## Guiding Intent
 
@@ -334,3 +336,7 @@ Adopt the authority and schema model in [`design.md`](design.md):
   linear in record size plus fixed traversal budgets rather than repeatedly
   searching long session histories. Full Windows validation passed with 3,522
   tests, 38 skips, and the three #1649 baseline tests deliberately deselected.
+- The lineage surfaces landed through #1710, after which #1706 was closed.
+  Opened #1712 for the final rollout/hardening slice: platform containment and
+  atomicity, mixed-version behavior, large-history latency, cross-scenario
+  convergence, remaining validation closure, and effort archival.
