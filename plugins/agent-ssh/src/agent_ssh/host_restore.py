@@ -48,7 +48,7 @@ def _dtssh_command(alias: str, port: int, *, apply: bool) -> list[str]:
         "Bypass",
         "-File",
         str(script),
-        "install" if apply else "status",
+        "update" if apply else "status",
         "-Alias",
         alias,
         "-Port",
