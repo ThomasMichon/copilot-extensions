@@ -10,6 +10,13 @@ import sys
 from typing import Any
 
 
+def _kill_process(proc: asyncio.subprocess.Process) -> None:
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+
+
 def ssh_subprocess_kwargs(**kwargs: Any) -> dict[str, Any]:
     """Return kwargs that keep an SSH process tree invisible and isolated.
 
@@ -39,7 +46,7 @@ async def terminate_ssh_process_tree(
         return
     pid = getattr(proc, "pid", None)
     if not isinstance(pid, int) or pid <= 0:
-        proc.kill()
+        _kill_process(proc)
         await proc.wait()
         return
     if sys.platform == "win32":
@@ -54,12 +61,12 @@ async def terminate_ssh_process_tree(
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except OSError:
-            proc.kill()
+            _kill_process(proc)
     else:
         try:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
         except OSError:
-            proc.kill()
+            _kill_process(proc)
     try:
         await asyncio.wait_for(proc.wait(), timeout=grace)
         return
@@ -69,9 +76,9 @@ async def terminate_ssh_process_tree(
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
         except OSError:
-            proc.kill()
+            _kill_process(proc)
     else:
-        proc.kill()
+        _kill_process(proc)
     try:
         await asyncio.wait_for(proc.wait(), timeout=2.0)
     except (TimeoutError, asyncio.TimeoutError):

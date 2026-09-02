@@ -214,6 +214,13 @@ def ssh_subprocess_kwargs() -> dict[str, object]:
     return {"start_new_session": True}
 
 
+def _signal_ssh_process(proc: subprocess.Popen[object], method: str) -> None:
+    try:
+        getattr(proc, method)()
+    except OSError:
+        pass
+
+
 def terminate_ssh_process_tree(
     proc: subprocess.Popen[object],
     *,
@@ -224,11 +231,11 @@ def terminate_ssh_process_tree(
         return
     pid = getattr(proc, "pid", None)
     if not isinstance(pid, int) or pid <= 0:
-        proc.terminate()
+        _signal_ssh_process(proc, "terminate")
         try:
             proc.wait(timeout=grace)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            _signal_ssh_process(proc, "kill")
         return
     if sys.platform == "win32":
         try:
@@ -241,12 +248,12 @@ def terminate_ssh_process_tree(
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except OSError:
-            proc.kill()
+            _signal_ssh_process(proc, "kill")
     else:
         try:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
         except OSError:
-            proc.kill()
+            _signal_ssh_process(proc, "kill")
     try:
         proc.wait(timeout=grace)
         return
@@ -256,9 +263,9 @@ def terminate_ssh_process_tree(
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
         except OSError:
-            proc.kill()
+            _signal_ssh_process(proc, "kill")
     else:
-        proc.kill()
+        _signal_ssh_process(proc, "kill")
     try:
         proc.wait(timeout=2.0)
     except subprocess.TimeoutExpired:

@@ -161,6 +161,22 @@ def test_ssh_command_reaps_tree_on_keyboard_interrupt(monkeypatch):
     assert reaped == [fake_proc]
 
 
+def test_terminate_ssh_tree_ignores_already_exited_signal_race():
+    class FakeProc:
+        pid = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            raise ProcessLookupError
+
+        def wait(self, timeout=None):
+            return 0
+
+    procutil.terminate_ssh_process_tree(FakeProc())
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows console integration")
 @pytest.mark.parametrize(
     "capture",

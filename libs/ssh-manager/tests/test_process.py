@@ -72,3 +72,18 @@ def test_terminate_windows_tree_runs_taskkill_off_event_loop(monkeypatch):
     asyncio.run(process.terminate_ssh_process_tree(FakeProc()))
 
     assert calls[0][0][0] == ["taskkill", "/PID", "123", "/T", "/F"]
+
+
+def test_terminate_tree_ignores_already_exited_kill_race():
+    class FakeProc:
+        returncode = None
+        pid = None
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+        def kill(self):
+            raise ProcessLookupError
+
+    asyncio.run(process.terminate_ssh_process_tree(FakeProc()))
