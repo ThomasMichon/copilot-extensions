@@ -152,9 +152,15 @@ attributable context atomically under the exact session's
 resumed session cannot replace each other's spill, without disclosing either
 path or exceeding common Windows path limits.
 Return one compact, byte-identical critical kernel from every participating
-hook that instructs the agent to load that absolute file before acting. Validate
-the session identifier, contain the write beneath the session-state root,
-reject symlink escapes, and use private file permissions on POSIX.
+hook. It contains the absolute spill instruction, exact command catalogs when
+they fit, complete highest-priority owner fragments selected by declared order,
+and a bounded exact-excerpt index for deferred contributors. If the full index
+cannot fit, retain its total, remaining count, and deterministic roster digest;
+the spill remains the full attribution source. The kernel must support safe
+first-turn decisions without requiring a file read, while the spill remains
+authoritative for deferred detail. Validate the session identifier, contain the
+write beneath the session-state root, reject symlink escapes, and use private
+file permissions on POSIX.
 
 ### Discover configuration without executing it
 

@@ -67,10 +67,14 @@ Aggregates above 8 KB are atomically written to
 `~/.copilot/session-state/<sessionId>/files/startup-context-<cwd-digest>.md`.
 The 96-bit SHA-256 prefix keys the spill to the same canonical CWD used by the
 rendezvous without exposing that path in the filename or exceeding common
-Windows path limits. Every hook then returns the same compact critical kernel
-with an absolute instruction to load that file before acting. This keeps
-repeated hook output below host-wide context limits without discarding the
-complete attributable aggregate.
+Windows path limits. Every hook then returns the same compact critical kernel:
+the absolute spill instruction, exact command catalogs when they fit, complete
+highest-priority owner fragments selected by declared order, and a bounded
+exact-excerpt index for deferred contributors. If the complete index cannot fit,
+the kernel retains a count and roster digest while the spill remains the full
+attribution source. This keeps repeated hook output below host-wide context
+limits, preserves safe first-turn decisions without a file read, and leaves the
+complete attributable aggregate available on demand.
 
 Set the host-level `timeoutSec` on producer and authority hooks to at least the
 engine's 25-second rendezvous deadline. A value of 30 seconds is recommended so

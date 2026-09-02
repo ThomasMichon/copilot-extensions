@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -33,9 +34,290 @@ def test_cold_start_budgets_fit_declared_engine_timeout() -> None:
     engine_timeout = contributor["timeoutSeconds"]
 
     assert MODULE.DEADLINE_SECONDS <= engine_timeout
-    assert MODULE.AWAIT_TIMEOUT_SECONDS < MODULE.DEADLINE_SECONDS
-    assert MODULE.MACHINE_TIMEOUT_SECONDS >= 4
-    assert MODULE.CONDUCT_TIMEOUT_SECONDS >= 6
+    assert MODULE.SNAPSHOT_WAIT_SECONDS < MODULE.DEADLINE_SECONDS
+    assert MODULE.MACHINE_TIMEOUT_SECONDS >= 8
+    assert MODULE.CONDUCT_TIMEOUT_SECONDS >= 8
+
+
+def test_snapshot_reader_loads_windows_and_posix_formats(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = json.dumps(
+        {
+            "sessionId": "session-1",
+            "cwd": str(tmp_path),
+            "source": "startup",
+            "timestamp": 123456789,
+        }
+    ).encode()
+    launch_key = MODULE._launch_keys(payload, "1.2.3")[0]
+    root = tmp_path / "snapshots"
+    root.mkdir()
+    monkeypatch.setattr(MODULE, "_snapshot_root", lambda: root)
+    (root / f"marketplace-overrides-{launch_key}.json").write_text(
+        json.dumps(
+            {
+                "launchKey": launch_key,
+                "output": json.dumps({"additionalContext": "marketplace"}),
+            }
+        ),
+        encoding="utf-8-sig",
+    )
+    (root / f"register-session-{launch_key}").write_text(
+        launch_key + "\n" + json.dumps({"additionalContext": "binding"}),
+        encoding="utf-8",
+    )
+    (root / f"register-nudge-{launch_key}.json").write_text(
+        json.dumps({"launchKey": launch_key, "output": "{}"}),
+        encoding="utf-8",
+    )
+
+    snapshots = MODULE._await_snapshots(
+        payload,
+        "1.2.3",
+        deadline=time.monotonic() + 1,
+    )
+
+    assert snapshots == {
+        "marketplace-overrides": "marketplace",
+        "register-session": "binding",
+        "register-nudge": "",
+    }
+
+
+def test_binding_snapshot_can_use_the_full_collector_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = [0.0]
+    monkeypatch.setattr(MODULE.time, "monotonic", lambda: current[0])
+    monkeypatch.setattr(
+        MODULE.time,
+        "sleep",
+        lambda seconds: current.__setitem__(0, current[0] + seconds),
+    )
+    monkeypatch.setattr(MODULE, "_launch_keys", lambda *_args: ("key",))
+
+    def fake_read(name: str, _keys: tuple[str, ...]) -> str | None:
+        if name == "register-session" and current[0] >= 4:
+            return "binding"
+        return None
+
+    monkeypatch.setattr(MODULE, "_read_snapshot", fake_read)
+
+    snapshots = MODULE._await_snapshots(
+        b"{}",
+        "1.2.3",
+        deadline=8.5,
+    )
+
+    assert snapshots["register-session"] == "binding"
+    assert snapshots["marketplace-overrides"] == ""
+    assert snapshots["register-nudge"] == ""
+    assert current[0] >= 4
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows snapshot-key parity")
+@pytest.mark.parametrize("timestamp", [123456789, 1e-7, 1.234567890123456])
+def test_launch_key_matches_windows_snapshot_consumer(
+    tmp_path: Path,
+    timestamp: int | float,
+) -> None:
+    version = json.loads(
+        (PLUGIN / "plugin.json").read_text(encoding="utf-8")
+    )["version"]
+    payload = json.dumps(
+        {
+            "sessionId": "session-key-parity",
+            "cwd": str(tmp_path),
+            "source": "startup",
+            "timestamp": timestamp,
+        }
+    )
+    launch_key = MODULE._launch_keys(payload.encode(), version)[0]
+    root = tmp_path / ".agent-worktrees" / ".session-context"
+    root.mkdir(parents=True)
+    expected = json.dumps({"additionalContext": "binding"})
+    (root / f"register-session-{launch_key}.json").write_text(
+        json.dumps({"launchKey": launch_key, "output": expected}),
+        encoding="utf-8-sig",
+    )
+    powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    assert powershell is not None
+
+    result = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-File",
+            str(PLUGIN / "scripts" / "register-session.ps1"),
+            "--context-only",
+        ],
+        input=payload,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "HOME": str(tmp_path),
+            "USERPROFILE": str(tmp_path),
+            "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+        },
+        check=True,
+    )
+
+    assert json.loads(result.stdout)["additionalContext"] == "binding"
+
+
+def test_float_launch_keys_are_injective() -> None:
+    first = json.dumps(
+        {
+            "sessionId": "session-float-key",
+            "cwd": str(PLUGIN),
+            "source": "startup",
+            "timestamp": 1.234567890123456,
+        }
+    ).encode()
+    second = json.dumps(
+        {
+            "sessionId": "session-float-key",
+            "cwd": str(PLUGIN),
+            "source": "startup",
+            "timestamp": 1.234567890123457,
+        }
+    ).encode()
+
+    assert set(MODULE._launch_keys(first, "1.2.3")).isdisjoint(
+        MODULE._launch_keys(second, "1.2.3")
+    )
+
+
+def test_side_effect_launch_key_contract_is_synchronized() -> None:
+    for name in ("register-session", "register-nudge", "marketplace-overrides"):
+        bash = (PLUGIN / "scripts" / f"{name}.sh").read_text(encoding="utf-8")
+        powershell = (PLUGIN / "scripts" / f"{name}.ps1").read_text(
+            encoding="utf-8"
+        )
+        assert '"f64:" + struct.pack(">d", timestamp).hex()' in bash
+        assert "[BitConverter]::DoubleToInt64Bits($Value)" in powershell
+        assert "'f64:' + $Bits.ToString(" in powershell
+
+
+def test_side_effect_hooks_prefer_payload_scripts() -> None:
+    hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    commands = hooks["hooks"]["sessionStart"]
+
+    for name in ("register-session", "register-nudge", "marketplace-overrides"):
+        hook = next(
+            item
+            for item in commands
+            if f"{name}.ps1" in item.get("powershell", "")
+        )
+        assert f"scripts\\{name}.ps1" in hook["powershell"]
+        assert f"scripts/{name}.sh" in hook["bash"]
+        assert f".agent-worktrees\\bin\\{name}.ps1" in hook["powershell"]
+        assert f".agent-worktrees/bin/{name}.sh" in hook["bash"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path-case parity")
+def test_launch_key_candidates_cover_windows_input_casing(tmp_path: Path) -> None:
+    version = json.loads(
+        (PLUGIN / "plugin.json").read_text(encoding="utf-8")
+    )["version"]
+    mixed_case_cwd = str(tmp_path).swapcase()
+    payload = json.dumps(
+        {
+            "sessionId": "session-case-parity",
+            "cwd": mixed_case_cwd,
+            "source": "startup",
+            "timestamp": 123456789,
+        }
+    )
+    launch_keys = MODULE._launch_keys(payload.encode(), version)
+    root = tmp_path / ".agent-worktrees" / ".session-context"
+    root.mkdir(parents=True)
+    powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    assert powershell is not None
+
+    matched = False
+    for launch_key in launch_keys:
+        snapshot = root / f"register-session-{launch_key}.json"
+        snapshot.write_text(
+            json.dumps(
+                {
+                    "launchKey": launch_key,
+                    "output": json.dumps({"additionalContext": "binding"}),
+                }
+            ),
+            encoding="utf-8-sig",
+        )
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-File",
+                str(PLUGIN / "scripts" / "register-session.ps1"),
+                "--context-only",
+            ],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "HOME": str(tmp_path),
+                "USERPROFILE": str(tmp_path),
+                "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+            },
+            check=True,
+        )
+        snapshot.unlink()
+        if json.loads(result.stdout).get("additionalContext") == "binding":
+            matched = True
+            break
+
+    assert matched
+
+
+def test_collect_fragments_spawns_only_substantive_runtime_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, tuple[str, ...], float]] = []
+    monkeypatch.setattr(
+        MODULE,
+        "_await_snapshots",
+        lambda *_args, **_kwargs: {
+            "marketplace-overrides": "marketplace",
+            "register-session": "binding",
+            "register-nudge": "nudge",
+        },
+    )
+
+    def fake_run(
+        script: Path,
+        _payload: bytes,
+        *args: str,
+        deadline: float,
+        timeout: float,
+    ) -> str:
+        assert deadline > time.monotonic()
+        calls.append((script.name, args, timeout))
+        return script.name
+
+    monkeypatch.setattr(MODULE, "_run", fake_run)
+
+    fragments = MODULE._collect_fragments(tmp_path, b"{}", "1.2.3")
+
+    assert sorted(calls) == [
+        ("session-conduct", ("--aggregate",), MODULE.CONDUCT_TIMEOUT_SECONDS),
+        ("session-machine", (), MODULE.MACHINE_TIMEOUT_SECONDS),
+    ]
+    assert fragments == {
+        "marketplace": "marketplace",
+        "binding": "binding",
+        "machine": "session-machine",
+        "conduct": "session-conduct",
+        "nudge": "nudge",
+    }
 
 
 def test_compose_prioritizes_binding_and_conduct_within_budget() -> None:

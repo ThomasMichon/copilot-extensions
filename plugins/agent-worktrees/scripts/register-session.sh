@@ -42,7 +42,7 @@ launch_key=""
 if [[ -n "$identity_python" && -n "$producer_version" ]]; then
     launch_key="$(
         printf '%s' "$payload" | "$identity_python" -c '
-import hashlib, json, math, os, sys
+import hashlib, json, math, os, struct, sys
 try:
     payload = json.load(sys.stdin)
     session_id = payload.get("sessionId")
@@ -60,7 +60,9 @@ try:
     ):
         raise ValueError
     timestamp_text = (
-        str(timestamp) if isinstance(timestamp, int) else format(timestamp, ".17g")
+        str(timestamp)
+        if isinstance(timestamp, int)
+        else "f64:" + struct.pack(">d", timestamp).hex()
     )
     identity = json.dumps(
         [session_id, os.path.realpath(cwd), source, version, timestamp_text],
