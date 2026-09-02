@@ -356,7 +356,16 @@ function Start-Container {
         }
         $img = $AuthTag
     }
-    docker rm -f $Container 2>$null | Out-Null
+    $existingContainer = (
+        docker ps -aq --filter "name=^/${Container}$" 2>$null |
+            Select-Object -First 1
+    )
+    if ($existingContainer) {
+        docker rm -f $Container 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "could not remove prior clean-room container $Container"
+        }
+    }
     New-Item -ItemType Directory -Force -Path $Results | Out-Null
     $scenDir = ($ScenarioDir) -replace '\\','/'
     $libDir  = ($LibDir)      -replace '\\','/'
