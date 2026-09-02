@@ -18,6 +18,10 @@ from pathlib import Path
 from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
 from agent_logger.sync.lock import sync_lock
+from agent_logger.sync.meta import (
+    MAX_DEFERRED_FILE_SAMPLES,
+    MAX_DEFERRED_PATH_CHARS,
+)
 from agent_logger.sync.notify import post_notify
 from agent_logger.sync.origin import classify_for_sync, effective_harness, mark_all
 from agent_logger.sync.targets import build_target
@@ -30,6 +34,13 @@ def _automation_disabled() -> bool:
 
 def _machine(cfg: Config) -> str:
     return cfg.machine_name or detect_machine()
+
+
+def _status_text(value, default: str = "(unknown)", limit: int = 512) -> str:
+    if not isinstance(value, (str, int, float, bool)):
+        return default
+    cleaned = "".join(char for char in str(value) if char.isprintable())
+    return cleaned[:limit] or default
 
 
 def _included_sessions(source, allowlist: list[str],
@@ -248,6 +259,28 @@ def do_status(cfg: Config) -> int:
     print(f"repo_allowlist: {allowlist or '(all)'}")
     notify = cfg.sync_notify
     print(f"notify:         {notify['url'] or '(none)'}")
+    latest = target.sync_status(machine)
+    if not latest.supported:
+        print("latest_sync:    (target does not expose status)")
+    elif latest.error:
+        print(f"latest_sync:    unreadable ({latest.error})")
+    elif latest.metadata is None:
+        print("latest_sync:    (none)")
+    else:
+        metadata = latest.metadata
+        print(f"latest_sync:    {_status_text(metadata.get('last_sync_utc'))}")
+        print(f"latest_status:  {_status_text(metadata.get('status'))}")
+        print(f"sessions:       {_status_text(metadata.get('session_count'))}")
+        deferred_count = metadata.get("deferred_file_count", 0)
+        print(f"deferred_files: {_status_text(deferred_count)}")
+        deferred_files = metadata.get("deferred_files")
+        if isinstance(deferred_files, list):
+            for path in deferred_files[:MAX_DEFERRED_FILE_SAMPLES]:
+                print(
+                    f"  - {_status_text(path, '(invalid)', MAX_DEFERRED_PATH_CHARS)}"
+                )
+        elif deferred_files is not None:
+            print("  - (invalid deferred_files metadata)")
     return 0
 
 

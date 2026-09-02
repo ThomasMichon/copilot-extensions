@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from agent_logger import sessions
 from agent_logger.sessions import SessionRef
 from agent_logger.sync.lock import sync_lock
-from agent_logger.sync.meta import write_sync_meta
+from agent_logger.sync.meta import read_sync_meta, write_sync_meta
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
     RESCUE_SNAPSHOT_PROVENANCE,
@@ -34,7 +34,7 @@ from agent_logger.sync.provenance import (
     rescue_snapshot_path,
     windows_extended_path as _windows_extended_path,
 )
-from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
+from agent_logger.sync.targets.base import DoctorResult, PushResult, SyncStatus, Target
 
 #: Files never copied to a destination (session lock sidecars, temp files).
 _EXCLUDE_NAMES = frozenset({".lock", "lock"})
@@ -1462,7 +1462,14 @@ class FilesystemTarget(Target):
 
         session_count = _count_sessions(dest)
         status = "partial" if locked_paths else "ok"
-        write_sync_meta(dest, machine, self.name, status, session_count)
+        write_sync_meta(
+            dest,
+            machine,
+            self.name,
+            status,
+            session_count,
+            deferred_files=(str(path) for path in locked_paths),
+        )
         detail = f"-> {dest}"
         if locked_paths:
             examples = ", ".join(str(path) for path in locked_paths[:3])
@@ -1476,6 +1483,18 @@ class FilesystemTarget(Target):
             file_count=copied,
             byte_count=nbytes,
         )
+
+    def sync_status(self, machine: str) -> SyncStatus:
+        try:
+            machine_root = _existing_relative_directory(self._root(), Path(machine))
+            metadata = (
+                read_sync_meta(machine_root)
+                if machine_root is not None
+                else None
+            )
+            return SyncStatus(supported=True, metadata=metadata)
+        except OSError as exc:
+            return SyncStatus(supported=True, error=str(exc))
 
     def prune(self, machine: str, retention_days: int | None) -> int:
         if not isinstance(retention_days, (int, float)) or retention_days <= 0:
