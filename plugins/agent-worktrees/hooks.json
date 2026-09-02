@@ -4,34 +4,16 @@
     "preToolUse": [
       {
         "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\statelessness_guard.py\"; if ($py -and (Test-Path $s)) { & $py $s } } catch {}; exit 0",
-        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/statelessness_guard.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" || true; fi; exit 0",
-        "timeoutSec": 10
-      },
-      {
-        "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\cross_repo_guard.py\"; if ($py -and (Test-Path $s)) { & $py $s } } catch {}; exit 0",
-        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/cross_repo_guard.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" || true; fi; exit 0",
-        "timeoutSec": 25
-      },
-      {
-        "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\anchor_write_guard.py\"; if ($py -and (Test-Path $s)) { & $py $s } } catch {}; exit 0",
-        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/anchor_write_guard.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" || true; fi; exit 0",
-        "timeoutSec": 10
+        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch {}; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\"; if ($py -and (Test-Path $s)) { & $py $s preToolUse } } catch {}; exit 0",
+        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/hook_client.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" preToolUse || true; fi; exit 0",
+        "timeoutSec": 30
       }
     ],
     "postToolUse": [
       {
         "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\nudge_status.py\"; if ($py -and (Test-Path $s)) { & $py $s } } catch {}; exit 0",
-        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/nudge_status.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" || true; fi; exit 0",
-        "timeoutSec": 10
-      },
-      {
-        "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\bind-nudge.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/bind-nudge.sh\"; [ -f \"$s\" ] && bash \"$s\"; exit 0",
+        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch {}; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\"; if ($py -and (Test-Path $s)) { & $py $s postToolUse } } catch {}; exit 0",
+        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/hook_client.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" postToolUse || true; fi; exit 0",
         "timeoutSec": 10
       }
     ],
