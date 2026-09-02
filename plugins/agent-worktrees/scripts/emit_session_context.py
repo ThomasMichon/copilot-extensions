@@ -24,6 +24,7 @@ CONDUCT_TIMEOUT_SECONDS = 8.0
 SNAPSHOT_TIMESTAMP_SKEW_MS = 5_000
 SNAPSHOT_MTIME_GRANULARITY_SECONDS = 2.0
 SNAPSHOT_RETENTION_SECONDS = 60 * 60
+SNAPSHOT_COMPLETION_WINDOW_SECONDS = 5 * 60
 SNAPSHOT_NAMES = (
     "marketplace-overrides",
     "register-session",
@@ -240,6 +241,70 @@ def _read_snapshot(
     return None
 
 
+def _read_fresh_binding_snapshot(
+    payload: bytes,
+    *,
+    min_mtime: float,
+    max_mtime: float,
+) -> str | None:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+        cwd = value.get("cwd")
+        if not isinstance(cwd, str) or not os.path.isabs(cwd):
+            return None
+        expected_cwd = os.path.normcase(os.path.realpath(cwd))
+        paths = list(_snapshot_root().glob("register-session-*"))
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, OSError):
+        return None
+
+    candidates = []
+    for path in paths:
+        try:
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or path.stat().st_mtime < min_mtime
+                or path.stat().st_mtime > max_mtime
+            ):
+                continue
+            candidates.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    for _, path in sorted(candidates, reverse=True):
+        try:
+            if path.name.endswith(".json"):
+                state = json.loads(path.read_text(encoding="utf-8-sig"))
+                output = state.get("output") if isinstance(state, dict) else None
+                context = _context(output) if isinstance(output, str) else ""
+            else:
+                raw = path.read_text(encoding="utf-8")
+                _stored_key, separator, output = raw.partition("\n")
+                context = _context(output) if separator else ""
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not context.startswith("## agent-worktrees session command catalog"):
+            continue
+        checkout_line = next(
+            (
+                line
+                for line in context.splitlines()
+                if line.startswith("Checkout: ")
+            ),
+            "",
+        )
+        _prefix, separator, checkout_path = checkout_line.partition("; path=")
+        if not separator:
+            continue
+        checkout_path = checkout_path.split(". Mux:", 1)[0].removesuffix(".")
+        try:
+            actual_cwd = os.path.normcase(os.path.realpath(checkout_path))
+        except OSError:
+            continue
+        if actual_cwd == expected_cwd:
+            return context
+    return None
+
+
 def _await_snapshots(
     payload: bytes,
     version: str,
@@ -263,6 +328,14 @@ def _await_snapshots(
         else time.time()
         - SNAPSHOT_MTIME_GRANULARITY_SECONDS
     )
+    max_mtime = (
+        payload_timestamp
+        + SNAPSHOT_COMPLETION_WINDOW_SECONDS
+        + SNAPSHOT_MTIME_GRANULARITY_SECONDS
+        if payload_timestamp is not None
+        else time.time()
+        + SNAPSHOT_MTIME_GRANULARITY_SECONDS
+    )
     optional_deadline = min(deadline, time.monotonic() + SNAPSHOT_WAIT_SECONDS)
     while len(results) < len(SNAPSHOT_NAMES):
         for name in SNAPSHOT_NAMES:
@@ -276,6 +349,12 @@ def _await_snapshots(
                 launch_keys,
                 min_mtime=min_mtime,
             )
+            if context is None and name == "register-session":
+                context = _read_fresh_binding_snapshot(
+                    payload,
+                    min_mtime=min_mtime,
+                    max_mtime=max_mtime,
+                )
             if context is not None:
                 results[name] = context
         if len(results) == len(SNAPSHOT_NAMES) or time.monotonic() >= deadline:

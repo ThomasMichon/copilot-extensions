@@ -178,6 +178,93 @@ def test_snapshot_reader_accepts_early_coarsely_timed_sibling(
     assert snapshots["register-session"] == "binding"
 
 
+def test_binding_snapshot_fallback_matches_fresh_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch_seconds = time.time()
+    payload = json.dumps(
+        {
+            "sessionId": "session-binding-fallback",
+            "cwd": str(tmp_path),
+            "source": "new",
+            "timestamp": int(launch_seconds * 1000),
+        }
+    ).encode()
+    root = tmp_path / "snapshots"
+    root.mkdir()
+    monkeypatch.setattr(MODULE, "_snapshot_root", lambda: root)
+    binding = (
+        "## agent-worktrees session command catalog\n\n"
+        '{"schema":"catalog"}\n\n'
+        "[agent-worktrees] This Copilot session is bound.\n"
+        f"Checkout: repo=example; id=wt; role=harness; kind=worktree; "
+        f"status=active; writable=true; path={tmp_path}.\n"
+        "State: status=ready."
+    )
+    (root / "register-session-unrelated-key.json").write_text(
+        json.dumps(
+            {
+                "launchKey": "unrelated-key",
+                "output": json.dumps({"additionalContext": binding}),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    snapshots = MODULE._await_snapshots(
+        payload,
+        "1.2.3",
+        deadline=time.monotonic() + 1,
+    )
+
+    assert snapshots["register-session"] == binding
+
+
+def test_binding_snapshot_fallback_rejects_future_mtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launch_seconds = time.time()
+    payload = json.dumps(
+        {
+            "sessionId": "session-future-binding",
+            "cwd": str(tmp_path),
+            "source": "new",
+            "timestamp": int(launch_seconds * 1000),
+        }
+    ).encode()
+    root = tmp_path / "snapshots"
+    root.mkdir()
+    monkeypatch.setattr(MODULE, "_snapshot_root", lambda: root)
+    binding = (
+        "## agent-worktrees session command catalog\n\n"
+        "[agent-worktrees] This Copilot session is bound.\n"
+        f"Checkout: repo=example; id=wt; role=harness; kind=worktree; "
+        f"status=active; writable=true; path={tmp_path}."
+    )
+    snapshot = root / "register-session-future.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "launchKey": "future",
+                "output": json.dumps({"additionalContext": binding}),
+            }
+        ),
+        encoding="utf-8",
+    )
+    future = launch_seconds + MODULE.SNAPSHOT_COMPLETION_WINDOW_SECONDS + 10
+    os.utime(snapshot, (future, future))
+
+    snapshots = MODULE._await_snapshots(
+        payload,
+        "1.2.3",
+        deadline=time.monotonic() + 0.1,
+    )
+
+    assert snapshots["register-session"] == ""
+
+
 def test_snapshot_reader_ignores_stale_or_missing_snapshot_roots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
