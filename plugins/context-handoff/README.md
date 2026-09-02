@@ -161,10 +161,13 @@ extension consume tool call, and three ground-layer lifecycle calls
 checkpoint without replaying the task payload. Retirement requires the recorded
 mux, PID, and process-creation identity; older metadata without those fields
 remains consumable but leaves the predecessor for explicit manual cleanup.
-The final terminate boundary is identity-bound: Windows verifies creation time
-and calls `TerminateProcess` through the same open process handle; POSIX uses
-`pidfd_open` plus `pidfd_send_signal`. A host without the required atomic
-primitive fails closed and preserves the predecessor.
+Before mux shutdown, the recorded mux, PID, and creation identity are
+revalidated. The mux then receives bounded graceful/hard pane shutdown. If the
+Copilot process survives as an orphan, Windows verifies creation time and calls
+`TerminateProcess` through the same open process handle; POSIX uses
+`pidfd_open` plus `pidfd_send_signal`. A host without the required atomic reap
+reports retirement failure and never signals the numeric PID unsafely, although
+the pane may already have exited.
 Copilot descendant creation tokens come from the original process-table
 snapshot used to discover that child tree. Retirement never learns a child's
 expected identity from a later PID lookup, which could mistake PID reuse for
@@ -212,6 +215,10 @@ in-flight work, and required confirmations. The effort README remains the
 single durable request/plan/journal; the baton does not copy it. Repositories
 without effort adoption, stale/closed bindings, and objectives with no effort
 continue to use the full standalone handoff.
+
+An effort or knowledge repository is therefore optional enrichment, not a
+handoff dependency. Handoff storage remains the pinned dispatch task or
+machine-local worktree-state file described below.
 
 The live `-i` seed reinforces that contract before the successor reads the
 baton: an active effort is the source of truth and completion gate, so the
@@ -358,12 +365,21 @@ the file store; `--json` emits machine-readable results.
 This remains a payload-only plugin: the fallback is invoked as
 `node <verified-plugin-root>/extensions/context-handoff/handoff-cli.mjs`. It
 does not add a PATH command, installer, venv, service, or runtime deployment.
-On Windows, shared-core system CLI calls use a short, cleaned-up machine-local
-batch transport whose arguments apply batch-safe percent escaping; text such as
-`%PATH%` in a title or seed reaches the target literally rather than undergoing
-`cmd.exe` environment expansion.
+Shared-core calls to `agent-worktrees` and `agent-dispatch` resolve only the
+provenance-checked sibling payload in the same marketplace installation cell;
+they never use ambient `PATH` or a project-dispatch wrapper to select that
+payload or its Python runtime. The sibling payload resolver locates or first-use
+provisions its authoritative versioned runtime, then the core invokes that
+Python directly with exact argv in isolated UTF-8 mode (`-I -X utf8`), with
+inherited `PYTHONHOME` and `PYTHONPATH` removed. Prompt/title/payload text
+therefore never becomes batch source or crosses a PowerShell-to-native argument
+re-serialization boundary. Provisioning has its own installation-sized timeout
+instead of inheriting the shorter health/query timeout.
 
 > **Module layout.** `cutover-seed.mjs` owns the pure bounded seed contract and
 > `handoff-core.mjs` owns storage, metadata, consumption, checkpoints, and
 > cutover. `extension.mjs` injects SDK logging into that core; `handoff-cli.mjs`
 > is the extension-free front end.
+
+The reusable lifecycle and invocation invariants are documented in
+[`docs/patterns/context-handoff-lifecycle.md`](../../docs/patterns/context-handoff-lifecycle.md).

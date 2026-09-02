@@ -205,6 +205,45 @@ snapshot would stale immediately. In particular, agent-bridge emits its command
 mapping rather than a worktree/session catalog; its CLI discovers the live
 service endpoint and topology when invoked.
 
+### Context handoff composition
+
+`context-handoff` is payload-only, but its integrated lifecycle composes two
+optional sibling capabilities without absorbing their responsibilities:
+
+- `agent-worktrees` remains the authority for session/worktree identity,
+  process ancestry, mux ownership, candidate association, succession, head
+  movement, title updates, and identity-bound process retirement.
+- `agent-dispatch` is an optional durable handoff store. A managed worktree and
+  reachable coordinator produce a pinned task; otherwise a resolvable managed
+  worktree or adopted anchor uses one one-time file in machine-local worktree
+  state.
+- An active effort is optional objective context. It selects a compact
+  effort-backed relay, but neither an effort nor a knowledge repository is a
+  handoff storage or lifecycle dependency.
+
+The full continuation is persisted before launch. The successor receives only
+a bounded, single-line locator: task summary, `/consume-handoff`
+recommendation, and one exact payload-local recovery command. Copilot creates no
+successor session until that initial prompt is submitted, so startup records
+only a candidate association. Explicit consumption checkpoints the baton and
+acknowledges the successor before succession/head movement, title update, and
+verified predecessor retirement.
+
+Extension and extension-free flows share the same SDK-free core. Cross-plugin
+calls never use ambient `PATH` to select the sibling payload or its Python
+runtime: they resolve the owning sibling payload inside the same
+provenance-checked marketplace installation cell. On Windows and POSIX, the
+payload resolver may locate or provision that authoritative runtime, but the
+actual command runs as direct, isolated, UTF-8 Python argv with inherited
+`PYTHONPATH`/`PYTHONHOME` removed. Prompt, title, and payload text therefore
+never become batch source or pass through a shell-to-native argument
+re-serialization boundary.
+
+The complete lifecycle and invocation contract is
+[`patterns/context-handoff-lifecycle.md`](patterns/context-handoff-lifecycle.md).
+Plugin-specific behavior, degraded modes, and evaluation evidence are in the
+[`context-handoff` README](../plugins/context-handoff/README.md).
+
 The complete authoring pattern is
 [runtime-agent-plugin](patterns/runtime-agent-plugin.md). The current roster is
 guarded by `libs/payload-invocation/tests/test_agent_plugin_coverage.py`.
