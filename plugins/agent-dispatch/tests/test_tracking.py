@@ -458,3 +458,7 @@ def test_session_activity_reports_explicit_idle():
     assert tracking.session_activity(
         {"status": "running", "liveness": "idle", "turn_state": "idle"}
     ) == "IDLE"
+
+
+def test_session_activity_reports_idle_status_without_liveness_fields():
+    assert tracking.session_activity({"status": "idle"}) == "IDLE"
