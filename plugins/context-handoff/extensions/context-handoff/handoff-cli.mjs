@@ -21,7 +21,8 @@
 //   node handoff-cli.mjs save     --title "<t>" --prompt-file <f>   # store + print seed + paste prompt (no cutover)
 //   node handoff-cli.mjs continue --seed "<HANDOFF_SEED>"           # trigger the cutover for an existing seed
 //   node handoff-cli.mjs retry                                      # retry from the stored handoff
-//   node handoff-cli.mjs consume  --locator <task:id|file:id>        # consume + acknowledge/take over
+//   node handoff-cli.mjs consume  --locator "task:<id>"             # consume a task baton
+//   node handoff-cli.mjs consume  --locator "file:<id>"             # consume a file baton
 //   node handoff-cli.mjs facts --json                              # basic extension-free handoff facts
 //   node handoff-cli.mjs help
 //
@@ -33,7 +34,7 @@
 //   --no-task             force the file store (skip an agent-dispatch task)
 //   --seed <s>            (continue) the exact HANDOFF_SEED to spawn a successor with
 //   --handoff-token <id>  (continue) stored token associated at successor sessionStart
-//   --locator <task:id|file:id> | --task-id <id> | --handoff-id <id> | --path <f>
+//   --locator "task:<id>"|"file:<id>" | --task-id <id> | --handoff-id <id> | --path <f>
 //                         stored handoff to consume
 //   --json                machine-readable output
 
@@ -92,7 +93,8 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs save     --title "<t>" --prompt-file <f>   store + print seed + paste prompt
   node handoff-cli.mjs continue --seed "<HANDOFF_SEED>"           trigger the cutover for a seed
   node handoff-cli.mjs retry                                      retry cutover from saved state
-  node handoff-cli.mjs consume  --locator <task:id|file:id>        consume + acknowledge/take over
+  node handoff-cli.mjs consume  --locator "task:<id>"             consume a task baton
+  node handoff-cli.mjs consume  --locator "file:<id>"             consume a file baton
   node handoff-cli.mjs facts --json                              emit basic extension-free facts
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id (\$COPILOT_AGENT_SESSION_ID),

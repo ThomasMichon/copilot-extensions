@@ -19,6 +19,8 @@ test("payload-local CLI exposes the extension fallback flow", () => {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
   assert.match(result.stdout, /--locator/);
+  assert.match(result.stdout, /"task:<id>"/);
+  assert.match(result.stdout, /"file:<id>"/);
   assert.match(result.stdout, /--task-id/);
   assert.match(result.stdout, /--handoff-token/);
 });
