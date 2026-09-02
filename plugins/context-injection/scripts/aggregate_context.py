@@ -368,10 +368,11 @@ def _spill_context(
     except (OSError, ValueError):
         return None
     pointer = (
-        "[context-injection] Before acting, read the complete startup context "
-        f"from `{target}`. It contains authoritative policy, routing, readiness, "
-        "and exact command catalogs. Until loaded, preserve worktree boundaries "
-        "and do not publish or mutate external state."
+        "[context-injection] delivery=spill; complete-context=true; "
+        f"path=`{target}`. Before acting beyond the bounded kernel, read that "
+        "complete startup context. It contains authoritative policy, routing, "
+        "readiness, and exact command catalogs. Until loaded, preserve worktree "
+        "boundaries and do not publish or mutate external state."
     )
     if fragments is None:
         return pointer
