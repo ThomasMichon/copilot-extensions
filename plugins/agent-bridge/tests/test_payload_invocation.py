@@ -74,6 +74,16 @@ def test_out_of_session_boundaries_remain_explicit() -> None:
     )
     assert pivot["list"][0] == "agent-bridge"
 
+    # The Picker runs this argv verbatim, so it must actually parse. `--json` is
+    # a GLOBAL flag (declared before the subcommand); placing it after the
+    # subcommand makes argparse exit 2 with "unrecognized arguments: --json" and
+    # the Bridges tab can never populate.
+    from agent_bridge.__main__ import build_parser
+
+    parsed = build_parser().parse_args(pivot["list"][1:])
+    assert parsed.json is True
+    assert parsed.command == "agents"
+
     provider = (
         PLUGIN / "src" / "agent_bridge" / "session_host" / "spawner.py"
     ).read_text(encoding="utf-8")
