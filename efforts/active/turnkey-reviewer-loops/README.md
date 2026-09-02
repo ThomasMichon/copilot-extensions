@@ -157,17 +157,17 @@ The missing capability is composition, not another bespoke reviewer.
 
 ### Phase 5 — Validate portability in a second repository
 
-- [ ] Hand the Phase 4 declaration/control contract to
+- [x] Hand the Phase 4 declaration/control contract to
       `validation-repository`;
       this slice starts only after the extracted schema and doctor/status
       surfaces have merged upstream.
-- [ ] Adopt the same turn-key contract in a second public repository using only
+- [x] Adopt the same turn-key contract in a second public repository using only
       repository-owned policy/configuration.
 - [ ] Prove discovery creates one review task for an eligible external pull
       request and creates none for an excluded pull request.
 - [ ] Prove a task survives worker or frontend interruption, resumes from its
       durable state, and completes without duplicate review actions.
-- [ ] Feed portability findings back into the generic contract before declaring
+- [x] Feed portability findings back into the generic contract before declaring
       the effort done.
 
 ## Validation Plan
@@ -329,3 +329,31 @@ declarative expansion follows only after that composition is proven.
   explicit non-rearmable recovery explanation rather than an impossible command.
   The final suite passed 1,558 tests and the runtime was deployed on the
   validation host.
+
+### 2026-09-02 — Second-repository adoption
+
+- Portability review found two generic declaration gaps before the second
+  repository could cut over. Merged
+  [PR 1604](https://github.com/ThomasMichon/copilot-extensions/pull/1604)
+  as `agent-dispatch` `0.1.0-dev257`: one top-level machine-placement filter is
+  inherited by the source, evaluator, and worker pool, while pool-specific
+  placement composes by permit intersection and reject union. Merged
+  [PR 1608](https://github.com/ThomasMichon/copilot-extensions/pull/1608)
+  as `agent-dispatch` `0.1.0-dev258`: exact task-label membership now
+  participates in the queue query before ordering and pagination.
+- A second repository replaced its separate emitter and worker-pool
+  declarations with one `kind: reviewer-loop` declaration. Runtime expansion
+  produced exactly one machine-scoped source, one evaluator, and one
+  four-process pool shared with a second review producer. Joined status and
+  doctor reported the pointer and all three units healthy after the registrar
+  cutover.
+- The repository-owned emitter projects stock reviewer recipes to accepted
+  create fields, uses canonical target-stable identity, applies the same
+  eligibility and generation policy to discovery and side-load, isolates
+  orphaned-task wake failures, and surfaces dead-letter or missing-revision
+  evidence as actionable diagnostics. Its focused suite and a live read-only
+  discovery pass succeeded.
+- An explicitly excluded pull request produced no task through the turn-key
+  side-load path. The eligible-change proof remains gated on an eligible
+  external pull request becoming available; the current open set contains only
+  repository ACL members.
