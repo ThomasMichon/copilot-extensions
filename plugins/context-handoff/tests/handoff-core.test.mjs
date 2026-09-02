@@ -77,15 +77,14 @@ test("buildSeedForStored: task-backed -> compact recovery locator", () => {
     },
   };
   const seed = buildSeedForStored(stored, { retry: true });
-  assert.match(seed, /Recovery: node -e /);
-  assert.match(seed, /consume --task-id task-42 --defer-complete/);
-  assert.doesNotMatch(seed, /Recovery: agent-dispatch consume/);
+  assert.match(seed, /Recovery: context-handoff task:task-42$/);
+  assert.doesNotMatch(seed, /node -e|handoff-cli/);
   assert.match(seed, /^Task: Ship the thing/);
   assert.match(
     seed,
-    /Recommendation: after startup invoke `\/consume-handoff` \(the `consume_handoff` tool\) to acknowledge and take over/,
+    /Resume: \/consume-handoff to take over/,
   );
-  assert.ok(seed.length <= 1024);
+  assert.ok(seed.length <= 200);
 });
 
 test("buildSeedForStored: file-backed -> exact file CLI recovery", () => {
@@ -96,8 +95,7 @@ test("buildSeedForStored: file-backed -> exact file CLI recovery", () => {
     metadata: { title: "Fix the parser", oldPane: null, worktree: null, sessionId: "sid1" },
   };
   const seed = buildSeedForStored(stored, { retry: true });
-  assert.match(seed, /handoff-cli\.mjs/);
-  assert.match(seed, /consume --handoff-id handoff-sid1/);
+  assert.match(seed, /Recovery: context-handoff file:handoff-sid1$/);
   assert.doesNotMatch(seed, /C:\\\\state\\\\handoff-sid1\.json/);
 });
 
@@ -279,7 +277,7 @@ test("cutover passes startup association after predecessor discovery", () => {
   const calls = [];
   const result = runHandoffCutover(
     "/repo",
-    "Task: Continue | Recommendation: after startup invoke `/consume-handoff` (the `consume_handoff` tool) to acknowledge and take over | Recovery: cmd",
+    "Task: Continue | Resume: /consume-handoff to take over | Recovery: context-handoff task:task-1",
     "session-1",
     (_bin, args) => {
       calls.push(args);
@@ -306,12 +304,16 @@ test("cutover passes startup association after predecessor discovery", () => {
 });
 
 test("manual fallback clearly delimits the exact copyable seed", () => {
-    const seed = "Task: Continue | Recommendation: after startup invoke `/consume-handoff` (the `consume_handoff` tool) to acknowledge and take over | Recovery: command";
+    const seed =
+      "Task: Continue | Resume: /consume-handoff to take over | " +
+      "Recovery: context-handoff file:handoff-1";
     const text = manualFallbackInstructions(
       { storage: "file", id: "handoff-1" },
       seed,
     );
-    assert.match(text, /Copy the following block exactly/);
+    assert.match(text, /Copy only the following short locator prompt/);
+    assert.match(text, /pass only the trailing `task:<id>` or `file:<id>` token/);
+    assert.match(text, /`consume --locator`/);
     assert.match(text, /```text/);
     assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });

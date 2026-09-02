@@ -223,9 +223,10 @@ optional sibling capabilities without absorbing their responsibilities:
 
 The full continuation is persisted before launch. The successor receives only
 a bounded, single-line locator: task summary, `/consume-handoff`
-recommendation, and one exact payload-local recovery command. Copilot creates no
-successor session until that initial prompt is submitted, so startup records
-only a candidate association. Explicit consumption checkpoints the baton and
+recommendation, and one short opaque task/file recovery locator. Executable
+source and shell commands never enter the seed. Copilot creates no successor
+session until that initial prompt is submitted, so startup records only a
+candidate association. Explicit consumption checkpoints the baton and
 acknowledges the successor before succession/head movement, title update, and
 verified predecessor retirement.
 

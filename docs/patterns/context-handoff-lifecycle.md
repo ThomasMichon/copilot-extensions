@@ -37,8 +37,10 @@ The normal sequence is:
    - a worktree-pinned agent-dispatch task when a managed worktree and
      coordinator are available; or
    - a one-time file in resolvable managed-worktree or adopted-anchor state.
-3. Build a maximum-1024-character ASCII seed containing exactly three logical
-   parts: task lead, canonical consume recommendation, and one recovery command.
+3. Build a maximum-200-character ASCII seed containing exactly three logical
+   parts: task lead, canonical consume recommendation, and one opaque
+   `task:<id>` or `file:<id>` recovery locator. Executable source and installed
+   paths remain outside the seed.
 4. Launch the successor without changing the worktree head. Submission of the
    initial prompt creates the real Copilot session; `sessionStart` may then
    record it as the handoff token's candidate.
@@ -60,7 +62,8 @@ checkpoint instead of replaying a consumed task.
 
 1. **Persist before launch.** Terminal creation is never the durability point.
 2. **One baton, one home.** Do not write both a task and a file.
-3. **The seed is a locator.** Full continuation markdown never enters the seed.
+3. **The seed is a locator.** Full continuation markdown, executable source,
+   shell commands, and installed paths never enter the seed.
 4. **Prompt submission precedes session identity.** Candidate registration
    cannot be treated as takeover.
 5. **Consumption is setup, not objective completion.** A deferred dispatch task
@@ -106,8 +109,9 @@ ownership.
    batch source, shell source, or a PowerShell-to-native argument boundary.
 
 These rules are stricter than ordinary static command-glossary invocation
-because handoff arguments deliberately contain nested recovery commands, quotes,
-percent signs, shell metacharacters, and potentially non-ASCII payload text.
+because handoff operations still carry non-ASCII payload text and quote- or
+shell-sensitive titles even though the startup seed itself contains only an
+opaque recovery locator.
 
 ## Degraded modes
 

@@ -21,7 +21,7 @@ def test_eval_manifest_declares_efficiency_and_lifecycle_metrics() -> None:
     assert manifest["runs"]["count"] == 1
     expected = json.dumps(manifest["expected_outcome"])
     for phrase in (
-        "1024",
+        "200",
         "one submitted initial prompt",
         "one agent turn",
         "payload",
@@ -112,7 +112,7 @@ def test_eval_fixture_self_test_emits_metrics(tmp_path: Path) -> None:
     assert live_turn["session_id"] == "successor-session"
     assert live_turn["turn"]["prompt"]
     assert live_turn["turn"]["turn_index"] == 0
-    assert metrics["initialSeed"]["characters"] <= 1024
+    assert metrics["initialSeed"]["characters"] <= 200
     assert metrics["initialSeed"]["parts"] == 3
     assert metrics["submittedPrompt"]["submittedPrompts"] == 1
     assert metrics["submittedPrompt"]["promptMatchesRunnerComposite"] is True

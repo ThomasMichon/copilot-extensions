@@ -59,7 +59,7 @@ claiming those issues as its own scope. It advances #1630.
 
 Improve context handoff so mux ownership can be recovered from the invoking
 session and process ancestry, successor seeds remain short and preserve exact
-recovery commands, non-live fallback output clearly tells users what to invoke,
+recovery locators, non-live fallback output clearly tells users what to invoke,
 and successful consumption establishes the successor before retiring the
 predecessor. Design and test the non-mux terminal-launch contract, but leave
 automatic non-mux terminal spawning to a follow-up implementation.
@@ -85,11 +85,11 @@ automatic non-mux terminal spawning to a follow-up implementation.
 ### Phase 2 — Compact and recoverable successor seeds
 - [x] Replace variable-length inline orchestration prose with the stable
   three-part seed: concise task summary, one `/consume-handoff`
-  recommendation, and one raw payload-recovery command.
-- [x] Preserve exact quoting and formatting for task-backed and file-backed
-  recovery commands without embedding the full handoff markdown in argv.
-- [x] Enforce a 1024-character seed budget in `cutover-seed.mjs` and a
-  single-line launch-safe form while retaining a lossless raw recovery command.
+  recommendation, and one opaque task/file recovery locator.
+- [x] Keep executable recovery procedures in the payload-local skill and CLI
+  rather than embedding source, paths, or shell-sensitive commands in argv.
+- [x] Enforce a 200-character seed budget in `cutover-seed.mjs` and a
+  single-line, selection-safe form.
 - [x] Make the non-live fallback explicitly user-facing and clearly delimit the
   exact prompt or command the user must copy.
 - [x] Preserve creation of the claimable task/file record and its record-first
@@ -153,9 +153,9 @@ automatic non-mux terminal spawning to a follow-up implementation.
   SDK-free core.
 
 ### Phase 8 — Code-review hardening
-- [x] Route task and file recovery commands through payload-local
-  `handoff-cli.mjs consume` so recovery includes checkpoint, acknowledgement,
-  takeover, and retirement.
+- [x] Route task and file recovery locators through payload-local
+  `handoff-cli.mjs consume --locator` so recovery includes checkpoint,
+  acknowledgement, takeover, and retirement.
 - [x] Require structured agent-dispatch status, owner, and
   `owner_session_id` proof before a task retry resumes lifecycle.
 - [x] Replace embedded absolute plugin paths with a bounded ASCII-safe canonical
@@ -200,8 +200,8 @@ automatic non-mux terminal spawning to a follow-up implementation.
 - [x] Mixed-version tests prove older version-1 handoff records without the new
   identity fields remain consumable and never trigger unverified retirement.
 - [x] Seed tests assert a bounded three-part shape, stable auto-title lead,
-  a maximum length of 1024 characters, exact task/file recovery commands, and
-  no embedded full handoff payload.
+  a maximum length of 200 characters, exact task/file recovery locators, no
+  executable source, and no embedded full handoff payload.
 - [x] Fallback-output tests assert an explanatory user instruction plus a
   clearly delimited copyable block.
 - [x] No-mux tests prove the claimable task/file and record-first pointer are
@@ -266,8 +266,8 @@ for binding, succession, head, title, and verified retirement.
   session-lock/process-ancestry authority, including process creation tokens.
 - Unified extension and CLI storage, metadata, seed, consume, checkpoint, and
   cutover behavior in the SDK-free handoff core.
-- Replaced launch/paste prose with the 1024-character three-part locator,
-  explicit fallback block, and one-command recovery path.
+- Replaced launch/paste prose with the bounded three-part locator, explicit
+  fallback block, and payload-local recovery path.
 - Added task-backed pre-consume checkpoints and idempotent
   bind/succession/head/title/verified-retire sequencing, including retries after
   every checkpointed lifecycle boundary and safe handling of legacy metadata.
@@ -368,3 +368,16 @@ for binding, succession, head, title, and verified retirement.
   continuation shape but do not own handoff storage or lifecycle.
 - Recorded ThomasMichon/copilot-extensions#1729 as the public coordination
   issue for this architecture documentation pass.
+
+### 2026-09-02 — Selection-safe recovery locator
+- A real terminal handoff showed that the inline Node resolver, while one
+  logical argv-safe line, wrapped across bordered terminal rows and copied with
+  gutters/newlines inserted into identifiers and source.
+- Replaced executable recovery source with a short opaque `task:<id>` or
+  `file:<id>` locator and reduced the seed budget from 1024 to 200 characters.
+- Added payload-CLI `consume --locator`; task locators preserve deferred
+  completion automatically, while the skill retains provenance-checked CLI
+  resolution when extension tools are unavailable.
+- Updated deterministic and Tier-E checks to reject executable source in the
+  seed and recorded ThomasMichon/copilot-extensions#1757 as the public
+  coordination issue.

@@ -324,15 +324,15 @@ else
         else
             pass "no-coordinator anchor handoff is durable and state-first discoverable"
             if printf '%s' "$_handoff_seed" | grep -q \
-                'consume --handoff-id handoff-clean-room-anchor-predecessor'; then
-                pass "file-backed successor seed carries one exact CLI recovery command"
+                'Recovery: context-handoff file:handoff-clean-room-anchor-predecessor'; then
+                pass "file-backed successor seed carries one opaque recovery locator"
             else
-                fail "file-backed successor seed did not carry the expected recovery command"
+                fail "file-backed successor seed did not carry the expected recovery locator"
             fi
             if capture "anchor-consume-first" -- node "$_handoff_cli_path" consume \
                 --json --session-id clean-room-anchor-successor \
-                --handoff-id handoff-clean-room-anchor-predecessor; then
-                pass "anchor handoff consumed once through the seed's exact id"
+                --locator file:handoff-clean-room-anchor-predecessor; then
+                pass "anchor handoff consumed once through the seed's locator"
             else
                 fail "first anchor handoff consume failed"
             fi
