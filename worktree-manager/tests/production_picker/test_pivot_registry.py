@@ -15,7 +15,7 @@ from dropin_registry import (
     ScanAuthority,
     WarningTracker,
 )
-from plugin_activation import ActivationReport, ActivePlugin
+from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
 from worktree_manager.production_picker.picker_tui import pivots
 
@@ -104,6 +104,113 @@ def test_active_plugin_materializes_attributed_absolute_command(tmp_path):
     assert Path(payload["plugin_root"]) == root.resolve()
     assert payload["template"] == "sample.json"
     assert Path(payload["list"][0]) == command.resolve()
+
+
+def test_active_plugin_materializes_all_distinct_live_roots(tmp_path):
+    source = "sample@example-marketplace"
+    installed = tmp_path / "installed"
+    local = tmp_path / "local"
+    _command(installed, "installed")
+    _template(
+        installed,
+        filename="installed.json",
+        label="Installed",
+        command="installed",
+    )
+    _command(local, "local")
+    _template(local, filename="local.json", label="Local", command="local")
+    active = ActivePlugin(
+        source=source,
+        name="sample",
+        marketplace="example-marketplace",
+        root=local.resolve(),
+        scopes=("global", "project:demo"),
+        roots=(
+            ActivePluginRoot(local.resolve(), ("project:demo",), "directory"),
+            ActivePluginRoot(installed.resolve(), ("global",), "installed"),
+        ),
+    )
+
+    report = pivots.scan_pivot_registry(
+        tmp_path / "pivots",
+        activation_report=ActivationReport(
+            ScanAuthority.COMPLETE,
+            {source: EntryDecision.active(active)},
+        ),
+    )
+
+    assert [pivot.label for pivot in report.pivots] == ["Installed", "Local"]
+
+
+@pytest.mark.parametrize("equivalent", [False, True])
+def test_same_named_pivot_prefers_first_live_root(tmp_path, equivalent):
+    source = "sample@example-marketplace"
+    installed = tmp_path / "installed"
+    local = tmp_path / "local"
+    installed_name = "sample" if equivalent else "installed"
+    local_name = "sample" if equivalent else "local"
+    _command(installed, installed_name)
+    local_command = _command(local, local_name)
+    _template(
+        installed,
+        filename="shared.json",
+        label="Same" if equivalent else "Installed",
+        command=installed_name,
+    )
+    _template(
+        local,
+        filename="shared.json",
+        label="Same" if equivalent else "Local",
+        command=local_name,
+    )
+    active = ActivePlugin(
+        source=source,
+        name="sample",
+        marketplace="example-marketplace",
+        root=local.resolve(),
+        scopes=("global", "project:demo"),
+        roots=(
+            ActivePluginRoot(local.resolve(), ("project:demo",), "directory"),
+            ActivePluginRoot(installed.resolve(), ("global",), "installed"),
+        ),
+    )
+
+    registry = tmp_path / "pivots"
+    report = pivots.scan_pivot_registry(
+        registry,
+        activation_report=ActivationReport(
+            ScanAuthority.COMPLETE,
+            {source: EntryDecision.active(active)},
+        ),
+    )
+
+    assert [pivot.label for pivot in report.pivots] == [
+        "Same" if equivalent else "Local"
+    ]
+    payload = json.loads((registry / "shared.json").read_text(encoding="utf-8"))
+    assert Path(payload["plugin_root"]) == local.resolve()
+    assert Path(payload["list"][0]) == local_command.resolve()
+
+
+def test_same_named_pivot_from_different_plugins_is_rejected(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _command(first, "first")
+    _command(second, "second")
+    _template(first, filename="shared.json", command="first")
+    _template(second, filename="shared.json", command="second")
+
+    registry = tmp_path / "pivots"
+    report = pivots.scan_pivot_registry(
+        registry,
+        activation_report=_active_reports(
+            ("first@example-marketplace", first),
+            ("second@example-marketplace", second),
+        ),
+    )
+
+    assert report.pivots == []
+    assert not (registry / "shared.json").exists()
 
 
 def test_invalid_plugin_template_does_not_block_valid_peer(tmp_path):

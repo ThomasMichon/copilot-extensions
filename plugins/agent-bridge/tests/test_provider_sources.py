@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from dropin_registry import EntryDecision, Finding, ScanAuthority
-from plugin_activation import ActivationReport, ActivePlugin
+from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
 from agent_bridge.agent_registry import (
     AgentResolver,
@@ -217,6 +217,37 @@ def test_v1_provider_requires_current_exact_plugin_root(tmp_path):
     )
     assert mismatch.manifests == {}
     assert mismatch.findings[0].reason == "identity-mismatch"
+
+
+def test_v1_provider_accepts_any_authoritative_live_root(tmp_path):
+    installed = tmp_path / "installed"
+    local = tmp_path / "local"
+    installed.mkdir()
+    local.mkdir()
+    providers = tmp_path / "providers"
+    _write_v1_provider(providers, installed)
+    source = "agent-codespaces@copilot-extensions"
+    active = ActivePlugin(
+        source=source,
+        name="agent-codespaces",
+        marketplace="copilot-extensions",
+        root=local.resolve(),
+        scopes=("global", "project:demo"),
+        roots=(
+            ActivePluginRoot(local.resolve(), ("project:demo",), "directory"),
+            ActivePluginRoot(installed.resolve(), ("global",), "installed"),
+        ),
+    )
+
+    report = scan_provider_registry(
+        providers,
+        activation_report=ActivationReport(
+            ScanAuthority.COMPLETE,
+            {source: EntryDecision.active(active)},
+        ),
+    )
+
+    assert set(report.manifests) == {"codespace"}
 
 
 def test_disabled_v1_provider_withdraws_prior_entry(tmp_path):

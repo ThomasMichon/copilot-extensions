@@ -145,3 +145,21 @@ def test_unreadable_source_fallback_reports_read_failure(tmp_path: Path) -> None
         {},
         ["cannot read file"],
     )
+
+
+def test_worktree_manager_version_surfaces_must_match(tmp_path: Path) -> None:
+    manager = tmp_path / "worktree-manager"
+    package = manager / "src" / "worktree_manager"
+    package.mkdir(parents=True)
+    (manager / "pyproject.toml").write_text(
+        '[project]\nversion = "0.1.0-dev28"\n',
+        encoding="utf-8",
+    )
+    init_path = package / "__init__.py"
+    init_path.write_text('__version__ = "0.1.0-dev28"\n', encoding="utf-8")
+
+    assert checker._worktree_manager_version_violations(manager) == []
+
+    init_path.write_text('__version__ = "0.1.0-dev27"\n', encoding="utf-8")
+    [violation] = checker._worktree_manager_version_violations(manager)
+    assert violation.startswith("worktree-manager: version mismatch")

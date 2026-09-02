@@ -47,12 +47,40 @@ _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
 @dataclass(frozen=True)
+class ActivePluginRoot:
+    """One identity-verified live root and the scopes that select it."""
+
+    root: Path
+    scopes: tuple[str, ...]
+    kind: str
+
+
+@dataclass(frozen=True)
 class ActivePlugin:
     source: str
     name: str
     marketplace: str
     root: Path
     scopes: tuple[str, ...]
+    roots: tuple[ActivePluginRoot, ...] = ()
+
+    @property
+    def live_roots(self) -> tuple[ActivePluginRoot, ...]:
+        """Return every live root, preserving compatibility with older values."""
+        return self.roots or (
+            ActivePluginRoot(root=self.root, scopes=self.scopes, kind="selected"),
+        )
+
+    def root_for_scope(self, scope: str) -> Path | None:
+        """Return the root selected by one activation scope, when known."""
+        return next(
+            (
+                selected.root
+                for selected in self.live_roots
+                if scope in selected.scopes
+            ),
+            None,
+        )
 
 
 @dataclass(frozen=True)
@@ -1094,17 +1122,20 @@ def resolve_active_plugins(
     registry_findings: list[Finding] = []
     scopes: dict[str, set[str]] = defaultdict(set)
     local_roots: dict[str, set[Path]] = defaultdict(set)
+    scope_local_roots: dict[str, dict[str, Path]] = defaultdict(dict)
     source_findings: dict[str, list[Finding]] = defaultdict(list)
     source_indeterminate: set[str] = set()
 
     global_settings = _user_settings(copilot_home)
     registry_findings.extend(global_settings.findings)
     for source in global_settings.settings.enabled_sources():
-        scopes[source].add("global")
+        scope = "global"
+        scopes[source].add(scope)
         candidate = _local_root(source, global_settings, base=copilot_home)
         source_findings[source].extend(candidate.findings)
         if candidate.root is not None:
             local_roots[source].add(candidate.root)
+            scope_local_roots[source][scope] = candidate.root
         if candidate.indeterminate:
             source_indeterminate.add(source)
 
@@ -1118,11 +1149,13 @@ def resolve_active_plugins(
         settings_authorities.append(project_settings.authority)
         registry_findings.extend(project_settings.findings)
         for source in project_settings.settings.enabled_sources():
-            scopes[source].add(f"project:{project}")
+            scope = f"project:{project}"
+            scopes[source].add(scope)
             candidate = _local_root(source, project_settings, base=root)
             source_findings[source].extend(candidate.findings)
             if candidate.root is not None:
                 local_roots[source].add(candidate.root)
+                scope_local_roots[source][scope] = candidate.root
             if candidate.indeterminate:
                 source_indeterminate.add(source)
 
@@ -1149,9 +1182,27 @@ def resolve_active_plugins(
             )
             continue
 
+        needs_installed = any(
+            scope not in scope_local_roots[source]
+            for scope in scopes[source]
+        )
         installed = _installed_root(copilot_home, source)
+        if installed.indeterminate and not needs_installed:
+            installed.findings = [
+                Finding(
+                    registry=finding.registry,
+                    entry=finding.entry,
+                    status="advisory",
+                    reason=finding.reason,
+                    target=finding.target,
+                    owner=finding.owner,
+                    remedy=finding.remedy,
+                    detail=finding.detail,
+                )
+                for finding in installed.findings
+            ]
         source_findings[source].extend(installed.findings)
-        if installed.indeterminate:
+        if installed.indeterminate and needs_installed:
             source_indeterminate.add(source)
         if source in source_indeterminate:
             decisions[source] = EntryDecision.indeterminate(
@@ -1159,7 +1210,8 @@ def resolve_active_plugins(
             )
             continue
 
-        root = installed.root or (next(iter(roots)) if roots else None)
+        local_root = next(iter(roots)) if roots else None
+        root = local_root or installed.root
         findings = _decision_findings(source, source_findings)
         if root is None:
             finding = _finding(
@@ -1171,12 +1223,34 @@ def resolve_active_plugins(
             decisions[source] = EntryDecision.inactive(*findings, finding)
             continue
 
+        roots_by_identity: dict[tuple[Path, str], set[str]] = defaultdict(set)
+        for scope in sorted(scopes[source]):
+            scope_root = scope_local_roots[source].get(scope)
+            if scope_root is not None:
+                roots_by_identity[(scope_root, "directory")].add(scope)
+            elif installed.root is not None:
+                roots_by_identity[(installed.root, "installed")].add(scope)
+        active_roots = tuple(
+            ActivePluginRoot(
+                root=selected_root,
+                scopes=tuple(sorted(selected_scopes)),
+                kind=kind,
+            )
+            for (selected_root, kind), selected_scopes in sorted(
+                roots_by_identity.items(),
+                key=lambda item: (
+                    0 if item[0][1] == "directory" else 1,
+                    str(item[0][0]),
+                ),
+            )
+        )
         active = ActivePlugin(
             source=source,
             name=name,
             marketplace=marketplace,
             root=root,
             scopes=tuple(sorted(scopes[source])),
+            roots=active_roots,
         )
         decisions[source] = (
             EntryDecision.advisory(active, *findings)

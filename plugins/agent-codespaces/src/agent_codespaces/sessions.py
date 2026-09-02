@@ -85,7 +85,10 @@ def _agent_codespaces_marketplace(
         matches = [
             plugin
             for plugin in codespaces
-            if _same_path(plugin.root, Path(explicit_root).expanduser())
+            if any(
+                _same_path(selected.root, Path(explicit_root).expanduser())
+                for selected in plugin.live_roots
+            )
         ]
         if len(matches) == 1:
             return matches[0].marketplace, ""

@@ -24,7 +24,7 @@ from dropin_registry import (
     ScanSnapshot,
     WarningTracker,
 )
-from plugin_activation import ActivationReport, ActivePlugin
+from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
 import agent_codespaces.config as cfg
 from agent_codespaces.config import (
@@ -140,6 +140,47 @@ def test_active_plugin_manifest_config_needs_no_pointer_or_adopted_repo(
     assert merged.repos[_REPO_KEY].workspace_repo == "example-app"
     assert merged.credentials.ado_host == "ado.example.com"
     assert merged.source_paths == [target.resolve().parent]
+
+
+def test_active_plugin_manifest_prefers_live_local_root_over_stale_installed_copy(
+    tmp_path, monkeypatch
+):
+    source, local_root, target = _declared_plugin(tmp_path)
+    installed_root = tmp_path / "installed" / "plugin"
+    installed_root.mkdir(parents=True)
+    (installed_root / "plugin.json").write_text(
+        json.dumps({"name": source.split("@")[0]}),
+        "utf-8",
+    )
+    active = ActivePlugin(
+        source=source,
+        name=source.split("@")[0],
+        marketplace=source.split("@")[1],
+        root=local_root.resolve(),
+        scopes=("global", "project:sample"),
+        roots=(
+            ActivePluginRoot(
+                root=local_root.resolve(),
+                scopes=("project:sample",),
+                kind="directory",
+            ),
+            ActivePluginRoot(
+                root=installed_root.resolve(),
+                scopes=("global",),
+                kind="installed",
+            ),
+        ),
+    )
+    report = ActivationReport(
+        authority=ScanAuthority.COMPLETE,
+        decisions={source: EntryDecision.active(active)},
+    )
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: report)
+    monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
+
+    scanned = cfg.scan_active_plugin_config_registry()
+
+    assert [item.target for item in scanned.active_configs] == [target.resolve()]
 
 
 def test_adopted_and_cwd_configs_override_active_plugin_default(
@@ -450,6 +491,41 @@ def test_managed_pointer_requires_enabled_exact_identity_root(tmp_path, monkeypa
     mismatch = _scan(d, monkeypatch, _active_report(source, root))
     assert not mismatch.active_configs
     assert mismatch.findings[0].reason == "identity-mismatch"
+
+
+def test_managed_pointer_accepts_secondary_authoritative_live_root(
+    tmp_path,
+    monkeypatch,
+):
+    source = "sample-harness@example-marketplace"
+    installed = tmp_path / "installed"
+    target = _plugin_config(installed)
+    local = tmp_path / "local"
+    local.mkdir()
+    d = _config_d(tmp_path, monkeypatch)
+    _managed_entry(d, source=source, root=installed, target=target)
+    active = ActivePlugin(
+        source=source,
+        name="sample-harness",
+        marketplace="example-marketplace",
+        root=local.resolve(),
+        scopes=("global", "project:demo"),
+        roots=(
+            ActivePluginRoot(local.resolve(), ("project:demo",), "directory"),
+            ActivePluginRoot(installed.resolve(), ("global",), "installed"),
+        ),
+    )
+
+    report = _scan(
+        d,
+        monkeypatch,
+        ActivationReport(
+            ScanAuthority.COMPLETE,
+            {source: EntryDecision.active(active)},
+        ),
+    )
+
+    assert report.active_configs[0].target == target.resolve()
 
 
 def test_managed_pointer_activation_uses_real_home_not_agent_home(
