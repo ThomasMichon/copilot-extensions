@@ -366,7 +366,23 @@ for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
                     continue
                 fi
                 setup_log INFO "Plugin reconcile: $_RSVC -> ${_RARGV[*]}"
-                "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
+                _RENV=()
+                _RENV_TEXT=$("$PYTHON" -c "
+import sys, json
+update = json.load(sys.stdin)['updates'][$_ri]
+for key in update.get('unset_environment', []):
+    print('-u')
+    print(key)
+for key, value in update.get('environment', {}).items():
+    print(f'{key}={value}')
+" <<< "$REC_JSON" 2>/dev/null) || {
+                    setup_log WARN "Plugin reconcile: invalid environment metadata for $_RSVC; skipping"
+                    continue
+                }
+                while IFS= read -r _reconcile_env; do
+                    [[ -n "$_reconcile_env" ]] && _RENV+=("$_reconcile_env")
+                done <<< "$_RENV_TEXT"
+                env ${_RENV[@]+"${_RENV[@]}"} "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
                     || setup_log WARN "Plugin reconcile: step failed for $_RSVC"
             done
         done

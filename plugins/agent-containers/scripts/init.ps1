@@ -196,6 +196,7 @@ if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
 function Write-Ok      { param([string]$Msg) Write-Host "  [OK]   $Msg" -ForegroundColor Green }
 function Write-Skip    { param([string]$Msg) Write-Host "  [SKIP] $Msg" -ForegroundColor Cyan }
 function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red }
+function Write-Warn    { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 
 # -- Paths --------------------------------------------------------------
@@ -620,6 +621,38 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 
 # -- 3. Install the package into the venv (uv pip install) -------------
 
+function Invoke-BoundedPackageCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+    $logPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $global:LASTEXITCODE = 1
+        & $Executable @Arguments *> $logPath
+        $code = $LASTEXITCODE
+        $tail = @()
+        if ($code -ne 0) {
+            $tail = @(Get-Content -LiteralPath $logPath -Tail 40 -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    ([string]$_) `
+                        -replace '(?i)(https?://)[^/\s@]+@', '$1***@' `
+                        -replace '(?i)((?:token|password|secret)=)[^&\s]+', '$1***'
+                })
+        }
+        [pscustomobject]@{ Code = $code; Tail = $tail }
+    } finally {
+        Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Write-PackageDiagnostics {
+    param([string[]]$Lines)
+    foreach ($line in $Lines) {
+        Write-Warn "package-manager: $line"
+    }
+}
+
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
@@ -628,27 +661,72 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
     # credential-relay first (vendored lib), force-reinstalled so local code
     # changes propagate even without a version bump; then agent-containers.
     if (Test-Path (Join-Path $CredRelayDir 'pyproject.toml')) {
-        & uv pip install --python $VenvPython --reinstall-package agent-credential-relay "$CredRelayDir" --quiet 2>&1 | Out-Null
+        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
+            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
+            'agent-credential-relay', "$CredRelayDir", '--quiet'
+        )
+        if ($result.Code -ne 0) {
+            Write-Fail 'credential-relay install failed'
+            Write-PackageDiagnostics $result.Tail
+            $ErrorActionPreference = $prevEAP
+            exit 1
+        }
     } else {
         Write-Fail "credential-relay source not found at $CredRelayDir"
         $ErrorActionPreference = $prevEAP
         exit 1
     }
     if (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml')) {
-        & uv pip install --python $VenvPython --reinstall-package agent-config-migrate "$CfgMigrateDir" --quiet 2>&1 | Out-Null
+        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
+            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
+            'agent-config-migrate', "$CfgMigrateDir", '--quiet'
+        )
+        if ($result.Code -ne 0) {
+            Write-Fail 'config-migrate install failed'
+            Write-PackageDiagnostics $result.Tail
+            $ErrorActionPreference = $prevEAP
+            exit 1
+        }
     } else {
         Write-Fail "config-migrate source not found at $CfgMigrateDir"
         $ErrorActionPreference = $prevEAP
         exit 1
     }
-    & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+    $providerResult = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
+        'pip', 'install', '--python', $VenvPython,
+        "$PluginDir[provider-exec]", '--quiet'
+    )
+    if ($providerResult.Code -eq 0) {
+        $pkgResult = 0
+    } else {
+        Write-Warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
+        Write-PackageDiagnostics $providerResult.Tail
+        $baseResult = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
+            'pip', 'install', '--python', $VenvPython, "$PluginDir", '--quiet'
+        )
+        $pkgResult = $baseResult.Code
+        $pkgTail = $baseResult.Tail
+    }
 } else {
-    & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
+    $providerResult = Invoke-BoundedPackageCommand -Executable $VenvPython -Arguments @(
+        '-m', 'pip', 'install', '--quiet', "$PluginDir[provider-exec]"
+    )
+    if ($providerResult.Code -eq 0) {
+        $pkgResult = 0
+    } else {
+        Write-Warn 'Could not install the optional provider-exec SSH transport; falling back to the base package'
+        Write-PackageDiagnostics $providerResult.Tail
+        $baseResult = Invoke-BoundedPackageCommand -Executable $VenvPython -Arguments @(
+            '-m', 'pip', 'install', '--quiet', "$PluginDir"
+        )
+        $pkgResult = $baseResult.Code
+        $pkgTail = $baseResult.Tail
+    }
 }
-$pkgResult = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
 if ($pkgResult -ne 0) {
     Write-Fail 'Failed to install agent-containers package into venv'
+    Write-PackageDiagnostics $pkgTail
     exit 1
 }
 

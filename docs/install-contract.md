@@ -877,6 +877,14 @@ When a session launches in a repo whose `.github/copilot/settings.json`
    `~/.<name>/deploy-manifest.json` `source.version`, and running the plugin's
    own `scripts/install.* update` (or `init.*`) only on drift.
 
+For a plugin that vendors the installation-context library, reconciliation
+locates and validates that plugin's active core-marketplace `install.json`
+receipt before running its installer. The child process receives that exact
+receipt through `COPILOT_EXTENSIONS_CONTEXT`; caller payload roots, Python
+paths, and any foreign plugin context are removed. A missing or invalid receipt
+blocks that plugin's mutation with an explicit diagnostic rather than falling
+through to an unattributed legacy root.
+
 A plugin declares whether — and where — its runtime should be reconciled via a
 **`runtimeScope`** field in its `plugin.json`:
 
