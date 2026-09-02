@@ -3472,7 +3472,7 @@ CURRENT_WSL_DISTRO_TYPE=null
 CURRENT_HOST=""
 
 resolve_current_environment() {
-    local uid passwd_entry home_path
+    local uid passwd_entry="" home_path="" account=""
     [[ -n "$CURRENT_PROFILE_HOME" ]] && return 0
     CURRENT_PLATFORM=posix
     CURRENT_HOST="$(normalized_short_host)"
@@ -3483,11 +3483,32 @@ resolve_current_environment() {
     if [[ -z "$passwd_entry" && -r /etc/passwd ]]; then
         passwd_entry="$(LC_ALL=C awk -F: -v uid="$uid" '$3 == uid { print; exit }' /etc/passwd)"
     fi
-    [[ -n "$passwd_entry" ]] ||
-        fail "Cannot determine the current account home from the passwd database."
-    home_path="$(printf '%s' "$passwd_entry" | LC_ALL=C cut -d: -f6)"
+    if [[ -n "$passwd_entry" ]]; then
+        home_path="$(printf '%s' "$passwd_entry" | LC_ALL=C cut -d: -f6)"
+    elif command -v dscl >/dev/null 2>&1; then
+        # A host may ship no `getent` and keep local accounts in a directory
+        # service rather than /etc/passwd (which then lists only system
+        # accounts), so both lookups above come back empty for a normal user.
+        # Ask the directory for the home directly instead of failing.
+        #
+        # `id -un` is guarded so that a failure falls through to the error path
+        # below rather than aborting the whole script under `set -e`, and the
+        # record is parsed with a whitespace-tolerant prefix strip (the
+        # separator after the key may be a tab or several spaces) that keeps the
+        # remainder of the line verbatim, so a home path containing spaces
+        # survives intact. `exit` takes only the first record.
+        account="$(id -un 2>/dev/null || true)"
+        if [[ -n "$account" ]]; then
+            home_path="$(dscl . -read "/Users/$account" NFSHomeDirectory 2>/dev/null |
+                LC_ALL=C awk '/^NFSHomeDirectory:/ {
+                    sub(/^NFSHomeDirectory:[[:space:]]*/, "")
+                    print
+                    exit
+                }' || true)"
+        fi
+    fi
     [[ -n "$home_path" ]] ||
-        fail "Cannot determine the current account home from the passwd database."
+        fail "Cannot determine the current account home from the account database."
     CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"
     CURRENT_WSL_DISTRO="${WSL_DISTRO_NAME:-}"
     if [[ -n "$CURRENT_WSL_DISTRO" ]]; then
