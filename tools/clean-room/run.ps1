@@ -574,11 +574,19 @@ function Invoke-ContainerPython(
     $encoded = [Convert]::ToBase64String(
         [System.Text.Encoding]::UTF8.GetBytes($Script)
     )
+    $encodedArguments = @(
+        foreach ($argument in $Arguments) {
+            [Convert]::ToBase64String(
+                [System.Text.Encoding]::UTF8.GetBytes([string]$argument)
+            )
+        }
+    )
     $bootstrap = (
         'import base64,sys;payload=sys.argv.pop(1);' +
+        'sys.argv[1:]=[base64.b64decode(v).decode() for v in sys.argv[1:]];' +
         'exec(base64.b64decode(payload))'
     )
-    & docker exec $Container python3 -c $bootstrap $encoded @Arguments
+    & docker exec $Container python3 -c $bootstrap $encoded @encodedArguments
 }
 
 # Drive one agent turn with a wall-clock timeout. `agent-bridge create` has no
