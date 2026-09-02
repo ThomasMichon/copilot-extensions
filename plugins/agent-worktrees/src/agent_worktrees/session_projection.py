@@ -1113,3 +1113,343 @@ def backfill_relations(
         "status_counts": status_counts,
         "items": items,
     }
+
+
+def _cwd_is_within(cwd: str | None, root: str) -> bool:
+    if not cwd or not root:
+        return False
+    try:
+        candidate = os.path.normcase(os.path.realpath(cwd))
+        expected = os.path.normcase(os.path.realpath(root))
+        return os.path.commonpath([candidate, expected]) == expected
+    except (OSError, ValueError):
+        return False
+
+
+def _configured_machine(project: str) -> str:
+    from . import config as cfg
+
+    try:
+        return cfg.load_config(
+            path=cfg.project_dir(project) / "config.yaml",
+            project=project,
+        ).machine
+    except Exception:
+        try:
+            return cfg.detect_machine()
+        except Exception:
+            return ""
+
+
+def recovery_report(
+    session_id: str,
+    *,
+    cwd: str | None = None,
+    record_loader: RecordLoader = _default_record_loader,
+    local_machine: str | None = None,
+) -> dict[str, Any]:
+    """Return bounded, validated recovery guidance for one exact session."""
+    report: dict[str, Any] = {
+        "session_id": session_id,
+        "status": "missing-projection",
+        "restored": False,
+        "relations": [],
+        "recommended_action": "none",
+    }
+    try:
+        restored = is_restored(session_id)
+        projection = read(session_id)
+    except MissingSessionTree:
+        report["status"] = "missing-session-tree"
+        return report
+    except UnsupportedProjectionVersion:
+        report["status"] = "unsupported"
+        report["recommended_action"] = "inspect"
+        return report
+    except ProjectionError:
+        report["status"] = "invalid"
+        report["recommended_action"] = "inspect"
+        return report
+    report["restored"] = restored
+    if projection is None:
+        return report
+    overflow = projection.get("overflow", False)
+    omitted = projection.get("omitted_relations", 0)
+    if (
+        not isinstance(overflow, bool)
+        or type(omitted) is not int
+        or omitted < 0
+    ):
+        report["status"] = "invalid"
+        report["recommended_action"] = "inspect"
+        return report
+    if overflow or omitted:
+        report["status"] = "incomplete"
+        report["recommended_action"] = "inspect"
+        return report
+    if restored:
+        validation = validate_restored_hint(
+            session_id,
+            projection,
+            record_loader=record_loader,
+        )
+        if validation["status"] != "restored-validated":
+            report["status"] = validation["status"]
+            report["recommended_action"] = "inspect"
+            return report
+
+    bound_relations = [
+        relation
+        for relation in projection.get("relations", [])
+        if isinstance(relation, dict) and relation.get("role") == "bound"
+    ]
+    if len(bound_relations) > 1:
+        report["status"] = "ambiguous"
+        report["recommended_action"] = "inspect"
+        return report
+    validated = []
+    for relation in projection.get("relations", []):
+        if not isinstance(relation, dict):
+            continue
+        role = relation.get("role")
+        project = relation.get("project")
+        worktree_id = relation.get("worktree_id")
+        if (
+            role not in {"bound", "controller"}
+            or not _safe_identity_token(project)
+            or not _safe_identity_token(worktree_id)
+        ):
+            validated.append({
+                "status": "invalid",
+                "role": role,
+                "project": project,
+                "worktree_id": worktree_id,
+            })
+            continue
+        record = record_loader(str(project), str(worktree_id))
+        if record is None:
+            validated.append({
+                "status": "foreign",
+                "role": role,
+                "project": project,
+                "worktree_id": worktree_id,
+            })
+            continue
+        item = _classify_relation(
+            record,
+            session_id,
+            role=role,
+            projection=projection,
+            restored=restored,
+            record_loader=record_loader,
+        )
+        relation_status = item["status"]
+        if relation_status in {"current", "restored-current"}:
+            if role == "bound":
+                entry = record.session_entry(session_id)
+                if entry is not None and entry.state == "handed-off":
+                    item["successor_session_id"] = entry.successor
+                    terminal = {"status": "error", "terminal_session_id": None}
+                    try:
+                        from . import controller_lineage
+
+                        terminal = controller_lineage.resolve_terminal_session(
+                            record,
+                            session_id,
+                        )
+                    except Exception:
+                        pass
+                    item["terminal_status"] = terminal["status"]
+                    item["terminal_session_id"] = terminal[
+                        "terminal_session_id"
+                    ]
+                    relation_status = (
+                        "handed-off"
+                        if terminal["status"] == "resolved"
+                        and terminal["terminal_session_id"]
+                        else "handoff-unresolved"
+                    )
+                elif entry is not None and entry.state == "concluded":
+                    relation_status = "concluded"
+                elif _cwd_is_within(cwd, record.worktree_path):
+                    relation_status = "bound-here"
+                else:
+                    relation_status = "bound-elsewhere"
+                item["worktree_path"] = record.worktree_path
+            else:
+                controller = record.controller_for_session(session_id)
+                if controller is not None and controller.state == "ended":
+                    relation_status = "controller-terminal"
+                effective_local_machine = (
+                    local_machine
+                    if local_machine is not None
+                    else _configured_machine(str(project))
+                )
+                if (
+                    relation_status != "controller-terminal"
+                    and effective_local_machine
+                    and record.machine != effective_local_machine
+                ):
+                    relation_status = "controlled-remote"
+                elif relation_status != "controller-terminal":
+                    relation_status = "controlled-elsewhere"
+                item["machine"] = record.machine
+                item["worktree_path"] = record.worktree_path
+        item["status"] = relation_status
+        validated.append(item)
+    report["relations"] = validated
+
+    bound = [
+        item
+        for item in validated
+        if item.get("role") == "bound"
+        and item.get("status") in {
+            "bound-here",
+            "bound-elsewhere",
+            "handed-off",
+            "handoff-unresolved",
+            "concluded",
+        }
+    ]
+    if len(bound) == 1:
+        report["status"] = bound[0]["status"]
+        report["recommended_action"] = {
+            "bound-here": "none",
+            "bound-elsewhere": "verify-and-bind",
+            "handed-off": "continue-successor",
+            "handoff-unresolved": "inspect",
+            "concluded": "none",
+        }[report["status"]]
+        report["primary"] = bound[0]
+        return report
+    if len(bound) > 1:
+        report["status"] = "ambiguous"
+        report["recommended_action"] = "inspect"
+        return report
+
+    controllers = [
+        item
+        for item in validated
+        if item.get("role") == "controller"
+        and item.get("status") in {
+            "controlled-elsewhere",
+            "controlled-remote",
+            "controller-terminal",
+        }
+    ]
+    if controllers:
+        live = [
+            item
+            for item in controllers
+            if item["status"] != "controller-terminal"
+        ]
+        if live:
+            report["status"] = (
+                "controlled-remote"
+                if all(item["status"] == "controlled-remote" for item in live)
+                else "controlled-elsewhere"
+            )
+            report["recommended_action"] = "inspect-controllers"
+        else:
+            report["status"] = "controller-terminal"
+            report["recommended_action"] = "none"
+        return report
+
+    problematic = [
+        str(item.get("status"))
+        for item in validated
+        if item.get("status") not in {"current", "restored-current"}
+    ]
+    if problematic:
+        report["status"] = (
+            "ambiguous"
+            if any(
+                status in {
+                    "ambiguous",
+                    "ambiguous-authority",
+                    "collision",
+                    "restored-ambiguous",
+                    "restored-collision",
+                }
+                for status in problematic
+            )
+            else problematic[0]
+        )
+        report["recommended_action"] = "inspect"
+    elif validated:
+        report["status"] = "current"
+    else:
+        report["status"] = "unbound-projection"
+        report["recommended_action"] = "inspect"
+    return report
+
+
+def render_recovery_context(report: dict[str, Any]) -> str:
+    """Render one concise sessionStart recovery pointer."""
+    status = report.get("status")
+    primary = report.get("primary") or {}
+    restored = " restored" if report.get("restored") else ""
+    if status == "bound-elsewhere":
+        return (
+            f"[agent-worktrees] Recovery hint: this exact session has a validated"
+            f"{restored} projection for "
+            f"{primary.get('project')}/{primary.get('worktree_id')}, but the "
+            f"startup cwd is elsewhere. Verify with `agent-worktrees "
+            f"session-recovery --session-id {report.get('session_id')}`; if "
+            f"continuing this work, change to {primary.get('worktree_path')} "
+            "and bind explicitly. The projection did not change the binding."
+        )
+    if status == "handed-off":
+        successor = primary.get("terminal_session_id")
+        return (
+            f"[agent-worktrees] Recovery hint: this exact session handed off "
+            f"{primary.get('project')}/{primary.get('worktree_id')} to session "
+            f"{successor}. Continue in that successor unless intentionally "
+            "reclaiming the work; the projection did not change the binding."
+        )
+    if status == "handoff-unresolved":
+        return (
+            f"[agent-worktrees] Recovery hint: this exact session handed off "
+            f"{primary.get('project')}/{primary.get('worktree_id')}, but its "
+            f"terminal lineage is {primary.get('terminal_status')}. Inspect "
+            f"`agent-worktrees session-recovery --session-id "
+            f"{report.get('session_id')}`; no successor was selected and no "
+            "binding was changed."
+        )
+    if status == "concluded":
+        return (
+            f"[agent-worktrees] Recovery hint: this exact session previously "
+            f"concluded its work on "
+            f"{primary.get('project')}/{primary.get('worktree_id')}. It has no "
+            "successor recovery action; the projection did not change the "
+            "binding."
+        )
+    if status in {"controlled-elsewhere", "controlled-remote"}:
+        relations = [
+            item
+            for item in report.get("relations", [])
+            if item.get("status") in {
+                "controlled-elsewhere",
+                "controlled-remote",
+            }
+        ][:3]
+        targets = ", ".join(
+            f"{item.get('machine')}/{item.get('project')}/"
+            f"{item.get('worktree_id')}"
+            for item in relations
+        )
+        return (
+            f"[agent-worktrees] Recovery hint: this exact session has validated"
+            f"{restored} controller relations for {targets}. Inspect them with "
+            f"`agent-worktrees session-recovery --session-id "
+            f"{report.get('session_id')}` before acting; controller metadata "
+            "does not bind this session to those worktrees."
+        )
+    if report.get("recommended_action") == "inspect":
+        return (
+            f"[agent-worktrees] Recovery hint: this exact session's projection "
+            f"is {status} and cannot be used automatically. Inspect it with "
+            f"`agent-worktrees session-recovery --session-id "
+            f"{report.get('session_id')}`; no binding was changed."
+        )
+    return ""

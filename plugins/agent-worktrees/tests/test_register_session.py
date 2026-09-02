@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import tracking
+from agent_worktrees import session_projection, tracking
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -605,3 +605,37 @@ class TestRegisterSessionReseedsStatusUpdater:
 
         assert rc == 0
         assert seen == []
+
+    def test_unbound_start_emits_projection_recovery_context(
+        self,
+        tmp_tracking_dir: Path,
+        monkeypatch_config,
+        monkeypatch,
+        capsys,
+    ):
+        _save_record(tmp_tracking_dir, "wt-z", "/tmp/src/wt-z")
+        payload = '{"sessionId":"sess-3","cwd":"/tmp/unrelated"}'
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+        monkeypatch.setattr(
+            session_projection,
+            "recovery_report",
+            lambda session_id, cwd=None: {
+                "session_id": session_id,
+                "status": "bound-elsewhere",
+                "restored": False,
+                "relations": [],
+                "recommended_action": "verify-and-bind",
+            },
+        )
+        monkeypatch.setattr(
+            session_projection,
+            "render_recovery_context",
+            lambda report: "validated recovery pointer",
+        )
+
+        rc = m.cmd_register_session(_args(stdin=True, emit_context=True))
+
+        assert rc == 0
+        assert json.loads(capsys.readouterr().out) == {
+            "additionalContext": "validated recovery pointer"
+        }
