@@ -53,18 +53,21 @@ def _is_exact_squash_result(
     )
     if parent.returncode != 0 or not parent.stdout.strip():
         return False
-    patch = git_ops.git(
-        "diff", "--binary", "--full-index", effective_base, pr_head,
-        cwd=cwd, check=False,
-    )
-    if patch.returncode != 0 or not patch.stdout:
-        return False
 
     env = {
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
     }
     try:
+        patch = subprocess.run(
+            [
+                "git", "diff", "--binary", "--full-index",
+                effective_base, pr_head,
+            ],
+            cwd=cwd, env=env, capture_output=True, timeout=30,
+        )
+        if patch.returncode != 0 or not patch.stdout:
+            return False
         with tempfile.TemporaryDirectory(prefix="aw-pr-complete-") as tmp:
             env["GIT_INDEX_FILE"] = str(Path(tmp) / "index")
             read = subprocess.run(
@@ -80,7 +83,7 @@ def _is_exact_squash_result(
                     "--whitespace=nowarn",
                 ],
                 cwd=cwd, env=env, input=patch.stdout, capture_output=True,
-                text=True, encoding="utf-8", errors="replace", timeout=30,
+                timeout=30,
             )
             if apply.returncode != 0:
                 return False
@@ -104,9 +107,22 @@ def _is_exact_squash_result(
     )
 
 
+def _rev_count_checked(revspec: str, *, cwd: str) -> int | None:
+    """Return a revision count, or ``None`` when Git cannot resolve it."""
+    result = git_ops.git(
+        "rev-list", "--count", revspec, cwd=cwd, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
 def _merged_pr_head(
     worktree_id: str, branch: str, upstream: str, *, cwd: str
-) -> str | None:
+) -> tuple[str, int] | None:
     """Return a verified merged PR head that is an ancestor of ``branch``.
 
     A recorded PR boundary lets reconciliation exclude the PR's original
@@ -138,9 +154,11 @@ def _merged_pr_head(
             "merge-base", "--is-ancestor", pr.head_sha, upstream,
             cwd=cwd, check=False,
         ).returncode == 0:
-            distance = git_ops._rev_count(
+            distance = _rev_count_checked(
                 f"{pr.head_sha}..{branch}", cwd=cwd,
             )
+            if distance is None:
+                continue
             candidates.append((distance, pr.head_sha))
             continue
 
@@ -169,11 +187,16 @@ def _merged_pr_head(
             for candidate in candidates_for_patch
         ):
             continue
-        distance = git_ops._rev_count(
+        distance = _rev_count_checked(
             f"{pr.head_sha}..{branch}", cwd=cwd,
         )
+        if distance is None:
+            continue
         candidates.append((distance, pr.head_sha))
-    return min(candidates)[1] if candidates else None
+    if not candidates:
+        return None
+    distance, head = min(candidates)
+    return head, distance
 
 
 def _branch_fully_merged(
@@ -293,14 +316,11 @@ def complete_worktree(
     # upstream (a squash-merge folded it)?  Used only to decide the *fallback*
     # below -- the primary move is a non-destructive rebase.
     fully_merged = _branch_fully_merged(merge_base, branch, upstream, cwd=worktree_path)
-    merged_pr_head = _merged_pr_head(
+    merged_pr = _merged_pr_head(
         worktree_id, branch, upstream, cwd=worktree_path,
     )
-    post_merge_commits = (
-        git_ops._rev_count(f"{merged_pr_head}..{branch}", cwd=worktree_path)
-        if merged_pr_head
-        else 0
-    )
+    merged_pr_head = merged_pr[0] if merged_pr else None
+    post_merge_commits = merged_pr[1] if merged_pr else 0
 
     if dry_run:
         if merged_pr_head:

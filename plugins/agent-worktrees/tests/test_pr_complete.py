@@ -306,6 +306,48 @@ class TestPrComplete:
             wid, branch, "origin/master", cwd=str(wt_path),
         ) is None
 
+    def test_exact_squash_tree_preserves_crlf_bytes(self, pr_repo):
+        """Tree verification must not normalize text diff bytes."""
+        _config, _wid, wt_path, _ = pr_repo
+        anchor = Path(_config.default_repo.anchor)
+        base = _git("merge-base", "origin/master", "HEAD", cwd=wt_path)
+        _git("reset", "--hard", base, cwd=wt_path)
+        (wt_path / "crlf.txt").write_bytes(b"one\r\ntwo\r\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "PR with CRLF", cwd=wt_path)
+        pr_head = _git("rev-parse", "HEAD", cwd=wt_path)
+
+        (anchor / "crlf.txt").write_bytes(b"one\r\ntwo\r\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "squash PR with CRLF", cwd=anchor)
+        candidate = _git("rev-parse", "HEAD", cwd=anchor)
+
+        assert pr_complete._is_exact_squash_result(
+            base, pr_head, candidate, cwd=str(wt_path),
+        )
+
+    def test_boundary_rejects_unreadable_post_pr_distance(
+        self, pr_repo, monkeypatch
+    ):
+        """A failed revision count cannot be interpreted as zero commits."""
+        _config, wid, wt_path, _ = pr_repo
+        anchor = Path(_config.default_repo.anchor)
+        branch = f"worktree/{wid}"
+        head = _git("rev-parse", branch, cwd=wt_path)
+        rec = tracking.load_record_by_id(wid)
+        assert rec is not None
+        rec.pr = tracking.PRRecord(state="merged", head_sha=head)
+        tracking.save_record(rec)
+        _squash_merge_upstream(
+            anchor, files={"a.txt": "one\n", "b.txt": "two\n"}, msg="squash")
+        monkeypatch.setattr(
+            pr_complete, "_rev_count_checked", lambda *_args, **_kwargs: None,
+        )
+
+        assert pr_complete._merged_pr_head(
+            wid, branch, "origin/master", cwd=str(wt_path),
+        ) is None
+
     def test_reconcile_preserves_post_merge_divergence_net_zero(self, pr_repo):
         """A post-merge commit that diverges from upstream but nets to the
         merge-base MUST survive the reconcile (test-chamber #2854).
