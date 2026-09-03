@@ -540,6 +540,7 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
         raise RegistrarError(
             "concurrency and max_active_processes must agree when both are set"
         )
+    _as_bool(data.get("reactive", False), key="reactive")
     decl = ProfileDeclaration(
         name=name,
         kind=kind,
@@ -558,7 +559,7 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
         max_attempts=_as_int(data.get("max_attempts", 3), key="max_attempts", minimum=0),
         label_max_attempts=_load_label_max_attempts(data.get("label_max_attempts")),
         heartbeat=_as_bool(data.get("heartbeat", True), key="heartbeat"),
-        reactive=_as_bool(data.get("reactive", False), key="reactive"),
+        reactive=False,
         reactive_interval=_as_float(
             data.get("reactive_interval", 2.0), key="reactive_interval", minimum=0.1
         ),
