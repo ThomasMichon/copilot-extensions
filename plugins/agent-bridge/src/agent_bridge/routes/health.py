@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from ssh_manager import get_default_manager
 
 from .. import __version__
 from ..protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
@@ -32,6 +33,7 @@ async def health(request: Request) -> dict:
         "draining": draining,
         "protocol_version": HTTP_PROTOCOL_VERSION,
         "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
+        "ssh_carriers": get_default_manager().carrier_diagnostics(),
     }
     readiness_error = getattr(request.app.state, "readiness_error", None)
     if readiness_error:
