@@ -1449,11 +1449,42 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
     """
     try:
         from . import related
+        from . import repos
+        from . import state_root
 
         cp = related.find_control_plane_anchor()
         anchors: list[str] = list(related.installed_plugin_related_anchors())
         if cp:
-            anchors.append(cp)
+            try:
+                cp_key = related._anchor_key(cp)
+                cp_project = next(
+                    (
+                        entry.name
+                        for entry in repos.list_repos()
+                        if entry.local_path()
+                        and related._anchor_key(entry.local_path()) == cp_key
+                    ),
+                    None,
+                )
+                cp_sources = state_root.config_source_anchors(
+                    load_config(
+                        include_control_plane_related_pr=False,
+                        project=cp_project,
+                    ),
+                    base_anchor=cp,
+                )
+            except Exception:
+                cp_sources = []
+            if cp_sources:
+                anchors.extend(
+                    related.config_contribution_anchor(source.anchor, source.origin)
+                    for source in cp_sources
+                    if source.anchor
+                )
+            else:
+                anchors.append(
+                    related.config_contribution_anchor(cp, "harness")
+                )
         if not anchors:
             return {}
         rc = related.read_related_grafted(anchors)
