@@ -33,7 +33,6 @@ keeps working.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -54,10 +53,7 @@ def _is_exact_squash_result(
     if parent.returncode != 0 or not parent.stdout.strip():
         return False
 
-    env = {
-        **os.environ,
-        "GIT_TERMINAL_PROMPT": "0",
-    }
+    env = git_ops.repository_identity_env()
     try:
         patch = subprocess.run(
             [
@@ -123,7 +119,7 @@ def _rev_count_checked(revspec: str, *, cwd: str) -> int | None:
 def _merged_pr_head(
     worktree_id: str, branch: str, upstream: str, *, cwd: str
 ) -> tuple[str, int] | None:
-    """Return a verified merged PR head that is an ancestor of ``branch``.
+    """Return a verified merged PR head and its distance from ``branch``.
 
     A recorded PR boundary lets reconciliation exclude the PR's original
     commits and replay only later local work. The boundary is trusted only when
@@ -131,7 +127,8 @@ def _merged_pr_head(
     and applying that PR diff to the candidate's parent produces the candidate's
     exact tree. The effective base is recomputed from the current upstream: a
     PR's recorded creation-time base can become stale while the open PR remains
-    mergeable.
+    mergeable. Returns ``None`` when no recorded merged PR boundary can be
+    proven safe.
     """
     record = tracking.load_record_by_id(worktree_id)
     if record is None:

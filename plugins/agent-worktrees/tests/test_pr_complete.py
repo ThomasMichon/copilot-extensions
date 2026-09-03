@@ -306,7 +306,7 @@ class TestPrComplete:
             wid, branch, "origin/master", cwd=str(wt_path),
         ) is None
 
-    def test_exact_squash_tree_preserves_crlf_bytes(self, pr_repo):
+    def test_exact_squash_tree_preserves_crlf_bytes(self, pr_repo, monkeypatch):
         """Tree verification must not normalize text diff bytes."""
         _config, _wid, wt_path, _ = pr_repo
         anchor = Path(_config.default_repo.anchor)
@@ -321,6 +321,8 @@ class TestPrComplete:
         _git("add", "-A", cwd=anchor)
         _git("commit", "-m", "squash PR with CRLF", cwd=anchor)
         candidate = _git("rev-parse", "HEAD", cwd=anchor)
+        monkeypatch.setenv("GIT_DIR", str(anchor / ".git"))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(anchor / "wrong-index"))
 
         assert pr_complete._is_exact_squash_result(
             base, pr_head, candidate, cwd=str(wt_path),
