@@ -756,7 +756,7 @@ enforcement before migrating the complete contributor stack.
   promised structured-output option or exact catalog argv. One repetition also
   broadened into repository discovery; the other two stopped at the missing
   grounding.
-- The F0 controls also failed 0/3. They performed five, eight, and nine tool
+- The F0 controls also passed 0/3. They performed five, eight, and nine tool
   calls, including broad repository discovery and irrelevant explicit rereads,
   without producing an option or attributable command.
 - Inspection of the frozen materialized context confirms the task stimulus is
