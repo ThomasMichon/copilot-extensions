@@ -9,6 +9,11 @@ from pathlib import Path
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 RUN_DIR_ENV = "AGENT_INDEX_RUN_DIR"
+STATE_DIR_ENV = "AGENT_INDEX_STATE_DIR"
+LOG_DIR_ENV = "AGENT_INDEX_LOG_DIR"
+CACHE_DIR_ENV = "AGENT_INDEX_CACHE_DIR"
+CONFIG_ROOT_ENV = "AGENT_INDEX_CONFIG_ROOT"
+ROUTING_DIR_ENV = "AGENT_INDEX_ROUTING_DIR"
 ENDPOINT_ENV = "AGENT_INDEX_ENDPOINT"
 HOME_ENV = "AGENT_INDEX_HOME"
 ROLE_ENV = "AGENT_INDEX_ROLE"
@@ -27,7 +32,10 @@ def install_dir() -> Path:
 
 def data_dir() -> Path:
     """Durable data directory for index state and task queues."""
-    return install_dir() / "data"
+    override = os.environ.get("AGENT_INDEX_DATA_DIR") or os.environ.get(
+        STATE_DIR_ENV
+    )
+    return Path(override).expanduser() if override else install_dir() / "data"
 
 
 def run_dir() -> Path:
@@ -37,7 +45,8 @@ def run_dir() -> Path:
 
 def routing_dir() -> Path:
     """Stable zdd routing-table directory shared by all installed versions."""
-    return install_dir()
+    override = os.environ.get(ROUTING_DIR_ENV)
+    return Path(override).expanduser() if override else install_dir()
 
 
 def config_path() -> Path:
@@ -50,6 +59,9 @@ def config_path() -> Path:
     override = os.environ.get(CONFIG_ENV)
     if override:
         return Path(override).expanduser()
+    config_root = os.environ.get(CONFIG_ROOT_ENV)
+    if config_root:
+        return Path(config_root).expanduser() / "config.yaml"
     return install_dir() / "config.yaml"
 
 

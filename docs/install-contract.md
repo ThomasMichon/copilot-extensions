@@ -62,6 +62,24 @@ complete.
    the actual authoritative root. Enabling policy never creates a parallel
    runtime beside unattributed legacy state, and disabling policy never silently
    reactivates legacy writers after a cell is active.
+10. Runtime selection is crash-consistent across the marker and deploy
+    manifest. A durable installation transaction records the prior selection,
+    validated completed target, receipt generations, and random transaction
+    authorization before marker CAS. Bootstrap/retry finishes the target or
+    restores the prior state; governance is rechecked before marker cutover and
+    before service reconciliation.
+11. Service-bearing cells separate passive instance evidence from active
+    discovery evidence. A passive generation does not start/dequeue shared work
+    or publish shared endpoint/running-version records before an ownership-checked
+    pre-route promotion has made it read-ready. Namespaced deploy, promotion,
+    and recovery require the live cell transaction receipt. Promotion requires
+    the exact passive instance PID/version/installation identity and token;
+    drain, undrain, and shutdown additionally bind that identity to the current
+    route.
+12. Cutover cleanup is installation-scoped and ownership-attested. Recovery may
+    reconcile attributable passive/demoted instance receipts, but it never kills
+    by process name or broad executable match; a completed transition leaves
+    exactly one owned installation PID.
 
 After canonicalizing the configured durable home, receipt validation requires
 the physical path chain `marketplaces/<marketplace-id>/plugins/<plugin-id>` to
@@ -265,6 +283,23 @@ temporary ownership marker remains until provenance publication and validation
 complete. Retry may remove only a marker-proven final directory that still has
 no provenance sidecar; a pre-existing, unowned, malformed, or conflicting
 snapshot is never deleted or replaced.
+
+Agent Index qualifies its runtime-slot identity by dependency profile:
+`<payload-version>+host`, `<payload-version>+client`, or
+`<payload-version>+unconfigured`. Its canonical `.install-complete.json`
+retains exactly `version`, `completed_at`, `pid`, and `payload_hash`; the
+separate immutable `.agent-index-runtime-profile.json` strictly binds
+marketplace, plugin, slot root/version, role, and extras. A configured-profile
+change therefore builds and selects another attributable slot rather than
+mutating a completed same-version runtime.
+
+POSIX virtual environments may use the standard slot-local `bin/python`
+symlink. An operative adapter may permit only that interpreter leaf after the
+slot ownership transaction validates, while also requiring an ordinary
+`pyvenv.cfg`, a resolvable executable target, and an isolated
+`agent_index.__file__` beneath the owned slot. This exception does not weaken
+the general prohibition on linked or reparsed slot roots, parent directories,
+receipts, package origins, or Windows interpreter artifacts.
 
 After a successful plugin-level cutover, the adapter atomically republishes
 `deploy-manifest.json` schema 4. Its `source` object records the most recently

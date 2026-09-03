@@ -11,6 +11,13 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $PluginDir = Split-Path -Parent $PSScriptRoot
 try {
+    $runtimeGate = Join-Path $PSScriptRoot 'runtime-gate.ps1'
+    if (Test-Path -LiteralPath $runtimeGate -PathType Leaf) {
+        & $runtimeGate __cell-bootstrap *> $null
+        $cellStatus = $LASTEXITCODE
+        if ($cellStatus -eq 0) { exit 0 }
+        if ($cellStatus -ne 10) { exit 0 }
+    }
     $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
     if (-not $name) { exit 0 }
     function Test-LegacyMutationAllowed {
@@ -122,6 +129,70 @@ try {
         Write-Host "[$name] selected context runtime $deployed -> $current; context-aware install is not active yet." -ForegroundColor DarkGray
         exit 0
     }
+    function Test-RuntimeOrigin {
+        param([string]$Python, [string]$Slot)
+        if (
+            -not (Test-Path -LiteralPath $Python -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $Slot -PathType Container)
+        ) {
+            return $false
+        }
+        $comparison = if ($env:OS -ceq 'Windows_NT') {
+            [StringComparison]::OrdinalIgnoreCase
+        } else {
+            [StringComparison]::Ordinal
+        }
+        $slotRoot = (Resolve-Path -LiteralPath $Slot).Path.TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        $pythonSlotPath = Split-Path -Parent (Split-Path -Parent $Python)
+        if (-not (Test-Path -LiteralPath $pythonSlotPath -PathType Container)) {
+            return $false
+        }
+        $pythonSlot = (
+            Resolve-Path -LiteralPath $pythonSlotPath
+        ).Path.TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        $sameSlot = if ($comparison -eq [StringComparison]::OrdinalIgnoreCase) {
+            [StringComparer]::OrdinalIgnoreCase.Equals($pythonSlot, $slotRoot)
+        } else {
+            [StringComparer]::Ordinal.Equals($pythonSlot, $slotRoot)
+        }
+        if (-not $sameSlot) {
+            return $false
+        }
+        $previousLocation = Get-Location
+        $previousCwd = [IO.Directory]::GetCurrentDirectory()
+        try {
+            Set-Location -LiteralPath $Slot
+            [IO.Directory]::SetCurrentDirectory($Slot)
+            $originOutput = @(
+                & $Python -I -X utf8 -c (
+                    'from pathlib import Path; import agent_index; ' +
+                    'print(Path(agent_index.__file__).resolve())'
+                ) 2>$null
+            )
+            if ($LASTEXITCODE -ne 0 -or $originOutput.Count -eq 0) {
+                return $false
+            }
+            $origin = [IO.Path]::GetFullPath(("$($originOutput[-1])").Trim())
+            return (
+                (Test-Path -LiteralPath $origin -PathType Leaf) -and
+                $origin.StartsWith(
+                    $slotRoot + [IO.Path]::DirectorySeparatorChar,
+                    $comparison
+                )
+            )
+        } catch {
+            return $false
+        } finally {
+            Set-Location -LiteralPath $previousLocation
+            [IO.Directory]::SetCurrentDirectory($previousCwd)
+        }
+    }
     # Before role setup, session start may refresh the cheap stamp but must not
     # build a runtime or choose/start a role-specific service.
     if (-not $configuredRole) {
@@ -148,12 +219,13 @@ try {
             $AgentRtPy = $null
             $env:AGENT_RT_ROOT = $InstallDir
             . (Join-Path $PSScriptRoot 'resolve-runtime.ps1')
-            $expectedPrefix = (Join-Path $InstallDir "versions\$current") + [IO.Path]::DirectorySeparatorChar
-            if ($AgentRtPy -and $AgentRtPy.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            $expectedSlot = Join-Path $InstallDir "versions\$current"
+            if ($AgentRtPy) {
                 $previous = $ErrorActionPreference
                 $ErrorActionPreference = 'Continue'
-                & $AgentRtPy -c 'import agent_index' *> $null
-                $provisioned = $LASTEXITCODE -eq 0
+                $provisioned = Test-RuntimeOrigin `
+                    -Python $AgentRtPy `
+                    -Slot $expectedSlot
                 $ErrorActionPreference = $previous
             }
         }
