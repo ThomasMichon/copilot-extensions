@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
+import multiprocessing
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -39,6 +41,14 @@ def _session_root(tmp_path: Path, monkeypatch, session_id: str = "session-a") ->
     (session_dir / "workspace.yaml").write_text("cwd: /tmp/wt-a\n", encoding="utf-8")
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: root)
     return session_dir
+
+
+def _hold_projection_lock(lock_path: str, ready, release) -> None:
+    with tracking._RecordLock(Path(lock_path), require_sidecar=True) as lock:
+        if not lock.acquired:
+            return
+        ready.set()
+        release.wait(timeout=10)
 
 
 def test_lifecycle_revision_writes_bound_projection(
@@ -140,6 +150,25 @@ def test_newer_projection_is_left_untouched(
     tracking.set_head_session(record, "session-a")
 
     assert sidecar.read_text(encoding="utf-8") == original
+
+
+def test_older_projection_is_rebuilt_from_authority(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    sidecar.write_text(
+        '{"version": 0, "session_id": "session-a", "relations": []}\n',
+        encoding="utf-8",
+    )
+
+    tracking.set_head_session(record, "session-a")
+
+    loaded = session_projection.read("session-a")
+    assert loaded is not None
+    assert loaded["version"] == session_projection.SCHEMA_VERSION
+    assert loaded["relations"][0]["worktree_id"] == "wt-a"
 
 
 def test_rescue_ingest_marker_is_read_only(
@@ -827,6 +856,68 @@ def test_projection_target_symlink_is_rejected(
     assert outside.read_text(encoding="utf-8") == "{}"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows path alias behavior")
+def test_case_aliased_session_directory_is_rejected(tmp_path, monkeypatch):
+    root = tmp_path / "session-state"
+    (root / "Session-A").mkdir(parents=True)
+    if not (root / "session-a").is_dir():
+        pytest.skip("case-insensitive directory aliases are unavailable")
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: root)
+
+    with pytest.raises(
+        session_projection.ProjectionError,
+        match="session directory identity",
+    ):
+        session_projection.read("session-a")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended path behavior")
+def test_extended_session_state_path_is_supported(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    root = tmp_path / "session-state"
+    (root / "session-a").mkdir(parents=True)
+    extended_root = Path("\\\\?\\" + str(root))
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: extended_root)
+    record = _record(tmp_tracking_dir)
+
+    tracking.set_head_session(record, "session-a")
+
+    loaded = session_projection.read("session-a")
+    assert loaded is not None
+    assert loaded["relations"][0]["worktree_id"] == "wt-a"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows short-name behavior")
+def test_short_name_session_alias_is_rejected(tmp_path, monkeypatch):
+    root = tmp_path / "session-state"
+    session_dir = root / "session-directory-for-alias"
+    session_dir.mkdir(parents=True)
+    get_short_path = ctypes.windll.kernel32.GetShortPathNameW
+    get_short_path.argtypes = (
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+    )
+    get_short_path.restype = ctypes.c_uint32
+    size = get_short_path(str(session_dir), None, 0)
+    if not size:
+        pytest.skip("short-name aliases are unavailable")
+    buffer = ctypes.create_unicode_buffer(size)
+    if not get_short_path(str(session_dir), buffer, size):
+        pytest.skip("short-name aliases are unavailable")
+    alias = Path(buffer.value).name
+    if alias == session_dir.name:
+        pytest.skip("short-name aliases are disabled on this volume")
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: root)
+
+    with pytest.raises(
+        session_projection.ProjectionError,
+        match="session directory identity",
+    ):
+        session_projection.read(alias)
+
+
 def test_read_does_not_create_projection_runtime_dirs(tmp_path, monkeypatch):
     _session_root(tmp_path, monkeypatch)
 
@@ -886,6 +977,74 @@ def test_relation_cap_never_evicts_bound_relation():
     assert "controller-extra" in retained_ids
 
 
+def test_relation_update_preserves_unknown_future_fields():
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [{
+            "project": "example",
+            "worktree_id": "wt-a",
+            "role": "bound",
+            "relation_revision": 1,
+            "head_revision": 1,
+            "lineage": {
+                "predecessor": None,
+                "successor": None,
+                "future_lineage_field": {"preserve": True},
+            },
+            "future_relation_field": {"preserve": True},
+        }],
+        "overflow": False,
+        "omitted_relations": 0,
+        "future_projection_field": ["preserve"],
+    }
+    update = {
+        "project": "example",
+        "worktree_id": "wt-a",
+        "role": "bound",
+        "relation_revision": 2,
+        "head_revision": 2,
+        "lineage": {
+            "predecessor": None,
+            "successor": "session-b",
+        },
+    }
+
+    merged = session_projection._merge_relation(projection, update)
+
+    assert merged["future_projection_field"] == ["preserve"]
+    assert merged["relations"][0]["future_relation_field"] == {"preserve": True}
+    assert merged["relations"][0]["head_revision"] == 2
+    assert merged["relations"][0]["lineage"] == {
+        "predecessor": None,
+        "successor": "session-b",
+        "future_lineage_field": {"preserve": True},
+    }
+
+
+def test_restored_validation_ignores_unknown_future_lineage_fields(
+    tmp_tracking_dir,
+):
+    record = _record(tmp_tracking_dir)
+    relation = session_projection.bound_relation(record, "session-a")
+    relation["lineage"]["future_lineage_field"] = {"preserve": True}
+    projection = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [relation],
+        "overflow": False,
+        "omitted_relations": 0,
+    }
+
+    validation = session_projection.validate_restored_hint(
+        "session-a",
+        projection,
+        record_loader=lambda _project, _worktree_id: record,
+    )
+
+    assert validation["status"] == "restored-validated"
+
+
 def test_relations_are_serialized_by_revision_then_identity():
     projection = {
         "version": 1,
@@ -919,6 +1078,25 @@ def test_relations_are_serialized_by_revision_then_identity():
     assert [
         relation["worktree_id"] for relation in merged["relations"]
     ] == ["earlier", "middle", "later"]
+
+
+def test_projection_encoding_is_deterministic_and_bounded():
+    projection = {
+        "session_id": "session-a",
+        "version": 1,
+        "relations": [],
+        "omitted_relations": 0,
+        "overflow": False,
+    }
+
+    encoded = session_projection._encode(projection)
+
+    assert encoded == session_projection._encode(dict(reversed(projection.items())))
+    assert encoded.endswith(b"\n")
+    with pytest.raises(session_projection.ProjectionError, match="exceeds"):
+        session_projection._encode(
+            dict(projection, future_field="x" * session_projection.MAX_BYTES)
+        )
 
 
 def test_non_object_relation_is_rejected(tmp_path, monkeypatch):
@@ -1087,12 +1265,21 @@ def test_projection_has_private_permissions(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
     session_dir = _session_root(tmp_path, monkeypatch)
+    root = sessions._session_state_dir()
+    lock_dir = root / ".agent-worktrees-locks"
+    temp_dir = root / ".agent-worktrees-tmp"
+    lock_dir.mkdir(mode=0o777)
+    temp_dir.mkdir(mode=0o777)
+    lock_dir.chmod(0o777)
+    temp_dir.chmod(0o777)
     record = _record(tmp_tracking_dir)
 
     tracking.set_head_session(record, "session-a")
 
     mode = (session_dir / session_projection.SIDECAR_NAME).stat().st_mode & 0o777
     assert mode == 0o600
+    assert lock_dir.stat().st_mode & 0o777 == 0o700
+    assert temp_dir.stat().st_mode & 0o777 == 0o700
 
 
 def test_projection_temporary_files_stay_outside_session_tree(
@@ -1105,6 +1292,79 @@ def test_projection_temporary_files_stay_outside_session_tree(
 
     assert list(session_dir.glob("*.tmp")) == []
     assert (sessions._session_state_dir() / ".agent-worktrees-tmp").is_dir()
+
+
+def test_atomic_replace_failure_preserves_target_and_cleans_temp(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    tracking.set_head_session(record, "session-a")
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    original = sidecar.read_bytes()
+    temp_dir = sessions._session_state_dir() / ".agent-worktrees-tmp"
+    monkeypatch.setattr(
+        tracking,
+        "_replace_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("interrupted replacement")
+        ),
+    )
+
+    with pytest.raises(OSError, match="interrupted replacement"):
+        session_projection._atomic_replace(sidecar, temp_dir, b"replacement\n")
+
+    assert sidecar.read_bytes() == original
+    assert list(temp_dir.glob("*.tmp")) == []
+
+
+def test_nonblocking_projection_sync_defers_under_lock_contention(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    _target, lock_base, _temp_dir = session_projection._session_paths(
+        "session-a",
+        writing=True,
+    )
+    context = multiprocessing.get_context("spawn")
+    ready = context.Event()
+    release = context.Event()
+    holder = context.Process(
+        target=_hold_projection_lock,
+        args=(str(lock_base), ready, release),
+        daemon=True,
+    )
+    holder.start()
+    try:
+        assert ready.wait(timeout=10)
+        outcome = session_projection.sync_bound(
+            record,
+            "session-a",
+            blocking=False,
+        )
+    finally:
+        release.set()
+        holder.join(timeout=10)
+
+    assert outcome == "deferred"
+    assert holder.exitcode == 0
+
+
+def test_transient_path_resolution_failure_defers_projection_sync(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    monkeypatch.setattr(
+        session_projection,
+        "_validate_session_directory",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            session_projection.ProjectionUnavailable("temporarily unavailable")
+        ),
+    )
+
+    assert session_projection.sync_bound(record, "session-a") == "deferred"
 
 
 def test_deferred_projection_remains_dirty_for_next_save(
