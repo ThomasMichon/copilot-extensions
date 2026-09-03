@@ -133,11 +133,10 @@ args=(-m agent_worktrees register-session --stdin --emit-context)
 registration_json=""
 use_fallback=1
 client="$HOME/.agent-worktrees/bin/hook_client.py"
-client_python="$identity_python"
-if [[ -n "$client_python" && -f "$client" ]]; then
+if [[ -f "$client" ]]; then
     client_output="$(
         printf '%s' "$payload" |
-            "$client_python" "$client" sessionStart 2>/dev/null || true
+            "$PYTHON" "$client" sessionStart 2>/dev/null || true
     )"
     if [[ "$client_output" == *$'\n'*$'\n'* ]]; then
         client_status="${client_output##*$'\n'}"

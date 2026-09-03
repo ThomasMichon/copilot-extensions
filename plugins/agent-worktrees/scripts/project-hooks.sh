@@ -17,11 +17,10 @@ if [[ ! -x "$PYTHON" ]]; then exit 0; fi
 hook=""
 resolved_by_monitor=0
 client="$HOME/.agent-worktrees/bin/hook_client.py"
-client_python="$(command -v python3 || command -v python || true)"
-if [[ -n "$client_python" && -f "$client" ]]; then
+if [[ -f "$client" ]]; then
     resolved="$(
         printf '%s' "$payload" |
-            "$client_python" "$client" projectResolve 2>/dev/null || true
+            "$PYTHON" "$client" projectResolve 2>/dev/null || true
     )"
     if [[ "$resolved" == *$'\n'* ]]; then
         resolved_status="${resolved##*$'\n'}"

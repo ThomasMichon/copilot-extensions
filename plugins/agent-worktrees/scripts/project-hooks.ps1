@@ -19,11 +19,10 @@ $env:PYTHONPATH = ''
 $HookPath = ''
 $resolvedByMonitor = $false
 $client = Join-Path $env:USERPROFILE '.agent-worktrees\bin\hook_client.py'
-$clientPython = (Get-Command python -ErrorAction SilentlyContinue).Source
-if ($clientPython -and (Test-Path -LiteralPath $client -PathType Leaf)) {
+if (Test-Path -LiteralPath $client -PathType Leaf) {
     try {
         $lines = @(
-            $payload | & $clientPython $client projectResolve 2>$null |
+            $payload | & $python $client projectResolve 2>$null |
                 ForEach-Object { [string]$_ }
         )
         if ($lines.Count -ge 2 -and $lines[-1] -eq '0') {

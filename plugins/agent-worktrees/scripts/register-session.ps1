@@ -152,11 +152,10 @@ if ($wt_id) { $cmdArgs += @('--worktree-id', $wt_id) }
 $registrationJson = ''
 $useFallback = $true
 $client = Join-Path $env:USERPROFILE '.agent-worktrees\bin\hook_client.py'
-$clientPython = (Get-Command python -ErrorAction SilentlyContinue).Source
-if ($clientPython -and (Test-Path -LiteralPath $client -PathType Leaf)) {
+if (Test-Path -LiteralPath $client -PathType Leaf) {
     try {
         $clientOutput = (
-            $payload | & $clientPython $client sessionStart 2>$null |
+            $payload | & $python $client sessionStart 2>$null |
                 Out-String
         ).TrimEnd()
         $lines = @($clientOutput -split "\r?\n")
