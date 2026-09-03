@@ -422,9 +422,27 @@ class TestMuxRetirePane:
         monkeypatch.setattr(subprocess, "run",
                             lambda *a, **k: type("R", (), {"returncode": 0})())
         out = sessions.mux_retire_pane("%3", mux="tmux", ctrl_c_gap=0,
-                                       poll_interval=0, settle_timeout=0)
+                                       poll_interval=0, settle_timeout=0,
+                                       hard_kill_settle=0)
         assert out["gone"] is False
         assert out["method"] == "failed"
+
+    def test_hard_kill_waits_for_mux_to_drop_pane(self, monkeypatch):
+        states = iter([True, True, True, True, False])
+        monkeypatch.setattr(
+            sessions, "_mux_pane_alive", lambda p, b: next(states),
+        )
+        import subprocess
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda *a, **k: type("R", (), {"returncode": 0})(),
+        )
+        out = sessions.mux_retire_pane(
+            "%3", mux="tmux", ctrl_c_gap=0, poll_interval=0,
+            settle_timeout=0, hard_kill_settle=1,
+        )
+        assert out["gone"] is True
+        assert out["method"] == "hard"
 
     def test_last_window_guard_skips_retire(self, monkeypatch):
         calls: list[list[str]] = []
@@ -519,6 +537,96 @@ class TestCmdHandoffCutover:
         assert rc == 1
         out = json.loads(capfd.readouterr().out)
         assert out["method"] == "process-identity-mismatch"
+
+    def test_retire_retry_accepts_already_gone_predecessor(
+        self, monkeypatch, capfd,
+    ):
+        monkeypatch.setattr(
+            sessions, "mux_session_for_pane", lambda pane: None,
+        )
+        monkeypatch.setattr(
+            sessions, "mux_binding_for_session",
+            lambda sid: pytest.fail("gone pane needs no live mux binding"),
+        )
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda *a, **k: pytest.fail("gone pane must not be signaled"),
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        seen = {}
+
+        def _ensure(sid, **kwargs):
+            seen.update(session=sid, **kwargs)
+            return {
+                "checked": True,
+                "identity_verified": True,
+                "found": 0,
+                "reaped": 0,
+                "survivors": 0,
+                "pids": [],
+            }
+
+        monkeypatch.setattr(reclaim, "ensure_session_copilot_reaped", _ensure)
+        rc = m.cmd_handoff_cutover(_ns(
+            retire_pane="%9",
+            session_id="old-sess",
+            mux_session="original-session",
+            require_mux_identity=True,
+            expected_copilot_pid=77,
+            expected_copilot_start_time="old-process",
+        ))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["method"] == "identity-unresolved-skip"
+        assert out["ok"] is True
+        assert seen == {
+            "session": "old-sess",
+            "expected_pid": 77,
+            "expected_start_time": "old-process",
+        }
+
+    def test_retire_retry_skips_reused_pane_without_live_binding(
+        self, monkeypatch, capfd,
+    ):
+        monkeypatch.setattr(
+            sessions, "mux_session_for_pane",
+            lambda pane: "different-session",
+        )
+        monkeypatch.setattr(
+            sessions, "mux_binding_for_session",
+            lambda sid: pytest.fail("reused pane needs no predecessor binding"),
+        )
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda *a, **k: pytest.fail("reused pane must not be signaled"),
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True,
+                "identity_verified": True,
+                "found": 0,
+                "reaped": 0,
+                "survivors": 0,
+                "pids": [],
+            },
+        )
+        rc = m.cmd_handoff_cutover(_ns(
+            retire_pane="%9",
+            session_id="old-sess",
+            mux_session="original-session",
+            require_mux_identity=True,
+            expected_copilot_pid=77,
+            expected_copilot_start_time="old-process",
+        ))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["method"] == "identity-mismatch-skip"
+        assert out["current_mux_session"] == "different-session"
+        assert out["ok"] is True
 
     def test_retire_mode(self, monkeypatch, capfd):
         monkeypatch.setattr(sessions, "mux_retire_pane",

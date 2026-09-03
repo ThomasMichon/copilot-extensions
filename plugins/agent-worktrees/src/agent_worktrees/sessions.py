@@ -2616,6 +2616,7 @@ def mux_retire_pane(
     poll_interval: float = 0.3,
     ctrl_c_gap: float = 0.6,
     escalate_after: float = 1.5,
+    hard_kill_settle: float = 1.5,
 ) -> dict:
     """Retire a specific pane by asking its Copilot to quit cleanly.
 
@@ -2708,7 +2709,7 @@ def mux_retire_pane(
         )
     except (OSError, subprocess.TimeoutExpired):
         pass
-    gone = not _mux_pane_alive(pane_id, mux_bin)
+    gone = _gone_within(max(hard_kill_settle, 0.0))
     return {
         "ok": gone, "pane": pane_id, "gone": gone,
         "method": "hard" if gone else "failed",

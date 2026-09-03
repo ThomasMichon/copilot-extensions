@@ -1821,14 +1821,25 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
             expected_copilot_pid is not None
             or expected_copilot_start is not None
         )
+        current_mux = (
+            sessions.mux_session_for_pane(retire_pane)
+            if expected_mux else None
+        )
+        pane_not_in_expected_mux = bool(
+            expected_mux and current_mux != expected_mux
+        )
         binding = (
             sessions.mux_binding_for_session(session_id)
-            if strict_process_identity and session_id
+            if (
+                strict_process_identity
+                and session_id
+                and not pane_not_in_expected_mux
+            )
             else None
         )
         process_identity_ok = True
         process_identity_reason = None
-        if strict_process_identity:
+        if strict_process_identity and not pane_not_in_expected_mux:
             if (
                 expected_copilot_pid is None
                 or not expected_copilot_start
@@ -1844,10 +1855,6 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
             ):
                 process_identity_ok = False
                 process_identity_reason = "process-identity-mismatch"
-        current_mux = (
-            sessions.mux_session_for_pane(retire_pane)
-            if expected_mux else None
-        )
         if not process_identity_ok:
             result = {
                 "ok": False,
