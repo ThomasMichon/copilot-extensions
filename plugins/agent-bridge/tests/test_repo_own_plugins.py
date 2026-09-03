@@ -1,10 +1,9 @@
 """Tests for repo_own_plugins -- staging a repo's OWN enabledPlugins as
 per-launch ``--plugin-dir`` args (dotfiles#905).
 
-Verifies the leak-safe backstop: an *enabled-but-uninstalled* plugin (fork /
-fresh-machine case) is staged via ``--plugin-dir`` resolved from a local
-marketplace; an *installed* plugin is NOT re-staged (no double-load); and bad
-input fails safe. No global copilot config is ever read or written.
+Verifies complete ACP stack composition: local marketplace plugins are staged
+from their source directories, remote marketplace plugins fall back to installed
+payloads, and bad input fails safe. No global Copilot config is read or written.
 """
 
 from __future__ import annotations

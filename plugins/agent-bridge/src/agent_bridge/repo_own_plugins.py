@@ -10,18 +10,17 @@ per-launch, scoped to that one process; this module **never** writes
 ``extraKnownMarketplaces``), never registers a marketplace, and never enables a
 plugin globally.
 
-Why this exists (verified, dotfiles#905): an *enabled-but-uninstalled* plugin
-(the fork / fresh machine case) is silently skipped in headless mode. In
-addition, once a repository launch needs explicit ``--plugin-dir`` arguments
-for local marketplaces, installed remote-marketplace payloads must also be
-passed explicitly; relying on repository settings alone can omit them from the
-ACP process. The primary guarantee is setup-install; this is the per-launch
-backstop that makes the complete enabled stack explicit without mutating global
-configuration.
+Why this exists (verified, dotfiles#905): Copilot ACP mode does not activate
+repository ``enabledPlugins`` by itself. The bridge therefore treats those
+settings as the desired-stack declaration and supplies every resolved payload
+explicitly. Local marketplaces provide source directories; installed inventory
+provides the fallback for remote marketplaces and other identities without a
+resolvable local source.
 
 Marketplace/plugin/settings resolution across the Copilot-native and Claude
 conventions (native preferred) lives in the shared, vendored ``plugin_resolve``
-lib; this module keeps only the bridge-specific installed-skip + leak-safe policy.
+lib; this module keeps only the bridge-specific complete-stack staging and
+leak-safe policy.
 
 Every function fails safe: any error yields an empty result, never an exception
 into the dispatch path.
