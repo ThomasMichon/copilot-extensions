@@ -668,3 +668,21 @@ enforcement before migrating the complete contributor stack.
   satisfied for the bounded mutation while remaining required afterward.
 - Next gate: land the epoch-3 fixture clarification, then require the corrected
   F0 multi-guide control to pass before rerunning any deferred variant.
+
+### 2026-09-03 - Corrected F0 remains behaviorally unstable
+
+- Ran three freeze-epoch-3 F0 full-inline multi-guide repetitions after the
+  satisfiability and evidence-contract fixes landed in #1872, #1876, and #1878.
+- Repetition 2 passed literally with three tool calls: read the owner-declared
+  execution configuration, run the exact bounded command, and confirm the
+  result while preserving the required review gate.
+- Repetition 1 completed the mutation but broadened into explicit irrelevant
+  guide reads and an inaccurate canary witness. Repetition 3 completed the
+  mutation but added an unnecessary broad search, read the generated script,
+  and duplicated canaries in a malformed witness.
+- The F0 control is therefore 1/3 PASS and fails the unanimous correctness
+  gate. No deferred multi-guide variant may be eliminated from this task; the
+  epoch-1 runs retain only decision-independent observations.
+- Next gate: publish this corrected control result and record a tracked
+  decision on whether to redesign the multi-guide task/model interaction or
+  continue Phase 2 on the remaining independently satisfiable task boundaries.

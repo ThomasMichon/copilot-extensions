@@ -190,6 +190,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / backtick payload-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 2, 3 | No elimination claim: prohibited generated-context rereads remain valid observations; behavioral selection awaits rerun. |
 | F3 / bare labeled path / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 4, 2 | No elimination claim: retain discovery and read observations pending rerun against the current freeze epoch. |
 | F3 / HTML comment locator / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 2, 1 | No elimination claim: comment discoverability stands; behavioral selection awaits rerun against the current freeze epoch. |
+| Epoch 3 F0 / full inline / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | all eight guides intentionally eager | 0, 0, 0 agent-read guides in counts-only records | Control is behaviorally unstable: one exact bounded execution, one broad/irrelevant-read false pass, and one broad/malformed-witness false pass. Do not eliminate deferred variants from this task. |
 
 Counts-only records:
 
@@ -202,6 +203,23 @@ local F0 control exposed an ambiguous review-gate state and incomplete explicit
 publication eligibility before any evidence was published. Freeze epoch 3
 removes that ambiguity, keeps the required guide/rule sets unchanged, and
 requires F0 to pass before a primary task can eliminate any variant.
+
+The corrected epoch-3 F0 control is satisfiable but not unanimous. Repetition 2
+passed with exactly three tool calls: read the execution configuration, run the
+exact bounded command, and confirm the result. Repetition 1 also completed the
+mutation but used broad discovery, explicitly reread three irrelevant guides,
+and returned an inaccurate canary witness. Repetition 3 completed the mutation
+but added an unnecessary broad synthetic-directory search, read the generated
+script, and duplicated canaries in a malformed witness.
+
+F0 intentionally exposes all eight guide bodies inline. The counts-only writer
+therefore records the complete eager set and zero agent-read guides; the
+independent transcript judge carries the explicit reread distinction for
+repetition 1. With only 1/3 literal passes, this task has no stable correctness
+ceiling on the calibration model and ACP venue. Preserve the epoch-1
+decision-independent observations, but do not rerun or eliminate deferred
+multi-guide variants until the task/model interaction is redesigned or a
+tracked decision explicitly accepts a different control rule.
 
 - [`evidence/f2-repo-conditional-flat-one-guide-r1.json`](evidence/f2-repo-conditional-flat-one-guide-r1.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r2.json`](evidence/f2-repo-conditional-flat-one-guide-r2.json)
@@ -245,6 +263,9 @@ requires F0 to pass before a primary task can eliminate any variant.
 - [`evidence/f3-comment-gated-flat-multi-guide-r1.json`](evidence/f3-comment-gated-flat-multi-guide-r1.json)
 - [`evidence/f3-comment-gated-flat-multi-guide-r2.json`](evidence/f3-comment-gated-flat-multi-guide-r2.json)
 - [`evidence/f3-comment-gated-flat-multi-guide-r3.json`](evidence/f3-comment-gated-flat-multi-guide-r3.json)
+- [`evidence/e3-f0-repo-gated-flat-multi-guide-r1.json`](evidence/e3-f0-repo-gated-flat-multi-guide-r1.json)
+- [`evidence/e3-f0-repo-gated-flat-multi-guide-r2.json`](evidence/e3-f0-repo-gated-flat-multi-guide-r2.json)
+- [`evidence/e3-f0-repo-gated-flat-multi-guide-r3.json`](evidence/e3-f0-repo-gated-flat-multi-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
