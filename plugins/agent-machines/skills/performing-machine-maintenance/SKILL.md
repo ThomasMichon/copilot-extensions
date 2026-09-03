@@ -24,9 +24,10 @@ reached through its declared SSH transports. It has two entry points:
 - **Target-side drain:** a session is running on the target and can perform its
   queued maintenance.
 
-The issue tracker records the obligation. agent-machines or another declared
-auto-update system owns repeatable state. agent-dispatch may own the execution
-claim. Do not invent a second queue or execute issue prose as a script.
+The issue tracker records the obligation. This plugin or another declared
+auto-update system owns repeatable state. The
+`agent-dispatch:agent-dispatch` workflow may own the execution claim. Do not
+invent a second queue or execute issue prose as a script.
 
 ## Required queue locator
 
@@ -59,8 +60,8 @@ resolved predicates.
      otherwise unavailable for the maintenance window.
 
 2. **Make repeatable state declarative first.**
-   - Put required packages, files, settings, services, and bootstrap state in an
-     agent-machines requirement package when that engine can own them.
+   - Put required packages, files, settings, services, and bootstrap state in a
+     requirement package owned by this plugin when its engine can own them.
    - A different auto-update system is acceptable only when the repository
      explicitly declares it as the owner.
    - Never use the issue as the only home for recurring desired state.
@@ -91,13 +92,14 @@ resolved predicates.
    credentials, private keys, tokens, and secret values out of the issue.
 
 6. **Create one execution claim when supported.**
-   Use agent-dispatch only when the source and target share one coordinator, or
-   when the task is created through the supported remote-embodiment path on the
-   target's authoritative coordinator. Use one stable dedup key and exclusive
-   key derived from the provider, repository, and issue identity; store the
-   pinned issue revision as task context, never in the key. The issue-level
-   exclusive key prevents a later revision from creating a second active
-   executor. A source-local `target_machine` task is not a cross-machine claim.
+   Use the `agent-dispatch:agent-dispatch` workflow only when the source and
+   target share one coordinator, or when the task is created through the
+   supported remote-embodiment path on the target's authoritative coordinator.
+   Use one stable dedup key and exclusive key derived from the provider,
+   repository, and issue identity; store the pinned issue revision as task
+   context, never in the key. The issue-level exclusive key prevents a later
+   revision from creating a second active executor. A source-local
+   `target_machine` task is not a cross-machine claim.
 
    Otherwise require a demonstrably atomic provider lease/CAS/lock visible to
    every possible drainer. An assignment or comment without atomic exclusion is
@@ -117,9 +119,9 @@ resolved predicates.
    backlog items.
 
 3. **Claim one item before mutation.**
-   Prefer an issue-linked task on the shared or target-authoritative
-   agent-dispatch coordinator. Otherwise acquire the issue provider's atomic
-   claim. If another owner is active, leave the item alone.
+   Prefer an issue-linked task on the shared or target-authoritative dispatch
+   coordinator. Otherwise acquire the issue provider's atomic claim. If another
+   owner is active, leave the item alone.
 
 4. **Pin and re-read the issue revision.**
    Record the issue revision or update timestamp used for planning and bind the
@@ -137,7 +139,7 @@ resolved predicates.
    says to.
 
 6. **Preview through the owning system.**
-   For agent-machines state:
+   For state owned by this plugin:
 
    ```text
    <agent-machines catalog argv[0]> doctor
@@ -159,7 +161,7 @@ resolved predicates.
 8. **Start the claimed task at the mutation boundary.**
    After planning and confirmation waits, refresh the provider's conditional
    revision claim and re-read the issue again. Only if it still matches the
-   claim may an agent-dispatch task transition from `claimed` to `started`.
+   claim may the dispatch task transition from `claimed` to `started`.
    Decline from `claimed` with `yield`; use `complete` only after successful
    verification.
 
@@ -176,8 +178,8 @@ resolved predicates.
 11. **Record evidence and settle ownership.**
     Comment with the observed before/after state, commands or skill entry points
     used, and verification result. Close the issue only when the outcome is
-    proven. Complete/release the agent-dispatch task or provider claim after the
-    issue is settled.
+    proven. Complete/release the dispatch task or provider claim after the issue
+    is settled.
 
 ## Failure and safe degradation
 
@@ -187,8 +189,9 @@ resolved predicates.
   release a suspension to `queued` for a replacement.
 - If the machine becomes reachable before local execution, re-check whether the
   normal remote deployment path can safely finish the item; do not duplicate it.
-- If agent-machines is unavailable, do not improvise equivalent direct edits.
-  Use the declared alternate auto-update owner or leave the issue blocked.
+- If this plugin's runtime is unavailable, do not improvise equivalent direct
+  edits. Use the declared alternate auto-update owner or leave the issue
+  blocked.
 - If no trusted issue provider, shared/target-authoritative dispatch
   coordinator, or atomic provider claim is available, inspection and planning
   may continue, but mutation must not.
