@@ -50,6 +50,14 @@ test("encode/decode round-trips metadata + text", () => {
   assert.equal(text, body);
 });
 
+test("decode accepts CRLF-delimited task payloads", () => {
+  const meta = { kind: "context-handoff", worktree: "wt-example" };
+  const encoded = encodeHandoffPayload("continue", meta).replace(/\n/g, "\r\n");
+  const { metadata, text } = decodeHandoffPayload(encoded);
+  assert.deepEqual(metadata, meta);
+  assert.equal(text, "continue");
+});
+
 test("decode of a plain (metadata-less) string returns null metadata + full text", () => {
   const raw = "no metadata here\njust text";
   const { metadata, text } = decodeHandoffPayload(raw);
@@ -356,6 +364,75 @@ test("task checkpoint persists payload before one-time consume", () => {
     }
 });
 
+test("task retry recovers metadata embedded in an affected checkpoint payload", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-crlf-retry-"));
+  const metadata = {
+    stateDir: dir,
+    worktree: "wt-example",
+    worktreeDir: "/repo",
+    title: "Recovered handoff",
+    predecessor: {
+      sessionId: "predecessor",
+      paneId: "%3",
+      muxSession: "wt-wt-example",
+      copilotPid: 33,
+      copilotStartTime: "created-33",
+    },
+  };
+  const payload = encodeHandoffPayload("continue", metadata);
+  const calls = [];
+  try {
+    const prepared = prepareTaskCutoverCheckpoint(
+      "/repo",
+      "task-crlf-retry",
+      "successor",
+      { metadata: { stateDir: dir }, text: payload },
+      () => dir,
+    );
+    prepared.checkpoint.steps.consumeAttempted = true;
+    prepared.checkpoint.steps.taskConsumed = true;
+    writeJsonAtomic(prepared.checkpoint.path, prepared.checkpoint);
+
+    const result = consumeDispatchHandoffTask(
+      "/repo",
+      "task-crlf-retry",
+      "successor",
+      true,
+      {
+        readPayload: () => "",
+        stateDirResolver: () => dir,
+        execute: (_bin, args) => {
+          calls.push(args);
+          if (args[0] === "bind-session") {
+            return JSON.stringify({
+              bound: true,
+              head_session: "successor",
+            });
+          }
+          if (args[0] === "status") return JSON.stringify({});
+          if (args[0] === "handoff-cutover") {
+            return JSON.stringify({ ok: true });
+          }
+          throw new Error(args.join(" "));
+        },
+      },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.metadata.worktree, "wt-example");
+    assert.equal(result.payload, "continue");
+    assert.equal(result.retire.retired, true);
+    assert.deepEqual(calls[0].slice(0, 7), [
+      "bind-session",
+      "--session-id", "successor",
+      "--worktree-id", "wt-example",
+      "--handoff-token", "task-crlf-retry",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("task retry requires structured ownership by this successor", () => {
   const dir = mkdtempSync(join(process.cwd(), ".test-handoff-owner-retry-"));
   const metadata = {
@@ -479,7 +556,7 @@ test("takeover uses atomic bind/head ack, title, then verified retire", () => {
       if (args[0] === "bind-session") {
         return JSON.stringify({ bound: true, head_session: "successor" });
       }
-      if (args[0] === "status") return JSON.stringify({ updated: true });
+      if (args[0] === "status") return "[OK] Worktree title updated";
       if (args[0] === "handoff-cutover") return JSON.stringify({ ok: true });
       throw new Error(`${bin} ${args.join(" ")}`);
     };
@@ -547,6 +624,43 @@ test("old metadata without process creation identity preserves predecessor", () 
     assert.equal(result.retired, false);
     assert.match(result.manualCleanup, /creation identity is unavailable/);
     assert.ok(!calls.includes("handoff-cutover"));
+});
+
+test("structured retire failure is preserved instead of thrown", () => {
+  const error = new Error("command failed");
+  error.stdout = JSON.stringify({
+    ok: false,
+    gone: false,
+    method: "failed",
+  });
+  const result = completeHandoffLifecycle(
+    "/repo",
+    {
+      worktree: "wt-example",
+      worktreeDir: "/repo",
+      predecessor: {
+        sessionId: "predecessor",
+        paneId: "%3",
+        muxSession: "wt-wt-example",
+        copilotPid: 33,
+        copilotStartTime: "created-33",
+      },
+    },
+    "successor",
+    "task-structured-failure",
+    {
+      execute: (_bin, args) => {
+        if (args[0] === "bind-session") {
+          return JSON.stringify({ bound: true, head_session: "successor" });
+        }
+        if (args[0] === "handoff-cutover") throw error;
+        throw new Error(args.join(" "));
+      },
+    },
+  );
+  assert.equal(result.retired, false);
+  assert.equal(result.retireResult.method, "failed");
+  assert.match(result.manualCleanup, /manual cleanup/);
 });
 
 test("same successor retry resumes from task checkpoint without replaying payload", () => {
