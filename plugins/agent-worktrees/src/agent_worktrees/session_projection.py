@@ -25,6 +25,10 @@ class ProjectionError(ValueError):
     """The session projection cannot be read or updated safely."""
 
 
+class ProjectionUnavailable(ProjectionError):
+    """Projection path validation failed for a potentially transient reason."""
+
+
 class UnsupportedProjectionVersion(ProjectionError):
     """The projection was written by a newer incompatible implementation."""
 
@@ -59,6 +63,31 @@ def _valid_session_id(session_id: str) -> bool:
     )
 
 
+def _validate_session_directory(
+    root: Path,
+    session_dir: Path,
+    session_id: str,
+) -> None:
+    if _is_reparse(root):
+        raise ProjectionError(f"unsafe or missing session-state root: {root}")
+    if _is_reparse(session_dir):
+        raise ProjectionError(f"unsafe or missing session directory: {session_dir}")
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved_session = session_dir.resolve(strict=True)
+    except OSError as exc:
+        raise ProjectionUnavailable(
+            f"cannot resolve projection session directory {session_dir}: {exc}"
+        ) from exc
+    if (
+        resolved_session.parent != resolved_root
+        or resolved_session.name != session_id
+    ):
+        raise ProjectionError(
+            f"session directory identity does not match {session_id!r}"
+        )
+
+
 def _session_paths(
     session_id: str,
     *,
@@ -69,13 +98,10 @@ def _session_paths(
     root = sessions._session_state_dir()
     if not root.is_dir():
         raise MissingSessionTree(f"missing session-state root: {root}")
-    if _is_reparse(root):
-        raise ProjectionError(f"unsafe or missing session-state root: {root}")
     session_dir = root / session_id
     if not session_dir.is_dir():
         raise MissingSessionTree(f"missing session directory: {session_dir}")
-    if _is_reparse(session_dir):
-        raise ProjectionError(f"unsafe or missing session directory: {session_dir}")
+    _validate_session_directory(root, session_dir, session_id)
     if writing and (session_dir / "rescued-origin.json").exists():
         raise RestoredProjectionReadOnly(
             f"restored session is read-only: {session_id}"
@@ -315,7 +341,14 @@ def _known_relation(relation: dict[str, Any]) -> dict[str, Any]:
             "created_at",
             "ended_at",
         })
-    return {key: relation.get(key) for key in keys}
+    known = {key: relation.get(key) for key in keys}
+    if role == "bound" and isinstance(known.get("lineage"), dict):
+        lineage = known["lineage"]
+        known["lineage"] = {
+            key: lineage.get(key)
+            for key in ("predecessor", "successor", "handoff_ordinal")
+        }
+    return known
 
 
 def validate_restored_hint(
@@ -455,6 +488,23 @@ def _protected_relation(relation: dict[str, Any]) -> bool:
     return state not in {"handed-off", "concluded", "ended", "finalized", "terminal"}
 
 
+def _merge_additive_relation_fields(
+    existing: dict[str, Any],
+    incoming: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(existing)
+    for key, value in incoming.items():
+        if (
+            key == "lineage"
+            and isinstance(merged.get(key), dict)
+            and isinstance(value, dict)
+        ):
+            merged[key] = dict(merged[key]) | value
+        else:
+            merged[key] = value
+    return merged
+
+
 def _merge_relation(
     projection: dict[str, Any],
     relation: dict[str, Any],
@@ -504,6 +554,7 @@ def _merge_relation(
             and existing_revision > incoming_revision
         ):
             return projection
+        relation = _merge_additive_relation_fields(existing, relation)
     relations = [
         item for item in projection.get("relations", [])
         if isinstance(item, dict) and _relation_key(item) != relation_key
@@ -679,11 +730,15 @@ def _sync_relation(
                 current = read(session_id) or _empty_projection(session_id)
             except UnsupportedProjectionVersion:
                 return "blocked"
+            except ProjectionUnavailable:
+                return "deferred"
             except ProjectionError:
                 try:
                     current = _read_recoverable(session_id)
                 except UnsupportedProjectionVersion:
                     return "blocked"
+                except ProjectionUnavailable:
+                    return "deferred"
                 except ProjectionError:
                     if relation is None:
                         return "deferred"
@@ -703,6 +758,8 @@ def _sync_relation(
             encoded = _encode(updated)
             _atomic_replace(target, temp_dir, encoded)
         return "written"
+    except ProjectionUnavailable:
+        return "deferred"
     except ProjectionError:
         return "blocked"
     except Exception:
@@ -951,12 +1008,20 @@ def _repair_relation(
                     item = _audit_item(record, session_id, role)
                     item["status"] = "newer-schema"
                     return item
+                except ProjectionUnavailable:
+                    item = _audit_item(record, session_id, role)
+                    item["status"] = "repair-deferred"
+                    return item
                 except ProjectionError:
                     try:
                         current = _read_recoverable(session_id)
                     except UnsupportedProjectionVersion:
                         item = _audit_item(record, session_id, role)
                         item["status"] = "newer-schema"
+                        return item
+                    except ProjectionUnavailable:
+                        item = _audit_item(record, session_id, role)
+                        item["status"] = "repair-deferred"
                         return item
                     except ProjectionError:
                         current = _empty_projection(session_id)
@@ -997,6 +1062,10 @@ def _repair_relation(
                 final["repairable"] = True
                 final["repaired"] = True
                 return final
+    except ProjectionUnavailable:
+        item = _audit_item(record, session_id, role)
+        item["status"] = "repair-deferred"
+        return item
     except ProjectionError:
         item = _audit_item(record, session_id, role)
         item["status"] = "repair-blocked"
@@ -1026,6 +1095,9 @@ def audit_relation(
         return item
     except UnsupportedProjectionVersion:
         item["status"] = "newer-schema"
+        return item
+    except ProjectionUnavailable:
+        item["status"] = "unavailable"
         return item
     except ProjectionError:
         if restored:
