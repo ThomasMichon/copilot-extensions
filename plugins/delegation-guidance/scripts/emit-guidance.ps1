@@ -25,13 +25,18 @@ try {
         "[owner: delegation-guidance@$Version]"
         'Hard rule: if a comparison/evaluation has 3+ independent tracks and each needs multiple source bodies, launch one bounded evidence agent per track before reading them; a reviewer is not a track substitute. Keep small lookups and comparisons direct. Delegate other broad separable research, domain-tool work, and disjoint edits early. Give delegates bounded non-overlapping scopes and compact evidence; the coordinator retains synthesis, integration, decisions, cohesive implementation, and completion. Sub-agents do not spawn children unless explicitly authorized. Use the `delegating-work` skill for routing details.'
     ) -join "`n"
-    if ([Text.Encoding]::UTF8.GetByteCount($Context) -ge $MaxContextBytes) {
-        throw 'guidance exceeds context budget'
-    }
     $OutputContext = if ($args -contains '--aggregate') {
         $AggregateContext
     } else {
         $Context
+    }
+    $OutputBudget = if ($args -contains '--aggregate') {
+        1024
+    } else {
+        $MaxContextBytes
+    }
+    if ([Text.Encoding]::UTF8.GetByteCount($OutputContext) -ge $OutputBudget) {
+        throw 'guidance exceeds context budget'
     }
     [Console]::Out.Write(
         (@{ additionalContext = $OutputContext } | ConvertTo-Json -Compress)
