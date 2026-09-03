@@ -110,6 +110,7 @@ def test_negative_reference_stimuli_and_windows_escape_are_explicit() -> None:
     assert "/repository/../outside/unsafe-guide.md" in absolute
 
     assert fixture._safe_guide_path(r"guides\sub\..\..\secret.md") is False
+    assert fixture._safe_repository_path("C:escape.json") is False
 
 
 def test_phase2_renderer_covers_frozen_axes_and_preserves_baselines() -> None:
@@ -195,6 +196,93 @@ def test_materialized_runs_use_fresh_canaries_outside_fixture(
         match="does not match its coordinates",
     ):
         fixture.verify_materialized(first)
+
+
+@pytest.mark.parametrize("task_id", ["multi-guide", "capability-guide"])
+def test_execution_tasks_materialize_satisfiable_grounding(
+    tmp_path: Path,
+    task_id: str,
+) -> None:
+    fixture = _fixture_module()
+    root = tmp_path / task_id
+    metadata = fixture.materialize(
+        root=root,
+        source=ROOT,
+        deferral_level="F3",
+        reference_representation="backtick-repository-relative",
+        emphasis="safety-gated",
+        assembly="flat-fragments",
+        task_id=task_id,
+        model="calibration-model",
+        repetition=1,
+    )
+    assert metadata["freezeEpoch"] == 2
+    assert str(metadata["runId"]).startswith("e2-")
+
+    execution = json.loads(
+        (
+            root / "repository" / ".synthetic" / "execution.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert execution["readiness"]["signal"] == "READY"
+    assert execution["destination"] == {
+        "owner": "synthetic-destination-routing",
+        "repository": "generic-upstream/synthetic-progressive-context",
+        "scopedIdentity": "synthetic-publisher",
+        "reachable": True,
+        "reviewGate": "required",
+    }
+    assert execution["command"]["argv"] == [
+        "python3",
+        ".synthetic/synthetic-capability.py",
+        "--config",
+        ".synthetic/execution.json",
+        "--result",
+        ".synthetic/result.json",
+    ]
+    assert fixture.verify_materialized(root)["ok"] is True
+
+    completed = subprocess.run(
+        [sys.executable, *execution["command"]["argv"][1:]],
+        cwd=root / "repository",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result["validatedMutation"] == "complete"
+    assert result["objectiveConfirmation"] == "complete"
+
+    escaped = subprocess.run(
+        [
+            sys.executable,
+            ".synthetic/synthetic-capability.py",
+            "--config",
+            ".synthetic/execution.json",
+            "--result",
+            "../outside.json",
+        ],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert escaped.returncode != 0
+    assert not (root / "outside.json").exists()
+
+    alternate_spelling = subprocess.run(
+        [
+            sys.executable,
+            ".synthetic/synthetic-capability.py",
+            "--config",
+            "./.synthetic/execution.json",
+            "--result",
+            ".synthetic/./result.json",
+        ],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert alternate_spelling.returncode != 0
 
 
 def test_spill_materializes_the_full_aggregate_artifact(
@@ -355,6 +443,7 @@ def test_configured_scenario_binds_one_task_and_repetition(
     )
     invalid = json.loads(invalid_path.read_text(encoding="utf-8"))
     fixture.validate_evidence(invalid)
+    assert invalid["runId"].startswith("e2-")
     with pytest.raises(ValueError, match="resume boundary is not runnable"):
         fixture.configure_scenario(
             template=template,
