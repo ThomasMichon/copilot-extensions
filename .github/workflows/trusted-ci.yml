@@ -1,3 +1,5 @@
+# Deployments may pin this file by Git blob SHA. Review changes in lockstep with
+# every consumer pin before enabling the self-hosted job.
 name: Trusted self-hosted CI
 
 on:
