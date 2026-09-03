@@ -873,13 +873,44 @@ function Write-V3Manifest {
     Write-ServiceOk "Deploy manifest written (source: $kind)"
 }
 
+function Test-UvConfiguredIndex {
+    if ($env:UV_CONFIG_FILE) {
+        $configPaths = @($env:UV_CONFIG_FILE)
+    } else {
+        $configPaths = @()
+        if ($env:APPDATA) {
+            $configPaths += Join-Path $env:APPDATA 'uv\uv.toml'
+        }
+        if ($env:PROGRAMDATA) {
+            $configPaths += Join-Path $env:PROGRAMDATA 'uv\uv.toml'
+        }
+    }
+    foreach ($configPath in $configPaths) {
+        if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
+        $inIndex = $false
+        foreach ($line in Get-Content -LiteralPath $configPath) {
+            $value = ($line -replace '\s+#.*$', '').Trim()
+            if ($value -match '^index-url\s*=') { return $true }
+            if ($value -match '^\[\[index\]\]$') {
+                $inIndex = $true
+                continue
+            }
+            if ($value -match '^\[') { $inIndex = $false }
+            if ($inIndex -and $value -match '^default\s*=\s*true$') {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
 function Ensure-UvIndex {
     <# Bridge the governed pip index-url to uv. uv does not read pip.conf, so a
        governed feed (where public PyPI is blocked) must be exported as
        UV_DEFAULT_INDEX or uv resolves against public PyPI and fails. No-op when
-       already set or when pip has no configured index. Mirrors install.sh's
-       `_ensure_uv_index`. #>
-    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL) { return }
+       uv already has an environment or file-configured index, or when pip has no
+       configured index. Mirrors install.sh's `_ensure_uv_index`. #>
+    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL -or (Test-UvConfiguredIndex)) { return }
     $idx = ''
     if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
         $result = Invoke-NativeCapture { & pip config get global.index-url }
