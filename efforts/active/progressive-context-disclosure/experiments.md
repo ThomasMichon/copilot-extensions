@@ -183,6 +183,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 3 PASS | 3/3 loaded only `runtime-diagnostics` | 0, 0, 0 | Retain as a surviving cell: task-applicable references removed the F2 exploration failure while reducing initial context from 4,379 to 2,862 characters. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / no-guide / ACP fresh | 3 | 3 PASS | no guide required or loaded | 0, 0, 0 | Retain as a surviving boundary: the critical kernel completed the task with zero tool calls and zero deferred reads. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 0, 1, 2 | Reject this variant: every behavioral run broadened beyond the bounded flow and violated CAP-1; two also loaded unrelated guides, and repetition 3 violated CMD-1. |
+| F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FAIL | all required guides loaded | 3, 3, 2 | Reject this representation: structured metadata increased irrelevant reads, lost provenance in every run, and did not produce the required decision. |
 
 Counts-only records:
 
@@ -207,6 +208,9 @@ Counts-only records:
 - [`evidence/f3-repo-gated-flat-multi-guide-r1.json`](evidence/f3-repo-gated-flat-multi-guide-r1.json)
 - [`evidence/f3-repo-gated-flat-multi-guide-r2.json`](evidence/f3-repo-gated-flat-multi-guide-r2.json)
 - [`evidence/f3-repo-gated-flat-multi-guide-r3.json`](evidence/f3-repo-gated-flat-multi-guide-r3.json)
+- [`evidence/f3-structured-gated-flat-multi-guide-r1.json`](evidence/f3-structured-gated-flat-multi-guide-r1.json)
+- [`evidence/f3-structured-gated-flat-multi-guide-r2.json`](evidence/f3-structured-gated-flat-multi-guide-r2.json)
+- [`evidence/f3-structured-gated-flat-multi-guide-r3.json`](evidence/f3-structured-gated-flat-multi-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -297,6 +301,18 @@ the multi-guide task, model, ACP venue, and fresh sessions fixed while changing
 only the reference representation from backtick repository-relative paths to
 the frozen structured-reference form. It tests whether explicit structured
 metadata can keep a multi-guide flow bounded without adding an assembly index.
+
+Structured references failed all three multi-guide repetitions. Every run read
+all required guides but also loaded two or three unrelated guides, lost complete
+owner provenance, and returned the wrong blocked or do-not-proceed decision
+instead of the required bounded procedure. Broad repository discovery remained
+present, with 14-18 tool calls per run.
+
+Reject the structured representation for this cell. The next controlled
+comparison should change only assembly from flat fragments to flat fragments
+with a generated index while returning to the lower-overhead
+repository-relative reference form. This tests whether a single explicit index
+can provide ordering without the structured-reference verbosity.
 
 ## Clean-room shape
 
