@@ -17,22 +17,29 @@ PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.guard
 
 
-def test_session_start_prefers_payload_bootstrap_with_installed_fallback() -> None:
+def test_session_start_prefers_payload_lifecycle_client_with_installed_fallback() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     entries = hooks["hooks"]["sessionStart"]
-    bootstrap = next(
+    lifecycle = next(
         entry
         for entry in entries
-        if "bootstrap-check" in entry.get("bash", "")
-        or "bootstrap-check" in entry.get("powershell", "")
+        if "hook_client.py" in entry.get("bash", "")
     )
 
-    assert '${COPILOT_PLUGIN_ROOT:-$PWD}' in bootstrap["bash"]
-    assert 's="$r/scripts/bootstrap-check.sh"' in bootstrap["bash"]
-    assert '$HOME/.agent-worktrees/bin/bootstrap-check.sh' in bootstrap["bash"]
-    assert "$env:COPILOT_PLUGIN_ROOT" in bootstrap["powershell"]
-    assert "scripts\\bootstrap-check.ps1" in bootstrap["powershell"]
-    assert ".agent-worktrees\\bin\\bootstrap-check.ps1" in bootstrap["powershell"]
+    assert '${COPILOT_PLUGIN_ROOT:-$PWD}' in lifecycle["bash"]
+    assert 's="$r/scripts/hook_client.py"' in lifecycle["bash"]
+    assert '$HOME/.agent-worktrees/bin/hook_client.py' in lifecycle["bash"]
+    assert "$env:COPILOT_PLUGIN_ROOT" in lifecycle["powershell"]
+    assert "scripts\\hook_client.py" in lifecycle["powershell"]
+    assert ".agent-worktrees\\bin\\hook_client.py" in lifecycle["powershell"]
+    assert "scripts\\bootstrap-check.ps1" in lifecycle["powershell"]
+    assert ".agent-worktrees\\bin\\bootstrap-check.ps1" in lifecycle["powershell"]
+    assert "scripts/bootstrap-check.sh" in lifecycle["bash"]
+    assert ".agent-worktrees/bin/bootstrap-check.sh" in lifecycle["bash"]
+
+    client = (PLUGIN / "scripts" / "hook_client.py").read_text(encoding="utf-8")
+    assert '"bootstrap-check.ps1"' in client
+    assert '"bootstrap-check.sh"' in client
 
 
 def test_bootstrap_stamps_payload_when_runtime_is_unprovisioned() -> None:

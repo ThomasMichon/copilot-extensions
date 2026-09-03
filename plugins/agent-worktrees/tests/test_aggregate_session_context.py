@@ -12,6 +12,7 @@ import sys
 import time
 
 import pytest
+import agent_worktrees.__main__ as main
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -423,20 +424,41 @@ def test_side_effect_launch_key_contract_is_synchronized() -> None:
         assert "'f64:' + $Bits.ToString(" in powershell
 
 
-def test_side_effect_hooks_prefer_payload_scripts() -> None:
+def test_combined_lifecycle_launch_key_matches_aggregate_consumer(tmp_path) -> None:
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(tmp_path),
+        "source": "new",
+        "timestamp": 1_000.25,
+        "_agentWorktrees": {
+            "pluginVersion": "1.5.3-dev745",
+            "environment": {},
+        },
+    }
+    produced = main._session_lifecycle_launch_key(
+        payload, "1.5.3-dev745"
+    )
+    consumed = MODULE._launch_keys(
+        json.dumps(payload).encode("utf-8"), "1.5.3-dev745"
+    )
+    assert produced in consumed
+
+
+def test_lifecycle_hook_prefers_payload_client_with_installed_fallback() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     commands = hooks["hooks"]["sessionStart"]
-
-    for name in ("register-session", "register-nudge", "marketplace-overrides"):
-        hook = next(
-            item
-            for item in commands
-            if f"{name}.ps1" in item.get("powershell", "")
-        )
-        assert f"scripts\\{name}.ps1" in hook["powershell"]
-        assert f"scripts/{name}.sh" in hook["bash"]
-        assert f".agent-worktrees\\bin\\{name}.ps1" in hook["powershell"]
-        assert f".agent-worktrees/bin/{name}.sh" in hook["bash"]
+    hook = next(
+        item
+        for item in commands
+        if "hook_client.py" in item.get("powershell", "")
+    )
+    assert "scripts\\hook_client.py" in hook["powershell"]
+    assert "scripts/hook_client.py" in hook["bash"]
+    assert ".agent-worktrees\\bin\\hook_client.py" in hook["powershell"]
+    assert ".agent-worktrees/bin/hook_client.py" in hook["bash"]
+    assert "sessionStart" in hook["powershell"]
+    assert "sessionStart" in hook["bash"]
+    assert len(commands) == 3
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows path-case parity")
