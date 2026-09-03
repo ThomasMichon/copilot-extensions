@@ -73,7 +73,11 @@ def test_sweep_removes_empty_skips_nonempty(tmp_path, monkeypatch):
 
     monkeypatch.setattr(gc, "candidate_roots", lambda r: [root])
     import agent_worktrees.git_ops as git_ops
-    monkeypatch.setattr(git_ops, "list_worktree_paths", lambda *, cwd: [])
+    monkeypatch.setattr(
+        git_ops,
+        "list_worktree_paths",
+        lambda *, cwd, fail_on_error=False: [],
+    )
 
     report = gc.sweep_orphans(repo, records=[], dry_run=False, min_settle_secs=0)
     removed = {Path(x["path"]).name for x in report["removed"]}
@@ -90,11 +94,18 @@ def test_sweep_dry_run_removes_nothing(tmp_path, monkeypatch):
     repo = _repo(root)
     monkeypatch.setattr(gc, "candidate_roots", lambda r: [root])
     import agent_worktrees.git_ops as git_ops
-    monkeypatch.setattr(git_ops, "list_worktree_paths", lambda *, cwd: [])
+    monkeypatch.setattr(
+        git_ops,
+        "list_worktree_paths",
+        lambda *, cwd, fail_on_error=False: [],
+    )
 
     report = gc.sweep_orphans(repo, records=[], dry_run=True, min_settle_secs=0)
     assert len(report["removed"]) == 1
-    assert "would remove" in report["removed"][0]["reason"]
+    assert report["removed"][0]["reason"] == (
+        "would remove if unlocked "
+        "(effectively empty; lock status not checked)"
+    )
     assert empty.exists()           # dry run: still on disk
 
 
@@ -104,7 +115,11 @@ def test_sweep_is_idempotent(tmp_path, monkeypatch):
     repo = _repo(root)
     monkeypatch.setattr(gc, "candidate_roots", lambda r: [root])
     import agent_worktrees.git_ops as git_ops
-    monkeypatch.setattr(git_ops, "list_worktree_paths", lambda *, cwd: [])
+    monkeypatch.setattr(
+        git_ops,
+        "list_worktree_paths",
+        lambda *, cwd, fail_on_error=False: [],
+    )
 
     first = gc.sweep_orphans(repo, records=[], dry_run=False, min_settle_secs=0)
     assert len(first["removed"]) == 1
@@ -119,16 +134,69 @@ def test_locked_dir_is_skipped_not_crashed(tmp_path, monkeypatch):
     repo = _repo(root)
     monkeypatch.setattr(gc, "candidate_roots", lambda r: [root])
     import agent_worktrees.git_ops as git_ops
-    monkeypatch.setattr(git_ops, "list_worktree_paths", lambda *, cwd: [])
+    monkeypatch.setattr(
+        git_ops,
+        "list_worktree_paths",
+        lambda *, cwd, fail_on_error=False: [],
+    )
+
+    locked_file = root / "locked" / "held.txt"
 
     def _always_locked(d):
-        raise PermissionError("held by another process")
+        raise PermissionError(13, "held by another process", str(locked_file))
     monkeypatch.setattr(gc.shutil, "rmtree", lambda *a, **k: _always_locked(a[0]))
 
     report = gc.sweep_orphans(repo, records=[], dry_run=False, min_settle_secs=0)
     assert report["removed"] == []
     assert len(report["skipped"]) == 1
-    assert "locked" in report["skipped"][0]["reason"]
+    reason = report["skipped"][0]["reason"]
+    assert "locked (PermissionError at " in reason
+    assert str(locked_file) in reason
+    assert reason.endswith("-- skipped, retry later")
+
+
+def test_locked_dir_without_filename_reports_root(tmp_path, monkeypatch):
+    root = _mkdir(tmp_path / "roots")
+    locked = _mkdir(root / "locked")
+    repo = _repo(root)
+    monkeypatch.setattr(gc, "candidate_roots", lambda r: [root])
+    import agent_worktrees.git_ops as git_ops
+    monkeypatch.setattr(
+        git_ops,
+        "list_worktree_paths",
+        lambda *, cwd, fail_on_error=False: [],
+    )
+    monkeypatch.setattr(
+        gc.shutil,
+        "rmtree",
+        lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")),
+    )
+
+    report = gc.sweep_orphans(repo, records=[], dry_run=False, min_settle_secs=0)
+
+    assert str(locked) in report["skipped"][0]["reason"]
+
+
+def test_sweep_aborts_when_registration_probe_fails(tmp_path, monkeypatch):
+    root = _mkdir(tmp_path / "roots")
+    orphan = _mkdir(root / "orphan")
+    repo = _repo(root)
+    monkeypatch.setattr(gc, "candidate_roots", lambda r: [root])
+    import agent_worktrees.git_ops as git_ops
+    monkeypatch.setattr(
+        git_ops,
+        "list_worktree_paths",
+        lambda **kwargs: (_ for _ in ()).throw(
+            RuntimeError("git worktree list failed")
+        ),
+    )
+
+    report = gc.sweep_orphans(repo, records=[], dry_run=False, min_settle_secs=0)
+
+    assert report["removed"] == []
+    assert report["scanned"] == 0
+    assert "registration probe failed" in report["skipped"][0]["reason"]
+    assert orphan.exists()
 
 
 # ---------------------------------------------------------------------------
