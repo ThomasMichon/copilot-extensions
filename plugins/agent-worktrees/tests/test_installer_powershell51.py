@@ -35,6 +35,99 @@ def test_windows_provision_bootstraps_uv_before_runtime_build():
     assert "$urlTemplate.Replace('{asset}', $asset)" in installer
 
 
+def test_uv_index_bridge_preserves_file_configured_index(tmp_path: Path):
+    installer = INSTALLER.read_text(encoding="utf-8")
+    configured = installer.split("function Test-UvConfiguredIndex", 1)[1].split(
+        "function Ensure-UvIndex", 1
+    )[0]
+    configured_body = configured.split("{", 1)[1].rsplit("}", 1)[0]
+    bridge = installer.split("function Ensure-UvIndex", 1)[1].split(
+        "function Ensure-Uv", 1
+    )[0]
+
+    assert "$env:UV_CONFIG_FILE" in configured
+    assert "uv\\uv.toml" in configured
+    assert "$env:PROGRAMDATA" in configured
+    assert "(Test-UvConfiguredIndex)" in bridge
+    assert bridge.index("(Test-UvConfiguredIndex)") < bridge.index(
+        "pip config get global.index-url"
+    )
+
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    appdata = tmp_path / "appdata"
+    config = appdata / "uv" / "uv.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        '[[index]] # configured\nurl = "https://example.invalid/simple/"\n'
+        "default = true # preferred\n",
+        encoding="utf-8",
+    )
+    script = f"""
+function Test-UvConfiguredIndex {{
+{configured_body}
+}}
+[Console]::Out.Write((Test-UvConfiguredIndex))
+"""
+    proc = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "APPDATA": str(appdata),
+            "PROGRAMDATA": str(tmp_path / "programdata"),
+            "UV_CONFIG_FILE": "",
+        },
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == "True"
+
+
+def test_posix_uv_index_bridge_preserves_file_configured_index(tmp_path: Path):
+    installer = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    bridge = installer.split("_ensure_uv_index() {", 1)[1].split(
+        "# Deploy ONLY", 1
+    )[0].rsplit("}", 1)[0]
+
+    assert '"${UV_CONFIG_FILE:-}"' in bridge
+    assert '"${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv.toml"' in bridge
+    assert "/etc/uv/uv.toml" in bridge
+    assert bridge.index("for uv_config in") < bridge.index("pip config get")
+
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
+        pytest.skip("native POSIX bash is unavailable")
+    config = tmp_path / "uv.toml"
+    config.write_text(
+        '[[index]] # configured\nurl = "https://example.invalid/simple/"\n'
+        "default = true # preferred\n",
+        encoding="utf-8",
+    )
+    script = f"""
+changed() {{ :; }}
+_ensure_uv_index() {{
+{bridge}
+}}
+unset UV_INDEX_URL UV_DEFAULT_INDEX
+UV_CONFIG_FILE="$1"
+export UV_CONFIG_FILE
+_ensure_uv_index
+[[ -z "${{UV_DEFAULT_INDEX:-}}" ]]
+"""
+    proc = subprocess.run(
+        [bash, "-c", script, "test", str(config)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
 def test_uv_bootstrap_python_survives_windows_powershell_argument_passing():
     installer = INSTALLER.read_text(encoding="utf-8")
     bootstrap = installer.split("$bootstrap = @'", 1)[1].split("'@", 1)[0]
