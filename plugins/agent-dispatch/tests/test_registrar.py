@@ -25,7 +25,7 @@ def test_minimal_declaration_defaults():
     assert d.interval == 30.0
     assert d.max_attempts == 3
     assert d.heartbeat is True
-    assert d.reactive is True
+    assert d.reactive is False
     assert d.body == Body()  # embody / task-worker
     assert d.fleet == Fleet()
 

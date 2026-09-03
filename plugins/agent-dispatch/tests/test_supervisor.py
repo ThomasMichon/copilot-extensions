@@ -2067,115 +2067,52 @@ def test_nudge_skips_when_not_confirmed_alive(q, client):
     assert sent == []
 
 
-# -- reactive-on-turn-end (event-driven supervision) -------------------------
+# -- retired turn-state polling ----------------------------------------------
 
 
-def _virtual_clock():
-    """A deterministic (clock, sleep) pair: sleep advances the virtual clock."""
-    t = [0.0]
-
-    def clock() -> float:
-        return t[0]
-
-    def sleep(d: float) -> None:
-        t[0] += d
-
-    return clock, sleep
-
-
-def _lease(q, task_id, *, machine="m", worktree="wt-1"):
-    """Drive a spawned task to leased+started so it is an embodied owner."""
-    q.claim_one(f"{machine}/{worktree}", task_id=task_id, machine=machine, worktree=worktree)
-    q.start(task_id, f"{machine}/{worktree}")
-
-
-def test_embodied_owners_only_leased_workers(q, client):
-    """_embodied_owners lists a spawned reservation's worker only once its task is
-    leased; a merely-queued (not yet claimed) spawn contributes nothing."""
-    t = q.create("work")
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
-    sup.poll_once()
-    assert sup._embodied_owners() == []  # spawned but not yet claimed -> no live turn
-    _lease(q, t.id)
-    assert sup._embodied_owners() == [("wt-1", "m")]
-
-
-def test_wait_for_turn_end_wakes_on_running_to_idle(q, client):
-    """A worker observed transitioning running -> idle settles a turn -> wake early."""
-    t = q.create("work")
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
-    sup.poll_once()
-    _lease(q, t.id)
-    states = iter(["running", "idle"])  # baseline running, then idle
-    sup.turn_state_fn = lambda wt, mc: next(states, "idle")
-    clock, sleep = _virtual_clock()
-    assert sup.wait_for_turn_end(30.0, sleep=sleep, clock=clock) is True
-
-
-def test_wait_for_turn_end_times_out_without_transition(q, client):
-    """A worker that stays running never wakes the wait -> False at timeout."""
-    t = q.create("work")
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
-    sup.poll_once()
-    _lease(q, t.id)
-    sup.turn_state_fn = lambda wt, mc: "running"
-    clock, sleep = _virtual_clock()
-    assert sup.wait_for_turn_end(6.0, sleep=sleep, clock=clock) is False
-
-
-def test_wait_for_turn_end_ignores_already_idle_worker(q, client):
-    """A worker already idle at entry is not a fresh turn-end (no busy-wake)."""
-    t = q.create("work")
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
-    sup.poll_once()
-    _lease(q, t.id)
-    sup.turn_state_fn = lambda wt, mc: "idle"  # idle at baseline and after
-    clock, sleep = _virtual_clock()
-    assert sup.wait_for_turn_end(6.0, sleep=sleep, clock=clock) is False
-
-
-def test_wait_for_turn_end_no_workers_is_a_plain_sleep(q, client):
-    """With nothing embodied, the wait is a single plain sleep of the full interval."""
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
+def test_wait_for_turn_end_never_polls_workers(q, client):
+    """The compatibility path performs one full sleep and no bridge/SSH probes."""
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        max_concurrent=5,
+        reactive=True,
+        turn_state_fn=lambda *_args: pytest.fail("turn-state polling is forbidden"),
+    )
     slept: list[float] = []
     assert sup.wait_for_turn_end(30.0, sleep=slept.append, clock=lambda: 0.0) is False
     assert slept == [30.0]
 
 
-def test_wait_for_turn_end_degrades_when_turn_state_unavailable(q, client):
-    """A None turn state (no reachable bridge) yields no signal -> plain timeout."""
-    t = q.create("work")
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
-    sup.poll_once()
-    _lease(q, t.id)
-    sup.turn_state_fn = lambda wt, mc: None
-    clock, sleep = _virtual_clock()
-    assert sup.wait_for_turn_end(6.0, sleep=sleep, clock=clock) is False
-
-
-def test_wait_for_turn_end_swallows_probe_errors(q, client):
-    """A raising turn-state resolver is treated as no signal, never fatal."""
-    t = q.create("work")
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
-    sup.poll_once()
-    _lease(q, t.id)
-
-    def boom(wt, mc):
-        raise RuntimeError("bridge down")
-
-    sup.turn_state_fn = boom
-    clock, sleep = _virtual_clock()
-    assert sup.wait_for_turn_end(4.0, sleep=sleep, clock=clock) is False
-
-
-def test_wait_for_turn_end_disabled_returns_immediately(q, client):
-    """reactive=False makes the wait a no-op (serve falls back to a fixed sleep)."""
+def test_wait_for_turn_end_ignores_retired_reactive_flag(q, client):
+    """reactive=False still performs the one fixed-interval sleep."""
     sup = Supervisor(
         client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5, reactive=False
     )
     slept: list[float] = []
     assert sup.wait_for_turn_end(30.0, sleep=slept.append, clock=lambda: 0.0) is False
-    assert slept == []
+    assert slept == [30.0]
+
+
+def test_serve_uses_one_full_interval_wait(q, client):
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
+    polls = 0
+    waits: list[float] = []
+
+    def poll_once():
+        nonlocal polls
+        polls += 1
+        if polls == 2:
+            raise KeyboardInterrupt
+        return []
+
+    sup.poll_once = poll_once
+    sup.wait_for_turn_end = lambda timeout: waits.append(timeout) or False
+
+    sup.serve(interval=30.0)
+
+    assert waits == [30.0]
 
 
 # -- Slice 5: headless fleet-body recovery (confirmed-gone over SSH) ----------

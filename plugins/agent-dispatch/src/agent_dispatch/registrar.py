@@ -184,7 +184,7 @@ class ProfileDeclaration:
     max_attempts: int = 3
     label_max_attempts: Mapping[str, int] = field(default_factory=dict)
     heartbeat: bool = True
-    reactive: bool = True
+    reactive: bool = False
     reactive_interval: float = 2.0
     verify_timeout: int = 0
     body: Body = field(default_factory=Body)
@@ -558,7 +558,7 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
         max_attempts=_as_int(data.get("max_attempts", 3), key="max_attempts", minimum=0),
         label_max_attempts=_load_label_max_attempts(data.get("label_max_attempts")),
         heartbeat=_as_bool(data.get("heartbeat", True), key="heartbeat"),
-        reactive=_as_bool(data.get("reactive", True), key="reactive"),
+        reactive=_as_bool(data.get("reactive", False), key="reactive"),
         reactive_interval=_as_float(
             data.get("reactive_interval", 2.0), key="reactive_interval", minimum=0.1
         ),
@@ -701,7 +701,7 @@ def declaration_from_env(name: str, env: Mapping[str, str]) -> ProfileDeclaratio
         "max_attempts": _env_int(g("MAX_ATTEMPTS"), key="MAX_ATTEMPTS", default=3),
         "label_max_attempts": label_max,
         "heartbeat": not extra["no_heartbeat"],
-        "reactive": not extra["no_reactive"],
+        "reactive": False,
         "body": body,
     }
     if extra["pool"]:

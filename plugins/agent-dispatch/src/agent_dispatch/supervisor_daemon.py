@@ -103,7 +103,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "label_max_attempts": {},
             "interval": 30.0,
             "heartbeat": True,
-            "reactive": True,
+            "reactive": False,
             "reactive_interval": 2.0,
             "verify_timeout": 0,
             "embody_backend": "headless",

@@ -1040,7 +1040,7 @@ agent-dispatch supervise --label autopilot            # loop; only spawn opted-i
 agent-dispatch supervise --all-repos --max-active-processes 3
 agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
 agent-dispatch supervise --pool host-a,host-b --origin origin --headless --label sweep
-agent-dispatch supervise --no-reactive --interval 30            # fixed polling only
+agent-dispatch supervise --interval 30                          # fixed reconciliation
 agent-dispatch supervise --evaluator eval.json --evaluator-ref repository-review-lifecycle
 agent-dispatch reservations list --state spawned      # what's in flight
 agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
@@ -1064,9 +1064,11 @@ re-embodiment, and can **nudge stalled-but-live workers** before recovery. An
 `unknown` liveness probe is always left alone. Repeated spawn failures are
 treated as a supervisor dead-letter condition (failed reservation history; no
 more auto-retry until a human intervenes), not as a second task state change.
-The serve loop is reactive by default: within the poll interval it wakes early
-when an embodied worker's turn goes `running -> idle`; `--no-reactive` restores
-plain fixed-interval polling.
+The serve loop uses fixed-interval reconciliation. The former two-second
+turn-state sampler was retired because remote owners turned each sample into a
+new SSH command. Prompt turn-end wakeups will return only through a cursor-based
+Agent Bridge event subscription over a shared persistent carrier; until then,
+`--no-reactive` and `--reactive-interval` are accepted as compatibility no-ops.
 
 The bare `supervise` above runs the loop in the foreground. The
 `supervise register|status|list|remove` subcommands instead manage durable
