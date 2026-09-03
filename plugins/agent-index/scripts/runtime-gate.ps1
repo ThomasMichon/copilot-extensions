@@ -153,7 +153,7 @@ if (
 elseif (
     -not $env:COPILOT_EXTENSIONS_CONTEXT -and
     $ResolutionStatus -ceq 'provenance-blocked' -and
-    [string]$resolution.policy.state -ceq 'valid'
+    $PolicyPresent
 ) {
     try {
         $policyDocument = Get-Content -LiteralPath $Policy -Raw |
