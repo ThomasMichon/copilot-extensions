@@ -18,7 +18,9 @@
   [#1138](https://github.com/ThomasMichon/copilot-extensions/issues/1138)
   (immutable event identity) ·
   [#1454](https://github.com/ThomasMichon/copilot-extensions/issues/1454)
-  (delegation attention/result projection)
+  (delegation attention/result projection) ·
+  [#1308](https://github.com/ThomasMichon/copilot-extensions/issues/1308)
+  (AHP 0.8 contract lock)
 
 ## Guiding Intent
 
@@ -78,10 +80,11 @@ resources, tools, confirmations, and durable elicitation.
 
 The released baseline for this effort is
 [AHP 0.8.0](https://github.com/microsoft/agent-host-protocol/tree/v0.8.0).
-The specification remains a working draft and the repository is developing an
-unreleased 1.0 line. The implementation therefore targets 0.8 first, negotiates
-versions explicitly, and isolates version-specific codecs rather than allowing
-draft behavior to leak through one mutable schema.
+The specification remains a working draft. AHP 0.9.0 was released after this
+target was reviewed; the implementation deliberately remains on 0.8.0 for the
+first slice. Adopting 0.9.0 or a later line requires a separately pinned and
+reviewed codec rather than allowing behavior from another version to leak
+through one mutable schema.
 
 The detailed current-state comparison and ownership decisions are in
 [compatibility-baseline.md](compatibility-baseline.md).
@@ -113,35 +116,38 @@ rather than binding to private implementation details.
       and state-prerequisite rules authoritative. If the registry has not landed
       yet, pin them locally here and register them before the first AHP writer is
       enabled.
-- [ ] Pin the released AHP 0.8 tag, generated JSON schemas, exported method
+- [x] Pin the released AHP 0.8 tag, generated JSON schemas, exported method
       maps, and reducer fixtures as test inputs; record an explicit precedence
       rule for disagreements among tagged prose, types, SDKs, and fixtures.
-- [ ] Record every baseline, named-capability-gated, state-prerequisite-gated,
+- [x] Record every baseline, named-capability-gated, state-prerequisite-gated,
       `x-` extension, version-sensitive, and explicitly out-of-scope surface.
       Do not invent a generic capability advertisement mechanism.
-- [ ] Define the compatibility policy for unreleased 1.0 changes: isolated
+- [x] Define the compatibility policy for later protocol changes: isolated
       codecs, no silent semantic drift, and no named capability or optional
       state surface without its complete state machine.
 - [ ] Establish bidirectional conformance probes using an independent AHP
       client and server implementation where available.
 
-### Phase 1 — Add the AHP edge
+### Phase 1 — Build the internal AHP kernel
 
-- [ ] Add an attributable AHP server command/endpoint alongside existing CLI,
-      REST/SSE, ACP, and Session Host surfaces.
+- [ ] Add internal JSON-RPC framing and channel routing without registering a
+      production endpoint.
 - [ ] Do not enable an AHP state writer until #1460's tolerant-reader,
       old-writer-fencing, and rollback prerequisites cover every shared durable
       record the adapter will change.
-- [ ] Implement JSON-RPC framing, channel routing, `ping`, `initialize`,
-      version selection, implementation metadata, client capabilities, and the
-      exact named agent capabilities defined by the selected version.
+- [ ] Implement `ping`, `initialize`, version selection, implementation
+      metadata, client capabilities, and the exact named agent capabilities
+      defined by the selected version.
 - [ ] Project agent discovery into authoritative `ahp-root://` state without
       exposing session resources before their ownership and URI mapping are
       defined.
-- [ ] Preserve the repository's local-first transport and endpoint-discovery
-      invariants; AHP must not introduce a fixed or globally exposed port.
+- [ ] Allocate every server action once in one durable, monotonically ordered
+      `serverSeq` space per future AHP endpoint, shared across all channels and
+      persisted before any observer can receive it.
+- [ ] Keep the kernel transport-neutral and preserve the repository's
+      local-first endpoint-discovery invariants for the later exposure phase.
 
-### Phase 2 — Define authority, identity, and the default chat
+### Phase 2 — Define authority, identity, and the read-only catalog
 
 - [ ] Define the ownership matrix before the ledger: bridge-owned resources use
       bridge domain state; native-host-owned resources remain authoritative in
@@ -153,8 +159,8 @@ rather than binding to private implementation details.
       when defining those mappings; do not introduce a second bridge lifecycle
       identity inside the AHP adapter.
 - [ ] After that identity contract is fixed, implement paginated `listSessions`
-      plus ephemeral `root/sessionAdded`, `root/sessionRemoved`, and
-      `root/sessionSummaryChanged` notifications.
+      plus the internal production of ephemeral `root/sessionAdded`,
+      `root/sessionRemoved`, and `root/sessionSummaryChanged` notifications.
 - [ ] Create every ready session with a catalogued `defaultChat`; treat
       additional chats, fork, and side-chat creation as optional behavior gated
       only by the exact `multipleChats` capability fields.
@@ -172,14 +178,17 @@ rather than binding to private implementation details.
       metadata, and occupancy. Keep Git worktrees optional and require
       `multipleWorkingDirectories` before multi-directory mutation.
 
-### Phase 3 — Build durable ordering and reconciliation
+### Phase 3 — Expose the read-only edge and reconciliation
 
-- [ ] Define root/session/chat snapshots and allocate each server action once
-      in one durable, monotonically ordered `serverSeq` space per exposed AHP
-      server endpoint, shared across every state channel, client, and transport
-      reconnection on that endpoint.
-- [ ] Persist actions before delivery and remove the current crash window where
-      a live consumer can observe an event before durable commit.
+- [ ] Register an attributable, local-first AHP server command/endpoint only
+      after the internal ordering, root-state, identity, and catalog contracts
+      are coherent.
+- [ ] Initially expose only `ping`, `initialize`, subscriptions, reconnect, root
+      state, and the read-only session/default-chat catalog; do not enable
+      create, mutation, or turn-driving methods in this phase.
+- [ ] Define root/session/chat snapshots against the durable `serverSeq`
+      outbox, preserving the persist-before-delivery invariant across every
+      connection and transport reconnection.
 - [ ] Implement subscribe, unsubscribe, reconnect replay, snapshot fallback,
       missing-resource handling, catalog re-fetch after reconnect, and
       optimistic client-action reconciliation.
@@ -303,6 +312,10 @@ The initial architecture and compatibility matrix are captured in
 baseline as AHP versions evolve, but implementation must not begin from an
 uncited or version-neutral interpretation of the protocol.
 
+The pinned 0.8.0 corpus, source hashes, method classification, capability
+policy, version decision, and exception ledger live in
+[`plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/`](../../../plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/).
+
 ## Journal
 
 ### 2026-08-31 — Compatibility-foundation reconciliation
@@ -325,3 +338,40 @@ uncited or version-neutral interpretation of the protocol.
 - Pinned released AHP 0.8 as the first compatibility target while keeping
   version-specific codecs ready for the unreleased 1.0 line.
 - No implementation begins until this plan clears review.
+
+### 2026-08-28 — Phase 0 contract lock
+
+- Started implementation under #1308 after the architecture plan cleared
+  review.
+- Pinned AHP 0.8.0 at commit
+  `7153143f1c6993fa886d7d59870811cdad479d83`, including schemas, specification
+  documents, SDK release metadata, and the reducer and round-trip corpora.
+- Recorded AHP 0.9.0 as a later release and deliberately retained 0.8.0 as the
+  only accepted first-slice version; another version requires an isolated,
+  reviewed codec.
+- Classified every exported command and notification and recorded all named
+  capabilities separately from optional state and runtime prerequisites.
+- Adjudicated the tagged `disposeChat` contradiction as recognized wire
+  vocabulary with no handler, `MethodNotFound`, and no `multipleChats`
+  advertisement until lifecycle semantics are reviewed again.
+- Kept runtime endpoint registration, ordering, replay, and live conformance
+  probes out of this contract-only slice.
+
+### 2026-09-02 — Trusted self-hosted CI gate
+
+- Added a default-branch `pull_request_target` workflow that accepts only
+  same-repository pull requests whose author and current event sender both have
+  effective `write`, `maintain`, or `admin` repository authority, checked on a
+  GitHub-hosted runner.
+- The self-hosted job uses only the dedicated `copilot-extensions-ci` label,
+  checks out the immutable pull-request head SHA without persisting a
+  credential, receives no secret, and remains disabled behind the explicit
+  `TRUSTED_SELF_HOSTED_CI=enabled` repository-variable latch until runner
+  activation.
+- Added a GitHub-hosted static contract guard and mutation tests for the event,
+  permission query, authorization dependency, activation latch, exact label,
+  immutable checkout, and credential boundary.
+- Runner activation remains conditional on repository settings requiring
+  approval for all external contributors. The static guard also rejects any
+  other checked-in workflow job that routes to `self-hosted` or the dedicated
+  label; this supplements repository policy but does not replace it.

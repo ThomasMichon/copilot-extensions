@@ -1,0 +1,1631 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/microsoft/agent-host-protocol",
+    "tag": "v0.8.0",
+    "commit": "7153143f1c6993fa886d7d59870811cdad479d83",
+    "license": "MIT"
+  },
+  "corpusCounts": {
+    "schemas": 5,
+    "reducers": 256,
+    "roundTrips": 39
+  },
+  "artifacts": [
+    {
+      "path": "upstream/LICENSE",
+      "bytes": 1183,
+      "sha256": "dea9265341829002e2c23a7372393eb2ed6e26085fb623f38a4ba0af833f30a6"
+    },
+    {
+      "path": "upstream/clients/go/release-metadata.json",
+      "bytes": 152,
+      "sha256": "a37df74c0e172b86ba766ad6f8d2ca2c32a7a56a3a6192cfab845ffb6f1f3e8c"
+    },
+    {
+      "path": "upstream/clients/kotlin/release-metadata.json",
+      "bytes": 156,
+      "sha256": "610a5b6fbdd1aad730493f0e3059b435b2e02dc0d260013f13156dba344f9d42"
+    },
+    {
+      "path": "upstream/clients/rust/release-metadata.json",
+      "bytes": 154,
+      "sha256": "465009d3d7a5bfc5e814e240e13aedf09114ebe881a86782d1ac60939cba6010"
+    },
+    {
+      "path": "upstream/clients/swift/release-metadata.json",
+      "bytes": 155,
+      "sha256": "ed9b706289cc16afdfce8f5fe656ff894704a16402f059449dcd5569699eaf7e"
+    },
+    {
+      "path": "upstream/clients/typescript/release-metadata.json",
+      "bytes": 160,
+      "sha256": "c4537da37ec91daf0e51530f400fe5d8ad1b88a52d68455dfa27dc973e1b1b0d"
+    },
+    {
+      "path": "upstream/docs/specification/authentication.md",
+      "bytes": 9012,
+      "sha256": "e981b1304595884013920888e98b13eb0c033e180d1df41c13be2b9a0051ae57"
+    },
+    {
+      "path": "upstream/docs/specification/chat-channel.md",
+      "bytes": 20725,
+      "sha256": "b632fcbe241a30aea5007e3c924cc81eea7b060306b37dc89e51840d745dead4"
+    },
+    {
+      "path": "upstream/docs/specification/comments-channel.md",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "upstream/docs/specification/lifecycle.md",
+      "bytes": 7173,
+      "sha256": "2a5d7d3056b61812f26eb7a0b0fe5bfd066730c26e07afd5e6f197686f1cf7a9"
+    },
+    {
+      "path": "upstream/docs/specification/mcp-channel.md",
+      "bytes": 5399,
+      "sha256": "ab67af77bc6bdb402538ad67f084043c6824d958a3d7eda525b0b8712e83b2d1"
+    },
+    {
+      "path": "upstream/docs/specification/overview.md",
+      "bytes": 8225,
+      "sha256": "cc5b3e15f37850f93c1d307cf6b70480a337e967e988e70055ff60bee8c7a5c2"
+    },
+    {
+      "path": "upstream/docs/specification/resource-watch-channel.md",
+      "bytes": 4282,
+      "sha256": "57bfcf86e24b696b8db2fc384f4bc31573b15c4f1d6cd7150da1de639f46f58b"
+    },
+    {
+      "path": "upstream/docs/specification/root-channel.md",
+      "bytes": 11221,
+      "sha256": "38a049356bc2b0c105cf8f612b600ac583ac591337eb604e42abdd6bf0adc614"
+    },
+    {
+      "path": "upstream/docs/specification/session-channel.md",
+      "bytes": 12157,
+      "sha256": "e2955db3f223c7abb8150a744cbd23a3509f3e99bf6d4218d1b6a7e4066162e2"
+    },
+    {
+      "path": "upstream/docs/specification/subscriptions.md",
+      "bytes": 10495,
+      "sha256": "1395723a3862f4d58e66a13dd61c40092dcdbeef7230edd8e58076c5b05d27e8"
+    },
+    {
+      "path": "upstream/docs/specification/telemetry-channel.md",
+      "bytes": 6862,
+      "sha256": "f4d3b8b75ca650594f4295091dc08ef817e9d177e77dbca22b61b54729f6b347"
+    },
+    {
+      "path": "upstream/docs/specification/terminal-channel.md",
+      "bytes": 6121,
+      "sha256": "24b0e1438586a1bfafa2741f3fa957fe1b975c512adf29c2991763afafa5db00"
+    },
+    {
+      "path": "upstream/docs/specification/transport.md",
+      "bytes": 2919,
+      "sha256": "af3b3f10657a853b2d4f06ea58c66829fbcc9e24ef8b71577f207d6e6ff23bea"
+    },
+    {
+      "path": "upstream/docs/specification/versioning.md",
+      "bytes": 7603,
+      "sha256": "db263f530a7c4a53ff8c3a67a5f2a5ad5f3e281cac70cf5b6a07b51df1794585"
+    },
+    {
+      "path": "upstream/schema/actions.schema.json",
+      "bytes": 344399,
+      "sha256": "8e9b82f9805df99d130c3bce2b689cfd866164e221b1165336835756fffbf1f5"
+    },
+    {
+      "path": "upstream/schema/commands.schema.json",
+      "bytes": 417037,
+      "sha256": "ec0f32043ccfeb71823efecbaf6612d31613f165ad5cc883297a72f9e3e60f1c"
+    },
+    {
+      "path": "upstream/schema/errors.schema.json",
+      "bytes": 419438,
+      "sha256": "f3db4c46fc7bb406c3fbf33476501089db4605e6da8676a8e259596827b1a833"
+    },
+    {
+      "path": "upstream/schema/notifications.schema.json",
+      "bytes": 257956,
+      "sha256": "135797c5d8e9c4bdbcbd83a476f0e788dc7057e355313b335b75acd6f3c9d380"
+    },
+    {
+      "path": "upstream/schema/state.schema.json",
+      "bytes": 242651,
+      "sha256": "96ee2c49b3ac345c1c91b5ada423e0bcb0bb2bd446091ed7cf2f270eacaf1dba"
+    },
+    {
+      "path": "upstream/types/common/messages.ts",
+      "bytes": 14393,
+      "sha256": "a12fc399aeb0b9695fb34ec5e2ad3875761ef1f6e810f18f5aa55047f5805f40"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/001-root-agentschanged.json",
+      "bytes": 511,
+      "sha256": "5272744aa9c695e52b4b399d1b89144466538e58049ca0aa9160312642ba26ca"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/002-root-activesessionschanged.json",
+      "bytes": 273,
+      "sha256": "43477ba9d259a7f08f1401a311c7b833d58fba6905073e53181e9338558d6bff"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/003-session-ready.json",
+      "bytes": 447,
+      "sha256": "e9735a3fefcab3d9d6e952f80e8abdf1134aedf96f2a04c9e3ba13278f27848a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/004-session-creationfailed.json",
+      "bytes": 658,
+      "sha256": "074b6ecfbef80200bd48ebc9b53fb0cb9f080215809dd0cb9716e27fb5b27b14"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/005-session-turnstarted.json",
+      "bytes": 900,
+      "sha256": "be27a070db507879245230aec7a721f0a939c6570b00aa87c428783df49f695c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/006-turnstarted-with-queuedmessageid-removes-from-queuedmessages.json",
+      "bytes": 1506,
+      "sha256": "7def183c3e94f4e10622f5b3a474530066f5c61ebb1bd8abec0bfe2c744905f0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/007-turnstarted-with-queuedmessageid-removes-last-queued-message.json",
+      "bytes": 1185,
+      "sha256": "bafcb594c72dea6b7445a68f8b30dbd21d57828b76b81e283d59596077a840e1"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/008-turnstarted-with-queuedmessageid-removes-matching-steering-message.json",
+      "bytes": 1166,
+      "sha256": "6c9cefb1e2cbf09eabc4863a9c4bc8f1ea62dc2ae2514602c65d634c7efc26f9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/009-turnstarted-without-queuedmessageid-does-not-touch-pending-messages.json",
+      "bytes": 1640,
+      "sha256": "474d384cbafa3ef314ce995e835ca65e55f506f2a64a8eb31bcfd1b22b9707e6"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/010-session-delta-appends-content.json",
+      "bytes": 1453,
+      "sha256": "5fac3ad545b902ad140f0fec7766e169be6e251d16921a9377b210b75232d1d2"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/011-session-delta-with-wrong-turnid-is-no-op.json",
+      "bytes": 1276,
+      "sha256": "e5dc2c7b257bf9254caab58f5e51a7c2897100aeb047c3064f5e50fdc4236cea"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/012-session-delta-without-activeturn-is-no-op.json",
+      "bytes": 561,
+      "sha256": "c52d3db56ba1c37c0e4529aaf2416f6691d885b48f69af7a2a6f5c6f7b968fe0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/013-session-responsepart-adds-to-responseparts.json",
+      "bytes": 1236,
+      "sha256": "2480cbdcfc2832e062349aa8fce358e6c1a8b33837a57243343926cdfc5dd477"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/014-session-turncomplete-finalizes-turn.json",
+      "bytes": 1577,
+      "sha256": "cb874321a10b5c5774b3061b0be6e131565a029d07e8b2b31901c7fa40093647"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/015-session-turncancelled-finalizes-turn.json",
+      "bytes": 1156,
+      "sha256": "c7d20afcc0358519af9999b191d233873393cb8df16bd46e5299a7c35969b6d5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/016-session-error-finalizes-turn-with-error.json",
+      "bytes": 1322,
+      "sha256": "4efcae349020ad393c0d2476073607d415a4f9c4be2dfc69a706848623819fb2"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/017-turncomplete-force-cancels-in-progress-tool-calls.json",
+      "bytes": 1790,
+      "sha256": "b43a5aaa9350a9219c7010d573d0ecc762c8e9cf4feb7204495cad344071a2ad"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/018-turncomplete-with-wrong-turnid-is-no-op.json",
+      "bytes": 1045,
+      "sha256": "66293b078931a1e0b314c61ff994c098e512adb0d08f389be8ce38157f6f4203"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/019-tool-call-full-lifecycle-start-delta-ready-confirmed-complete.json",
+      "bytes": 2561,
+      "sha256": "e054b3db90e212f3cb4caa057b10d308075a721ab7936ab2c0ec6c4be4bcd6b5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/020-tool-call-ready-with-auto-confirm-transitions-to-running.json",
+      "bytes": 1728,
+      "sha256": "8e78261d4ecf921e9608efce3fc15807d7532223fc39e8e6a2fcf6d89dd15cec"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/021-tool-call-denied-transitions-to-cancelled.json",
+      "bytes": 1923,
+      "sha256": "81f6ccffeccb6e764e952872c6cc2d0914a3a1a8fbb3fea0589a606a95f6e390"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/022-tool-call-result-confirmation-pending-approved.json",
+      "bytes": 2262,
+      "sha256": "135043d0b60201bc31be63be1ee4bc8017899018ad8f2700c767557c9f0ab94b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/023-tool-call-result-denied-cancelled-with-result-denied-reason.json",
+      "bytes": 2108,
+      "sha256": "41a454e4fb2d710f5cccab1f09065bef4fa40dd741b67acd4e23e05603699eef"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/024-tool-call-complete-from-pending-confirmation-defaults-confirmed.json",
+      "bytes": 1965,
+      "sha256": "38b215504d05da5a6bb445f9969b9725fe08e8ada488e894610efd240eaa58d0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/025-tool-call-actions-for-unknown-toolcallid-are-no-op.json",
+      "bytes": 1102,
+      "sha256": "273338814594113b05151780e6f3ef137e764c4725903e058d42c669c12e32c0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/026-toolcallready-transitions-running-tool-back-to-pending-confirmation.json",
+      "bytes": 2229,
+      "sha256": "93f92801c0ce64c166023646f7df9d8947326f3f9be23dcc83a489b100ae3f4a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/027-toolcallready-re-confirmation-approved-transitions-back-to-running.json",
+      "bytes": 2067,
+      "sha256": "532a2054d4e07f6b4b3c222faa420b93bf663bf1a5acb403b9e5386745c65343"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/028-toolcallready-re-confirmation-denied-transitions-to-cancelled.json",
+      "bytes": 2120,
+      "sha256": "2a6e90ca0d77dcc169bdc0908c4c3f7fd24f2d285661e85fa2dd9cba304e9ab5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/029-toolcallready-updates-pending-confirmation-tool-calls.json",
+      "bytes": 2095,
+      "sha256": "0e24d35d8fa02cbf020f93a3ac627492a03785aa355a17cd29f865dc92eb85ae"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/030-session-titlechanged-updates-title.json",
+      "bytes": 503,
+      "sha256": "95de9891af0f8ccc7dd9975e5b267bf6a0f0d366f67cb388da54789a56f5af0e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/031-session-usage-updates-usage-on-active-turn.json",
+      "bytes": 1154,
+      "sha256": "d9bb85ab32c548482cea0c0afa34a22808909fd65cfc0b898ddcb8142d3f0146"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/032-session-reasoning-appends-reasoning-content.json",
+      "bytes": 1501,
+      "sha256": "2511376a41f4c8f6e022ab21af1de2fbbe5183bddf931d4359a2156416745c56"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/034-session-servertoolschanged-sets-server-tools.json",
+      "bytes": 724,
+      "sha256": "9c567047dde0bb5096b8a2830d00e1f21489d1a375cc6f183a5428343652e2f0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/035-session-activeclientset-adds-client.json",
+      "bytes": 710,
+      "sha256": "fce8b0e9ecd19e3c1bd5e0d063ff657305dab8773104357090cb6e3c6943cf71"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/036-session-activeclientset-replaces-client.json",
+      "bytes": 1061,
+      "sha256": "f27955638a14d628b31e88636db7c64df170ad3972d607f1aea0e4c8e7422112"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/039-set-steering-message.json",
+      "bytes": 806,
+      "sha256": "157b10c17cb268c17def05d2aac6cf84b18e10ef991480144f31908c645d7956"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/040-replace-existing-steering-message.json",
+      "bytes": 954,
+      "sha256": "cfe041184462f9067d4a333ae54c8fd99a1bb898d213b207c378758dcb91c06c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/041-update-steering-message-content-via-set-with-same-id.json",
+      "bytes": 986,
+      "sha256": "d9a864d725e93bbf833ee144d36f91d4a95529c92fec26d1d9f6f4c48b0e6fc3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/042-remove-steering-message.json",
+      "bytes": 716,
+      "sha256": "1665077a7b80ce109644bef186e1736a8c8d882ab2fb527a382a687f28976fb2"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/043-remove-steering-message-is-no-op-for-mismatched-id.json",
+      "bytes": 879,
+      "sha256": "aef17950a57bfd37b54affe17c8fd34148b500eaf92192b39c75e837a5d5ad4a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/044-remove-steering-message-is-no-op-when-none-exists.json",
+      "bytes": 554,
+      "sha256": "15b7cf9d27d0b7a51548c31be4d98becd7729cb2bd5c081c0b2cb81fb21cc897"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/045-set-a-new-queued-message.json",
+      "bytes": 833,
+      "sha256": "e7d6640c71c7a3fb925889a465da72307ef1d76809183cb91c57f55dff975c78"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/046-append-queued-message-when-id-is-new.json",
+      "bytes": 1179,
+      "sha256": "cefa4d75adf2757ff5cf4b9413459f74a2b30b341f0634a35c234f360cbdcc45"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/047-update-queued-message-in-place-when-id-already-exists.json",
+      "bytes": 1370,
+      "sha256": "a94b2cfdaaede3339d5594b9470493a1d904775794c049546840699cb0356d22"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/048-remove-a-queued-message.json",
+      "bytes": 1062,
+      "sha256": "f2983047e0d9deaa563eb4b169cfff1abd7ae7ce67b32274c2dbff154c74e977"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/049-remove-last-queued-message-sets-array-to-undefined.json",
+      "bytes": 772,
+      "sha256": "dccdea0931e9430281c7a3f67962b419488be9724ed7c08b5a9a7f66f2d8de2c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/050-remove-queued-message-is-no-op-for-unknown-id.json",
+      "bytes": 930,
+      "sha256": "30b800658c1098857a0f1b7c2562689d501f0294be9d14f2a896255b6b4dfdb5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/051-remove-queued-message-is-no-op-when-array-is-empty.json",
+      "bytes": 553,
+      "sha256": "09c774f05baf4c22d2085f56578d522e5148bcff473d011e2043caacee9a0002"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/052-steering-and-queued-messages-are-independent.json",
+      "bytes": 1200,
+      "sha256": "dd618277c29f82a440e5c3c4be4cada23563e4b590ede3c2394c27019b4c524f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/053-reorders-queued-messages.json",
+      "bytes": 1515,
+      "sha256": "15b9a83e0268782f98efdbb3e2c8ae4a375f695a1fab4cfaa2068ca1a38ea439"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/054-keeps-messages-not-in-order-at-end-in-original-order.json",
+      "bytes": 1517,
+      "sha256": "86625137657fcea401389b3e930e252751a9484063ce2f155f9a4e1c5aaf6dbd"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/055-ignores-unknown-ids-in-reorder.json",
+      "bytes": 1249,
+      "sha256": "abc0ba017c3c9f80cb8cdb64d7eccb4f3cdbe987684245e4ea35a54463ab754d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/056-empty-reorder-preserves-all-messages-in-original-order.json",
+      "bytes": 896,
+      "sha256": "f0fcd506e5beb4786bb0009f91cbd53028c9d91509e4f17ce84d25e6d61126d4"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/057-reorder-is-no-op-when-no-queued-messages-exist.json",
+      "bytes": 558,
+      "sha256": "c1c622784ecc4f12cb42bee8588183322267a09153fdb3da2b3f7e52aca8936b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/058-session-customizationschanged-replaces-entire-list.json",
+      "bytes": 1217,
+      "sha256": "0b7edf608dde92817b58c88a6b92ff26f7a857aea1dcb02aba21f9014e4180f5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/059-session-customizationschanged-replaces-existing-customizations.json",
+      "bytes": 1041,
+      "sha256": "d436af51db8b70405900c992948b670fd34ddac819f326396d10e50589fdecdf"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/060-session-customizationtoggled-toggles-by-id.json",
+      "bytes": 1776,
+      "sha256": "3fe383bfd9b1dffa282aaad88f2496aa0f58de6aec36f99f2ef2d96e00f26de8"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/061-session-customizationtoggled-is-no-op-for-unknown-id.json",
+      "bytes": 981,
+      "sha256": "153cb41ea99a63b296d39f11810ea4c786c649aebe1b4a09dfe08aa7ebb316c5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/062-session-customizationtoggled-is-no-op-when-customizations-undefined.json",
+      "bytes": 650,
+      "sha256": "13642ae738478697a764670ec6a9201202d35fdce6419bd518bd1579f6c68805"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/063-session-truncated-keeps-turns-up-to-turnid.json",
+      "bytes": 1730,
+      "sha256": "1620831f9557520678b785bec3a25427707f12f40a7ef11f9f3a69d28629aceb"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/064-session-truncated-keeps-all-when-turnid-is-last.json",
+      "bytes": 1498,
+      "sha256": "8cc7f52a0cfdbc38bd30fabac1d2a24c2b35dda95a21451afa99cafb7f238446"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/065-session-truncated-keeps-only-first-when-turnid-is-first.json",
+      "bytes": 1505,
+      "sha256": "7c8396554c5da5dcc4b3df3155e61588a4a69183478a64a8afffd6b825e0f757"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/066-session-truncated-clears-all-when-turnid-omitted.json",
+      "bytes": 1235,
+      "sha256": "0cc85293020cc3d2be07076c739b04e25bb4dcfb495043a79739272321646ba0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/067-session-truncated-drops-active-turn.json",
+      "bytes": 1499,
+      "sha256": "c747e69ca2dc906a51757d29f5bf1c415e3621d366b08288f32f29e7db3a4fa0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/068-session-truncated-drops-active-turn-even-when-clearing-all.json",
+      "bytes": 780,
+      "sha256": "9ab26da07a3cdd843594b35858004fc8d72240c1f77ec1669ea1b816944cadcd"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/069-session-truncated-is-no-op-for-unknown-turnid.json",
+      "bytes": 1477,
+      "sha256": "894371c118d79e8a12435e1aba75cb976574cbd8fa9a9c3b6ae0bc71f9b281db"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/070-full-turn-flow-with-tool-calls-and-re-confirmation.json",
+      "bytes": 5251,
+      "sha256": "18276fe098db851472a7b4c63b1a67154b62e2029111aca80bf5be0d3e11c15d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/071-root-terminalschanged.json",
+      "bytes": 997,
+      "sha256": "b920448f7a7b16fdd3861f540161f29df763e9ad1f97b6f2f1cab16b3cf2fb21"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/071-session-isreadchanged-marks-session-as-read.json",
+      "bytes": 505,
+      "sha256": "87cd21687794852423f1d5b961ed61ecec7fed73090f906a12628da1efecf990"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/072-session-isreadchanged-marks-session-as-unread.json",
+      "bytes": 508,
+      "sha256": "c21e2f6cc70b959904c7dcecafec82ab3c5d555f28a9f0a764c307222e1c2414"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/072-terminal-data-appends.json",
+      "bytes": 659,
+      "sha256": "a6694fb4ebe7d260771fbdd261d8da95464c32ece85d5cd271dec6d2a0f2e16a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/073-session-isarchivedchanged-marks-session-as-archived.json",
+      "bytes": 521,
+      "sha256": "b472907c2cbae265c6003c07fcc41411271ed72f5763841d2c7fc89853730c8a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/073-terminal-input-noop.json",
+      "bytes": 585,
+      "sha256": "9fc3415e169fdcac9c8f00187b5470b9ce5c43c04406c6fc7946c744c73cf2d0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/074-session-isarchivedchanged-unarchives-session.json",
+      "bytes": 527,
+      "sha256": "475191f838abf1e63574c84c0da02187e0e403133cb1d74216bdde89ccf56334"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/074-terminal-resized.json",
+      "bytes": 511,
+      "sha256": "dfa1c105ea6a0bb09f605a3931494301fa6703a2a4126c9bfd4daee1ea6ebcc9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/075-terminal-claimed-client.json",
+      "bytes": 511,
+      "sha256": "7a00649127fa4e04ae8f44de8f5a2a5585a9cbc1f02a4b9b49a237f98baab015"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/075-turnstarted-clears-isread.json",
+      "bytes": 944,
+      "sha256": "183fb5d3cf851503ffbe7ccd2a2d387a9b8b97fc7dbf03701ac3271f2b8cac9b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/076-terminal-claimed-session.json",
+      "bytes": 650,
+      "sha256": "87890b58fe9a33e0278a36bab8d04362caa39ea4da850072a568c1b4a8d850f6"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/077-terminal-claimed-release.json",
+      "bytes": 586,
+      "sha256": "04735f632e4b13febbccca081ce940a6d1be69a6456f6e439076a9691e6e144b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/078-terminal-titlechanged.json",
+      "bytes": 468,
+      "sha256": "1a8d08f1a030daac1d6b6142daab112acd6c9c1d3880fbd6a3d963df36ab286f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/079-terminal-cwdchanged.json",
+      "bytes": 519,
+      "sha256": "f18d31c7f6053971c8ca968781b2056c2e1d3a1aad6c23ea3ea31518be2c0bdd"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/081-terminal-exited.json",
+      "bytes": 669,
+      "sha256": "a90b0541a55448d97434b0fbd149297818c1441c20074013fdaa2bd703a37156"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/082-terminal-cleared.json",
+      "bytes": 495,
+      "sha256": "1ef3280aea47d7b42931d4ca5ecb8b2dec8ede59278dbd98c580ddfb2da13209"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/083-terminal-full-lifecycle.json",
+      "bytes": 1231,
+      "sha256": "09edcfc2ee90ac4c529d8592e317ccab2445c1fa73dba620b7c7a2b386b31257"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/084-toolcall-contentchanged-updates-running.json",
+      "bytes": 2332,
+      "sha256": "b64ad555a69635ec1d3e543fc59ecc3798bf4370eab4dbb03a41d110d3affc77"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/085-toolcall-contentchanged-noop-non-running.json",
+      "bytes": 2286,
+      "sha256": "8ce25fc238d003d4d601d2852c469e91bcae05e9baf0f86b9c1cd6368cbb48b0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/086-toolcall-contentchanged-replaces-existing.json",
+      "bytes": 2732,
+      "sha256": "e8e6f2b94d3ab9052eab84861b6f98a93332e205feba1c9c1b6d7354e9ff13d3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/087-root-unknown-action-type-is-no-op.json",
+      "bytes": 224,
+      "sha256": "695ef086c853b095ad12487b6d9f3f39699003a0c234ab70ad22bb45f38e5629"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/088-session-unknown-action-type-is-no-op.json",
+      "bytes": 479,
+      "sha256": "62c0e6d60677d20402f42155d199fcb788ae5fdfa843bf7d55a6b711a3f85bdd"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/089-terminal-unknown-action-type-is-no-op.json",
+      "bytes": 482,
+      "sha256": "694046d289b4e886aff06293b74881b357fe7d00a960fbcf29130ae63d86d317"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/090-toolcalldelta-wrong-turnid-is-no-op.json",
+      "bytes": 1621,
+      "sha256": "6dda793c6ac644b1f6937f0d935f4303b68fec62c55483cce8a43a062892acf5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/091-responsepart-wrong-turnid-is-no-op.json",
+      "bytes": 1123,
+      "sha256": "a5d5137ac2757dbcd6218ca2d54d63d51af13cbb6786ab95aa59d7ced3bf3e2b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/092-toolcallstart-wrong-turnid-is-no-op.json",
+      "bytes": 1113,
+      "sha256": "d3203200f6db5883c7d71b0497fe08555d3a6c54a020428ec7e8461fc0158a38"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/093-usage-wrong-turnid-is-no-op.json",
+      "bytes": 1088,
+      "sha256": "fb88dd84a92626a35823970f0d2bc50e42c8ff6e876c2b241f987a5ee77c088f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/094-delta-nonexistent-partid-is-no-op.json",
+      "bytes": 1292,
+      "sha256": "45765b4a359de626aedc7d17a2df3306e962168e1e9fab5627cb0d15f594466c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/095-toolcalldelta-wrong-status-is-no-op.json",
+      "bytes": 1992,
+      "sha256": "db80801e38b3a900120970fedaffa2a77ce4054b50313f23ab54ffaf603cdb9f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/096-toolcallconfirmed-wrong-status-is-no-op.json",
+      "bytes": 2018,
+      "sha256": "7fb9cf535896a10e37d2e5ac11a6585232b1f01f79b253a4d556813d0eb7b848"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/097-toolcallcomplete-wrong-status-is-no-op.json",
+      "bytes": 2221,
+      "sha256": "175848b6c5c1ae15a24a3f63db20bcb065603a0734915e7e666f0d8db8fa95d3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/098-toolcallresultconfirmed-wrong-status-is-no-op.json",
+      "bytes": 2003,
+      "sha256": "45a32bf992cbd89ea23df37f4bb58e558a397fe6899bc0fcc938fc38d0364fb1"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/099-endturn-force-cancels-running-tool-call.json",
+      "bytes": 2188,
+      "sha256": "0a74ac06952e38c1f931010f9d73ce8cbfb973aaf8a738ba8fbee16b8017804f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/100-delta-targeting-toolcall-partid-is-no-op.json",
+      "bytes": 1961,
+      "sha256": "9bc73836c81524ae7c9faa2bac0f01320b3fbd43c55cb52b08db09ca94ba9847"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/101-toolcalldelta-without-invocationmessage.json",
+      "bytes": 1807,
+      "sha256": "e0170e41323ca5134bf33ceccac3d27937e27c4465deb918130a36a937fef5ac"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/102-reasoning-targeting-non-reasoning-is-no-op.json",
+      "bytes": 1304,
+      "sha256": "242a892ae7c741573a3b13f3c7e8b362b6cd40dd2cb6b48651af85c39bffb59d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/103-delta-skips-parts-without-id.json",
+      "bytes": 1401,
+      "sha256": "997b9871a4f175229aa4dccc5e54fbde5f9be18050dc2889cdb7c2439fd2a0b8"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/105-session-input-full-draft-and-complete-flow.json",
+      "bytes": 3503,
+      "sha256": "3097a584467d5b5f467a135777e8e9a31df9a05bb5638f6b4f173a3dbb9ad11f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/106-session-input-requested-with-drafts-status.json",
+      "bytes": 2079,
+      "sha256": "e35609e00bff96ef5aef0b2467cabb6bf70d317004ebf94705d1ac527400b968"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/107-session-input-turn-end-cleans-turn-scoped-only.json",
+      "bytes": 2352,
+      "sha256": "e05c76a133d66e6ea81300da4f3a9e84cd528a23da06d8aa44971743c4eb015b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/108-session-input-upsert-and-clear-answer.json",
+      "bytes": 2044,
+      "sha256": "715c1ea0a921c4cd0a6aba898276b53d1ff4118518b13b6cb2c1a7c9997a542a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/109-session-input-unknown-actions-are-no-op.json",
+      "bytes": 747,
+      "sha256": "8e95403f2798a5f854059fef7570ca4626ec869fba536aa35a80380d15aed540"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/110-session-input-completion-and-truncation-filtering.json",
+      "bytes": 2038,
+      "sha256": "213aa1efeab5155b609b4b301d7c212e1480128e410400c4693c865fa2fb10e8"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/111-toolcall-pending-confirmation-sets-input-needed-status.json",
+      "bytes": 2002,
+      "sha256": "d0f1fc677767b95253e453909279161da42d2db79f6481146b7179e37abfdf14"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/112-toolcall-pending-result-confirmation-sets-input-needed-status.json",
+      "bytes": 2069,
+      "sha256": "9a2d9eb45c227f08ad41798dc70914bedb6a736f444904eb94064634b15212aa"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/113-session-configchanged-merges-into-config-values.json",
+      "bytes": 1673,
+      "sha256": "0637f369e74d71db99d17da576f31755a10c3847625a37378b8bbc7dfd5baddc"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/114-session-configchanged-noops-when-config-undefined.json",
+      "bytes": 538,
+      "sha256": "95859862ec72e6e6b0a9eddb165e959422bf5f610ebfba005210bdde1b8e68ed"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/119-terminal-commandexecuted-appends-part.json",
+      "bytes": 792,
+      "sha256": "bc4bdc203e5903289f6dc204fcfd2ed095647b66437a909736de3d80da2179e3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/120-terminal-data-appends-to-command-output.json",
+      "bytes": 1068,
+      "sha256": "a489014bd1dce0ecfbf5db982d2800ca64a11597f6707d6ce97c78abdb0a03c0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/121-terminal-commandfinished-completes-part.json",
+      "bytes": 1101,
+      "sha256": "bbf05946f0c6cee1ae0783caa35608b17e0047833058629d177b0b01418034e5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/122-terminal-data-after-complete-creates-unclassified.json",
+      "bytes": 1106,
+      "sha256": "aeee92e74bc1c27a16094465bab5b84fa6673cca520ad8887dba77aca2159770"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/123-terminal-command-full-lifecycle.json",
+      "bytes": 1913,
+      "sha256": "fc255fb9428eaa14f4397ffadd86193e8e143a43fa4e47eb034d4045b07b87fa"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/124-terminal-cleared-resets-content-parts.json",
+      "bytes": 839,
+      "sha256": "d1673fb1df0e01fb9b915dde5d901dd0cd3f0fc311e1f347b2d6de8ff009deeb"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/125-terminal-commanddetectionavailable.json",
+      "bytes": 496,
+      "sha256": "3da12c869daa9fd45811b65fe4751140491e2898b8f22243f9e9fa8950d4ae8a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/127-root-configchanged-merges-into-config-values.json",
+      "bytes": 949,
+      "sha256": "ca3255a595b49e1067ddbd71f64290c935a8691d4e81eaa59fdd9e9060779761"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/127-toolcallready-with-confirmation-options.json",
+      "bytes": 3479,
+      "sha256": "4feb9b3b82d0866444c085261ee288bc2af632c82d3285b40e6cd1e4770005be"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/128-root-configchanged-noops-when-config-undefined.json",
+      "bytes": 284,
+      "sha256": "9439538fd0774da92472855cb62b3758757faf0358f3c7182f9b8ee1584a5346"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/128-toolcallconfirmed-approved-with-selectedoption.json",
+      "bytes": 2587,
+      "sha256": "c65080010e217efd466235022fa928ebe0d05934592d4af77107302fbab531b3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/129-session-configchanged-replace-replaces-all-values.json",
+      "bytes": 1669,
+      "sha256": "d697bd3abae1dc59691c4fa9259bc017a0e812a857fbecb2e1b379a9c52eeb7e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/129-toolcallconfirmed-denied-with-selectedoption.json",
+      "bytes": 2655,
+      "sha256": "9f084e1725b0b1f7bea8cfc95fc5171c6a45e3ee030e5b44478ea219fa5e496a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/130-root-configchanged-replace-replaces-all-values.json",
+      "bytes": 1352,
+      "sha256": "c618f1b4cce34796de56c694ec9f7eb6be5929aa4b9f799c1163bbfc8274226a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/130-selectedoption-carries-through-to-completed.json",
+      "bytes": 2739,
+      "sha256": "407e7af60487ea5f5a78905b4e5edc98cf49e09874db7183077e878b8f7c580f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/131-selectedoption-carries-through-result-confirmation.json",
+      "bytes": 2882,
+      "sha256": "7ba2a662352981258a403a46c0c35dd772d3e44c68d5ed47d6fb5591fd1d80f9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/132-selectedoption-carries-through-result-denied.json",
+      "bytes": 2644,
+      "sha256": "bdd638ee88d296cf9a3b46e33909ad431d152d6336a474ec4e44373e053d14f7"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/133-session-activitychanged-sets-activity.json",
+      "bytes": 579,
+      "sha256": "ac0d514b25b13dfc312cf06b568c52dc3405f7fc2bcfc6b5c30d02588746727b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/134-session-activitychanged-clears-activity.json",
+      "bytes": 564,
+      "sha256": "91a53ef24389d9f74558fd8da17cb2218a213bfcb73c4690f7b2e1d76481aad1"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/135-session-metachanged-sets-meta.json",
+      "bytes": 756,
+      "sha256": "4ea72ca12988ed6085068cdec1d67468f908fd13640b94f08dd54fc610216c9d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/136-changeset-status-changed-to-ready.json",
+      "bytes": 435,
+      "sha256": "7476c79a5a30eff658abbf53f01e433002eddf8a79bc9aa9e35eaba0276912fa"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/137-changeset-status-changed-to-error.json",
+      "bytes": 529,
+      "sha256": "8ae0a61ad7aabcf33757c4398fb4006a3d7f0024e1bfc6bd77b44431308eb22e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/137-session-customizationupdated-replaces-existing-container.json",
+      "bytes": 1651,
+      "sha256": "b527d082f5f4a4c13b834128a6e4d10a24d4f3d0df0d326bf7a64bdfba409e0b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/138-changeset-fileset-appends-new-file.json",
+      "bytes": 1482,
+      "sha256": "f6b75c1df903a90eb9470e0cf3ac62451a4a9a32f917757b39e9a3ab983a3c5c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/138-session-customizationupdated-appends-unknown-id.json",
+      "bytes": 1270,
+      "sha256": "f29c99bbf5bf9bee6523a1deb279f3adac20fe77dd9cbd747591cf4d4e919169"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/139-changeset-fileset-replaces-existing-file.json",
+      "bytes": 1772,
+      "sha256": "75b3d86ae1cf094d5ba20bc067535c593aa168330d88d64854456e782830cb45"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/139-session-customizationupdated-creates-list.json",
+      "bytes": 1051,
+      "sha256": "0493df1ba1f99898a335e818d2731963d3113381401f9b8261738a2f08543538"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/140-changeset-fileremoved-drops-matching-file.json",
+      "bytes": 1292,
+      "sha256": "9662ffde5bb800c9bde6a6670a8eabe6bc092a2b75938561043c510d14f33fcc"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/141-changeset-operationschanged-sets-and-clears.json",
+      "bytes": 783,
+      "sha256": "a365f8aaf222572b7832eda3cbdbb8f4f4759e588e1948daeb0c35ea27cedab6"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/142-changeset-cleared-empties-files.json",
+      "bytes": 647,
+      "sha256": "428188b0a77a813fe9614d97d5ed80763073cddabb74646c0a2412f9f7173853"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/144-changeset-unknown-action-type-is-no-op.json",
+      "bytes": 283,
+      "sha256": "a8efe1a645f5ec00eed1761b6c0f45bd40287ff0b0017cbab9ae2953cb67808d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/145-session-changesetschanged-sets-catalogue.json",
+      "bytes": 885,
+      "sha256": "e77cd3fa0897029c1753a1419a9b63b9ab9c596ad23b2c52bd94c9ca5bc8b836"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/146-session-changesetschanged-clears-catalogue.json",
+      "bytes": 710,
+      "sha256": "26f8b2c824cd4d02f9801619763a3ad7d76e0071b389d56013577db536d158b8"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/147-session-ready-preserves-inprogress-status.json",
+      "bytes": 577,
+      "sha256": "c0f4e573812db381a3f3c134314cb6ea17a473dee9ac4006d892771ef91e8500"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/152-session-customizationremoved-removes-container-and-children.json",
+      "bytes": 1233,
+      "sha256": "5a714f5f3fe0319c9c16bb379482a4d7e874251078b04369bfb9d69db76fc53f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/153-session-customizationremoved-removes-child.json",
+      "bytes": 1456,
+      "sha256": "859234322f36421bad5a9bb3c47c445b2c4c4c97c2aba729b42857d369b57619"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/154-session-customizationremoved-noop-unknown-id.json",
+      "bytes": 874,
+      "sha256": "71a8660bf28367180e73dae1f6b990b822ded270069643a2db21daa3f72850fd"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/155-changeset-operationstatuschanged-sets-running.json",
+      "bytes": 961,
+      "sha256": "12772e9a8b6fca700efad866905570bc47a752ca7e2d9a4b1e0ac7ec8c129dc6"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/156-changeset-operationstatuschanged-error-then-recovers.json",
+      "bytes": 1262,
+      "sha256": "35fbd17134af8bc2d614e425084c27e877a795490f9a792e12f9c71c4dcf3768"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/156-session-default-chat-changed.json",
+      "bytes": 597,
+      "sha256": "413e0c78844cd8d3ec20afade2d57462ebc77c0de5ecc85c8cddc820d9078f9d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/157-changeset-operationstatuschanged-unknown-operation-is-no-op.json",
+      "bytes": 965,
+      "sha256": "58570e73e56fe2050a23de21cbaa2b373c4e52b3fc63f2b73b08842c73883707"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/158-changeset-contentchanged-replaces-content.json",
+      "bytes": 2508,
+      "sha256": "a86de4cde13a317d311fa30c9f6d31e15eeb46966fde99a5fb7f8dcdb026739a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/158-toolcallconfirmed-approved-with-editedtoolinput-overrides-original.json",
+      "bytes": 2237,
+      "sha256": "03c392b4d9e4258af62d6ff257ba487251b833d273352ac810c62e8bf5d33fed"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/159-changeset-contentchanged-updates-error.json",
+      "bytes": 1810,
+      "sha256": "68cb23f5b7b47340d5c391817aa80aa21b7e1fb21b531499d5b542b52318d88f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/159-session-mcpserverstatechanged-upserts-top-level-server.json",
+      "bytes": 1172,
+      "sha256": "dd3c2849de3d096a0a9f976d3857756326d24acd18fd235486b391bd16b47fc5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/160-session-default-chat-changed-unsets.json",
+      "bytes": 547,
+      "sha256": "01b0d1b8a3edcf2dddb9f0b2125832ff0e00b598057de0d60e7506fbce6a491f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/160-session-mcpserverstatechanged-upserts-container-child.json",
+      "bytes": 1947,
+      "sha256": "b7ce4843b6633eca05fad6c1cd90ba3eff79903408db1bfaa4ca42712ccdd12b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/161-chat-turn-lifecycle-on-chat.json",
+      "bytes": 1648,
+      "sha256": "411d96f2f8aed5b9f6e57fed0471cc052e61c830e1e2bd7d23917fd44641a1f3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/161-session-mcpserverstatechanged-noop-unknown-id.json",
+      "bytes": 1173,
+      "sha256": "106d22e466914a1364edfccffaf574f887a24d41838b43c8d1e456bb5aa5a40d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/162-session-mcpserverstatechanged-noop-non-mcp-id.json",
+      "bytes": 1616,
+      "sha256": "617608c134de97294080699ea58d44497749c22934fc4f7edfddcdd0d3072b86"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/163-toolcallstart-carries-mcp-contributor-through-lifecycle.json",
+      "bytes": 2416,
+      "sha256": "4f26baa0a3a528c8948815442bda7b25b9144979a2157060926e069512723193"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/170-session-chatadded-appends.json",
+      "bytes": 903,
+      "sha256": "5a2cd2d6a1df8982c033eb2fde6eaa2fc722132433fa22fa0181b6e3f16bf13d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/171-session-chatadded-upserts.json",
+      "bytes": 1136,
+      "sha256": "89f267038ec6d12b02abd282287fe42e4f8e71fbe733a1b009dfe6659552c593"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/172-session-chatremoved.json",
+      "bytes": 1375,
+      "sha256": "7e3e7d6c7d9b4687a5970d31df2dcac825c3123fc54986258da4aedce54e660c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/173-session-chatupdated.json",
+      "bytes": 1129,
+      "sha256": "3079b3ed76f74b60aa470201cd35ea31cd82e03f22dbce2844f4a4f4da4a2460"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/174-session-chatremoved-noop.json",
+      "bytes": 1006,
+      "sha256": "cee26e7b7e118690c88b669c976af0f9f460c028b2a3112c2d53530d97d3dfba"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/175-session-chatupdated-noop.json",
+      "bytes": 997,
+      "sha256": "50b9d5e21dfe67364a4583a17c43fd885a0fe2ba0a5b594838bc91753757057a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/200-resourcewatch-changed-passthrough.json",
+      "bytes": 535,
+      "sha256": "c12f69d51a57881e5b123795652a08e2f7095c0963c00c11e2ec9a4b39ee730b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/201-resourcewatch-unknown-action-is-no-op.json",
+      "bytes": 327,
+      "sha256": "830b44d95629fc887ee3f5c7e01e131ba08ccd25480c4502c4282501a61d6f89"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/210-annotations-set-appends-new-annotation.json",
+      "bytes": 1602,
+      "sha256": "565242b3e8ce54f05be4190731e360e58d3a14d74614ec2a933c10c95e63a087"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/211-annotations-set-replaces-existing-annotation.json",
+      "bytes": 1207,
+      "sha256": "2df1e0f468bdf5ca637290f2f62888a6b72f0d351285a3c34f1c530d44828e7d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/212-annotations-removed-drops-matching-annotation.json",
+      "bytes": 1374,
+      "sha256": "a467f9cf1254491c91375becf264569f769641294d36fa29dd0950c529bb6a2a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/213-annotations-entryset-appends-and-replaces.json",
+      "bytes": 1209,
+      "sha256": "2d8289f5941446ba93017dc56cc722a743465ffb47f308c0b97d0a14788e308c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/214-annotations-entryset-unknown-annotation-is-no-op.json",
+      "bytes": 1033,
+      "sha256": "fb8980e9d8702a83dce5d4f1db27644a79867063a9530dc64998da9b2f2e05da"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/215-annotations-entryremoved-drops-matching-entry.json",
+      "bytes": 1312,
+      "sha256": "c3a0c3fdf87a05d0dae7012354e835546fe08965eb416ba3121e853a1903aa2f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/216-annotations-updated-resolves-and-preserves-entries.json",
+      "bytes": 1217,
+      "sha256": "05d776ff1086477fa74dde5a83eea93ea92947c90b7b2fa5e97728dbb21076a9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/217-annotations-unknown-action-type-is-no-op.json",
+      "bytes": 921,
+      "sha256": "8fc96d2143442eafc827c8a9f27e373febbfeb006ade7bf0b17a4dc63ddfa4a9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/218-annotations-updated-reanchors-turn-and-range.json",
+      "bytes": 1227,
+      "sha256": "4620f644aff7ff8bcbc5ff6006c119eb4575580be6b93cdda274b4b49f774709"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/219-annotations-updated-unknown-annotation-is-no-op.json",
+      "bytes": 745,
+      "sha256": "eed321737237fa892fe611051aded863f0efa77089ea5345ee2732c848f0fbc1"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/220-toolcall-actions-update-meta.json",
+      "bytes": 10254,
+      "sha256": "8fa8110f4ebdbf6fb94ba336487e27171668ddc865f4917a5ef65d50554ad4c9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/221-session-activeclientremoved-removes-client.json",
+      "bytes": 742,
+      "sha256": "b21d105e1e614a45c64c4c64f25a351b7a1cf434f7c73934750d431af27f6df4"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/222-session-activeclientremoved-no-op-unknown-client.json",
+      "bytes": 693,
+      "sha256": "3ac12f180873a74583a9d1c94a5a1381fa4344ad3b83afcb9762c2a2a12c89d3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/223-chat-activitychanged-sets-activity.json",
+      "bytes": 599,
+      "sha256": "563bd0c349815d726b89bfb623d8ab589eebd73568f155c02632f420e15dd832"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/223-chat-draftchanged-sets-draft.json",
+      "bytes": 1043,
+      "sha256": "6df4f3b34ce65bac2fa1cf89424ed4a8ba2380a6501719d828f38d852f374798"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/223-session-inputneededset-adds-chat-input.json",
+      "bytes": 1724,
+      "sha256": "f1d807d5af538a7135d443601bf58b31b3a25a2ca2bc2e870bee4ccf017164b5"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/224-chat-activitychanged-clears-activity.json",
+      "bytes": 587,
+      "sha256": "bef9069d4817b82e72712fcc4d00f20908a525efd895fea86f720f5362771e8c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/224-chat-draftchanged-clears-draft.json",
+      "bytes": 631,
+      "sha256": "040f1864ce4515beac59781c90374fb9d2c076bda16b19a6191358a2a101f87b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/224-session-inputneededset-appends-tool-confirmation.json",
+      "bytes": 1984,
+      "sha256": "e9c9ef5fe422243b1254177beb8b9ccad7ab12bfdd1d7669e656d3427dbba395"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/225-changeset-filesreviewchanged-marks-reviewed.json",
+      "bytes": 1086,
+      "sha256": "e3edf92569d8571634c79127099ccd03bfc55ea02eda36e41dac39c6c1797966"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/225-session-customizationtoggled-toggles-child-by-id.json",
+      "bytes": 2256,
+      "sha256": "62dc7f5e3b837e9da42d690191b8b97dab6e288c96ba2394af3dd559566712b0"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/225-session-inputneededset-replaces-existing.json",
+      "bytes": 2164,
+      "sha256": "f15858190295eea296a75c0ac34cf389e4350af220718aabf18e189e912db442"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/226-changeset-filesreviewchanged-clears-reviewed.json",
+      "bytes": 1091,
+      "sha256": "f74d6b99ee5e18ca573084e8c2e310467a7d1ade3dd8446ce050204b340bd1a3"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/226-session-customizationtoggled-is-no-op-for-unknown-child-id.json",
+      "bytes": 1385,
+      "sha256": "d588a99789192cdb3f2ce8d1241e0b3b6ba5a58784aa179f6b472b4640b0d4bb"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/226-session-inputneededremoved-removes-entry.json",
+      "bytes": 1303,
+      "sha256": "f6e75969e6267a65885467b4b676dfe6ffb7af9f6857191b5ace5aaa8774ac1f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/227-changeset-filesreviewchanged-no-op-unknown-files.json",
+      "bytes": 725,
+      "sha256": "1a859d8af23aa9495cc09883a4cb5040804652d912d8921efc943a9966fab984"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/227-session-inputneededremoved-no-op-unknown-id.json",
+      "bytes": 1039,
+      "sha256": "828973a411c489a629bfb83ea5d61b1fdc917541d9e7286bfcc5fdbc78247efc"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/228-session-inputneededremoved-no-op-absent.json",
+      "bytes": 558,
+      "sha256": "76eacca16568139b92e9257d85c761f8621a152e9dc4060e157908e36b5b4a05"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/229-session-inputneededremoved-clears-status-when-empty.json",
+      "bytes": 858,
+      "sha256": "65802614261b552a8c351944ff13001e3116916cc790d4b8cb4497f708d8603a"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/230-session-inputneededremoved-preserves-orthogonal-flags.json",
+      "bytes": 843,
+      "sha256": "b3f21ccbd6de3bb779f52ec255fb4ac1ac7bcc6083fecf71c9d7ac316ef597d1"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/231-session-inputneededset-preserves-orthogonal-flags.json",
+      "bytes": 1007,
+      "sha256": "fec64d7845d3e418a1a7e0e265edc00423d23f1e9a4bc55f68357b5403b3fa9d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/232-chat-turnsloaded-prepends-older-turns.json",
+      "bytes": 2096,
+      "sha256": "70290358c6715af0be4f1fa2d7a32b6470f37d3cfa4cb73f63d79e5416fd3890"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/233-chat-turnsloaded-dedupes-overlap-and-clears-cursor.json",
+      "bytes": 2314,
+      "sha256": "04fcab244e82061c2d1270feeba99d69e1216a4b308667bf813b2f3758b04627"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/234-chat-truncated-clears-turns-next-cursor-when-clearing-all.json",
+      "bytes": 777,
+      "sha256": "4ab504cce200ed26eb4c1268651a8543db0b2cf2affd6f9e3854a91eccf6f890"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/235-session-input-completion-records-declined-request-in-turn.json",
+      "bytes": 2707,
+      "sha256": "494452c8571e40f5d5fa4b9c9abc7d482d252fe6aeaf0638bacd60bd686f0afd"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/235-session-mcpserverstartrequested-starts-top-level-server.json",
+      "bytes": 1121,
+      "sha256": "281a98492c595922738bbd1185bd0a89196c62dd22eb8b5b1b60d41d73a6951b"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/236-session-input-completion-without-active-turn-records-nothing.json",
+      "bytes": 1210,
+      "sha256": "55c6c0bca97e358fb4e499631256d3b6caa016273d144ee9da9410900e870e14"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/236-session-mcpserverstoprequested-stops-auth-required-server.json",
+      "bytes": 1295,
+      "sha256": "7e85b0e19f0a7a4a8e0593f1d7428567d2d452ae7889b0d0bc6b73f6ff11df97"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/237-session-input-completion-no-op-unknown-id-with-open-requests.json",
+      "bytes": 1419,
+      "sha256": "f20b5c769b463b2fb805f8c436566effa4a43e8a96b81df52fc26f68c42787e8"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/237-session-mcpserverstoprequested-stops-container-child.json",
+      "bytes": 1880,
+      "sha256": "0a591ddd9bc88f879a6490827d9037653038425654f794ce7ca845e218bf6605"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/238-session-mcpserverstartrequested-no-op-absent-customizations.json",
+      "bytes": 551,
+      "sha256": "413dc08103e3bbfd4eea8925b0f4da441c65df44d26590aad214b8e98b2058ce"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/239-session-mcpserverstartrequested-no-op-unknown-id.json",
+      "bytes": 2015,
+      "sha256": "f32dd9c609b171eab07cb12ccb2271cb8e31ddd5dfc874972a91074aaecab07d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/240-turn-duration-is-clamped-to-zero.json",
+      "bytes": 1173,
+      "sha256": "3c769cabceae6d9d4501290858afba4fedf84dfee2238f86c7a7402c99cc6fd9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/241-session-workingdirectoryset-adds-to-empty-set.json",
+      "bytes": 585,
+      "sha256": "b7b354bc9fc374589c2114a7a8e351f29029cd4db2284a3b7de9785d7ec54c93"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/241-toolcallready-stores-loading-risk-assessment.json",
+      "bytes": 1996,
+      "sha256": "76936a707b994f4a6d53e4022cc3d421d49ac4981306f529b1d95709e1cfda0e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/242-session-workingdirectoryset-appends-to-existing-set.json",
+      "bytes": 673,
+      "sha256": "3bd662ff404e59c081fb06b580d4f4fb84c281a6688e184f0b2884409370ccfc"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/242-toolcallready-completes-risk-assessment.json",
+      "bytes": 3244,
+      "sha256": "d9ca2a328290f7454ceb1a1ca87ba107a0a1c781b09a95b5a21949f017b62b26"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/243-session-workingdirectoryset-no-op-when-already-present.json",
+      "bytes": 652,
+      "sha256": "c858f0b5e881e57217c345669aea0d937855722563ce5a9b8ae2aa336aceb530"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/243-toolcallauthrequired-full-lifecycle-running-authrequired-running-completed.json",
+      "bytes": 2971,
+      "sha256": "297b96d0a6d3610795a24669b42015aa5baf7fc02212656a3d722b0837c71bac"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/243-toolcallready-ignores-finished-tool-calls.json",
+      "bytes": 2725,
+      "sha256": "a5b83b62d31e619f55efb3b426be5aa6f2cc50392ea1c1f0904a6e6397b395d9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/244-session-workingdirectoryremoved-removes-existing.json",
+      "bytes": 674,
+      "sha256": "4ec623f662080056358d0e0239c1bdb85d41b4347b22a3e5edd8a7db4d71861c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/244-toolcallauthrequired-noop-for-non-mcp-contributor.json",
+      "bytes": 2245,
+      "sha256": "9d7c8eff0d2a97ba7019891200ab2c7f81e02d8f45c4a3b915723ebc2cee975f"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/245-session-workingdirectoryremoved-no-op-when-not-in-set.json",
+      "bytes": 655,
+      "sha256": "4ae4eb297a12d83ba842fd3ca3e37be94ec823080f5c302483c41d84a450d01e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/245-toolcallauthrequired-noop-when-contributor-absent.json",
+      "bytes": 2005,
+      "sha256": "2e697ad5936846012ab72cd998230fb578ab4a14a6753ba699baff8248d55492"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/246-session-workingdirectoryremoved-no-op-when-set-absent.json",
+      "bytes": 539,
+      "sha256": "0d79febd6ee7a431cf5f9dd75d6bb24563005431e5060e53d18fef2d5ae3b520"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/246-toolcallauthrequired-noop-when-not-running.json",
+      "bytes": 2343,
+      "sha256": "49f4592b1935762922cca3c282a98488d8a77d9c6a2834a00082463b0b220130"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/247-chat-workingdirectoryset-adds-to-empty-set.json",
+      "bytes": 602,
+      "sha256": "c92f41b82daa5566355f918cdd0abd9db6ff50a68b39387485e929ca7fd24999"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/247-toolcallauthresolved-noop-when-not-auth-required.json",
+      "bytes": 2213,
+      "sha256": "fef8368281c08b5854e1345c5ee2a85cf29c01fae68a617b7383661c02a4a546"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/248-chat-workingdirectoryset-appends-to-existing-set.json",
+      "bytes": 690,
+      "sha256": "0e4e8f290d14cd8b0e88ada63f5abdad61101ee0c1c16241184616fae8e39a6d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/248-toolcallauthrequired-sets-input-needed-status-and-preserves-metadata.json",
+      "bytes": 3730,
+      "sha256": "7a49eec145c396f43392f3d729160e879564963ff3954a845e6b96513640235c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/249-chat-workingdirectoryset-no-op-when-already-present.json",
+      "bytes": 669,
+      "sha256": "14acf34b4b76428055ccaf98078d07e6ad295727c1131a5feae9cdd1cba9303c"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/249-toolcallauthresolved-preserves-fields-and-clears-input-needed.json",
+      "bytes": 3470,
+      "sha256": "57277b99f1436c78b97d8d71cbd1b6b04800ce7c0832b610091bf9aed60686ee"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/250-chat-workingdirectoryremoved-removes-existing.json",
+      "bytes": 691,
+      "sha256": "4e6123cfbec8287b56859ea2e96760172bf1a1be0b1c206003377bed285c5d74"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/250-turncomplete-force-cancels-auth-required-tool-call.json",
+      "bytes": 2612,
+      "sha256": "c81eff0f72340538fa3d0c8a47c55abf9fc6e1c8428f1ad18b2de505e0815997"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/251-chat-workingdirectoryremoved-no-op-when-not-in-set.json",
+      "bytes": 672,
+      "sha256": "ea380936b036b38c382af2587431114b3ac367d564e1c213d49723aceae27643"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/251-session-inputneededset-appends-tool-authentication.json",
+      "bytes": 3084,
+      "sha256": "da482e51746075748cd981a3257271a0de7167e4b4e1727e6e2c24d44b53049e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/252-chat-workingdirectoryremoved-no-op-when-set-absent.json",
+      "bytes": 556,
+      "sha256": "3cbb769cbff372abfa399c95644a1ee5eb1592b5a196080a29f7c6518b733ca8"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/252-session-inputneededremoved-removes-tool-authentication.json",
+      "bytes": 1448,
+      "sha256": "329760eacd884fdabd243eebd32c906674053b45071cce64acb29d1f3828dbe9"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/253-toolcallcomplete-cancels-auth-required-tool-call.json",
+      "bytes": 4304,
+      "sha256": "eb5cb53ca5f6e668cb905a6423381b8f611fb3fd431d1eec879dc765e54c4383"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/254-toolcallcomplete-ignores-successful-result-from-auth-required.json",
+      "bytes": 4415,
+      "sha256": "72055e026ff90324b97ad6cdd49fef2c3cb41e54d5887ef01cacad08cad64563"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/255-toolcallcomplete-ignores-requiresresultconfirmation-when-cancelling-auth-required.json",
+      "bytes": 4440,
+      "sha256": "a2c1b5a1aebbfe4fe477584b75a12e846fa0d11bca87ae4a2645c3260daac1f6"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/256-session-chatadded-preserves-sidechat-selection.json",
+      "bytes": 1329,
+      "sha256": "a94eb9024d95284d082819d52bfe3e9aa536374c344978cc358d9d9312048984"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/257-toolcallready-refines-metadata-without-changing-client-ownership.json",
+      "bytes": 6283,
+      "sha256": "d1ce1da54ecd17ef84de63d826e5e418a91f3f252e9161bf779eb8a663ef0110"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/260-edited-tool-input-survives-reconfirmation.json",
+      "bytes": 2421,
+      "sha256": "a9a6ea77f4535ee69d75549eaf49b9e3ae7aea0b8ef20f6dbb1a49daa80620a7"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/261-session-inputneededset-client-execution-keeps-inprogress.json",
+      "bytes": 1670,
+      "sha256": "48fca79778883353ad9fc10a617432b25264cdd65d3cc4cfe7e214268af6a065"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/262-session-inputneededremoved-client-execution-remains-inprogress.json",
+      "bytes": 1950,
+      "sha256": "8db82a19e01d0fea8fb307e55a698000c7d2fe5193caf180d8d03490053b235d"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/263-session-customizationtoggled-clears-enablement.json",
+      "bytes": 1295,
+      "sha256": "b098cd58a62997ec18a3638c2461e531453d5800e3eec2a299afbcfa33ac0c64"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/264-session-workingdirectoryreplaced-no-op-when-absent.json",
+      "bytes": 605,
+      "sha256": "028c29dc0085d47fd75dfe96c2f0d006b5808c50d30db0047a3d5cd97392caa6"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/266-session-workingdirectoryreplaced-no-op-when-directory-is-absent.json",
+      "bytes": 762,
+      "sha256": "f51e13fdc27264c308dd55a0f68bde7dcfc7b8670a0d24b3a59235b858898969"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/267-session-workingdirectoryreplaced-replaces-and-deduplicates.json",
+      "bytes": 801,
+      "sha256": "4c5f814499434ce6548eb30cad7e6c3cfd59c2cd78fe3d41b6467b605b631b38"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/268-session-workingdirectoryreplaced-replaces-primary.json",
+      "bytes": 778,
+      "sha256": "9d0b3b0820314015341a35e23450e0bd3837407d7bff704795c8161b7b4f847e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/269-session-workingdirectoryreplaced-replaces-non-primary.json",
+      "bytes": 808,
+      "sha256": "8b45c930c37b3c771e0ef7bba692bba3586a02d11b614adcf6af3b773e1deb4e"
+    },
+    {
+      "path": "upstream/types/test-cases/reducers/270-session-workingdirectoryreplaced-deduplicates-earlier-replacement.json",
+      "bytes": 796,
+      "sha256": "8853212e997b184ff78ae5b9c9723602fde94a8e2c9ad2229d844da92c1b4c7f"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/001-action-envelope-session-title-changed.json",
+      "bytes": 769,
+      "sha256": "f1b6f1015fd1c2e6e8338941b6f0cf2b8b42dd0f1cf0bb6a795c033adfb37944"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/002-state-action-unknown-variant-preserved.json",
+      "bytes": 382,
+      "sha256": "3598ac843f4fe26abea324ca124cea3db28a4d2027089e760f0188dc5575fbdf"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/003-customization-unknown-type-preserved.json",
+      "bytes": 476,
+      "sha256": "426bf0b734062209359d05428c909d33894e55fd05e4dc9c0d414fba0c20b768"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/004-session-status-bitset-flags.json",
+      "bytes": 281,
+      "sha256": "d02af62736a6f472144cea3ca22f37e87ae97b540216ff0acb2e1d3ab48d4bb3"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/005-session-status-unknown-bits-preserved.json",
+      "bytes": 322,
+      "sha256": "d6d314e40f1904071585994f30b0d878450ff4cd18305f6ceedb0b1b5e1d3ae6"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/006-string-or-markdown-plain.json",
+      "bytes": 268,
+      "sha256": "0171d6867ff5de056ba834f2aed48c3e13c1d5ac6bb40042b7f7c5bb4b4b1417"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/007-string-or-markdown-object.json",
+      "bytes": 303,
+      "sha256": "ad09530e9e12d7ea84e34e3b8ac3c6f11283330541fddc53200b3e50c5af28f1"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/008-jsonrpc-request.json",
+      "bytes": 421,
+      "sha256": "fdea0126a088ae16b4a0cf7aab83c5cfb3dd10693c916ed67877ea64b6f85050"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/009-jsonrpc-notification.json",
+      "bytes": 402,
+      "sha256": "e87d49a00b081e87d004234e237e281219c2883290932043b0b7f68a9fb5e05e"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/010-jsonrpc-success.json",
+      "bytes": 365,
+      "sha256": "4c65c1d07049493eaec07ca94d05f6478e77c89b27aa08815634178751523bab"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/011-jsonrpc-error.json",
+      "bytes": 460,
+      "sha256": "cec7f851ea7c599a39d77da2987854b13adbcfff667e48517c2a252291066440"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/012-changeset-target-resource.json",
+      "bytes": 461,
+      "sha256": "9e99fcf34bdd90c29463403eae2111b6353c365c82e60e8cc93366e75c4ffd16"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/013-changeset-target-range.json",
+      "bytes": 679,
+      "sha256": "5729c1e1eca97814713faa3ed81f994d29f92f04b4cbcaed59a0af105099264f"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/014-session-input-question-number.json",
+      "bytes": 484,
+      "sha256": "0523f0a81976c31b77535fe58d78607ca492ba6c35f63775393b930377099f76"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/015-session-input-question-integer.json",
+      "bytes": 532,
+      "sha256": "35a2ae92dcca8361973b1dfa823b3f4cf80d458db1b2d94c66d5e83756bd3562"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/016-long-above-int32-max-preserved.json",
+      "bytes": 726,
+      "sha256": "3a1b9162d7a57fb29858965d88865c6ddec2be20ce21721d84158eefd5909cbf"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/017-unknown-wire-keys-ignored.json",
+      "bytes": 1521,
+      "sha256": "3a38e42589cf2bb494b28fa236a4dc4493cba4f36673a17c2a2ceaa296932433"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/018-nested-optional-null-round-trip.json",
+      "bytes": 734,
+      "sha256": "5193da3ff0b2f4b40786ae14bae0f7e16c2b92d29961a0ce9e295d361afa569e"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/019-channel-scoped-notification-uri.json",
+      "bytes": 1721,
+      "sha256": "f793f944210246eabbeec61f51dad60e7206191f4037c4474aa17d673e19eb7f"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/020-partial-summary-all-null.json",
+      "bytes": 322,
+      "sha256": "dc0871a659584d033326c99915d4ca85609c4dfcdd4b1965c2bec0b8346a2b45"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/024-changeset-changekind-known-and-unknown.json",
+      "bytes": 1262,
+      "sha256": "d24ad3c0dcffe8f0c49b2df44bbe38c28dcd7fd6998cd35b81972e7d001e3da3"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/025-action-envelope-origin-absent.json",
+      "bytes": 795,
+      "sha256": "5cdc1d1f821b989a377e4e7baa643d84b1495158cee24403b22cede3f4b11ab6"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/026-action-envelope-origin-present.json",
+      "bytes": 669,
+      "sha256": "6ab4a3fd781106c4f0bccc88d8730ccc4fac651fcc5294f26743fa5701c4dbb0"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/027-agent-customization-model-and-tools.json",
+      "bytes": 1323,
+      "sha256": "4c20c03ee649fa1de6ca69ffb174ced0c670e47d1315b91405005d7a9ca6d12c"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/028-implementation-identity.json",
+      "bytes": 581,
+      "sha256": "63027e939e062e23a249d0b91968e2b615d600261dc086664be31c3e6d743b25"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/029-initialize-terminal-command-prefix.json",
+      "bytes": 813,
+      "sha256": "9ad5c7b6aa7c9be3d9868c0e2df4c42e7db070b4deb2d4ea1733e7c27994eced"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/030-agent-side-chat-capability.json",
+      "bytes": 1373,
+      "sha256": "25b7e1cdbe20bce540b273f509bf741cfd93894dc74d8a36aa88634bb4dd547d"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/030-terminal-content-ispty.json",
+      "bytes": 1043,
+      "sha256": "385d49350d416215b3afb2743ce94876ce07896f68e99b02191938e4e66d7257"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/031-side-chat-origin.json",
+      "bytes": 901,
+      "sha256": "4053ce2f0a81c2bc3baf537b7bb3bf78b9eefc81c00b76a1f8199bd7295fe734"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/031-terminal-content-completed.json",
+      "bytes": 1342,
+      "sha256": "61c37b59c82112d83c1b607bbaa9a36a0d26aaabe24b0b93030e3da6f9805ff3"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/032-chat-transcript-attachment.json",
+      "bytes": 1140,
+      "sha256": "fb0e5b1c52295412c5cfeb2bc80ffedcf4a38b7afca33a666fd27e41faedf503"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/033-chat-source-side-chat.json",
+      "bytes": 431,
+      "sha256": "67a42f7f117908a6237e1691ce3a6149e62c7e0c52f5f99884962ac00a360bab"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/034-side-chat-origin-active.json",
+      "bytes": 951,
+      "sha256": "100120d659c8ade253b1392d24737cec86453b185a16197079298203b25f5265"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/035-chat-source-side-chat-active.json",
+      "bytes": 474,
+      "sha256": "3403767082476b44fb35688db37e8879d5aefc2400495c5795033ca157a817e6"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/036-chat-source-fork.json",
+      "bytes": 418,
+      "sha256": "d8d737a9749514a6af152426cd210227566d5b222b60e4b9d795e3b16a0eee79"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/037-chat-origin-fork.json",
+      "bytes": 886,
+      "sha256": "21bc208452cb5082120238eb70e22c541a7039d3163677bd1e3d655bd0cf3461"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/038-chat-source-side-chat-selection.json",
+      "bytes": 651,
+      "sha256": "aa514f2d604f21a8b35fa62b83de9398f682bc976cec3efeea45815cc24d45bc"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/039-side-chat-origin-selection.json",
+      "bytes": 1188,
+      "sha256": "ccbd1947ec17b16864d66bb55b30376fa926f04a37b49e60c6036b6909324686"
+    },
+    {
+      "path": "upstream/types/test-cases/round-trips/040-chat-transcript-attachment-latest-turn.json",
+      "bytes": 1131,
+      "sha256": "0f44bce9cadea9eff02e8d831e82dbcf0d8683c6c0237826fa98e79b65105e4e"
+    },
+    {
+      "path": "upstream/types/version/message-checks.ts",
+      "bytes": 5045,
+      "sha256": "325198877f5daecd528203ced9ce36340e25538fc18baf806ccb6e55822ae408"
+    },
+    {
+      "path": "upstream/types/version/registry.ts",
+      "bytes": 9048,
+      "sha256": "303e452526110a3966353abfc72e82712cabb33d3b27a2c122da86825b6a2253"
+    }
+  ]
+}

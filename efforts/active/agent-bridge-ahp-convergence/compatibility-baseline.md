@@ -25,9 +25,11 @@ the REST API:
 
 The first target is the released
 [AHP 0.8.0 tag](https://github.com/microsoft/agent-host-protocol/tree/v0.8.0).
-It is explicitly a working draft. Current development toward 1.0 changes
-fork/resume and other semantics, so the host must negotiate a version and keep
-version-specific schemas isolated.
+It is explicitly a working draft. AHP 0.9.0 was released after this target was
+reviewed; the first implementation slice deliberately stays on 0.8.0. The host
+must negotiate a version and keep version-specific schemas isolated, and no
+0.9.0 or later behavior may enter the 0.8.0 codec without a separate
+compatibility review.
 
 Phase 0 freezes the tagged generated JSON schemas, exported method maps, and
 reducer fixtures as wire-compatibility inputs, with tagged prose supplying
@@ -35,6 +37,11 @@ behavioral intent. Any disagreement blocks implementation until the effort
 records a deliberate compatibility decision. One known example already needs
 that treatment: the tagged chat-channel prose says no `disposeChat` command
 exists while the tagged command types expose one.
+
+The frozen corpus, SHA-256 manifest, complete method classification, named
+capability and state-prerequisite policy, and exception ledger are maintained
+under
+[`plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/`](../../../plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/).
 
 AHP requires reliable ordered bidirectional delivery, but does not mandate
 WebSocket, TCP, process discovery, a graphical client, Git worktrees, task

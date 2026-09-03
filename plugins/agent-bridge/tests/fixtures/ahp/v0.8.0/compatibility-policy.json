@@ -1,0 +1,375 @@
+{
+  "schemaVersion": 1,
+  "contract": {
+    "name": "Agent Host Protocol",
+    "selectedVersion": "0.8.0",
+    "sourceRepository": "https://github.com/microsoft/agent-host-protocol",
+    "sourceTag": "v0.8.0",
+    "sourceCommit": "7153143f1c6993fa886d7d59870811cdad479d83",
+    "acceptedProtocolVersions": [
+      "0.8.0"
+    ],
+    "observedLaterRelease": "0.9.0",
+    "decision": "retain-0.8.0",
+    "rationale": [
+      "The reviewed first implementation slice targets the released 0.8.0 contract.",
+      "Adopting 0.9.0 requires a separate compatibility review and version-specific codec update.",
+      "No field, method, action, or reducer behavior may be borrowed from another AHP version."
+    ],
+    "upgradeGate": "Pin the new tag and commit, regenerate this policy and manifest, review the semantic delta, and add a separate codec before advertising another version."
+  },
+  "authority": {
+    "sourceAuthorities": [
+      {
+        "source": "tagged-source-commit",
+        "authority": "Defines the complete corpus boundary."
+      },
+      {
+        "source": "generated-json-schemas-and-exported-message-maps",
+        "authority": "Define wire vocabulary and JSON shape."
+      },
+      {
+        "source": "reducer-and-round-trip-fixtures",
+        "authority": "Define state-transition and codec expectations."
+      },
+      {
+        "source": "tagged-specification",
+        "authority": "Defines behavioral intent and interoperability requirements."
+      },
+      {
+        "source": "sdk-release-metadata",
+        "authority": "Confirms released package and protocol-version alignment."
+      }
+    ],
+    "conflictPolicy": {
+      "default": "block",
+      "resolution": "adjudicated-exception",
+      "rule": "Overlapping sources that disagree do not silently override one another. Runtime implementation remains blocked until an explicit exception records the selected behavior."
+    }
+  },
+  "surfaceClassifications": {
+    "clientCommands": {
+      "baseline": [
+        "initialize",
+        "ping",
+        "reconnect",
+        "subscribe",
+        "createSession",
+        "disposeSession",
+        "listSessions"
+      ],
+      "named-capability": [
+        "createChat"
+      ],
+      "state-prerequisite": [
+        "createTerminal",
+        "disposeTerminal",
+        "createResourceWatch",
+        "resourceRead",
+        "resourceWrite",
+        "resourceList",
+        "resourceCopy",
+        "resourceDelete",
+        "resourceMove",
+        "resourceResolve",
+        "resourceMkdir",
+        "resourceRequest",
+        "fetchTurns",
+        "authenticate",
+        "resolveSessionConfig",
+        "sessionConfigCompletions",
+        "completions",
+        "invokeChangesetOperation"
+      ],
+      "adjudicated-exception": [
+        "disposeChat"
+      ],
+      "x-extension": [],
+      "version-sensitive": [],
+      "explicitly-out-of-scope": []
+    },
+    "serverCommands": {
+      "baseline": [],
+      "named-capability": [],
+      "state-prerequisite": [
+        "resourceRead",
+        "resourceWrite",
+        "resourceList",
+        "resourceCopy",
+        "resourceDelete",
+        "resourceMove",
+        "resourceResolve",
+        "resourceMkdir",
+        "resourceRequest",
+        "createResourceWatch"
+      ],
+      "adjudicated-exception": [],
+      "x-extension": [],
+      "version-sensitive": [],
+      "explicitly-out-of-scope": []
+    },
+    "clientNotifications": {
+      "baseline": [
+        "unsubscribe"
+      ],
+      "named-capability": [],
+      "state-prerequisite": [
+        "dispatchAction"
+      ],
+      "adjudicated-exception": [],
+      "x-extension": [],
+      "version-sensitive": [],
+      "explicitly-out-of-scope": []
+    },
+    "serverNotifications": {
+      "baseline": [
+        "action",
+        "root/sessionAdded",
+        "root/sessionRemoved",
+        "root/sessionSummaryChanged"
+      ],
+      "named-capability": [],
+      "state-prerequisite": [
+        "root/progress",
+        "auth/required",
+        "otlp/exportLogs",
+        "otlp/exportTraces",
+        "otlp/exportMetrics"
+      ],
+      "adjudicated-exception": [],
+      "x-extension": [],
+      "version-sensitive": [],
+      "explicitly-out-of-scope": []
+    }
+  },
+  "namedCapabilities": [
+    {
+      "path": "AgentCapabilities.multipleChats",
+      "status": "deferred",
+      "constraint": "Must remain absent until the disposeChat contradiction is re-adjudicated."
+    },
+    {
+      "path": "AgentCapabilities.multipleChats.fork",
+      "status": "deferred",
+      "constraint": "May not be advertised without multipleChats and an implemented fork codec."
+    },
+    {
+      "path": "AgentCapabilities.multipleChats.sideChat",
+      "status": "deferred",
+      "constraint": "May not be advertised without multipleChats and implemented side-chat semantics."
+    },
+    {
+      "path": "AgentCapabilities.multipleWorkingDirectories",
+      "status": "later-phase",
+      "constraint": "Advertise only when directory grants and mutation semantics are implemented."
+    },
+    {
+      "path": "AgentCapabilities.multipleWorkingDirectories.immutablePrimary",
+      "status": "later-phase",
+      "constraint": "Advertise only with protected primary-directory enforcement."
+    },
+    {
+      "path": "AgentCapabilities.multipleWorkingDirectories.primaryReplacement",
+      "status": "later-phase",
+      "constraint": "Advertise only with atomic primary replacement."
+    },
+    {
+      "path": "ClientCapabilities.mcpApps",
+      "status": "client-declared",
+      "constraint": "MCP App customizations and channels require this exact client capability."
+    },
+    {
+      "path": "McpServerCustomizationApps.capabilities.serverTools",
+      "status": "later-phase",
+      "constraint": "Advertise only when the host proxies MCP tools/list and tools/call."
+    },
+    {
+      "path": "McpServerCustomizationApps.capabilities.serverTools.listChanged",
+      "status": "later-phase",
+      "constraint": "Advertise only when MCP tools list-change notifications are forwarded."
+    },
+    {
+      "path": "McpServerCustomizationApps.capabilities.serverResources",
+      "status": "later-phase",
+      "constraint": "Advertise only when the host proxies MCP resource read, list, and template operations."
+    },
+    {
+      "path": "McpServerCustomizationApps.capabilities.serverResources.listChanged",
+      "status": "later-phase",
+      "constraint": "Advertise only when MCP resource list-change notifications are forwarded."
+    },
+    {
+      "path": "McpServerCustomizationApps.capabilities.logging",
+      "status": "later-phase",
+      "constraint": "Advertise only when MCP App log notifications and level changes are forwarded."
+    },
+    {
+      "path": "McpServerCustomizationApps.capabilities.sampling",
+      "status": "later-phase",
+      "constraint": "Advertise only when sampling/createMessage is served through the AHP MCP channel."
+    },
+    {
+      "path": "McpServerCustomizationApps.capabilities.sampling.tools",
+      "status": "later-phase",
+      "constraint": "Advertise only when sampling accepts the corresponding tool content blocks."
+    },
+    {
+      "path": "ChangesetCapabilities.review",
+      "status": "later-phase",
+      "constraint": "Advertise only with per-file review-state support."
+    }
+  ],
+  "statePrerequisites": [
+    {
+      "kind": "optional-state",
+      "path": "InitializeResult.telemetry.logs",
+      "surfaces": [
+        "otlp/exportLogs"
+      ]
+    },
+    {
+      "kind": "optional-state",
+      "path": "InitializeResult.telemetry.traces",
+      "surfaces": [
+        "otlp/exportTraces"
+      ]
+    },
+    {
+      "kind": "optional-state",
+      "path": "InitializeResult.telemetry.metrics",
+      "surfaces": [
+        "otlp/exportMetrics"
+      ]
+    },
+    {
+      "kind": "optional-state-or-live-notification",
+      "path": "AgentInfo.protectedResources",
+      "surfaces": [
+        "authenticate",
+        "auth/required"
+      ]
+    },
+    {
+      "kind": "optional-state",
+      "path": "RootState.terminals",
+      "surfaces": [
+        "createTerminal",
+        "disposeTerminal"
+      ]
+    },
+    {
+      "kind": "runtime-context",
+      "path": "Selected agent provider and working directory",
+      "surfaces": [
+        "resolveSessionConfig"
+      ]
+    },
+    {
+      "kind": "optional-schema",
+      "path": "SessionConfigProperty.enumDynamic",
+      "surfaces": [
+        "sessionConfigCompletions"
+      ]
+    },
+    {
+      "kind": "optional-state",
+      "path": "InitializeResult.completionTriggerCharacters",
+      "surfaces": [
+        "completions"
+      ]
+    },
+    {
+      "kind": "optional-state",
+      "path": "SessionState.changesets",
+      "surfaces": [
+        "invokeChangesetOperation"
+      ]
+    },
+    {
+      "kind": "optional-state",
+      "path": "ChatState.nextCursor",
+      "surfaces": [
+        "fetchTurns"
+      ]
+    },
+    {
+      "kind": "runtime-context",
+      "path": "Advertised resource URIs and authorization",
+      "surfaces": [
+        "createResourceWatch",
+        "resourceRead",
+        "resourceWrite",
+        "resourceList",
+        "resourceCopy",
+        "resourceDelete",
+        "resourceMove",
+        "resourceResolve",
+        "resourceMkdir",
+        "resourceRequest"
+      ]
+    },
+    {
+      "kind": "runtime-context",
+      "path": "A live subscription to the target channel",
+      "surfaces": [
+        "dispatchAction"
+      ]
+    },
+    {
+      "kind": "request-context",
+      "path": "A request progress token",
+      "surfaces": [
+        "root/progress"
+      ]
+    }
+  ],
+  "extensions": {
+    "reservedPrefix": "x-",
+    "status": "no-extensions-in-first-slice",
+    "rule": "An extension requires prior peer agreement and a separately documented negotiation mechanism. It may not masquerade as a core capability."
+  },
+  "exceptions": [
+    {
+      "id": "dispose-chat-tagged-source-contradiction",
+      "surface": "disposeChat",
+      "classification": "adjudicated-exception",
+      "sources": [
+        "upstream/types/common/messages.ts",
+        "upstream/types/version/message-checks.ts",
+        "upstream/docs/specification/chat-channel.md"
+      ],
+      "decision": {
+        "wireVocabulary": "recognized",
+        "runtimeHandler": "not-implemented",
+        "response": "JSON-RPC MethodNotFound",
+        "capabilityConstraint": "AgentCapabilities.multipleChats remains absent."
+      },
+      "revisitGate": "A later reviewed compatibility decision resolves lifecycle semantics for additional chats."
+    }
+  ],
+  "explicitlyOutOfScope": [
+    "Registering or exposing an AHP runtime endpoint.",
+    "Implementing the connection, ordering, replay, or outbox kernel.",
+    "Migrating existing session lifecycle authority.",
+    "Advertising native-host federation or automation extensions."
+  ],
+  "conformance": {
+    "officialClientCandidates": [
+      "go",
+      "kotlin",
+      "rust",
+      "swift",
+      "typescript"
+    ],
+    "independentServerInPinnedCorpus": null,
+    "offlineContractChecks": [
+      "artifact-hashes",
+      "schema-json",
+      "method-map-exhaustiveness",
+      "reducer-fixture-shapes",
+      "round-trip-fixture-shapes",
+      "sdk-release-metadata"
+    ],
+    "runtimeProbeGate": "Before enabling a runtime endpoint, exercise it with at least two independently generated official SDK clients. Add the reverse client-to-independent-server probe when a suitable server implementation is available."
+  }
+}

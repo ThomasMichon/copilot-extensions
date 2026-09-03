@@ -117,6 +117,10 @@ jobs:
         run: python tools/check-docs-consistency.py
       - name: Runbook references
         run: python tools/check-runbook-references.py
+      - name: Trusted self-hosted CI contract
+        run: >-
+          python tools/check-trusted-ci.py &&
+          python -m pytest -q tools/test_check_trusted_ci.py
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --
