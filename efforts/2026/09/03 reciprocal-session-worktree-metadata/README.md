@@ -4,9 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase worktrees landed serially to `main`
 - **Created:** 2026-09-01
-- **Status:** Active
+- **Status:** Done
 - **Vision:** vision-extending for
-  [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
+  [`visions/plugins/agent-worktrees`](../../../../visions/plugins/agent-worktrees/README.md)
   - reciprocal session projections and controller-aware recovery
 - **Umbrella issue:** [#1635](https://github.com/ThomasMichon/copilot-extensions/issues/1635)
 - **Sub-issues:** [#1643](https://github.com/ThomasMichon/copilot-extensions/issues/1643)
@@ -185,7 +185,7 @@ Public-safe transcription of the operator request:
       counts.
 - [x] Validate Linux, Windows, remote-control, handoff, and synchronized-session
       scenarios.
-- [ ] Carve and close phase-specific issues; archive the effort only after the
+- [x] Carve and close phase-specific issues; archive the effort only after the
       implementation and documentation match the revised vision.
 
 ## Validation Plan
@@ -419,3 +419,17 @@ Adopt the authority and schema model in [`design.md`](design.md):
   suite passed on POSIX with 3,729 tests and 17 skips. The complete Windows
   suite passed with 3,706 tests and 40 skips after correcting one unrelated
   platform-mocked runtime-installer fixture.
+
+### 2026-09-03 - Rollout complete
+- Cross-platform hardening and convergence evidence landed through #1851.
+  Schema v2 writer emission, migration, and the remaining validation matrix
+  landed through #1866.
+- The merged marketplace advanced to agent-worktrees `1.5.3-dev745` before
+  deployment. The observed Windows and POSIX writer environments both report
+  schema version 2; unobserved downstream environments remain owned by their
+  transferred private objectives.
+- Closed #1712 after every phase issue and validation item was resolved. The
+  reciprocal projection now remains a bounded, rebuildable convenience layer:
+  worktree records stay authoritative, mixed-version writers fail safely, and
+  incomplete history is represented explicitly rather than inferred.
+- Status is Done and the effort is ready for the dated archive.
