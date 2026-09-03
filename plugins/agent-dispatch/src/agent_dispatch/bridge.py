@@ -13,7 +13,7 @@ import json
 import shlex
 import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from . import remote_dispatch
 from .procutil import (
@@ -102,6 +102,8 @@ def spawn_worker(
     worker_id: str,
     prompt: str | None = None,
     route: str = "",
+    target_dir: str | None = None,
+    worktree_id: str | None = None,
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
@@ -134,12 +136,76 @@ def spawn_worker(
     cmd = [*exe]
     if json_output:
         cmd.append("--json")
-    cmd += ["create", agent, prompt]
+    cmd += ["create"]
+    if target_dir:
+        cmd += ["--target-dir", target_dir]
+    if worktree_id:
+        cmd += ["--worktree-id", worktree_id]
+    cmd += [agent, prompt]
     if not wait:
         cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
+    )
+
+
+def spawn_or_resume_worker(
+    task_id: str,
+    *,
+    agent: str = DEFAULT_WORKER_AGENT,
+    worker_id: str,
+    prompt: str,
+    prior_session_id: str | None = None,
+    liveness_fn: Callable[[str], str] | None = None,
+    target_dir: str | None = None,
+    worktree_id: str | None = None,
+    wait: bool = True,
+    json_output: bool = False,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess:
+    """Resume a carried bridge session when safe, otherwise create one.
+
+    Unknown liveness and a live session that rejects the prompt both fail
+    closed. A confirmed-gone session is offered one resume attempt first because
+    a stopped ACP session remains reusable; only a failed resume after a
+    confirmed-gone verdict permits creating a replacement.
+    """
+    if prior_session_id:
+        verdict = liveness_fn(prior_session_id) if liveness_fn else "unknown"
+        if verdict == "unknown":
+            raise BridgeUnavailable(
+                f"could not determine carried session liveness: {prior_session_id}"
+            )
+        if resume_worker(
+            prior_session_id,
+            prompt,
+            wait=wait,
+            timeout=timeout,
+        ):
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=json.dumps(
+                    {"session_id": prior_session_id, "reused": True}
+                ),
+                stderr="",
+            )
+        if verdict != "gone":
+            raise BridgeUnavailable(
+                f"carried session remains live and cannot accept work: "
+                f"{prior_session_id}"
+            )
+    return spawn_worker(
+        task_id,
+        agent=agent,
+        worker_id=worker_id,
+        prompt=prompt,
+        target_dir=target_dir,
+        worktree_id=worktree_id,
+        wait=wait,
+        json_output=json_output,
+        timeout=timeout,
     )
 
 
@@ -179,14 +245,18 @@ def resume_worker(
     session_id: str,
     prompt: str,
     *,
+    wait: bool = False,
     timeout: float | None = 20.0,
 ) -> bool:
     """Resume an existing stopped ACP session and enqueue its next task turn."""
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
+    cmd = [*exe, "send", session_id, "--prompt-file", "-"]
+    if not wait:
+        cmd.append("--no-wait")
     completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
-        [*exe, "send", session_id, "--prompt-file", "-", "--no-wait"],
+        cmd,
         input=prompt,
         check=False,
         capture_output=True,

@@ -315,10 +315,20 @@ def test_mcp_create_visible_over_rest(coord):
     import json
 
     res = asyncio.new_event_loop().run_until_complete(
-        _call(coord, "dispatch_create", {"title": "via mcp", "dedup_key": "m1", "repo": TEST_REPO})
+        _call(
+            coord,
+            "dispatch_create",
+            {
+                "title": "via mcp",
+                "dedup_key": "m1",
+                "exclusive_key": "resource:42",
+                "repo": TEST_REPO,
+            },
+        )
     )
     task = json.loads(res.content[0].text)
     assert task["status"] == Status.QUEUED
+    assert task["exclusive_key"] == "resource:42"
     # the REST client sees the same task
     got = DispatchClient(coord).get(task["id"])
     assert got["title"] == "via mcp"

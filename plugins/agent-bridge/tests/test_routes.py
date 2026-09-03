@@ -636,7 +636,7 @@ class TestSessionRoutes:
 
         mock_resolver = MagicMock()
         mock_resolver.resolve_async = AsyncMock(return_value=SpawnTarget(
-            type="local", cwd="/original/dir",
+            type="local", cwd="/original/dir", project="test-project",
         ))
         app.state.resolver = mock_resolver
 
@@ -672,6 +672,8 @@ class TestSessionRoutes:
         spawn_call = mock_spawn.call_args
         target = spawn_call.args[0]
         assert target.cwd == "/worktree/path"
+        assert target.project == "test-project"
+        assert target.explicit_cwd is True
 
     @patch("agent_bridge.session_manager.spawn")
     @patch("agent_bridge.session_manager.AcpClient")

@@ -394,6 +394,10 @@ class Task:
     #: terminal tasks stamped with their own identity; worker pools remain
     #: ordinary filters and never own domain judgment.
     evaluator_ref: str | None = None
+    #: Logical resource identity whose spawned worker must be singular across
+    #: task episodes. Distinct from ``dedup_key``, which identifies one exact
+    #: task create request.
+    exclusive_key: str | None = None
     dedup_key: str | None = None
     #: Bounded coordinator-owned create authority metadata. ``None`` preserves
     #: legacy/unmanaged create behavior. The nested scope is one exact canonical
@@ -491,6 +495,7 @@ class Task:
             source=row["source"],
             origin_ref=row["origin_ref"],
             evaluator_ref=row["evaluator_ref"],
+            exclusive_key=row["exclusive_key"],
             dedup_key=row["dedup_key"],
             producer_fence=(
                 json.loads(row["producer_fence"])
@@ -629,11 +634,13 @@ class SpawnReservation:
 
     key: str
     task_id: str
+    exclusive_key: str | None
     attempt: int
     state: str
     reserved_by: str | None = None
     session_handle: str | None = None
     worktree: str | None = None
+    release_requested: bool = False
     detail: str | None = None
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
@@ -645,11 +652,13 @@ class SpawnReservation:
         return cls(
             key=row["key"],
             task_id=row["task_id"],
+            exclusive_key=row["exclusive_key"],
             attempt=row["attempt"],
             state=row["state"],
             reserved_by=row["reserved_by"],
             session_handle=row["session_handle"],
             worktree=row["worktree"],
+            release_requested=bool(row["release_requested"]),
             detail=row["detail"],
             conclusion_state=row["conclusion_state"],
             conclusion_detail=row["conclusion_detail"],
@@ -739,6 +748,7 @@ _COLUMNS: dict[str, str] = {
     "target_repo": "TEXT",
     "source": "TEXT",
     "origin_ref": "TEXT",
+    "exclusive_key": "TEXT",
     "dedup_key": "TEXT",
     "producer_fence": "TEXT",
     "producer_request_hash": "TEXT",
@@ -1036,11 +1046,13 @@ class TaskQueue:
                 "CREATE TABLE IF NOT EXISTS spawn_reservations ("
                 "  key TEXT PRIMARY KEY,"
                 "  task_id TEXT NOT NULL,"
+                "  exclusive_key TEXT,"
                 "  attempt INTEGER NOT NULL,"
                 "  state TEXT NOT NULL,"
                 "  reserved_by TEXT,"
                 "  session_handle TEXT,"
                 "  worktree TEXT,"
+                "  release_requested INTEGER NOT NULL DEFAULT 0,"
                 "  detail TEXT,"
                 "  conclusion_state TEXT,"
                 "  conclusion_detail TEXT,"
@@ -1072,6 +1084,30 @@ class TaskQueue:
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
+            if "exclusive_key" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN exclusive_key TEXT"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            if "release_requested" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN release_requested INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            conn.execute(
+                "UPDATE spawn_reservations SET exclusive_key = ("
+                " SELECT exclusive_key FROM tasks"
+                " WHERE tasks.id = spawn_reservations.task_id"
+                ") WHERE exclusive_key IS NULL"
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_spawn_res_task "
                 "ON spawn_reservations(task_id)"
@@ -1079,6 +1115,12 @@ class TaskQueue:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_spawn_res_state "
                 "ON spawn_reservations(state)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_spawn_res_exclusive_active "
+                "ON spawn_reservations(exclusive_key) "
+                "WHERE exclusive_key IS NOT NULL "
+                "AND state IN ('reserving','spawned','cold')"
             )
             # Recurring-schedule registry -- the persisted form of the timer
             # producer's spec entries, so recurring jobs are managed first-class
@@ -2190,6 +2232,8 @@ class TaskQueue:
         source: str | None = None,
         origin_ref: str | None = None,
         evaluator_ref: str | None = None,
+        exclusive_key: str | None = None,
+        supersede_exclusive_key: bool = False,
         dedup_key: str | None = None,
         producer_scope: Mapping[str, object] | None = None,
         producer_id: str | None = None,
@@ -2234,6 +2278,12 @@ class TaskQueue:
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
+        if exclusive_key is not None:
+            exclusive_key = exclusive_key.strip() or None
+        if supersede_exclusive_key and exclusive_key is None:
+            raise TaskError(
+                "supersede_exclusive_key requires a non-empty exclusive_key"
+            )
         canonical_repo = self._canonical_repo(repo)
         if not canonical_repo:
             raise TaskError(
@@ -2278,7 +2328,7 @@ class TaskQueue:
             else None
         )
         request_hash = None
-        legacy_request_hash = None
+        compatible_request_hashes: set[str | None] = set()
         if fence is not None:
             request_fields = {
                 "title": title,
@@ -2297,6 +2347,7 @@ class TaskQueue:
                 "source": source,
                 "origin_ref": origin_ref,
                 "evaluator_ref": evaluator_ref,
+                "exclusive_key": exclusive_key,
                 "dedup_key": dedup_key,
                 "producer_scope": fence["scope"],
                 "producer_id": fence["producer_id"],
@@ -2305,6 +2356,12 @@ class TaskQueue:
                 "done_criteria": done_criteria,
             }
             request_hash = self._producer_request_hash(request_fields)
+            compatible_request_hashes.add(request_hash)
+            pre_exclusive_fields = dict(request_fields)
+            pre_exclusive_fields.pop("exclusive_key")
+            compatible_request_hashes.add(
+                self._producer_request_hash(pre_exclusive_fields)
+            )
             raw_requires = sorted(set(requires or ()))
             raw_excludes = sorted(set(excludes or ()))
             if (
@@ -2314,7 +2371,13 @@ class TaskQueue:
                 legacy_fields = dict(request_fields)
                 legacy_fields["requires"] = raw_requires
                 legacy_fields["excludes"] = raw_excludes
-                legacy_request_hash = self._producer_request_hash(legacy_fields)
+                compatible_request_hashes.add(
+                    self._producer_request_hash(legacy_fields)
+                )
+                legacy_fields.pop("exclusive_key")
+                compatible_request_hashes.add(
+                    self._producer_request_hash(legacy_fields)
+                )
         ts = self._now(now)
         task_id = uuid.uuid4().hex
         spill_content = (
@@ -2514,10 +2577,7 @@ class TaskQueue:
                             producer_request_id=request_id,
                         )
                     if request is not None:
-                        if request["request_hash"] not in {
-                            request_hash,
-                            legacy_request_hash,
-                        }:
+                        if request["request_hash"] not in compatible_request_hashes:
                             raise ProducerFenceError(
                                 "producer_request_id was already accepted with "
                                 "different canonical create fields",
@@ -2668,14 +2728,48 @@ class TaskQueue:
                         },
                     )
                 if accepted is None:
+                    if supersede_exclusive_key:
+                        superseded = conn.execute(
+                            "SELECT id, status FROM tasks "
+                            "WHERE repo = ? AND exclusive_key = ? "
+                            "AND status IN (?, ?)",
+                            (
+                                canonical_repo,
+                                exclusive_key,
+                                Status.PROPOSED,
+                                Status.QUEUED,
+                            ),
+                        ).fetchall()
+                        for prior in superseded:
+                            conn.execute(
+                                "UPDATE tasks SET status = ?, owner = NULL, "
+                                "lease_expires_at = NULL, activity = NULL, "
+                                "activity_updated_at = ?, updated_at = ? "
+                                "WHERE id = ?",
+                                (
+                                    Status.ABANDONED,
+                                    ts,
+                                    ts,
+                                    prior["id"],
+                                ),
+                            )
+                            self._audit(
+                                conn,
+                                prior["id"],
+                                ts=ts,
+                                from_status=prior["status"],
+                                to_status=Status.ABANDONED,
+                                note=f"superseded by exclusive task {task_id}",
+                            )
                     conn.execute(
                         "INSERT INTO tasks (id, title, prompt, status, repo, requires, excludes,"
                         " affinity, labels, payload_ref, payload_inline, target_machine,"
                         " target_worktree, target_repo,"
-                        " source, origin_ref, evaluator_ref, dedup_key, goal, done_criteria,"
+                        " source, origin_ref, evaluator_ref, exclusive_key, dedup_key,"
+                        " goal, done_criteria,"
                         " producer_fence, producer_request_hash,"
                         " not_before, created_at, updated_at)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             task_id,
                             title,
@@ -2694,6 +2788,7 @@ class TaskQueue:
                             source,
                             origin_ref,
                             evaluator_ref,
+                            exclusive_key,
                             dedup_key,
                             goal,
                             done_criteria,
@@ -3370,8 +3465,9 @@ class TaskQueue:
         """Release a suspended task to ``queued`` for a replacement worker.
 
         Ownership and owner-session identity are cleared, and any active spawn
-        reservation for the former embodiment is released in the same
-        transaction so a supervisor may reserve a replacement.
+        reservation for the former embodiment receives a durable release
+        request in the same transaction. The supervisor settles it only after
+        liveness-safe teardown.
         """
         note = _clip(reason, PROGRESS_SUMMARY_MAX) or "release suspended task"
         return self._transition(
@@ -3390,6 +3486,7 @@ class TaskQueue:
                 "resume_requested": 0,
             },
             release_spawn=True,
+            release_spawn_detail="task released from suspension",
         )
 
     def yield_task(
@@ -3399,6 +3496,7 @@ class TaskQueue:
         *,
         note: str | None = None,
         exclude: str | None = None,
+        release_spawn: bool = True,
         now: float | None = None,
     ) -> Task:
         """Return an owned task to ``queued`` with updates.
@@ -3416,6 +3514,10 @@ class TaskQueue:
         ``agent:<def>`` when it knows the exclusion generalizes). Because excludes
         only ever grow, the candidate set shrinks monotonically: the task either
         finds a taker or becomes unclaimable (surfaced for the operator).
+
+        ``release_spawn`` requests release of the current embodiment; it never
+        settles the reservation inline. The supervisor confirms or performs
+        teardown before making a replacement spawn eligible.
         """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -3460,6 +3562,8 @@ class TaskQueue:
             now=now,
             note=note or "yield",
             extra=extra,
+            release_spawn=release_spawn,
+            release_spawn_detail="task yielded",
         )
 
     def abandon(
@@ -4595,6 +4699,7 @@ class TaskQueue:
         stamp: str | None = None,
         extra: dict[str, object] | None = None,
         release_spawn: bool = False,
+        release_spawn_detail: str = "task released from suspension",
         wake_requested: bool = False,
         wake_message: str | None = None,
         bump_generation: bool = False,
@@ -4674,13 +4779,12 @@ class TaskQueue:
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
             if release_spawn:
                 conn.execute(
-                    "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
-                    " detail = COALESCE(detail, ?) WHERE task_id = ?"
+                    "UPDATE spawn_reservations SET release_requested = 1, "
+                    "updated_at = ?, detail = COALESCE(detail, ?) WHERE task_id = ?"
                     " AND state IN (?, ?, ?)",
                     (
-                        SpawnState.SETTLED,
                         ts,
-                        "task released from suspension",
+                        release_spawn_detail,
                         task_id,
                         SpawnState.RESERVING,
                         SpawnState.SPAWNED,
@@ -4873,13 +4977,30 @@ class TaskQueue:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
             rows = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
+                "SELECT * FROM spawn_reservations WHERE task_id = ? "
+                "ORDER BY attempt ASC",
                 (task_id,),
             ).fetchall()
-            for row in rows:
-                if row["state"] in SpawnState.ACTIVE:
+            if task.exclusive_key is not None:
+                active = conn.execute(
+                    "SELECT * FROM spawn_reservations "
+                    "WHERE exclusive_key = ? AND state IN (?, ?, ?) "
+                    "ORDER BY reserved_at ASC LIMIT 1",
+                    (
+                        task.exclusive_key,
+                        SpawnState.RESERVING,
+                        SpawnState.SPAWNED,
+                        SpawnState.COLD,
+                    ),
+                ).fetchone()
+                if active is not None:
                     conn.execute("COMMIT")
-                    return SpawnReservation._from_row(row), False
+                    return SpawnReservation._from_row(active), False
+            else:
+                for row in rows:
+                    if row["state"] in SpawnState.ACTIVE:
+                        conn.execute("COMMIT")
+                        return SpawnReservation._from_row(row), False
             if task.status != Status.QUEUED or task.owner is not None:
                 conn.execute("COMMIT")
                 raise TaskError(
@@ -4888,11 +5009,35 @@ class TaskQueue:
                 )
             attempt = (max(r["attempt"] for r in rows) + 1) if rows else 1
             key = spawn_key(task_id, attempt)
+            carried_worktree = task.affinity.get("worktree")
+            carried_session = None
+            if task.exclusive_key is not None:
+                prior = conn.execute(
+                    "SELECT session_handle, worktree FROM spawn_reservations "
+                    "WHERE exclusive_key = ? AND worktree IS NOT NULL "
+                    "ORDER BY reserved_at DESC LIMIT 1",
+                    (task.exclusive_key,),
+                ).fetchone()
+                if prior is not None:
+                    carried_worktree = prior["worktree"]
+                    carried_session = prior["session_handle"]
             conn.execute(
                 "INSERT INTO spawn_reservations "
-                "(key, task_id, attempt, state, reserved_by, reserved_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (key, task_id, attempt, SpawnState.RESERVING, reserved_by, ts, ts),
+                "(key, task_id, exclusive_key, attempt, state, reserved_by, "
+                "session_handle, worktree, reserved_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    key,
+                    task_id,
+                    task.exclusive_key,
+                    attempt,
+                    SpawnState.RESERVING,
+                    reserved_by,
+                    carried_session,
+                    carried_worktree,
+                    ts,
+                    ts,
+                ),
             )
             row = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
@@ -5072,6 +5217,53 @@ class TaskQueue:
             worktree=worktree,
             now=now,
         )
+
+    def record_spawn_worktree(
+        self,
+        key: str,
+        worktree: str,
+        *,
+        now: float | None = None,
+    ) -> SpawnReservation:
+        """Record a reusable worktree while the reservation is still reserving.
+
+        Replacing a carried worktree clears its carried session handle: a
+        confirmed-missing worktree cannot safely retain a session binding from
+        the vanished checkout.
+        """
+        worktree = worktree.strip()
+        if not worktree:
+            raise TaskError("spawn worktree must be non-empty")
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such reservation: {key}")
+            if row["state"] != SpawnState.RESERVING:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"reservation {key} is {row['state']!r}, not "
+                    f"{SpawnState.RESERVING!r}"
+                )
+            conn.execute(
+                "UPDATE spawn_reservations SET "
+                "session_handle = CASE "
+                "WHEN worktree IS NULL OR worktree <> ? THEN NULL "
+                "ELSE session_handle END, "
+                "worktree = ?, updated_at = ? WHERE key = ?",
+                (worktree, worktree, ts, key),
+            )
+            updated = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(updated)
 
     def record_cold(
         self, key: str, *, now: float | None = None

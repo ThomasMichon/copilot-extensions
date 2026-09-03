@@ -240,6 +240,7 @@ _SAFE_TASK_FIELDS = (
     "source",
     "target_machine",
     "target_worktree",
+    "exclusive_key",
     "owner",
     "attempts",
 )

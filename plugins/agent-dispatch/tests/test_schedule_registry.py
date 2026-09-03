@@ -252,6 +252,25 @@ def test_registry_tick_produces_and_is_idempotent(client):
     assert ids_second <= ids_first  # same occurrences -> dedup, no new tasks
 
 
+def test_registry_tick_threads_exclusive_resource_fields(client):
+    client.register_schedule(
+        _entry(
+            "exclusive",
+            exclusive_key="scheduled-resource",
+            supersede_exclusive_key=True,
+        )
+    )
+
+    result = schedule.run_registry_tick(client, now=7200.0)
+
+    assert result["errors"] == []
+    assert result["created"]
+    assert all(
+        task["exclusive_key"] == "scheduled-resource"
+        for task in result["created"]
+    )
+
+
 def test_register_from_spec_bakes_default_repo(client):
     spec = {
         "default_repo": TEST_REPO,

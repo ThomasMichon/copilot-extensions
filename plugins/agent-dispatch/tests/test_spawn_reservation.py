@@ -153,6 +153,146 @@ def test_reserve_is_atomic_under_concurrency(q):
     assert len(q.list_reservations(task_id=t.id)) == 1
 
 
+def test_exclusive_reserve_is_atomic_across_task_ids(q):
+    """Racing task episodes for one resource still produce one active owner."""
+    tasks = [
+        q.create(f"review {index}", exclusive_key="review:repo:42")
+        for index in range(16)
+    ]
+    barrier = threading.Barrier(len(tasks))
+
+    def race(task_id):
+        barrier.wait()
+        reservation, won = q.reserve_spawn(task_id)
+        return reservation, won
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+        outcomes = list(pool.map(lambda task: race(task.id), tasks))
+
+    assert sum(1 for _reservation, won in outcomes if won) == 1
+    active = q.list_reservations(state=SpawnState.ACTIVE)
+    assert len(active) == 1
+    assert {reservation.key for reservation, _won in outcomes} == {
+        active[0].key
+    }
+
+
+def test_exclusive_key_blocks_second_task_spawn(q):
+    """Two head-specific tasks sharing a resource key cannot both spawn."""
+    t1 = q.create("review old", exclusive_key="review:repo:42")
+    t2 = q.create("review new", exclusive_key="review:repo:42")
+
+    r1, ok1 = q.reserve_spawn(t1.id)
+    r2, ok2 = q.reserve_spawn(t2.id)
+
+    assert ok1 is True
+    assert ok2 is False
+    assert r2.key == r1.key
+    assert r2.task_id == t1.id
+    assert len(q.list_reservations(state=SpawnState.ACTIVE)) == 1
+
+
+def test_exclusive_key_reuses_prior_worktree_after_settle(q):
+    t1 = q.create("review old", exclusive_key="review:repo:42")
+    r1, _ = q.reserve_spawn(t1.id)
+    q.record_spawn(r1.key, session_handle="sess-old", worktree="wt-reviewer")
+    q.settle_spawn(r1.key)
+
+    t2 = q.create("review new", exclusive_key="review:repo:42")
+    r2, ok2 = q.reserve_spawn(t2.id)
+
+    assert ok2 is True
+    assert r2.task_id == t2.id
+    assert r2.worktree == "wt-reviewer"
+    assert r2.exclusive_key == "review:repo:42"
+
+
+def test_exclusive_key_can_take_affinity_as_initial_resume_target(q):
+    t = q.create(
+        "review new",
+        exclusive_key="review:repo:42",
+        affinity={"worktree": "wt-recorded"},
+    )
+
+    reservation, reserved = q.reserve_spawn(t.id)
+
+    assert reserved is True
+    assert reservation.worktree == "wt-recorded"
+
+
+def test_record_spawn_worktree_does_not_mark_spawned(q):
+    t = q.create("work")
+    reservation, reserved = q.reserve_spawn(t.id)
+    assert reserved is True
+
+    updated = q.record_spawn_worktree(reservation.key, "wt-created")
+
+    assert updated.state == SpawnState.RESERVING
+    assert updated.worktree == "wt-created"
+    q.record_spawn(updated.key, session_handle="sess-created")
+    final = q.get_reservation(updated.key)
+    assert final.state == SpawnState.SPAWNED
+    assert final.worktree == "wt-created"
+    assert final.session_handle == "sess-created"
+
+
+def test_record_replacement_worktree_clears_carried_session(q):
+    first = q.create("old", exclusive_key="review:repo:42")
+    prior, _ = q.reserve_spawn(first.id)
+    q.record_spawn(
+        prior.key,
+        session_handle="local-body:old-session",
+        worktree="wt-missing",
+    )
+    q.settle_spawn(prior.key)
+    current = q.create("new", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(current.id)
+    assert reservation.session_handle == "local-body:old-session"
+
+    updated = q.record_spawn_worktree(reservation.key, "wt-fresh")
+
+    assert updated.state == SpawnState.RESERVING
+    assert updated.worktree == "wt-fresh"
+    assert updated.session_handle is None
+
+
+def test_yield_requests_release_without_settling_live_reservation(q):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="fleet-body:worker-host:session-live",
+    )
+    q.claim_one("fleet-owner", task_id=task.id)
+    q.start(task.id, "fleet-owner")
+
+    yielded = q.yield_task(task.id, "fleet-owner")
+    updated = q.get_reservation(reservation.key)
+
+    assert yielded.status == "queued"
+    assert updated.state == SpawnState.SPAWNED
+    assert updated.release_requested is True
+
+
+def test_supersede_exclusive_key_abandons_only_queued_or_proposed(q):
+    queued = q.create("old queued", exclusive_key="review:repo:42")
+    held = q.create("old held", exclusive_key="review:repo:42")
+    q.claim_one("m/wt", task_id=held.id)
+
+    new = q.create(
+        "new head",
+        exclusive_key="review:repo:42",
+        supersede_exclusive_key=True,
+    )
+
+    assert q.get(queued.id).status == "abandoned"
+    assert q.get(held.id).status == "claimed"
+    assert q.get(new.id).status == "queued"
+    assert q.events(queued.id)[-1]["note"] == (
+        f"superseded by exclusive task {new.id}"
+    )
+
+
 def _fail_attempts(q, task_id, count=3):
     for _ in range(count):
         reservation, reserved = q.reserve_spawn(task_id)
