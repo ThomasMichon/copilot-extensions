@@ -26,44 +26,8 @@
       },
       {
         "type": "command",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = (Join-Path $r 'scripts\\bootstrap-check.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\bootstrap-check.ps1\" }; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$r/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/bootstrap-check.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
-        "timeoutSec": 15
-      },
-      {
-        "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\project-hooks.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
-        "bash": "cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/project-hooks.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
-        "timeoutSec": 10
-      },
-      {
-        "type": "command",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = (Join-Path $r 'scripts\\register-nudge.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\register-nudge.ps1\" }; if (Test-Path $s) { & $s --side-effect-only } else { [Console]::Out.Write('{}') }",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$r/scripts/register-nudge.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/register-nudge.sh\"; if [ -f \"$s\" ]; then bash \"$s\" --side-effect-only; else printf '{}'; fi",
-        "timeoutSec": 10
-      },
-      {
-        "type": "command",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = (Join-Path $r 'scripts\\register-session.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\register-session.ps1\" }; if (Test-Path $s) { & $s --side-effect-only } else { [Console]::Out.Write('{}') }",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$r/scripts/register-session.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/register-session.sh\"; if [ -f \"$s\" ]; then bash \"$s\" --side-effect-only; else printf '{}'; fi",
-        "timeoutSec": 10
-      },
-      {
-        "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\anchor-hygiene-check.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
-        "bash": "cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/anchor-hygiene-check.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
-        "timeoutSec": 10
-      },
-      {
-        "type": "command",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = (Join-Path $r 'scripts\\marketplace-overrides.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\marketplace-overrides.ps1\" }; if (Test-Path $s) { & $s --side-effect-only } else { [Console]::Out.Write('{}') }",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$r/scripts/marketplace-overrides.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/marketplace-overrides.sh\"; if [ -f \"$s\" ]; then bash \"$s\" --side-effect-only; else printf '{}'; fi",
-        "timeoutSec": 10
-      },
-      {
-        "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\provision-check.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
-        "bash": "cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/provision-check.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; try { Set-Location -LiteralPath $env:COPILOT_PROJECT_DIR -ErrorAction Stop } catch { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} } }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = (Join-Path $r 'scripts\\hook_client.py'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\" }; $py = (Get-Command python -CommandType Application -ErrorAction SilentlyContinue).Source; if ($py -match '\\WindowsApps\\') { $py = $null }; $ran = $false; if ($py -and (Test-Path $s)) { & $py $s sessionStart; $ran = ($LASTEXITCODE -eq 0) }; if (-not $ran) { $b = (Join-Path $r 'scripts\\bootstrap-check.ps1'); if (-not (Test-Path $b)) { $b = \"$env:USERPROFILE\\.agent-worktrees\\bin\\bootstrap-check.ps1\" }; if (Test-Path $b) { & $b } else { [Console]::Out.Write('{}') } }",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; cd \"${COPILOT_PROJECT_DIR:-$HOME}\" 2>/dev/null || cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$r/scripts/hook_client.py\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/hook_client.py\"; ran=false; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then if python3 \"$s\" sessionStart; then ran=true; fi; fi; if [ \"$ran\" != true ]; then b=\"$r/scripts/bootstrap-check.sh\"; [ -f \"$b\" ] || b=\"$HOME/.agent-worktrees/bin/bootstrap-check.sh\"; if [ -f \"$b\" ]; then bash \"$b\"; else printf '{}'; fi; fi",
         "timeoutSec": 15
       },
       {

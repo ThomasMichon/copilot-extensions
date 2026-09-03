@@ -492,8 +492,12 @@ def test_launch_and_hook_surfaces_include_reconciler():
     ).read_text(encoding="utf-8")
     hooks = json.loads((plugin / "hooks.json").read_text(encoding="utf-8"))
     commands = json.dumps(hooks["hooks"]["sessionStart"])
-    assert "marketplace-overrides.ps1" in commands
-    assert "marketplace-overrides.sh" in commands
+    assert "hook_client.py" in commands
+    source = (
+        plugin / "src" / "agent_worktrees" / "__main__.py"
+    ).read_text(encoding="utf-8")
+    assert "_reconcile_marketplace_snapshot" in source
+    assert "marketplace_overrides.reconcile" in source
 
 
 def test_tracked_local_settings_are_rejected(tmp_path: Path):

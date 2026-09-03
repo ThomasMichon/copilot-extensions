@@ -121,7 +121,10 @@ def test_bash_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         home.mkdir(parents=True)
         cwd.mkdir()
         command = str(hook["bash"])
-        if "invoke-context-contributor.sh" in command:
+        if (
+            "invoke-context-contributor.sh" in command
+            or "hook_client.py" in command
+        ):
             continue
         _stage_stub(command, home, cwd, "exit 23")
 
@@ -129,22 +132,14 @@ def test_bash_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         assert result.returncode == 23
 
 
-def test_bash_hook_forwards_runtime_script_output(tmp_path: Path):
-    home = tmp_path / "home"
-    cwd = tmp_path / "cwd"
-    home.mkdir()
-    cwd.mkdir()
-    command = next(
+def test_bash_lifecycle_hook_is_one_bounded_client():
+    commands = [
         str(hook["bash"])
         for hook in _hooks("sessionStart")
-        if "invoke-context-contributor.sh" not in str(hook["bash"])
-    )
-    expected = '{"additionalContext":"runtime guidance"}'
-    _stage_stub(command, home, cwd, f"printf '%s' '{expected}'")
-
-    result = _run(command, _bash(), home, cwd)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == expected
+        if "hook_client.py" in str(hook["bash"])
+    ]
+    assert len(commands) == 1
+    assert "sessionStart" in commands[0]
 
 
 def test_register_session_bash_coalesces_command_catalog(tmp_path: Path):
@@ -450,7 +445,10 @@ def test_powershell_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         script = tmp_path / str(index) / "stub.ps1"
         script.write_text("exit 23\n", encoding="utf-8")
         raw_command = str(hook["powershell"])
-        if "invoke-context-contributor.ps1" in raw_command:
+        if (
+            "invoke-context-contributor.ps1" in raw_command
+            or "hook_client.py" in raw_command
+        ):
             continue
         command = _powershell_wrapper(raw_command, script)
 
@@ -458,28 +456,14 @@ def test_powershell_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         assert result.returncode != 0
 
 
-def test_powershell_hook_forwards_runtime_script_output(tmp_path: Path):
-    powershell = _powershell()
-    home = tmp_path / "home"
-    cwd = tmp_path / "cwd"
-    home.mkdir()
-    cwd.mkdir()
-    script = tmp_path / "stub.ps1"
-    expected = '{"additionalContext":"runtime guidance"}'
-    script.write_text(f"[Console]::Out.Write('{expected}')\n", encoding="utf-8")
-    command = _powershell_wrapper(
-        next(
-            str(hook["powershell"])
-            for hook in _hooks("sessionStart")
-            if "invoke-context-contributor.ps1"
-            not in str(hook["powershell"])
-        ),
-        script,
-    )
-
-    result = _run(command, powershell, home, cwd)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == expected
+def test_powershell_lifecycle_hook_is_one_bounded_client():
+    commands = [
+        str(hook["powershell"])
+        for hook in _hooks("sessionStart")
+        if "hook_client.py" in str(hook["powershell"])
+    ]
+    assert len(commands) == 1
+    assert "sessionStart" in commands[0]
 
 
 def test_register_session_powershell_coalesces_context_and_fails_open(

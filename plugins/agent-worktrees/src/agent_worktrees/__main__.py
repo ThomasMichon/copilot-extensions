@@ -57,6 +57,7 @@ import os
 import platform
 import re
 import secrets
+import signal
 import shutil
 import socket
 import subprocess
@@ -4996,6 +4997,38 @@ def _sweep_finished_sessions_on_cadence() -> None:
         pass
 
 
+def _write_session_lifecycle_receipt(payload: dict, state: str) -> None:
+    version, _environment = _session_lifecycle_metadata(payload)
+    launch_key = _session_lifecycle_launch_key(payload, version)
+    if not launch_key:
+        return
+    root = _aw_runtime_home() / ".session-context"
+    target = root / f"lifecycle-{launch_key}.json"
+    temporary = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        prune_before = time.time() - 60 * 60
+        for candidate in root.glob("lifecycle-*.json"):
+            try:
+                if candidate.stat().st_mtime < prune_before:
+                    candidate.unlink()
+            except OSError:
+                pass
+        temporary.write_text(
+            json.dumps(
+                {"launchKey": launch_key, "state": state},
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+
 def _sweep_managed_on_exit() -> None:
     """Best-effort GC of leaked system/bridge worktrees at a lifecycle boundary.
 
@@ -7765,6 +7798,461 @@ def _hook_payload_cwd(payload: dict) -> str:
     return str(payload.get("workingDirectory") or payload.get("cwd") or os.getcwd())
 
 
+def _session_lifecycle_metadata(payload: dict) -> tuple[str, dict[str, str]]:
+    metadata = payload.get("_agentWorktrees")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    version = metadata.get("pluginVersion")
+    environment = metadata.get("environment")
+    normalized_environment = (
+        {
+            str(key): str(value)
+            for key, value in environment.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        if isinstance(environment, dict)
+        else {}
+    )
+    return version if isinstance(version, str) else "", normalized_environment
+
+
+def _session_lifecycle_launch_key(payload: dict, version: str) -> str:
+    import hashlib
+    import math
+    import struct
+
+    session_id = payload.get("sessionId")
+    cwd = payload.get("cwd")
+    source = payload.get("source", "")
+    timestamp = payload.get("timestamp")
+    if (
+        not isinstance(session_id, str)
+        or not session_id
+        or not isinstance(cwd, str)
+        or not os.path.isabs(cwd)
+        or not isinstance(source, str)
+        or not version
+        or isinstance(timestamp, bool)
+        or not isinstance(timestamp, (int, float))
+        or not math.isfinite(timestamp)
+    ):
+        return ""
+    try:
+        canonical_cwd = os.path.realpath(cwd)
+    except OSError:
+        return ""
+    timestamp_text = (
+        str(timestamp)
+        if isinstance(timestamp, int)
+        else f"f64:{struct.pack('>d', timestamp).hex()}"
+    )
+    identity = json.dumps(
+        [session_id, canonical_cwd, source, version, timestamp_text],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(identity).hexdigest()
+
+
+def _write_session_lifecycle_snapshot(
+    name: str,
+    payload: dict,
+    output_text: str,
+) -> None:
+    version, _environment = _session_lifecycle_metadata(payload)
+    if not version:
+        try:
+            version = (_aw_runtime_home() / "current-version").read_text(
+                encoding="utf-8"
+            ).strip()
+        except (OSError, UnicodeError):
+            version = ""
+    launch_key = _session_lifecycle_launch_key(
+        payload, version
+    )
+    if not launch_key:
+        return
+    root = _aw_runtime_home() / ".session-context"
+    target = root / f"{name}-{launch_key}.json"
+    temporary = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(
+            json.dumps(
+                {"launchKey": launch_key, "output": output_text},
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
+    except OSError:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+
+def _registration_nudge_context(cwd: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return ""
+        top = Path(result.stdout.strip()).resolve()
+        anchor = git_ops.resolve_to_anchor(top)
+        name = anchor.name
+        if not name:
+            return ""
+        projects = inst.read_projects_registry().get("projects", {})
+        if isinstance(projects, dict) and name in projects:
+            return ""
+        import hashlib
+
+        marker_dir = _aw_runtime_home() / ".register-nudged"
+        marker = marker_dir / hashlib.sha1(
+            str(top).encode("utf-8")
+        ).hexdigest()
+        if marker.exists():
+            return ""
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        marker.touch(exist_ok=True)
+        return (
+            f"This repo ({name}) is not a registered agent-worktrees project. "
+            "To enable isolated, concurrent worktree sessions (create/finalize "
+            "+ the PR flow), register it once from the repo root: "
+            f"agent-worktrees register {name} . This is an onboarding nudge "
+            "only -- nothing has been registered, and agent-worktrees never "
+            "auto-adopts a repo."
+        )
+    except Exception:
+        return ""
+
+
+def _start_project_session_hook(
+    cwd: str,
+    environment: dict[str, str],
+) -> subprocess.Popen | None:
+    try:
+        _activate_project_for_path(cwd, force=True)
+        project = cfg.project_name()
+    except Exception:
+        return None
+    script = cfg.project_dir(project) / "hooks" / (
+        "session-start.ps1" if os.name == "nt" else "session-start.sh"
+    )
+    if not script.is_file():
+        return None
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        argv = (
+            [shell, "-NoLogo", "-NoProfile", "-File", str(script)]
+            if shell
+            else []
+        )
+    else:
+        shell = shutil.which("bash")
+        argv = [shell, str(script)] if shell else []
+    if not argv:
+        return None
+    child_environment = dict(environment)
+    group_kwargs = (
+        {"start_new_session": True}
+        if os.name == "posix"
+        else {
+            "creationflags": getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0  # headless-guard: allow: bounded hook process group plus the resident headless-child guard
+            )
+        }
+    )
+    try:
+        return subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=child_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            **group_kwargs,
+        )
+    except OSError:
+        return None
+
+
+def _finish_project_session_hook(
+    process: subprocess.Popen | None,
+    deadline: float | None,
+) -> tuple[dict, str]:
+    if process is None:
+        return {}, ""
+    remaining = (
+        max(0.1, deadline - time.time() - 0.25)
+        if deadline is not None
+        else 10.0
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=remaining)
+    except subprocess.TimeoutExpired:
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            else:
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+        except (OSError, ProcessLookupError):
+            process.kill()
+        try:
+            process.communicate(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
+        return {}, "[agent-worktrees] Project session-start hook timed out.\n"
+    hook_result: dict = {}
+    try:
+        value = json.loads(stdout.strip() or "{}")
+        if isinstance(value, dict):
+            hook_result = value
+    except ValueError:
+        stderr += stdout
+    diagnostic = stderr
+    if process.returncode != 0:
+        diagnostic += (
+            "[agent-worktrees] Project session-start hook exited "
+            f"{process.returncode}.\n"
+        )
+    return hook_result, diagnostic
+
+
+def _anchor_hygiene_diagnostic(cwd: str) -> str:
+    try:
+        from . import anchor_hygiene
+
+        report = anchor_hygiene.check_anchor(cwd)
+    except Exception:
+        return ""
+    messages = []
+    if report.is_behind:
+        messages.append(
+            "[agent-worktrees] Anchor repo is "
+            f"{report.behind_count} commit(s) behind "
+            f"{report.tracking or 'upstream'}: {report.anchor_path}"
+        )
+    if report.dirty_files:
+        messages.append(
+            f"[agent-worktrees] Anchor repo has uncommitted work: {report.anchor_path}"
+        )
+    if report.stash_entries:
+        messages.append(
+            f"[agent-worktrees] Anchor repo has stash entries: {report.anchor_path}"
+        )
+    return "".join(f"{message}\n" for message in messages)
+
+
+def _reconcile_marketplace_snapshot(payload: dict, cwd: str) -> None:
+    output_text = "{}"
+    try:
+        from . import marketplace_overrides
+
+        repo = _checkout_root(cwd)
+        if repo is not None:
+            summary = marketplace_overrides.reconcile(
+                repo,
+                refresh_repositories=False,
+                fast_forward_repositories=False,
+            )
+            if summary.get("changed"):
+                path = summary.get("settings_local", "settings.local.json")
+                output_text = json.dumps({
+                    "additionalContext": (
+                        "Agent Worktrees updated local plugin marketplace "
+                        f"source overrides in {path}. Restart Copilot CLI for "
+                        "the new plugin sources to take effect."
+                    )
+                })
+    except Exception:
+        pass
+    _write_session_lifecycle_snapshot(
+        "marketplace-overrides", payload, output_text
+    )
+
+
+def _start_provisioning_if_needed(
+    cwd: str,
+    session_environment: dict[str, str] | None = None,
+) -> str:
+    session_environment = session_environment or {}
+    if (
+        session_environment.get("WORKTREE_NO_RECONCILE") == "1"
+        or session_environment.get("WORKTREE_NO_PROVISION") == "1"
+    ):
+        return ""
+    status = _aw_runtime_home() / "logs" / "provision-status.json"
+    diagnostic = ""
+    try:
+        previous = json.loads(status.read_text(encoding="utf-8"))
+        if (
+            isinstance(previous, dict)
+            and previous.get("ok") is False
+            and os.path.normcase(os.path.realpath(str(previous.get("repo") or "")))
+            == os.path.normcase(os.path.realpath(cwd))
+        ):
+            failed = ", ".join(
+                str(item.get("service"))
+                for item in previous.get("failed", [])
+                if isinstance(item, dict) and item.get("service")
+            ) or str(previous.get("reason") or "unknown failure")
+            diagnostic += (
+                "[agent-worktrees] Previous background provisioning failed: "
+                f"{failed}. Inspect {_aw_runtime_home() / 'logs'} and rerun "
+                "reconcile-plugins.\n"
+            )
+    except (OSError, UnicodeError, ValueError, TypeError):
+        pass
+    try:
+        from . import reconcile
+
+        plan = reconcile.build_plan(Path(cwd), save=False)
+    except Exception as exc:
+        return diagnostic + (
+            f"[agent-worktrees] Runtime provisioning preview failed: {exc}\n"
+        )
+    if plan.get("action") != "reconcile":
+        return diagnostic
+    services = ", ".join(
+        dict.fromkeys(
+            str(item.get("service"))
+            for item in plan.get("updates", [])
+            if isinstance(item, dict) and item.get("service")
+        )
+    )
+    status.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    log = status.parent / f"provision-{stamp}.log"
+    argv = [
+        sys.executable,
+        "-m",
+        "agent_worktrees",
+        "reconcile-plugins",
+        "--repo",
+        cwd,
+        "--status",
+        str(status),
+        "--apply",
+    ]
+    argv[0] = _windowless_python()
+    kwargs: dict = {
+        "stdin": subprocess.DEVNULL,
+        "cwd": os.path.expanduser("~"),
+    }
+    kwargs.update(detached_kwargs(breakaway=True))
+    try:
+        stdout = log.open("w", encoding="utf-8")
+        stderr = log.with_suffix(".log.err").open("w", encoding="utf-8")
+        try:
+            subprocess.Popen(argv, stdout=stdout, stderr=stderr, **kwargs)
+        finally:
+            stdout.close()
+            stderr.close()
+        spawned = True
+    except Exception:
+        spawned = False
+    if not spawned:
+        diagnostic += (
+            "[agent-worktrees] Could not start background provisioning.\n"
+        )
+    elif services:
+        diagnostic += (
+            "[agent-worktrees] Provisioning runtime(s) in background: "
+            f"{services}\n"
+        )
+    return diagnostic
+
+
+def _run_session_lifecycle(
+    payload: dict,
+    *,
+    deadline: float | None = None,
+) -> dict:
+    cwd = _hook_payload_cwd(payload)
+    _version, session_environment = _session_lifecycle_metadata(payload)
+    prior_project = cfg.active_project()
+    diagnostics = ""
+    result: dict = {}
+    project_process = None
+    _write_session_lifecycle_receipt(payload, "started")
+    try:
+        project_process = _start_project_session_hook(cwd, session_environment)
+        nudge = _registration_nudge_context(cwd)
+        _write_session_lifecycle_snapshot(
+            "register-nudge",
+            payload,
+            json.dumps({"additionalContext": nudge}) if nudge else "{}",
+        )
+
+        _reconcile_marketplace_snapshot(payload, cwd)
+
+        registration_args = argparse.Namespace(
+            worktree_id=session_environment.get("WORKTREE_ID"),
+            session_id=payload.get("sessionId"),
+            cwd=payload.get("cwd"),
+            stdin=False,
+            pid=None,
+            pane=(
+                session_environment.get("TMUX_PANE")
+                or session_environment.get("PSMUX_PANE")
+            ),
+            launch_id=session_environment.get("WORKTREE_LAUNCH_ID"),
+            assignment_token=session_environment.get(
+                profile_assignment.ASSIGNMENT_TOKEN_ENV
+            ),
+            emit_context=True,
+            handoff_token=None,
+            handoff_candidate_token=session_environment.get(
+                _SESSION_HANDOFF_TOKEN
+            ),
+            result_holder=[],
+            resident_environment=True,
+            hook_payload=payload,
+        )
+        try:
+            cmd_register_session(registration_args)
+        except Exception as exc:
+            diagnostics += f"[agent-worktrees] Session registration failed: {exc}\n"
+        registration_output = (
+            registration_args.result_holder[-1]
+            if registration_args.result_holder
+            else "{}"
+        )
+        _write_session_lifecycle_snapshot(
+            "register-session", payload, registration_output or "{}"
+        )
+
+        if deadline is None or time.time() < deadline - 1.0:
+            diagnostics += _anchor_hygiene_diagnostic(cwd)
+        if deadline is None or time.time() < deadline - 1.0:
+            diagnostics += _start_provisioning_if_needed(
+                cwd, session_environment
+            )
+    except Exception as exc:
+        diagnostics += f"[agent-worktrees] Session lifecycle failed: {exc}\n"
+    finally:
+        project_result, project_diagnostic = _finish_project_session_hook(
+            project_process, deadline
+        )
+        result.update(project_result)
+        diagnostics += project_diagnostic
+        _write_session_lifecycle_receipt(payload, "completed")
+        cfg.set_active_project(prior_project)
+    if diagnostics:
+        result["_stderr"] = diagnostics
+    return result
+
+
 def _load_hook_client_module():
     import importlib.util
 
@@ -7973,6 +8461,8 @@ def _resident_hook_decision(
             return advisory or binding
         if kind == "snapshot":
             return {"segment": segment_cache.get(cwd)}
+        if kind == "sessionStart":
+            return _run_session_lifecycle(payload, deadline=deadline)
         return {}
     finally:
         cfg.set_active_project(previous_project)
@@ -19049,6 +19539,22 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Pending token this newly-created session is a "
                          "candidate to consume; associates without takeover")
 
+    sp = sub.add_parser(
+        "session-lifecycle",
+        help="Run the combined Copilot session-start lifecycle hook",
+    )
+    sp.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read the Copilot sessionStart JSON payload from stdin",
+    )
+    sp.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=10.0,
+        help="Bound the combined lifecycle before the outer hook deadline",
+    )
+
     sp = sub.add_parser("deregister-session",
                         help="Mark a Copilot session as ended on a worktree")
     sp.add_argument("--worktree-id", default=None,
@@ -19474,6 +19980,15 @@ def _hook_event_timestamp(payload: dict | None) -> str | None:
     return None
 
 
+def _emit_register_session_result(args: argparse.Namespace, result: dict) -> None:
+    text = json.dumps(result, separators=(",", ":"))
+    holder = getattr(args, "result_holder", None)
+    if isinstance(holder, list):
+        holder.append(text)
+    else:
+        print(text)
+
+
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked).
 
@@ -19493,17 +20008,21 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     pid = getattr(args, "pid", None)
     event_at = None
     source = "hook"
-    pane_id = (
-        getattr(args, "pane", None)
-        or os.environ.get("TMUX_PANE")
-        or os.environ.get("PSMUX_PANE")
-        or None
-    )
+    resident_environment = getattr(args, "resident_environment", False)
+    pane_id = getattr(args, "pane", None)
+    if not pane_id and not resident_environment:
+        pane_id = (
+            os.environ.get("TMUX_PANE")
+            or os.environ.get("PSMUX_PANE")
+            or None
+        )
     if isinstance(pane_id, str):
         pane_id = pane_id.strip() or None
 
+    payload = getattr(args, "hook_payload", None)
     if getattr(args, "stdin", False):
         payload = _read_hook_stdin()
+    if isinstance(payload, dict):
         if payload:
             session_id = session_id or payload.get("sessionId")
             cwd = cwd or payload.get("cwd")
@@ -19513,7 +20032,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 source = f"hook:{hook_source.strip()}"
 
     # Last-resort env fallback (set for tool subprocesses, not the hook).
-    if not session_id:
+    if not session_id and not resident_environment:
         session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     if not session_id:
         return 0  # nothing to register -- silent no-op
@@ -19565,11 +20084,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 cwd=cwd,
             )
             message = session_projection.render_recovery_context(report)
-            print(
-                json.dumps(
-                    {"additionalContext": message} if message else {},
-                    separators=(",", ":"),
-                )
+            _emit_register_session_result(
+                args,
+                {"additionalContext": message} if message else {},
             )
         return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
     if not cfg.active_project():
@@ -19590,7 +20107,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
 
     candidate_token = (
         getattr(args, "handoff_candidate_token", None)
-        or os.environ.get(_SESSION_HANDOFF_TOKEN)
+        or (
+            None
+            if resident_environment
+            else os.environ.get(_SESSION_HANDOFF_TOKEN)
+        )
         or None
     )
     candidate_associated = False
@@ -19623,7 +20144,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         return 1
     profile_assignment.bind(
         getattr(args, "assignment_token", None)
-        or os.environ.get(profile_assignment.ASSIGNMENT_TOKEN_ENV),
+        or (
+            None
+            if resident_environment
+            else os.environ.get(profile_assignment.ASSIGNMENT_TOKEN_ENV)
+        ),
         session_id,
         wt_id,
     )
@@ -19632,7 +20157,14 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         "session_started",
         worktree_id=wt_id,
         session_id=session_id,
-        launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"),
+        launch_id=(
+            getattr(args, "launch_id", None)
+            or (
+                None
+                if resident_environment
+                else os.environ.get("WORKTREE_LAUNCH_ID")
+            )
+        ),
     )
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
     # off-mux).  The launcher spawns it at psmux create/join, but an attached
@@ -19721,7 +20253,21 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 "remains head until this successor explicitly consumes and "
                 "acknowledges the handoff."
             )
-        print(json.dumps({"additionalContext": message}, separators=(",", ":")))
+        _emit_register_session_result(args, {"additionalContext": message})
+    return 0
+
+
+def cmd_session_lifecycle(args: argparse.Namespace) -> int:
+    """Run one combined session-start lifecycle pass."""
+    payload = _read_hook_stdin() if getattr(args, "stdin", False) else {}
+    timeout = max(0.1, float(getattr(args, "timeout_seconds", 10.0)))
+    result = _run_session_lifecycle(
+        payload or {}, deadline=time.time() + timeout
+    )
+    diagnostic = result.pop("_stderr", None)
+    if diagnostic:
+        print(str(diagnostic), file=sys.stderr, end="")
+    print(json.dumps(result, separators=(",", ":")))
     return 0
 
 
@@ -21642,6 +22188,7 @@ COMMAND_MAP = {
     "register-project-entry": cmd_register_project_entry,
     "dev": cmd_dev,
     "register-session": cmd_register_session,
+    "session-lifecycle": cmd_session_lifecycle,
     "deregister-session": cmd_deregister_session,
     "session-binding": cmd_session_binding,
     "session-recovery": cmd_session_recovery,
@@ -21994,7 +22541,7 @@ _NO_PROJECT_COMMANDS = {
     "register", "hook", "knowledge", "reconcile-marketplaces",
     "picker", "doctor", "reap-shells", "status-updater", "status-monitor",
     "reconcile-sessions", "status-monitor-restart", "restart",
-    "register-session", "deregister-session", "session-binding",
+    "register-session", "session-lifecycle", "deregister-session", "session-binding",
     "session-recovery",
     "session-lineage",
     "installer-readiness",
