@@ -55,6 +55,7 @@ def _merged_pr_head(
         return None
 
     candidates: list[tuple[int, str]] = []
+    upstream_patch_ids: dict[str, set[str]] = {}
     for pr in record.prs:
         if (
             pr.state != "merged"
@@ -69,25 +70,17 @@ def _merged_pr_head(
         ).returncode != 0:
             continue
 
-        commits = git_ops.git(
-            "rev-list", f"{pr.base_sha}..{upstream}", cwd=cwd, check=False,
-        )
-        if commits.returncode != 0:
-            continue
-        for commit in commits.stdout.splitlines():
-            parent = git_ops.git(
-                "rev-parse", f"{commit}^", cwd=cwd, check=False,
+        if pr.base_sha not in upstream_patch_ids:
+            upstream_patch_ids[pr.base_sha] = pr_ops._commit_patch_ids(
+                pr.base_sha, upstream, cwd=cwd,
             )
-            if parent.returncode != 0:
-                continue
-            if pr_ops._patch_id(
-                parent.stdout.strip(), commit, cwd=cwd,
-            ) == pr.patch_id:
-                distance = git_ops._rev_count(
-                    f"{pr.head_sha}..{branch}", cwd=cwd,
-                )
-                candidates.append((distance, pr.head_sha))
-                break
+        patch_ids = upstream_patch_ids[pr.base_sha]
+        if pr.patch_id not in patch_ids:
+            continue
+        distance = git_ops._rev_count(
+            f"{pr.head_sha}..{branch}", cwd=cwd,
+        )
+        candidates.append((distance, pr.head_sha))
     return min(candidates)[1] if candidates else None
 
 
@@ -247,10 +240,11 @@ def complete_worktree(
             "update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False,
         )
         if backup.returncode != 0:
+            detail = (backup.stderr or backup.stdout or "unknown Git error").strip()
             return {**base, "action": "error",
                     "error": (
                         f"Could not create recovery ref {BACKUP_REF}; "
-                        "the branch is unchanged."
+                        f"the branch is unchanged: {detail}"
                     )}
 
     # A tracked merged PR gives us the exact boundary between the squashed PR

@@ -200,6 +200,39 @@ def _patch_id(base: str, head: str, *, cwd: str) -> str:
     return out.split()[0] if out else ""
 
 
+def _commit_patch_ids(base: str, head: str, *, cwd: str) -> set[str]:
+    """Patch IDs for non-merge commits in ``base..head``, or an empty set.
+
+    Compute the range in one ``git log`` + ``git patch-id`` batch. This avoids
+    spawning a diff and patch-id process per commit when an old PR base has a
+    long upstream history.
+    """
+    if not base:
+        return set()
+    log = git_ops.git(
+        "log", "--no-merges", "--format=commit %H", "-p",
+        f"{base}..{head}", cwd=cwd, check=False,
+    )
+    if log.returncode != 0 or not log.stdout:
+        return set()
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "patch-id", "--stable"],
+            input=log.stdout, cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if result.returncode != 0:
+        return set()
+    return {
+        line.split()[0]
+        for line in result.stdout.splitlines()
+        if line.split()
+    }
+
+
 def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
     """Best-effort worktree title from its own commit history.
 

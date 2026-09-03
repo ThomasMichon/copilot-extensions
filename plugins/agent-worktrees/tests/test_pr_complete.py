@@ -194,6 +194,7 @@ class TestPrComplete:
         assert res["success"] is False
         assert res["action"] == "error"
         assert "recovery ref" in res["error"]
+        assert "ref locked" in res["error"]
         assert _git("rev-parse", "HEAD", cwd=wt_path) == before
 
     def test_reconcile_preserves_post_merge_divergence_net_zero(self, pr_repo):
