@@ -1425,8 +1425,8 @@ function Deploy-Wrappers {
 
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
-    # Deploy hook scripts: sessionStart (session-conduct + session-machine + bootstrap-check + project-hooks + register-nudge + register/deregister-session + anchor-hygiene-check + marketplace-overrides + provision-check) + preToolUse guards (statelessness_guard + cross_repo_guard + anchor_write_guard) + postToolUse nudges (nudge_status + bind-nudge)
-    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'marketplace-overrides.ps1', 'marketplace-overrides.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'nudge_status.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'marketplace-overrides.ps1', 'marketplace-overrides.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
@@ -2748,8 +2748,8 @@ switch ($Action) {
         # -- Shared runtime (venv first: package install targets the venv) --
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Package)) { exit 1 }
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
+        if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
@@ -3074,8 +3074,8 @@ switch ($Action) {
         # -- Shared runtime (venv first: package install targets the venv) --
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Package)) { exit 1 }
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
+        if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental

@@ -116,6 +116,16 @@ def test_kill_switch(tmp_path):
         assert nudge.decide(_payload(cwd), env=env, home=home, now=1000.0) is None
 
 
+def test_expired_deadline_does_not_commit_sidecar(tmp_path):
+    home, cwd = _make_home(tmp_path)
+    env = {"AGENT_WORKTREES_NUDGE_CALLS": "1"}
+    assert nudge.decide(
+        _payload(cwd), env=env, home=home, deadline=0
+    ) is None
+    sidecar = home / ".agent-worktrees" / "nudge-state" / f"{_WID}.json"
+    assert not sidecar.exists()
+
+
 @pytest.mark.parametrize("scope_key", ["summary", "title"])
 def test_nudge_mentions_both_summary_and_title(tmp_path, scope_key):
     home, cwd = _make_home(tmp_path)

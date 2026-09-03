@@ -7468,43 +7468,52 @@ def cmd_reconcile_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
-def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> None:
+def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> bool:
     """Push a session-scoped mux option (best-effort, bounded)."""
     try:
-        subprocess.run([mux_bin, "set-option", "-t", sess, opt, val],
-                       capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            [mux_bin, "set-option", "-t", sess, opt, val],
+            capture_output=True, text=True, timeout=15)
+        return result.returncode == 0
     except Exception:
-        pass
+        return False
 
 
-def _monitor_list_sessions(mux_bin: str) -> dict[str, int] | None:
+def _monitor_list_sessions(
+    mux_bin: str,
+) -> dict[str, tuple[int, str]] | None:
     """Enumerate mux sessions with the monitor's OWN selected binary.
 
     ``sessions._list_mux_sessions`` chooses tmux/psmux by *platform*, which can
     disagree with the binary ``cmd_status_monitor`` actually resolved
     (psmux-if-present) -- a mismatch would enumerate the wrong multiplexer and
     return nothing every sweep, so the monitor neither serves nor idle-exits.
-    Query ``mux_bin`` directly instead.  Returns ``{session_name: attached}`` or
-    ``None`` on a transient failure (so the caller neither prunes nor exits).
+    Query ``mux_bin`` directly instead. Returns
+    ``{session_name: (attached, incarnation)}`` or ``None`` on a transient
+    failure (so the caller neither prunes nor exits).
     """
     try:
         r = subprocess.run(
             [mux_bin, "list-sessions", "-F",
-             "#{session_name}:#{session_attached}"],
+             "#{session_name}:#{session_attached}:"
+             "#{session_id}:#{session_created}"],
             capture_output=True, text=True, timeout=15)
     except Exception:
         return None
     if r.returncode != 0:
         return None
-    out: dict[str, int] = {}
+    out: dict[str, tuple[int, str]] = {}
     for line in (r.stdout or "").strip().splitlines():
-        if ":" not in line:
+        if line.count(":") < 3:
             continue
-        name, _, cnt = line.rpartition(":")
+        name, _, created = line.rpartition(":")
+        name, _, session_id = name.rpartition(":")
+        name, _, cnt = name.rpartition(":")
+        incarnation = f"{session_id}:{created}"
         try:
-            out[name] = int(cnt)
+            out[name] = (int(cnt), incarnation)
         except ValueError:
-            out[name] = 0
+            out[name] = (0, incarnation)
     return out
 
 
@@ -7514,6 +7523,9 @@ def _monitor_sweep(
     picker_projects: set[str] | None = None,
     catalog_observer=None,
     pane_observer=None,
+    segment_cache=None,
+    published: dict[tuple[str, str], str] | None = None,
+    incarnations: dict[str, str] | None = None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -7539,6 +7551,25 @@ def _monitor_sweep(
             _remove_monitor_entry(reg_dir, sess)
             registry.pop(sess, None)
             ctx_done.discard(sess)
+            if incarnations is not None:
+                incarnations.pop(sess, None)
+            if published is not None:
+                for key in [key for key in published if key[0] == sess]:
+                    published.pop(key, None)
+        if incarnations is not None:
+            for sess in live_wt:
+                value = live.get(sess)
+                incarnation = (
+                    str(value[1])
+                    if isinstance(value, tuple) and len(value) > 1 else ""
+                )
+                prior = incarnations.get(sess)
+                if prior is not None and prior != incarnation:
+                    ctx_done.discard(sess)
+                    if published is not None:
+                        for key in [key for key in published if key[0] == sess]:
+                            published.pop(key, None)
+                incarnations[sess] = incarnation
         served = [(s, p) for s, p in registry.items() if s in live_wt and p]
     warm_projects: dict[str, str | None] = {
         project: None for project in (picker_projects or set())
@@ -7554,23 +7585,33 @@ def _monitor_sweep(
         # Win the single-instance election so any per-session updater retires,
         # publishing our current-runtime prefix so it defers to us (not to a
         # superseded owner) -- see cmd_status_updater's debounce.
-        _monitor_mux_set(mux_bin, sess, "@aw_updater", token)
-        _monitor_mux_set(mux_bin, sess, "@aw_updater_prefix", prefix)
+        def _publish(option: str, value: str, session: str = sess) -> bool:
+            key = (session, option)
+            if published is not None and published.get(key) == value:
+                return True
+            success = _monitor_mux_set(mux_bin, session, option, value)
+            if published is not None and success:
+                published[key] = value
+            return success
+
+        _publish("@aw_updater", token)
+        _publish("@aw_updater_prefix", prefix)
         if sess not in ctx_done:
             try:
-                _monitor_mux_set(
-                    mux_bin, sess, "@aw_ctx",
-                    _render_status_context(path, plain=False))
-                ctx_done.add(sess)
+                if _publish("@aw_ctx", _render_status_context(path, plain=False)):
+                    ctx_done.add(sess)
             except Exception:
                 pass
         try:
-            seg = _render_status_segment(
-                path, fetch=False, plain=False, no_title=False,
-                persist_title=True)
+            if segment_cache is not None:
+                seg = segment_cache.get(path)
+            else:
+                seg = _render_status_segment(
+                    path, fetch=False, plain=False, no_title=False,
+                    persist_title=True)
         except Exception:
             seg = ""
-        _monitor_mux_set(mux_bin, sess, "@aw_seg", seg)
+        _publish("@aw_seg", seg)
     for project, path in warm_projects.items():
         try:
             if path:
@@ -7581,6 +7622,280 @@ def _monitor_sweep(
         except Exception:
             pass
     return len(served)
+
+
+class _StatusSegmentCache:
+    """Share throttled Git classification across monitor and IPC consumers."""
+
+    def __init__(self, ttl: float = 60.0):
+        self.ttl = max(15.0, float(ttl))
+        self._entries: dict[str, tuple[float, str]] = {}
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _key(path: str) -> str:
+        return os.path.normcase(os.path.realpath(path))
+
+    def get(self, path: str) -> str:
+        record = _find_record_for_path(path)
+        target = record.worktree_path if record and record.worktree_path else path
+        key = self._key(target)
+        now = time.monotonic()
+        with self._lock:
+            cached = self._entries.get(key)
+            if cached and now - cached[0] < self.ttl:
+                return cached[1]
+        _activate_project_for_path(target, force=True)
+        value = _render_status_segment(
+            target, fetch=False, plain=False, no_title=False, persist_title=True)
+        with self._lock:
+            self._entries[key] = (now, value)
+        return value
+
+    def invalidate(self, cwd: str | None) -> None:
+        if not cwd:
+            return
+        target = self._key(cwd)
+        with self._lock:
+            for key in list(self._entries):
+                try:
+                    common = os.path.commonpath((target, key))
+                except (OSError, ValueError):
+                    continue
+                if common == key or common == target:
+                    self._entries.pop(key, None)
+
+    def invalidate_all(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
+_HOOK_WRITE_TOOLS = frozenset({
+    "create", "edit", "str_replace", "str_replace_editor",
+    "str_replace_based_edit_tool", "write", "write_file", "insert",
+    "apply_patch", "new_file", "multi_edit",
+})
+_HOOK_SHELL_TOOLS = frozenset({
+    "bash", "sh", "shell", "powershell", "pwsh", "cmd", "run",
+    "run_command", "execute", "exec", "terminal",
+})
+
+
+def _hook_payload_cwd(payload: dict) -> str:
+    return str(payload.get("workingDirectory") or payload.get("cwd") or os.getcwd())
+
+
+def _load_hook_client_module():
+    import importlib.util
+
+    candidates = (
+        Path.home() / ".agent-worktrees" / "bin" / "hook_client.py",
+        Path(__file__).resolve().parents[2] / "scripts" / "hook_client.py",
+    )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        spec = importlib.util.spec_from_file_location(
+            "_agent_worktrees_resident_hook_client", path)
+        if spec is None or spec.loader is None:
+            continue
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    return None
+
+
+class _ResidentHookPolicy:
+    """Warm hook policy inputs that previously required per-event discovery."""
+
+    def __init__(self, hook_client, ttl: float = 300.0):
+        self.hook_client = hook_client
+        self.ttl = ttl
+        self._anchors: tuple[float, tuple[int, int] | None, list[dict]] = (
+            0.0, None, [])
+        self._guarded: dict[str, tuple[float, list[dict]]] = {}
+
+    def _module(self, name: str):
+        if self.hook_client is None:
+            return None
+        return self.hook_client._load_sibling(name)
+
+    def ready(self) -> bool:
+        return self.hook_client is not None and all(
+            self._module(name) is not None
+            for name in (
+                "statelessness_guard.py",
+                "cross_repo_guard.py",
+                "anchor_write_guard.py",
+                "nudge_status.py",
+            )
+        )
+
+    def anchors(self) -> list[dict]:
+        now = time.monotonic()
+        module = self._module("anchor_write_guard.py")
+        source = module._repos_yaml(Path.home()) if module else None
+        try:
+            stat = source.stat() if source else None
+            identity = (stat.st_mtime_ns, stat.st_size) if stat else None
+        except OSError:
+            identity = None
+        if now - self._anchors[0] < self.ttl and identity == self._anchors[1]:
+            return self._anchors[2]
+        value = module.load_worktree_anchors(Path.home()) if module else []
+        self._anchors = (now, identity, value)
+        return value
+
+    def guarded_roots(self, cwd: str) -> list[dict]:
+        from . import related, repos
+
+        module = self._module("cross_repo_guard.py")
+        root = module.find_repo_root(cwd) if module else None
+        if root is None:
+            return []
+        key = os.path.normcase(os.path.realpath(root))
+        now = time.monotonic()
+        cached = self._guarded.get(key)
+        if cached and now - cached[0] < self.ttl:
+            return cached[1]
+        try:
+            anchors = _related_config_source_anchors(str(root))
+            entries = related.list_related_grafted(anchors)
+            value = []
+            for entry in entries:
+                if not entry.delegate or entry.delegate == "none":
+                    continue
+                path = repos.resolve_path(entry.name)
+                if path:
+                    value.append({
+                        "name": entry.name,
+                        "delegate": entry.delegate,
+                        "path": path,
+                        "locus": {
+                            "preferred": entry.locus.preferred,
+                            "machines": list(entry.locus.machines),
+                        },
+                    })
+        except Exception:
+            value = []
+        self._guarded[key] = (now, value)
+        return value
+
+    def pre(self, payload: dict) -> dict:
+        tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
+        may_write = tool in _HOOK_WRITE_TOOLS or tool in _HOOK_SHELL_TOOLS
+        combined: dict = {}
+        for name in ("statelessness_guard.py", "cross_repo_guard.py",
+                     "anchor_write_guard.py"):
+            module = self._module(name)
+            if module is None:
+                continue
+            kwargs = {}
+            if name == "cross_repo_guard.py":
+                kwargs["guarded_roots"] = (
+                    self.guarded_roots(_hook_payload_cwd(payload))
+                    if may_write else []
+                )
+            elif name == "anchor_write_guard.py":
+                kwargs["anchors"] = self.anchors() if may_write else []
+            try:
+                decision = module.decide(payload, home=Path.home(), **kwargs)
+            except Exception:
+                continue
+            if isinstance(decision, dict) and decision:
+                combined = self.hook_client._merge_pre_decisions(
+                    combined, decision)
+                if combined.get("permissionDecision") == "deny":
+                    break
+        return combined
+
+    def post(self, payload: dict, deadline: float | None = None) -> dict:
+        module = self._module("nudge_status.py")
+        if module is None:
+            return {}
+        cwd = _hook_payload_cwd(payload)
+        found = None
+        try:
+            _activate_project_for_path(cwd, force=True)
+            wt_id = tracking.find_worktree_id_by_cwd(cwd)
+            path = cfg.tracking_dir() / f"{wt_id}.yaml" if wt_id else None
+            if wt_id and path and path.is_file():
+                found = (wt_id, path)
+        except Exception:
+            pass
+        try:
+            text = module.decide(
+                payload, home=Path.home(), tracking_record=found,
+                deadline=deadline)
+        except Exception:
+            return {}
+        return {"additionalContext": text} if text else {}
+
+    def mutation_targets(self, payload: dict) -> list[str] | None:
+        tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
+        if tool in _HOOK_WRITE_TOOLS:
+            args = payload.get("toolArgs") or payload.get("tool_input") or {}
+            cwd = _hook_payload_cwd(payload)
+            if isinstance(args, dict):
+                for key in (
+                    "path", "file_path", "filePath", "filename", "fileName",
+                    "target_file", "targetFile",
+                ):
+                    value = args.get(key)
+                    if value:
+                        path = str(value)
+                        if not os.path.isabs(path):
+                            path = os.path.join(cwd, path)
+                        return [path]
+            return [cwd]
+        if tool not in _HOOK_SHELL_TOOLS:
+            return []
+        args = payload.get("toolArgs") or payload.get("tool_input") or {}
+        if not isinstance(args, dict):
+            return []
+        command = next(
+            (str(args.get(key) or "") for key in (
+                "command", "cmd", "script", "commandLine", "commandline", "input"
+            ) if args.get(key)),
+            "",
+        )
+        module = self._module("statelessness_guard.py")
+        return None if module and module._WRITE_VERBS.search(command) else []
+
+
+def _resident_hook_decision(
+    kind: str,
+    payload: dict,
+    *,
+    segment_cache: _StatusSegmentCache,
+    policy: _ResidentHookPolicy,
+    deadline: float | None = None,
+) -> dict:
+    cwd = _hook_payload_cwd(payload)
+    previous_project = cfg.active_project()
+    _activate_project_for_path(cwd, force=True)
+    try:
+        if kind == "preToolUse":
+            return policy.pre(payload)
+        if kind == "postToolUse":
+            targets = policy.mutation_targets(payload)
+            if targets is None:
+                segment_cache.invalidate_all()
+            else:
+                for target in targets:
+                    segment_cache.invalidate(target)
+            advisory = policy.post(payload, deadline)
+            binding = _bind_nudge_decision(cwd, deadline=deadline)
+            if advisory and binding:
+                a = str(advisory.get("additionalContext") or "")
+                b = str(binding.get("additionalContext") or "")
+                return {"additionalContext": "\n\n".join(x for x in (a, b) if x)}
+            return advisory or binding
+        if kind == "snapshot":
+            return {"segment": segment_cache.get(cwd)}
+        return {}
+    finally:
+        cfg.set_active_project(previous_project)
 
 
 def cmd_status_monitor(args: argparse.Namespace) -> int:
@@ -7597,6 +7912,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import monitor_roots
     from . import pane_reaper
     from . import session_catalog
+    from .hook_ipc import HookIpcServer, HookUnavailable
 
     _install_headless_child_guard()
 
@@ -7633,6 +7949,44 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         register_monitor_session=_register_session_for_monitor)
     pane_reconciler = pane_reaper.ResidentPaneReconciler(
         activate_project=_activate_project_for_path)
+    try:
+        cache_ttl = float(
+            os.environ.get("AGENT_WORKTREES_STATUS_CACHE_SECONDS", "60"))
+    except ValueError:
+        cache_ttl = 60.0
+    segment_cache = _StatusSegmentCache(cache_ttl)
+    published: dict[tuple[str, str], str] = {}
+    incarnations: dict[str, str] = {}
+    state_lock = threading.RLock()
+    hook_client = _load_hook_client_module()
+    hook_policy = _ResidentHookPolicy(hook_client)
+
+    def _decide(kind: str, payload: dict, deadline: float) -> dict:
+        remaining = deadline - time.time()
+        if remaining <= 0 or not state_lock.acquire(timeout=min(0.05, remaining)):
+            raise HookUnavailable
+        try:
+            return _resident_hook_decision(
+                kind, payload, segment_cache=segment_cache,
+                policy=hook_policy, deadline=deadline)
+        finally:
+            state_lock.release()
+
+    hook_server = None
+    if hook_policy.ready():
+        try:
+            hook_server = HookIpcServer(_decide)
+            hook_server.start()
+        except Exception:
+            hook_server = None
+
+    def _lock_extra() -> dict:
+        extra = {"prefix": my_prefix, "mux": bool(mux_bin)}
+        if hook_server is not None:
+            extra.update(hook_server.rendezvous())
+        return extra
+
+    _locks.write_lock(lock, extra=_lock_extra())
     empty_strikes = 0
     _MAX_EMPTY_STRIKES = 3
     try:
@@ -7641,25 +7995,27 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 break  # a newer runtime took over -> retire; it re-spawns current
             if _other_current_monitor():
                 return 0  # a current successor claimed the lock -> stand down
-            _locks.write_lock(
-                lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
+            _locks.write_lock(lock, extra=_lock_extra())
 
             picker_projects = monitor_roots.live_picker_projects()
             demand_projects = list_cache.recent_demand_projects()
             external_projects = picker_projects | demand_projects
-            served = _monitor_sweep(
-                mux_bin, token, my_prefix, ctx_done,
-                interval=interval, picker_projects=external_projects,
-                catalog_observer=reconciler.observe_mux,
-                pane_observer=pane_reconciler.observe)
-            try:
-                reconciler.step()
-            except Exception:
-                pass
-            try:
-                pane_reconciler.step(mux_bin)
-            except Exception:
-                pass
+            with state_lock:
+                served = _monitor_sweep(
+                    mux_bin, token, my_prefix, ctx_done,
+                    interval=interval, picker_projects=external_projects,
+                    catalog_observer=reconciler.observe_mux,
+                    pane_observer=pane_reconciler.observe,
+                    segment_cache=segment_cache, published=published,
+                    incarnations=incarnations)
+                try:
+                    reconciler.step()
+                except Exception:
+                    pass
+                try:
+                    pane_reconciler.step(mux_bin)
+                except Exception:
+                    pass
             if served < 0:
                 time.sleep(interval)  # transient mux failure: hold, don't exit
                 continue
@@ -7688,6 +8044,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 empty_strikes = 0
             time.sleep(interval)
     finally:
+        if hook_server is not None:
+            hook_server.close()
         # Release the lock only if it is still ours (never clobber a successor).
         d = _locks.read_lock(lock)
         if isinstance(d, dict) and d.get("pid") == os.getpid():
@@ -18874,7 +19232,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         # project context from it before the lookup (mirrors status-updater's
         # _activate_project_for_path fix).  Guard the lookup so a cwd outside
         # any adopted project stays a silent no-op rather than an error.
-        _activate_project_for_path(cwd)
+        _activate_project_for_path(cwd, force=True)
         try:
             wt_id = tracking.find_worktree_id_by_cwd(cwd)
         except Exception:
@@ -19397,6 +19755,55 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bind_nudge_decision(
+    cwd: str, *, deadline: float | None = None
+) -> dict:
+    """Return the advisory bind reminder without importing a CLI subprocess."""
+    import time as _time
+
+    try:
+        _activate_project_for_path(cwd)
+        try:
+            wt_id = tracking.find_worktree_id_by_cwd(cwd)
+        except Exception:
+            return {}
+        if not wt_id:
+            return {}
+        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            return {}
+        record = tracking.load_record(yaml_path)
+        if not _bind_nudge_should_fire(record):
+            return {}
+
+        stamp = cfg.tracking_dir() / f"{wt_id}.bind-nudge-at"
+        now = _time.time()
+        try:
+            if stamp.exists() and (now - stamp.stat().st_mtime) < _BIND_NUDGE_COOLDOWN_S:
+                return {}
+        except Exception:
+            pass
+
+        wdir = record.worktree_path or cwd
+        msg = (
+            "[agent-worktrees] This worktree has no session bound on record, but "
+            "you are working in it -- so its live tracking (status bar, picker) is "
+            "inactive. If you started here (or changed directory in) without being "
+            "registered, restore the binding by running:\n"
+            f"    agent-worktrees bind-session --worktree-dir={wdir}\n"
+            "This is a one-time declaration; once bound, this reminder stops."
+        )
+        if deadline is not None and _time.time() >= deadline:
+            return {}
+        try:
+            stamp.write_text(str(now), encoding="utf-8")
+        except Exception:
+            pass
+        return {"additionalContext": msg}
+    except Exception:
+        return {}
+
+
 def cmd_bind_nudge(args: argparse.Namespace) -> int:
     """postToolUse hook: nudge an unbound-but-active session to bind (JSON out).
 
@@ -19408,8 +19815,6 @@ def cmd_bind_nudge(args: argparse.Namespace) -> int:
     ``bind-session`` call does the binding.
     """
     import json as _json
-    import time as _time
-
     def _emit(obj) -> int:
         try:
             sys.stdout.write(_json.dumps(obj))
@@ -19423,44 +19828,7 @@ def cmd_bind_nudge(args: argparse.Namespace) -> int:
             payload = _read_hook_stdin()
             if payload:
                 cwd = payload.get("workingDirectory") or payload.get("cwd")
-        cwd = cwd or os.getcwd()
-        _activate_project_for_path(cwd)
-        try:
-            wt_id = tracking.find_worktree_id_by_cwd(cwd)
-        except Exception:
-            return _emit({})
-        if not wt_id:
-            return _emit({})
-        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-        if not yaml_path.exists():
-            return _emit({})
-        record = tracking.load_record(yaml_path)
-        if not _bind_nudge_should_fire(record):
-            return _emit({})
-
-        # Debounce: at most one nudge per worktree per cooldown window.
-        stamp = cfg.tracking_dir() / f"{wt_id}.bind-nudge-at"
-        now = _time.time()
-        try:
-            if stamp.exists() and (now - stamp.stat().st_mtime) < _BIND_NUDGE_COOLDOWN_S:
-                return _emit({})
-        except Exception:
-            pass
-
-        wdir = record.worktree_path or cwd
-        msg = (
-            "[agent-worktrees] This worktree has no session bound on record, but "
-            "you are working in it -- so its live tracking (status bar, picker) is "
-            "inactive. If you started here (or changed directory in) without being "
-            "registered, restore the binding by running:\n"
-            f"    agent-worktrees bind-session --worktree-dir={wdir}\n"
-            "This is a one-time declaration; once bound, this reminder stops."
-        )
-        try:
-            stamp.write_text(str(now), encoding="utf-8")
-        except Exception:
-            pass
-        return _emit({"additionalContext": msg})
+        return _emit(_bind_nudge_decision(cwd or os.getcwd()))
     except Exception:
         return _emit({})
 
