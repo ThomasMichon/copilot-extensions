@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees and pull requests
 - **Created:** 2026-09-03
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [`repository-owned-aggregate-configuration`](../../../visions/plugins/agent-logger/README.md#repository-owned-aggregate-configuration) · [`explainable-machine-plan`](../../../visions/plugins/agent-logger/README.md#explainable-machine-plan) · [`resolve-before-side-effects`](../../../visions/plugins/agent-logger/README.md#resolve-before-side-effects) · [`reject-cross-repository-collisions`](../../../visions/plugins/agent-logger/README.md#reject-cross-repository-collisions) · [`configuration-is-authorization`](../../../visions/plugins/agent-logger/README.md#configuration-is-authorization)
 - **Umbrella issue:** #1817
-- **Sub-issues:** Pending decomposition
+- **Sub-issues:** #1831 · #1832 · #1833 · #1834 · #1835
 
 ## Guiding Intent
 
@@ -70,7 +70,7 @@ particular control-repository name, machine inventory, or private topology.
 
 ## Plan
 
-### Phase 1 — Specify the resolution contract
+### Phase 1 — [Specify the resolution contract](resolution-contract.md)
 
 - [ ] Define the versioned repository declaration and repository-scoped local-override contracts without overloading the existing log-presentation-only file.
 - [ ] Define a portable discovery-provider seam and the first concrete discovery path, including stable repository identity, declaration provenance, and an explicit machine-local admission registry.
@@ -83,7 +83,7 @@ particular control-repository name, machine inventory, or private topology.
 - [ ] Make aggregate resolution independent of process cwd and ordinary environment overrides; only admitted, provenance-bearing inputs may create or suppress claims.
 - [ ] Define canonical normalization, overlap witnesses, error taxonomy, and the versioned resolved-plan JSON contract.
 - [ ] Define ownership-change semantics for already-rendered records and reservation state; default to applying new ownership only to newly due work unless an explicit migration is requested.
-- [ ] Carve implementation slices into public sub-issues before code changes begin.
+- [x] Carve implementation slices into public sub-issues before code changes begin.
 
 ### Phase 2 — Build the aggregate compiler
 
@@ -159,7 +159,7 @@ particular control-repository name, machine inventory, or private topology.
 
 ## Proposal
 
-_Pending review. Begin implementation only after this effort plan merges._
+Reviewed and merged in #1828. Implementation is authorized against this plan.
 
 ## Journal
 
@@ -175,3 +175,13 @@ _Pending review. Begin implementation only after this effort plan merges._
   repositories, decidable non-substring claims, multi-worktree handling,
   observe-only migration before enforcement, fallback collision treatment,
   schema quarantine, cwd independence, and stable ownership-change behavior.
+
+### 2026-09-03 — Execution started
+
+- The reviewed effort merged in #1828 and the implementation worktree pulled
+  forward onto the merged plan.
+- Carved Phase 1 through adoption into #1831, #1832, #1833, #1834, and #1835.
+- Began #1831 with the linked aggregate resolution contract covering
+  configuration homes, trust and admission, authoritative checkouts, stable
+  identity, claim algebra, deterministic machine selection, collision
+  witnesses, diagnostics, observe-only rollout, and ownership changes.
