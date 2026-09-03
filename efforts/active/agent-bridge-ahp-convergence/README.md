@@ -356,3 +356,21 @@ policy, version decision, and exception ledger live in
   advertisement until lifecycle semantics are reviewed again.
 - Kept runtime endpoint registration, ordering, replay, and live conformance
   probes out of this contract-only slice.
+
+### 2026-09-02 — Trusted self-hosted CI gate
+
+- Added a default-branch `pull_request_target` workflow that authorizes only
+  the pull-request author's current `write`, `maintain`, or `admin` repository
+  permission on a GitHub-hosted runner.
+- The self-hosted job uses only the dedicated `copilot-extensions-ci` label,
+  checks out the immutable pull-request head SHA without persisting a
+  credential, receives no secret, and remains disabled behind the explicit
+  `TRUSTED_SELF_HOSTED_CI=enabled` repository-variable latch until runner
+  activation.
+- Added a GitHub-hosted static contract guard and mutation tests for the event,
+  permission query, authorization dependency, activation latch, exact label,
+  immutable checkout, and credential boundary.
+- Runner activation remains conditional on repository settings requiring
+  approval for all external contributors. The static guard also rejects any
+  other checked-in workflow job that routes to `self-hosted` or the dedicated
+  label; this supplements repository policy but does not replace it.
