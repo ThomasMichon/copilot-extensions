@@ -358,6 +358,26 @@ def test_get_worktree_dir_is_current_worktree(adopted_repo, active_myproj, monke
     assert Path(out).resolve() == wt_path.resolve()
 
 
+def test_get_worktree_dir_uses_actual_foreign_worktree_path(
+    adopted_repo, active_myproj, tmp_path, monkeypatch, capsys
+):
+    """A host-created linked worktree must not be projected under worktree_root."""
+    anchor, wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    foreign = tmp_path / "copilot-worktrees" / "app-session"
+    foreign.parent.mkdir()
+    git_ops.git(
+        "worktree", "add", str(foreign), "-b", "app-session", "master",
+        cwd=str(anchor),
+    )
+    monkeypatch.chdir(foreign)
+
+    rc = m.cmd_get(types.SimpleNamespace(key="worktree-dir"))
+
+    assert rc == 0
+    assert Path(capsys.readouterr().out.strip()).resolve() == foreign.resolve()
+    assert not (wt_root / "app-session").exists()
+
+
 def test_get_worktree_dir_empty_at_anchor(adopted_repo, active_myproj, monkeypatch, capsys):
     """At the anchor (not inside a worktree) `get worktree-dir` is empty."""
     anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
