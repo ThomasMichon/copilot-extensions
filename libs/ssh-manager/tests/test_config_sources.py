@@ -117,3 +117,20 @@ class TestSSHProfileSource:
         alias_a = SSHProfileSource("alias-a").get_ssh_config()
         alias_b = SSHProfileSource("alias-b").get_ssh_config()
         assert alias_a.connection_identity == alias_b.connection_identity
+
+    def test_effective_profile_is_cached(self, monkeypatch):
+        calls = 0
+
+        def resolve(_self):
+            nonlocal calls
+            calls += 1
+            return (("hostname", "shared.example"),)
+
+        monkeypatch.setattr(SSHProfileSource, "_resolve_effective_config", resolve)
+        source = SSHProfileSource("alias")
+        first = source.get_ssh_config()
+        second = source.get_ssh_config()
+        refreshed = source.refresh()
+        assert first is second
+        assert second is refreshed
+        assert calls == 1

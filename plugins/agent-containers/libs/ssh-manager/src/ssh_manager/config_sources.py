@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -120,15 +121,20 @@ class SSHProfileSource:
         self._user = user
         self._port = port
         self._config_file = config_file
+        self._cached_config: SSHConfig | None = None
+        self._cache_lock = threading.Lock()
 
     def get_ssh_config(self) -> SSHConfig:
-        return SSHConfig(
-            host_alias=self._host_alias,
-            user=self._user,
-            port=self._port,
-            config_file=self._config_file,
-            effective_config=self._resolve_effective_config(),
-        )
+        with self._cache_lock:
+            if self._cached_config is None:
+                self._cached_config = SSHConfig(
+                    host_alias=self._host_alias,
+                    user=self._user,
+                    port=self._port,
+                    config_file=self._config_file,
+                    effective_config=self._resolve_effective_config(),
+                )
+            return self._cached_config
 
     def refresh(self) -> SSHConfig:
         # Static profiles don't change -- just return current config
