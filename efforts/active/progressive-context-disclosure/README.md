@@ -523,3 +523,18 @@ enforcement before migrating the complete contributor stack.
 - Next gate: keep F3, safety-gated emphasis, flat fragments, multi-guide task,
   model, ACP venue, and fresh boundary fixed while changing only the reference
   representation to `structured-reference`.
+
+### 2026-09-03 - Structured references do not recover multi-guide
+
+- Ran three independently generated F3 safety-gated multi-guide repetitions
+  with only the reference representation changed from repository-relative
+  backticks to `structured-reference`.
+- All three failed literal mode. Every run read all required guides but also
+  loaded two or three unrelated guides, lost complete owner provenance, and
+  returned the wrong blocked or do-not-proceed decision instead of the bounded
+  procedure.
+- Structured references increased tool use to 14-18 calls and did not prevent
+  broad repository discovery. Reject this representation for the cell.
+- Next gate: return to repository-relative references and change only assembly
+  from flat fragments to `flat-with-index`, testing whether one explicit
+  generated index can provide ordering without structured-reference verbosity.
