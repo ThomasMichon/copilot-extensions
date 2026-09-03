@@ -22688,12 +22688,13 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     """Perform (or preview) a submitter-direct merge -- ``pr-merge --now``.
 
     Only a **pr-self-merge** repo may use this submitter-direct merge verb.
-    Honoring the repo's ``prefer_auto_merge`` policy (#225, default on): it first
-    tries the provider's native CI-gated auto-merge (``enable_auto_merge`` -- the
-    PR lands on its own once required checks/reviews pass) and falls back to a
-    squash merge (``merge_pull``) only where auto-merge is unavailable or
-    ``prefer_auto_merge`` is off. The fallback uses an admin bypass only for a
-    non-blocking review posture; a blocking review remains provider-enforced.
+    Azure DevOps routes through its native ``request_auto_complete`` operation,
+    which either arms auto-complete or completes immediately with the configured
+    policy bypass. Other providers honor ``prefer_auto_merge`` (#225, default
+    on): first try ``enable_auto_merge``, then fall back to ``merge_pull`` where
+    auto-merge is unavailable or disabled. The fallback uses an admin bypass
+    only for a non-blocking review posture; a blocking review remains
+    provider-enforced.
     Any other profile is refused-with-reminder, steering the agent to the
     sanctioned wait/consent path.
     Returns a shell exit code (0 success, 1 merge failure, 2 refusal/usage).
@@ -22754,9 +22755,61 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
 
     tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
 
-    # Policy: prefer the provider's native CI-gated auto-merge (so the merge
-    # waits on required checks) and fall back to an immediate self-merge only
-    # where the provider offers no auto-merge or it can't be armed (#225).
+    # Azure DevOps exposes completion through request_auto_complete rather than
+    # the GitHub-oriented enable_auto_merge / merge_pull interfaces.
+    if provider.name == "azure-devops":
+        try:
+            err = provider.request_auto_complete(
+                args.repo,
+                args.pr,
+                api_base=base,
+                token=tok,
+                automerge_label=getattr(prcfg, "automerge_label", ""),
+                squash=getattr(prcfg, "squash", True),
+                delete_source_branch=getattr(
+                    prcfg, "delete_source_branch", True
+                ),
+                bypass_policy=getattr(prcfg, "bypass_policy", False),
+                bypass_reason=getattr(prcfg, "bypass_reason", ""),
+            )
+        except ProviderError as exc:
+            err = str(exc)
+        if err:
+            rem = pc.pr_reminder(
+                flow, "pr-merge", ok=False,
+                reason="the Azure DevOps completion request failed",
+            )
+            if args.json:
+                print(_json.dumps({
+                    "repo": args.repo, "pr": args.pr, "action": "auto-complete",
+                    "applied": False, "error": err,
+                    "flow_profile": flow.profile, "reminder": rem.as_dict(),
+                }))
+            else:
+                output.err(
+                    f"pr-merge --now: failed to complete PR #{args.pr} in "
+                    f"{args.repo}: {err}"
+                )
+                print(rem.text(), file=sys.stderr)
+            return 1
+        rem = pc.pr_reminder(flow, "pr-watch", ok=True)
+        if args.json:
+            print(_json.dumps({
+                "repo": args.repo, "pr": args.pr, "action": "auto-complete",
+                "applied": True, "merged": False,
+                "flow_profile": flow.profile, "reminder": rem.as_dict(),
+            }))
+        else:
+            output.ok(
+                f"pr-merge --now: requested Azure DevOps completion for PR "
+                f"#{args.pr} in {args.repo}."
+            )
+            print(rem.text(), file=sys.stderr)
+        return 0
+
+    # Other providers prefer native CI-gated auto-merge (so the merge waits on
+    # required checks) and fall back to an immediate self-merge only where the
+    # provider offers no auto-merge or it can't be armed (#225).
     auto_armed = False
     if prefer_auto:
         try:
