@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import socket
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import agent_worktrees.hook_ipc as hook_ipc
 from agent_worktrees.hook_ipc import HookIpcServer, HookUnavailable
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "hook_client.py"
@@ -82,6 +85,27 @@ def test_stalled_connection_is_closed_after_read_timeout():
             assert conn.recv(100) == b""
     finally:
         server.close()
+
+
+def test_fallback_write_ignores_disconnected_client():
+    class DisconnectedWriter:
+        def write(self, data):
+            raise BrokenPipeError
+
+    handler = hook_ipc._Handler.__new__(hook_ipc._Handler)
+    handler.request = SimpleNamespace(settimeout=lambda timeout: None)
+    handler.rfile = io.BytesIO(
+        json.dumps({
+            "version": 1,
+            "token": "token",
+            "kind": "preToolUse",
+            "payload": {},
+            "deadline": time.time() - 1,
+        }).encode() + b"\n"
+    )
+    handler.wfile = DisconnectedWriter()
+    handler.server = SimpleNamespace(token="token", decide=lambda *args: {})
+    handler.handle()
 
 
 def test_busy_server_explicitly_requests_fallback(tmp_path):

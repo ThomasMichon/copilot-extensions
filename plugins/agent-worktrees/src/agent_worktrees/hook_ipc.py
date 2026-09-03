@@ -59,7 +59,10 @@ class _Handler(socketserver.StreamRequestHandler):
                 + b"\n"
             )
         except HookUnavailable:
-            self.wfile.write(b'{"version":1,"fallback":true}\n')
+            try:
+                self.wfile.write(b'{"version":1,"fallback":true}\n')
+            except OSError:
+                return
         except Exception:
             return
 

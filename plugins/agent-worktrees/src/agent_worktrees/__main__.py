@@ -7488,8 +7488,9 @@ def _monitor_list_sessions(
     disagree with the binary ``cmd_status_monitor`` actually resolved
     (psmux-if-present) -- a mismatch would enumerate the wrong multiplexer and
     return nothing every sweep, so the monitor neither serves nor idle-exits.
-    Query ``mux_bin`` directly instead.  Returns ``{session_name: attached}`` or
-    ``None`` on a transient failure (so the caller neither prunes nor exits).
+    Query ``mux_bin`` directly instead. Returns
+    ``{session_name: (attached, incarnation)}`` or ``None`` on a transient
+    failure (so the caller neither prunes nor exits).
     """
     try:
         r = subprocess.run(
