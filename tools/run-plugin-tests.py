@@ -21,8 +21,8 @@ Design notes:
 * **uv-based.** Uses ``uv`` for the venv + editable install so plugins that
   vendor path dependencies via ``[tool.uv.sources]`` (agent-containers,
   agent-codespaces, ...) resolve correctly -- plain ``pip`` cannot.
-* **Cached venvs** live under ``.test-venvs/<plugin>`` (git-ignored) and are
-  reused across runs; ``--reinstall`` rebuilds one.
+* **Cached venvs** live under ``.test-venvs/<platform>/<plugin>`` (git-ignored)
+  and are reused across runs; ``--reinstall`` rebuilds one.
 * **Windows-safe temp.** Passes a randomized ``--basetemp`` so pytest's tmp
   cleanup does not trip the ``pytest-current`` junction ``PermissionError`` on
   Windows (teardown noise that would otherwise mask a green run).
@@ -58,7 +58,7 @@ from plugin_test_containment import (
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
-VENV_ROOT = REPO / ".test-venvs"
+VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 

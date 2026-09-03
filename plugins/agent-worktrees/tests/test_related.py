@@ -195,7 +195,13 @@ def _register_project(home: Path, name: str, repo: Path) -> None:
         ["git", "-C", str(repo), "remote", "add", "origin", remote],
         check=True,
     )
-    platform_key = "windows" if os.name == "nt" else "linux"
+    platform_key = (
+        "windows"
+        if os.name == "nt"
+        else "wsl"
+        if os.environ.get("WSL_DISTRO_NAME")
+        else "linux"
+    )
     _write_json(
         home / ".agent-worktrees" / "projects.yaml",
         {"projects": {name: {"config_dir": f"~/.{name}"}}},
