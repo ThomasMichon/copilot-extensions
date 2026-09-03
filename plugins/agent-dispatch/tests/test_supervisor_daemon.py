@@ -20,6 +20,8 @@ from __future__ import annotations
 import pytest
 
 from agent_dispatch.registrar import load_declaration
+from agent_dispatch.registrar_reconcile import declaration_to_registration
+from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
 from agent_dispatch.supervisor_daemon import (
     SupervisorDaemon,
     UnsupportedKind,
@@ -272,6 +274,49 @@ def test_build_command_periodic_emitter():
     assert cmd[:5] == ["PY", "-m", "agent_dispatch", "emitter", "serve"]
     assert "/run/emitter.json" in cmd
     assert cmd[cmd.index("--holder") + 1] == "anomalous-potato"
+
+
+def test_repository_issue_loop_expansion_builds_periodic_emitter_command():
+    source, _workers = expand_repository_issue_loop(
+        {
+            "name": "backlog",
+            "kind": "repository-issue-loop",
+            "repo": "example/project",
+            "source": "repository-backlog",
+            "cadence_seconds": 3600,
+            "task_label": "repository-issue-work",
+            "forge": {
+                "provider": "github",
+                "producer_login": "issue-bot",
+            },
+            "reservation": {"label": "agent-reserved"},
+            "pool": {"body": {"type": "headless", "agent": "issue-worker"}},
+        }
+    )
+    registration = declaration_to_registration(
+        source, machine="host-a", env="default"
+    )
+    captured = {}
+
+    def materialize(name, payload):
+        captured[name] = payload
+        return f"/run/{name}.json"
+
+    command = build_command(
+        registration, python="PY", materialize=materialize
+    )
+
+    assert command == [
+        "PY",
+        "-m",
+        "agent_dispatch",
+        "emitter",
+        "serve",
+        "/run/emitter.json",
+        "--holder",
+        "host-a",
+    ]
+    assert captured["emitter"]["repository_issue_loop"]["name"] == "backlog"
 
 
 def test_build_command_needs_materializer_for_inline_spec():

@@ -627,6 +627,87 @@ emitter, it does not cancel a command that was already in flight.
 An explicitly conflicting direct registration remains a separate supervised
 unit; loop controls do not guess that a different spec should be stopped.
 
+### Repository issue loops (`agent-dispatch repository-issue-loop`)
+
+A repository can adopt a bounded issue-backlog worker with one complete
+`kind: repository-issue-loop` declaration. The registrar expands it into an
+epoch-anchored periodic issue-source emitter and one concurrency-one headless
+worker lane. No overlay or second policy file is merged into the declaration.
+
+```yaml
+name: repository-backlog
+kind: repository-issue-loop
+repo: owner/project
+source: repository-backlog
+cadence_seconds: 21600
+tick_interval_seconds: 60
+quiet_period_seconds: 1800
+include_labels: [ready]
+exclude_labels: [bootstrap, wontfix]
+priority_labels: [priority:high, priority:medium]
+batch_size: 3
+task_label: repository-issue-work
+forge:
+  provider: github
+  producer_login: issue-bot
+reservation:
+  label: agent-reserved
+  comment: true
+  orphan_after_seconds: 3600
+pool:
+  max_active_processes: 1
+  body:
+    type: headless
+    agent: repository-issue-worker
+```
+
+The emitter may tick more frequently than the configured cadence, but each
+occurrence is anchored to the Unix epoch. A completed task suppresses a replay
+of its occurrence after restart, and any nonterminal loop task backpressures
+later occurrences. Eligible issues must satisfy the quiet window and label
+policy, then sort by configured priority-label rank, creation time, and issue
+number. One goal-bearing task represents at most `batch_size` issues and carries
+a loop-wide `exclusive_key`; the lane's concurrency-one cap is defense in depth.
+Suppressed occurrences return before forge discovery. Unsuppressed GitHub
+discovery fetches issue fields and marker comments in bounded GraphQL pages,
+avoiding one comment request per issue.
+
+GitHub is the first forge adapter. It reserves each issue visibly with the
+declared label and an ownership marker comment before task creation, promotes
+the marker after creation, and reconciles its own orphaned reservation after a
+partial failure. A coordinator-atomic canonical repository/issue reservation
+elects exactly one winner before task creation when overlapping declarations
+race. Opaque acquisition tokens fence stale same-owner bind/release calls, and
+an indeterminate create response is resolved by deterministic task lookup
+before any release. Each token is renewed before a non-runnable proposed task
+is created; the task enters the worker queue only after every issue binds, and
+a bind failure abandons it. Later ticks retry approval for fully bound proposed
+tasks and terminal abandonment for incomplete ones, retaining reservations
+until terminal state is confirmed. Losers visibly release their provisional
+marker; an exact shared label remains while a distinct loser label is removed. Reservations
+owned by another loop are selection blockers and are never silently cleared. The configured
+`forge.producer_login` is verified against the authenticated `gh` identity and
+repository immediately before every mutation; comments from other authors are
+untrusted issue data.
+
+```bash
+agent-dispatch repository-issue-loop setup .agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop inspect .agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop discover .agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop status .agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop doctor .agent-dispatch/registrar/issues.yaml
+agent-dispatch repository-issue-loop disable .agent-dispatch/registrar/issues.yaml \
+  --reason "maintenance"
+agent-dispatch repository-issue-loop enable .agent-dispatch/registrar/issues.yaml
+```
+
+`discover` is read-only. `status`/`doctor` report the last emitter success or
+failure, staleness, active occurrence, forge-visible reservations, pool state,
+and local kill switch. Forge discovery or credential failures are explicit
+health failures, not indistinguishable from an empty eligible set. See
+[`docs/repository-issue-loop.md`](docs/repository-issue-loop.md) for the worker
+contract, migration sequence, and provider boundary.
+
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
@@ -746,9 +827,12 @@ agent-dispatch emitter side-load <registration-id> owner/name#42
 With `task_output=json`, discovery and side-load commands emit one task object
 or a list of task objects on stdout. Each object contains `title` plus ordinary
 create fields (`repo`, `prompt`, `labels`, `dedup_key`, and so on).
-agent-dispatch authors the tasks and forcibly stamps `source=emitter`,
+agent-dispatch authors the tasks and forcibly stamps `source=emitter` by
+default,
 `origin_ref=<emitter id>`, and the declaration's `evaluator_ref`; command output
-cannot spoof that provenance. The same operation is exposed as
+cannot spoof that provenance. A command emitter may declare a non-empty
+`source` to use a dedicated producer identity; existing declarations that omit
+it retain `source=emitter`. The same operation is exposed as
 `dispatch_emitter_side_load` by local and coordinator-hosted MCP.
 
 An evaluator registration may declare the same `evaluator_ref`. Its service
