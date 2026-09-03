@@ -5,7 +5,7 @@
 - **Branch(es):** one proposal PR followed by independently reviewable
   implementation and archive PRs from the delegation-contract driver worktree
 - **Created:** 2026-09-01
-- **Status:** Active
+- **Status:** Done
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   §Features/`attention-boundary-subscriptions` and
@@ -171,10 +171,10 @@ a scheduler or callback service.
 - [x] Update the delegation contract and agent-bridge CLI/API documentation with
       selected reasons, timeout semantics, cursor neutrality, retained versus
       detached behavior, and the temporary compatibility rule.
-- [ ] Reconcile #1450 and the parent
+- [x] Reconcile #1450 and the parent
       `agent-bridge-delegation-convergence` Phase 1B checklist after the
       implementation and validation PRs merge.
-- [ ] Archive this focused effort and record the next unblocked delegation
+- [x] Archive this focused effort and record the next unblocked delegation
       convergence slice.
 
 ## Validation Plan
@@ -311,3 +311,11 @@ The authoritative reason-source matrix begins with these ownership rules:
   the unrelated deterministic stable-read defect tracked in #1680
   (`st_ctime_ns` differs between handle and path metadata); 40 tests pass,
   1 skips, and 6 fail at that known boundary.
+
+### 2026-09-03 — Merged and archived
+
+- Merged the implementation through #1899 with agent-bridge `0.4.0-dev424`
+  after the focused review findings and required CI were resolved.
+- Reconciled parent Phase 1B and closed #1450. The next delegation-convergence
+  implementation slice is Phase 2 / #1451 once its #1460/#1468 writer gates
+  permit queue and admission changes.
