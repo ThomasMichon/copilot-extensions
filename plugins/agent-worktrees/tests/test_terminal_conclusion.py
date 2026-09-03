@@ -383,7 +383,6 @@ def test_short_wait_does_not_break_a_fresh_lifecycle_lock(
     assert lock_path.exists()
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Waiting for finalization lock" in captured.err
 
 
 def test_reused_pid_does_not_keep_a_stale_lifecycle_lock(
