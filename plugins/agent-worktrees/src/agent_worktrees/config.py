@@ -1440,20 +1440,57 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
     once (installed-plugin contributions + the control-plane ``related.yaml``)
     and returns only the entries that carry a ``pr`` block.
 
-    Config-free and fail-safe: it uses ``find_control_plane_anchor`` /
-    ``installed_plugin_related_anchors`` (registry + file reads only, never
-    ``load_config``), and degrades to ``{}`` on any error so the hot config path
-    can never be broken by control-plane discovery. ``load_config`` layers each
-    block ABOVE the foreign repo's own in-repo ``pr`` and BELOW a machine-local
+    Fail-safe: it resolves the control-plane project without PR grafting, then
+    uses the standard config-source seam to include its knowledge overlay. An
+    unregistered control-plane anchor falls back to the original anchor-only
+    behavior rather than inheriting the caller's active project. Any error
+    degrades to the available anchors (or ``{}``) so the hot config path cannot
+    be broken by control-plane discovery. ``load_config`` layers each block
+    ABOVE the foreign repo's own in-repo ``pr`` and BELOW a machine-local
     ``repos.<name>.pr`` override.
     """
     try:
         from . import related
+        from . import repos
+        from . import state_root
 
         cp = related.find_control_plane_anchor()
         anchors: list[str] = list(related.installed_plugin_related_anchors())
         if cp:
-            anchors.append(cp)
+            try:
+                cp_key = related._anchor_key(cp)
+                cp_project = next(
+                    (
+                        entry.name
+                        for entry in repos.list_repos()
+                        if entry.local_path()
+                        and related._anchor_key(entry.local_path()) == cp_key
+                    ),
+                    None,
+                )
+                cp_sources = (
+                    state_root.config_source_anchors(
+                        load_config(
+                            include_control_plane_related_pr=False,
+                            project=cp_project,
+                        ),
+                        base_anchor=cp,
+                    )
+                    if cp_project
+                    else []
+                )
+            except Exception:
+                cp_sources = []
+            if cp_sources:
+                anchors.extend(
+                    related.config_contribution_anchor(source.anchor, source.origin)
+                    for source in cp_sources
+                    if source.anchor
+                )
+            else:
+                anchors.append(
+                    related.config_contribution_anchor(cp, "harness")
+                )
         if not anchors:
             return {}
         rc = related.read_related_grafted(anchors)
