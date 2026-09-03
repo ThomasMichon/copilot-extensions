@@ -378,7 +378,8 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "session-machine.ps1", "session-machine.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py",
-                 "anchor_write_guard.py", "nudge_status.py"):
+                 "anchor_write_guard.py", "nudge_status.py", "bind_nudge.py",
+                 "hook_client.py"):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, bd / name)

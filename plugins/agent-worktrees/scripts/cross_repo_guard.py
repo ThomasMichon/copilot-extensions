@@ -381,7 +381,9 @@ def _runtime_argv(root: Path | None = None) -> list[str] | None:
 _RUNTIME_UNRESOLVED_WARNED = False
 
 
-def _run_related(args: list[str], cwd: str) -> str | None:
+def _run_related(
+    args: list[str], cwd: str, deadline: float | None = None
+) -> str | None:
     """Run ``agent-worktrees related <args>`` and return stdout, or None."""
     argv = _runtime_argv()
     if not argv:
@@ -399,9 +401,12 @@ def _run_related(args: list[str], cwd: str) -> str | None:
             )
         return None
     try:
+        timeout = 20.0
+        if deadline is not None:
+            timeout = max(0.1, min(timeout, deadline - time.monotonic()))
         proc = subprocess.run(
             [*argv, "related", *args], cwd=cwd,
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -410,7 +415,9 @@ def _run_related(args: list[str], cwd: str) -> str | None:
     return proc.stdout
 
 
-def _discover_guarded_roots(root: str) -> list[dict]:
+def _discover_guarded_roots(
+    root: str, deadline: float | None = None
+) -> list[dict]:
     """Guarded related repos with a local checkout path, via the related CLI.
 
     Guarded == ``delegate`` not in (none/empty) AND a local ``registry.path``
@@ -418,7 +425,12 @@ def _discover_guarded_roots(root: str) -> list[dict]:
     retired extension's ``loadGuardedRoots``; the CLI already merges the
     knowledge-repo config overlay + resolves paths.
     """
-    list_out = _run_related(["list", "--json", "--repo", root], root)
+    def _run(args: list[str]) -> str | None:
+        if deadline is None:
+            return _run_related(args, root)
+        return _run_related(args, root, deadline)
+
+    list_out = _run(["list", "--json", "--repo", root])
     if not list_out:
         return []
     try:
@@ -427,6 +439,8 @@ def _discover_guarded_roots(root: str) -> list[dict]:
         return []
     guarded: list[dict] = []
     for r in related:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         if not isinstance(r, dict):
             continue
         delegate = r.get("delegate")
@@ -435,7 +449,7 @@ def _discover_guarded_roots(root: str) -> list[dict]:
         name = r.get("name")
         if not name:
             continue
-        show_out = _run_related(["show", name, "--json", "--repo", root], root)
+        show_out = _run(["show", name, "--json", "--repo", root])
         path = ""
         locus = r.get("locus")
         if show_out:
@@ -451,12 +465,16 @@ def _discover_guarded_roots(root: str) -> list[dict]:
     return guarded
 
 
-def load_guarded_roots(root: str, home: Path) -> list[dict]:
+def load_guarded_roots(
+    root: str, home: Path, deadline: float | None = None
+) -> list[dict]:
     """Cached :func:`_discover_guarded_roots` (short TTL sidecar)."""
     cache = _cache_path(root, home)
     cached = _read_cache(cache)
     if cached is not None:
         return cached
+    if deadline is not None:
+        return _discover_guarded_roots(root, deadline)
     roots = _discover_guarded_roots(root)
     _write_cache(cache, roots)
     return roots
@@ -548,7 +566,7 @@ def _hit_to_output(hit: dict, mode: str) -> dict | None:
 
 
 def decide(payload: dict, *, env=None, home=None,
-           guarded_roots=None) -> dict | None:
+           guarded_roots=None, deadline: float | None = None) -> dict | None:
     """Return a hook-output decision dict, or None to allow. Pure/injectable."""
     env = env if env is not None else os.environ
     home = Path(home) if home is not None else Path.home()
@@ -568,7 +586,7 @@ def decide(payload: dict, *, env=None, home=None,
         root = find_repo_root(cwd)
         if root is None:
             return None
-        guarded = load_guarded_roots(str(root), home)
+        guarded = load_guarded_roots(str(root), home, deadline)
     else:
         guarded = guarded_roots
     if not guarded:

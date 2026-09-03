@@ -12,6 +12,7 @@ real mux.
 from __future__ import annotations
 
 import argparse
+import re
 import types
 
 import agent_procutil
@@ -126,7 +127,7 @@ def _capture_set(monkeypatch):
     calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         m, "_monitor_mux_set",
-        lambda mux_bin, sess, opt, val: calls.append((sess, opt, val)))
+        lambda mux_bin, sess, opt, val: calls.append((sess, opt, val)) or True)
     return calls
 
 
@@ -179,6 +180,233 @@ def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
     seg_sets = [c for c in calls if c[1] == "@aw_seg"]
     assert len(ctx_sets) == 1                            # identity: once
     assert len(seg_sets) == 2                            # disposition: every pass
+
+
+def test_sweep_reuses_segment_and_skips_unchanged_mux_values(
+    tmp_path, monkeypatch
+):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    calls = _capture_set(monkeypatch)
+
+    class Cache:
+        count = 0
+
+        def get(self, path):
+            self.count += 1
+            return "SEG"
+
+    cache = Cache()
+    published = {}
+    ctx_done = set()
+    m._monitor_sweep(
+        "tmux", "T", "P", ctx_done, segment_cache=cache,
+        published=published)
+    m._monitor_sweep(
+        "tmux", "T", "P", ctx_done, segment_cache=cache,
+        published=published)
+
+    assert cache.count == 2
+    assert [call for call in calls if call[1] == "@aw_seg"] == [
+        ("wt-a", "@aw_seg", "SEG")
+    ]
+
+
+def test_sweep_retries_failed_mux_publish(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    attempts = []
+
+    def publish(mux, session, option, value):
+        attempts.append((session, option, value))
+        return len(attempts) > 4
+
+    monkeypatch.setattr(m, "_monitor_mux_set", publish)
+    published = {}
+    m._monitor_sweep("tmux", "T", "P", set(), published=published)
+    assert published == {}
+    m._monitor_sweep("tmux", "T", "P", set(), published=published)
+    assert len(attempts) == 8
+
+
+def test_sweep_republishes_for_recreated_mux_session(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    incarnation = ["100"]
+    monkeypatch.setattr(
+        m, "_monitor_list_sessions",
+        lambda mux_bin: {"wt-a": (1, incarnation[0])})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    calls = _capture_set(monkeypatch)
+    published = {}
+    incarnations = {}
+    ctx_done = set()
+
+    m._monitor_sweep(
+        "tmux", "T", "P", ctx_done, published=published,
+        incarnations=incarnations)
+    incarnation[0] = "200"
+    m._monitor_sweep(
+        "tmux", "T", "P", ctx_done, published=published,
+        incarnations=incarnations)
+
+    assert len([call for call in calls if call[1] == "@aw_seg"]) == 2
+    assert len([call for call in calls if call[1] == "@aw_ctx"]) == 2
+
+
+def test_segment_cache_throttles_and_invalidates(monkeypatch):
+    renders = []
+    monkeypatch.setattr(m, "_find_record_for_path", lambda path: None)
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(
+        m, "_render_status_segment",
+        lambda path, **kwargs: renders.append(path) or f"SEG-{len(renders)}",
+    )
+    cache = m._StatusSegmentCache(ttl=60)
+    assert cache.get("/w/a") == "SEG-1"
+    assert cache.get("/w/a") == "SEG-1"
+    cache.invalidate("/w/a/src")
+    assert cache.get("/w/a") == "SEG-2"
+    assert renders == ["/w/a", "/w/a"]
+
+
+def test_resident_hook_scopes_and_restores_project(monkeypatch):
+    prior = m.cfg.active_project()
+    seen = []
+
+    class Policy:
+        def pre(self, payload):
+            seen.append(m.cfg.active_project())
+            return {}
+
+    monkeypatch.setattr(
+        m,
+        "_activate_project_for_path",
+        lambda cwd, force: m.cfg.set_active_project("request-project"),
+    )
+    try:
+        m.cfg.set_active_project("prior-project")
+        result = m._resident_hook_decision(
+            "preToolUse",
+            {"cwd": "/w/a", "toolName": "view"},
+            segment_cache=object(),
+            policy=Policy(),
+        )
+        assert result == {}
+        assert seen == ["request-project"]
+        assert m.cfg.active_project() == "prior-project"
+    finally:
+        m.cfg.set_active_project(prior)
+
+
+def test_hook_mutation_targets_are_target_aware():
+    class Guard:
+        _WRITE_VERBS = re.compile(r"Set-Content|git\s+commit", re.IGNORECASE)
+
+    class Client:
+        @staticmethod
+        def _load_sibling(name):
+            return Guard
+
+    policy = m._ResidentHookPolicy(Client())
+    assert policy.mutation_targets({
+        "toolName": "edit",
+        "cwd": "/w/a",
+        "toolArgs": {"path": "/w/b/file.py"},
+    }) == ["/w/b/file.py"]
+    assert policy.mutation_targets({
+        "toolName": "powershell",
+        "cwd": "/w/a",
+        "toolArgs": {"command": "git status --short"},
+    }) == []
+    assert policy.mutation_targets({
+        "toolName": "powershell",
+        "cwd": "/w/a",
+        "toolArgs": {"command": "git commit -m test"},
+    }) is None
+
+
+def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path):
+    registry = tmp_path / "repos.yaml"
+    registry.write_text("one", encoding="utf-8")
+
+    class Anchor:
+        calls = 0
+
+        @staticmethod
+        def _repos_yaml(home):
+            return registry
+
+        @classmethod
+        def load_worktree_anchors(cls, home):
+            cls.calls += 1
+            return [{"name": str(cls.calls), "path": "/repo"}]
+
+    class Client:
+        @staticmethod
+        def _load_sibling(name):
+            return Anchor
+
+    policy = m._ResidentHookPolicy(Client())
+    assert policy.anchors()[0]["name"] == "1"
+    assert policy.anchors()[0]["name"] == "1"
+    registry.write_text("two-two", encoding="utf-8")
+    assert policy.anchors()[0]["name"] == "2"
+
+
+def test_resident_agent_bridge_policy_denies_guarded_write(
+    tmp_path, monkeypatch
+):
+    from agent_worktrees import related, repos
+
+    control = tmp_path / "control"
+    guarded = tmp_path / "guarded"
+    (control / ".git").mkdir(parents=True)
+    (guarded / ".git").mkdir(parents=True)
+    entry = types.SimpleNamespace(
+        name="guarded",
+        delegate="agent-bridge",
+        locus=types.SimpleNamespace(
+            preferred="machine:devbox",
+            machines=["devbox"],
+        ),
+    )
+    monkeypatch.setattr(
+        m, "_related_config_source_anchors", lambda root: [root])
+    monkeypatch.setattr(
+        related, "list_related_grafted", lambda anchors: [entry])
+    monkeypatch.setattr(
+        repos, "resolve_path", lambda name: str(guarded))
+
+    hook_client = m._load_hook_client_module()
+    assert hook_client is not None
+    policy = m._ResidentHookPolicy(hook_client)
+    monkeypatch.setattr(policy, "anchors", lambda: [])
+    decision = policy.pre({
+        "toolName": "edit",
+        "cwd": str(control),
+        "toolArgs": {"path": str(guarded / "file.py")},
+    })
+    assert decision["permissionDecision"] == "deny"
+    assert "agent-bridge send devbox" in decision["permissionDecisionReason"]
 
 
 def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):

@@ -218,3 +218,27 @@ consumer — one heavy stdio bridge per session per server collapses to a thin
 forwarder + one shared `serve` session-map process); Phase 6's agent-vault
 **drain-safe cutover** (#743, now unblocked by the #737 lease primitive); and the
 per-plugin last-known-good rollout (#742).
+
+### 2026-09-02 — Phase 4 performance conformance (#918)
+
+- Audited the effective Copilot hook surface and found agent-worktrees launching
+  three Python guards before every tool plus two post-tool command trees after
+  every successful tool. The bind nudge imported the complete CLI for a tiny
+  advisory decision, costing about 2.5 seconds per post-tool event on Windows.
+- Consolidated the five commands into one tiny Python client per event class.
+  It makes one bounded, token-authenticated request to the resident monitor over
+  a dynamic `127.0.0.1:0` endpoint advertised through the monitor's atomic
+  liveness-lock/rendezvous record.
+  If the monitor is absent, pre-tool safety guards still run together in one
+  process; advisory post-tool fallback stays lightweight.
+- Promoted the monitor into the warm policy/state owner: delegated roots resolve
+  directly from the loaded topology and repo registry (no nested CLI fan-out),
+  anchor and topology inputs are cached, nudge lookup uses the active project's
+  tracking directory, and bind-nudge is now an in-process decision helper.
+- Added a shared status-segment cache with a 60-second maximum age and targeted
+  invalidation after mutating tool events. Read-only shell commands remain cache
+  hits, multiple sessions on the same worktree share one Git classification,
+  and unchanged mux option values are no longer republished every sweep.
+- A 20-process local benchmark of the final pre-tool client measured 76.6 ms
+  median / 108.7 ms p95, replacing three separate roughly 109-130 ms guard
+  launches. The full post-tool CLI import is removed from the hook path.

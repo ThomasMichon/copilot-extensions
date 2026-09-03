@@ -270,6 +270,19 @@ class TestBindNudgeCmd:
         assert rc == 0
         assert capsys.readouterr().out.strip() == "{}"
 
+    def test_expired_deadline_does_not_stamp(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-deadline", "/tmp/src/wt-deadline")
+        monkeypatch.setattr(
+            m, "_activate_project_for_path", lambda c, force=False: None)
+        assert m._bind_nudge_decision(
+            "/tmp/src/wt-deadline", deadline=0
+        ) == {}
+        assert not (
+            tmp_tracking_dir / "wt-deadline.bind-nudge-at"
+        ).exists()
+
 
 class TestHistoryDigestCmd:
     def test_digest_cmd_activates_project_and_prints(

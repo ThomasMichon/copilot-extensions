@@ -45,14 +45,30 @@ def _py_hook_scripts() -> set[str]:
 def test_py_hooks_are_nonempty_and_exist():
     scripts = _py_hook_scripts()
     # Sanity: we actually found the wired hooks (not a parsing miss).
-    assert {"statelessness_guard.py", "cross_repo_guard.py",
-            "anchor_write_guard.py", "nudge_status.py"} <= scripts
+    assert scripts == {"hook_client.py"}
     for g in scripts:
         assert (_SCRIPTS / g).is_file(), f"hooks.json wires {g} but scripts/{g} is missing"
 
 
+def test_python_hook_runners_recover_from_invalid_windows_cwd():
+    data = json.loads(_HOOKS.read_text("utf-8"))
+    for event in _PY_HOOK_EVENTS:
+        hooks = data["hooks"][event]
+        assert len(hooks) == 1
+        command = hooks[0]["powershell"]
+        assert "Set-Location -LiteralPath $env:USERPROFILE" in command
+        assert "[IO.Path]::GetPathRoot((Get-Location).Path)" in command
+        assert "[IO.Directory]::SetCurrentDirectory((Get-Location).Path)" in command
+
+
 def test_all_installers_deploy_every_py_hook():
-    scripts = _py_hook_scripts()
+    scripts = _py_hook_scripts() | {
+        "statelessness_guard.py",
+        "cross_repo_guard.py",
+        "anchor_write_guard.py",
+        "nudge_status.py",
+        "bind_nudge.py",
+    }
     installers = {
         "install.ps1": _INSTALL_PS1.read_text("utf-8"),
         "install.sh": _INSTALL_SH.read_text("utf-8"),
@@ -66,6 +82,21 @@ def test_all_installers_deploy_every_py_hook():
     assert not missing, (
         "python hook(s) wired in hooks.json but not deployed by an "
         "installer (they would silently no-op):\n  " + "\n  ".join(missing))
+
+
+def test_wrappers_deploy_before_monitor_activation():
+    ps1 = _INSTALL_PS1.read_text("utf-8")
+    sh = _INSTALL_SH.read_text("utf-8")
+    assert not re.search(
+        r"Invoke-VersionedActivate\)\s*\{ exit 1 \}.{0,200}Deploy-Wrappers",
+        ps1,
+        re.DOTALL,
+    )
+    assert not re.search(
+        r"_versioned_activate \|\| exit 1.{0,200}deploy_wrappers",
+        sh,
+        re.DOTALL,
+    )
 
 
 def test_all_installers_deploy_platform_pane_wrapper():

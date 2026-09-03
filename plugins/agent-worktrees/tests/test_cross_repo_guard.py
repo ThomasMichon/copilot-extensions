@@ -321,3 +321,16 @@ def test_load_guarded_roots_cache_roundtrip(monkeypatch, tmp_path):
     r1 = guard.load_guarded_roots(str(tmp_path), home)
     r2 = guard.load_guarded_roots(str(tmp_path), home)
     assert r1 == r2 and calls["n"] == 1  # second call served from cache
+
+
+def test_deadline_discovery_does_not_publish_partial_cache(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setattr(
+        guard,
+        "_discover_guarded_roots",
+        lambda root, deadline: [],
+    )
+    assert guard.load_guarded_roots(
+        str(tmp_path), home, deadline=guard.time.monotonic() + 1
+    ) == []
+    assert not guard._cache_path(str(tmp_path), home).exists()
