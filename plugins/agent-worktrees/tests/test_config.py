@@ -646,6 +646,36 @@ class TestControlPlaneRelatedPRTier:
         }
         assert got["ext"]["merge_actor"] == "submitter-direct"
 
+    def test_cp_related_pr_map_does_not_load_unproven_project(
+        self, tmp_path, monkeypatch
+    ):
+        from agent_worktrees import related as _related
+        from agent_worktrees import repos
+
+        cp = tmp_path / "unregistered-control-plane"
+        cp.mkdir()
+        _related.write_related(cp, _related.RelatedConfig(related={
+            "ext": _related.RelatedEntry(name="ext", role="tooling", pr={
+                "enabled": True,
+                "merge_actor": "submitter-direct",
+            }),
+        }))
+        monkeypatch.setattr(_related, "find_control_plane_anchor", lambda: str(cp))
+        monkeypatch.setattr(
+            _related, "installed_plugin_related_anchors", lambda *a, **k: [])
+        monkeypatch.setattr(repos, "list_repos", lambda class_filter=None: [])
+        monkeypatch.setattr(
+            cfg,
+            "load_config",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("unproven project must not be loaded")
+            ),
+        )
+
+        got = cfg._control_plane_related_pr_map()
+
+        assert got["ext"]["merge_actor"] == "submitter-direct"
+
 
 class TestLayeredConfig:
     """Three-tier merge: global < in-repo < machine-local; optional machine file."""
