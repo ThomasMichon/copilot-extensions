@@ -172,6 +172,25 @@ and unnecessary reads choose among variants only after they are inside that
 gate. If finalists are behaviorally unstable across repeats, models, or venues,
 the result is “no standard yet,” not permission to choose the smallest prompt.
 
+## Phase 2 evidence ledger
+
+| Cell | Repetitions | Judge result | Required guides | Irrelevant reads | Decision |
+|------|-------------|--------------|-----------------|------------------|----------|
+| F2 / backtick repository-relative / conditional / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 1 | Reject this cell: conditional wording did not reliably prevent broad discovery or the unrelated `command-reference` read. |
+
+Counts-only records:
+
+- [`evidence/f2-repo-conditional-flat-one-guide-r1.json`](evidence/f2-repo-conditional-flat-one-guide-r1.json)
+- [`evidence/f2-repo-conditional-flat-one-guide-r2.json`](evidence/f2-repo-conditional-flat-one-guide-r2.json)
+- [`evidence/f2-repo-conditional-flat-one-guide-r3.json`](evidence/f2-repo-conditional-flat-one-guide-r3.json)
+
+All three sessions retained owner provenance, loaded the required guide, avoided
+path invention and critical-rule violations, and reached the owned readiness
+decision. Repetitions 2 and 3 nevertheless enumerated the guide tree and loaded
+`command-reference`; literal mode therefore rejects the cell. Continue one axis
+at a time with stronger emphasis before changing the reference representation
+or deferral level.
+
 ## Clean-room shape
 
 Add a dedicated Tier-P renderer/containment scenario and a Tier-E literal-mode
