@@ -12,6 +12,7 @@ real mux.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import types
 
@@ -28,6 +29,41 @@ def test_status_monitor_registered():
     # and the launcher reap must never kill the resident tracker.
     assert "status-monitor" in m._NO_PROJECT_COMMANDS
     assert "status-monitor" in m._LAUNCHER_REAP_VETOES
+
+
+def test_resident_lifecycle_requests_wait_for_their_deadline():
+    assert m._resident_hook_lock_timeout("sessionStart", 1.75) == 1.75
+    assert m._resident_hook_lock_timeout("projectResolve", 1.75) == 1.75
+    assert m._resident_hook_lock_timeout("preToolUse", 1.75) == 0.05
+    assert m._resident_hook_lock_timeout("postToolUse", 0.02) == 0.02
+
+
+def test_resident_session_context_inputs_are_cached(monkeypatch):
+    calls = {"config": 0, "anchors": 0}
+    config = object()
+    anchors = [object()]
+
+    def load_config():
+        calls["config"] += 1
+        return config
+
+    def load_anchors():
+        calls["anchors"] += 1
+        return anchors
+
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "project")
+    monkeypatch.setattr(m.cfg, "load_config", load_config)
+    monkeypatch.setattr(
+        "agent_worktrees.related.installed_plugin_related_anchors",
+        load_anchors,
+    )
+    policy = m._ResidentHookPolicy(object())
+
+    assert policy.context_config() is config
+    assert policy.context_config() is config
+    assert policy.plugin_related_anchors() is anchors
+    assert policy.plugin_related_anchors() is anchors
+    assert calls == {"config": 1, "anchors": 1}
 
 
 def test_reconcile_sessions_registered():
@@ -315,6 +351,43 @@ def test_resident_hook_scopes_and_restores_project(monkeypatch):
         assert m.cfg.active_project() == "prior-project"
     finally:
         m.cfg.set_active_project(prior)
+
+
+def test_resident_session_start_preserves_hook_metadata(monkeypatch):
+    captured = {}
+
+    def register(args):
+        captured.update(vars(args))
+        print(json.dumps({"additionalContext": "bound"}))
+        return 0
+
+    monkeypatch.setattr(m, "cmd_register_session", register)
+    policy = m._ResidentHookPolicy(None)
+    result = policy.session_start({
+        "sessionId": "session-1",
+        "cwd": "/worktree",
+        "source": "startup",
+        "timestamp": 123,
+        "_agentWorktreesEnvironment": {
+            "AGENT_WORKTREES_BIND_WORKTREE_ID": "wt-bound",
+            "AGENT_WORKTREES_BIND_SESSION_ID": "session-1",
+            "AGENT_WORKTREES_HANDOFF_TOKEN": "handoff-token",
+            "AGENT_WORKTREES_PROFILE_ASSIGNMENT_TOKEN": "assignment-token",
+            "TMUX_PANE": "%8",
+            "WORKTREE_LAUNCH_ID": "launch-1",
+        },
+    })
+
+    assert result == {"additionalContext": "bound"}
+    assert captured["worktree_id"] == "wt-bound"
+    assert captured["session_id"] == "session-1"
+    assert captured["cwd"] == "/worktree"
+    assert captured["pane"] == "%8"
+    assert captured["event_at"] == "1970-01-01T00:02:03"
+    assert captured["source"] == "hook:startup"
+    assert captured["handoff_candidate_token"] == "handoff-token"
+    assert captured["assignment_token"] == "assignment-token"
+    assert captured["launch_id"] == "launch-1"
 
 
 def test_hook_mutation_targets_are_target_aware():

@@ -171,3 +171,57 @@ def test_client_does_not_import_agent_worktrees_main():
     text = _SCRIPT.read_text("utf-8")
     assert "agent_worktrees.__main__" not in text
     assert "-m agent_worktrees" not in text
+
+
+def test_session_start_forwards_session_environment(monkeypatch, tmp_path):
+    seen = {}
+
+    def request(kind, payload, home):
+        seen.update(kind=kind, payload=payload, home=home)
+        return {"additionalContext": "bound"}
+
+    monkeypatch.setenv("TMUX_PANE", "%7")
+    monkeypatch.setenv("AGENT_WORKTREES_HANDOFF_TOKEN", "handoff-token")
+    monkeypatch.setattr(hook_client, "_request", request)
+
+    result = hook_client.decide(
+        "sessionStart",
+        {"sessionId": "session-1", "cwd": "/worktree"},
+        home=tmp_path,
+    )
+
+    assert result == {"additionalContext": "bound"}
+    assert seen["kind"] == "sessionStart"
+    assert seen["home"] == tmp_path
+    environment = seen["payload"]["_agentWorktreesEnvironment"]
+    assert environment["TMUX_PANE"] == "%7"
+    assert environment["AGENT_WORKTREES_HANDOFF_TOKEN"] == "handoff-token"
+
+
+def test_project_resolve_supplies_current_directory(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        hook_client,
+        "_request",
+        lambda kind, payload, home: seen.update(
+            kind=kind, payload=payload
+        ) or {},
+    )
+
+    assert hook_client.decide(
+        "projectResolve", {}, home=tmp_path
+    ) == {}
+    assert seen == {
+        "kind": "projectResolve",
+        "payload": {"cwd": str(tmp_path)},
+    }
+
+
+def test_session_start_requests_fallback_when_monitor_is_absent(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(hook_client, "_request", lambda *a, **k: None)
+    assert hook_client.decide(
+        "sessionStart", {"sessionId": "session-1"}, home=tmp_path
+    ) == {"fallback": True}

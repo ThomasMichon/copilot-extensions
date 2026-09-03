@@ -56,6 +56,17 @@ def test_agent_worktrees_project_hook_runner_stays_in_process():
         "project-hooks.ps1 must invoke the project hook in its current PowerShell "
         f"process; found: {match.group('interpreter') if match else ''}"
     )
+    assert "hook_client.py" in runner
+    assert "projectResolve" in runner
+
+
+@pytest.mark.guard
+def test_agent_worktrees_lifecycle_hooks_remain_bash_3_compatible():
+    scripts = _PLUGINS / "agent-worktrees" / "scripts"
+    for name in ("project-hooks.sh", "register-session.sh"):
+        source = (scripts / name).read_text(encoding="utf-8")
+        assert "mapfile" not in source
+        assert "readarray" not in source
 
 
 @pytest.mark.guard

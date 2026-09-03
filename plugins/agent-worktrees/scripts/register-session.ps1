@@ -149,9 +149,30 @@ $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
 $cmdArgs = @('-m', 'agent_worktrees', 'register-session', '--stdin', '--emit-context')
 if ($wt_id) { $cmdArgs += @('--worktree-id', $wt_id) }
 
-try {
-    $registrationJson = ($payload | & $python @cmdArgs 2>$null | Out-String).Trim()
-} catch { }
+$registrationJson = ''
+$useFallback = $true
+$client = Join-Path $env:USERPROFILE '.agent-worktrees\bin\hook_client.py'
+$clientPython = (Get-Command python -ErrorAction SilentlyContinue).Source
+if ($clientPython -and (Test-Path -LiteralPath $client -PathType Leaf)) {
+    try {
+        $clientOutput = (
+            $payload | & $clientPython $client sessionStart 2>$null |
+                Out-String
+        ).TrimEnd()
+        $lines = @($clientOutput -split "\r?\n")
+        if ($lines.Count -ge 3 -and $lines[-1] -eq '0') {
+            $registrationJson = [string]$lines[0]
+            $useFallback = $false
+        }
+    } catch { }
+}
+if ($useFallback) {
+    try {
+        $registrationJson = (
+            $payload | & $python @cmdArgs 2>$null | Out-String
+        ).Trim()
+    } catch { }
+}
 
 $catalogJson = ''
 $catalogScript = if ($env:COPILOT_PLUGIN_ROOT) {

@@ -50,8 +50,10 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import enum
+import io
 import json
 import os
 import platform
@@ -7606,6 +7608,7 @@ def _monitor_sweep(
     segment_cache=None,
     published: dict[tuple[str, str], str] | None = None,
     incarnations: dict[str, str] | None = None,
+    project_lock=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -7657,11 +7660,32 @@ def _monitor_sweep(
     for sess, path in served:
         if pane_observer is not None:
             pane_observer(sess, path)
-        try:
-            _activate_project_for_path(path, force=True)
-            warm_projects.setdefault(cfg.project_name(), path)
-        except Exception:
-            pass
+        context_value = None
+        segment_value = ""
+        with (
+            project_lock
+            if project_lock is not None
+            else contextlib.nullcontext()
+        ):
+            try:
+                _activate_project_for_path(path, force=True)
+                warm_projects.setdefault(cfg.project_name(), path)
+            except Exception:
+                pass
+            if sess not in ctx_done:
+                try:
+                    context_value = _render_status_context(path, plain=False)
+                except Exception:
+                    pass
+            try:
+                if segment_cache is not None:
+                    segment_value = segment_cache.get(path)
+                else:
+                    segment_value = _render_status_segment(
+                        path, fetch=False, plain=False, no_title=False,
+                        persist_title=True)
+            except Exception:
+                pass
         # Win the single-instance election so any per-session updater retires,
         # publishing our current-runtime prefix so it defers to us (not to a
         # superseded owner) -- see cmd_status_updater's debounce.
@@ -7676,31 +7700,23 @@ def _monitor_sweep(
 
         _publish("@aw_updater", token)
         _publish("@aw_updater_prefix", prefix)
-        if sess not in ctx_done:
+        if context_value is not None and _publish("@aw_ctx", context_value):
+            ctx_done.add(sess)
+        _publish("@aw_seg", segment_value)
+    for project, path in warm_projects.items():
+        with (
+            project_lock
+            if project_lock is not None
+            else contextlib.nullcontext()
+        ):
             try:
-                if _publish("@aw_ctx", _render_status_context(path, plain=False)):
-                    ctx_done.add(sess)
+                if path:
+                    _activate_project_for_path(path, force=True)
+                else:
+                    cfg.set_active_project(project)
+                _warm_list_cache_for_active_project(interval=interval)
             except Exception:
                 pass
-        try:
-            if segment_cache is not None:
-                seg = segment_cache.get(path)
-            else:
-                seg = _render_status_segment(
-                    path, fetch=False, plain=False, no_title=False,
-                    persist_title=True)
-        except Exception:
-            seg = ""
-        _publish("@aw_seg", seg)
-    for project, path in warm_projects.items():
-        try:
-            if path:
-                _activate_project_for_path(path, force=True)
-            else:
-                cfg.set_active_project(project)
-            _warm_list_cache_for_active_project(interval=interval)
-        except Exception:
-            pass
     return len(served)
 
 
@@ -7791,9 +7807,12 @@ class _ResidentHookPolicy:
     def __init__(self, hook_client, ttl: float = 300.0):
         self.hook_client = hook_client
         self.ttl = ttl
+        self.context_ttl = ttl
         self._anchors: tuple[float, tuple[int, int] | None, list[dict]] = (
             0.0, None, [])
         self._guarded: dict[str, tuple[float, list[dict]]] = {}
+        self._context_configs: dict[str, tuple[float, object]] = {}
+        self._plugin_anchors: tuple[float, list] = (0.0, [])
 
     def _module(self, name: str):
         if self.hook_client is None:
@@ -7861,6 +7880,26 @@ class _ResidentHookPolicy:
         self._guarded[key] = (now, value)
         return value
 
+    def context_config(self):
+        project = cfg.active_project() or ""
+        now = time.monotonic()
+        cached = self._context_configs.get(project)
+        if cached and now - cached[0] < self.context_ttl:
+            return cached[1]
+        value = cfg.load_config()
+        self._context_configs[project] = (now, value)
+        return value
+
+    def plugin_related_anchors(self) -> list:
+        from . import related
+
+        now = time.monotonic()
+        if now - self._plugin_anchors[0] < self.context_ttl:
+            return self._plugin_anchors[1]
+        value = related.installed_plugin_related_anchors()
+        self._plugin_anchors = (now, value)
+        return value
+
     def pre(self, payload: dict) -> dict:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
         may_write = tool in _HOOK_WRITE_TOOLS or tool in _HOOK_SHELL_TOOLS
@@ -7910,6 +7949,75 @@ class _ResidentHookPolicy:
         except Exception:
             return {}
         return {"additionalContext": text} if text else {}
+
+    def session_start(self, payload: dict) -> dict:
+        environment = payload.get("_agentWorktreesEnvironment")
+        if not isinstance(environment, dict):
+            environment = {}
+        session_id = payload.get("sessionId")
+        bound_session = environment.get(_SESSION_BIND_SESSION)
+        worktree_id = environment.get("WORKTREE_ID")
+        if session_id and bound_session == session_id:
+            worktree_id = environment.get(_SESSION_BIND_WORKTREE) or worktree_id
+        pane_id = (
+            environment.get("TMUX_PANE")
+            or environment.get("PSMUX_PANE")
+        )
+        source = payload.get("source")
+        source = (
+            f"hook:{source.strip()}"
+            if isinstance(source, str) and source.strip()
+            else "hook"
+        )
+        args = argparse.Namespace(
+            worktree_id=worktree_id,
+            session_id=session_id,
+            cwd=payload.get("cwd"),
+            stdin=False,
+            pid=payload.get("pid"),
+            pane=pane_id,
+            emit_context=True,
+            event_at=_hook_event_timestamp(payload),
+            source=source,
+            handoff_token=None,
+            handoff_candidate_token=environment.get(_SESSION_HANDOFF_TOKEN),
+            assignment_token=environment.get(
+                profile_assignment.ASSIGNMENT_TOKEN_ENV
+            ),
+            launch_id=environment.get("WORKTREE_LAUNCH_ID"),
+            context_config=(
+                self.context_config() if self.hook_client is not None else None
+            ),
+            plugin_related_anchors=(
+                self.plugin_related_anchors()
+                if self.hook_client is not None else None
+            ),
+        )
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            rc = cmd_register_session(args)
+        if rc != 0:
+            raise RuntimeError("session registration failed")
+        try:
+            result = json.loads(stdout.getvalue().strip() or "{}")
+        except ValueError:
+            result = {}
+        if not isinstance(result, dict):
+            result = {}
+        return result
+
+    def project_hook(self) -> dict:
+        project = cfg.active_project()
+        if not project:
+            return {}
+        suffix = "ps1" if os.name == "nt" else "sh"
+        hook = (
+            Path.home()
+            / f".{project}"
+            / "hooks"
+            / f"session-start.{suffix}"
+        )
+        return {"projectHook": str(hook)} if hook.is_file() else {}
 
     def mutation_targets(self, payload: dict) -> list[str] | None:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
@@ -7971,11 +8079,21 @@ def _resident_hook_decision(
                 b = str(binding.get("additionalContext") or "")
                 return {"additionalContext": "\n\n".join(x for x in (a, b) if x)}
             return advisory or binding
+        if kind == "sessionStart":
+            return policy.session_start(payload)
+        if kind == "projectResolve":
+            return policy.project_hook()
         if kind == "snapshot":
             return {"segment": segment_cache.get(cwd)}
         return {}
     finally:
         cfg.set_active_project(previous_project)
+
+
+def _resident_hook_lock_timeout(kind: str, remaining: float) -> float:
+    if kind in {"sessionStart", "projectResolve"}:
+        return remaining
+    return min(0.05, remaining)
 
 
 def cmd_status_monitor(args: argparse.Namespace) -> int:
@@ -8043,7 +8161,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
         remaining = deadline - time.time()
-        if remaining <= 0 or not state_lock.acquire(timeout=min(0.05, remaining)):
+        lock_timeout = _resident_hook_lock_timeout(kind, remaining)
+        if remaining <= 0 or not state_lock.acquire(timeout=lock_timeout):
             raise HookUnavailable
         try:
             return _resident_hook_decision(
@@ -8080,14 +8199,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             picker_projects = monitor_roots.live_picker_projects()
             demand_projects = list_cache.recent_demand_projects()
             external_projects = picker_projects | demand_projects
+            served = _monitor_sweep(
+                mux_bin, token, my_prefix, ctx_done,
+                interval=interval, picker_projects=external_projects,
+                catalog_observer=reconciler.observe_mux,
+                pane_observer=pane_reconciler.observe,
+                segment_cache=segment_cache, published=published,
+                incarnations=incarnations, project_lock=state_lock)
             with state_lock:
-                served = _monitor_sweep(
-                    mux_bin, token, my_prefix, ctx_done,
-                    interval=interval, picker_projects=external_projects,
-                    catalog_observer=reconciler.observe_mux,
-                    pane_observer=pane_reconciler.observe,
-                    segment_cache=segment_cache, published=published,
-                    incarnations=incarnations)
                 try:
                     reconciler.step()
                 except Exception:
@@ -19485,8 +19604,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     session_id = getattr(args, "session_id", None)
     cwd = getattr(args, "cwd", None)
     pid = getattr(args, "pid", None)
-    event_at = None
-    source = "hook"
+    event_at = getattr(args, "event_at", None)
+    source = getattr(args, "source", None) or "hook"
     pane_id = (
         getattr(args, "pane", None)
         or os.environ.get("TMUX_PANE")
@@ -19670,7 +19789,10 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         message = ""
         if record is not None:
             try:
-                context_config = cfg.load_config()
+                context_config = (
+                    getattr(args, "context_config", None)
+                    or cfg.load_config()
+                )
                 registry_context = session_context_mod.render_registry_context(
                     context_config,
                     record,
@@ -19680,6 +19802,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                         recovered_mux.get("session_name")
                         if recovered_mux
                         else None
+                    ),
+                    plugin_anchors=getattr(
+                        args, "plugin_related_anchors", None
                     ),
                 )
                 message = (

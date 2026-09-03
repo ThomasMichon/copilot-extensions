@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import socket
 import sys
 import time
@@ -17,6 +18,8 @@ from functools import cache
 from pathlib import Path
 
 _CONNECT_TIMEOUT_S = 0.5
+_SESSION_START_TIMEOUT_S = 6.0
+_PROJECT_RESOLVE_TIMEOUT_S = 3.0
 _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
 
@@ -42,21 +45,25 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         return None
     if not isinstance(token, str) or not token:
         return None
+    timeout = {
+        "sessionStart": _SESSION_START_TIMEOUT_S,
+        "projectResolve": _PROJECT_RESOLVE_TIMEOUT_S,
+    }.get(kind, _CONNECT_TIMEOUT_S)
     request = json.dumps(
         {
             "version": 1,
             "token": token,
             "kind": kind,
             "payload": payload,
-            "deadline": time.time() + _CONNECT_TIMEOUT_S,
+            "deadline": time.time() + timeout,
         },
         separators=(",", ":"),
     ).encode("utf-8") + b"\n"
     try:
         with socket.create_connection(
-            (host, int(port_text)), timeout=_CONNECT_TIMEOUT_S
+            (host, int(port_text)), timeout=timeout
         ) as conn:
-            conn.settimeout(_CONNECT_TIMEOUT_S)
+            conn.settimeout(timeout)
             conn.sendall(request)
             chunks: list[bytes] = []
             size = 0
@@ -174,22 +181,57 @@ def _fallback_post(payload: dict, home: Path) -> dict:
     )
 
 
+def _session_start_payload(payload: dict) -> dict:
+    enriched = dict(payload)
+    environment = {}
+    for name in (
+        "WORKTREE_ID",
+        "TMUX_PANE",
+        "PSMUX_PANE",
+        "WORKTREE_LAUNCH_ID",
+        "AGENT_WORKTREES_BIND_PROJECT",
+        "AGENT_WORKTREES_BIND_WORKTREE_ID",
+        "AGENT_WORKTREES_BIND_SESSION_ID",
+        "AGENT_WORKTREES_HANDOFF_TOKEN",
+        "AGENT_WORKTREES_PROFILE_ASSIGNMENT_TOKEN",
+    ):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    if environment:
+        enriched["_agentWorktreesEnvironment"] = environment
+    return enriched
+
+
 def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
     home = home or Path.home()
-    remote = _request(kind, payload, home)
+    request_payload = (
+        _session_start_payload(payload)
+        if kind == "sessionStart"
+        else {"cwd": os.getcwd(), **payload}
+        if kind == "projectResolve"
+        else payload
+    )
+    remote = _request(kind, request_payload, home)
     if remote is not None:
         return remote
     if kind == "preToolUse":
         return _fallback_pre(payload, home)
     if kind == "postToolUse":
         return _fallback_post(payload, home)
+    if kind == "sessionStart":
+        return {"fallback": True}
+    if kind == "projectResolve":
+        return {"fallback": True}
     return {}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     kind = argv[0] if argv else ""
-    if kind not in {"preToolUse", "postToolUse"}:
+    if kind not in {
+        "preToolUse", "postToolUse", "sessionStart", "projectResolve"
+    }:
         return 0
     try:
         raw = sys.stdin.read()
@@ -197,7 +239,24 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(payload, dict):
             payload = {}
         result = decide(kind, payload)
-        if result:
+        if kind == "sessionStart":
+            context = {}
+            if result.get("additionalContext"):
+                context["additionalContext"] = result["additionalContext"]
+            sys.stdout.write(
+                json.dumps(context, separators=(",", ":"))
+                + "\n"
+                + str(result.get("projectHook") or "-")
+                + "\n"
+                + ("1" if result.get("fallback") else "0")
+            )
+        elif kind == "projectResolve":
+            sys.stdout.write(
+                str(result.get("projectHook") or "-")
+                + "\n"
+                + ("1" if result.get("fallback") else "0")
+            )
+        elif result:
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
     except Exception:
         pass

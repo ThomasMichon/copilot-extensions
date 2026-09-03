@@ -340,3 +340,24 @@ per-plugin last-known-good rollout (#742).
 - Next: land this reviewed intent/pattern PR, report the evidence and follow-up
   trackers on #625, then close #625 while #1836, #1837, #1841, and #743 carry
   the remaining implementation.
+### 2026-09-03 — Phase 4b resident lifecycle implementation (#1788)
+
+- Routed session registration and project-hook resolution through the existing
+  token-authenticated status-monitor IPC, while retaining the full versioned
+  CLI paths as explicit monitor-down fallbacks. Session-local binding, mux,
+  launch, handoff, and profile-assignment metadata now travels in the bounded
+  request rather than relying on the daemon's inherited environment.
+- The live benchmark exposed two resident-path bottlenecks before publication:
+  lifecycle requests inherited the tool-hook path's 50 ms lock wait, and the
+  monitor held that lock across an entire multi-session sweep. Lifecycle waits
+  now use their own deadlines, while monitor locking covers only
+  project-dependent rendering rather than mux I/O and the whole sweep.
+- Cached the expensive effective-plugin and related-topology inputs in the
+  resident policy. A profile of the uncached registration path attributed about
+  4.1 of 5.8 seconds to duplicate plugin-activation and related-anchor
+  discovery; the warmed resident client subsequently measured roughly
+  1.5-2.6 seconds, and the complete PowerShell registration hook measured a
+  2.3-second median versus the prior roughly 4.7-second process path.
+- Added focused IPC, metadata-preservation, locking, cache, process-hygiene, and
+  Bash 3 compatibility guards. The healthy path keeps project-owned hooks in
+  the current shell process and preserves their original session-start payload.

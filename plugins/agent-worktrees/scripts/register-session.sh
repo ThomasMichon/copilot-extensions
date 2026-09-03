@@ -131,10 +131,31 @@ args=(-m agent_worktrees register-session --stdin --emit-context)
 # this narrow same-plugin merge, agents receive either the binding or the exact
 # argv[0], but not reliably both.
 registration_json=""
-if registration_json="$(printf '%s' "$payload" | PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null)"; then
-    _log OK "registered session (wt=${wt_id:-<from-cwd>})"
+use_fallback=1
+client="$HOME/.agent-worktrees/bin/hook_client.py"
+client_python="$(command -v python3 || true)"
+if [[ -n "$client_python" && -f "$client" ]]; then
+    client_output="$(
+        printf '%s' "$payload" |
+            "$client_python" "$client" sessionStart 2>/dev/null || true
+    )"
+    if [[ "$client_output" == *$'\n'*$'\n'* ]]; then
+        client_status="${client_output##*$'\n'}"
+        client_context="${client_output%%$'\n'*}"
+        if [[ "$client_status" == "0" ]]; then
+            registration_json="$client_context"
+            use_fallback=0
+        fi
+    fi
+fi
+if (( use_fallback )); then
+    if registration_json="$(printf '%s' "$payload" | PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null)"; then
+        _log OK "registered session fallback (wt=${wt_id:-<from-cwd>})"
+    else
+        _log WARN "register-session failed (exit $?) wt=${wt_id:-<from-cwd>}"
+    fi
 else
-    _log WARN "register-session failed (exit $?) wt=${wt_id:-<from-cwd>}"
+    _log OK "registered session through resident monitor (wt=${wt_id:-<from-cwd>})"
 fi
 
 catalog_json=""
