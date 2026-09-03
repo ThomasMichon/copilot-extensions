@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from threading import Event, Thread
 
 import pytest
 
@@ -122,6 +123,34 @@ class TestEventLog:
     async def test_wait_for_events_timeout(self, event_log: EventLog) -> None:
         events = await event_log.wait_for_events(after=0, timeout=0.1)
         assert events == []
+
+    @pytest.mark.asyncio
+    async def test_wait_for_events_registration_is_atomic(
+        self, event_log: EventLog
+    ) -> None:
+        registration_started = Event()
+        append_attempted = Event()
+
+        class BlockingWaiters(list):
+            def append(self, item) -> None:
+                registration_started.set()
+                assert append_attempted.wait(timeout=1.0)
+                super().append(item)
+
+        event_log._waiters = BlockingWaiters()
+
+        def append_during_registration() -> None:
+            assert registration_started.wait(timeout=1.0)
+            append_attempted.set()
+            event_log.append("raced", {"x": 1})
+
+        thread = Thread(target=append_during_registration)
+        thread.start()
+        events = await event_log.wait_for_events(after=0, timeout=1.0)
+        thread.join(timeout=1.0)
+
+        assert not thread.is_alive()
+        assert [event.event for event in events] == ["raced"]
 
 
 class TestActiveToolCall:

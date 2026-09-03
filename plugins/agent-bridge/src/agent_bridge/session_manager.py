@@ -1394,6 +1394,18 @@ class SessionManager:
         """The backing database (used by routes for cursor persistence)."""
         return self._db
 
+    def _mark_session_failed(self, session: Session, *, trigger: str) -> None:
+        """Persist and publish one authoritative failed transition."""
+        session.status = SessionStatus.FAILED
+        self._db.update_session_status(
+            session.session_id, SessionStatus.FAILED.value, time.time()
+        )
+        if session.event_log:
+            session.event_log.append(
+                "session_state_changed",
+                {"status": SessionStatus.FAILED.value, "trigger": trigger},
+            )
+
     @staticmethod
     def _capture_progress(session: Session, event_type: str, data: dict) -> None:
         """Update a session's structured progress from a captured event (#46.3)."""
@@ -2624,11 +2636,8 @@ class SessionManager:
                 session.target.to_json(),
                 session.target.cwd,
             )
-            session.status = SessionStatus.FAILED
-            self._db.update_session_status(
-                old_session_id,
-                SessionStatus.FAILED.value,
-                time.time(),
+            self._mark_session_failed(
+                session, trigger="container_recreate_failed"
             )
             if session.event_log:
                 session.event_log.append("container_recreate_failed", {
@@ -2644,12 +2653,7 @@ class SessionManager:
             session.target.to_json(),
             session.target.cwd,
         )
-        session.status = SessionStatus.FAILED
-        self._db.update_session_status(
-            old_session_id,
-            SessionStatus.FAILED.value,
-            time.time(),
-        )
+        self._mark_session_failed(session, trigger="container_recreated")
         if session.event_log:
             session.event_log.append("container_recreated", {
                 "message": "The original container identity was replaced.",
@@ -4405,10 +4409,7 @@ class SessionManager:
             # Structured failure: we know exactly which stage failed and
             # whether a retry could help -- never an opaque "agent died".
             await _cleanup_failed_process_launch()
-            session.status = SessionStatus.FAILED
-            self._db.update_session_status(
-                session_id, SessionStatus.FAILED.value, time.time()
-            )
+            self._mark_session_failed(session, trigger="connect_failed")
             session.event_log.append("connect_failed", {
                 "stage": int(exc.stage),
                 "stage_name": exc.stage.name,
@@ -4430,9 +4431,8 @@ class SessionManager:
             # --force-claim. No claim was acquired, so there is nothing to
             # release here.
             await _cleanup_failed_process_launch()
-            session.status = SessionStatus.FAILED
-            self._db.update_session_status(
-                session_id, SessionStatus.FAILED.value, time.time()
+            self._mark_session_failed(
+                session, trigger="codespace_claim_conflict"
             )
             session.event_log.append("codespace_claim_conflict", {
                 "codespace": exc.codespace,
@@ -4447,9 +4447,8 @@ class SessionManager:
             )
         except CodespaceCoordinationRejectedError as exc:
             await _cleanup_failed_process_launch()
-            session.status = SessionStatus.FAILED
-            self._db.update_session_status(
-                session_id, SessionStatus.FAILED.value, time.time()
+            self._mark_session_failed(
+                session, trigger="codespace_coordination_rejected"
             )
             session.event_log.append("codespace_coordination_rejected", {
                 "codespace": exc.codespace,
@@ -4464,10 +4463,7 @@ class SessionManager:
             )
         except Exception as exc:
             await _cleanup_failed_process_launch()
-            session.status = SessionStatus.FAILED
-            self._db.update_session_status(
-                session_id, SessionStatus.FAILED.value, time.time()
-            )
+            self._mark_session_failed(session, trigger="start_exception")
             session.event_log.append("error", {"message": str(exc)})
             log.error("Failed to start session %s: %s", session_id, exc, exc_info=True)
 
@@ -5666,6 +5662,18 @@ class SessionManager:
             tool_call_id, content, action=action,
         )
 
+    async def answer_permission(
+        self, session_id: str, request_id: str, option_id: str
+    ) -> bool:
+        """Resolve a correlated permission request on a live session."""
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+        if session.client is None:
+            raise ValueError(f"Session {session_id} has no live ACP client")
+        return session.client.resolve_permission(request_id, option_id)
+
     async def stop_session(
         self, session_id: str, *, force: bool = False, reap_host: bool = False,
         cancel_turn: bool = True,
@@ -5837,11 +5845,8 @@ class SessionManager:
                         getattr(rec, "endpoint", None) or {},
                     )
                     if not confirmed_dead:
-                        session.status = SessionStatus.FAILED
-                        self._db.update_session_status(
-                            session_id,
-                            SessionStatus.FAILED.value,
-                            time.time(),
+                        self._mark_session_failed(
+                            session, trigger="remote_reap_inconclusive"
                         )
                         raise RemoteHostRecoveryPendingError(
                             "Container Session Host reap is inconclusive; "

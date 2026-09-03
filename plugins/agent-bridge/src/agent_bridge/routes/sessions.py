@@ -12,8 +12,17 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
+from ..attention_wait import (
+    AttentionHistoryChangedError,
+    AttentionTokenError,
+    attention_position_session_id,
+    evaluate_owned_attention,
+)
 from ..models import (
     AnswerAskUserRequest,
+    AnswerPermissionRequest,
+    AttentionReason,
+    AttentionWaitResponse,
     CursorAckRequest,
     CursorInfo,
     DelegatedResultSnapshot,
@@ -826,6 +835,63 @@ def get_result_detail(
         raise HTTPException(status_code=404, detail=detail) from exc
 
 
+@router.get(
+    "/{session_ref}/attention",
+    response_model=AttentionWaitResponse,
+)
+async def wait_for_attention(
+    session_ref: str,
+    request: Request,
+    reason: list[AttentionReason] = Query(min_length=1),
+    position: str | None = Query(default=None, max_length=2048),
+    timeout_seconds: float = Query(default=30.0, ge=0.0, le=30.0),
+):
+    """Wait for the earliest selected durable attention boundary."""
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        session = (
+            mgr.get_session(attention_position_session_id(position))
+            if position is not None
+            else _resolve_result_session(mgr, session_ref)
+        )
+    except AttentionTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session or worktree {session_ref} not found",
+        )
+    if session.event_log is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Session history is not loaded in the active bridge generation",
+        )
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        after = session.event_log.latest_id
+        try:
+            result = evaluate_owned_attention(
+                db=mgr.db,
+                session=session,
+                requested_ref=session_ref,
+                reasons=reason,
+                position=position,
+            )
+        except AttentionHistoryChangedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AttentionTokenError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if result.settled or result.identity.successor_id:
+            return result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return result
+        await session.event_log.wait_for_events(
+            after, timeout=min(remaining, 30.0)
+        )
+
+
 @router.post("/{session_id}/turns", response_model=SubmitPromptResponse)
 async def submit_prompt(
     session_id: str,
@@ -1180,6 +1246,31 @@ async def answer_ask_user(
             status_code=409,
             detail=(
                 f"No pending ask_user for tool call {req.tool_call_id} "
+                f"on session {session_id}"
+            ),
+        )
+    return {"status": "answered"}
+
+
+@router.post("/{session_id}/permission")
+async def answer_permission(
+    session_id: str, req: AnswerPermissionRequest, request: Request,
+):
+    """Resolve the currently parked correlated permission request."""
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        resolved = await mgr.answer_permission(
+            session_id, req.request_id, req.option_id
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if not resolved:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No pending permission request {req.request_id} "
                 f"on session {session_id}"
             ),
         )
