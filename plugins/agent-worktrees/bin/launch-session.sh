@@ -203,11 +203,11 @@ invoke_update_apply() {
     _UPDATE_APPLIED=1
 
     local status_file="$HOME/.agent-worktrees/updater-status.json"
-    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_apply_blocked=""
+    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_root="" runtime_apply_blocked=""
 
     _parse_stage_status() {
         [[ -f "$status_file" ]] || return 0
-        IFS=$'\t' read -r stage_done plugin_changed skipped plugin_dir runtime_apply_blocked < <(
+        IFS=$'\t' read -r stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked < <(
             "$PYTHON" -c "
 import sys, json
 try:
@@ -219,6 +219,7 @@ print('\t'.join([
     str(d.get('plugin_changed', False)),
     str(d.get('skipped', '')),
     str(d.get('plugin_dir', '')),
+    str(d.get('runtime_root', '')),
     str(d.get('runtime_apply_blocked', '')),
 ]))
 " "$status_file" 2>/dev/null
@@ -249,40 +250,78 @@ print('\t'.join([
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
         if [[ "$plugin_changed" == "True" ]]; then
-            local _installer="$plugin_dir/scripts/install.sh"
-            if [[ -n "$plugin_dir" && -f "$_installer" ]]; then
-                local _inst_args=(update)
-                if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
-                    _inst_args+=(--project-name "$WORKTREE_PROJECT")
-                fi
-                if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
-                    # Escape hatch (recovery/debug): apply synchronously.
-                    setup_status INFO 'A new plugin version was downloaded; installing the updated runtime...'
-                    if bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line; do
-                        setup_log INFO "installer: $_line"
-                    done; then
-                        setup_log INFO 'Installer update succeeded (launcher change, if any, applies next launch)'
+            local _stage_env_text=""
+            local _stage_env=()
+            if ! _stage_env_text=$("$PYTHON" -c "
+import sys, json
+status = json.load(open(sys.argv[1], encoding='utf-8'))
+unset = status.get('unset_environment', [])
+environment = status.get('environment', {})
+if (
+    not isinstance(unset, list)
+    or not all(isinstance(key, str) and key for key in unset)
+    or not isinstance(environment, dict)
+    or not all(
+        isinstance(key, str) and key and isinstance(value, str)
+        for key, value in environment.items()
+    )
+):
+    raise SystemExit(2)
+for key in unset:
+    print('-u')
+    print(key)
+for key, value in environment.items():
+    print(f'{key}={value}')
+" "$status_file" 2>/dev/null); then
+                setup_log WARN 'Plugin installer environment metadata is invalid -- skipping'
+                plugin_changed="False"
+            fi
+            while IFS= read -r _stage_env_entry; do
+                [[ -n "$_stage_env_entry" ]] && _stage_env+=("$_stage_env_entry")
+            done <<< "$_stage_env_text"
+
+            if [[ "$plugin_changed" == "True" ]]; then
+                local _installer="$plugin_dir/scripts/install.sh"
+                if [[ -n "$plugin_dir" && -f "$_installer" ]]; then
+                    local _inst_args=(
+                        update
+                        --install-dir "$runtime_root"
+                    )
+                    if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
+                        _inst_args+=(--project-name "$WORKTREE_PROJECT")
+                    fi
+                    if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
+                        # Escape hatch (recovery/debug): apply synchronously.
+                        setup_status INFO 'A new plugin version was downloaded; installing the updated runtime...'
+                        if env ${_stage_env[@]+"${_stage_env[@]}"} \
+                            bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line; do
+                            setup_log INFO "installer: $_line"
+                        done; then
+                            setup_log INFO 'Installer update succeeded (launcher change, if any, applies next launch)'
+                        else
+                            setup_log WARN "Installer update failed -- continuing with existing version"
+                        fi
                     else
-                        setup_log WARN "Installer update failed -- continuing with existing version"
+                        # Default: DETACH the install so the launch never blocks on the
+                        # (slow) venv rebuild. Immutable versioned slots make this safe
+                        # -- the installer builds a NEW versions/<v> slot and flips the
+                        # current-version marker atomically, never touching the slot
+                        # THIS session execs from. So launch on the active slot now; the
+                        # new version applies on the next launch (stage-next), the same
+                        # way the runtime reconcile already runs detached. The installer
+                        # carries its own single-instance lock, so a concurrent launch's
+                        # background install can't collide.
+                        setup_status INFO 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
+                        local _ilog="${APERTURE_SETUP_LOG:-${WORKTREE_SETUP_LOG:-/dev/null}}"
+                        setsid env ${_stage_env[@]+"${_stage_env[@]}"} \
+                            bash "$_installer" "${_inst_args[@]}" \
+                            >>"$_ilog" 2>&1 </dev/null &
+                        disown 2>/dev/null || true
+                        setup_log INFO 'Background install started (new version applies on the next launch)'
                     fi
                 else
-                    # Default: DETACH the install so the launch never blocks on the
-                    # (slow) venv rebuild. Immutable versioned slots make this safe
-                    # -- the installer builds a NEW versions/<v> slot and flips the
-                    # current-version marker atomically, never touching the slot
-                    # THIS session execs from. So launch on the active slot now; the
-                    # new version applies on the next launch (stage-next), the same
-                    # way the runtime reconcile already runs detached. The installer
-                    # carries its own single-instance lock, so a concurrent launch's
-                    # background install can't collide.
-                    setup_status INFO 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
-                    local _ilog="${APERTURE_SETUP_LOG:-${WORKTREE_SETUP_LOG:-/dev/null}}"
-                    setsid bash "$_installer" "${_inst_args[@]}" >>"$_ilog" 2>&1 </dev/null &
-                    disown 2>/dev/null || true
-                    setup_log INFO 'Background install started (new version applies on the next launch)'
+                    setup_log WARN "Plugin installer not found ($_installer) -- skipping"
                 fi
-            else
-                setup_log WARN "Plugin installer not found ($_installer) -- skipping"
             fi
         fi
 
@@ -316,9 +355,39 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
     print(a)
 " <<< "$PRE_JSON" 2>/dev/null)
                 if [[ ${#UPDATE_ARGV[@]} -gt 0 ]]; then
+                    _UPDATE_ENV=()
+                    _UPDATE_ENV_TEXT=$("$PYTHON" -c "
+import sys, json
+update = json.load(sys.stdin)['updates'][$i]
+unset = update.get('unset_environment', [])
+environment = update.get('environment', {})
+if (
+    not isinstance(unset, list)
+    or not all(isinstance(key, str) and key for key in unset)
+    or not isinstance(environment, dict)
+    or not all(
+        isinstance(key, str) and key and isinstance(value, str)
+        for key, value in environment.items()
+    )
+):
+    raise SystemExit(2)
+for key in unset:
+    print('-u')
+    print(key)
+for key, value in environment.items():
+    print(f'{key}={value}')
+" <<< "$PRE_JSON" 2>/dev/null) || {
+                        setup_log WARN "Update environment invalid for $SVC_NAME; skipping"
+                        continue
+                    }
+                    while IFS= read -r _update_env; do
+                        [[ -n "$_update_env" ]] && _UPDATE_ENV+=("$_update_env")
+                    done <<< "$_UPDATE_ENV_TEXT"
                     setup_status INFO "Updating $SVC_NAME..."
                     setup_log INFO "  command: ${UPDATE_ARGV[*]}"
-                    "${UPDATE_ARGV[@]}" || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
+                    env ${_UPDATE_ENV[@]+"${_UPDATE_ENV[@]}"} \
+                        "${UPDATE_ARGV[@]}" \
+                        || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
                 fi
             done
             setup_log INFO 'Re-checking staleness after update'

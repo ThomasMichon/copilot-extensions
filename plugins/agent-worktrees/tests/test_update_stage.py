@@ -188,9 +188,13 @@ def test_stage_no_drift_when_versions_match(tmp_path: Path, monkeypatch):
     assert result["plugin_changed"] is False
 
 
-def test_stage_selected_context_blocks_legacy_runtime_apply(
+@pytest.mark.parametrize("mode_status", ["ready", "deactivation-required"])
+@pytest.mark.parametrize("inherited_context", [None, "/caller/install.json"])
+def test_stage_namespaced_runtime_uses_validated_installer_environment(
     tmp_path: Path,
     monkeypatch,
+    mode_status,
+    inherited_context,
 ):
     from agent_worktrees import reconcile
 
@@ -198,6 +202,8 @@ def test_stage_selected_context_blocks_legacy_runtime_apply(
     payload = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
     cell_root = tmp_path / "cell" / "plugins" / "agent-worktrees"
     cell_root.mkdir(parents=True)
+    context = cell_root / "install.json"
+    context.write_text("{}", encoding="utf-8")
     (cell_root / "deploy-manifest.json").write_text(
         json.dumps({"source": {"version": "dev1"}}),
         encoding="utf-8",
@@ -212,18 +218,66 @@ def test_stage_selected_context_blocks_legacy_runtime_apply(
         return True, "updated to dev2"
 
     monkeypatch.setattr(us, "_run_copilot_update", fake_update)
+    if inherited_context is None:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", inherited_context)
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/caller/payload")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python")
     monkeypatch.setattr(
         reconcile,
-        "_selected_runtime_root",
-        lambda name, plugin_dir, **kwargs: (cell_root, True),
+        "resolve_runtime_installation",
+        lambda name, plugin_dir, **kwargs: reconcile.RuntimeInstallationResolution(
+            runtime_root=cell_root,
+            context=context,
+            actual_mode="namespaced",
+            desired_mode=(
+                "namespaced" if mode_status == "ready" else "legacy"
+            ),
+            status=mode_status,
+            reason=(
+                "namespaced-active"
+                if mode_status == "ready"
+                else "policy-disabled-active"
+            ),
+        ),
     )
 
     result = us.stage(status=status, lock=lock, home=home)
 
-    assert result["plugin_changed"] is False
-    assert result["venv_drift"] is False
-    assert result["runtime_apply_blocked"] == "installation-context-read-only"
-    assert result["context_runtime_root"] == str(cell_root)
+    assert result["plugin_changed"] is True
+    assert result["venv_drift"] is True
+    assert result["runtime_root"] == str(cell_root)
+    assert result["environment"] == {
+        "COPILOT_EXTENSIONS_CONTEXT": str(context)
+    }
+    assert result["unset_environment"] == list(reconcile._RUNTIME_ENV_UNSET)
+    assert "runtime_apply_blocked" not in result
+
+
+def test_stage_legacy_default_uses_conventional_runtime_environment(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from agent_worktrees import reconcile
+
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    _make_runtime_manifest(home, "dev1")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(
+        us, "_run_copilot_update", lambda: (True, "already at latest")
+    )
+
+    result = us.stage(
+        status=tmp_path / "status.json",
+        lock=tmp_path / "lock",
+        home=home,
+    )
+
+    assert result["runtime_root"] == str(home / ".agent-worktrees")
+    assert result["environment"] == {}
+    assert result["unset_environment"] == list(reconcile._RUNTIME_ENV_UNSET)
 
 
 def test_stage_unexpected_drift_check_failure_is_reported(
@@ -240,7 +294,7 @@ def test_stage_unexpected_drift_check_failure_is_reported(
     )
     monkeypatch.setattr(
         reconcile,
-        "_selected_runtime_root",
+        "runtime_installer_environment",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             RuntimeError("unexpected validator failure")
         ),

@@ -20,6 +20,9 @@ from agent_worktrees import config as cfg
 from agent_worktrees import activation_preservation, reconcile
 
 
+_READ_USER_ENABLED_PLUGINS = reconcile.read_user_enabled_plugins
+
+
 @pytest.fixture(autouse=True)
 def _pin_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin Copilot resolution to the literal ``copilot`` so the argv assertions
@@ -94,7 +97,7 @@ def test_loop_covers_all_registered_including_payload_only(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    m._update_registered_plugins()
+    assert m._update_registered_plugins()
 
     # Marketplace refreshed once.
     assert ["copilot", "plugin", "marketplace", "update", reconcile.MARKETPLACE] in calls
@@ -130,6 +133,203 @@ def test_installed_but_inactive_plugin_is_updated(monkeypatch):
         "update",
         "context-handoff@copilot-extensions",
     ] in calls
+
+
+def test_inactive_inventory_failure_is_advisory(monkeypatch, capsys):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: [])
+    monkeypatch.setattr(
+        reconcile, "read_installed_plugins", lambda: ["context-handoff"]
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+
+    def fake_run(argv, **kwargs):
+        if argv[:3] == ["copilot", "plugin", "marketplace"]:
+            return _ok()
+        return _fail()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert m._update_registered_plugins() is True
+    assert "inactive installed inventory advisory" in capsys.readouterr().out
+
+
+def test_active_plugin_failure_remains_fatal(monkeypatch):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(
+        reconcile,
+        "read_enabled_plugins",
+        lambda repo_dir: ["context-handoff"],
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "read_installed_plugins",
+        lambda: ["context-handoff"],
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+
+    def fake_run(argv, **kwargs):
+        if argv[:3] == ["copilot", "plugin", "marketplace"]:
+            return _ok()
+        return _fail()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert m._update_registered_plugins() is False
+
+
+@pytest.mark.parametrize(
+    "failed_scope",
+    ["invocation-discovery", "invocation", "repo", "config"],
+)
+def test_activation_read_failure_keeps_installed_payload_hard(
+    monkeypatch,
+    tmp_path,
+    failed_scope,
+):
+    anchor = Path("/repo/anchor")
+    _install_config(monkeypatch, str(anchor))
+    invocation = tmp_path / "invocation"
+    if failed_scope == "invocation-discovery":
+        monkeypatch.setattr(
+            m,
+            "_invocation_update_context",
+            lambda: (_ for _ in ()).throw(
+                OSError("invocation settings unavailable")
+            ),
+        )
+    elif failed_scope == "invocation":
+        settings = invocation / ".github" / "copilot" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(m, "_INVOCATION_CWD", invocation)
+    elif failed_scope == "config":
+        monkeypatch.setattr(
+            cfg,
+            "load_config",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                OSError("project registry unavailable")
+            ),
+        )
+
+    def read_enabled(repo_dir):
+        if (
+            failed_scope == "invocation"
+            and repo_dir == invocation
+        ) or (
+            failed_scope == "repo"
+            and repo_dir == anchor
+        ):
+            raise OSError("activation settings unavailable")
+        return []
+
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", read_enabled)
+    monkeypatch.setattr(
+        reconcile,
+        "read_installed_plugins",
+        lambda: ["agent-codespaces"],
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+    targets = m._registered_plugin_targets()
+
+    assert targets["agent-codespaces"].activation is m._PluginActivation.UNKNOWN
+    assert targets["agent-codespaces"].required
+
+    def fail_payload(argv, **kwargs):
+        if argv[:3] == ["copilot", "plugin", "marketplace"]:
+            return _ok()
+        return _fail()
+
+    monkeypatch.setattr(subprocess, "run", fail_payload)
+    assert m._update_registered_plugins(targets) is False
+
+
+def test_invocation_context_detects_local_only_settings(monkeypatch, tmp_path):
+    invocation = tmp_path / "repo" / "subdir"
+    settings = (
+        invocation.parent
+        / ".github"
+        / "copilot"
+        / "settings.local.json"
+    )
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(m, "_INVOCATION_CWD", invocation)
+
+    assert m._invocation_update_context() == invocation.parent
+
+
+def test_malformed_user_global_settings_keeps_installed_payload_hard(
+    monkeypatch,
+    tmp_path,
+):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: [])
+    copilot_home = tmp_path / ".copilot"
+    copilot_home.mkdir()
+    (copilot_home / "settings.json").write_text("{", encoding="utf-8")
+    monkeypatch.setattr(reconcile, "_copilot_home", lambda: copilot_home)
+    monkeypatch.setattr(
+        reconcile,
+        "read_user_enabled_plugins",
+        _READ_USER_ENABLED_PLUGINS,
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "read_installed_plugins",
+        lambda: ["agent-codespaces"],
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+    targets = m._registered_plugin_targets()
+
+    assert targets["agent-codespaces"].activation is m._PluginActivation.UNKNOWN
+    assert targets["agent-codespaces"].required
+
+    def fail_payload(argv, **kwargs):
+        if argv[:3] == ["copilot", "plugin", "marketplace"]:
+            return _ok()
+        return _fail()
+
+    monkeypatch.setattr(subprocess, "run", fail_payload)
+    assert m._update_registered_plugins(targets) is False
+
+
+def test_active_and_inactive_success_preserves_overall_success(monkeypatch):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(
+        reconcile,
+        "read_enabled_plugins",
+        lambda repo_dir: ["context-handoff"],
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "read_installed_plugins",
+        lambda: ["context-handoff", "visions"],
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: _ok())
+
+    assert m._update_registered_plugins() is True
 
 
 def test_missing_payload_install_uses_activation_preserving_wrapper(monkeypatch):
@@ -356,6 +556,7 @@ def test_ordering_plugins_before_services(monkeypatch, payload_result, expected_
     _install_config(monkeypatch, "/repo/anchor")
     order: list[str] = []
     run_cwds: list[Path | None] = []
+    collections: list[str] = []
 
     # Step 1: agent-worktrees payload update (subprocess).
     def fake_run(argv, **kw):
@@ -365,7 +566,12 @@ def test_ordering_plugins_before_services(monkeypatch, payload_result, expected_
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(
         m, "_update_registered_plugins",
-        lambda: (order.append("registered-plugins"), payload_result)[1],
+        lambda targets: (order.append("registered-plugins"), payload_result)[1],
+    )
+    monkeypatch.setattr(
+        m,
+        "_registered_plugin_targets",
+        lambda: (collections.append("collected") or {}),
     )
     monkeypatch.setattr(
         m, "_find_installed_plugin_dir", lambda: Path("/plugin/dir")
@@ -421,6 +627,7 @@ def test_ordering_plugins_before_services(monkeypatch, payload_result, expected_
     assert order.index("registered-plugins") < order.index("modules")
     # And the agent-worktrees payload update precedes the registered loop.
     assert order.index("aw-plugin-update") < order.index("registered-plugins")
+    assert collections == ["collected"]
 
 
 # ── user-global enabled plugins (#653) ────────────────────────────────────────
