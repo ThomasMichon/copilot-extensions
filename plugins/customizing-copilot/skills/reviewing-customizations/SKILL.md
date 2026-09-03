@@ -36,7 +36,8 @@ Gather the harness's customization surfaces:
 - **Skills** — every `SKILL.md` under `.github/skills/` (and any plugin skills
   the harness authors).
 - **Sub-agents** — every `.agent.md` under `.github/agents/` and
-  `.claude/agents/`, plus agents shipped by the plugins enabled for this repo.
+  `.claude/agents/`, explicitly declared repository-owned agent roots, plus
+  agents shipped by the plugins enabled for this repo.
 - **Instructions** — root `AGENTS.md` and any nested `AGENTS.md` / custom
   instruction files.
 - **Hooks** — `.github/hooks/*.json` (or `hooks.json`).
@@ -60,6 +61,20 @@ design:
 python3 <skill-dir>/scripts/scan-customizations.py <repo-root> [--json] [--strict]
 ```
 
+Repositories that own agent definitions outside the standard directories name
+each directory explicitly:
+
+```bash
+python3 <skill-dir>/scripts/scan-customizations.py <repo-root> \
+  --owned-agent-root services/example/agents
+```
+
+`--owned-agent-root` is repeatable, repository-relative, non-recursive, and
+limited to immediate `*.agent.md` children. Those agents receive the same
+blocking ownership checks as `.github/agents`; absolute paths, traversal,
+missing directories, and symlink escapes are rejected. The same roots join
+`--context-budget` metadata accounting.
+
 It reports (BLOCKING vs WARNING) on: **skill frontmatter** (`name` +
 `description`), **name/folder match**, **trigger collisions** across skills,
 **anti-recursion** (a Task-capable agent without an agent-specific
@@ -81,7 +96,8 @@ Add `--context-budget` for a reproducible, counts-only inventory:
 
 ```bash
 python3 <skill-dir>/scripts/scan-customizations.py <repo-root> \
-  --from-settings --context-budget
+  --from-settings --context-budget \
+  --owned-agent-root services/example/agents
 ```
 
 It counts Unicode characters, UTF-8 bytes, words, and estimated tokens using the
