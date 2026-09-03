@@ -462,12 +462,12 @@ enforcement before migrating the complete contributor stack.
   emphasis coordinate changed from safety-gated to optional.
 - All three were literal-mode false passes. Each loaded the required
   `runtime-diagnostics` guide and preserved READY-1, but each also performed
-  broad compensating discovery and loaded unrelated guidance.
+  broad compensating discovery and loaded unrelated guidance; repetition 1
+  also lost complete owner provenance.
 - The frozen counts-only records report irrelevant guide counts of 1, 1, and 2.
   Independent transcript judges counted 1, 2, and 2 direct irrelevant guide
-  reads. Repetition 1 also lost complete owner provenance. Repetition 2
-  malformed one encountered canary in its final witness, explaining the
-  canary-backed undercount.
+  reads. Repetition 2 malformed one encountered canary in its final witness,
+  explaining the canary-backed undercount.
 - All four F2 emphasis levels are rejected for this one-guide cell. Next gate:
   change only deferral from F2 to F3, keeping repository-relative backticks,
   safety-gated emphasis, flat fragments, task, model, ACP venue, and fresh
