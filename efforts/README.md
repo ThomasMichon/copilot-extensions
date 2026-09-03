@@ -11,7 +11,6 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active | #1817 |
-| [Reciprocal Session-Worktree Metadata](active/reciprocal-session-worktree-metadata/README.md) | Active | #1635 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
 | [Persistent SSH Carrier and Push Supervision](active/persistent-ssh-carrier/README.md) | Active | #1763 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
