@@ -34,7 +34,13 @@ from agent_logger.sync.provenance import (
     rescue_snapshot_path,
     windows_extended_path as _windows_extended_path,
 )
-from agent_logger.sync.targets.base import DoctorResult, PushResult, SyncStatus, Target
+from agent_logger.sync.targets.base import (
+    DoctorResult,
+    FleetSyncStatus,
+    PushResult,
+    SyncStatus,
+    Target,
+)
 
 #: Files never copied to a destination (session lock sidecars, temp files).
 _EXCLUDE_NAMES = frozenset({".lock", "lock"})
@@ -47,6 +53,10 @@ _SESSION_INDEX_NAMES = frozenset(
     {"session-store.db", "session-store.db-wal", "session-store.db-shm"}
 )
 _MAX_TRANSACTION_MANIFEST_BYTES = 16 * 1024 * 1024
+_MAX_FLEET_MACHINE_DEPTH = 4
+_MAX_FLEET_MACHINES = 1000
+_MAX_FLEET_DIRECTORIES = 2000
+_MAX_FLEET_ENTRIES = 10_000
 
 
 def _is_excluded_name(name: str) -> bool:
@@ -61,6 +71,10 @@ def _is_windows_sharing_violation(exc: OSError) -> bool:
 
 
 class _LockedSourceFile(OSError):
+    pass
+
+
+class _FleetScanLimitError(OSError):
     pass
 
 
@@ -1493,8 +1507,116 @@ class FilesystemTarget(Target):
                 else None
             )
             return SyncStatus(supported=True, metadata=metadata)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             return SyncStatus(supported=True, error=str(exc))
+
+    def fleet_sync_status(self) -> FleetSyncStatus:
+        """Read bounded per-machine metadata without entering session payloads."""
+        try:
+            root = _existing_real_directory(self._root())
+            if root is None:
+                return FleetSyncStatus(supported=True)
+            machines: dict[str, SyncStatus] = {}
+            pending = [(root, Path())]
+            visited_directories = 0
+            visited_entries = 0
+            while pending:
+                directory, relative = pending.pop()
+                visited_directories += 1
+                if visited_directories > _MAX_FLEET_DIRECTORIES:
+                    raise _FleetScanLimitError(
+                        f"fleet scan exceeds {_MAX_FLEET_DIRECTORIES} directories"
+                    )
+                metadata_path = directory / "sync-meta.json"
+                try:
+                    metadata_mode = os.lstat(
+                        _windows_extended_path(metadata_path)
+                    ).st_mode
+                except FileNotFoundError:
+                    metadata_mode = None
+                except OSError as exc:
+                    if not relative.parts:
+                        raise
+                    machines[relative.as_posix()] = SyncStatus(
+                        supported=True,
+                        error=str(exc),
+                    )
+                    if len(machines) > _MAX_FLEET_MACHINES:
+                        raise OSError(
+                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
+                        )
+                    continue
+                if relative.parts and metadata_mode is not None and (
+                    stat.S_ISREG(metadata_mode)
+                    and not is_link_or_reparse(metadata_path, metadata_mode)
+                ):
+                    machine = relative.as_posix()
+                    try:
+                        metadata = read_sync_meta(directory)
+                        machines[machine] = SyncStatus(
+                            supported=True,
+                            metadata=metadata,
+                        )
+                    except OSError as exc:
+                        machines[machine] = SyncStatus(
+                            supported=True,
+                            error=str(exc),
+                        )
+                    if len(machines) > _MAX_FLEET_MACHINES:
+                        raise OSError(
+                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
+                        )
+                    continue
+                if len(relative.parts) >= _MAX_FLEET_MACHINE_DEPTH:
+                    continue
+                children: list[tuple[str, int]] = []
+                try:
+                    with os.scandir(_windows_extended_path(directory)) as entries:
+                        for entry in entries:
+                            visited_entries += 1
+                            if visited_entries > _MAX_FLEET_ENTRIES:
+                                raise _FleetScanLimitError(
+                                    f"fleet scan exceeds {_MAX_FLEET_ENTRIES} entries"
+                                )
+                            try:
+                                mode = entry.stat(follow_symlinks=False).st_mode
+                            except OSError:
+                                continue
+                            children.append((entry.name, mode))
+                except _FleetScanLimitError:
+                    raise
+                except OSError as exc:
+                    if not relative.parts:
+                        raise
+                    machines[relative.as_posix()] = SyncStatus(
+                        supported=True,
+                        error=str(exc),
+                    )
+                    if len(machines) > _MAX_FLEET_MACHINES:
+                        raise OSError(
+                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
+                        )
+                    continue
+                if relative and any(
+                    name in {"session-state", "provenance", "archived"}
+                    for name, _mode in children
+                ):
+                    machines[relative.as_posix()] = SyncStatus(
+                        supported=True,
+                        metadata=None,
+                    )
+                    if len(machines) > _MAX_FLEET_MACHINES:
+                        raise OSError(
+                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
+                        )
+                    continue
+                for name, mode in children:
+                    path = directory / name
+                    if stat.S_ISDIR(mode) and not is_link_or_reparse(path, mode):
+                        pending.append((path, relative / name))
+            return FleetSyncStatus(supported=True, machines=machines)
+        except OSError as exc:
+            return FleetSyncStatus(supported=True, error=str(exc))
 
     def prune(self, machine: str, retention_days: int | None) -> int:
         if not isinstance(retention_days, (int, float)) or retention_days <= 0:

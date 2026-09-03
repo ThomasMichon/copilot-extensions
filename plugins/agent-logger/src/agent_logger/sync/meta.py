@@ -36,6 +36,17 @@ def write_sync_meta(
     """Atomically write ``sync-meta.json`` into *dest* (best-effort)."""
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     deferred = [str(path) for path in deferred_files]
+    partial_streak = 0
+    if status == "partial":
+        partial_streak = 1
+        try:
+            previous = read_sync_meta(dest)
+        except OSError:
+            previous = None
+        if previous and previous.get("status") == "partial":
+            prior_streak = previous.get("consecutive_partial_count")
+            if isinstance(prior_streak, int) and not isinstance(prior_streak, bool):
+                partial_streak = max(1, min(prior_streak, 999_999) + 1)
     meta = json.dumps(
         {
             "machine_id": _bounded_text(machine),
@@ -43,6 +54,7 @@ def write_sync_meta(
             "sync_version": SYNC_VERSION,
             "transport": _bounded_text(transport),
             "status": _bounded_text(status),
+            "consecutive_partial_count": partial_streak,
             "session_count": session_count,
             "deferred_file_count": len(deferred),
             "deferred_files": [
@@ -79,7 +91,12 @@ def read_sync_meta(dest: Path) -> dict | None:
         raise OSError(f"sync metadata is too large: {meta_file}")
     try:
         payload = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        RecursionError,
+        ValueError,
+    ) as exc:
         raise OSError(f"invalid sync metadata: {meta_file}") from exc
     if not isinstance(payload, dict):
         raise OSError(f"sync metadata must be an object: {meta_file}")

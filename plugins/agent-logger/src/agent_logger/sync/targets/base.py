@@ -53,6 +53,15 @@ class SyncStatus:
     error: str = ""
 
 
+@dataclass
+class FleetSyncStatus:
+    """Latest persisted results for every machine exposed by a sync target."""
+
+    supported: bool
+    machines: dict[str, SyncStatus] = field(default_factory=dict)
+    error: str = ""
+
+
 def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
     """Build rsync include/exclude args restricting the transfer to session data.
 
@@ -148,6 +157,10 @@ class Target(ABC):
     def sync_status(self, machine: str) -> SyncStatus:
         """Return the latest persisted sync result when the target exposes one."""
         return SyncStatus(supported=False)
+
+    def fleet_sync_status(self) -> FleetSyncStatus:
+        """Return persisted sync results for every visible machine."""
+        return FleetSyncStatus(supported=False)
 
     def push_archives(self, archive_root: Path, machine: str) -> PushResult:
         """Publish the compressed archive store under ``{machine}/archived/``.

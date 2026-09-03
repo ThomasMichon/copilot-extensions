@@ -11,6 +11,8 @@ Console script: ``session-sync`` (see pyproject ``[project.scripts]``).
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -270,6 +272,10 @@ def do_status(cfg: Config) -> int:
         metadata = latest.metadata
         print(f"latest_sync:    {_status_text(metadata.get('last_sync_utc'))}")
         print(f"latest_status:  {_status_text(metadata.get('status'))}")
+        print(
+            "partial_streak: "
+            f"{_status_text(metadata.get('consecutive_partial_count', 0))}"
+        )
         print(f"sessions:       {_status_text(metadata.get('session_count'))}")
         deferred_count = metadata.get("deferred_file_count", 0)
         print(f"deferred_files: {_status_text(deferred_count)}")
@@ -282,6 +288,113 @@ def do_status(cfg: Config) -> int:
         elif deferred_files is not None:
             print("  - (invalid deferred_files metadata)")
     return 0
+
+
+def do_health(
+    cfg: Config,
+    *,
+    fleet: bool,
+    machines: list[str],
+    max_age_hours: float,
+    partial_threshold: int,
+    json_output: bool,
+) -> int:
+    from agent_logger.sync.health import classify_sync_health
+
+    def fail(message: str, code: int) -> int:
+        cleaned = _status_text(message)
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "health": "unknown" if code == 2 else "unhealthy",
+                        "error": cleaned,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"session-sync health: {cleaned}", file=sys.stderr)
+        return code
+
+    target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+    if fleet:
+        fleet_status = target.fleet_sync_status()
+        if not fleet_status.supported:
+            return fail("target does not expose fleet status", 2)
+        if fleet_status.error:
+            return fail(f"fleet status unreadable ({fleet_status.error})", 1)
+        statuses = fleet_status.machines
+        if machines:
+            statuses = {
+                machine: (
+                    statuses[machine]
+                    if machine in statuses
+                    else target.sync_status(machine)
+                )
+                for machine in machines
+            }
+    else:
+        if len(machines) > 1:
+            return fail("--machine may be repeated only with --fleet", 2)
+        machine = machines[0] if machines else _machine(cfg)
+        latest = target.sync_status(machine)
+        if not latest.supported:
+            return fail("target does not expose status", 2)
+        statuses = {machine: latest}
+
+    results = [
+        classify_sync_health(
+            machine,
+            status,
+            max_age_hours=max_age_hours,
+            partial_threshold=partial_threshold,
+        )
+        for machine, status in sorted(statuses.items())
+    ]
+    if not results:
+        return fail("no machine metadata found", 1)
+
+    unhealthy = sum(result.health == "unhealthy" for result in results)
+    degraded = sum(result.health == "degraded" for result in results)
+    healthy = sum(result.health == "healthy" for result in results)
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "health": "unhealthy" if unhealthy else (
+                        "degraded" if degraded else "healthy"
+                    ),
+                    "max_age_hours": max_age_hours,
+                    "partial_threshold": partial_threshold,
+                    "summary": {
+                        "healthy": healthy,
+                        "degraded": degraded,
+                        "unhealthy": unhealthy,
+                    },
+                    "machines": [result.as_dict() for result in results],
+                },
+                indent=2,
+            )
+        )
+    else:
+        for result in results:
+            age = (
+                f"{result.age_hours:.1f}h"
+                if result.age_hours is not None
+                else "unknown"
+            )
+            print(
+                f"{_status_text(result.machine)}: "
+                f"{result.health} ({result.reason}); "
+                f"age={age}, "
+                f"status={_status_text(result.latest_status, 'unknown')}, "
+                f"partial_streak={result.consecutive_partial_count}"
+            )
+        print(
+            f"summary: healthy={healthy} degraded={degraded} unhealthy={unhealthy}"
+        )
+    return 1 if unhealthy else 0
 
 
 def do_doctor(cfg: Config) -> int:
@@ -389,6 +502,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_rescue.add_argument("--verbose", action="store_true", help="verbose output")
 
     sub.add_parser("status", help="show resolved sync configuration")
+    p_health = sub.add_parser(
+        "health",
+        help="classify sync freshness and repeated partial results",
+    )
+    p_health.add_argument(
+        "--fleet",
+        action="store_true",
+        help="summarize every machine visible to a filesystem target",
+    )
+    p_health.add_argument(
+        "--machine",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="inspect an exact machine name (repeatable with --fleet)",
+    )
+    p_health.add_argument(
+        "--max-age-hours",
+        type=float,
+        default=12.0,
+        help="mark metadata older than this unhealthy (default: 12)",
+    )
+    p_health.add_argument(
+        "--partial-threshold",
+        type=int,
+        default=3,
+        help="mark this many consecutive partial passes unhealthy (default: 3)",
+    )
+    p_health.add_argument("--json", action="store_true", help="emit JSON")
     sub.add_parser("doctor", help="check the target is reachable/usable")
 
     p_compact = sub.add_parser(
@@ -441,6 +583,36 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "status":
             return do_status(cfg)
+        if args.command == "health":
+            if (
+                not math.isfinite(args.max_age_hours)
+                or args.max_age_hours <= 0
+                or args.partial_threshold <= 0
+            ):
+                if args.json:
+                    print(
+                        json.dumps(
+                            {
+                                "health": "unknown",
+                                "error": "thresholds must be finite and positive",
+                            },
+                            indent=2,
+                        )
+                    )
+                else:
+                    print(
+                        "session-sync health: thresholds must be finite and positive",
+                        file=sys.stderr,
+                    )
+                return 2
+            return do_health(
+                cfg,
+                fleet=args.fleet,
+                machines=args.machine,
+                max_age_hours=args.max_age_hours,
+                partial_threshold=args.partial_threshold,
+                json_output=args.json,
+            )
         if args.command == "doctor":
             return do_doctor(cfg)
         if args.command == "compact":
