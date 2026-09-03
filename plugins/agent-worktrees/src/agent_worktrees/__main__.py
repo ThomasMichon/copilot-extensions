@@ -14030,21 +14030,34 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
     if scope == "none":
         return "payload-only"
 
-    try:
-        reconcile.runtime_installation_candidate(name, pdir)
-    except ValueError as error:
-        return f"installation context invalid: {error}"
+    # Classify the installer before applying receipt policy. ``install.*``
+    # runtimes participate in installation cells and remain fail-closed even
+    # when their deployed version is current. Legacy ``init.*`` bootstraps do
+    # not claim cell ownership and must not require or inherit a receipt.
+    install_name = "install.ps1" if platform == "windows" else "install.sh"
+    init_name = "init.ps1" if platform == "windows" else "init.sh"
+    install_script = pdir / "scripts" / install_name
+    init_script = pdir / "scripts" / init_name
+    if install_script.exists():
+        installer = install_script
+        requires_installation_context = True
+    elif init_script.exists():
+        installer = init_script
+        requires_installation_context = False
+    else:
+        return "installer not found"
+
+    if requires_installation_context:
+        try:
+            reconcile.runtime_installation_candidate(name, pdir)
+        except ValueError as error:
+            return f"installation context invalid: {error}"
+
     runtime_root = reconcile.runtime_dir(name)
     pver = reconcile.payload_version(pdir)
     dver = reconcile.runtime_deployed_version(name, root=runtime_root)
     if not force and pver and dver and reconcile._versions_equal(dver, pver):
         return "SKIPPED (current)"
-    try:
-        child_environment, _governed_root = reconcile.runtime_installer_environment(
-            name, pdir
-        )
-    except ValueError as error:
-        return f"installation context invalid: {error}"
 
     # Resolve the runtime installer with the SAME preference the launch-path
     # reconciler uses (``reconcile.runtime_installer_argv``): prefer
@@ -14060,27 +14073,34 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if not shell:
             return "powershell not found"
-        installer = pdir / "scripts" / "install.ps1"
-        if installer.exists():
+        if requires_installation_context:
             argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-File", str(installer), "update"]
         else:
-            installer = pdir / "scripts" / "init.ps1"
             argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-File", str(installer)] + (["-Force"] if force else [])
     else:
-        installer = pdir / "scripts" / "install.sh"
-        if installer.exists():
+        if requires_installation_context:
             # This argv is handed to bash even from Windows hosts when
             # reconciling non-Windows runtimes; backslashes are escapes/path
             # separators bash won't interpret as native filesystem separators.
             argv = ["bash", installer.as_posix(), "update"]
         else:
-            installer = pdir / "scripts" / "init.sh"
             # Same bash argv contract as install.sh: keep separators POSIX.
             argv = ["bash", installer.as_posix()] + (["--force"] if force else [])
-    if not installer.exists():
-        return "installer not found"
+
+    try:
+        if requires_installation_context:
+            child_environment, _governed_root = (
+                reconcile.runtime_installer_environment(name, pdir)
+            )
+        else:
+            # Init-only runtimes predate installation cells and do not claim
+            # cell ownership. Scrub any caller context instead of fabricating a
+            # receipt that their bootstrap neither requires nor produces.
+            child_environment = reconcile.clean_runtime_installer_environment()
+    except ValueError as error:
+        return f"installation context invalid: {error}"
 
     output.header(f"Reconciling Runtime: {name}"
                   + (" (forced)" if force else ""))
