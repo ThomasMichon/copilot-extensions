@@ -683,6 +683,18 @@ def _cmd_version(_args: argparse.Namespace) -> None:
     print(f"agent-bridge {__version__}")
 
 
+def _cmd_carrier(args: argparse.Namespace) -> None:
+    """Run the Agent Bridge-owned remote carrier endpoint."""
+    if not args.stdio:
+        raise SystemExit("carrier currently requires --stdio")
+    from .carrier import cmd_carrier_stdio
+
+    try:
+        cmd_carrier_stdio()
+    except KeyboardInterrupt:
+        pass
+
+
 def _cmd_token(args: argparse.Namespace) -> None:
     """Print the bearer token external ACP clients (e.g. acp-ui) authenticate with.
 
@@ -4907,6 +4919,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     ver_p = sub.add_parser("version", help="Print version")
     ver_p.set_defaults(func=_cmd_version)
+
+    carrier_p = sub.add_parser(
+        "carrier",
+        help="Run the framed remote Agent Bridge carrier endpoint",
+    )
+    carrier_p.add_argument(
+        "--stdio",
+        action="store_true",
+        help="Serve the carrier protocol on stdin/stdout",
+    )
+    carrier_p.set_defaults(func=_cmd_carrier)
 
     token_p = sub.add_parser(
         "token",
