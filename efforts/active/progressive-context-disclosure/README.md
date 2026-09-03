@@ -512,10 +512,11 @@ enforcement before migrating the complete contributor stack.
   transport `INVALID`; a fresh independently generated retry supplied the
   behavioral repetition with new canaries.
 - All three behavioral repetitions loaded every required guide but were
-  literal-mode false passes after broad compensating exploration. Each violated
-  CAP-1's bounded-task rule; repetitions 2 and 3 also loaded unrelated guides,
-  and repetition 3 violated CMD-1 by loading `command-reference` without a
-  required non-kernel command option.
+  literal-mode false passes after bounded-flow violations. Repetitions 1 and 3
+  used broad compensating exploration; repetition 2 failed the experimental
+  mode gate. Each violated CAP-1's bounded-task rule; repetitions 2 and 3 also
+  loaded unrelated guides, and repetition 3 violated CMD-1 by loading
+  `command-reference` without a required non-kernel command option.
 - Reject the F3 repository-relative safety-gated flat variant despite its
   unanimous no-guide and one-guide cells. Per the frozen protocol, one critical
   violation eliminates the variant.

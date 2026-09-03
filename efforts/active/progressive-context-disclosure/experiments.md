@@ -182,7 +182,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F2 / backtick repository-relative / optional / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 1, 1, 2 | Reject this cell: optional wording never produced a literal pass and every repetition broadened beyond the task-applicable guide. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 3 PASS | 3/3 loaded only `runtime-diagnostics` | 0, 0, 0 | Retain as a surviving cell: task-applicable references removed the F2 exploration failure while reducing initial context from 4,379 to 2,862 characters. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / no-guide / ACP fresh | 3 | 3 PASS | no guide required or loaded | 0, 0, 0 | Retain as a surviving boundary: the critical kernel completed the task with zero tool calls and zero deferred reads. |
-| F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 0, 1, 2 | Reject this variant: every behavioral run broadened beyond the bounded flow and violated CAP-1; two also loaded unrelated guides. |
+| F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 0, 1, 2 | Reject this variant: every behavioral run broadened beyond the bounded flow and violated CAP-1; two also loaded unrelated guides, and repetition 3 violated CMD-1. |
 
 Counts-only records:
 
