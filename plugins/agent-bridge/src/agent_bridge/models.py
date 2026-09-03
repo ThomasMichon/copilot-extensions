@@ -43,6 +43,21 @@ class SessionStatus(str, Enum):
     ENDED = "ended"
 
 
+class AttentionReason(str, Enum):
+    """Stable reasons that may settle an attached attention wait."""
+
+    TURN_COMPLETE = "turn_complete"
+    TURN_CANCELLED = "turn_cancelled"
+    FAILED = "failed"
+    INPUT_REQUIRED = "input_required"
+    PERMISSION_REQUIRED = "permission_required"
+    UNREACHABLE = "unreachable"
+    POLICY_REQUIRED = "policy_required"
+    CONTRACT_CHANGED = "contract_changed"
+    STOPPED = "stopped"
+    ENDED = "ended"
+
+
 # -- Agent config ------------------------------------------------------------
 
 
@@ -229,6 +244,13 @@ class AnswerAskUserRequest(BaseModel):
     action: str = "accept"
 
 
+class AnswerPermissionRequest(BaseModel):
+    """Resolve the currently parked permission request on a live session."""
+
+    request_id: str
+    option_id: str
+
+
 class CursorAckRequest(BaseModel):
     """Acknowledge delivery of events up to ``last_id`` for a caller.
 
@@ -405,6 +427,51 @@ class DelegatedResultSnapshot(BaseModel):
     latest_result: ResultField
     incremental: ResultIncrement
     limits: ResultLimits
+
+
+class AttentionIdentity(BaseModel):
+    """Existing delegate and lineage identities observed by an attention wait."""
+
+    logical_delegate_kind: Literal["worktree", "session"]
+    logical_delegate_id: str
+    requested_ref: str
+    observed_session_id: str
+    current_session_id: str
+    successor_id: str | None = None
+
+
+class AttentionReference(BaseModel):
+    """One bounded, opaque reference associated with an attention boundary."""
+
+    kind: Literal[
+        "result",
+        "input",
+        "permission",
+        "terminal",
+        "policy",
+        "successor",
+    ]
+    ref: str
+    availability: Literal[
+        "available",
+        "resolved",
+        "withdrawn",
+        "unknown_after_restart",
+        "unavailable",
+    ] = "available"
+    value: dict[str, Any] | None = None
+
+
+class AttentionWaitResponse(BaseModel):
+    """Cursor-neutral result of evaluating selected attention boundaries."""
+
+    settled: bool
+    reason: AttentionReason | None = None
+    identity: AttentionIdentity
+    position: str | None = None
+    boundary_event_id: int | None = None
+    reference: AttentionReference | None = None
+    limitations: list[str] = Field(default_factory=list)
 
 
 class SessionListResponse(BaseModel):

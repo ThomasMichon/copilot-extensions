@@ -38,7 +38,8 @@ delegated-agent facade.
 | Submit a turn | `send <session> <prompt>` | `POST /api/v1/sessions/{id}/turns` | Immediate `turn_index`, or a queued result when `queue=true` |
 | Handle a busy hosted session | Default `send` refuses; `send ... --queue` preserves the turn; `send ... --force` ends/replaces it | Default prompt submission returns 409; `queue=true` persists FIFO work | Reject, queue identity/position, or a fresh unlinked session depending on the explicit mode |
 | Manage pending prompts | Queue flags through `send` | Queue snapshot, delete-one, and clear-all endpoints | Durable FIFO queue maintenance |
-| Observe a live turn | attached `send`, `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
+| Observe a live turn | attached `send`, bare `wait`, or following `read` | `GET .../events` plus cursor acknowledgement | Collapsed event stream |
+| Wait for selected attention | `wait --attention REASON` / `--all-attention`, optionally `--json` and `--position` | Authenticated `GET .../attention` with repeatable reasons, opaque position, and bounded timeout | Structured earliest-boundary settlement; human mode flushes the SSE feed through the boundary, JSON mode remains cursor-neutral |
 | Read accumulated events | `read`, `read --since`, `--tail`, `--range`, or `--event` | `GET .../events` or `GET .../events/range` | Event records; random access does not move the caller cursor |
 | Read a bounded accumulated result | `result`, optionally from an opaque `--position` or with explicit `--expand` | `GET .../result` and `GET .../result/detail` | Current state, latest completed result, collapsed incremental work, and a cursor-neutral opaque next position |
 | Inspect the downstream transcript without launching ACP | `peek` | Target-execution helper, not a public session route | Bounded Copilot `events.jsonl` snapshot and reuse verdict |
@@ -48,6 +49,7 @@ delegated-agent facade.
 | Resume | `resume` or automatic resume on later send | `POST .../resume` | Session returns to `idle` when recovery succeeds |
 | End and remove | `end` | `DELETE /api/v1/sessions/{id}` | Bridge-owned session state is retired |
 | Answer agent input | `answer` | `POST .../ask-user` | Parked elicitation resumes |
+| Answer a manual permission | No dedicated CLI verb yet | `POST .../permission` with correlated request and option IDs | Parked permission resumes and emits durable resolution |
 | Hand off context | `handoff` | `POST .../handoff` | A successor session is created and linked |
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |
 | Message a represented interactive session | `send <live-handle>` | `POST /api/v1/live-sessions/{id}/messages` | Durable inbox message ID; optional waited reply |
@@ -152,7 +154,8 @@ Current `wait` means **wait for the current turn to settle**:
   running.
 - A timeout returns control while the remote turn may still be running.
 
-This is narrower than the target attention contract.
+Bare `wait` deliberately remains narrower than the explicit attention contract
+for compatibility.
 
 ## Target attention contract
 
@@ -175,21 +178,32 @@ The stable semantic reasons are:
 | `stopped` | The session was deliberately preserved but is not currently executing |
 | `ended` | The logical delegate or its current session was deliberately retired |
 
-The observable mapping is:
+The reason-source matrix is:
 
-| Current signal | Target attention result |
-|----------------|-------------------------|
-| `turn_complete` with a normal stop reason | `turn_complete` |
-| `turn_complete` with a cancelled stop reason after explicit interrupt | `turn_cancelled` |
-| `ask_user_request` while the turn is parked | `input_required` |
-| `permission_request` while the host cannot resolve it | `permission_required` |
-| `error` or terminal `failed` after the target remains reachable enough to report failure | `failed` |
-| Disconnected liveness while recovery remains viable | No settlement; continue reconnect/replay |
-| Exhausted reachability recovery with no authoritative terminal result | `unreachable` |
-| Context/ownership/contract policy that cannot proceed automatically | `policy_required` |
-| Compatible `session_handoff` | Continue on the successor without settling |
-| Incompatible successor contract | `contract_changed` |
-| Deliberate terminal session transition | `stopped` or `ended` |
+| Reason | Durable authority | Correlation and resolution | Restart and current availability | Prerequisite owner |
+|--------|-------------------|----------------------------|----------------------------------|--------------------|
+| `turn_complete` | First selected `turn_complete` event with a normal stop reason, paired with the completed turn row | Event boundary and bounded result reference | Durable and replayable | agent-bridge |
+| `turn_cancelled` | `turn_complete.stop_reason` only when it explicitly proves cancellation; a generic `interrupted` event is evidence-limited | Event boundary and bounded result reference | Durable and replayable | agent-bridge |
+| `failed` | Terminal `session_state_changed(status=failed)` plus its fatal/terminal evidence | Session and terminal event boundary | Durable and replayable; generic `error` does not settle | #22 for complete production evidence |
+| `input_required` | `ask_user_request` | `tool_call_id`; `ask_user_resolved` or `ask_user_withdrawn` reports current availability | Boundary is durable; answerability is live and becomes `unknown_after_restart` when it cannot be recovered | agent-bridge |
+| `permission_required` | Correlated `permission_request` | Stable `request_id`; `permission_resolved` reports current availability | Boundary is durable once correlation exists; legacy uncorrelated requests do not settle | #1450 implementation |
+| `unreachable` | Explicit terminal reachability-exhausted event | Terminal event boundary | Durable and replayable; disconnected liveness alone never settles | #22 |
+| `policy_required` | Dedicated durable policy-boundary event | Stable action/decision correlation and resolution event | Durable and replayable once an owner emits it; `context_critical` and warnings do not settle | Future policy-event owner |
+| `contract_changed` | Explicit successor protocol/reason-set rejection while following `session_handoff` | Successor identity plus last predecessor boundary | Client-synthesized and ephemeral until session-pinned generations exist | #1460 and #1468 |
+| `stopped` | Deliberate `session_state_changed(status=stopped)` | Session and transition event boundary | Durable and replayable, except a predecessor stop after handoff cannot beat compatible succession | agent-bridge |
+| `ended` | Reserved for a retained deliberate-retirement tombstone | Session and terminal boundary | Gated: current `end` deletes the session and history, so attention wait must not claim replayability | Future terminal-retention owner |
+
+Settlement is the earliest selected durable boundary after the supplied opaque
+attention position. The position is distinct from a result position and carries
+the logical delegate plus the observed lineage segment, session, event-log
+continuity, and event boundary. Reissuing from the same position therefore
+returns the same logical settlement even if current request availability or
+session state has advanced. Exactly-once means deterministic logical
+settlement, not exactly-once HTTP delivery.
+
+A timeout is a non-settled bounded response carrying current identity and the
+latest attention position. It is not an attention reason and does not assert a
+terminal verdict.
 
 Rules:
 
@@ -209,6 +223,13 @@ Rules:
 7. A queued steering operation is selected by its logical-message identity.
    When it later starts, the admission record gains the turn/current-session
    correlation that a waiter and bounded-result reader follow.
+
+The current explicit implementation is HTTP protocol v10. Human CLI mode uses
+the existing SSE stream as its only wait channel and probes the shared
+cursor-neutral evaluator after rendered events are acknowledged. JSON mode uses
+only the bounded attention request. The server scans durable evidence before
+performing one bounded event-log wait; it never reads or advances a delivery
+cursor.
 
 ## Target logical-message idempotency
 
