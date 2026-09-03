@@ -66,7 +66,7 @@ reproducible. The workflow needs:
 ## Plan
 
 ### Phase 1 - Intent and maintenance-handoff contract
-- [ ] Extend the agent-fabric vision with the unreachable-machine maintenance
+- [x] Extend the agent-fabric vision with the unreachable-machine maintenance
       handoff.
 - [ ] Define the provider-neutral queue locator and maintenance issue contract:
       provider, explicit user repository, canonical machine identity,
