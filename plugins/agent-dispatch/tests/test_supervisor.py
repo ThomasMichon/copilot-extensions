@@ -274,6 +274,45 @@ def test_other_pool_reservation_does_not_consume_process_capacity(q, client):
     assert sup.poll_once() == [runnable.id]
 
 
+def test_other_label_reservations_are_not_probed(q, client):
+    held = q.create("other held task", labels=["other"])
+    held_reservation, _ = q.reserve_spawn(held.id)
+    q.record_spawn(
+        held_reservation.key,
+        session_handle="other-session",
+        worktree="other-worktree",
+    )
+    owner = "other-machine/other-worktree"
+    q.claim_one(owner, task_id=held.id)
+    q.start(held.id, owner)
+
+    unclaimed = q.create("other unclaimed task", labels=["other"])
+    queued_reservation, _ = q.reserve_spawn(unclaimed.id)
+    q.record_spawn(
+        queued_reservation.key,
+        session_handle="queued-session",
+        worktree="queued-worktree",
+    )
+
+    probes: list[tuple[str, str]] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        stall_seconds=1,
+        liveness_fn=lambda worktree, _machine: (
+            probes.append(("live", worktree)) or {"session_id": "session"}
+        ),
+        verdict_fn=lambda worktree, _machine, _session: (
+            probes.append(("verdict", worktree)) or tracking.LIVE
+        ),
+    )
+
+    assert sup.poll_once(now=held.created_at + 10) == []
+    assert probes == []
+
+
 def test_suspended_local_headless_body_is_cooled(q, client):
     task = q.create("dormant review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
