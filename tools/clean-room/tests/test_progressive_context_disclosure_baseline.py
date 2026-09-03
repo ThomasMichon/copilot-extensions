@@ -216,8 +216,8 @@ def test_execution_tasks_materialize_satisfiable_grounding(
         model="calibration-model",
         repetition=1,
     )
-    assert metadata["freezeEpoch"] == 2
-    assert str(metadata["runId"]).startswith("e2-")
+    assert metadata["freezeEpoch"] == 3
+    assert str(metadata["runId"]).startswith("e3-")
 
     execution = json.loads(
         (
@@ -225,12 +225,21 @@ def test_execution_tasks_materialize_satisfiable_grounding(
         ).read_text(encoding="utf-8")
     )
     assert execution["readiness"]["signal"] == "READY"
+    assert execution["publication"] == {
+        "owner": "synthetic-publication",
+        "materialClassification": "synthetic",
+        "secretsPresent": False,
+        "privateIdentifiersPresent": False,
+        "rawTranscriptPresent": False,
+    }
     assert execution["destination"] == {
         "owner": "synthetic-destination-routing",
         "repository": "generic-upstream/synthetic-progressive-context",
         "scopedIdentity": "synthetic-publisher",
+        "destinationApproved": True,
         "reachable": True,
         "reviewGate": "required",
+        "reviewGateSatisfied": True,
     }
     assert execution["command"]["argv"] == [
         "python3",
@@ -443,7 +452,7 @@ def test_configured_scenario_binds_one_task_and_repetition(
     )
     invalid = json.loads(invalid_path.read_text(encoding="utf-8"))
     fixture.validate_evidence(invalid)
-    assert invalid["runId"].startswith("e2-")
+    assert invalid["runId"].startswith("e3-")
     with pytest.raises(ValueError, match="resume boundary is not runnable"):
         fixture.configure_scenario(
             template=template,

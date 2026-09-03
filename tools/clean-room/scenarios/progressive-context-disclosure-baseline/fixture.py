@@ -825,10 +825,23 @@ def main() -> int:
         raise SystemExit("execution paths escape the bounded repository")
     config = json.loads(config_path.read_text(encoding="utf-8"))
     readiness = config["readiness"]
+    publication = config["publication"]
     destination = config["destination"]
     if readiness["signal"] != "READY":
         raise SystemExit("capability is not ready")
-    if not destination["reachable"] or destination["reviewGate"] != "required":
+    if (
+        publication["materialClassification"] != "synthetic"
+        or publication["secretsPresent"]
+        or publication["privateIdentifiersPresent"]
+        or publication["rawTranscriptPresent"]
+    ):
+        raise SystemExit("publication gate failed")
+    if (
+        not destination["destinationApproved"]
+        or not destination["reachable"]
+        or destination["reviewGate"] != "required"
+        or not destination["reviewGateSatisfied"]
+    ):
         raise SystemExit("destination gate failed")
     result = {
         "boundedRead": "complete",
@@ -837,6 +850,7 @@ def main() -> int:
         "destination": destination["repository"],
         "scopedIdentity": destination["scopedIdentity"],
         "reviewGate": destination["reviewGate"],
+        "reviewGateSatisfied": destination["reviewGateSatisfied"],
     }
     result_path.write_text(
         json.dumps(result, sort_keys=True) + "\\n",
@@ -1863,6 +1877,11 @@ def _validate_corpus_and_tasks() -> None:
                 if execution_fixture is not None
                 else None
             )
+            publication = (
+                execution_fixture.get("publication")
+                if execution_fixture is not None
+                else None
+            )
             locators = (
                 [
                     str(execution_fixture["configLocator"]),
@@ -1881,13 +1900,21 @@ def _validate_corpus_and_tasks() -> None:
                 )
                 or not isinstance(readiness, dict)
                 or readiness.get("signal") != "READY"
+                or not isinstance(publication, dict)
+                or publication.get("owner") != "synthetic-publication"
+                or publication.get("materialClassification") != "synthetic"
+                or publication.get("secretsPresent") is not False
+                or publication.get("privateIdentifiersPresent") is not False
+                or publication.get("rawTranscriptPresent") is not False
                 or not isinstance(destination, dict)
                 or destination.get("owner")
                 != "synthetic-destination-routing"
                 or not destination.get("repository")
                 or not destination.get("scopedIdentity")
+                or destination.get("destinationApproved") is not True
                 or destination.get("reachable") is not True
                 or destination.get("reviewGate") != "required"
+                or destination.get("reviewGateSatisfied") is not True
                 or not isinstance(command, dict)
                 or command.get("owner")
                 != "synthetic-capability-procedure"
