@@ -375,3 +375,6 @@ policy, version decision, and exception ledger live in
   approval for all external contributors. The static guard also rejects any
   other checked-in workflow job that routes to `self-hosted` or the dedicated
   label; this supplements repository policy but does not replace it.
+- The workflow now warns that deployments may pin its Git blob SHA, and
+  CODEOWNERS routes edits through the repository owner before consumers update
+  their reviewed pins.
