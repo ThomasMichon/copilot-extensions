@@ -189,6 +189,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / Markdown link / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded; none auto-loaded | 2, 0, 2 | Reject this representation: real links did not auto-load guide bodies, but every run broadened into repository or configuration discovery and failed CAP-1 or the bounded-flow gate. |
 | F3 / backtick payload-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded; none auto-loaded | 3, 2, 3 | Reject this representation: every run reread the prohibited generated context source, violated CAP-1, and broadened into irrelevant payload or repository discovery. |
 | F3 / bare labeled path / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FAIL | all required guides loaded; none auto-loaded | 3, 4, 2 | Reject this representation: every run used broad guide or repository discovery, loaded irrelevant guidance, and returned an incorrect or over-grounded blocker. |
+| F3 / HTML comment locator / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FAIL | all required guides loaded; none auto-loaded | 3, 2, 1 | Reject this representation: comment locators were discoverable, but every run broadened beyond them and loaded irrelevant guidance before an incorrect or over-grounded blocker. |
 
 Counts-only records:
 
@@ -231,6 +232,9 @@ Counts-only records:
 - [`evidence/f3-bare-gated-flat-multi-guide-r1.json`](evidence/f3-bare-gated-flat-multi-guide-r1.json)
 - [`evidence/f3-bare-gated-flat-multi-guide-r2.json`](evidence/f3-bare-gated-flat-multi-guide-r2.json)
 - [`evidence/f3-bare-gated-flat-multi-guide-r3.json`](evidence/f3-bare-gated-flat-multi-guide-r3.json)
+- [`evidence/f3-comment-gated-flat-multi-guide-r1.json`](evidence/f3-comment-gated-flat-multi-guide-r1.json)
+- [`evidence/f3-comment-gated-flat-multi-guide-r2.json`](evidence/f3-comment-gated-flat-multi-guide-r2.json)
+- [`evidence/f3-comment-gated-flat-multi-guide-r3.json`](evidence/f3-comment-gated-flat-multi-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -425,6 +429,23 @@ broad exploration actions after the first unresolved gate.
 Reject `bare-labeled-path`. The next controlled comparison changes only the
 representation to `html-comment-locator`, completing the frozen seven-form
 reference sweep for this F3 multi-guide coordinate.
+
+HTML comment locators were discoverable in every repetition: all three required
+guides were loaded and no guide body auto-loaded. They did not bound selection.
+Each run began or continued with broad guide, repository, or configuration
+discovery and loaded one to three irrelevant guides. Tool-call counts were 17,
+9, and 16.
+
+Repetitions 1 and 3 preserved the critical rules but continued past the first
+unresolved gate and returned over-grounded blockers. Repetition 2 violated
+CAP-1 and substituted an unrelated readiness rule for the declared task. All
+three lost exact task-scoped provenance.
+
+Reject `html-comment-locator`. All seven frozen reference representations are
+now rejected for the F3 safety-gated flat multi-guide coordinate. The next
+controlled comparison should return to the repository-relative representation
+and change only deferral from F3 to F1, testing whether one plugin-level index
+provides enough coherent orientation without the per-task F3 ambiguity.
 
 ## Clean-room shape
 
