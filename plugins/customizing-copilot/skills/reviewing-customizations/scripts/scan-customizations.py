@@ -1565,7 +1565,6 @@ def repo_owned_agent_files(
     files = (
         set(root.glob(".github/agents/*.agent.md"))
         | set(root.glob(".claude/agents/*.agent.md"))
-        | set(root.glob("plugins/*/agents/*.agent.md"))
     )
     for agent_root in owned_agent_roots:
         files.update(agent_root.glob("*.agent.md"))
@@ -1586,6 +1585,7 @@ def scan_agents(
     for af in repo_owned_agent_files(root, owned_agent_roots):
         agent_files[af.resolve()] = None
     for af in root.glob("plugins/*/agents/*.agent.md"):
+        agent_files[af.resolve()] = None
         owned_plugin_agents.add((af.parent.parent.name, af.name))
     for source in sorted(
         plugin_sources or [], key=lambda item: not item.controlled

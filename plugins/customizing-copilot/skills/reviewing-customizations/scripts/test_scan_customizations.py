@@ -2328,6 +2328,26 @@ def test_owned_agent_root_joins_context_budget_metadata(tmp_path: Path):
     assert "services/document-intake-bureau/docs/README.md" not in paths
 
 
+def test_default_budget_does_not_add_unenabled_repo_plugin_agents(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _agent(
+        repo / "plugins" / "local-plugin" / "agents",
+        "local-agent",
+        desc="Local plugin agent.",
+    )
+
+    budget = scan.build_context_budget(repo, home=tmp_path / "home")
+    paths = {
+        entry["path"]
+        for entry in budget["metadata_upper_bounds"]["files"]
+    }
+
+    assert "plugins/local-plugin/agents/local-agent.agent.md" not in paths
+
+
 def test_custom_instruction_dirs_accept_comma_separator(
     tmp_path: Path, monkeypatch,
 ):
