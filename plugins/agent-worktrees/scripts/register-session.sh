@@ -136,7 +136,7 @@ client="$HOME/.agent-worktrees/bin/hook_client.py"
 if [[ -f "$client" ]]; then
     client_output="$(
         printf '%s' "$payload" |
-            "$PYTHON" "$client" sessionStart 2>/dev/null || true
+            PYTHONPATH="" "$PYTHON" "$client" sessionStart 2>/dev/null || true
     )"
     if [[ "$client_output" == *$'\n'*$'\n'* ]]; then
         client_status="${client_output##*$'\n'}"

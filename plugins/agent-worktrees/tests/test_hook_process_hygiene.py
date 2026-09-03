@@ -67,6 +67,7 @@ def test_agent_worktrees_lifecycle_hooks_remain_bash_3_compatible():
         source = (scripts / name).read_text(encoding="utf-8")
         assert "mapfile" not in source
         assert "readarray" not in source
+        assert 'PYTHONPATH="" "$PYTHON" "$client"' in source
 
 
 @pytest.mark.guard

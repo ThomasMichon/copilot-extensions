@@ -20,7 +20,7 @@ client="$HOME/.agent-worktrees/bin/hook_client.py"
 if [[ -f "$client" ]]; then
     resolved="$(
         printf '%s' "$payload" |
-            "$PYTHON" "$client" projectResolve 2>/dev/null || true
+            PYTHONPATH="" "$PYTHON" "$client" projectResolve 2>/dev/null || true
     )"
     if [[ "$resolved" == *$'\n'* ]]; then
         resolved_status="${resolved##*$'\n'}"
@@ -39,6 +39,10 @@ if (( ! resolved_by_monitor )); then
 fi
 if [[ ! -f "$hook" ]]; then exit 0; fi
 
-printf '%s' "$payload" | bash "$hook" || true
+if [[ -n "$payload" ]]; then
+    printf '%s' "$payload" | bash "$hook" || true
+else
+    bash "$hook" || true
+fi
 
 exit 0
