@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_bridge import repo_own_plugins
 from agent_bridge.repo_own_plugins import repo_plugin_dir_args
 
@@ -42,6 +44,15 @@ def _make_repo(anchor: Path, enabled: dict, marketplaces: dict) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def restore_installed_root():
+    original = repo_own_plugins._INSTALLED
+    try:
+        yield
+    finally:
+        repo_own_plugins._INSTALLED = original
+
+
 def test_stages_enabled_uninstalled_plugin_from_local_marketplace(tmp_path):
     mp = tmp_path / "market"
     _make_local_marketplace(mp, "tw", "hello")
@@ -60,7 +71,7 @@ def test_stages_enabled_uninstalled_plugin_from_local_marketplace(tmp_path):
     assert str(mp / "plugins" / "hello") in args
 
 
-def test_installed_plugin_not_restaged(tmp_path):
+def test_installed_local_plugin_is_staged_from_local_source(tmp_path):
     mp = tmp_path / "market"
     _make_local_marketplace(mp, "tw", "hello")
     anchor = tmp_path / "repo"
@@ -69,15 +80,82 @@ def test_installed_plugin_not_restaged(tmp_path):
         enabled={"hello@tw": True},
         marketplaces={"tw": {"source": {"source": "local", "path": str(mp)}}},
     )
-    # Mark the plugin installed on disk -> must NOT be staged (avoids double-load).
+    # ACP ignores enabledPlugins, so the preferred local source remains explicit.
     installed = tmp_path / "installed"
     _write(installed / "tw" / "hello" / "plugin.json", {"name": "hello"})
     repo_own_plugins._INSTALLED = installed
 
+    assert repo_plugin_dir_args(anchor) == [
+        "--plugin-dir",
+        str(mp / "plugins" / "hello"),
+    ]
+
+
+def test_installed_remote_marketplace_plugin_is_staged(tmp_path):
+    anchor = tmp_path / "repo"
+    _make_repo(
+        anchor,
+        enabled={"remote@ghmp": True},
+        marketplaces={"ghmp": {"source": {"source": "github", "repo": "o/r"}}},
+    )
+    installed = tmp_path / "installed"
+    _write(installed / "ghmp" / "remote" / "plugin.json", {"name": "remote"})
+    repo_own_plugins._INSTALLED = installed
+
+    args = repo_plugin_dir_args(anchor)
+
+    assert args == ["--plugin-dir", str(installed / "ghmp" / "remote")]
+
+
+def test_local_and_installed_remote_plugins_are_both_staged(tmp_path):
+    anchor = tmp_path / "repo"
+    local = anchor / ".ai"
+    _make_local_marketplace(local, "local-mp", "local-plugin")
+    _make_repo(
+        anchor,
+        enabled={
+            "local-plugin@local-mp": True,
+            "remote-plugin@remote-mp": True,
+        },
+        marketplaces={
+            "local-mp": {"source": {"source": "directory", "path": str(local)}},
+            "remote-mp": {
+                "source": {"source": "github", "repo": "example/plugins"}
+            },
+        },
+    )
+    installed = tmp_path / "installed"
+    _write(
+        installed / "remote-mp" / "remote-plugin" / "plugin.json",
+        {"name": "remote-plugin"},
+    )
+    repo_own_plugins._INSTALLED = installed
+
+    assert repo_plugin_dir_args(anchor) == [
+        "--plugin-dir",
+        str(local / "plugins" / "local-plugin"),
+        "--plugin-dir",
+        str(installed / "remote-mp" / "remote-plugin"),
+    ]
+
+
+def test_installed_path_components_cannot_escape_inventory(tmp_path):
+    anchor = tmp_path / "repo"
+    _make_repo(
+        anchor,
+        enabled={"../plugin@remote-mp": True},
+        marketplaces={
+            "remote-mp": {
+                "source": {"source": "github", "repo": "example/plugins"}
+            }
+        },
+    )
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+
     assert repo_plugin_dir_args(anchor) == []
 
 
-def test_disabled_and_unresolved_are_not_staged(tmp_path):
+def test_disabled_and_unavailable_are_not_staged(tmp_path):
     anchor = tmp_path / "repo"
     _make_repo(
         anchor,
@@ -86,7 +164,7 @@ def test_disabled_and_unresolved_are_not_staged(tmp_path):
     )
     repo_own_plugins._INSTALLED = tmp_path / "installed"
 
-    # Disabled -> skipped; remote (non-local) uninstalled -> not staged, no mutation.
+    # Disabled -> skipped; remote (non-local) unavailable -> not staged, no mutation.
     assert repo_plugin_dir_args(anchor) == []
 
 
@@ -141,7 +219,7 @@ def test_stages_ai_directory_marketplace_relative_path(tmp_path):
     assert str(anchor / ".ai" / "generating-connect") in args
 
 
-def test_ai_installed_plugin_not_restaged(tmp_path):
+def test_ai_installed_plugin_is_staged_from_local_source(tmp_path):
     anchor = tmp_path / "repo"
     _make_ai_marketplace(anchor, "dotfiles-plugins", "generating-connect")
     _make_repo(
@@ -151,7 +229,7 @@ def test_ai_installed_plugin_not_restaged(tmp_path):
             "dotfiles-plugins": {"source": {"source": "directory", "path": "./.ai"}}
         },
     )
-    # Mark installed via a `.claude-plugin/plugin.json` manifest -> not re-staged.
+    # Mark installed via a `.claude-plugin/plugin.json`; local source still wins.
     installed = tmp_path / "installed"
     _write(
         installed / "dotfiles-plugins" / "generating-connect" / ".claude-plugin"
@@ -160,7 +238,10 @@ def test_ai_installed_plugin_not_restaged(tmp_path):
     )
     repo_own_plugins._INSTALLED = installed
 
-    assert repo_plugin_dir_args(anchor) == []
+    assert repo_plugin_dir_args(anchor) == [
+        "--plugin-dir",
+        str(anchor / ".ai" / "generating-connect"),
+    ]
 
 
 # ---------------------------------------------------------------------------
