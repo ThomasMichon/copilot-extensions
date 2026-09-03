@@ -730,6 +730,31 @@ class ScheduleLease:
         )
 
 
+@dataclass(frozen=True)
+class ResourceReservation:
+    """An atomic producer reservation for one external logical resource."""
+
+    key: str
+    owner: str
+    token: str
+    task_id: str | None = None
+    acquired_at: float = 0.0
+    updated_at: float = 0.0
+    expires_at: float | None = None
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> ResourceReservation:
+        return cls(
+            key=row["key"],
+            owner=row["owner"],
+            token=row["token"],
+            task_id=row["task_id"],
+            acquired_at=row["acquired_at"],
+            updated_at=row["updated_at"],
+            expires_at=row["expires_at"],
+        )
+
+
 # Column name -> DDL type, applied additively so existing DBs upgrade in place.
 _COLUMNS: dict[str, str] = {
     "id": "TEXT PRIMARY KEY",
@@ -1147,6 +1172,48 @@ class TaskQueue:
                 "  renewed_at REAL NOT NULL,"
                 "  expires_at REAL"
                 ")"
+            )
+            # Producer resource reservations -- atomic election before a
+            # producer creates work for an external resource. Unbound rows are
+            # short leases so a crash between election and task creation can
+            # recover; binding a task removes the expiry until terminal
+            # reconciliation releases the row.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS resource_reservations ("
+                "  key TEXT PRIMARY KEY,"
+                "  owner TEXT NOT NULL,"
+                "  token TEXT NOT NULL,"
+                "  task_id TEXT,"
+                "  acquired_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL,"
+                "  expires_at REAL"
+                ")"
+            )
+            resource_reservation_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(resource_reservations)"
+                ).fetchall()
+            }
+            if "token" not in resource_reservation_columns:
+                conn.execute(
+                    "ALTER TABLE resource_reservations ADD COLUMN token TEXT"
+                )
+            for row in conn.execute(
+                "SELECT key FROM resource_reservations "
+                "WHERE token IS NULL OR token = ''"
+            ).fetchall():
+                conn.execute(
+                    "UPDATE resource_reservations SET token = ? WHERE key = ?",
+                    (secrets.token_urlsafe(24), row["key"]),
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_res_owner "
+                "ON resource_reservations(owner)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_res_task "
+                "ON resource_reservations(task_id)"
             )
             # Supervisor registration registry -- the durable set of units the
             # host's singleton supervisor runs (a lane to spawn for, a schedule,
@@ -4827,6 +4894,9 @@ class TaskQueue:
         target_repo: str | None = None,
         label: str | None = None,
         evaluator_ref: str | None = None,
+        source: str | None = None,
+        origin_ref: str | None = None,
+        exclusive_key: str | None = None,
         limit: int = 200,
     ) -> list[Task]:
         """List tasks, optionally filtered. Newest first.
@@ -4860,6 +4930,15 @@ class TaskQueue:
                 params.append(evaluator_ref)
             else:
                 clauses.append("evaluator_ref IS NULL")
+        if source is not None:
+            clauses.append("source = ?")
+            params.append(source)
+        if origin_ref is not None:
+            clauses.append("origin_ref = ?")
+            params.append(origin_ref)
+        if exclusive_key is not None:
+            clauses.append("exclusive_key = ?")
+            params.append(exclusive_key)
         if label is not None:
             clauses.append(
                 "EXISTS (SELECT 1 FROM json_each("
@@ -5750,3 +5829,167 @@ class TaskQueue:
                 "SELECT * FROM schedule_leases ORDER BY scope"
             ).fetchall()
         return [ScheduleLease._from_row(r) for r in rows]
+
+    # -- external producer resource reservations ----------------------------
+
+    def acquire_resource_reservation(
+        self,
+        key: str,
+        owner: str,
+        *,
+        ttl: float,
+        token: str | None = None,
+        now: float | None = None,
+    ) -> tuple[ResourceReservation, bool]:
+        """Atomically elect one owner for an external logical resource.
+
+        An unbound reservation expires so another producer can recover after a
+        crash before task creation. Once bound to a task, it remains owned until
+        explicit terminal reconciliation releases it.
+        """
+        if not key or not owner:
+            raise TaskError("resource reservation key and owner are required")
+        if ttl <= 0:
+            raise TaskError("resource reservation ttl must be positive")
+        ts = self._now(now)
+        expires_at = ts + ttl
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
+            ).fetchone()
+            if row is None:
+                token = secrets.token_urlsafe(24)
+                conn.execute(
+                    "INSERT INTO resource_reservations "
+                    "(key, owner, token, task_id, acquired_at, updated_at, expires_at) "
+                    "VALUES (?, ?, ?, NULL, ?, ?, ?)",
+                    (key, owner, token, ts, ts, expires_at),
+                )
+                granted = True
+            elif (
+                token is not None
+                and row["owner"] == owner
+                and secrets.compare_digest(row["token"], token)
+            ):
+                if row["task_id"] is None:
+                    conn.execute(
+                        "UPDATE resource_reservations "
+                        "SET updated_at = ?, expires_at = ? WHERE key = ?",
+                        (ts, expires_at, key),
+                    )
+                granted = True
+            elif row["task_id"] is None and (
+                row["expires_at"] is not None and row["expires_at"] <= ts
+            ):
+                token = secrets.token_urlsafe(24)
+                conn.execute(
+                    "UPDATE resource_reservations SET owner = ?, token = ?, task_id = NULL, "
+                    "acquired_at = ?, updated_at = ?, expires_at = ? WHERE key = ?",
+                    (owner, token, ts, ts, expires_at, key),
+                )
+                granted = True
+            else:
+                granted = False
+            row = conn.execute(
+                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return ResourceReservation._from_row(row), granted
+
+    def bind_resource_reservation(
+        self,
+        key: str,
+        owner: str,
+        token: str,
+        task_id: str,
+        *,
+        now: float | None = None,
+    ) -> ResourceReservation:
+        """Bind an owned reservation to its created task."""
+        if not token or not task_id:
+            raise TaskError("resource reservation token and task_id are required")
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such resource reservation: {key}")
+            if row["owner"] != owner or not secrets.compare_digest(
+                row["token"], token
+            ):
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"resource reservation {key!r} identity does not match"
+                )
+            if row["task_id"] not in (None, task_id):
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"resource reservation {key!r} is already bound to "
+                    f"{row['task_id']!r}"
+                )
+            conn.execute(
+                "UPDATE resource_reservations "
+                "SET task_id = ?, updated_at = ?, expires_at = NULL WHERE key = ?",
+                (task_id, ts, key),
+            )
+            row = conn.execute(
+                "SELECT * FROM resource_reservations WHERE key = ?", (key,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return ResourceReservation._from_row(row)
+
+    def release_resource_reservation(
+        self, key: str, owner: str, token: str
+    ) -> bool:
+        """Release only the caller's own resource reservation.
+
+        A non-owner receives ``False``; the current owner's reservation is
+        never modified.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT owner, token FROM resource_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return False
+            if row["owner"] != owner or not secrets.compare_digest(
+                row["token"], token
+            ):
+                conn.execute("COMMIT")
+                return False
+            conn.execute(
+                "DELETE FROM resource_reservations WHERE key = ?", (key,)
+            )
+            conn.execute("COMMIT")
+        return True
+
+    def list_resource_reservations(
+        self,
+        *,
+        owner_prefix: str | None = None,
+        task_id: str | None = None,
+    ) -> list[ResourceReservation]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if owner_prefix is not None:
+            clauses.append("substr(owner, 1, ?) = ?")
+            params.extend((len(owner_prefix), owner_prefix))
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            params.append(task_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM resource_reservations"
+                + where
+                + " ORDER BY key",
+                params,
+            ).fetchall()
+        return [ResourceReservation._from_row(row) for row in rows]

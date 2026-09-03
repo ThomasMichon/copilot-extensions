@@ -30,12 +30,30 @@ def validate_spec(spec: dict[str, Any]) -> None:
     if not isinstance(spec.get("id"), str) or not spec["id"]:
         raise EmitterError("command emitter needs a non-empty 'id'")
     command = spec.get("command")
-    if (
+    builtin = spec.get("repository_issue_loop")
+    if command is None and builtin is None:
+        raise EmitterError(
+            "emitter needs a 'command' or 'repository_issue_loop' configuration"
+        )
+    if command is not None and (
         not isinstance(command, list)
         or not command
         or any(not isinstance(part, str) or not part for part in command)
     ):
         raise EmitterError("'command' must be a non-empty list of non-empty strings")
+    if builtin is not None:
+        if command is not None:
+            raise EmitterError(
+                "'command' and 'repository_issue_loop' are mutually exclusive"
+            )
+        if not isinstance(builtin, dict):
+            raise EmitterError("'repository_issue_loop' must be an object")
+        from ..repository_issue_loops import validate_config
+
+        try:
+            validate_config(builtin)
+        except ValueError as exc:
+            raise EmitterError(str(exc)) from exc
     try:
         interval = float(spec.get("interval_seconds"))
     except (TypeError, ValueError) as exc:
@@ -70,6 +88,9 @@ def validate_spec(spec: dict[str, Any]) -> None:
     task_output = spec.get("task_output")
     if task_output not in (None, "json"):
         raise EmitterError("'task_output' must be 'json' when present")
+    source = spec.get("source")
+    if source is not None and (not isinstance(source, str) or not source):
+        raise EmitterError("'source' must be a non-empty string")
     side_load = spec.get("side_load")
     if side_load is not None:
         if not isinstance(side_load, dict):
@@ -141,7 +162,7 @@ def _author_tasks(
     for row in _task_specs(stdout):
         fields = dict(row)
         title = fields.pop("title")
-        fields["source"] = "emitter"
+        fields["source"] = spec.get("source") or "emitter"
         fields["origin_ref"] = spec["id"]
         fields["evaluator_ref"] = spec.get("evaluator_ref")
         created.append(client.create(title, **fields))
@@ -230,6 +251,24 @@ def run_tick(
         env = {**os.environ, **spec["env"]}
     started_at = clock()
     try:
+        if spec.get("repository_issue_loop") is not None:
+            from ..repository_issue_loops import run_tick as run_issue_tick
+
+            result = run_issue_tick(
+                client,
+                spec["repository_issue_loop"],
+                clock=clock,
+            )
+            return {
+                "held": True,
+                "lease": lease.get("lease"),
+                "scope": scope,
+                "returncode": 0,
+                "error": None,
+                "created": result.get("created", []),
+                "result": result,
+                "duration_seconds": max(0.0, clock() - started_at),
+            }
         completed = runner(
             _render_command(spec["command"]),
             cwd=spec.get("cwd"),
@@ -296,17 +335,35 @@ def serve(
             )
 
     report = on_tick or _default_on_tick
+    health_path = Path(spec_path).with_suffix(".health.json")
     while True:
         interval = 60.0
         try:
             spec = load_spec(spec_path)
             interval = float(spec["interval_seconds"])
             with DispatchClient(url, token=token) as client:
-                report(run_tick(client, spec, holder=holder))
+                result = run_tick(client, spec, holder=holder)
+                report(result)
+                health_path.write_text(
+                    json.dumps(
+                        {"updated_at": time.time(), "ok": not result.get("error"), **result},
+                        default=str,
+                    ),
+                    encoding="utf-8",
+                )
         except KeyboardInterrupt:
             return
         except Exception as exc:
             print(f"agent-dispatch emitter: tick failed: {exc}", file=sys.stderr)
+            try:
+                health_path.write_text(
+                    json.dumps(
+                        {"updated_at": time.time(), "ok": False, "error": str(exc)}
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
         try:
             sleep(interval)
         except KeyboardInterrupt:

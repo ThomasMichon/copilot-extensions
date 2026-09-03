@@ -353,7 +353,7 @@ def build_command(
 
     if kind == RegistrationKind.EMITTER:
         path = _need_materialize("emitter", spec)
-        if "command" in spec:
+        if "command" in spec or "repository_issue_loop" in spec:
             holder = str(reg.get("machine") or platform.node() or "local")
             return base + ["emitter", "serve", path, "--holder", holder]
         argv = base + ["webhook", "--config", path]

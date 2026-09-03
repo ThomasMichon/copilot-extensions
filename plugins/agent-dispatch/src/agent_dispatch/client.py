@@ -734,6 +734,70 @@ class DispatchClient:
     def get_schedule_lease(self, scope: str) -> dict | None:
         return self._unwrap(self._http.get(f"/schedule-leases/{scope}"))
 
+    # -- external producer resource reservations ----------------------------
+
+    def acquire_resource_reservation(
+        self,
+        key: str,
+        owner: str,
+        *,
+        ttl: float,
+        token: str | None = None,
+    ) -> dict:
+        body: dict[str, object] = {
+            "key": key,
+            "owner": owner,
+            "ttl": ttl,
+        }
+        if token is not None:
+            body["token"] = token
+        return self._unwrap(
+            self._http.post(
+                "/resource-reservations/acquire",
+                json=body,
+            )
+        )
+
+    def bind_resource_reservation(
+        self, key: str, owner: str, token: str, task_id: str
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                "/resource-reservations/bind",
+                json={
+                    "key": key,
+                    "owner": owner,
+                    "token": token,
+                    "task_id": task_id,
+                },
+            )
+        )
+
+    def release_resource_reservation(
+        self, key: str, owner: str, token: str
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                "/resource-reservations/release",
+                json={"key": key, "owner": owner, "token": token},
+            )
+        )
+
+    def list_resource_reservations(
+        self,
+        *,
+        owner_prefix: str | None = None,
+        task_id: str | None = None,
+    ) -> list[dict]:
+        params: dict[str, str] = {}
+        if owner_prefix is not None:
+            params["owner_prefix"] = owner_prefix
+        if task_id is not None:
+            params["task_id"] = task_id
+        return self._unwrap(
+            self._http.get("/resource-reservations", params=params)
+        )
+
     # -- supervisor registrations -------------------------------------------
 
     def register_registration(

@@ -31,6 +31,77 @@ def api(app):
     return TestClient(app)
 
 
+def test_resource_reservation_api_elects_binds_and_owner_releases(api):
+    key = "forge:github:repository:example/project:issue:7"
+    acquired = api.post(
+        "/resource-reservations/acquire",
+        json={"key": key, "owner": "loop:alpha", "ttl": 60},
+    )
+    assert acquired.status_code == 200
+    assert acquired.json()["granted"]
+    token = acquired.json()["reservation"]["token"]
+
+    stale_same_owner = api.post(
+        "/resource-reservations/acquire",
+        json={"key": key, "owner": "loop:alpha", "ttl": 60},
+    )
+    assert not stale_same_owner.json()["granted"]
+    assert "token" not in stale_same_owner.json()["reservation"]
+
+    renewed = api.post(
+        "/resource-reservations/acquire",
+        json={
+            "key": key,
+            "owner": "loop:alpha",
+            "token": token,
+            "ttl": 60,
+        },
+    )
+    assert renewed.json()["granted"]
+    assert renewed.json()["reservation"]["token"] == token
+
+    denied = api.post(
+        "/resource-reservations/acquire",
+        json={"key": key, "owner": "loop:beta", "ttl": 60},
+    )
+    assert denied.status_code == 200
+    assert not denied.json()["granted"]
+    assert denied.json()["reservation"]["owner"] == "loop:alpha"
+    assert "token" not in denied.json()["reservation"]
+
+    bound = api.post(
+        "/resource-reservations/bind",
+        json={
+            "key": key,
+            "owner": "loop:alpha",
+            "token": token,
+            "task_id": "task-7",
+        },
+    )
+    assert bound.status_code == 200
+    assert bound.json()["task_id"] == "task-7"
+
+    refused = api.post(
+        "/resource-reservations/release",
+        json={"key": key, "owner": "loop:beta", "token": token},
+    )
+    assert refused.status_code == 200
+    assert not refused.json()["released"]
+
+    listed = api.get(
+        "/resource-reservations", params={"owner_prefix": "loop:"}
+    )
+    assert listed.status_code == 200
+    assert [item["key"] for item in listed.json()] == [key]
+
+    released = api.post(
+        "/resource-reservations/release",
+        json={"key": key, "owner": "loop:alpha", "token": token},
+    )
+    assert released.status_code == 200
+    assert released.json()["released"]
+
+
 @pytest.fixture
 def server_url(app):
     # Run a real uvicorn server on an ephemeral port so the sync client (and SSE)

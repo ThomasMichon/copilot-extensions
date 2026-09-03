@@ -141,6 +141,48 @@ def test_run_tick_authors_json_tasks_with_emitter_provenance():
     assert result["created"][0]["evaluator_ref"] == "review-loop"
 
 
+def test_run_tick_uses_configured_task_source():
+    client = FakeClient()
+    spec = _spec(task_output="json", source="repository-backlog")
+
+    def runner(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout='{"title":"work"}')
+
+    result = emitter.run_tick(client, spec, holder="host-a", runner=runner)
+    assert result["created"][0]["source"] == "repository-backlog"
+
+
+def test_run_tick_dispatches_builtin_repository_issue_loop(monkeypatch):
+    client = FakeClient()
+    config = {"kind": "repository-issue-loop"}
+    spec = _spec(command=None, repository_issue_loop=config)
+    observed = {}
+
+    monkeypatch.setattr(emitter, "validate_spec", lambda _spec: None)
+
+    def fake_run_tick(actual_client, actual_config, **kwargs):
+        observed.update(
+            client=actual_client,
+            config=actual_config,
+            kwargs=kwargs,
+        )
+        return {"created": [{"id": "task-1"}]}
+
+    monkeypatch.setattr(
+        "agent_dispatch.repository_issue_loops.run_tick", fake_run_tick
+    )
+    times = iter([10.0, 12.0])
+
+    result = emitter.run_tick(
+        client, spec, holder="host-a", clock=lambda: next(times)
+    )
+
+    assert observed["client"] is client
+    assert observed["config"] is config
+    assert result["created"] == [{"id": "task-1"}]
+    assert result["duration_seconds"] == 2.0
+
+
 def test_run_tick_accepts_empty_json_task_list_as_noop():
     client = FakeClient()
 

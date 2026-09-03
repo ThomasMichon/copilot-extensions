@@ -982,3 +982,28 @@ configuration to token flags where process arguments may be observable.
 - **Don't fake identity.** Let `claim` / `worktree-status` resolve it from CWD;
   only pass `--machine` / `--worktree` to override or where agent-worktrees is
   absent.
+For a standing repository issue backlog, prefer one source-controlled
+`kind: repository-issue-loop` declaration over a custom schedule plus worker
+script. It expands to the stock periodic emitter and a concurrency-one headless
+lane, selects quiet label-eligible issues deterministically, visibly reserves
+them on the forge, and emits one exclusive goal task for the bounded batch.
+Overlapping declarations also compete for one coordinator-atomic
+repository/issue reservation, so exactly one loop wins before task creation;
+the loser visibly releases its provisional forge marker.
+Declare the expected `forge.producer_login`; the runtime verifies the
+repository-scoped authenticated identity and ignores marker-shaped comments
+from every other author.
+
+```bash
+<agent-dispatch catalog argv[0]> repository-issue-loop discover \
+  .agent-dispatch/registrar/issues.yaml
+<agent-dispatch catalog argv[0]> repository-issue-loop doctor \
+  .agent-dispatch/registrar/issues.yaml
+```
+
+Use `setup|inspect|status|doctor|disable|enable` for lifecycle controls.
+`discover` is the safe dry run. Do not hand-clear another loop's reservation;
+steer, release, or abandon a blocked dispatch task explicitly. During host
+migration, disable the old declaration, release or hand off its emitter lease,
+then transfer declaration placement/producer authority before enabling the new
+host. See the plugin README and `docs/repository-issue-loop.md`.
