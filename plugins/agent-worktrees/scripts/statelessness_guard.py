@@ -96,6 +96,49 @@ def find_repo_root(start: str) -> Path | None:
     return None
 
 
+def project_name(root: Path, home: Path) -> str:
+    """Resolve the registry project name without spawning a process."""
+    anchor = root
+    dotgit = root / ".git"
+    if dotgit.is_file():
+        try:
+            raw = dotgit.read_text(encoding="utf-8").strip()
+            if raw.lower().startswith("gitdir:"):
+                gitdir = Path(raw.split(":", 1)[1].strip())
+                if not gitdir.is_absolute():
+                    gitdir = (root / gitdir).resolve()
+                for parent in (gitdir, *gitdir.parents):
+                    if parent.name == ".git":
+                        anchor = parent.parent
+                        break
+        except (OSError, UnicodeDecodeError, ValueError):
+            pass
+
+    try:
+        text = (home / ".agent-worktrees" / "repos.yaml").read_text("utf-8")
+        current = None
+        in_repos = False
+        for raw in text.splitlines():
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(raw) - len(raw.lstrip())
+            if indent == 0:
+                in_repos = stripped == "repos:"
+                current = None
+            elif in_repos and indent == 2 and stripped.endswith(":"):
+                current = stripped[:-1]
+            elif in_repos and current and indent == 4:
+                key, sep, value = stripped.partition(":")
+                if sep and key in {"windows", "wsl", "linux"}:
+                    candidate = value.strip().strip("'\"").replace("\\\\", "\\")
+                    if candidate and Path(candidate).resolve() == anchor.resolve():
+                        return current
+    except (OSError, UnicodeDecodeError, ValueError):
+        pass
+    return anchor.name or "the-harness"
+
+
 def requires_external_state_root(root: Path) -> bool:
     """True if the repo declares ``stateless: true`` or
     ``requires_external_state_root: true`` in its in-repo agent-worktrees config."""
@@ -199,7 +242,7 @@ def decide(payload: dict, *, env=None, home=None) -> dict | None:
     if root is None or not requires_external_state_root(root):
         return None  # not a stateless harness => not our business
 
-    harness = (env.get("WORKTREE_PROJECT") or root.name or "the-harness").strip()
+    harness = project_name(root, home).strip()
     if active_break_glass(harness, home):
         return None
 

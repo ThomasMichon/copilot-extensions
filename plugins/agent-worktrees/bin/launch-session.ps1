@@ -8,14 +8,14 @@
 
     After Copilot exits, calls agent_worktrees post-exit for finalization.
 
-    Uses $WORKTREE_PROJECT to determine the active project.
+    Accepts --project to name the active project when CWD cannot.
     Runtime lives at ~/.agent-worktrees/; project config at ~/.{project}/.
 #>
 # Accept all arguments via $args (not param block) to avoid PowerShell's
 # parameter binding rejecting unknown flags like --acp, --stdio, --no-mux
 # when called via 'pwsh -File'.
-$CopilotArgs = $args
-$script:LaunchProject = $env:WORKTREE_PROJECT
+$CopilotArgs = @($args)
+$script:LaunchProject = $null
 
 $ErrorActionPreference = 'Stop'
 
@@ -113,24 +113,42 @@ try {
         Remove-Item -Force -ErrorAction SilentlyContinue
 } catch {}
 
-Write-SetupLog 'launch-session.ps1 starting'
-Write-LaunchTrace 'launcher_start'
-
 # --recovery: bypass worktree resolution entirely, go straight to setup script
+# --project: explicit project identity for CWD-neutral callers
 # --no-update: skip pre-launch self-update (propagated via WORKTREE_NO_UPDATE)
 # --: everything after this separator is copilot passthrough args (e.g. --acp --stdio)
 $FilteredArgs = @()
 $CopilotPassthrough = @()
 $RecoveryMode = $false
 $SeenSeparator = $false
-foreach ($arg in $CopilotArgs) {
+$index = 0
+while ($index -lt $CopilotArgs.Count) {
+    $arg = $CopilotArgs[$index]
     if ($SeenSeparator) {
         $CopilotPassthrough += $arg
     } elseif ($arg -eq '--') {
         $SeenSeparator = $true
+    } elseif ($arg -eq '--project') {
+        if ($script:LaunchProject) {
+            Write-SetupLog '--project may be specified only once' 'ERROR'
+            [Console]::Error.WriteLine('ERROR: --project may be specified only once.')
+            exit 2
+        }
+        if ($index + 1 -ge $CopilotArgs.Count) {
+            Write-SetupLog '--project requires a value' 'ERROR'
+            [Console]::Error.WriteLine('ERROR: --project requires a value.')
+            exit 2
+        }
+        $candidate = [string]$CopilotArgs[$index + 1]
+        if ($candidate -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') {
+            Write-SetupLog "Invalid --project value: $candidate" 'ERROR'
+            [Console]::Error.WriteLine("ERROR: Invalid --project value '$candidate'.")
+            exit 2
+        }
+        $script:LaunchProject = $candidate
+        $index++
     } elseif ($arg -eq '--recovery' -or $arg -eq '-Recovery' -or $arg -eq 'recovery') {
         $RecoveryMode = $true
-        $env:WORKTREE_RECOVERY = '1'
         Write-SetupLog 'Recovery mode requested via CLI arg'
     } elseif ($arg -eq '--no-update') {
         $env:WORKTREE_NO_UPDATE = '1'
@@ -138,8 +156,11 @@ foreach ($arg in $CopilotArgs) {
     } else {
         $FilteredArgs += $arg
     }
+    $index++
 }
 $CopilotArgs = $FilteredArgs
+Write-SetupLog 'launch-session.ps1 starting'
+Write-LaunchTrace 'launcher_start'
 if ($CopilotPassthrough.Count -gt 0) {
     Write-SetupLog "Copilot passthrough args: $($CopilotPassthrough -join ' ')"
 }
@@ -169,31 +190,43 @@ if ($CopilotPassthrough -contains '--stdio') {
 # Recovery fast-path: skip resolve/picker, launch directly in anchor repo
 if ($RecoveryMode) {
     Write-SetupLog 'Recovery fast-path — bypassing worktree resolution'
-    # Find the anchor repo: try git rev-parse from cwd, then project config
-    $anchor = $null
-    $gitRoot = git rev-parse --show-toplevel 2>$null
-    if ($LASTEXITCODE -eq 0 -and $gitRoot) {
-        $anchor = $gitRoot -replace '/', '\'
-    }
-    if (-not $anchor -or -not (Test-Path $anchor)) {
-        $project = if ($env:WORKTREE_PROJECT) { $env:WORKTREE_PROJECT } else { $null }
-        if ($project) {
-            $cfgPath = Join-Path $env:USERPROFILE ".$project\config.yaml"
-            if (Test-Path $cfgPath) {
-                $anchorLine = Select-String -Path $cfgPath -Pattern '^\s+anchor:\s+(.+)$' | Select-Object -First 1
-                if ($anchorLine) {
-                    $anchor = $anchorLine.Matches[0].Groups[1].Value.Trim()
-                }
+    # Explicit project config takes precedence over unrelated ambient CWD.
+    $candidates = @()
+    if ($script:LaunchProject) {
+        $cfgPath = Join-Path $env:USERPROFILE ".$($script:LaunchProject)\config.yaml"
+        if (Test-Path $cfgPath) {
+            $anchorLine = Select-String -Path $cfgPath -Pattern '^\s+anchor:\s+(.+)$' | Select-Object -First 1
+            if ($anchorLine) {
+                $candidates += $anchorLine.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
             }
         }
     }
-    if (-not $anchor -or -not (Test-Path $anchor)) {
-        $anchor = $PWD.Path
+    $gitRoot = git rev-parse --show-toplevel 2>$null
+    if ($LASTEXITCODE -eq 0 -and $gitRoot) {
+        $candidates += ($gitRoot -replace '/', '\')
     }
-    $setupScript = Join-Path $anchor 'tools\setup\setup.ps1'
+    $candidates += $PWD.Path
+    $anchor = $null
+    $setupScript = $null
+    foreach ($candidate in $candidates) {
+        $candidateScript = Join-Path $candidate 'tools\setup\setup.ps1'
+        if (Test-Path -LiteralPath $candidateScript -PathType Leaf) {
+            $anchor = $candidate
+            $setupScript = $candidateScript
+            break
+        }
+    }
+    if (-not $setupScript) {
+        [Console]::Error.WriteLine('ERROR: Cannot find a recovery setup script in the project anchor, Git root, or current directory.')
+        exit 1
+    }
     Write-SetupLog "Recovery: launching $setupScript in $anchor"
     Set-Location $anchor
-    & pwsh.exe -NoProfile -NoLogo -File $setupScript -Recovery @CopilotArgs
+    $setupArgs = @('-Recovery') + $CopilotArgs
+    if ($CopilotPassthrough.Count -gt 0) {
+        $setupArgs += $CopilotPassthrough
+    }
+    & pwsh.exe -NoProfile -NoLogo -File $setupScript @setupArgs
     exit $LASTEXITCODE
 }
 
@@ -399,7 +432,7 @@ function Invoke-UpdateApply {
                         '-InstallDir',
                         [string]$status.runtime_root
                     )
-                    if ($env:WORKTREE_PROJECT) { $installerArgs += @('-ProjectName', $env:WORKTREE_PROJECT) }
+                    if ($script:LaunchProject) { $installerArgs += @('-ProjectName', $script:LaunchProject) }
                     try {
                         & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
                             ForEach-Object { Write-SetupLog "installer: $_" }
@@ -430,7 +463,7 @@ function Invoke-UpdateApply {
                         '-InstallDir',
                         "`"$([string]$status.runtime_root)`""
                     )
-                    if ($env:WORKTREE_PROJECT) { $bgArgs += @('-ProjectName', "`"$($env:WORKTREE_PROJECT)`"") }
+                    if ($script:LaunchProject) { $bgArgs += @('-ProjectName', "`"$($script:LaunchProject)`"") }
                     try {
                         # conhost --headless: -WindowStyle Hidden alone is ignored
                         # by the DefTerm handoff (windows-launch-hardening #786).
@@ -575,7 +608,12 @@ if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
     # reconcile, matching the historical direct-command behavior) before
     # dispatching.
     Invoke-UpdateApply -StageJob (Start-UpdateStage)
-    & $VenvPython -m agent_worktrees @CopilotArgs
+    $directArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) {
+        $directArgs += @('--project', $script:LaunchProject)
+    }
+    $directArgs += $CopilotArgs
+    & $VenvPython @directArgs
     exit $LASTEXITCODE
 }
 
@@ -623,6 +661,9 @@ $plan = ($jsonOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
 if ($plan.PSObject.Properties.Name -contains 'launch') {
     $plan = $plan.launch
 }
+if (-not $script:LaunchProject -and $plan.PSObject.Properties.Name -contains 'project') {
+    $script:LaunchProject = [string]$plan.project
+}
 
 Write-SetupLog "Plan resolved: action=$($plan.action) work_dir=$($plan.work_dir) worktree_id=$($plan.worktree_id)"
 
@@ -657,7 +698,12 @@ if ($plan.action -eq 'refresh') {
     # plugin/module -- could relaunch stale (dotfiles#443). `update` is itself
     # version-gated, so it stays quick when everything is already current.
     if (-not $noUpdate) {
-        & $VenvPython -m agent_worktrees update
+        $updateArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) {
+            $updateArgs += @('--project', $script:LaunchProject)
+        }
+        $updateArgs += 'update'
+        & $VenvPython @updateArgs
         if ($LASTEXITCODE -ne 0) {
             Write-SetupLog "Full update returned exit $LASTEXITCODE -- continuing to reconcile/relaunch" 'WARN'
         }
@@ -667,7 +713,15 @@ if ($plan.action -eq 'refresh') {
     Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
     $newLauncher = Join-Path $env:USERPROFILE '.agent-worktrees\bin\launch-session.ps1'
     if (Test-Path $newLauncher) {
-        & pwsh.exe -NoProfile -File $newLauncher @CopilotArgs
+        $relaunchArgs = @()
+        if ($script:LaunchProject) {
+            $relaunchArgs += @('--project', $script:LaunchProject)
+        }
+        $relaunchArgs += $CopilotArgs
+        if ($CopilotPassthrough.Count -gt 0) {
+            $relaunchArgs += @('--') + $CopilotPassthrough
+        }
+        & pwsh.exe -NoProfile -File $newLauncher @relaunchArgs
         exit $LASTEXITCODE
     }
     Write-SetupLog 'Relaunch launcher missing after refresh; exiting' 'WARN'
@@ -819,10 +873,8 @@ if ($plan.env) {
 }
 
 # Identity vars are NOT published into the child Copilot session -- in-session
-# tools resolve context from CWD (git-like). Clear any inherited copies so the
-# session env carries no ambient project/worktree identity. The launcher uses
-# $plan.worktree_id (never $env) for its own psmux + post-exit logic, and its
-# $env:WORKTREE_PROJECT uses (recovery / self-update) are all earlier.
+# tools resolve context from CWD (git-like). Clear inherited legacy copies so
+# the session env carries no ambient project/worktree identity.
 Remove-Item Env:WORKTREE_ID -ErrorAction SilentlyContinue
 Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
 

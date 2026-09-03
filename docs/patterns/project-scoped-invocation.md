@@ -92,10 +92,11 @@ one per-project entry point reaches every layer.**
 - **No ambient env var for project identity.** The project is carried as an
   argument (`--project`) or by the per-project binstub that supplies it — **not**
   smuggled through a mutated session environment variable (which would leak into
-  child processes and the interactive shell). The existing binstubs already avoid
-  this; keep it that way. (A scoped, restored env var is acceptable only in a
-  narrow recovery fallback, as the current binstubs do for `WORKTREE_PROJECT`
-  when the venv is missing.)
+  child processes and the interactive shell). Launch, recovery, and
+  self-update paths all preserve the explicit argument.
+- **Recovery is an unconditional fast path.** On every platform, `--recovery`
+  bypasses normal resolution and selects the first usable setup script from the
+  explicit project anchor, the current Git root, then the current directory.
 - **Dispatch is back-compat by construction.** Adding the namespace dispatch to
   `<repo>` must not change the meaning of any existing `<repo> <agent-worktrees
   subcommand>` invocation. The reserved layer-name set is the only thing that

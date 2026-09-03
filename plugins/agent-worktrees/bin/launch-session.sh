@@ -62,9 +62,81 @@ chmod 600 "$SETUP_LOG" 2>/dev/null || true
 # shellcheck disable=SC2012
 ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
 
+# --recovery: bypass worktree resolution entirely, go straight to setup script
+# --project: explicit project identity for CWD-neutral callers
+# --: everything after this separator is copilot passthrough args (e.g. --acp --stdio)
+LAUNCH_PROJECT=""
+RECOVERY_MODE=0
+FILTERED_ARGS=()
+COPILOT_PASSTHROUGH=()
+_SEEN_SEPARATOR=0
+while [[ $# -gt 0 ]]; do
+    arg="$1"
+    shift
+    if [[ $_SEEN_SEPARATOR -eq 1 ]]; then
+        COPILOT_PASSTHROUGH+=("$arg")
+    elif [[ "$arg" == "--" ]]; then
+        _SEEN_SEPARATOR=1
+    elif [[ "$arg" == "--project" ]]; then
+        if [[ -n "$LAUNCH_PROJECT" ]]; then
+            setup_log ERROR '--project may be specified only once'
+            echo "ERROR: --project may be specified only once." >&2
+            exit 2
+        fi
+        if [[ $# -eq 0 ]]; then
+            setup_log ERROR '--project requires a value'
+            echo "ERROR: --project requires a value." >&2
+            exit 2
+        fi
+        LAUNCH_PROJECT="$1"
+        shift
+        if [[ ! "$LAUNCH_PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+            setup_log ERROR "Invalid --project value: $LAUNCH_PROJECT"
+            echo "ERROR: Invalid --project value '$LAUNCH_PROJECT'." >&2
+            exit 2
+        fi
+    elif [[ "$arg" == "--recovery" || "$arg" == "-Recovery" || "$arg" == "recovery" ]]; then
+        RECOVERY_MODE=1
+        setup_log INFO 'Recovery mode requested via CLI arg'
+    else
+        FILTERED_ARGS+=("$arg")
+    fi
+done
+set -- "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"
+
 setup_log INFO 'launch-session.sh starting'
-LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
 launch_trace launcher_start
+if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
+    setup_log INFO "Copilot passthrough args: ${COPILOT_PASSTHROUGH[*]}"
+fi
+
+# Recovery escape hatch resolves from explicit project identity or CWD.
+if [[ "$RECOVERY_MODE" == "1" ]]; then
+    CANDIDATES=()
+    if [[ -n "$LAUNCH_PROJECT" ]]; then
+        CONFIG="$HOME/.$LAUNCH_PROJECT/config.yaml"
+        if [[ -f "$CONFIG" ]]; then
+            CONFIG_ANCHOR=$(sed -nE 's/^[[:space:]]+anchor:[[:space:]]+["'"'"']?([^"'"'"']+)["'"'"']?[[:space:]]*$/\1/p' "$CONFIG" | head -n 1)
+            [[ -n "$CONFIG_ANCHOR" ]] && CANDIDATES+=("$CONFIG_ANCHOR")
+        fi
+    fi
+    GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    [[ -n "$GIT_ROOT" ]] && CANDIDATES+=("$GIT_ROOT")
+    CANDIDATES+=("$PWD")
+    for ANCHOR in "${CANDIDATES[@]}"; do
+        SETUP_SCRIPT="$ANCHOR/tools/setup/setup.sh"
+        if [[ -f "$SETUP_SCRIPT" ]]; then
+            RECOVERY_ARGS=(--recovery "$@")
+            if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
+                RECOVERY_ARGS+=("${COPILOT_PASSTHROUGH[@]}")
+            fi
+            cd "$ANCHOR"
+            exec bash "$SETUP_SCRIPT" "${RECOVERY_ARGS[@]}"
+        fi
+    done
+    echo "ERROR: Cannot find a recovery setup script in the project anchor, Git root, or current directory." >&2
+    exit 1
+fi
 
 # Runtime resolution (junction-free, marker-only). Prefer the `current-version`
 # marker -> versions/<ver>/bin/python; fall back to the newest slot only -- the
@@ -120,47 +192,6 @@ activity_log() {
         ${LAUNCH_ID:+--launch-id "$LAUNCH_ID"} \
         "${fields[@]+"${fields[@]}"}" >/dev/null 2>&1 & ) || true
 }
-
-# --recovery: skip vault credential loading (propagated via env var to setup.sh)
-# --: everything after this separator is copilot passthrough args (e.g. --acp --stdio)
-FILTERED_ARGS=()
-COPILOT_PASSTHROUGH=()
-_SEEN_SEPARATOR=0
-for arg in "$@"; do
-    if [[ $_SEEN_SEPARATOR -eq 1 ]]; then
-        COPILOT_PASSTHROUGH+=("$arg")
-    elif [[ "$arg" == "--" ]]; then
-        _SEEN_SEPARATOR=1
-    elif [[ "$arg" == "--recovery" || "$arg" == "recovery" ]]; then
-        export WORKTREE_RECOVERY=1
-        setup_log INFO 'Recovery mode requested via CLI arg'
-    else
-        FILTERED_ARGS+=("$arg")
-    fi
-done
-set -- "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"
-if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
-    setup_log INFO "Copilot passthrough args: ${COPILOT_PASSTHROUGH[*]}"
-fi
-
-# Recovery escape hatch (broken venv)
-if [[ "${WORKTREE_RECOVERY:-}" == "1" ]] && [[ ! -x "$PYTHON" ]]; then
-    PROJECT="${WORKTREE_PROJECT:-}"
-    if [[ -z "$PROJECT" ]]; then
-        echo "ERROR: WORKTREE_PROJECT is not set. Set it or run from inside the anchor repo." >&2
-        exit 1
-    fi
-    CONFIG="$HOME/.$PROJECT/config.yaml"
-    if [[ -f "$CONFIG" ]]; then
-        ANCHOR=$(awk '/^    anchor:/ {print $2}' "$CONFIG")
-        if [[ -n "$ANCHOR" && -d "$ANCHOR" ]]; then
-            cd "$ANCHOR"
-            exec bash "$ANCHOR/tools/setup/setup.sh" --recovery "$@"
-        fi
-    fi
-    echo "ERROR: Cannot determine anchor path for recovery." >&2
-    exit 1
-fi
 
 # ── Plugin auto-update ─────────────────────────────────────────────────────
 # If installed from the copilot-extensions marketplace plugin, check for
@@ -287,8 +318,8 @@ for key, value in environment.items():
                         update
                         --install-dir "$runtime_root"
                     )
-                    if [[ -n "${WORKTREE_PROJECT:-}" ]]; then
-                        _inst_args+=(--project-name "$WORKTREE_PROJECT")
+                    if [[ -n "$LAUNCH_PROJECT" ]]; then
+                        _inst_args+=(--project-name "$LAUNCH_PROJECT")
                     fi
                     if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
                         # Escape hatch (recovery/debug): apply synchronously.
@@ -488,7 +519,10 @@ if [[ -n "$_IS_DIRECT" ]]; then
     # reconcile, matching historical direct-command behavior) before dispatch.
     start_update_stage
     invoke_update_apply 0
-    exec "$PYTHON" -m agent_worktrees "$@"
+    direct_args=(-m agent_worktrees)
+    [[ -n "$LAUNCH_PROJECT" ]] && direct_args+=(--project "$LAUNCH_PROJECT")
+    direct_args+=("$@")
+    exec "$PYTHON" "${direct_args[@]}"
 fi
 
 # ── Background update stage (#1430) ──────────────────────────────────────
@@ -520,6 +554,9 @@ fi
 JSON=$(printf '%s' "$JSON" | "$PYTHON" -c "import sys, json
 d = json.load(sys.stdin)
 print(json.dumps(d['launch'] if isinstance(d, dict) and 'launch' in d else d))")
+if [[ -z "$LAUNCH_PROJECT" ]]; then
+    LAUNCH_PROJECT=$(printf '%s' "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('project',''))")
+fi
 
 ACTION=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','none'))")
 setup_log INFO "Plan resolved: action=$ACTION"
@@ -555,13 +592,22 @@ if [[ "$ACTION" == "refresh" ]]; then
     # stale (dotfiles#443). `update` is itself version-gated, so it stays quick
     # when everything is already current.
     if [[ "${WORKTREE_NO_UPDATE:-}" != "1" ]]; then
-        "$PYTHON" -m agent_worktrees update \
+        update_args=(-m agent_worktrees)
+        [[ -n "$LAUNCH_PROJECT" ]] && update_args+=(--project "$LAUNCH_PROJECT")
+        update_args+=(update)
+        "$PYTHON" "${update_args[@]}" \
             || setup_log WARN 'Full update returned non-zero -- continuing to reconcile/relaunch'
     fi
     invoke_update_apply 1 1
     _RELAUNCH="$HOME/.agent-worktrees/bin/launch-session.sh"
     if [[ -x "$_RELAUNCH" ]]; then
-        exec "$_RELAUNCH" "$@"
+        relaunch_args=()
+        [[ -n "$LAUNCH_PROJECT" ]] && relaunch_args+=(--project "$LAUNCH_PROJECT")
+        relaunch_args+=("$@")
+        if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
+            relaunch_args+=(-- "${COPILOT_PASSTHROUGH[@]}")
+        fi
+        exec "$_RELAUNCH" "${relaunch_args[@]}"
     fi
     setup_log WARN 'Relaunch launcher missing after refresh; exiting'
     exit 1
@@ -915,7 +961,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         done
         if [[ "$TMUX_CREATE_EXIT" -ne 0 ]]; then
             set -e
-            RECOVERY_PROJECT="${WORKTREE_PROJECT:-agent-worktrees}"
+            RECOVERY_PROJECT="${LAUNCH_PROJECT:-agent-worktrees}"
             RECOVERY_COMMAND="$RECOVERY_PROJECT --worktree-id $WORKTREE_ID"
             PRESERVED_PATH="${STATUS_PATH:-${WORK_DIR:-.}}"
             setup_log ERROR "Failed to create tmux session $TMUX_SESS after $TMUX_CREATE_TOTAL_ATTEMPTS attempts (exit $TMUX_CREATE_EXIT). Worktree preserved at $PRESERVED_PATH; retry with: $RECOVERY_COMMAND"

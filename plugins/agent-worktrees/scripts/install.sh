@@ -331,15 +331,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Infer project name ──────────────────────────────────────────────────
-# Priority: --project-name arg > WORKTREE_PROJECT env > existing config
+# Priority: --project-name arg > existing config
 # CWD is NOT auto-adopted -- pass --project-name to adopt explicitly.
 
 PROJECT_NAME=""
 
 if [[ -n "$PROJECT_NAME_ARG" ]]; then
     PROJECT_NAME="$PROJECT_NAME_ARG"
-elif [[ -n "${WORKTREE_PROJECT:-}" ]]; then
-    PROJECT_NAME="$WORKTREE_PROJECT"
 else
     # Try to infer from CWD basename matching an existing config dir
     _cwd_name="$(basename "$PWD")"
@@ -1030,6 +1028,7 @@ deploy_binstub() {
     tmp="$(mktemp "$LOCAL_BIN/$PROJECT_NAME.XXXXXX")"
     cat > "$tmp" <<'BINSTUB_HEAD'
 #!/usr/bin/env bash
+# agent-worktrees project binstub
 BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
 export PYTHONUTF8=1
@@ -1039,8 +1038,7 @@ export AGENT_WORKTREES_LAUNCH_TRACE="\$HOME/.agent-worktrees/logs/picker-launche
 mkdir -p "\$(dirname "\$AGENT_WORKTREES_LAUNCH_TRACE")" 2>/dev/null || true
 printf '%s\n' '{"event":"binstub_start","timestamp":"'"\$AGENT_WORKTREES_BINSTUB_STARTED"'","launch_id":"'"\$AGENT_WORKTREES_LAUNCH_ID"'","project":"$PROJECT_NAME"}' >>"\$AGENT_WORKTREES_LAUNCH_TRACE" 2>/dev/null || true
 if [[ \$# -eq 0 ]]; then
-    export WORKTREE_PROJECT="$PROJECT_NAME"
-    exec "\$HOME/.agent-worktrees/bin/launch-session.sh"
+    exec "\$HOME/.agent-worktrees/bin/launch-session.sh" --project "$PROJECT_NAME"
 fi
 # Context resolves from CWD / --project (git-like); the binstub names its
 # project via --project, not an ambient env var.
@@ -1054,9 +1052,8 @@ _py="\$AW_PY"
 if [[ -n "\$_py" && -x "\$_py" ]]; then
     exec "\$_py" -m agent_worktrees --project "$PROJECT_NAME" "\$@"
 fi
-# Recovery (venv missing): launch-session reads WORKTREE_PROJECT
-export WORKTREE_PROJECT="$PROJECT_NAME"
-exec "\$HOME/.agent-worktrees/bin/launch-session.sh" "\$@"
+# Recovery (venv missing): preserve explicit project identity.
+exec "\$HOME/.agent-worktrees/bin/launch-session.sh" --project "$PROJECT_NAME" "\$@"
 BINSTUB_BODY
     chmod +x "$tmp"
     mv -f "$tmp" "$LOCAL_BIN/$PROJECT_NAME"

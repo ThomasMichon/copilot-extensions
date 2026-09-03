@@ -104,9 +104,34 @@ def test_break_glass_allows(harness, tmp_path):
         "grants": {"citadel-harness": {"expires_at_ms": (time.time() + 600) * 1000}}
     }), encoding="utf-8")
     p = _write("create", harness / "efforts/x.md", harness)
-    # repo name comes from WORKTREE_PROJECT
-    env = {"WORKTREE_PROJECT": "citadel-harness"}
-    assert guard.decide(p, env=env, home=home) is None
+    assert guard.decide(p, env={}, home=home) is None
+
+
+def test_break_glass_resolves_anchor_name_from_worktree_gitfile(harness, tmp_path):
+    home = tmp_path / "home"
+    (home / ".agent-worktrees").mkdir(parents=True)
+    (home / ".agent-worktrees" / "allow-edits.json").write_text(json.dumps({
+        "grants": {"registered-name": {"expires_at_ms": (time.time() + 600) * 1000}}
+    }), encoding="utf-8")
+    (home / ".agent-worktrees" / "repos.yaml").write_text(
+        "repos:\n"
+        "  registered-name:\n"
+        "    class: worktree\n"
+        f"    windows: \"{str(harness).replace(chr(92), chr(92) * 2)}\"\n",
+        encoding="utf-8",
+    )
+    worktree = tmp_path / "worktrees" / "task-123"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text(
+        f"gitdir: {harness / '.git' / 'worktrees' / 'task-123'}\n",
+        encoding="utf-8",
+    )
+    (worktree / ".agent-worktrees").mkdir()
+    (worktree / ".agent-worktrees" / "config.yaml").write_text(
+        "default_branch: main\nstateless: true\n", encoding="utf-8"
+    )
+    p = _write("create", worktree / "efforts/x.md", worktree)
+    assert guard.decide(p, env={}, home=home) is None
 
 
 def test_expired_break_glass_denies(harness, tmp_path):
@@ -116,7 +141,7 @@ def test_expired_break_glass_denies(harness, tmp_path):
         "grants": {"citadel-harness": {"expires_at_ms": (time.time() - 10) * 1000}}
     }), encoding="utf-8")
     p = _write("create", harness / "efforts/x.md", harness)
-    d = guard.decide(p, env={"WORKTREE_PROJECT": "citadel-harness"}, home=home)
+    d = guard.decide(p, env={}, home=home)
     assert d and d["permissionDecision"] == "deny"
 
 

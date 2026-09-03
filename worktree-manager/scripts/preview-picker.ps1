@@ -139,7 +139,6 @@ if ($Interactive) {
 `$env:AGENT_HOME = '$sandbox'
 `$env:AGENT_WORKTREES_PLUGINS_DIR = '$pluginsDir'
 `$env:WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE = '1'
-`$env:WORKTREE_PROJECT = '$Project'
 `$env:WORKTREE_MANAGER_AGENT_WORKTREES_SRC = '$(Join-Path $awPlugin "src")'
 `$env:WORKTREE_MANAGER_ENGINE_ARGV = '$engineArgvLiteral'
 `$env:PATH = '$($previewPath -join ';');' + `$env:PATH
@@ -165,7 +164,6 @@ try {
     $env:AGENT_HOME = $sandbox
     $env:AGENT_WORKTREES_PLUGINS_DIR = $pluginsDir
     $env:WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE = "1"
-    $env:WORKTREE_PROJECT = $Project
     $env:WORKTREE_MANAGER_AGENT_WORKTREES_SRC = Join-Path $awPlugin "src"
     $env:WORKTREE_MANAGER_ENGINE_ARGV = $engineArgvJson
     $env:PATH = "$($previewPath -join ';');$env:PATH"

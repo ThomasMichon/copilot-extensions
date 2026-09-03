@@ -1594,7 +1594,6 @@ class TestCascadeAndOrphans:
         self, tmp_tracking_dir: Path, monkeypatch, tmp_path: Path
     ):
         import types
-        monkeypatch.setenv("WORKTREE_PROJECT", "test-project")
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                             lambda: tmp_tracking_dir)
         monkeypatch.setattr("agent_worktrees.config.load_config",

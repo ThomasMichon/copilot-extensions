@@ -255,8 +255,7 @@ Register a repo for worktree-managed sessions. Run **from inside the repo**.
 The binstub names its project via `--project` (context otherwise resolves from
 CWD, git-like) and routes through the Python CLI, which dispatches subcommands
 and launches sessions. It falls back to `launch-session` only when the runtime is
-missing (recovery), passing the project via `WORKTREE_PROJECT` on that degraded
-path.
+missing (recovery), preserving the same explicit project argument.
 
 The generated project binstub routes to the versioned runtime slot named by
 `~/.agent-worktrees/current-version` and invokes:
@@ -267,8 +266,8 @@ python -m agent_worktrees --project {repo-name} ...
 
 On Windows both `{repo}.ps1` and `{repo}.cmd` are emitted; on POSIX a bare
 `{repo}` shell stub is emitted. The fallback path is only for a missing runtime:
-it sets `WORKTREE_PROJECT` and hands off to `launch-session.{cmd,sh}` so the
-launcher can still recover.
+it hands `--project {repo-name}` to `launch-session.{cmd,sh}` so the launcher
+can still recover without ambient identity state.
 
 ### WSL Support (Windows)
 

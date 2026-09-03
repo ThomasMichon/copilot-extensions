@@ -373,10 +373,10 @@ async def _resolve_worktree(
     python = _agent_worktrees_python()
 
     # Clear VIRTUAL_ENV/PYTHONHOME so the bridge's own venv doesn't pollute the
-    # agent-worktrees subprocess (they may use different Python versions), and set
-    # WORKTREE_PROJECT so it resolves the right project config. The versioned
-    # runtime bundles its own site-packages, so no PYTHONPATH is needed; a legacy
-    # host that still carries ~/.agent-worktrees/lib gets it for compatibility.
+    # agent-worktrees subprocess (they may use different Python versions). The
+    # versioned runtime bundles its own site-packages, so no PYTHONPATH is needed;
+    # a legacy host that still carries ~/.agent-worktrees/lib gets it for
+    # compatibility.
     env = dict(env)
     _aw_lib = os.path.join(os.path.expanduser("~"), ".agent-worktrees", "lib")
     if os.path.isdir(_aw_lib):
@@ -384,9 +384,6 @@ async def _resolve_worktree(
     env["PYTHONUTF8"] = "1"
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
-    if target.project and not target.explicit_cwd:
-        env["WORKTREE_PROJECT"] = target.project
-
     # Pass the project as the global --project flag (before the subcommand).
     # agent-worktrees resolves the project from cwd or --project ONLY -- the
     # ambient $WORKTREE_PROJECT identity fallback was retired (cwd-resolution

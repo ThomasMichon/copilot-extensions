@@ -104,14 +104,28 @@ def test_launchers_pass_project_to_resolve_and_post_exit():
     """Bare launches run from HOME, so every CLI call must carry project context."""
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
-    assert "$script:LaunchProject = $env:WORKTREE_PROJECT" in ps
+    assert "$script:LaunchProject = $null" in ps
+    assert "$arg -eq '--project'" in ps
     assert "$resolveArgs += @('--project', $script:LaunchProject)" in ps
     assert "$postArgs += @('--project', $script:LaunchProject)" in ps
+    assert "$script:LaunchProject = [string]$plan.project" in ps
+    assert "$directArgs += @('--project', $script:LaunchProject)" in ps
+    assert "$setupArgs += $CopilotPassthrough" in ps
+    assert "$relaunchArgs += @('--project', $script:LaunchProject)" in ps
     assert "Invoke-AwPostExit $plan.worktree_id" in ps
-    assert 'LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"' in sh
+    assert 'elif [[ "$arg" == "--project" ]]' in sh
     assert 'resolve_args+=(--project "$LAUNCH_PROJECT")' in sh
     assert 'post_args+=(--project "$LAUNCH_PROJECT")' in sh
+    assert "json.load(sys.stdin).get('project','')" in sh
+    assert 'direct_args+=(--project "$LAUNCH_PROJECT")' in sh
+    assert 'if [[ "$RECOVERY_MODE" == "1" ]]' in sh
+    assert 'RECOVERY_ARGS+=("${COPILOT_PASSTHROUGH[@]}")' in sh
+    assert 'relaunch_args+=(--project "$LAUNCH_PROJECT")' in sh
     assert 'run_post_exit "$WORKTREE_ID"' in sh
+    assert "WORKTREE_PROJECT=" not in ps
+    assert "WORKTREE_PROJECT=" not in sh
+    assert "WORKTREE_RECOVERY" not in ps
+    assert "WORKTREE_RECOVERY" not in sh
 
 
 def test_launchers_render_status_bar_from_worktree_path():
@@ -272,7 +286,7 @@ def test_launchers_retry_mux_creation_and_preserve_recovery_context():
     assert "recoverable=true" in sh
     assert "The worktree remains at '$PRESERVED_PATH'" in sh
     assert '"attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"' in sh
-    assert 'RECOVERY_PROJECT="${WORKTREE_PROJECT:-agent-worktrees}"' in sh
+    assert 'RECOVERY_PROJECT="${LAUNCH_PROJECT:-agent-worktrees}"' in sh
 
 
 def test_launchers_propagate_attach_failures_without_killing_shared_sessions():

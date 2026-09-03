@@ -669,13 +669,13 @@ def _binstub_lock(project: str):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-# A file in ~/.local/bin is one of *our* project binstubs when it carries this
-# routing signature -- the module dispatch (`agent_worktrees --project`) or the
-# recovery fallback (`WORKTREE_PROJECT` + the runtime dir). Foreign stubs from
-# other tools (vav-consumer, codespace-ssh, sibling plugins) lack both and are
-# never touched by reconciliation. The global `agent-worktrees` stub matches too,
-# so callers must exclude it by name.
+# A file in ~/.local/bin is one of *our* project binstubs when it carries the
+# project-addressed payload routing signature. The legacy environment signature
+# remains detection-only so reconciliation can migrate old stubs; generated
+# stubs never emit it. Foreign stubs from other tools lack both signatures.
 def _is_project_binstub(text: str) -> bool:
+    if "agent-worktrees project binstub" in text:
+        return True
     if "bin/payload/agent-worktrees" in text.replace("\\", "/"):
         return True
     if "agent_worktrees --project" in text:
@@ -705,6 +705,7 @@ def _project_binstub_specs(
         ps1_project = project.replace("'", "''")
         cmd_content = "\r\n".join([
             "@echo off",
+            "rem agent-worktrees project binstub",
             'set "PYTHONUTF8=1"',
             f'set "AGENT_WORKTREES_LAUNCH_ID={project}-%RANDOM%-%RANDOM%"',
             'set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"',
@@ -712,8 +713,7 @@ def _project_binstub_specs(
             'if not exist "%USERPROFILE%\\.agent-worktrees\\logs" mkdir "%USERPROFILE%\\.agent-worktrees\\logs" >nul 2>&1',
             f'(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {{"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"{project}"}}) 2>nul',
             'if "%~1"=="" (',
-            f'  set "WORKTREE_PROJECT={project}"',
-            '  call "%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd"',
+            f'  call "%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" --project {project}',
             "  exit /b %ERRORLEVEL%",
             ")",
             "rem This attributable project entry point is pinned to its owning payload.",
@@ -721,6 +721,7 @@ def _project_binstub_specs(
             "exit /b %ERRORLEVEL%",
         ])
         ps1_content = "\r\n".join([
+            "# agent-worktrees project binstub",
             "$env:PYTHONUTF8 = '1'",
             f"$env:AGENT_WORKTREES_LAUNCH_ID = '{ps1_project}-' + [guid]::NewGuid().ToString('N')",
             "$env:AGENT_WORKTREES_BINSTUB_STARTED = [DateTime]::UtcNow.ToString('o')",
@@ -732,15 +733,8 @@ def _project_binstub_specs(
             "    [IO.File]::AppendAllText($env:AGENT_WORKTREES_LAUNCH_TRACE, ($_awEvent | ConvertTo-Json -Compress) + [Environment]::NewLine)",
             "} catch {}",
             "if ($args.Count -eq 0) {",
-            "    $_savedProj = $env:WORKTREE_PROJECT",
-            f"    $env:WORKTREE_PROJECT = '{ps1_project}'",
-            "    try {",
-            "        & \"$env:USERPROFILE\\.agent-worktrees\\bin\\launch-session.ps1\"",
-            "        $_rc = $LASTEXITCODE",
-            "    } finally {",
-            "        if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }",
-            "    }",
-            "    exit $_rc",
+            f"    & \"$env:USERPROFILE\\.agent-worktrees\\bin\\launch-session.ps1\" --project '{ps1_project}'",
+            "    exit $LASTEXITCODE",
             "}",
             "# This attributable project entry point is pinned to its owning payload.",
             f"& '{ps1_path}' --project '{ps1_project}' @args",
@@ -753,6 +747,7 @@ def _project_binstub_specs(
     payload_cmd = payload / "bin" / "payload" / "agent-worktrees"
     sh_content = (
         "#!/usr/bin/env bash\n"
+        "# agent-worktrees project binstub\n"
         "export PYTHONUTF8=1\n"
         f"export AGENT_WORKTREES_LAUNCH_ID={shlex.quote(project)}-$$-$RANDOM-$(date +%s)\n"
         "export AGENT_WORKTREES_BINSTUB_STARTED=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\n"
@@ -760,8 +755,8 @@ def _project_binstub_specs(
         "mkdir -p \"$(dirname \"$AGENT_WORKTREES_LAUNCH_TRACE\")\" 2>/dev/null || true\n"
         f"printf '%s\\n' '{{\"event\":\"binstub_start\",\"timestamp\":\"'\"$AGENT_WORKTREES_BINSTUB_STARTED\"'\",\"launch_id\":\"'\"$AGENT_WORKTREES_LAUNCH_ID\"'\",\"project\":\"{project}\"}}' >>\"$AGENT_WORKTREES_LAUNCH_TRACE\" 2>/dev/null || true\n"
         "if [[ $# -eq 0 ]]; then\n"
-        f"  export WORKTREE_PROJECT={shlex.quote(project)}\n"
-        "  exec \"$HOME/.agent-worktrees/bin/launch-session.sh\"\n"
+        "  exec \"$HOME/.agent-worktrees/bin/launch-session.sh\" --project "
+        f"{shlex.quote(project)}\n"
         "fi\n"
         "# This attributable project entry point is pinned to its owning payload.\n"
         f"exec {shlex.quote(str(payload_cmd))} --project "
@@ -1149,8 +1144,8 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
 
     Creates a thin binstub that names its project via ``--project`` (context
     otherwise resolves from CWD, git-like) and routes through the Python CLI for
-    subcommand dispatch. Falls back to the shell launcher if the venv is missing
-    (recovery path), which passes the project via ``WORKTREE_PROJECT``.
+    subcommand dispatch. Falls back to the shell launcher if the venv is missing,
+    still carrying the project through ``--project``.
 
     On Windows both a ``.ps1`` (primary pwsh resolution) and a ``.cmd`` fallback
     are written; posix gets one bare stub.
@@ -1172,10 +1167,9 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
             output.ok(f"Binstub: {dst}")
 
     # Unified agent-worktrees command (project-agnostic; routes straight to the
-    # venv console script). It must NOT require WORKTREE_PROJECT -- global
-    # subcommands like `register <project>`, `update`, and `--version` run
-    # without a project context. The project-specific launchers above are the
-    # gating mechanism that sets WORKTREE_PROJECT; this stub stays unconditional.
+    # venv console script). Global subcommands like `register <project>`,
+    # `update`, and `--version` run without project context. Project-specific
+    # launchers carry explicit `--project`; this stub stays unconditional.
     #
     # IMPORTANT: this content must stay byte-for-byte (newline-normalized)
     # identical to the global stub written by the native installers
