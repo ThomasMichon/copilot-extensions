@@ -1563,6 +1563,23 @@ def create_app(
         bus.publish({"type": "spawn.settled", "reservation": result})
         return result
 
+    @app.post("/spawn-reservations/{key}/conclusion")
+    def record_spawn_conclusion(key: str, body: ReservationDetailBody) -> dict:
+        if not body.conclusion_state or body.conclusion_detail is None:
+            raise HTTPException(
+                status_code=400,
+                detail="conclusion_state and conclusion_detail are required",
+            )
+        result = _reservation_guard(
+            lambda: queue.record_spawn_conclusion(
+                key,
+                conclusion_state=body.conclusion_state or "",
+                conclusion_detail=body.conclusion_detail or "",
+            )
+        )
+        bus.publish({"type": "spawn.conclusion", "reservation": result})
+        return result
+
     @app.post("/spawn-reservations/tasks/{task_id}/rearm")
     def rearm_spawn(task_id: str, body: RearmSpawnBody) -> dict:
         try:

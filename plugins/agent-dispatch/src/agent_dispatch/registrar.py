@@ -603,15 +603,6 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
                 "body.disposable_cli_labels are supported only for local "
                 "worker bodies"
             )
-        if decl.body.type == "embody":
-            cli_labels = watched - set(decl.body.headless_labels)
-        else:
-            cli_labels = set(decl.body.cli_labels)
-        if non_cli := disposable - cli_labels:
-            raise RegistrarError(
-                f"body.disposable_cli_labels {sorted(non_cli)} are not routed "
-                "to CLI bodies"
-            )
     return decl
 
 

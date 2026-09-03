@@ -477,6 +477,25 @@ def test_http_reserve_record_list(api):
     assert settled.status_code == 200
     assert settled.json()["conclusion_state"] == "pending"
     assert settled.json()["conclusion_detail"] == '{"reason":"live-session"}'
+    active_task = _create_task(api)
+    active = api.post(
+        "/spawn-reservations",
+        json={"task_id": active_task, "reserved_by": "cli"},
+    ).json()["reservation"]
+    api.post(
+        f"/spawn-reservations/{active['key']}/spawned",
+        json={"session_handle": "local-body:s", "worktree": "w"},
+    )
+    checkpoint = api.post(
+        f"/spawn-reservations/{active['key']}/conclusion",
+        json={
+            "conclusion_state": "pending",
+            "conclusion_detail": '{"attempts":1}',
+        },
+    )
+    assert checkpoint.status_code == 200
+    assert checkpoint.json()["state"] == SpawnState.SPAWNED
+    assert checkpoint.json()["conclusion_state"] == "pending"
 
 
 def test_http_reserve_unknown_task_404(api):

@@ -618,6 +618,23 @@ class DispatchClient:
             )
         )
 
+    def record_spawn_conclusion(
+        self,
+        key: str,
+        *,
+        conclusion_state: str,
+        conclusion_detail: str,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/conclusion",
+                json={
+                    "conclusion_state": conclusion_state,
+                    "conclusion_detail": conclusion_detail,
+                },
+            )
+        )
+
     def rearm_spawn(
         self,
         task_id: str,
