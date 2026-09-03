@@ -31,6 +31,18 @@ from .procutil import (
 DEFAULT_DRIVER = "agent-dispatch"
 
 
+class EmbodyUnavailable(RuntimeError):
+    """Raised when the ``agent-worktrees`` CLI is unavailable or indeterminate."""
+
+
+class WorktreeNotFound(EmbodyUnavailable):
+    """Raised when agent-worktrees positively confirms a worktree is absent."""
+
+
+class DisposableConclusionError(RuntimeError):
+    """Raised when safe terminal conclusion cannot be executed."""
+
+
 def project_for_task(task: dict) -> str | None:
     """Resolve a task's lane to a local **project name** for embody's ``--project``.
 
@@ -154,15 +166,66 @@ def resolve_worktree(
             continue
         if row.get("id") == worktree_id:
             return {"worktree": worktree_id, "path": row.get("path")}
-    raise EmbodyUnavailable(f"worktree not found: {worktree_id}")
+    raise WorktreeNotFound(f"worktree not found: {worktree_id}")
 
 
-class EmbodyUnavailable(RuntimeError):
-    """Raised when the ``agent-worktrees`` CLI is not available on this host."""
+def prepare_reusable_worktree(
+    task: dict,
+    reservation: dict,
+    *,
+    timeout: float | None = None,
+) -> dict[str, object]:
+    """Resolve or create the worktree carried by an exclusive reservation.
 
+    A successful lookup reuses the existing checkout. A positively missing
+    carried id falls back to a fresh worktree. Any indeterminate failure
+    propagates without creating a replacement, so a possibly live binding is
+    never overwritten.
+    """
+    project = project_for_task(task)
+    carried = reservation.get("worktree")
+    if isinstance(carried, str) and carried:
+        try:
+            resolved = resolve_worktree(
+                carried,
+                project=project,
+                timeout=timeout,
+            )
+        except WorktreeNotFound:
+            created = create_worktree(project=project, timeout=timeout)
+            path = created.get("path")
+            if not isinstance(path, str) or not path:
+                raise EmbodyUnavailable(
+                    "agent-worktrees create returned no worktree path"
+                )
+            return {
+                "worktree": created["worktree"],
+                "path": path,
+                "created": True,
+                "replaced": True,
+            }
+        path = resolved.get("path")
+        if not isinstance(path, str) or not path:
+            raise EmbodyUnavailable(
+                f"agent-worktrees resolved {carried!r} without a path"
+            )
+        return {
+            "worktree": carried,
+            "path": path,
+            "created": False,
+            "replaced": False,
+        }
 
-class DisposableConclusionError(RuntimeError):
-    """Raised when safe terminal conclusion cannot be executed."""
+    created = create_worktree(project=project, timeout=timeout)
+    path = created.get("path")
+    if not isinstance(path, str) or not path:
+        raise EmbodyUnavailable("agent-worktrees create returned no worktree path")
+    return {
+        "worktree": created["worktree"],
+        "path": path,
+        "created": True,
+        "replaced": False,
+    }
 
 
 def _agent_worktrees_launch_prefix() -> list[str] | None:
@@ -395,6 +458,7 @@ def spawn_embodied_worker(
     worker_id: str,
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
+    worktree_id: str | None = None,
     route: str = "",
     repo: str | None = None,
     all_repos: bool = False,
@@ -435,7 +499,12 @@ def spawn_embodied_worker(
         # `embody` subcommand. It lets a CWD-neutral caller name the target
         # project instead of relying on git-like CWD discovery.
         cmd += ["--project", project]
-    cmd += ["embody", "--new", "--seed", seed, "--driver", driver, "--json"]
+    cmd += ["embody"]
+    if worktree_id:
+        cmd += ["--worktree-id", worktree_id]
+    else:
+        cmd += ["--new"]
+    cmd += ["--seed", seed, "--driver", driver, "--json"]
     if verify_timeout:
         cmd += ["--verify-timeout", str(verify_timeout)]
     return subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally

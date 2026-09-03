@@ -72,13 +72,26 @@ class FakeClient:
                 }
         raise BridgeClientError(404, "not found")
 
-    def start_session(self, *, agent=None, caller_id=None, sender_repo=None,
-                      force_new=False, caller_owner_ref=None,
-                      model=None, effort=None, request_timeout=None):
+    def start_session(
+        self,
+        *,
+        agent=None,
+        target_dir=None,
+        caller_id=None,
+        sender_repo=None,
+        force_new=False,
+        caller_owner_ref=None,
+        worktree_id=None,
+        model=None,
+        effort=None,
+        request_timeout=None,
+    ):
         self.started.append(
-            {"agent": agent, "caller_id": caller_id,
+            {"agent": agent, "target_dir": target_dir,
+             "caller_id": caller_id,
              "sender_repo": sender_repo, "force_new": force_new,
              "caller_owner_ref": caller_owner_ref,
+             "worktree_id": worktree_id,
              "model": model, "effort": effort,
              "request_timeout": request_timeout}
         )
@@ -215,6 +228,23 @@ def test_create_force_new_passes_flag_and_skips_reuse(fixed_caller, monkeypatch)
     sid = m._start_agent_session(client, "codespace:cs", force_new=True)
     assert sid == "fresh-sid"
     assert client.started and client.started[0]["force_new"] is True
+
+
+def test_create_passes_existing_checkout_target(fixed_caller, monkeypatch):
+    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **k: None)
+    client = FakeClient(sessions=[])
+
+    sid = m._start_agent_session(
+        client,
+        "task-worker",
+        force_new=True,
+        target_dir="/tmp/wt-review",
+        worktree_id="wt-review",
+    )
+
+    assert sid == "fresh-sid"
+    assert client.started[0]["target_dir"] == "/tmp/wt-review"
+    assert client.started[0]["worktree_id"] == "wt-review"
 
 
 def test_create_refuse_on_conflict_raises(fixed_caller):

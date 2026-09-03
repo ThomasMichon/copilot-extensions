@@ -48,33 +48,42 @@ time.
 ## The primitive: an atomic spawn reservation
 
 A **spawn reservation** is an atomic record, distinct from the execution claim,
-that guarantees **exactly one embody spawn per (task, attempt)**.
+that guarantees **exactly one embody spawn per (task, attempt)**. A task may
+also carry an `exclusive_key`, which extends the same guarantee across task ids
+that represent successive episodes for one logical resource.
 
 - **Distinct from the claim.** The execution *claim* is taken later, by the
   embodied worker, under its own worktree identity (`claim`/`start`/`complete`).
   The *reservation* is taken first, by the **spawner** (a `create --spawn` CLI,
   or — later — the supervisor loop), **before** launching embody.
 - **Keyed** `dispatch-task:<task_id>:<attempt>`.
-- **Lifecycle:** `reserving → spawned → settled`, plus `failed` for a bounded
-  retry that mints a fresh attempt and `rearmed` when an operator atomically
-  retires failed history after repairing the transport.
+- **Lifecycle:** `reserving → spawned → settled`, with `cold` for a suspended
+  reusable headless body, `failed` for a bounded retry that mints a fresh
+  attempt, and `rearmed` when an operator atomically retires failed history
+  after repairing the transport.
 
   | state       | meaning                                                        |
   |-------------|----------------------------------------------------------------|
   | `reserving` | this spawner owns the (task, attempt) spawn; embody not yet confirmed launched. A restart reconciles a reservation stuck here. |
   | `spawned`   | embody launched; the session/worktree handle is recorded.      |
+  | `cold`      | the headless process is stopped while its resumable session, worktree, and task ownership remain bound. |
   | `settled`   | the reserved attempt reached a terminal outcome; no more spawning. Optional `conclusion_state` / structured `conclusion_detail` keep post-settlement disposable-worktree priming retryable and visible. |
   | `failed`    | spawn failed or was lost; a fresh attempt may now be reserved.  |
   | `rearmed`   | a failed attempt was retired by an audited operator rearm; preserved for history but excluded from the dead-letter count. |
 
 - **Exactly-one invariant.** `reserve_spawn(task_id)` is a single
   `BEGIN IMMEDIATE` transaction: if any reservation for the task is **active**
-  (`reserving`/`spawned`), it returns `(existing, reserved=False)` — the caller
-  must **not** spawn. Otherwise the task must still be `queued` and unowned; a
-  different task state is refused. It then mints attempt `max(prior)+1` (or
-  `1`), `reserving`, and returns `(new, reserved=True)`. A prior
-  `failed`/`settled`/`rearmed` reservation therefore never blocks a legitimate
-  retry, but no two callers ever spawn the same attempt.
+  (`reserving`/`spawned`/`cold`), it returns
+  `(existing, reserved=False)` — the caller must **not** spawn. For an
+  `exclusive_key`, the active lookup and a partial unique index use that key
+  across all task ids, so two episodes cannot reserve the same resource. A new
+  exclusive reservation carries the most recent recorded worktree and bridge
+  session as reuse candidates. Otherwise the task must still be `queued` and
+  unowned; a different task state is refused. It then mints attempt
+  `max(prior)+1` (or `1`), `reserving`, and returns `(new, reserved=True)`. A
+  prior `failed`/`settled`/`rearmed` reservation therefore never blocks a
+  legitimate retry, but no two callers ever spawn the same attempt or exclusive
+  resource.
 
 ### Where it lives
 
@@ -84,6 +93,7 @@ atomic-under-concurrency guarantee with no new locking. HTTP surface:
 
 ```
 POST /spawn-reservations               {task_id, reserved_by} -> {reserved, reservation}
+POST /spawn-reservations/{key}/worktree {worktree}
 POST /spawn-reservations/{key}/spawned  {session_handle, worktree}
 POST /spawn-reservations/{key}/fail     {detail}
 POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_detail?}
@@ -102,8 +112,13 @@ on the SSE bus.
 
 1. `reserve_spawn(task_id)`. If `reserved=False`, print a skip note and return
    (an active spawn already exists — the double-spawn is prevented).
-2. If `reserved=True`, run the spawn (`embody` or `bridge` backend).
-3. On success, `record_spawn(key, session_handle, worktree)`; on non-zero exit
+2. For an exclusive task, resolve its carried worktree or create one, then
+   record that id while the reservation is still `reserving`. A positively
+   missing carried id may be replaced; an indeterminate lookup fails closed.
+3. Run the spawn (`embody` or `bridge` backend) in that recorded checkout. The
+   bridge backend first resumes a valid carried ACP session and creates a
+   replacement only after the prior session is confirmed gone.
+4. On success, `record_spawn(key, session_handle, worktree)`; on non-zero exit
    or no mechanism, `fail_spawn(key, detail=…)` so a later run can retry a fresh
    attempt.
 
@@ -124,9 +139,12 @@ spawned — or is still held by a slow-but-alive embody — is skipped. **Elapse
 time is not treated as death**, so a slow-but-alive embody is never
 double-spawned. Each cycle:
 
-1. **reconcile** — settle `spawned` reservations whose task reached a **terminal**
-   state (`completed`/`abandoned`). This is the *only* automatic release, and only
-   for a provably-finished task, so it can never free a still-running spawn. For
+1. **reconcile** — settle reservations whose task reached a **terminal** state
+   (`completed`/`abandoned`). An exclusive reservation is not released merely
+   because its task became terminal: live/unknown bodies remain bound, and only
+   a confirmed-gone body or an explicit end/conclusion permits release. A
+   completed idle headless session may remain carried for the next task episode.
+   For
    labels explicitly opted into `--disposable-cli-label`, settlement releases
    the reservation first and durably marks conclusion pending, then asks
    agent-worktrees to conclude the exact recorded session/worktree and prime a

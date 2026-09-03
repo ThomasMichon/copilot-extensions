@@ -258,6 +258,62 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
     ]
 
 
+def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
+    monkeypatch.setattr(
+        embody,
+        "resolve_worktree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            embody.WorktreeNotFound("missing")
+        ),
+    )
+    monkeypatch.setattr(
+        embody,
+        "create_worktree",
+        lambda **_kwargs: {
+            "worktree": "wt-fresh",
+            "path": "/tmp/wt-fresh",
+        },
+    )
+
+    prepared = embody.prepare_reusable_worktree(
+        {"repo": "example.com/acme/widgets"},
+        {"worktree": "wt-missing"},
+    )
+
+    assert prepared == {
+        "worktree": "wt-fresh",
+        "path": "/tmp/wt-fresh",
+        "created": True,
+        "replaced": True,
+    }
+
+
+def test_prepare_reusable_worktree_holds_on_indeterminate_resolution(
+    monkeypatch,
+):
+    created = []
+    monkeypatch.setattr(
+        embody,
+        "resolve_worktree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            embody.EmbodyUnavailable("registry unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        embody,
+        "create_worktree",
+        lambda **_kwargs: created.append(True),
+    )
+
+    with pytest.raises(embody.EmbodyUnavailable, match="registry unavailable"):
+        embody.prepare_reusable_worktree(
+            {"repo": "example.com/acme/widgets"},
+            {"worktree": "wt-unknown"},
+        )
+
+    assert created == []
+
+
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     captured = {}
     monkeypatch.setattr(

@@ -972,23 +972,26 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
 
     reservation = resp["reservation"]
     key = reservation["key"]
-    spawn_task = {**task, "spawn_worktree": reservation.get("worktree")}
-    if (
-        getattr(args, "spawn_backend", "bridge") == "embody"
-        and not spawn_task.get("spawn_worktree")
-    ):
+    spawn_task = task
+    if task.get("exclusive_key"):
         from . import embody
 
         try:
-            created = embody.create_worktree(project=embody.project_for_task(task))
-            worktree = created.get("worktree")
-            if not worktree:
-                raise embody.EmbodyUnavailable("agent-worktrees create returned no worktree id")
-            with _client(args) as c:
-                c.record_spawn_worktree(key, worktree)
-            spawn_task["spawn_worktree"] = worktree
-            if created.get("path"):
-                spawn_task["spawn_worktree_path"] = created.get("path")
+            prepared = embody.prepare_reusable_worktree(task, reservation)
+            worktree = str(prepared["worktree"])
+            if reservation.get("worktree") != worktree:
+                with _client(args) as c:
+                    c.record_spawn_worktree(key, worktree)
+            spawn_task = {
+                **task,
+                "spawn_worktree": worktree,
+                "spawn_worktree_path": prepared["path"],
+                "spawn_session_handle": (
+                    None
+                    if prepared.get("replaced")
+                    else reservation.get("session_handle")
+                ),
+            }
         except (DispatchError, embody.EmbodyUnavailable) as exc:
             try:
                 with _client(args) as c:
@@ -1098,15 +1101,32 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
         )
 
     from . import bridge
+    from . import embody
 
     worker_id = f"spawn-{uuid.uuid4().hex[:8]}"
+    prompt = bridge.worker_prompt(
+        task["id"],
+        worker_id=worker_id,
+        route=route,
+    )
+    prior_session = None
+    session_handle = task.get("spawn_session_handle")
+    if isinstance(session_handle, str) and session_handle.startswith(
+        "local-body:"
+    ):
+        prior_session = session_handle.removeprefix("local-body:") or None
     try:
-        result = bridge.spawn_worker(
+        result = bridge.spawn_or_resume_worker(
             task["id"],
             agent=args.spawn_agent,
             worker_id=worker_id,
-            route=route,
+            prompt=prompt,
+            prior_session_id=prior_session,
+            liveness_fn=embody.local_body_verdict,
+            target_dir=task.get("spawn_worktree_path"),
+            worktree_id=task.get("spawn_worktree"),
             wait=not args.run_async,
+            json_output=bool(task.get("spawn_worktree")),
         )
     except bridge.BridgeUnavailable as exc:
         print(
@@ -1116,7 +1136,16 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
         )
         return None
     _report_spawn_result(result, task["id"], "agent-bridge")
-    return result, "agent-bridge", {"session": worker_id, "worktree": None}
+    session = embody.parse_fleet_body_session(result)
+    handle = (
+        f"local-body:{session}"
+        if session and task.get("spawn_worktree")
+        else worker_id
+    )
+    return result, "agent-bridge", {
+        "session": handle,
+        "worktree": task.get("spawn_worktree"),
+    }
 
 
 def _report_spawn_result(result, task_id: str, via: str) -> None:

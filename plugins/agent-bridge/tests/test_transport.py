@@ -22,6 +22,7 @@ from agent_bridge.transport import (
     _resolve_worktree,
     _resolve_worktree_remote,
     _wrap_batch_for_windows,
+    resolve_local_launch,
     spawn,
     spawn_local,
     spawn_raw,
@@ -1146,6 +1147,30 @@ class TestLocalResolveBridgeFallback:
         p.returncode = returncode
         p.communicate = AsyncMock(return_value=(stdout, stderr))
         return p
+
+    @pytest.mark.asyncio
+    async def test_explicit_cwd_bypasses_project_worktree_resolution(self):
+        target = SpawnTarget(
+            type="local",
+            cwd="/tmp/wt-review",
+            project="test-chamber",
+            worktree_id="wt-review",
+            explicit_cwd=True,
+            copilot_path="/usr/bin/copilot",
+        )
+
+        with patch(
+            "agent_bridge.transport._resolve_worktree",
+            new=AsyncMock(
+                side_effect=AssertionError(
+                    "explicit target directory must not create another checkout"
+                )
+            ),
+        ):
+            args, cwd, _env = await resolve_local_launch(target)
+
+        assert args == ["/usr/bin/copilot", "--acp", "--stdio"]
+        assert cwd == "/tmp/wt-review"
 
     @pytest.mark.asyncio
     async def test_local_new_sends_bridge(self):

@@ -85,6 +85,9 @@ class QueueBackedClient:
     def record_spawn(self, key, *, session_handle=None, worktree=None):
         return asdict(self._q.record_spawn(key, session_handle=session_handle, worktree=worktree))
 
+    def record_spawn_worktree(self, key, worktree):
+        return asdict(self._q.record_spawn_worktree(key, worktree))
+
     def fail_spawn(self, key, *, detail=None):
         return asdict(self._q.fail_spawn(key, detail=detail))
 
@@ -135,8 +138,24 @@ class QueueBackedClient:
             )
         )
 
-    def yield_task(self, task_id, worker_id, *, note=None, exclude=None):
-        return asdict(self._q.yield_task(task_id, worker_id, note=note, exclude=exclude))
+    def yield_task(
+        self,
+        task_id,
+        worker_id,
+        *,
+        note=None,
+        exclude=None,
+        release_spawn=True,
+    ):
+        return asdict(
+            self._q.yield_task(
+                task_id,
+                worker_id,
+                note=note,
+                exclude=exclude,
+                release_spawn=release_spawn,
+            )
+        )
 
     def release(self, task_id, worker_id, *, reason=None):
         return asdict(
@@ -1466,6 +1485,7 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
         worker_id,
         driver,
         project=None,
+        worktree_id=None,
         route="",
         repo=None,
         all_repos=False,
@@ -1628,6 +1648,136 @@ def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
     assert "boom" in handle["error"]
 
 
+def test_make_headless_spawn_reuses_carried_session(monkeypatch):
+    from agent_dispatch import bridge, embody
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    resumed = []
+    created = []
+    monkeypatch.setattr(embody, "local_body_verdict", lambda _sid: "live")
+    monkeypatch.setattr(
+        bridge,
+        "resume_worker",
+        lambda sid, prompt, **_kwargs: resumed.append((sid, prompt)) or True,
+    )
+    monkeypatch.setattr(
+        bridge,
+        "spawn_worker",
+        lambda *args, **kwargs: created.append((args, kwargs)),
+    )
+
+    ok, handle = make_headless_spawn()(
+        {
+            "id": "next-task",
+            "repo": TEST_REPO,
+            "spawn_worktree": "wt-review",
+            "spawn_worktree_path": "/tmp/wt-review",
+            "spawn_session_handle": "local-body:session-old",
+        }
+    )
+
+    assert ok is True
+    assert handle == {
+        "session": "local-body:session-old",
+        "worktree": "wt-review",
+    }
+    assert resumed and resumed[0][0] == "session-old"
+    assert "next-task" in resumed[0][1]
+    assert created == []
+
+
+def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
+    from agent_dispatch import bridge, embody
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    created = []
+    monkeypatch.setattr(embody, "local_body_verdict", lambda _sid: "live")
+    monkeypatch.setattr(bridge, "resume_worker", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        bridge,
+        "spawn_worker",
+        lambda *args, **kwargs: created.append((args, kwargs)),
+    )
+
+    ok, handle = make_headless_spawn()(
+        {
+            "id": "next-task",
+            "spawn_worktree": "wt-review",
+            "spawn_worktree_path": "/tmp/wt-review",
+            "spawn_session_handle": "local-body:session-busy",
+        }
+    )
+
+    assert ok is False
+    assert "remains live" in handle["error"]
+    assert created == []
+
+
+def test_make_headless_spawn_replaces_confirmed_gone_session(monkeypatch):
+    import subprocess
+
+    from agent_dispatch import bridge, embody
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    created = []
+    monkeypatch.setattr(embody, "local_body_verdict", lambda _sid: "gone")
+    monkeypatch.setattr(bridge, "resume_worker", lambda *_args, **_kwargs: False)
+
+    def create(*args, **kwargs):
+        created.append((args, kwargs))
+        return subprocess.CompletedProcess(
+            [],
+            0,
+            '{"session_id":"session-new"}',
+            "",
+        )
+
+    monkeypatch.setattr(bridge, "spawn_worker", create)
+
+    ok, handle = make_headless_spawn()(
+        {
+            "id": "next-task",
+            "spawn_worktree": "wt-review",
+            "spawn_worktree_path": "/tmp/wt-review",
+            "spawn_session_handle": "local-body:session-gone",
+        }
+    )
+
+    assert ok is True
+    assert handle == {
+        "session": "local-body:session-new",
+        "worktree": "wt-review",
+    }
+    assert created[0][1]["target_dir"] == "/tmp/wt-review"
+    assert created[0][1]["worktree_id"] == "wt-review"
+
+
+def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
+    from agent_dispatch import bridge, embody
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    created = []
+    monkeypatch.setattr(embody, "local_body_verdict", lambda _sid: "unknown")
+    monkeypatch.setattr(
+        bridge,
+        "spawn_worker",
+        lambda *args, **kwargs: created.append((args, kwargs)),
+    )
+
+    ok, handle = make_headless_spawn()(
+        {
+            "id": "next-task",
+            "spawn_worktree": "wt-review",
+            "spawn_worktree_path": "/tmp/wt-review",
+            "spawn_session_handle": "local-body:session-unknown",
+        }
+    )
+
+    assert ok is False
+    assert "could not determine" in handle["error"]
+    assert created == []
+
+
 def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
     from agent_dispatch import bridge, embody
     from agent_dispatch.supervisor import make_headless_spawn
@@ -1707,6 +1857,71 @@ def test_cli_supervise_headless_is_default(monkeypatch, q, client):
     assert m._cmd_supervise(args) == 0
     assert set(headless_calls) == {a.id, b.id}  # both headless by default
     assert embody_calls == []
+
+
+def test_ordinary_headless_task_does_not_require_worktree_precreation(
+    monkeypatch, q, client
+):
+    from agent_dispatch import embody
+
+    task = q.create("ordinary")
+    spawn = _ok_spawn({"session": "local-body:s1", "worktree": None})
+    setattr(spawn, "requires_reusable_worktree", True)
+    monkeypatch.setattr(
+        embody,
+        "prepare_reusable_worktree",
+        lambda *_args, **_kwargs: pytest.fail(
+            "ordinary headless task must not use agent-worktrees"
+        ),
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+    )
+
+    assert sup.poll_once() == [task.id]
+
+
+def test_exclusive_spawn_records_precreated_worktree_before_launch(
+    monkeypatch, q, client
+):
+    from agent_dispatch import embody
+
+    task = q.create("review", exclusive_key="review:repo:42")
+    observed = {}
+
+    def spawn(spawn_task):
+        reservation = q.latest_reservation(task.id)
+        observed.update(task=spawn_task, reservation=reservation)
+        return True, {
+            "session": "local-body:session-new",
+            "worktree": spawn_task["spawn_worktree"],
+        }
+
+    setattr(spawn, "requires_reusable_worktree", True)
+    monkeypatch.setattr(
+        embody,
+        "prepare_reusable_worktree",
+        lambda _task, _reservation: {
+            "worktree": "wt-precreated",
+            "path": "/tmp/wt-precreated",
+            "created": True,
+            "replaced": False,
+        },
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+    )
+
+    assert sup.poll_once() == [task.id]
+    assert observed["reservation"].state == SpawnState.RESERVING
+    assert observed["reservation"].worktree == "wt-precreated"
+    assert observed["task"]["spawn_worktree_path"] == "/tmp/wt-precreated"
 
 
 def test_cli_supervise_cli_label_opts_out(monkeypatch, q, client):
@@ -1845,6 +2060,127 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
 
 
 # -- Slice 2: liveness-gated auto-recovery -----------------------------------
+
+
+@pytest.mark.parametrize("verdict", ["live", "unknown"])
+def test_superseded_task_does_not_release_exclusive_live_reservation(
+    q, client, verdict
+):
+    old = q.create("old", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(old.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:session-old",
+        worktree="wt-review",
+    )
+    new = q.create(
+        "new",
+        exclusive_key="review:repo:42",
+        supersede_exclusive_key=True,
+    )
+    ended = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        local_body_verdict_fn=lambda _sid: verdict,
+        local_end_fn=lambda sid: ended.append(sid) or False,
+        nudge=False,
+    )
+
+    assert q.get(old.id).status == Status.ABANDONED
+    assert sup.reconcile() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    blocked, acquired = q.reserve_spawn(new.id)
+    assert acquired is False
+    assert blocked.key == reservation.key
+    assert ended == (["session-old"] if verdict == "live" else [])
+
+
+def test_confirmed_gone_superseded_body_releases_exclusive_key(q, client):
+    old = q.create("old", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(old.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:session-old",
+        worktree="wt-review",
+    )
+    new = q.create(
+        "new",
+        exclusive_key="review:repo:42",
+        supersede_exclusive_key=True,
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_end_fn=lambda _sid: pytest.fail(
+            "confirmed-gone body does not need an end request"
+        ),
+        nudge=False,
+    )
+
+    assert sup.reconcile() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+    fresh, acquired = q.reserve_spawn(new.id)
+    assert acquired is True
+    assert fresh.worktree == "wt-review"
+
+
+def test_explicit_end_releases_live_exclusive_body(q, client):
+    task = q.create("work", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:session-live",
+        worktree="wt-review",
+    )
+    q.abandon(task.id, permitted=True, reason="superseded")
+    ended = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        local_body_verdict_fn=lambda _sid: "live",
+        local_end_fn=lambda sid: ended.append(sid) or True,
+        nudge=False,
+    )
+
+    assert sup.reconcile() == 1
+    assert ended == ["session-live"]
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+
+
+def test_completed_idle_exclusive_body_is_carried_to_next_episode(q, client):
+    task = q.create("old", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:session-idle",
+        worktree="wt-review",
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    q.complete(task.id, "headless-owner", result_ref="result/1")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_end_fn=lambda _sid: pytest.fail(
+            "idle completed session should remain reusable"
+        ),
+        nudge=False,
+    )
+
+    assert sup.reconcile() == 1
+    next_task = q.create("new", exclusive_key="review:repo:42")
+    carried, acquired = q.reserve_spawn(next_task.id)
+    assert acquired is True
+    assert carried.worktree == "wt-review"
+    assert carried.session_handle == "local-body:session-idle"
 
 
 @pytest.mark.parametrize(

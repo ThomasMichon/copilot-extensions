@@ -162,12 +162,21 @@ def test_health(api):
 
 
 def test_create_and_get(api):
-    r = api.post("/tasks", json={"title": "work", "prompt": "go"})
+    r = api.post(
+        "/tasks",
+        json={
+            "title": "work",
+            "prompt": "go",
+            "exclusive_key": "resource:42",
+        },
+    )
     assert r.status_code == 200
     task = r.json()
     assert task["status"] == Status.QUEUED
+    assert task["exclusive_key"] == "resource:42"
     got = api.get(f"/tasks/{task['id']}").json()
     assert got["title"] == "work"
+    assert got["exclusive_key"] == "resource:42"
 
 
 def test_get_missing_is_404(api):

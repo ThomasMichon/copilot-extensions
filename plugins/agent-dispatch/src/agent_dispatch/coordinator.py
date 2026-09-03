@@ -1097,6 +1097,8 @@ def create_app(
             raise HTTPException(
                 status_code=status, detail=exc.detail(operation="create")
             ) from exc
+        except TaskError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if outcome.event_type is not None:
             _emit(outcome.event_type, task)
         return task
