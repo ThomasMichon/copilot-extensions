@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from agent_index import server
 from agent_index.config import Config
 
@@ -42,3 +46,63 @@ def test_passive_does_not_self_publish(monkeypatch, tmp_path) -> None:
     server._publish_routing(Config(host="127.0.0.1", port=0), 4322, passive=True)
 
     assert calls == []
+
+
+def test_namespaced_startup_cleans_owned_evidence_when_routing_publish_fails(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    home = tmp_path / "home"
+    run_root = home / "run"
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(home))
+    monkeypatch.setenv("AGENT_INDEX_RUN_DIR", str(run_root))
+    monkeypatch.setenv("AGENT_INDEX_INSTALLATION_ID", "cell-a/agent-index")
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            installation_id="cell-a/agent-index",
+            instance_token="instance-token",
+            transaction_id=None,
+            runtime_version=server.current_runtime_version(),
+            promoted=True,
+        )
+    )
+    monkeypatch.setattr(server, "build_app", lambda *, passive=False: app)
+
+    class _Socket:
+        closed = False
+
+        @staticmethod
+        def getsockname():
+            return ("127.0.0.1", 4321)
+
+        def close(self):
+            self.closed = True
+
+    sock = _Socket()
+    monkeypatch.setattr(server, "_bind_listen_socket", lambda *_args: sock)
+
+    class _Server:
+        def __init__(self, _config):
+            pass
+
+        def run(self, *, sockets):
+            pytest.fail(f"server ran after routing publication failed: {sockets}")
+
+    monkeypatch.setattr("uvicorn.Config", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr("uvicorn.Server", _Server)
+    monkeypatch.setattr(
+        server,
+        "_publish_routing",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("routing publish failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="routing publish failed"):
+        server.serve(Config(host="127.0.0.1", port=0))
+
+    assert sock.closed is True
+    assert not (run_root / "endpoint.json").exists()
+    assert not (home / "running-version.json").exists()
+    assert list((run_root / "instances").glob("*.json")) == []

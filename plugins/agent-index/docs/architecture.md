@@ -47,7 +47,7 @@ stays on the host and is resolved there.
 | Area | Location | Owner |
 |------|----------|-------|
 | Runtime root | `~/.agent-index` | plugin installer |
-| Versioned service slots | `~/.agent-index/versions/<version>` | immutable service runtime |
+| Versioned service slots | `~/.agent-index/versions/<payload-version>+<profile>` | immutable role-qualified service runtime |
 | Active service marker | `~/.agent-index/current-version` | atomic runtime selection |
 | zdd routing table | `~/.agent-index/active.json` | active service endpoint |
 | Legacy rendezvous | `~/.agent-index/run/endpoint.json` | fallback diagnostics |
@@ -73,20 +73,40 @@ the operator explicitly runs `agent-index setup --single` or
 `agent-index setup --indexer <machine> --ssh <alias>`.
 3. Setup provisions from the stamped snapshot, writes the selected role, then
 reconciles the role-specific runtime and service. Noninteractive setup requires
-an explicit role flag.
+an explicit role flag. `host` and `client` use distinct immutable slots even
+when the plugin payload version is unchanged; `.agent-index-runtime-profile.json`
+strictly binds the slot to its role and installed extras.
 4. `ensure-service` runs on session start only when the current repository has
 an explicit `indexer`/`indexers` designation. On a designated `host` it starts
 or recovers the user-mode service (and engine when provisioned); on a
 designated `client` or an unconfigured repository it exits without starting
-a daemon.
+a daemon. Namespaced mode performs only a bounded coalescing check in the hook:
+one detached cell-runtime worker owns the real ensure, while a live worker or
+busy installation lock returns immediately within the hook budget. On Windows,
+the ordinary cold-start interpreter is suspended, assigned to an owned Job, and
+then resumed, so readiness failure before an instance receipt still terminates
+the exact interpreter child tree.
 5. `install update` performs an active/passive zdd service cutover when a live
-service is healthy. `agent-index deploy --recover` runs breadcrumb recovery for
-an interrupted cutover.
+service is healthy. A passive generation publishes an instance-specific receipt
+only; it neither starts the shared task runner nor publishes `endpoint.json` or
+`running-version.json` before an ownership-checked promotion. After passive
+health succeeds, governance is rechecked, promotion makes the target read-ready,
+and only then is the zdd route published; maintenance or deactivation retires
+the passive target without draining, rerouting, or stopping the old service.
+6. Namespaced marker CAS, deploy-manifest publication, and service
+reconciliation are one durable installation transaction. Retry/bootstrap
+finishes a validated target or restores the prior marker and manifest.
+`cell-recover` resumes interrupted selection/cutover work and reaps only exact,
+ownership-attested passive or demoted instances. Legacy
+`agent-index deploy --recover` remains compatible; namespaced direct
+deploy/recovery requires the live cell transaction receipt.
 
-Every launch path requires both a valid `.install-complete.json` marker and a
-successful `import agent_index`. A partial or corrupt slot is never dispatched;
-explicit setup/provisioning removes the broken target slot and only publishes
-`current-version` after the rebuilt slot passes both checks.
+Every launch path requires the canonical exact four-field
+`.install-complete.json`, the strict role/extras profile receipt, a valid
+`pyvenv.cfg`, and a successful `import agent_index` from beneath the selected
+slot. POSIX permits only the standard `bin/python` venv symlink after validating
+its owned parent slot and resolved executable; all other linked/reparse runtime
+artifacts remain rejected. A partial or corrupt slot is never dispatched.
 
 Scheduled tasks/systemd units are not the default persistence mechanism. They are
 an opt-in advanced tier via the installer `register-tasks` action. This follows
@@ -100,14 +120,15 @@ The service binds `AGENT_INDEX_HOST` (default `127.0.0.1`) and
 
 | Endpoint | Meaning |
 |----------|---------|
-| `GET /health` | `{status: "ok"}` or `{status: "draining"}` |
+| `GET /health` | `{status: "passive"|"ok"|"draining"}` plus installation, PID, and instance token |
 | `GET /status` | plugin/version, drain state, index counts/sources, indexing runner state |
 | `GET /search` | semantic + lexical search; degraded JSON if unavailable |
 | `GET /similar` | nearest neighbours for an indexed chunk |
 | `GET /clusters` | near-duplicate cluster artifact |
 | `POST /reindex` | enqueue background indexing unless draining/deps missing |
-| `POST /drain`, `/undrain` | zdd cutover drain gates |
-| `POST /shutdown` | service shutdown used by CLI/cutover |
+| `POST /drain`, `/undrain` | zdd cutover drain gates; namespaced calls require the exact instance token |
+| `POST /promote` | instance- and transaction-owned pre-route passive promotion |
+| `POST /shutdown` | ownership-attested service shutdown used by CLI/cutover |
 | `POST /adopt-relay` | compatibility stub; returns no relay |
 
 Endpoint discovery is local: zdd `active.json` first, then legacy rendezvous.
@@ -214,6 +235,14 @@ collection that protects live PIDs;
 - installer self-staging and watchdog bounds to avoid wedging the singleton
 plugin payload;
 - zdd active/passive service cutover with drain/undrain and breadcrumb recovery;
+- atomic read admission: drain closes `search`, `similar`, and `clusters`
+  admission before waiting for already-admitted reads;
+- passive generations remain task-runner and shared-evidence inert until
+  explicit promotion;
+- durable marker+manifest transaction recovery for forward updates and
+  historical rollback, with governance rechecks at both mutation boundaries;
+- installation-scoped service-instance receipts and exact-token reconciliation
+  that converge successful and recovered cutovers to one owned PID;
 - durable queue + detached workers for reindex work across cutovers;
 - engine reachability checks before vectorization so a source fails loudly rather
 than committing unsearchable content;

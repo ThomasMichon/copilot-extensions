@@ -3,13 +3,10 @@
 # ensure-service.ps1. Guarantees the indexer daemon (and, on host, the durable
 # embedding engine) is running as a user process -- via systemd --user (already
 # user-mode, no elevation) or a nohup start -- never elevated. Fast + timeout-
-# safe: a healthy daemon returns immediately; an unhealthy one kicks a BACKGROUND
-# `install.sh ensure` and returns without blocking session start.
+# safe: namespaced mode coalesces a background cell-runtime ensure; legacy mode
+# kicks a background `install.sh ensure`. Neither path waits for service startup.
 set -u
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-INSTALL_DIR="$HOME/.agent-index"
-# Only act on a box where agent-index is actually deployed.
-[ -f "$INSTALL_DIR/deploy-manifest.json" ] || exit 0
 
 # Session start is repository-scoped activation. Merely enabling the plugin
 # must not start a machine-global daemon in an unrelated repository.
@@ -20,8 +17,21 @@ repo_config="$repo_root/.agent-index/config.yaml"
 me="$(printf '%s' "${AGENT_INDEX_MACHINE:-$(hostname -s)}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || exit 0
-role="$("$py" "$script_dir/resolve-activation-role.py" --config "$repo_config" --machine "$me" 2>/dev/null || true)"
+role="$(CDPATH= cd -- "$script_dir" &&
+    "$py" -I -X utf8 "$script_dir/resolve-activation-role.py" \
+        --config "$repo_config" --machine "$me" 2>/dev/null || true)"
 [ "$role" = "host" ] || exit 0
+
+if [ -f "$script_dir/runtime-gate.sh" ]; then
+    bash "$script_dir/runtime-gate.sh" __cell-service-ensure >/dev/null 2>&1
+    cell_status=$?
+    if [ "$cell_status" -eq 0 ]; then exit 0; fi
+    if [ "$cell_status" -ne 10 ]; then exit 0; fi
+fi
+
+INSTALL_DIR="$HOME/.agent-index"
+# Only act on a box where agent-index is actually deployed.
+[ -f "$INSTALL_DIR/deploy-manifest.json" ] || exit 0
 
 # Fast health probe on the LIVE routing endpoint (active.json ephemeral port).
 # Resolve the runtime's OWN slot python via the canonical marker-only resolver
@@ -36,20 +46,24 @@ if [ -f "$_res" ]; then
 fi
 
 healthy=0
-if [ -n "$pybin" ]; then
-    if "$pybin" - "$INSTALL_DIR/active.json" <<'PY' 2>/dev/null
+probe_python="${pybin:-$py}"
+if [ -n "$probe_python" ]; then
+    if (CDPATH= cd -- "$INSTALL_DIR" &&
+        "$probe_python" -I -X utf8 - "$INSTALL_DIR/active.json" <<'PY' 2>/dev/null
 import json, sys, urllib.request
 try:
-    p = json.load(open(sys.argv[1]))["active"]["port"]
-    urllib.request.urlopen("http://127.0.0.1:%d/health" % int(p), timeout=2).read()
-    sys.exit(0)
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        p = json.load(stream)["active"]["port"]
+    value = json.loads(
+        urllib.request.urlopen(
+            "http://127.0.0.1:%d/health" % int(p), timeout=2
+        ).read().decode("utf-8")
+    )
+    sys.exit(0 if value.get("status") == "ok" and value.get("promoted") is not False else 1)
 except Exception:
     sys.exit(1)
 PY
-    then healthy=1; fi
-elif command -v curl >/dev/null 2>&1; then
-    port="$(sed -n 's/.*"port"[: ]*\([0-9]\{1,\}\).*/\1/p' "$INSTALL_DIR/active.json" | head -n1)"
-    [ -n "$port" ] && curl -fsS --max-time 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1 && healthy=1
+    ); then healthy=1; fi
 fi
 [ "$healthy" = "1" ] && exit 0
 

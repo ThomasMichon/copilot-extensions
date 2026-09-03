@@ -181,6 +181,16 @@ def _default_stream_batch_size() -> int:
     return 500 if device.startswith("cuda") else 64
 
 
+def _default_backup_dir() -> Path:
+    override = os.environ.get("AGENT_INDEX_BACKUP_DIR")
+    if override:
+        return Path(override).expanduser()
+    install_root = Path(
+        os.environ.get("AGENT_INDEX_HOME", "~/.agent-index")
+    ).expanduser()
+    return install_root / "backups"
+
+
 # -- Main config -------------------------------------------------------------
 
 
@@ -191,7 +201,9 @@ class IndexConfig:
     # Paths
     data_dir: Path = field(
         default_factory=lambda: Path(
-            os.environ.get("AGENT_INDEX_DATA_DIR", "~/.agent-index/data")
+            os.environ.get("AGENT_INDEX_DATA_DIR")
+            or os.environ.get("AGENT_INDEX_STATE_DIR")
+            or "~/.agent-index/data"
         ).expanduser()
     )
 
@@ -272,9 +284,7 @@ class IndexConfig:
 
     # Optional backup target for fast recovery snapshots.
     backup_dir: Path = field(
-        default_factory=lambda: Path(
-            os.environ.get("AGENT_INDEX_BACKUP_DIR", "~/.agent-index/backups")
-        ).expanduser()
+        default_factory=_default_backup_dir
     )
 
     @property

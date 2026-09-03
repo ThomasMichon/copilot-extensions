@@ -5,25 +5,36 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib.util
+import json
 import logging
 import os
 import socket
 import sys
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from threading import Condition, Lock
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from . import __version__
-from .config import Config, data_dir, load_config, routing_dir, run_dir
+from .config import Config, data_dir, install_dir, load_config, routing_dir, run_dir
 from .query_surface import format_error, hit_to_dict, stored_cluster_to_dict
 from .rendezvous import clear_endpoint, write_endpoint
+from .runtime_version import current_runtime_version
 
 log = logging.getLogger("agent-index.server")
+INSTALLATION_HEADER = "X-Agent-Index-Installation-Id"
+INSTANCE_HEADER = "X-Agent-Index-Instance-Token"
+TRANSACTION_HEADER = "X-Agent-Index-Transaction-Token"
+
+
+class DrainAdmissionClosed(RuntimeError):
+    """New read work is closed while the service drains."""
 
 
 class ReindexRequest(BaseModel):
@@ -42,12 +53,12 @@ class DrainRequest(BaseModel):
 
 
 class DrainGate:
-    """Process-wide drain state plus in-flight search tracking."""
+    """Process-wide drain state plus atomic in-flight read admission."""
 
     def __init__(self) -> None:
         self._condition = Condition()
         self._draining = False
-        self._searches = 0
+        self._reads = 0
 
     @property
     def draining(self) -> bool:
@@ -55,9 +66,14 @@ class DrainGate:
             return self._draining
 
     @property
-    def searches(self) -> int:
+    def reads(self) -> int:
         with self._condition:
-            return self._searches
+            return self._reads
+
+    @property
+    def searches(self) -> int:
+        """Compatibility alias for older drain diagnostics."""
+        return self.reads
 
     def set_draining(self, value: bool) -> None:
         with self._condition:
@@ -65,25 +81,31 @@ class DrainGate:
             self._condition.notify_all()
 
     @contextmanager
-    def track_search(self) -> Iterator[None]:
+    def track_read(self) -> Iterator[None]:
         with self._condition:
-            self._searches += 1
+            if self._draining:
+                raise DrainAdmissionClosed("service is draining")
+            self._reads += 1
         try:
             yield
         finally:
             with self._condition:
-                self._searches = max(0, self._searches - 1)
+                self._reads = max(0, self._reads - 1)
                 self._condition.notify_all()
 
-    def wait_for_searches(self, *, timeout: float, poll: float) -> bool:
+    def wait_for_reads(self, *, timeout: float, poll: float) -> bool:
         deadline = time.monotonic() + max(0.0, timeout)
         with self._condition:
-            while self._searches > 0:
+            while self._reads > 0:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
                 self._condition.wait(timeout=min(max(poll, 0.05), remaining))
             return True
+
+    def wait_for_searches(self, *, timeout: float, poll: float) -> bool:
+        """Compatibility alias for older callers."""
+        return self.wait_for_reads(timeout=timeout, poll=poll)
 
 
 class _EventBus:
@@ -93,7 +115,118 @@ class _EventBus:
         return
 
 
-def build_app() -> FastAPI:
+def _create_task_runner() -> Any:
+    from agent_index.indexing.runner import TaskRunner
+    from agent_index.indexing.task_store import TaskStore
+
+    store = TaskStore(data_dir() / "tasks.db")
+    runner = TaskRunner(store, _EventBus())
+
+    def _run_reindex(**kwargs: Any) -> dict[str, float]:
+        from agent_index.indexing import engine as indexing_engine
+
+        return indexing_engine.run_reindex(**kwargs)
+
+    runner.set_index_fn(_run_reindex)
+    return store, runner
+
+
+async def _start_task_runner(app: FastAPI) -> None:
+    if getattr(app.state, "task_runner", None) is not None:
+        return
+    async with app.state.task_runner_lock:
+        if getattr(app.state, "task_runner", None) is not None:
+            return
+        store, runner = _create_task_runner()
+        try:
+            await runner.start()
+        except Exception:
+            with contextlib.suppress(Exception):
+                await runner.stop()
+            raise
+        app.state.task_store = store
+        app.state.task_runner = runner
+
+
+async def _stop_task_runner(app: FastAPI) -> None:
+    runner = getattr(app.state, "task_runner", None)
+    if runner is None:
+        return
+    with contextlib.suppress(Exception):
+        await runner.stop()
+    app.state.task_runner = None
+    app.state.task_store = None
+
+
+def _instance_receipt_path(app: FastAPI) -> Path | None:
+    if not app.state.installation_id:
+        return None
+    return run_dir() / "instances" / f"{os.getpid()}.json"
+
+
+def _write_instance_receipt(app: FastAPI, state: str) -> None:
+    path = _instance_receipt_path(app)
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema": "copilot-extensions.agent-index.service-instance",
+        "version": 1,
+        "installationId": app.state.installation_id,
+        "runtimeVersion": app.state.runtime_version,
+        "pid": os.getpid(),
+        "instanceToken": app.state.instance_token,
+        "host": app.state.bound_host,
+        "port": app.state.bound_port,
+        "state": state,
+        "transactionId": app.state.transaction_id,
+    }
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    if os.name != "nt":
+        with contextlib.suppress(OSError):
+            temporary.chmod(0o600)
+    os.replace(temporary, path)
+
+
+def _clear_instance_receipt(app: FastAPI) -> None:
+    path = _instance_receipt_path(app)
+    if path is None:
+        return
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return
+    if (
+        isinstance(record, dict)
+        and record.get("pid") == os.getpid()
+        and record.get("instanceToken") == app.state.instance_token
+    ):
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+
+def _publish_active_evidence(app: FastAPI, *, strict: bool) -> None:
+    try:
+        write_endpoint(
+            run_dir(),
+            "tcp",
+            f"{app.state.bound_host}:{app.state.bound_port}",
+        )
+        from .runtime_version import write_running_version
+
+        write_running_version(strict=strict)
+    except Exception:
+        if strict:
+            raise
+        log.warning("Failed to publish active service evidence", exc_info=True)
+
+
+def build_app(*, passive: bool = False) -> FastAPI:
     """Build the agent-index service application."""
     cached_search_engine: Any | None = None
     search_engine_lock = Lock()
@@ -101,34 +234,124 @@ def build_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         data_dir().mkdir(parents=True, exist_ok=True)
-        runner = None
-        try:
-            from agent_index.indexing.runner import TaskRunner
-            from agent_index.indexing.task_store import TaskStore
-
-            store = TaskStore(data_dir() / "tasks.db")
-            runner = TaskRunner(store, _EventBus())
-
-            def _run_reindex(**kwargs: Any) -> dict[str, float]:
-                from agent_index.indexing import engine as indexing_engine
-
-                return indexing_engine.run_reindex(**kwargs)
-
-            runner.set_index_fn(_run_reindex)
-            app.state.task_store = store
-            app.state.task_runner = runner
-            await runner.start()
-        except Exception:
-            log.warning("Task runner startup skipped", exc_info=True)
+        if app.state.promoted:
+            try:
+                await _start_task_runner(app)
+            except Exception:
+                log.warning("Task runner startup skipped", exc_info=True)
         try:
             yield
         finally:
-            if runner is not None:
-                with contextlib.suppress(Exception):
-                    await runner.stop()
+            await _stop_task_runner(app)
 
     app = FastAPI(title="agent-index", version=__version__, lifespan=lifespan)
     app.state.drain_gate = DrainGate()
+    app.state.installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
+    app.state.instance_token = (
+        os.environ.get("AGENT_INDEX_INSTANCE_TOKEN") or uuid.uuid4().hex
+    )
+    app.state.transaction_token = os.environ.get(
+        "AGENT_INDEX_CELL_TRANSACTION_TOKEN", ""
+    )
+    app.state.transaction_id = os.environ.get(
+        "AGENT_INDEX_CELL_TRANSACTION_ID", ""
+    ) or None
+    app.state.runtime_version = current_runtime_version()
+    app.state.passive = passive
+    app.state.promoted = not passive
+    app.state.bound_host = None
+    app.state.bound_port = None
+    app.state.task_store = None
+    app.state.task_runner = None
+    app.state.task_runner_lock = asyncio.Lock()
+
+    def service_identity(request: Request) -> dict[str, Any]:
+        return {
+            "installationId": request.app.state.installation_id,
+            "instanceToken": request.app.state.instance_token,
+            "pid": os.getpid(),
+        }
+
+    def authorize_control(request: Request) -> None:
+        expected_installation = request.headers.get(INSTALLATION_HEADER, "")
+        expected_instance = request.headers.get(INSTANCE_HEADER)
+        if expected_installation != request.app.state.installation_id:
+            raise HTTPException(status_code=409, detail="installation ownership mismatch")
+        if request.app.state.installation_id and not expected_instance:
+            raise HTTPException(status_code=409, detail="service instance token required")
+        if (
+            expected_instance is not None
+            and expected_instance != request.app.state.instance_token
+        ):
+            raise HTTPException(status_code=409, detail="service instance mismatch")
+
+    def authorize_transaction(request: Request) -> None:
+        if not request.app.state.installation_id:
+            return
+        expected = request.app.state.transaction_token
+        supplied = request.headers.get(TRANSACTION_HEADER, "")
+        path_value = os.environ.get("AGENT_INDEX_CELL_TRANSACTION", "")
+        transaction_id = os.environ.get("AGENT_INDEX_CELL_TRANSACTION_ID", "")
+        valid_receipt = False
+        try:
+            path = Path(path_value)
+            expected_path = install_dir() / "selection-transaction.json"
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+            target = receipt.get("target") if isinstance(receipt, dict) else None
+            valid_receipt = (
+                path.resolve(strict=True) == expected_path.resolve(strict=True)
+                and isinstance(receipt, dict)
+                and receipt.get("schema")
+                == "copilot-extensions.agent-index.selection-transaction"
+                and receipt.get("version") == 1
+                and receipt.get("id") == transaction_id
+                and receipt.get("installationId")
+                == request.app.state.installation_id
+                and receipt.get("token") == expected
+                and receipt.get("state")
+                in {
+                    "prepared",
+                    "marker-published",
+                    "manifest-published",
+                    "reconciling",
+                }
+                and isinstance(target, dict)
+                and target.get("runtimeVersion") == request.app.state.runtime_version
+            )
+        except (OSError, ValueError, TypeError):
+            valid_receipt = False
+        if not expected or supplied != expected or not valid_receipt:
+            raise HTTPException(
+                status_code=409,
+                detail="installation transaction ownership mismatch",
+            )
+
+    @contextmanager
+    def track_read(request: Request) -> Iterator[None]:
+        if not request.app.state.promoted:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "service_passive",
+                    "retryable": True,
+                    "message": "service is awaiting promotion",
+                },
+                headers={"Retry-After": "1"},
+            )
+        gate: DrainGate = request.app.state.drain_gate
+        try:
+            with gate.track_read():
+                yield
+        except DrainAdmissionClosed as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "service_draining",
+                    "retryable": True,
+                    "message": str(exc),
+                },
+                headers={"Retry-After": "1"},
+            ) from exc
 
     def get_search_engine() -> Any:
         nonlocal cached_search_engine
@@ -148,18 +371,33 @@ def build_app() -> FastAPI:
             cached_search_engine = None
 
     @app.get("/health")
-    def health(request: Request) -> dict[str, str]:
+    def health(request: Request) -> dict[str, Any]:
         gate: DrainGate = request.app.state.drain_gate
-        return {"status": "draining" if gate.draining else "ok"}
+        return {
+            "status": (
+                "draining"
+                if gate.draining
+                else ("ok" if request.app.state.promoted else "passive")
+            ),
+            "plugin": "agent-index",
+            "version": request.app.state.runtime_version,
+            "passive": request.app.state.passive,
+            "promoted": request.app.state.promoted,
+            **service_identity(request),
+        }
 
     @app.get("/status")
     def status(request: Request, sources: bool = False) -> dict[str, Any]:
         gate: DrainGate = request.app.state.drain_gate
         payload: dict[str, Any] = {
             "plugin": "agent-index",
-            "version": __version__,
+            "version": request.app.state.runtime_version,
             "draining": gate.draining,
+            "passive": request.app.state.passive,
+            "promoted": request.app.state.promoted,
+            "inflightReads": gate.reads,
             "index": _index_status(include_sources=sources),
+            **service_identity(request),
         }
         runner = getattr(request.app.state, "task_runner", None)
         if runner is not None:
@@ -175,8 +413,7 @@ def build_app() -> FastAPI:
         repo: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        gate: DrainGate = request.app.state.drain_gate
-        with gate.track_search():
+        with track_read(request):
             try:
                 engine = get_search_engine()
                 hits = engine.search(q, limit=limit, source=source, language=language, repo=repo)
@@ -197,8 +434,7 @@ def build_app() -> FastAPI:
         limit: int = 10,
         source: str | None = None,
     ) -> dict[str, Any]:
-        gate: DrainGate = request.app.state.drain_gate
-        with gate.track_search():
+        with track_read(request):
             try:
                 engine = get_search_engine()
                 hits = engine.find_similar(chunk_id, limit=limit, source=source)
@@ -222,56 +458,61 @@ def build_app() -> FastAPI:
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
-        try:
-            from .index_config import IndexConfig
-            from .store.cluster_store import ClusterStore
-            from .store.clustering import source_bucket
+        with track_read(request):
+            try:
+                from .index_config import IndexConfig
+                from .store.cluster_store import ClusterStore
+                from .store.clustering import source_bucket
 
-            if source and not bucket:
-                bucket = source_bucket(source)
-            limit = max(1, min(limit, 200))
-            cfg = IndexConfig(data_dir=data_dir())
-            store = ClusterStore(cfg.clusters_db)
-            stored = store.list_clusters(
-                bucket=bucket,
-                model_id=model,
-                has_exact_dupes=True if exact_dupes_only else None,
-                limit=limit,
-                offset=max(0, offset),
-            )
-            return {
-                "available": True,
-                "count": len(stored),
-                "clusters": [stored_cluster_to_dict(c) for c in stored],
-            }
-        except Exception as exc:
-            log.debug("Clusters unavailable", exc_info=True)
-            return {"available": False, "error": format_error(exc), "count": 0, "clusters": []}
+                if source and not bucket:
+                    bucket = source_bucket(source)
+                limit = max(1, min(limit, 200))
+                cfg = IndexConfig(data_dir=data_dir())
+                store = ClusterStore(cfg.clusters_db)
+                stored = store.list_clusters(
+                    bucket=bucket,
+                    model_id=model,
+                    has_exact_dupes=True if exact_dupes_only else None,
+                    limit=limit,
+                    offset=max(0, offset),
+                )
+                return {
+                    "available": True,
+                    "count": len(stored),
+                    "clusters": [stored_cluster_to_dict(c) for c in stored],
+                }
+            except Exception as exc:
+                log.debug("Clusters unavailable", exc_info=True)
+                return {
+                    "available": False,
+                    "error": format_error(exc),
+                    "count": 0,
+                    "clusters": [],
+                }
 
     @app.post("/reindex")
     def reindex(request: Request, body: ReindexRequest | None = None) -> dict[str, Any]:
-        gate: DrainGate = request.app.state.drain_gate
-        if gate.draining:
-            return {"accepted": False, "error": "service is draining"}
-        missing = _missing_indexing_dependencies()
-        if missing:
-            return {"accepted": False, "error": missing}
-        full = body.full if body else False
-        source = body.source if body else None
-        store = getattr(request.app.state, "task_store", None)
-        runner = getattr(request.app.state, "task_runner", None)
-        if store is None or runner is None:
-            return {"accepted": False, "error": "indexing task runner unavailable"}
-        task = store.enqueue(
-            source=source or "all",
-            full=full,
-            trigger_source="api:agent_index_reindex",
-        )
-        runner.notify()
-        return {"accepted": True, "task": task.to_dict()}
+        with track_read(request):
+            missing = _missing_indexing_dependencies()
+            if missing:
+                return {"accepted": False, "error": missing}
+            full = body.full if body else False
+            source = body.source if body else None
+            store = getattr(request.app.state, "task_store", None)
+            runner = getattr(request.app.state, "task_runner", None)
+            if store is None or runner is None or not request.app.state.promoted:
+                return {"accepted": False, "error": "indexing task runner unavailable"}
+            task = store.enqueue(
+                source=source or "all",
+                full=full,
+                trigger_source="api:agent_index_reindex",
+            )
+            runner.notify()
+            return {"accepted": True, "task": task.to_dict()}
 
     @app.post("/drain")
     async def drain(request: Request, body: DrainRequest | None = None) -> dict[str, Any]:
+        authorize_control(request)
         gate: DrainGate = request.app.state.drain_gate
         opts = body or DrainRequest()
         timeout = max(0.0, float(opts.timeout))
@@ -283,24 +524,26 @@ def build_app() -> FastAPI:
         if runner is not None:
             runner_clean = await runner.drain(timeout=timeout, poll=poll)
         remaining = max(0.0, timeout - (time.monotonic() - start))
-        searches_clean = await asyncio.to_thread(
-            gate.wait_for_searches,
+        reads_clean = await asyncio.to_thread(
+            gate.wait_for_reads,
             timeout=remaining,
             poll=poll,
         )
-        clean = runner_clean and searches_clean
+        clean = runner_clean and reads_clean
         forced = bool(opts.force and not clean)
         drained = clean or forced
         return {
             "drained": drained,
             "clean": clean,
             "forced": forced,
-            "busy_searches": gate.searches,
+            "busy_reads": gate.reads,
+            "busy_searches": gate.reads,
             "active_task_id": getattr(runner, "active_task_id", None),
         }
 
     @app.post("/undrain")
     async def undrain(request: Request) -> dict[str, Any]:
+        authorize_control(request)
         gate: DrainGate = request.app.state.drain_gate
         gate.set_draining(False)
         runner = getattr(request.app.state, "task_runner", None)
@@ -308,8 +551,50 @@ def build_app() -> FastAPI:
             await runner.resume()
         return {"draining": False}
 
+    @app.post("/promote")
+    async def promote(request: Request) -> dict[str, Any]:
+        authorize_control(request)
+        if request.app.state.promoted:
+            return {"promoted": True, **service_identity(request)}
+        authorize_transaction(request)
+        transaction_environment = {
+            name: os.environ.get(name)
+            for name in (
+                "AGENT_INDEX_CELL_TRANSACTION",
+                "AGENT_INDEX_CELL_TRANSACTION_TOKEN",
+                "AGENT_INDEX_CELL_TRANSACTION_ID",
+            )
+        }
+        try:
+            for name in transaction_environment:
+                os.environ.pop(name, None)
+            await _start_task_runner(request.app)
+            request.app.state.passive = False
+            request.app.state.promoted = True
+            _write_instance_receipt(request.app, "active")
+            _publish_active_evidence(request.app, strict=True)
+        except Exception as exc:
+            request.app.state.passive = True
+            request.app.state.promoted = False
+            with contextlib.suppress(Exception):
+                _write_instance_receipt(request.app, "passive")
+            await _stop_task_runner(request.app)
+            clear_endpoint(run_dir(), owner_pid=os.getpid())
+            from .runtime_version import clear_running_version
+
+            clear_running_version(owner_pid=os.getpid())
+            for name, value in transaction_environment.items():
+                if value is not None:
+                    os.environ[name] = value
+            raise HTTPException(
+                status_code=503,
+                detail="passive service promotion failed",
+            ) from exc
+        return {"promoted": True, **service_identity(request)}
+
     @app.post("/shutdown")
     def shutdown(request: Request) -> dict[str, Any]:
+        authorize_control(request)
         server = getattr(request.app.state, "uvicorn_server", None)
         if server is not None:
             server.should_exit = True
@@ -405,8 +690,14 @@ def _index_status(include_sources: bool = False) -> dict[str, Any]:
     return {"chunks": chunks, "available": available, "tables": tables, "sources": sources}
 
 
-def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> None:
-    """Publish this process into the shared zdd routing table, best-effort."""
+def _publish_routing(
+    cfg: Config,
+    bound_port: int,
+    *,
+    passive: bool = False,
+    strict: bool = False,
+) -> None:
+    """Publish this process into the shared zdd routing table."""
     if passive:
         return
     try:
@@ -417,10 +708,12 @@ def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> 
             bind=cfg.host,
             port=bound_port,
             pid=os.getpid(),
-            version=__version__,
+            version=current_runtime_version(),
             demote_existing=True,
         )
     except Exception:
+        if strict:
+            raise
         log.warning("Failed to publish routing table", exc_info=True)
 
 
@@ -442,12 +735,16 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     sock = _bind_listen_socket(cfg.host, cfg.port)
     bound_port = sock.getsockname()[1]
-    write_endpoint(run_dir(), "tcp", f"{cfg.host}:{bound_port}")
-    _publish_routing(cfg, bound_port, passive=passive)
-    from .runtime_version import write_running_version
-
-    write_running_version()
-    app = build_app()
+    app = build_app(passive=passive)
+    if not passive:
+        for name in (
+            "AGENT_INDEX_CELL_TRANSACTION",
+            "AGENT_INDEX_CELL_TRANSACTION_TOKEN",
+            "AGENT_INDEX_CELL_TRANSACTION_ID",
+        ):
+            os.environ.pop(name, None)
+    app.state.bound_host = cfg.host
+    app.state.bound_port = bound_port
     server = uvicorn.Server(
         uvicorn.Config(
             app,
@@ -456,10 +753,20 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     )
     app.state.uvicorn_server = server
     try:
+        _write_instance_receipt(app, "passive" if passive else "active")
+        if not passive:
+            namespaced = bool(app.state.installation_id)
+            _publish_active_evidence(app, strict=namespaced)
+            _publish_routing(cfg, bound_port, strict=namespaced)
         server.run(sockets=[sock])
     finally:
-        _clear_routing()
-        clear_endpoint(run_dir())
+        if app.state.promoted:
+            _clear_routing()
+            clear_endpoint(run_dir(), owner_pid=os.getpid())
+            from .runtime_version import clear_running_version
+
+            clear_running_version(owner_pid=os.getpid())
+        _clear_instance_receipt(app)
         sock.close()
 
 

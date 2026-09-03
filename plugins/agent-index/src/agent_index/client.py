@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -10,9 +11,24 @@ import httpx
 class AgentIndexClient:
     """Synchronous client for the local agent-index service."""
 
-    def __init__(self, base_url: str, *, timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout: float = 120.0,
+        installation_id: str | None = None,
+        instance_token: str | None = None,
+        transaction_token: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.installation_id = (
+            os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
+            if installation_id is None
+            else installation_id
+        )
+        self.instance_token = instance_token
+        self.transaction_token = transaction_token
 
     def _request(
         self,
@@ -27,11 +43,17 @@ class AgentIndexClient:
             else None
         )
         with httpx.Client(timeout=self.timeout) as client:
+            headers = {"X-Agent-Index-Installation-Id": self.installation_id}
+            if self.instance_token is not None:
+                headers["X-Agent-Index-Instance-Token"] = self.instance_token
+            if self.transaction_token is not None:
+                headers["X-Agent-Index-Transaction-Token"] = self.transaction_token
             response = client.request(
                 method,
                 f"{self.base_url}{path}",
                 json=json,
                 params=filtered_params,
+                headers=headers,
             )
             response.raise_for_status()
             if not response.content:
@@ -109,6 +131,9 @@ class AgentIndexClient:
 
     def shutdown(self) -> dict[str, Any]:
         return self._request("POST", "/shutdown")
+
+    def promote(self) -> dict[str, Any]:
+        return self._request("POST", "/promote")
 
     def adopt_relay(self) -> dict[str, Any]:
         return self._request("POST", "/adopt-relay")

@@ -170,6 +170,69 @@ def test_status_payload_no_endpoint_reports_unknown(monkeypatch) -> None:
     assert payload["runtime"]["state"] == "ready"
 
 
+def test_status_payload_reports_draining_as_not_ready(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+    monkeypatch.setenv("AGENT_INDEX_INSTALLATION_ID", "cell-a/agent-index")
+    monkeypatch.setattr("agent_index.transport.plan_route", lambda: ("host", None))
+    monkeypatch.setattr(cli, "client_url", lambda: "http://127.0.0.1:4444")
+    monkeypatch.setattr(
+        cli,
+        "_routing_endpoint_for_url",
+        lambda _url: SimpleNamespace(
+            base_url="http://127.0.0.1:4444",
+            pid=123,
+            version="9.9.9",
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_owned_service_status",
+        lambda *_args, **_kwargs: {
+            "plugin": "agent-index",
+            "installationId": "cell-a/agent-index",
+            "version": "9.9.9",
+            "pid": 123,
+            "instanceToken": "exact-token",
+            "promoted": True,
+            "status": "draining",
+        },
+    )
+
+    class _Response:
+        @staticmethod
+        def json():
+            return {
+                "installationId": "cell-a/agent-index",
+                "version": "9.9.9",
+                "pid": 123,
+                "instanceToken": "exact-token",
+                "promoted": True,
+                "draining": True,
+            }
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        @staticmethod
+        def get(_url):
+            return _Response()
+
+    monkeypatch.setattr(cli.httpx, "Client", _Client)
+
+    payload = cli._status_payload()
+
+    assert payload["state"] == "draining"
+    assert payload["running"] is False
+    assert payload["configured"] is True
+
+
 def test_status_payload_without_role_is_setup_required(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("AGENT_INDEX_ROLE", raising=False)
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))

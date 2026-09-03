@@ -5,11 +5,14 @@
 
 ## Status
 
-**Command-only exemplar operative.** The reviewed contract, cross-platform
-resolver, immutable runtime-slot ownership/completion/cutover, and the
-Agent Machines payload/runtime flow are in place. Agent Machines alone may use
-an already-active validated cell; absent/false policy remains legacy. The
-service exemplar, repair/release, and uninstall remain non-operative.
+**Command-only exemplar operative; service-bearing exemplar implementation-ready,
+acceptance pending.** The reviewed contract, cross-platform resolver, immutable
+runtime-slot ownership/completion/cutover, Agent Machines payload/runtime flow,
+and Agent Index service/runtime implementation are in place. Each path may use
+only its own already-active validated cell; absent/false policy remains legacy.
+The Agent Index Linux full-lifecycle and Windows clean-room arms remain required
+before the service-bearing exemplar is called operative. Repair/release and
+uninstall remain non-operative.
 
 ## Goals
 
@@ -663,7 +666,7 @@ provenance requires forward reconciliation. Snapshot publication stages into an
 owned sibling and retries may reclaim only a marker-proven, unproven
 interruption.
 
-### Service-bearing: agent-index
+### Service-bearing: agent-index (implementation-ready; acceptance pending)
 
 agent-index was the first payload-invocation pilot and has strong clean-room and
 cutover coverage. It proves:
@@ -687,6 +690,33 @@ Its pre-activation adapter has the same explicit authorization, ownership, and
 completion boundary as Agent Machines, including exact snapshot payload
 root/version matching. It does not build the runtime or mutate service, engine,
 task/unit, endpoint, current/LKG, or activation identity.
+
+The implementation-ready payload dispatcher applies installation-mode governance
+before runtime resolution. An active validated Agent Index cell selects only
+its cell-local runtime and qualifies durable state, run/routing, logs, cache,
+configuration, launchers, and engine roots beneath that installation. Service
+launch uses an installation-local launcher and an OS-assigned loopback endpoint;
+it publishes no generic systemd unit, scheduled task, or machine-global command.
+Cell provisioning carries snapshot provenance through immutable slot ownership
+and completion before marker cutover, and schema-4 deploy manifests keep
+reconciled payload provenance separate from the selected runtime so historical
+rollback does not masquerade as a payload downgrade.
+
+Marker CAS and manifest publication are joined by an installation-scoped
+transaction receipt. Bootstrap/retry can finish a validated target or restore
+the prior selection after interruption, including historical rollback.
+Governance is rechecked immediately before marker cutover and before service
+reconciliation. A passive daemon publishes only its per-instance ownership
+receipt until the new route selects it and an exact-instance,
+transaction-authorized promotion starts task adoption and publishes active
+evidence. Namespaced deploy/recovery is therefore reachable only through the
+cell transaction; successful and recovered cutovers reconcile exact owned
+instance receipts until one installation PID remains.
+
+The clean-room-only restriction is an operational rollout policy: namespaced
+Agent Index lifecycle is exercised only in disposable fixtures until both
+acceptance arms pass. It is not a host-detection security boundary, and the
+implementation does not rely on a spoofable "clean room" marker.
 
 ## Delivery slices
 
@@ -741,6 +771,12 @@ other platform still derives a different marketplace id or root.
 | Historical completion validation after receipt advance | Same immutable slot remains attributable; generation regression fails |
 | One cell updates or rolls back | Other runtime/service remains unchanged and available |
 | Receipt changes during mutation | Generation check restarts; stale writer cannot overwrite |
+| Crash after marker CAS or before/after manifest publication | Transaction retry finishes the validated target or restores the exact prior selection |
+| Governance changes before cutover or service reconcile | Completed target stays inert; selection/service remain or return to the prior owned state |
+| Passive, flipped, draining, or committed cutover crash | Installer recovery converges to one ownership-attested installation PID |
+| Ordinary namespaced payload invokes deploy/recover | Rejected without the live cell transaction id and random token |
+| Stale same-cell control endpoint | Routing PID/version and exact instance token mismatch is rejected before control |
+| Two waiters reclaim one stale install lock | One atomically claims a tombstone; neither can delete the other's new lock |
 | Service runs while receipt/payload updates | Service keeps its pinned immutable slot |
 | Payload disappears | Cell remains attributable and inert |
 | Uninstall with mismatched receipt | Refuses every destructive action |

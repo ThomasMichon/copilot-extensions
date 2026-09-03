@@ -6,12 +6,21 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'ensure', 'uninstall', 'engine', 'engine-update', 'register-tasks', 'stamp', 'provision', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'ensure', 'uninstall', 'engine', 'engine-update', 'register-tasks', 'stamp', 'provision', 'cell-provision', 'cell-recover', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
     [string]$ExpectedMarketplaceId,
     [string]$DurableHome,
+    [string]$OriginPayloadRoot,
+    [string]$ExpectedNamespaceGeneration,
+    [string]$ExpectedInstallGeneration,
+    [string]$ExpectedCurrentVersion,
+    [string]$TargetPayloadRoot,
+    [string]$TargetPayloadVersion,
+    [string]$TargetSnapshotId,
+    [string]$TargetRuntimeVersion,
+    [switch]$ExpectCurrentAbsent,
     [switch]$NoService,
     [switch]$Purge,
     [switch]$Force,
@@ -56,10 +65,13 @@ $probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
 # runtime. Status remains read-only and does not need mutation authorization.
 if ($Action -notin @(
     'status',
+    'cell-provision',
+    'cell-recover',
     'slot-provision',
     'slot-validate',
     'slot-complete',
-    'slot-completion-validate'
+    'slot-completion-validate',
+    'slot-cutover'
 )) {
     $probeLegacyRoot = if ($InstallDir) {
         [IO.Path]::GetFullPath($InstallDir)
@@ -80,10 +92,13 @@ if ($Action -notin @(
 # Status and dependency-light cell-slot actions do not enter the self-stage
 # block that creates and reaps legacy staging directories.
 $cellSlotAction = $Action -in @(
+    'cell-provision',
+    'cell-recover',
     'slot-provision',
     'slot-validate',
     'slot-complete',
-    'slot-completion-validate'
+    'slot-completion-validate',
+    'slot-cutover'
 )
 if ($cellSlotAction) {
     Set-Location -LiteralPath $env:USERPROFILE
@@ -91,10 +106,13 @@ if ($cellSlotAction) {
 }
 $skipSelfStage = $Action -in @(
     'status',
+    'cell-provision',
+    'cell-recover',
     'slot-provision',
     'slot-validate',
     'slot-complete',
-    'slot-completion-validate'
+    'slot-completion-validate',
+    'slot-cutover'
 ) -and
     -not $env:COPILOT_PLUGIN_INSTALL_STAGED
 if ($skipSelfStage) {
@@ -330,6 +348,98 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
     }
 }
 
+if ($Action -in @('cell-provision', 'cell-recover', 'slot-cutover')) {
+    if ([string]::IsNullOrWhiteSpace($Context)) {
+        Write-Fail "$Action requires -Context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedMarketplaceId)) {
+        Write-Fail "$Action requires -ExpectedMarketplaceId"
+        exit 2
+    }
+    $cellRuntime = Join-Path $PSScriptRoot 'cell-runtime.py'
+    if (-not (Test-Path -LiteralPath $cellRuntime -PathType Leaf)) {
+        Write-Fail 'Installation-cell runtime coordinator is unavailable'
+        exit 1
+    }
+    $cellPython = $null
+    foreach ($candidate in @('python', 'python3', 'py')) {
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        if (-not $found) { continue }
+        if ($candidate -eq 'py') {
+            $resolved = @(& $found.Source -3 -c 'import sys; print(sys.executable)' 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $resolved.Count -gt 0) {
+                $cellPython = ("$($resolved[-1])").Trim()
+            }
+        } else {
+            $cellPython = $found.Source
+        }
+        if ($cellPython) { break }
+    }
+    if (-not $cellPython) {
+        Write-Fail 'Python 3.10+ is required for installation-cell lifecycle actions'
+        exit 1
+    }
+    $cellArgs = @(
+        $cellRuntime,
+        $Action,
+        '--context', $Context,
+        '--expected-marketplace-id', $ExpectedMarketplaceId
+    )
+    if ($DurableHome) {
+        $cellArgs += @('--durable-home', $DurableHome)
+    }
+    if ($Action -eq 'cell-provision') {
+        if ($OriginPayloadRoot) {
+            $cellArgs += @('--origin-payload-root', $OriginPayloadRoot)
+        }
+    } elseif ($Action -eq 'slot-cutover') {
+        if (
+            [string]::IsNullOrWhiteSpace($ExpectedNamespaceGeneration) -or
+            [string]::IsNullOrWhiteSpace($ExpectedInstallGeneration)
+        ) {
+            Write-Fail 'slot-cutover requires expected namespace and install generations'
+            exit 2
+        }
+        if (
+            [string]::IsNullOrWhiteSpace($TargetPayloadRoot) -or
+            [string]::IsNullOrWhiteSpace($TargetPayloadVersion) -or
+            [string]::IsNullOrWhiteSpace($TargetSnapshotId) -or
+            [string]::IsNullOrWhiteSpace($TargetRuntimeVersion)
+        ) {
+            Write-Fail 'slot-cutover requires explicit target payload, snapshot, and runtime identity'
+            exit 2
+        }
+        if (
+            ($ExpectCurrentAbsent -and $ExpectedCurrentVersion) -or
+            (-not $ExpectCurrentAbsent -and
+                [string]::IsNullOrWhiteSpace($ExpectedCurrentVersion))
+        ) {
+            Write-Fail 'slot-cutover requires exactly one current-version expectation'
+            exit 2
+        }
+        $cellArgs += @(
+            '--expected-namespace-generation', $ExpectedNamespaceGeneration,
+            '--expected-install-generation', $ExpectedInstallGeneration,
+            '--target-payload-root', $TargetPayloadRoot,
+            '--target-payload-version', $TargetPayloadVersion,
+            '--target-snapshot-id', $TargetSnapshotId,
+            '--target-runtime-version', $TargetRuntimeVersion
+        )
+        if ($ExpectCurrentAbsent) {
+            $cellArgs += '--expect-current-absent'
+        } else {
+            $cellArgs += @('--expected-current-version', $ExpectedCurrentVersion)
+        }
+    }
+    Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+    Set-Location -LiteralPath $PluginDir
+    [IO.Directory]::SetCurrentDirectory($PluginDir)
+    & $cellPython -I -X utf8 @cellArgs
+    exit $LASTEXITCODE
+}
+
 if ($Action -in @(
     'slot-provision',
     'slot-validate',
@@ -376,6 +486,51 @@ function Test-VenvIsLink {
     catch { return $false }
 }
 
+function Test-RuntimeOrigin {
+    param([string]$Python, [string]$Slot)
+    if (
+        -not (Test-Path -LiteralPath $Python -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $Slot -PathType Container)
+    ) {
+        return $false
+    }
+    $priorCwd = [IO.Directory]::GetCurrentDirectory()
+    $priorLocation = Get-Location
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        Set-Location -LiteralPath $Slot
+        [IO.Directory]::SetCurrentDirectory($Slot)
+        $originOutput = @(
+            & $Python -I -X utf8 -c (
+                'from pathlib import Path; import agent_index; ' +
+                'print(Path(agent_index.__file__).resolve())'
+            ) 2>$null
+        )
+        if ($LASTEXITCODE -ne 0 -or $originOutput.Count -eq 0) {
+            return $false
+        }
+        $origin = [IO.Path]::GetFullPath(("$($originOutput[-1])").Trim())
+        $slotRoot = (Resolve-Path -LiteralPath $Slot).Path.TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        return (
+            (Test-Path -LiteralPath $origin -PathType Leaf) -and
+            $origin.StartsWith(
+                $slotRoot + [IO.Path]::DirectorySeparatorChar,
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        )
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $previousPreference
+        Set-Location -LiteralPath $priorLocation
+        [IO.Directory]::SetCurrentDirectory($priorCwd)
+    }
+}
+
 function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
     # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
@@ -409,8 +564,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Refusing to activate incomplete runtime slot versions/$SrcVersion"
         return $false
     }
-    & $py -c 'import agent_index' *> $null
-    if ($LASTEXITCODE -ne 0) {
+    if (-not (Test-RuntimeOrigin -Python $py -Slot $VenvDir)) {
         Write-Fail "Refusing to activate runtime slot versions/$SrcVersion because agent_index is not importable"
         return $false
     }
@@ -1103,8 +1257,9 @@ function Install-Runtime {
         if (Test-Path -LiteralPath $activePython -PathType Leaf) {
             & $activePython (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $activeVersion *> $null
             if ($LASTEXITCODE -eq 0) {
-                & $activePython -c 'import agent_index' *> $null
-                $activeReady = $LASTEXITCODE -eq 0
+                $activeReady = Test-RuntimeOrigin `
+                    -Python $activePython `
+                    -Slot (Join-Path (Join-Path $InstallDir 'versions') $activeVersion)
             }
         }
         if (-not $activeReady) {
@@ -1129,8 +1284,7 @@ function Install-Runtime {
         if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
             & $VenvPython $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
             if ($LASTEXITCODE -eq 0) {
-                & $VenvPython -c 'import agent_index' *> $null
-                $slotReady = $LASTEXITCODE -eq 0
+                $slotReady = Test-RuntimeOrigin -Python $VenvPython -Slot $VenvDir
             }
         }
         if (-not $slotReady -or $env:AGENT_INDEX_REBUILD_CURRENT -eq '1') {
@@ -1257,8 +1411,7 @@ function Install-Runtime {
         $prevVersion = Get-VersionedCurrent
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $VenvPython -c 'import agent_index' 2>$null
-        $slotOk = ($LASTEXITCODE -eq 0)
+        $slotOk = Test-RuntimeOrigin -Python $VenvPython -Slot $VenvDir
         $ErrorActionPreference = $prevEAP
         if (-not $slotOk) {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
@@ -1277,8 +1430,7 @@ function Install-Runtime {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $LinkPython -c 'import agent_index' 2>$null
-    $importOk = ($LASTEXITCODE -eq 0)
+    $importOk = Test-RuntimeOrigin -Python $LinkPython -Slot $LinkDir
     $ErrorActionPreference = $prevEAP
     if ($importOk) { Write-Ok 'Verification: module imports successfully' }
     else { Write-Fail 'Verification: module import failed'; exit 1 }
@@ -1541,9 +1693,9 @@ function Restart-EngineDaemon {
         Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
         Write-Ok "Engine daemon restarted via task: $EngineTaskName"
     } elseif (Test-Path $EngineVenvPython) {
-        & $EngineVenvPython -m agent_index engine stop 2>&1 | Out-Host
+        & $EngineVenvPython -I -X utf8 -m agent_index engine stop 2>&1 | Out-Host
         Start-Sleep -Seconds 1
-        & $EngineVenvPython -m agent_index engine start 2>&1 | Out-Host
+        & $EngineVenvPython -I -X utf8 -m agent_index engine start 2>&1 | Out-Host
         Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
     } else {
         Write-Skip 'Engine runtime not provisioned -- restart skipped'
@@ -1568,7 +1720,7 @@ if (Test-Path `$envFile) {
         }
     }
 }
-& '$($EngineVenvPython -replace "'","''")' -m agent_index engine run
+& '$($EngineVenvPython -replace "'","''")' -I -X utf8 -m agent_index engine run
 exit `$LASTEXITCODE
 "@
     [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
@@ -1761,11 +1913,11 @@ if (Test-Path -LiteralPath `$_resolver -PathType Leaf) {
 }
 `$_py = `$AgentRtPy
 if (`$_py) {
-    & `$_py -c 'import agent_index' *> `$null
+    & `$_py -I -X utf8 -c 'import agent_index' *> `$null
     if (`$LASTEXITCODE -ne 0) { `$_py = `$null }
 }
 if (-not `$_py) { [Console]::Error.WriteLine('[agent-index] no complete, importable runtime slot is available.'); exit 1 }
-& `$_py -m agent_index start
+& `$_py -I -X utf8 -m agent_index start
 exit `$LASTEXITCODE
 "@
     [System.IO.File]::WriteAllText($Launcher, $launcherContent, $utf8NoBom)
@@ -1853,7 +2005,7 @@ function Ensure-ServiceRunning {
     if (-not (Test-Path $activePy)) { Write-Skip 'Runtime not installed -- service not ensured'; return }
     Write-ServiceFiles
     if (Test-ServiceHealthy) { Write-Skip 'Service already healthy (user-mode daemon serving)'; return }
-    & $activePy -m agent_index deploy 2>&1 | Out-Host
+    & $activePy -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
     if (Test-ServiceHealthy) { Write-Ok 'Service ensured (user-mode daemon)' }
     else { Write-Warn 'Service ensure attempted -- endpoint not yet healthy (it may still be starting)' }
 }
@@ -1865,7 +2017,7 @@ function Ensure-EngineRunning {
     if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- engine not ensured'; return }
     Write-EngineFiles
     if (Test-EnginePort) { Write-Skip 'Engine already serving -- leaving the warm engine untouched'; return }
-    & $EngineVenvPython -m agent_index engine start 2>&1 | Out-Host
+    & $EngineVenvPython -I -X utf8 -m agent_index engine start 2>&1 | Out-Host
     Write-Ok 'Engine ensured (user-mode durable daemon)'
 }
 
@@ -1901,7 +2053,7 @@ function Invoke-ServiceCutover {
     Write-ServiceFiles
     if (Test-ServiceHealthy) {
         Write-Step 'Graceful cutover: moving the live service to the new build (zdd active/passive flip)...'
-        & $LinkPython -m agent_index deploy 2>&1 | Out-Host
+        & $LinkPython -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
         if (Test-ServiceHealthy) { Write-Ok 'Service cut over to the new build (routing flipped; old drained + retired)' }
         else { Write-Warn 'Service cutover attempted -- endpoint not yet healthy (it may still be starting)' }
     } else {
@@ -1976,7 +2128,7 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
-    if (Test-Path $LinkPython) { & $LinkPython -m agent_index stop | Out-Host }
+    if (Test-Path $LinkPython) { & $LinkPython -I -X utf8 -m agent_index stop | Out-Host }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Write-Ok "Service task stopped: $TaskName"

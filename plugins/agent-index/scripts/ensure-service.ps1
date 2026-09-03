@@ -9,16 +9,12 @@
     task as the default persistence layer; scheduled tasks are an opt-in advanced
     tier (`install.ps1 register-tasks`).
 
-    Fast + timeout-safe: a healthy daemon returns immediately; an unhealthy one
-    kicks a BACKGROUND `install.ps1 ensure` and returns without blocking session
-    start on the daemon spawn (or the engine's model load). PS5.1+.
+    Fast + timeout-safe: namespaced mode coalesces a background cell-runtime
+    ensure; legacy mode kicks a BACKGROUND `install.ps1 ensure`. Neither waits
+    for daemon startup or the engine's model load. PS5.1+.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 try {
-    $InstallDir = Join-Path $env:USERPROFILE '.agent-index'
-    # Only act on a box where agent-index is actually deployed.
-    if (-not (Test-Path (Join-Path $InstallDir 'deploy-manifest.json'))) { exit 0 }
-
     # Session start is repository-scoped activation. Merely enabling the plugin
     # must not start a machine-global daemon in an unrelated repository.
     $repoRoot = (& git rev-parse --show-toplevel 2>$null).Trim()
@@ -34,9 +30,32 @@ try {
     if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
     if (-not $python) { exit 0 }
     $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
-    $role = (& $python.Source $resolver --config $repoConfig --machine $me 2>$null |
-        Select-Object -Last 1)
+    $previousLocation = Get-Location
+    $previousCwd = [IO.Directory]::GetCurrentDirectory()
+    try {
+        Set-Location -LiteralPath $PSScriptRoot
+        [IO.Directory]::SetCurrentDirectory($PSScriptRoot)
+        $role = (
+            & $python.Source -I -X utf8 $resolver `
+                --config $repoConfig --machine $me 2>$null |
+                Select-Object -Last 1
+        )
+    } finally {
+        Set-Location -LiteralPath $previousLocation
+        [IO.Directory]::SetCurrentDirectory($previousCwd)
+    }
     if (("$role").Trim().ToLower() -ne 'host') { exit 0 }
+
+    $runtimeGate = Join-Path $PSScriptRoot 'runtime-gate.ps1'
+    if (Test-Path -LiteralPath $runtimeGate -PathType Leaf) {
+        & $runtimeGate __cell-service-ensure *> $null
+        $cellStatus = $LASTEXITCODE
+        if ($cellStatus -eq 0) { exit 0 }
+        if ($cellStatus -ne 10) { exit 0 }
+    }
+    $InstallDir = Join-Path $env:USERPROFILE '.agent-index'
+    # Only act on a box where agent-index is actually deployed.
+    if (-not (Test-Path (Join-Path $InstallDir 'deploy-manifest.json'))) { exit 0 }
 
     # Fast health probe on the LIVE routing endpoint (active.json ephemeral port);
     # a stale active.json pointing at a dead pid correctly reads as unhealthy.
@@ -47,7 +66,12 @@ try {
             $port = [int]((Get-Content $aj -Raw | ConvertFrom-Json).active.port)
             if ($port) {
                 $r = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2
-                $healthy = ($r.StatusCode -eq 200)
+                $health = $r.Content | ConvertFrom-Json
+                $healthy = (
+                    $r.StatusCode -eq 200 -and
+                    $health.status -ceq 'ok' -and
+                    $health.promoted -ne $false
+                )
             }
         } catch { $healthy = $false }
     }

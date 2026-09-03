@@ -34,10 +34,13 @@ for ((__legacy_i = 1; __legacy_i < ${#__legacy_args[@]}; __legacy_i++)); do
     fi
 done
 if [[ "$__legacy_action" != status &&
+      "$__legacy_action" != cell-provision &&
+      "$__legacy_action" != cell-recover &&
       "$__legacy_action" != slot-provision &&
       "$__legacy_action" != slot-validate &&
       "$__legacy_action" != slot-complete &&
-      "$__legacy_action" != slot-completion-validate ]]; then
+      "$__legacy_action" != slot-completion-validate &&
+      "$__legacy_action" != slot-cutover ]]; then
     LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
     if [[ ! -f "$LEGACY_PROBE" ]]; then
         _fail 'Legacy mutation probe is unavailable'
@@ -60,17 +63,23 @@ fi
 # Status and dependency-light cell-slot actions do not enter the self-stage
 # block that creates and reaps legacy staging directories.
 __skip_self_stage=0
-if [[ "$__legacy_action" == slot-provision ||
+if [[ "$__legacy_action" == cell-provision ||
+      "$__legacy_action" == cell-recover ||
+      "$__legacy_action" == slot-provision ||
       "$__legacy_action" == slot-validate ||
       "$__legacy_action" == slot-complete ||
-      "$__legacy_action" == slot-completion-validate ]]; then
+      "$__legacy_action" == slot-completion-validate ||
+      "$__legacy_action" == slot-cutover ]]; then
     cd "$HOME"
 fi
 if [[ ("$__legacy_action" == status ||
+       "$__legacy_action" == cell-provision ||
+       "$__legacy_action" == cell-recover ||
        "$__legacy_action" == slot-provision ||
        "$__legacy_action" == slot-validate ||
        "$__legacy_action" == slot-complete ||
-       "$__legacy_action" == slot-completion-validate) &&
+       "$__legacy_action" == slot-completion-validate ||
+       "$__legacy_action" == slot-cutover) &&
       -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
     if [[ "$__legacy_action" == status ]]; then
         export COPILOT_PLUGIN_INSTALL_STAGED=read-only-status
@@ -228,6 +237,15 @@ INSTALL_DIR=""
 CONTEXT=""
 EXPECTED_MARKETPLACE_ID=""
 DURABLE_HOME=""
+ORIGIN_PAYLOAD_ROOT=""
+EXPECTED_NAMESPACE_GENERATION=""
+EXPECTED_INSTALL_GENERATION=""
+EXPECTED_CURRENT_VERSION=""
+EXPECT_CURRENT_ABSENT=0
+TARGET_PAYLOAD_ROOT=""
+TARGET_PAYLOAD_VERSION=""
+TARGET_SNAPSHOT_ID=""
+TARGET_RUNTIME_VERSION=""
 FORCE="${AGENT_INDEX_ALLOW_DOWNGRADE:-0}"
 [[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
 while [[ $# -gt 0 ]]; do
@@ -239,6 +257,15 @@ while [[ $# -gt 0 ]]; do
         --context) CONTEXT="${2:-}"; shift 2 ;;
         --expected-marketplace-id) EXPECTED_MARKETPLACE_ID="${2:-}"; shift 2 ;;
         --durable-home) DURABLE_HOME="${2:-}"; shift 2 ;;
+        --origin-payload-root) ORIGIN_PAYLOAD_ROOT="${2:-}"; shift 2 ;;
+        --expected-namespace-generation) EXPECTED_NAMESPACE_GENERATION="${2:-}"; shift 2 ;;
+        --expected-install-generation) EXPECTED_INSTALL_GENERATION="${2:-}"; shift 2 ;;
+        --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
+        --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
+        --target-payload-root) TARGET_PAYLOAD_ROOT="${2:-}"; shift 2 ;;
+        --target-payload-version) TARGET_PAYLOAD_VERSION="${2:-}"; shift 2 ;;
+        --target-snapshot-id) TARGET_SNAPSHOT_ID="${2:-}"; shift 2 ;;
+        --target-runtime-version) TARGET_RUNTIME_VERSION="${2:-}"; shift 2 ;;
         *) shift ;;
     esac
 done
@@ -293,6 +320,83 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 # created). LINK_DIR is kept ONLY to derive `--link-name` so activate/gc can still
 # find and REMOVE any pre-existing `.venv` link.
 LINK_PYTHON="$VENV_PYTHON"
+
+if [[ "$ACTION" == "cell-provision" ||
+      "$ACTION" == "cell-recover" ||
+      "$ACTION" == "slot-cutover" ]]; then
+    [[ -n "$CONTEXT" ]] || {
+        _fail "$ACTION requires --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] || {
+        _fail "$ACTION requires --expected-marketplace-id"
+        exit 2
+    }
+    CELL_RUNTIME="$SCRIPT_DIR/cell-runtime.py"
+    [[ -f "$CELL_RUNTIME" ]] || {
+        _fail 'Installation-cell runtime coordinator is unavailable'
+        exit 1
+    }
+    CELL_PYTHON=""
+    for _candidate in python3 python; do
+        if command -v "$_candidate" >/dev/null 2>&1; then
+            CELL_PYTHON="$(command -v "$_candidate")"
+            break
+        fi
+    done
+    [[ -n "$CELL_PYTHON" ]] || {
+        _fail 'Python 3.10+ is required for installation-cell lifecycle actions'
+        exit 1
+    }
+    CELL_ARGS=(
+        "$CELL_RUNTIME"
+        "$ACTION"
+        --context "$CONTEXT"
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
+    )
+    if [[ -n "$DURABLE_HOME" ]]; then
+        CELL_ARGS+=(--durable-home "$DURABLE_HOME")
+    fi
+    if [[ "$ACTION" == "cell-provision" ]]; then
+        if [[ -n "$ORIGIN_PAYLOAD_ROOT" ]]; then
+            CELL_ARGS+=(--origin-payload-root "$ORIGIN_PAYLOAD_ROOT")
+        fi
+    elif [[ "$ACTION" == "slot-cutover" ]]; then
+        [[ -n "$EXPECTED_NAMESPACE_GENERATION" &&
+           -n "$EXPECTED_INSTALL_GENERATION" ]] || {
+            _fail 'slot-cutover requires expected namespace and install generations'
+            exit 2
+        }
+        [[ -n "$TARGET_PAYLOAD_ROOT" &&
+           -n "$TARGET_PAYLOAD_VERSION" &&
+           -n "$TARGET_SNAPSHOT_ID" &&
+           -n "$TARGET_RUNTIME_VERSION" ]] || {
+            _fail 'slot-cutover requires explicit target payload, snapshot, and runtime identity'
+            exit 2
+        }
+        if [[ "$EXPECT_CURRENT_ABSENT" -eq 1 && -n "$EXPECTED_CURRENT_VERSION" ]] ||
+           [[ "$EXPECT_CURRENT_ABSENT" -eq 0 && -z "$EXPECTED_CURRENT_VERSION" ]]; then
+            _fail 'slot-cutover requires exactly one current-version expectation'
+            exit 2
+        fi
+        CELL_ARGS+=(
+            --expected-namespace-generation "$EXPECTED_NAMESPACE_GENERATION"
+            --expected-install-generation "$EXPECTED_INSTALL_GENERATION"
+            --target-payload-root "$TARGET_PAYLOAD_ROOT"
+            --target-payload-version "$TARGET_PAYLOAD_VERSION"
+            --target-snapshot-id "$TARGET_SNAPSHOT_ID"
+            --target-runtime-version "$TARGET_RUNTIME_VERSION"
+        )
+        if [[ "$EXPECT_CURRENT_ABSENT" -eq 1 ]]; then
+            CELL_ARGS+=(--expect-current-absent)
+        else
+            CELL_ARGS+=(--expected-current-version "$EXPECTED_CURRENT_VERSION")
+        fi
+    fi
+    unset PYTHONPATH PYTHONHOME
+    cd "$PLUGIN_DIR" || exit 1
+    exec "$CELL_PYTHON" -I -X utf8 "${CELL_ARGS[@]}"
+fi
 
 if [[ "$ACTION" == "slot-provision" ||
       "$ACTION" == "slot-validate" ||
@@ -352,7 +456,7 @@ _versioned_activate() {
         _fail "Refusing to activate incomplete runtime slot versions/$SRC_VERSION"
         return 1
     fi
-    if ! "$py" -c 'import agent_index' >/dev/null 2>&1; then
+    if ! _runtime_origin_under "$py" "$VENV_DIR"; then
         _fail "Refusing to activate runtime slot versions/$SRC_VERSION because agent_index is not importable"
         return 1
     fi
@@ -803,6 +907,24 @@ _version_lt() {
     [[ "$lower" == "$a" ]]
 }
 
+_runtime_origin_under() {
+    local py="$1" slot="$2" origin="" origin_dir="" origin_abs="" slot_abs=""
+    [[ -x "$py" && -d "$slot" ]] || return 1
+    origin="$(
+        cd "$slot" &&
+        "$py" -I -X utf8 -c \
+            'from pathlib import Path; import agent_index; print(Path(agent_index.__file__).resolve())'
+    2>/dev/null)" || return 1
+    [[ -n "$origin" && -f "$origin" ]] || return 1
+    origin_dir="$(dirname "$origin")"
+    origin_abs="$(cd "$origin_dir" && pwd -P)/$(basename "$origin")" || return 1
+    slot_abs="$(cd "$slot" && pwd -P)" || return 1
+    case "$origin_abs" in
+        "$slot_abs"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 _downgrade_guard() {
     local installed source
     installed="$(_installed_version)" || return 0
@@ -941,7 +1063,7 @@ _ensure_runtime() {
         [[ -x "$active_python" ]] || active_python="$INSTALL_DIR/versions/$active_version/Scripts/python.exe"
         if [[ -x "$active_python" ]] \
             && "$active_python" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$active_version" >/dev/null 2>&1 \
-            && "$active_python" -c 'import agent_index' >/dev/null 2>&1; then
+            && _runtime_origin_under "$active_python" "$INSTALL_DIR/versions/$active_version"; then
             active_ready=1
         fi
         if [[ "$active_ready" == 0 ]]; then
@@ -962,7 +1084,7 @@ _ensure_runtime() {
         local slot_ready=0 vr="$SCRIPT_DIR/versioned_runtime.py"
         if [[ -x "$VENV_PYTHON" ]] \
             && "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1 \
-            && "$VENV_PYTHON" -c 'import agent_index' >/dev/null 2>&1; then
+            && _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
             slot_ready=1
         fi
         if [[ "$slot_ready" == 0 || "${AGENT_INDEX_REBUILD_CURRENT:-0}" == 1 ]]; then
@@ -1042,7 +1164,7 @@ _ensure_runtime() {
     local prev_version=""
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! "$VENV_PYTHON" -c 'import agent_index' 2>/dev/null; then
+        if ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
@@ -1056,7 +1178,7 @@ _ensure_runtime() {
 
     _write_manifest
 
-    if "$LINK_PYTHON" -c 'import agent_index' 2>/dev/null; then
+    if _runtime_origin_under "$LINK_PYTHON" "$(dirname "$(dirname "$LINK_PYTHON")")"; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'
@@ -1317,7 +1439,7 @@ Type=simple
 Environment=PYTHONUTF8=1
 Environment=AGENT_INDEX_ENGINE_HOME=$ENGINE_HOME
 EnvironmentFile=-$ENGINE_ENV_FILE
-ExecStart=$ENGINE_VENV_PYTHON -m agent_index engine run
+ExecStart=$ENGINE_VENV_PYTHON -I -X utf8 -m agent_index engine run
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$ENGINE_HOME
@@ -1369,7 +1491,7 @@ After=network.target
 Type=simple
 EnvironmentFile=-$ENV_FILE
 Environment=PYTHONUTF8=1
-ExecStart=$VENV_PYTHON -m agent_index start
+ExecStart=$VENV_PYTHON -I -X utf8 -m agent_index start
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=$INSTALL_DIR
@@ -1404,7 +1526,7 @@ _start() {
         _ok "Service started ($SYSTEMD_UNIT)"
     elif [[ -x "$LINK_PYTHON" ]]; then
         if _service_healthy; then _skip 'Service already running -- not starting a second daemon'; return 0; fi
-        nohup "$LINK_PYTHON" -m agent_index start >> "$INSTALL_DIR/service.log" 2>&1 &
+        nohup "$LINK_PYTHON" -I -X utf8 -m agent_index start >> "$INSTALL_DIR/service.log" 2>&1 &
         _ok "Service process started"
     else
         _fail 'Runtime not installed'
@@ -1414,7 +1536,7 @@ _start() {
 
 _stop() {
     if [[ -x "$LINK_PYTHON" ]]; then
-        "$LINK_PYTHON" -m agent_index stop || true
+        "$LINK_PYTHON" -I -X utf8 -m agent_index stop || true
     fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
@@ -1510,7 +1632,7 @@ _ensure_engine_running() {
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT" ]]; then
         systemctl --user start "$ENGINE_SYSTEMD_UNIT" 2>/dev/null || true
     else
-        "$ENGINE_VENV_PYTHON" -m agent_index engine start 2>/dev/null || true
+        "$ENGINE_VENV_PYTHON" -I -X utf8 -m agent_index engine start 2>/dev/null || true
     fi
     _ok 'Engine ensured (user-mode durable daemon)'
 }
@@ -1545,7 +1667,7 @@ _service_cutover() {
     # Cut over only a LIVE routed service; no live endpoint -> fall back.
     _service_healthy || return 1
     _step 'Graceful cutover: moving the live service to the new build (zdd active/passive flip)...'
-    if "$LINK_PYTHON" -m agent_index deploy >/dev/null 2>&1 && _service_healthy; then
+    if "$LINK_PYTHON" -I -X utf8 -m agent_index deploy >/dev/null 2>&1 && _service_healthy; then
         _ok 'Service cut over to the new build (routing flipped; old drained + retired; warm engine untouched)'
         return 0
     fi

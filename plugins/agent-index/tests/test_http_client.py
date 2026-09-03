@@ -25,18 +25,24 @@ def test_clusters_omits_unspecified_filters(monkeypatch):
         def __exit__(self, *_args):
             return None
 
-        def request(self, method, url, *, json, params):
+        def request(self, method, url, *, json, params, headers):
             captured.update(
                 method=method,
                 url=url,
                 json=json,
                 params=params,
+                headers=headers,
             )
             return FakeResponse()
 
     monkeypatch.setattr(client.httpx, "Client", FakeHttpClient)
 
-    client.AgentIndexClient("http://indexer").clusters(
+    api = client.AgentIndexClient(
+        "http://indexer",
+        instance_token="instance",
+        transaction_token="transaction",
+    )
+    api.clusters(
         source=None,
         bucket=None,
         model=None,
@@ -48,3 +54,10 @@ def test_clusters_omits_unspecified_filters(monkeypatch):
         "exact_dupes_only": False,
         "limit": 50,
     }
+    assert captured["headers"]["X-Agent-Index-Installation-Id"] == ""
+    assert captured["headers"]["X-Agent-Index-Instance-Token"] == "instance"
+    assert captured["headers"]["X-Agent-Index-Transaction-Token"] == "transaction"
+
+    api.promote()
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://indexer/promote"
