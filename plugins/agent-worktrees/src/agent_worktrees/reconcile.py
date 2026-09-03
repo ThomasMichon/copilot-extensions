@@ -25,9 +25,11 @@ Runtime reconciliation is **local and version-keyed**: it compares the
 installed payload version (``plugin.json``) against the deployed runtime
 version (normally ``~/.<plugin>/deploy-manifest.json`` -> ``source.version``)
 and only acts on drift, so a re-launch with no version change does ~no work.
-For installation-cell-aware plugins, reconciliation validates the active
-plugin-specific receipt, inspects that namespaced root, and supplies the same
-receipt to the installer. The marketplace **payload**
+For installation-cell-aware plugins, reconciliation asks the vendored
+installation-context helper which mode is authoritative. An authorized legacy
+runtime remains receipt-free; namespaced operation requires the helper's exact
+validated plugin-specific receipt/root, which is then supplied to the installer.
+The marketplace **payload**
 install/refresh (``copilot plugin install/update``, a network pull that also
 holds the Windows payload dir open) is **off by default** and emitted only when
 a caller opts in via ``include_payload_refresh`` -- the Picker/operator "update
@@ -53,6 +55,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +87,14 @@ _RUNTIME_ENV_UNSET = (
     "COPILOT_PLUGIN_ROOT",
     "COPILOT_PLUGIN_STAGED_FROM",
     "PYTHONPATH",
+)
+_INSTALLATION_RESOLUTION_SCHEMA = "copilot-extensions.installation-resolution"
+_CORE_SOURCE_JSON = json.dumps(
+    {
+        "source": "github",
+        "repo": "ThomasMichon/copilot-extensions",
+    },
+    separators=(",", ":"),
 )
 
 # Candidate locations for the Copilot CLI executable when a bare ``copilot`` is
@@ -159,6 +170,19 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build one JSON object while rejecting duplicate or case-conflicting keys."""
+    result: dict[str, Any] = {}
+    normalized: set[str] = set()
+    for key, value in pairs:
+        folded = key.casefold()
+        if key in result or folded in normalized:
+            raise ValueError(f"duplicate or case-conflicting JSON key: {key}")
+        result[key] = value
+        normalized.add(folded)
+    return result
 
 
 def _home() -> Path:
@@ -249,6 +273,40 @@ def _ce_plugin_names(enabled: dict[str, bool]) -> set[str]:
     return names
 
 
+def _read_enabled_plugin_settings(
+    base: Path,
+    rels: Sequence[tuple[str, ...]],
+) -> list[str]:
+    """Read activation settings strictly so callers can fail closed."""
+    enabled: dict[str, bool] = {}
+    for rel in rels:
+        path = base.joinpath(*rel)
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError) as error:
+            raise ValueError(f"cannot read plugin settings {path}: {error}") from error
+        try:
+            data = json.loads(raw, object_pairs_hook=_strict_json_object)
+        except (json.JSONDecodeError, ValueError) as error:
+            raise ValueError(f"invalid plugin settings {path}: {error}") from error
+        if not isinstance(data, dict):
+            raise ValueError(f"plugin settings must contain an object: {path}")
+        raw_enabled = data.get("enabledPlugins")
+        if raw_enabled is None:
+            continue
+        if not isinstance(raw_enabled, dict):
+            raise ValueError(f"enabledPlugins must be an object: {path}")
+        for source, value in raw_enabled.items():
+            if not isinstance(source, str) or not isinstance(value, bool):
+                raise ValueError(
+                    f"enabledPlugins entries must be string/boolean pairs: {path}"
+                )
+            enabled[source] = value
+    return sorted(_ce_plugin_names(enabled))
+
+
 def read_enabled_plugins(repo_dir: Path) -> list[str]:
     """Return copilot-extensions plugin names enabled in repo settings.
 
@@ -259,9 +317,9 @@ def read_enabled_plugins(repo_dir: Path) -> list[str]:
     the local file overriding per key and native winning over Claude on a key
     conflict. Excludes ``agent-worktrees`` itself (managed by the self-update path).
     """
-    from plugin_resolve import read_repo_settings
+    from plugin_resolve import SETTINGS_RELS
 
-    return sorted(_ce_plugin_names(read_repo_settings(repo_dir).enabled))
+    return _read_enabled_plugin_settings(repo_dir, SETTINGS_RELS)
 
 
 def read_user_enabled_plugins() -> list[str]:
@@ -274,26 +332,14 @@ def read_user_enabled_plugins() -> list[str]:
     ``.github/copilot/settings.json``), so a plugin enabled **only** user-global
     would otherwise never be refreshed by ``update`` and would silently go stale
     (#653). Same marketplace filter + ``agent-worktrees`` self-exclusion.
-    Fail-safe -> ``[]``.
+    Missing files produce ``[]``; unreadable or malformed files raise so update
+    can keep installed inventory required instead of treating unknown activation
+    as inactive.
     """
-    home = _copilot_home()
-    enabled: dict[str, bool] = {}
-    for fname in ("settings.json", "settings.local.json"):  # local overrides base
-        p = home / fname
-        try:
-            if not p.is_file():
-                continue
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(data, dict):
-            continue
-        en = data.get("enabledPlugins")
-        if isinstance(en, dict):
-            for k, v in en.items():
-                if isinstance(k, str):
-                    enabled[k] = bool(v)
-    return sorted(_ce_plugin_names(enabled))
+    return _read_enabled_plugin_settings(
+        _copilot_home(),
+        (("settings.json",), ("settings.local.json",)),
+    )
 
 
 def read_installed_plugins() -> list[str]:
@@ -418,21 +464,10 @@ def _explicit_context_receipt() -> tuple[Path, dict[str, Any]] | None:
     if not pointer.is_absolute():
         raise ValueError("COPILOT_EXTENSIONS_CONTEXT must be an absolute path")
 
-    def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        normalized: set[str] = set()
-        for key, value in pairs:
-            folded = key.casefold()
-            if key in result or folded in normalized:
-                raise ValueError(f"duplicate or case-conflicting JSON key: {key}")
-            result[key] = value
-            normalized.add(folded)
-        return result
-
     try:
         receipt = json.loads(
             pointer.read_text(encoding="utf-8"),
-            object_pairs_hook=_strict_object,
+            object_pairs_hook=_strict_json_object,
         )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         raise ValueError(
@@ -641,55 +676,146 @@ def runtime_installation_context(
     plugin_name: str,
     plugin_dir: Path,
 ) -> tuple[Path, Path] | None:
-    """Return the validated active core receipt and plugin root.
-
-    A plugin without the vendored installation-context library remains a
-    legacy runtime. Once the library is present, reconciliation fails closed
-    when its active receipt is missing or invalid.
-    """
-    candidate = runtime_installation_candidate(plugin_name, plugin_dir)
-    if candidate is None:
+    """Return the validated active namespaced receipt and plugin root, if any."""
+    resolution = resolve_runtime_installation(plugin_name, plugin_dir)
+    if resolution.context is None:
         return None
-    receipt, plugin_root = candidate
+    return resolution.context, resolution.runtime_root
+
+
+@dataclass(frozen=True)
+class RuntimeInstallationResolution:
+    """One helper-authorized runtime root for reconciliation."""
+
+    runtime_root: Path
+    context: Path | None
+    actual_mode: str
+    desired_mode: str
+    status: str
+    reason: str
+
+
+def _legacy_runtime_resolution(
+    plugin_name: str,
+    *,
+    home: Path | None = None,
+    reason: str = "legacy-helper-absent",
+) -> RuntimeInstallationResolution:
+    return RuntimeInstallationResolution(
+        runtime_root=runtime_dir(plugin_name, home),
+        context=None,
+        actual_mode="legacy",
+        desired_mode="legacy",
+        status="ready",
+        reason=reason,
+    )
+
+
+def _installation_context_helper(
+    plugin_name: str,
+    plugin_dir: Path,
+) -> Path | None:
+    helper_dir = plugin_dir / "scripts" / "installation-context"
+    helper_py = helper_dir / "installation_context.py"
+    helper_ps1 = helper_dir / "installation-context.ps1"
+    if not helper_py.is_file() and not helper_ps1.is_file():
+        return None
+    required = helper_ps1 if os.name == "nt" else helper_py
+    if not required.is_file():
+        raise ValueError(
+            f"platform installation-context helper is missing for {plugin_name}"
+        )
+    return required
+
+
+def _run_installation_mode_helper(
+    plugin_name: str,
+    plugin_dir: Path,
+    helper: Path,
+    legacy_root: Path,
+    *,
+    context: Path | None,
+) -> dict[str, Any]:
+    durable_home = _home() / ".copilot-extensions"
+    common = {
+        "source_json": _CORE_SOURCE_JSON,
+        "marketplace_key": MARKETPLACE,
+        "plugin_id": plugin_name,
+        "payload_root": str(plugin_dir),
+        "copilot_home": str(_copilot_home()),
+        "durable_home": str(durable_home),
+        "legacy_root": str(legacy_root),
+        "expected_marketplace_id": CORE_MARKETPLACE_ID,
+        "expected_plugin_id": plugin_name,
+        "expected_payload_root": str(plugin_dir),
+    }
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if shell is None:
+            raise ValueError(
+                f"PowerShell is required to resolve installation mode for {plugin_name}"
+            )
+        command = [
+            shell,
+            "-NoProfile",
+            "-File",
+            str(helper),
+            "probe-legacy",
+            "-SourceJson",
+            common["source_json"],
+            "-MarketplaceKey",
+            common["marketplace_key"],
+            "-PluginId",
+            common["plugin_id"],
+            "-PayloadRoot",
+            common["payload_root"],
+            "-CopilotHome",
+            common["copilot_home"],
+            "-DurableHome",
+            common["durable_home"],
+            "-LegacyRoot",
+            common["legacy_root"],
+            "-ExpectedMarketplaceId",
+            common["expected_marketplace_id"],
+            "-ExpectedPluginId",
+            common["expected_plugin_id"],
+            "-ExpectedPayloadRoot",
+            common["expected_payload_root"],
+        ]
+        if context is not None:
+            command.extend(["-Context", str(context)])
+    else:
+        command = [
+            sys.executable,
+            str(helper),
+            "probe-legacy",
+            "--source-json",
+            common["source_json"],
+            "--marketplace-key",
+            common["marketplace_key"],
+            "--plugin-id",
+            common["plugin_id"],
+            "--payload-root",
+            common["payload_root"],
+            "--copilot-home",
+            common["copilot_home"],
+            "--durable-home",
+            common["durable_home"],
+            "--legacy-root",
+            common["legacy_root"],
+            "--expected-marketplace-id",
+            common["expected_marketplace_id"],
+            "--expected-plugin-id",
+            common["expected_plugin_id"],
+            "--expected-payload-root",
+            common["expected_payload_root"],
+        ]
+        if context is not None:
+            command.extend(["--context", str(context)])
 
     child_environment = os.environ.copy()
     for key in _RUNTIME_ENV_UNSET:
         child_environment.pop(key, None)
-    if os.name == "nt":
-        helper = (
-            plugin_dir
-            / "scripts"
-            / "installation-context"
-            / "installation-context.ps1"
-        )
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        if shell is None:
-            raise ValueError(
-                f"PowerShell is required to validate installation context for {plugin_name}"
-            )
-        command = [
-            shell, "-NoProfile", "-File", str(helper), "validate",
-            "-Context", str(receipt),
-            "-ExpectedMarketplaceId", CORE_MARKETPLACE_ID,
-            "-ExpectedPluginId", plugin_name,
-            "-ExpectedPayloadRoot", str(plugin_dir),
-            "-DurableHome", str(_home() / ".copilot-extensions"),
-        ]
-    else:
-        helper = (
-            plugin_dir
-            / "scripts"
-            / "installation-context"
-            / "installation_context.py"
-        )
-        command = [
-            sys.executable, str(helper), "validate",
-            "--context", str(receipt),
-            "--expected-marketplace-id", CORE_MARKETPLACE_ID,
-            "--expected-plugin-id", plugin_name,
-            "--expected-payload-root", str(plugin_dir),
-            "--durable-home", str(_home() / ".copilot-extensions"),
-        ]
     try:
         process = subprocess.run(
             command,
@@ -699,67 +825,273 @@ def runtime_installation_context(
             env=child_environment,
             timeout=15,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
         raise ValueError(
-            f"installation-context validator could not run for {plugin_name}: {error}"
+            f"installation-mode resolution timed out for {plugin_name}"
         ) from error
-    if process.returncode:
-        detail = process.stderr.strip() or process.stdout.strip() or "validation failed"
+    except OSError as error:
         raise ValueError(
-            f"active installation receipt is invalid for {plugin_name}: {detail}"
+            f"installation-mode resolver could not run for {plugin_name}: {error}"
+        ) from error
+    if process.returncode not in {0, 3}:
+        raise ValueError(
+            f"installation-mode resolver failed for {plugin_name}"
         )
     try:
-        result = json.loads(process.stdout)
-        validated_root = Path(result["pluginRoot"])
-        validated_receipt = Path(result["installReceipt"])
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        result = json.loads(
+            process.stdout,
+            object_pairs_hook=_strict_json_object,
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
         raise ValueError(
-            f"installation-context validator returned invalid output for {plugin_name}"
+            f"installation-mode resolver returned invalid JSON for {plugin_name}"
         ) from error
-    if not _same_path(validated_receipt, receipt):
+    if not isinstance(result, dict):
         raise ValueError(
-            f"installation-context validator selected an unexpected receipt for {plugin_name}"
+            f"installation-mode resolver returned a non-object for {plugin_name}"
         )
-    if not _same_path(validated_root, plugin_root):
+    allow_mutation = result.get("allowMutation")
+    if (
+        (process.returncode == 0 and allow_mutation is not True)
+        or (process.returncode == 3 and allow_mutation is not False)
+    ):
         raise ValueError(
-            f"installation-context validator selected an unexpected root for {plugin_name}"
+            f"installation-mode resolver returned inconsistent mutation status "
+            f"for {plugin_name}"
         )
-    return receipt, plugin_root
+    return result
+
+
+def _path_field(
+    result: dict[str, Any],
+    field: str,
+    plugin_name: str,
+    *,
+    required: bool,
+) -> Path | None:
+    value = result.get(field)
+    if value is None and not required:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError(
+            f"installation-mode resolver returned invalid {field} for {plugin_name}"
+        )
+    path = Path(value)
+    if not path.is_absolute():
+        raise ValueError(
+            f"installation-mode resolver returned relative {field} for {plugin_name}"
+        )
+    return path
+
+
+def _select_runtime_installation(
+    plugin_name: str,
+    result: dict[str, Any],
+    *,
+    home: Path | None = None,
+) -> RuntimeInstallationResolution:
+    if (
+        result.get("schema") != _INSTALLATION_RESOLUTION_SCHEMA
+        or result.get("version") != 1
+    ):
+        raise ValueError(
+            f"installation-mode resolver returned an unsupported schema for {plugin_name}"
+        )
+    if result.get("pluginId") != plugin_name:
+        raise ValueError(
+            f"installation-mode resolver selected another plugin for {plugin_name}"
+        )
+
+    marketplace_id = result.get("marketplaceId")
+    status = result.get("status")
+    reason = result.get("reason")
+    actual_mode = result.get("actualMode")
+    desired_mode = result.get("desiredMode")
+    allow_mutation = result.get("allowMutation")
+    if status not in {
+        "ready",
+        "maintenance-blocked",
+        "foreign-environment",
+        "orphaned-transfer",
+        "revalidation-required",
+        "migration-required",
+        "deactivation-required",
+        "provenance-blocked",
+        "invalid",
+    }:
+        raise ValueError(
+            f"installation-mode resolver returned invalid status for {plugin_name}"
+        )
+    if not isinstance(reason, str) or not reason:
+        raise ValueError(
+            f"installation-mode resolver returned invalid reason for {plugin_name}"
+        )
+    if actual_mode not in {"legacy", "namespaced", None}:
+        raise ValueError(
+            f"installation-mode resolver returned invalid actualMode for {plugin_name}"
+        )
+    if desired_mode not in {"legacy", "namespaced", None}:
+        raise ValueError(
+            f"installation-mode resolver returned invalid desiredMode for {plugin_name}"
+        )
+    if not isinstance(allow_mutation, bool):
+        raise ValueError(
+            f"installation-mode resolver returned invalid allowMutation for {plugin_name}"
+        )
+
+    runtime_root = _path_field(
+        result,
+        "runtimeRoot",
+        plugin_name,
+        required=actual_mode is not None,
+    )
+    context = _path_field(
+        result,
+        "context",
+        plugin_name,
+        required=actual_mode == "namespaced",
+    )
+    legacy_root = runtime_dir(plugin_name, home)
+
+    legacy_allowed = (
+        actual_mode == "legacy"
+        and allow_mutation
+        and marketplace_id == CORE_MARKETPLACE_ID
+        and (
+            (status == "ready" and desired_mode == "legacy")
+            or status == "migration-required"
+        )
+    )
+    if legacy_allowed:
+        if runtime_root is None or not _same_path(runtime_root, legacy_root):
+            raise ValueError(
+                f"installation-mode resolver selected an unexpected legacy root "
+                f"for {plugin_name}"
+            )
+        return RuntimeInstallationResolution(
+            runtime_root=legacy_root,
+            context=None,
+            actual_mode=actual_mode,
+            desired_mode=desired_mode,
+            status=status,
+            reason=reason,
+        )
+
+    namespaced_allowed = (
+        actual_mode == "namespaced"
+        and status in {"ready", "deactivation-required"}
+    )
+    if namespaced_allowed:
+        if marketplace_id != CORE_MARKETPLACE_ID:
+            raise ValueError(
+                f"installation-mode resolver selected another marketplace for "
+                f"{plugin_name}"
+            )
+        expected_context = (
+            (home or _home())
+            / ".copilot-extensions"
+            / "marketplaces"
+            / CORE_MARKETPLACE_ID
+            / "plugins"
+            / plugin_name
+            / "install.json"
+        )
+        expected_root = expected_context.parent
+        if (
+            context is None
+            or runtime_root is None
+            or not _same_path(context, expected_context)
+            or not _same_path(runtime_root, expected_root)
+            or not context.is_file()
+            or not runtime_root.is_dir()
+        ):
+            raise ValueError(
+                f"installation-mode resolver selected an unexpected namespaced "
+                f"receipt or root for {plugin_name}"
+            )
+        return RuntimeInstallationResolution(
+            runtime_root=expected_root,
+            context=expected_context,
+            actual_mode=actual_mode,
+            desired_mode=desired_mode,
+            status=status,
+            reason=reason,
+        )
+
+    raise ValueError(
+        f"installation mode blocks runtime reconciliation for {plugin_name}: "
+        f"status={status}, reason={reason}"
+    )
+
+
+def resolve_runtime_installation(
+    plugin_name: str,
+    plugin_dir: Path,
+    *,
+    home: Path | None = None,
+) -> RuntimeInstallationResolution:
+    """Resolve the authoritative runtime root without activating any mode.
+
+    Plugins without installation-cell support keep their conventional legacy
+    root. Cell-aware plugins delegate desired/actual mode and mutation
+    authorization to their vendored installation-context helper. Legacy mode
+    requires no ``install.json`` receipt; namespaced mode requires the helper's
+    validated, exact receipt and root.
+    """
+    explicit = (
+        _explicit_context_target()
+        if plugin_name.startswith("agent-")
+        else None
+    )
+    eligibility = installation_cell_eligibility(plugin_name, plugin_dir)
+    if eligibility is False:
+        if explicit is not None and explicit[1].startswith("agent-"):
+            raise ValueError(
+                f"exact core installation context cannot authorize non-cell "
+                f"runtime {plugin_name}"
+            )
+        return _legacy_runtime_resolution(plugin_name, home=home)
+    if eligibility is None:
+        raise ValueError(
+            f"installation-cell eligibility is indeterminate for {plugin_name}"
+        )
+
+    helper = _installation_context_helper(plugin_name, plugin_dir)
+    if helper is None:
+        if explicit is not None and explicit[1].startswith("agent-"):
+            raise ValueError(
+                f"no trusted installation-context validator is available for "
+                f"{plugin_name}"
+            )
+        return _legacy_runtime_resolution(plugin_name, home=home)
+
+    context: Path | None = None
+    if explicit is not None:
+        pointer, target_name = explicit
+        if target_name == plugin_name:
+            context = pointer
+        else:
+            # Validate an exact core context before removing it from this
+            # plugin's helper invocation. A context for another plugin must not
+            # capture this plugin, but malformed core evidence still fails closed.
+            _selected_runtime_root(plugin_name, plugin_dir, home=home)
+
+    result = _run_installation_mode_helper(
+        plugin_name,
+        plugin_dir,
+        helper,
+        runtime_dir(plugin_name, home),
+        context=context,
+    )
+    return _select_runtime_installation(plugin_name, result, home=home)
 
 
 def runtime_installation_candidate(
     plugin_name: str,
     plugin_dir: Path,
 ) -> tuple[Path, Path] | None:
-    """Return the deterministic governed receipt/root without validating it."""
-    helper_dir = plugin_dir / "scripts" / "installation-context"
-    helper_py = helper_dir / "installation_context.py"
-    helper_ps1 = helper_dir / "installation-context.ps1"
-    if not helper_py.is_file() and not helper_ps1.is_file():
-        return None
-    required_helper = (
-        helper_ps1
-        if os.name == "nt"
-        else helper_py
-    )
-    if not required_helper.is_file():
-        raise ValueError(
-            f"platform installation-context helper is missing for {plugin_name}"
-        )
-    receipt = (
-        _home()
-        / ".copilot-extensions"
-        / "marketplaces"
-        / CORE_MARKETPLACE_ID
-        / "plugins"
-        / plugin_name
-        / "install.json"
-    )
-    if not receipt.is_file():
-        raise ValueError(
-            f"active installation receipt is missing for {plugin_name}: {receipt}"
-        )
-    return receipt, receipt.parent
+    """Return the helper-authorized namespaced receipt/root, if active."""
+    return runtime_installation_context(plugin_name, plugin_dir)
 
 
 def clean_runtime_installer_environment(
@@ -778,15 +1110,18 @@ def runtime_installer_environment(
     plugin_dir: Path,
     *,
     base: dict[str, str] | None = None,
-) -> tuple[dict[str, str], Path | None]:
-    """Build a clean installer environment and return its governed runtime root."""
+    home: Path | None = None,
+) -> tuple[dict[str, str], Path]:
+    """Build a clean installer environment and return the selected runtime root."""
     child_environment = clean_runtime_installer_environment(base=base)
-    context = runtime_installation_context(plugin_name, plugin_dir)
-    if context is None:
-        return child_environment, None
-    receipt, plugin_root = context
-    child_environment["COPILOT_EXTENSIONS_CONTEXT"] = str(receipt)
-    return child_environment, plugin_root
+    resolution = resolve_runtime_installation(
+        plugin_name,
+        plugin_dir,
+        home=home,
+    )
+    if resolution.context is not None:
+        child_environment["COPILOT_EXTENSIONS_CONTEXT"] = str(resolution.context)
+    return child_environment, resolution.runtime_root
 
 
 # Hook shims deployed to ``~/.agent-worktrees/bin/`` by install.ps1's
@@ -887,7 +1222,12 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-def runtime_running_version(name: str, home: Path | None = None) -> str | None:
+def runtime_running_version(
+    name: str,
+    home: Path | None = None,
+    *,
+    root: Path | None = None,
+) -> str | None:
     """Version the *running* runtime reported on boot, if its pid is still alive.
 
     Reads ``~/.<plugin>/running-version.json`` (``{version, pid, started_at}``),
@@ -897,7 +1237,8 @@ def runtime_running_version(name: str, home: Path | None = None) -> str | None:
     the truthful "what is actually serving" signal -- a live daemon can lag its
     installed plugin while the on-disk manifest already matches (dotfiles #533).
     """
-    data = _read_json(runtime_dir(name, home) / "running-version.json")
+    selected_root = root or runtime_dir(name, home)
+    data = _read_json(selected_root / "running-version.json")
     if not data:
         return None
     ver = data.get("version")
@@ -959,7 +1300,11 @@ def _zero_downtime_update(plugin_dir: Path) -> bool:
     return bool(data.get("zeroDowntimeUpdate"))
 
 
-def runtime_installer_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
+def runtime_installer_argv(
+    plugin_dir: Path,
+    *,
+    context: Path | None = None,
+) -> tuple[str, list[str]] | None:
     """Build the (display, argv) to deploy/update a plugin's runtime.
 
     Prefers ``scripts/install.{sh,ps1} update``; falls back to
@@ -974,6 +1319,60 @@ def runtime_installer_argv(plugin_dir: Path) -> tuple[str, list[str]] | None:
     ``update`` never passes the flag, so its behavior is unchanged.
     """
     scripts = plugin_dir / "scripts"
+    if context is not None:
+        manifest = _read_json(plugin_dir / "plugin.json") or {}
+        plugin_name = manifest.get("name")
+        if plugin_name != "agent-machines":
+            raise ValueError(
+                f"namespaced runtime transaction is unavailable for "
+                f"{plugin_name or plugin_dir.name}"
+            )
+        try:
+            durable_home = context.parents[4]
+        except IndexError as error:
+            raise ValueError(
+                f"installation context is outside the durable receipt layout: "
+                f"{context}"
+            ) from error
+        if platform.system() == "Windows":
+            installer = scripts / "init.ps1"
+            if not installer.is_file():
+                return None
+            shell = shutil.which("pwsh") or shutil.which("powershell")
+            if shell is None:
+                raise ValueError(
+                    "PowerShell is required for namespaced runtime provisioning"
+                )
+            argv = [
+                shell,
+                "-File",
+                str(installer),
+                "-Action",
+                "cell-provision",
+                "-Context",
+                str(context),
+                "-ExpectedMarketplaceId",
+                CORE_MARKETPLACE_ID,
+                "-DurableHome",
+                str(durable_home),
+            ]
+        else:
+            installer = scripts / "init.sh"
+            if not installer.is_file():
+                return None
+            argv = [
+                "bash",
+                str(installer),
+                "cell-provision",
+                "--context",
+                str(context),
+                "--expected-marketplace-id",
+                CORE_MARKETPLACE_ID,
+                "--durable-home",
+                str(durable_home),
+            ]
+        return " ".join(argv), argv
+
     zero_downtime = _zero_downtime_update(plugin_dir)
     if platform.system() == "Windows":
         order = (("install.ps1", True), ("init.ps1", False))
@@ -1250,7 +1649,9 @@ def build_plan(
             scope, name, machine, gate, gate_present=gate_present
         ):
             try:
-                runtime_installation_candidate(name, pdir)
+                runtime_env, selected_runtime_root = runtime_installer_environment(
+                    name, pdir
+                )
             except ValueError as error:
                 diagnostics.append({
                     "service": name,
@@ -1259,11 +1660,8 @@ def build_plan(
                     "message": str(error),
                 })
                 continue
-            # A receipt authorizes the legacy installer; it does not activate
-            # the installation cell. Until explicit migration publishes an
-            # activation, the conventional runtime remains authoritative.
-            rdep = runtime_deployed_version(name)
-            rrun = runtime_running_version(name)
+            rdep = runtime_deployed_version(name, root=selected_runtime_root)
+            rrun = runtime_running_version(name, root=selected_runtime_root)
             # Prefer the *running* version when a live service reports one, so a
             # daemon that lags its installed plugin is healed even though the
             # on-disk manifest already matches the payload (dotfiles #533). No
@@ -1278,20 +1676,24 @@ def build_plan(
                 # (rver is None) and forward/ambiguous cases still deploy.
                 if _version_lt(pver, rver):
                     continue
-                built = runtime_installer_argv(pdir)
+                try:
+                    built = runtime_installer_argv(
+                        pdir,
+                        context=(
+                            Path(runtime_env["COPILOT_EXTENSIONS_CONTEXT"])
+                            if "COPILOT_EXTENSIONS_CONTEXT" in runtime_env
+                            else None
+                        ),
+                    )
+                except ValueError as error:
+                    diagnostics.append({
+                        "service": name,
+                        "phase": "runtime",
+                        "reason": "installation-context-unsupported",
+                        "message": str(error),
+                    })
+                    continue
                 if built is not None:
-                    try:
-                        runtime_env, _governed_root = runtime_installer_environment(
-                            name, pdir
-                        )
-                    except ValueError as error:
-                        diagnostics.append({
-                            "service": name,
-                            "phase": "runtime",
-                            "reason": "installation-context-invalid",
-                            "message": str(error),
-                        })
-                        continue
                     cmd, argv = built
                     if rver is None:
                         reason = "runtime-missing"

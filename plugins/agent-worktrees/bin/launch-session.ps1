@@ -309,6 +309,39 @@ function Start-UpdateStage {
     }
 }
 
+function Push-UpdateEnvironment {
+    param([object]$Update)
+    $saved = @{}
+    if ($Update -and $Update.PSObject.Properties['unset_environment']) {
+        foreach ($key in @($Update.unset_environment | Where-Object { $_ })) {
+            $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+            [Environment]::SetEnvironmentVariable($key, $null, 'Process')
+        }
+    }
+    if ($Update -and $Update.PSObject.Properties['environment'] -and $Update.environment) {
+        foreach ($property in @($Update.environment.PSObject.Properties)) {
+            if (-not $saved.ContainsKey($property.Name)) {
+                $saved[$property.Name] = [Environment]::GetEnvironmentVariable(
+                    $property.Name, 'Process'
+                )
+            }
+            [Environment]::SetEnvironmentVariable(
+                $property.Name, [string]$property.Value, 'Process'
+            )
+        }
+    }
+    return $saved
+}
+
+function Pop-UpdateEnvironment {
+    param([hashtable]$Saved)
+    foreach ($entry in $Saved.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable(
+            $entry.Key, $entry.Value, 'Process'
+        )
+    }
+}
+
 function Invoke-UpdateApply {
     # Join the background stage and apply any pending update. Idempotent: runs
     # its body at most once per launch.
@@ -357,17 +390,26 @@ function Invoke-UpdateApply {
             $pdir = $status.plugin_dir
             $pluginInstaller = if ($pdir) { Join-Path $pdir 'scripts\install.ps1' } else { $null }
             if ($pluginInstaller -and (Test-Path $pluginInstaller)) {
+                $savedEnvironment = Push-UpdateEnvironment $status
                 if ($env:WORKTREE_BLOCKING_INSTALL) {
                     # Escape hatch (recovery/debug): apply synchronously.
                     Write-SetupStatus 'A new plugin version was downloaded; installing the updated runtime...'
-                    $installerArgs = @('update')
+                    $installerArgs = @(
+                        'update',
+                        '-InstallDir',
+                        [string]$status.runtime_root
+                    )
                     if ($env:WORKTREE_PROJECT) { $installerArgs += @('-ProjectName', $env:WORKTREE_PROJECT) }
-                    & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
-                        ForEach-Object { Write-SetupLog "installer: $_" }
-                    if ($LASTEXITCODE -eq 0) {
-                        Write-SetupLog 'Installer update succeeded (launcher change, if any, applies next launch)'
-                    } else {
-                        Write-SetupLog "Installer update failed (exit $LASTEXITCODE) — continuing with existing version" 'WARN'
+                    try {
+                        & pwsh.exe -NoProfile -File $pluginInstaller @installerArgs 2>&1 |
+                            ForEach-Object { Write-SetupLog "installer: $_" }
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-SetupLog 'Installer update succeeded (launcher change, if any, applies next launch)'
+                        } else {
+                            Write-SetupLog "Installer update failed (exit $LASTEXITCODE) — continuing with existing version" 'WARN'
+                        }
+                    } finally {
+                        Pop-UpdateEnvironment $savedEnvironment
                     }
                 } else {
                     # Default: DETACH the install so the launch never blocks on the
@@ -380,7 +422,14 @@ function Invoke-UpdateApply {
                     # single-instance lock, so a concurrent background install can't
                     # collide.
                     Write-SetupStatus 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
-                    $bgArgs = @('-NoProfile', '-File', "`"$pluginInstaller`"", 'update')
+                    $bgArgs = @(
+                        '-NoProfile',
+                        '-File',
+                        "`"$pluginInstaller`"",
+                        'update',
+                        '-InstallDir',
+                        "`"$([string]$status.runtime_root)`""
+                    )
                     if ($env:WORKTREE_PROJECT) { $bgArgs += @('-ProjectName', "`"$($env:WORKTREE_PROJECT)`"") }
                     try {
                         # conhost --headless: -WindowStyle Hidden alone is ignored
@@ -389,6 +438,8 @@ function Invoke-UpdateApply {
                         Write-SetupLog 'Background install started (new version applies on the next launch)'
                     } catch {
                         Write-SetupLog "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
+                    } finally {
+                        Pop-UpdateEnvironment $savedEnvironment
                     }
                 }
             } else {
@@ -415,11 +466,16 @@ function Invoke-UpdateApply {
                     if ($argv.Count -gt 0) {
                         $exe = $argv[0]
                         $rest = if ($argv.Count -gt 1) { $argv[1..($argv.Count - 1)] } else { @() }
-                        & $exe @rest
-                        if ($LASTEXITCODE -ne 0) {
-                            Write-SetupLog "Update failed for $($update.service) (exit $LASTEXITCODE)" 'WARN'
-                        } else {
-                            Write-SetupLog "Updated $($update.service) successfully"
+                        $savedEnvironment = Push-UpdateEnvironment $update
+                        try {
+                            & $exe @rest
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-SetupLog "Update failed for $($update.service) (exit $LASTEXITCODE)" 'WARN'
+                            } else {
+                                Write-SetupLog "Updated $($update.service) successfully"
+                            }
+                        } finally {
+                            Pop-UpdateEnvironment $savedEnvironment
                         }
                     }
                 }

@@ -22,6 +22,10 @@
     Project name (e.g. 'my-project'). Defaults to: WORKTREE_PROJECT env var,
     then inferred from existing config, then basename of CWD repo.
 
+.PARAMETER InstallDir
+    Exact runtime installation root. Structured context callers must supply the
+    root selected by the installation-context resolver.
+
 .PARAMETER RemoveConfig
     On uninstall: also delete project config and worktree session metadata.
 
@@ -36,12 +40,179 @@ param(
 
     [string]$ProjectName,
 
+    [string]$InstallDir,
     [switch]$RemoveConfig,
     [switch]$Force
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$InstallDirSpecified = [bool]$InstallDir
+if ($InstallDir) {
+    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+} else {
+    $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+}
+$ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
+if ($ContextualInstall) {
+    if ($Action -notin @('install', 'update', 'status')) {
+        Write-Error "Structured installation context does not support action '$Action'."
+        exit 1
+    }
+    if (-not $InstallDirSpecified) {
+        Write-Error 'Structured installation context requires -InstallDir.'
+        exit 1
+    }
+    $contextPath = [IO.Path]::GetFullPath($env:COPILOT_EXTENSIONS_CONTEXT)
+    if (-not (Test-Path -LiteralPath $contextPath -PathType Leaf)) {
+        Write-Error 'Structured installation context is unavailable.'
+        exit 1
+    }
+    $contextPayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+        [IO.Path]::GetFullPath($env:COPILOT_PLUGIN_STAGED_FROM)
+    } else {
+        (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    }
+    $contextHelper = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+    if (-not (Test-Path -LiteralPath $contextHelper -PathType Leaf)) {
+        Write-Error 'Installation-context validator is unavailable.'
+        exit 1
+    }
+    $contextDurableHome = $contextPath
+    1..5 | ForEach-Object {
+        $contextDurableHome = Split-Path -Parent $contextDurableHome
+    }
+    $hostExe = (Get-Process -Id $PID).Path
+    $validatedJson = & $hostExe -NoProfile -ExecutionPolicy Bypass -File $contextHelper validate `
+        -Context $contextPath `
+        -DurableHome $contextDurableHome `
+        -ExpectedPluginId 'agent-worktrees' `
+        -ExpectedPayloadRoot $contextPayload
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    try {
+        $validatedContext = $validatedJson | ConvertFrom-Json
+        $validatedRoot = (Resolve-Path -LiteralPath (
+            [IO.Path]::GetFullPath([string]$validatedContext.pluginRoot)
+        )).Path
+        $InstallDir = (Resolve-Path -LiteralPath $InstallDir).Path
+    } catch {
+        Write-Error 'Installation-context validator returned invalid output.'
+        exit 1
+    }
+    if ($validatedRoot -ne $InstallDir) {
+        Write-Error '-InstallDir does not match validated installation context.'
+        exit 1
+    }
+
+    # The standard self-stage block is byte-identical across plugins and uses
+    # the legacy root. Stage context installs inside their selected root first,
+    # then mark the child staged so the standard block remains inert.
+    if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
+        try {
+            Set-Location -LiteralPath $env:USERPROFILE
+            [System.IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+        } catch {}
+        $contextStageRoot = Join-Path $InstallDir '.install-stage'
+        $contextStage = Join-Path $contextStageRoot (
+            (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID"
+        )
+        New-Item -ItemType Directory -Force -Path $contextStage | Out-Null
+        Copy-Item -LiteralPath $contextPayload -Destination $contextStage -Recurse -Force
+        $contextStagedPayload = Join-Path $contextStage (Split-Path -Leaf $contextPayload)
+        $contextStagedEntry = Join-Path (
+            Join-Path $contextStagedPayload 'scripts'
+        ) (Split-Path -Leaf $PSCommandPath)
+        Get-ChildItem $contextStageRoot -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -ne $contextStage } |
+            ForEach-Object {
+                $ownerPid = 0
+                if ($_.Name -match '-(\d+)$') {
+                    [void][int]::TryParse($Matches[1], [ref]$ownerPid)
+                }
+                $ownerAlive = $false
+                if ($ownerPid -gt 0) {
+                    $ownerAlive = [bool](
+                        Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+                    )
+                }
+                if (-not $ownerAlive) {
+                    try {
+                        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+                    } catch {}
+                }
+            }
+        $contextForward = @()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $value = $PSBoundParameters[$key]
+            if ($value -is [System.Management.Automation.SwitchParameter]) {
+                if ($value.IsPresent) { $contextForward += "-$key" }
+            } else {
+                $contextForward += "-$key"
+                $contextForward += [string]$value
+            }
+        }
+        $env:COPILOT_PLUGIN_INSTALL_STAGED = 'context-install'
+        $env:COPILOT_PLUGIN_STAGED_FROM = $contextPayload
+        $contextDeadline = 480
+        $contextDeadlineRaw = $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC
+        if (-not $contextDeadlineRaw) {
+            $contextDeadlineRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC
+        }
+        if ($contextDeadlineRaw) {
+            [void][int]::TryParse(
+                [string]$contextDeadlineRaw,
+                [ref]$contextDeadline
+            )
+        }
+        $contextChild = Start-Process -FilePath $hostExe -PassThru -NoNewWindow `
+            -WorkingDirectory $contextStagedPayload `
+            -ArgumentList (
+                @(
+                    '-NoProfile',
+                    '-ExecutionPolicy',
+                    'Bypass',
+                    '-File',
+                    $contextStagedEntry
+                ) + $contextForward
+            )
+        if (
+            $contextDeadline -gt 0 -and
+            -not $contextChild.WaitForExit($contextDeadline * 1000)
+        ) {
+            try {
+                & taskkill.exe /PID $contextChild.Id /T /F 2>&1 | Out-Null
+            } catch {}
+            try {
+                Stop-Process -Id $contextChild.Id -Force -ErrorAction SilentlyContinue
+            } catch {}
+            try {
+                Add-Content -LiteralPath (
+                    Join-Path $InstallDir 'reconcile.err.log'
+                ) -Value (
+                    (
+                        "[{0}] WATCHDOG-KILL agent-worktrees context install " +
+                        "exceeded {1}s deadline (child pid {2}); killed tree. " +
+                        "Stage: {3}"
+                    ) -f
+                    ((Get-Date).ToUniversalTime().ToString('s') + 'Z'),
+                    $contextDeadline,
+                    $contextChild.Id,
+                    $contextStage
+                )
+            } catch {}
+            $contextExitCode = 124
+        } else {
+            if ($contextDeadline -le 0) {
+                $contextChild.WaitForExit()
+            }
+            $contextExitCode = $contextChild.ExitCode
+        }
+        Remove-Item -LiteralPath $contextStage -Recurse -Force -ErrorAction SilentlyContinue
+        exit $contextExitCode
+    }
+}
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -215,7 +386,6 @@ if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
 # -- Metadata -------------------------------------------------------------
 
 $ServiceName     = 'Worktree Manager'
-$InstallDir      = Join-Path $env:USERPROFILE '.agent-worktrees'
 $BinDir          = Join-Path $InstallDir 'bin'
 $LocalBin        = Join-Path $env:USERPROFILE '.local\bin'
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -355,10 +525,12 @@ function Invoke-VersionedActivate {
     # the superseded monitor + spawn the current one now (from the NEW slot's
     # python), so every live session's bar is re-served with no session restart.
     # Best-effort, never fatal.
-    try {
-        & $LinkPython -m agent_worktrees status-monitor-restart 2>&1 |
-            ForEach-Object { Write-ServiceChanged "monitor: $_" }
-    } catch {}
+    if (-not $ContextualInstall) {
+        try {
+            & $LinkPython -m agent_worktrees status-monitor-restart 2>&1 |
+                ForEach-Object { Write-ServiceChanged "monitor: $_" }
+        } catch {}
+    }
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a
     # newest-slot guess. Atomic (temp + rename); best-effort, never fatal.
@@ -2734,11 +2906,19 @@ switch ($Action) {
         # Optional: psmux terminal multiplexer for session persistence. Pinned
         # to 3.3.8, which includes the post-3.3.6 attach and Ctrl+C fixes.
         # See Ensure-Psmux (shared with 'update' so existing boxes self-heal).
-        Ensure-Psmux
+        if (-not $ContextualInstall) {
+            Ensure-Psmux
+        }
 
-        # Create directory structure (runtime dirs always; project dirs only if adopting)
-        $runtimeDirs = @($InstallDir, $BinDir, $LocalBin)
-        if ($HasProject) { $runtimeDirs += @($ProjectDir, $WorktreesDir) }
+        # Structured contexts may mutate only their installation-local paths.
+        $runtimeDirs = if ($ContextualInstall) {
+            @($InstallDir, $BinDir)
+        } else {
+            @($InstallDir, $BinDir, $LocalBin)
+        }
+        if ($HasProject -and -not $ContextualInstall) {
+            $runtimeDirs += @($ProjectDir, $WorktreesDir)
+        }
         foreach ($dir in $runtimeDirs) {
             Ensure-InstallDir $dir
         }
@@ -2748,6 +2928,11 @@ switch ($Action) {
         if (-not (Deploy-Package)) { exit 1 }
         if (-not (Deploy-Wrappers)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
+        if ($ContextualInstall) {
+            Write-V3Manifest
+            Write-ServiceOk "Context runtime installed at $InstallDir"
+            exit 0
+        }
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental
@@ -3063,6 +3248,19 @@ switch ($Action) {
 
     'update' {
         Write-ServiceHeader "Updating $ServiceName"
+
+        if ($ContextualInstall) {
+            foreach ($dir in @($InstallDir, $BinDir)) {
+                Ensure-InstallDir $dir
+            }
+            if (-not (Deploy-Venv)) { exit 1 }
+            if (-not (Deploy-Package)) { exit 1 }
+            if (-not (Deploy-Wrappers)) { exit 1 }
+            if (-not (Invoke-VersionedActivate)) { exit 1 }
+            Write-V3Manifest
+            Write-ServiceOk "Context runtime updated at $InstallDir"
+            exit 0
+        }
 
         if (-not (Test-Path $BinDir)) {
             Write-ServiceErr "Not installed - run 'install' first"

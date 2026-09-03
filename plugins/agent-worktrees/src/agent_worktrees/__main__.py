@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import enum
 import json
 import os
 import platform
@@ -13549,7 +13550,8 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     # agent-worktrees payload update above stays first (it provides this flow);
     # read_enabled_plugins already excludes agent-worktrees so it is not
     # double-updated here.
-    if _update_registered_plugins() is False:
+    registered_targets = _registered_plugin_targets()
+    if _update_registered_plugins(registered_targets) is False:
         payloads_ok = False
 
     # Step 2 -- find the installed plugin directory
@@ -13573,14 +13575,18 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
 
     plat = cfg.detect_platform()
     force = getattr(args, "force", False)
-    aw_payload_ver = _reconcile.payload_version(plugin_dir)
     try:
-        aw_runtime_root, aw_context_selected = _reconcile._selected_runtime_root(
-            "agent-worktrees", plugin_dir
+        aw_runtime_env, aw_runtime_root = (
+            _reconcile.runtime_installer_environment(
+                "agent-worktrees",
+                plugin_dir,
+            )
         )
     except ValueError as error:
         output.err(f"Installation context invalid: {error}")
         return 1
+    aw_payload_ver = _reconcile.payload_version(plugin_dir)
+    aw_context_selected = "COPILOT_EXTENSIONS_CONTEXT" in aw_runtime_env
     aw_deployed_ver = _reconcile.runtime_deployed_version(
         "agent-worktrees", root=aw_runtime_root
     )
@@ -13598,18 +13604,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
         and not aw_context_selected
         and _reconcile.hook_shims_drifted(plugin_dir)
     )
-    if aw_context_selected:
-        if versions_equal:
-            output.ok(
-                f"Selected context runtime already at {aw_deployed_ver} -- "
-                "skipping legacy installer"
-            )
-        else:
-            output.warn(
-                "Selected context runtime is missing or stale; namespaced "
-                "installation remains read-only, so the legacy installer was skipped"
-            )
-    elif version_match and not hooks_drifted:
+    if version_match and not hooks_drifted:
         output.ok(f"Runtime already at {aw_deployed_ver} -- skipping installer "
                   "(use --force to re-deploy)")
         # The full installer is skipped, but LIVE Windows Terminal state drifts
@@ -13634,16 +13629,28 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
                 output.err("PowerShell not found")
                 return 1
             argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-File", str(installer), "update"]
+                    "-File", str(installer), "update",
+                    "-InstallDir", str(aw_runtime_root)]
         else:
             installer = plugin_dir / "scripts" / "install.sh"
-            argv = ["bash", str(installer), "update"]
+            argv = [
+                "bash",
+                str(installer),
+                "update",
+                "--install-dir",
+                str(aw_runtime_root),
+            ]
 
         if not installer.exists():
             output.err(f"Installer not found: {installer}")
             return 1
 
-        result = subprocess.run(argv, cwd=plugin_dir, timeout=300)
+        result = subprocess.run(
+            argv,
+            cwd=plugin_dir,
+            timeout=600,
+            env=aw_runtime_env,
+        )
         if result.returncode != 0:
             return result.returncode
 
@@ -13660,7 +13667,15 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
 
     # Step 4 -- update registered sibling modules (agent-bridge, etc.)
     skip_modules = getattr(args, "skip_modules", None)
-    _update_modules(plugin_dir, plat, skip_modules, force=force)
+    runtimes_ok = True
+    if _update_modules(
+        plugin_dir,
+        plat,
+        skip_modules,
+        force=force,
+        targets=registered_targets,
+    ) is False:
+        runtimes_ok = False
 
     # Step 4.5 -- rebuild the RUNTIME for every other enabled plugin whose
     # runtime the steps above never touch. ``_update_modules`` only runs the
@@ -13671,14 +13686,21 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     # leave it serving stale code under a mismatched version (dotfiles #1025).
     # This closes that gap: reconcile those runtimes here, version-keyed by
     # default and force-reinstalled under ``--force``.
-    _reconcile_registered_runtimes(plugin_dir, plat, skip_modules, force=force)
+    if _reconcile_registered_runtimes(
+        plugin_dir,
+        plat,
+        skip_modules,
+        force=force,
+        targets=registered_targets,
+    ) is False:
+        runtimes_ok = False
 
     # Step 5 -- fast-forward the managed repo anchor(s) so in-repo config
     # bindings deploy alongside the plugin update (not just on next launch).
     if not getattr(args, "no_anchor_sync", False):
         _fast_forward_project_anchors()
 
-    return 0 if payloads_ok else 1
+    return 0 if payloads_ok and runtimes_ok else 1
 
 
 def _project_update_context() -> Path | None:
@@ -13698,11 +13720,18 @@ _UPDATE_CONTEXT_ENV = "AGENT_WORKTREES_UPDATE_CONTEXT"
 
 def _invocation_update_context() -> Path | None:
     """Return the invoking checkout when it carries repository Copilot settings."""
+    from plugin_resolve import SETTINGS_RELS
+
     transported = os.environ.get(_UPDATE_CONTEXT_ENV)
     cwd = Path(transported) if transported else (_INVOCATION_CWD or Path.cwd())
     for candidate in (cwd, *cwd.parents):
-        if (candidate / ".github" / "copilot" / "settings.json").is_file():
-            return candidate
+        try:
+            if any(candidate.joinpath(*rel).is_file() for rel in SETTINGS_RELS):
+                return candidate
+        except OSError as error:
+            raise ValueError(
+                f"cannot inspect plugin settings under {candidate}: {error}"
+            ) from error
     return None
 
 
@@ -13809,7 +13838,26 @@ def _update_one_plugin_payload(
     return f"install exited {r2.returncode}"
 
 
-def _update_registered_plugins() -> bool:
+class _PluginActivation(str, enum.Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    UNKNOWN = "unknown"
+
+
+@dataclasses.dataclass(frozen=True)
+class _RegisteredPluginTarget:
+    context: Path | None
+    activation: _PluginActivation
+
+    @property
+    def required(self) -> bool:
+        """Whether payload/runtime failures must remain hard."""
+        return self.activation is not _PluginActivation.INACTIVE
+
+
+def _update_registered_plugins(
+    targets: dict[str, _RegisteredPluginTarget] | None = None,
+) -> bool:
     """Update every installed or enabled copilot-extensions plugin payload.
 
     ``update`` must refresh EVERY enabled plugin's payload -- including
@@ -13836,68 +13884,135 @@ def _update_registered_plugins() -> bool:
     (or ``install`` when missing) for each. Payloads only -- runtimes are handled
     afterward by ``_update_modules`` and the anchor reconcile. Best-effort and
     idempotent: a single plugin's failure warns and continues; an already-current
-    plugin is a no-op; an empty target set is a silent no-op.
+    plugin is a no-op; an empty target set is a silent no-op. Failures for
+    repo-scoped or user-global active plugins fail the overall update.
+    Installed-but-inactive inventory is still refreshed opportunistically, but
+    its failures are explicit advisories and do not make deployment fail.
+    When any activation source is unreadable, installed inventory is marked
+    unknown and remains a hard payload/runtime requirement.
     """
     from . import reconcile
 
-    contexts = _registered_plugin_contexts()
-    if not contexts:
+    targets = _registered_plugin_targets() if targets is None else targets
+    if not targets:
         return True
 
     output.header("Updating Registered Plugin Payloads")
     refreshed: set[Path | None] = set()
-    for context in contexts.values():
+    for target in targets.values():
+        context = target.context
         if context not in refreshed:
             _refresh_marketplace(reconcile.MARKETPLACE, cwd=context)
             refreshed.add(context)
 
-    results: list[tuple[str, str]] = []
-    for name in sorted(contexts):
+    results: list[tuple[str, str, _RegisteredPluginTarget]] = []
+    for name in sorted(targets):
+        target = targets[name]
         results.append(
             (
                 name,
                 _update_one_plugin_payload(
-                    name, reconcile.MARKETPLACE, cwd=contexts[name]
+                    name, reconcile.MARKETPLACE, cwd=target.context
                 ),
+                target,
             )
         )
 
     output.header("Plugin Payload Update Summary")
-    for name, status in results:
+    for name, status, target in results:
         if status.startswith("OK"):
             output.ok(name if status == "OK" else f"{name} ({status})")
+        elif not target.required:
+            output.warn(
+                f"{name}: {status} (inactive installed inventory advisory)"
+            )
         else:
             output.warn(f"{name}: {status}")
-    return all(status.startswith("OK") for _, status in results)
+    return all(
+        status.startswith("OK") or not target.required
+        for _, status, target in results
+    )
 
 
-def _registered_plugin_contexts() -> dict[str, Path | None]:
-    """Installed-or-enabled plugins and preferred marketplace contexts."""
+def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
+    """Collect active, inactive, and activation-unknown installed targets."""
     from . import reconcile
 
-    contexts: dict[str, Path | None] = {}
+    targets: dict[str, _RegisteredPluginTarget] = {}
+
+    def add(
+        name: str,
+        context: Path | None,
+        *,
+        activation: _PluginActivation,
+    ) -> None:
+        existing = targets.get(name)
+        if existing is None:
+            targets[name] = _RegisteredPluginTarget(context, activation)
+            return
+        preferred_context = (
+            existing.context if existing.context is not None else context
+        )
+        precedence = {
+            _PluginActivation.INACTIVE: 0,
+            _PluginActivation.UNKNOWN: 1,
+            _PluginActivation.ACTIVE: 2,
+        }
+        selected_activation = (
+            existing.activation
+            if precedence[existing.activation] >= precedence[activation]
+            else activation
+        )
+        targets[name] = _RegisteredPluginTarget(
+            preferred_context,
+            selected_activation,
+        )
+
+    activation_unknown = False
+    activation_warnings: list[str] = []
+
+    def record_activation_error(message: str, error: Exception) -> None:
+        nonlocal activation_unknown
+        activation_unknown = True
+        detail = str(error).replace("\r", " ").replace("\n", " ")[:240]
+        activation_warnings.append(f"{message}: {detail}")
 
     # Prefer the invoking checkout for plugins it declares. Linked worktrees are
     # trusted by the launcher, while a repository's main anchor may intentionally
     # be untrusted and therefore have its repository settings ignored by Copilot.
-    invocation_context = _invocation_update_context()
+    try:
+        invocation_context = _invocation_update_context()
+    except Exception as exc:
+        invocation_context = None
+        record_activation_error(
+            "Could not discover enabled plugins from the invocation context",
+            exc,
+        )
     if invocation_context is not None:
         try:
             for name in reconcile.read_enabled_plugins(invocation_context):
-                contexts.setdefault(name, invocation_context)
+                add(
+                    name,
+                    invocation_context,
+                    activation=_PluginActivation.ACTIVE,
+                )
         except Exception as exc:
-            output.warn(
+            record_activation_error(
                 "Could not read enabled plugins from invocation context "
-                f"{invocation_context}: {exc}"
+                f"{invocation_context}",
+                exc,
             )
 
     # 1. Repo-scoped enabled plugins (each managed repo's settings).
     try:
         config = cfg.load_config()
         repos = config.repos or {}
-    except Exception:
-        # No resolvable project config -- fall through to the user-global set.
+    except Exception as exc:
         repos = {}
+        record_activation_error(
+            "Could not read managed project configuration",
+            exc,
+        )
 
     seen_anchors: set[str] = set()
     for repo in repos.values():
@@ -13908,15 +14023,19 @@ def _registered_plugin_contexts() -> dict[str, Path | None]:
         try:
             context = Path(anchor)
             for name in reconcile.read_enabled_plugins(context):
-                contexts.setdefault(name, context)
+                add(name, context, activation=_PluginActivation.ACTIVE)
         except Exception as exc:
-            output.warn(f"Could not read enabled plugins from {anchor}: {exc}")
+            record_activation_error(
+                f"Could not read enabled plugins from {anchor}",
+                exc,
+            )
 
-    # 2. Installed inventory is the update authority. Activation controls where
-    #    a plugin runs, not whether its available payload stays current.
+    # 2. Installed inventory is opportunistic only when every activation source
+    #    was authoritative. Any read failure leaves installed identities
+    #    potentially active, so their payload/runtime failures remain hard.
+    installed_names: list[str] = []
     try:
-        for name in reconcile.read_installed_plugins():
-            contexts.setdefault(name, None)
+        installed_names = reconcile.read_installed_plugins()
     except Exception as exc:
         output.warn(f"Could not read installed plugin inventory: {exc}")
 
@@ -13924,11 +14043,31 @@ def _registered_plugin_contexts() -> dict[str, Path | None]:
     #    repo's settings would otherwise be silently skipped and left stale.
     try:
         for name in reconcile.read_user_enabled_plugins():
-            contexts.setdefault(name, None)
+            add(name, None, activation=_PluginActivation.ACTIVE)
     except Exception as exc:
-        output.warn(f"Could not read user-global enabled plugins: {exc}")
+        record_activation_error(
+            "Could not read user-global enabled plugins",
+            exc,
+        )
 
-    return contexts
+    inventory_activation = (
+        _PluginActivation.UNKNOWN
+        if activation_unknown
+        else _PluginActivation.INACTIVE
+    )
+    for name in installed_names:
+        add(name, None, activation=inventory_activation)
+
+    warning_limit = 4
+    for warning in activation_warnings[:warning_limit]:
+        output.warn(warning)
+    remaining = len(activation_warnings) - warning_limit
+    if remaining > 0:
+        output.warn(
+            f"{remaining} additional plugin activation read failure(s) omitted"
+        )
+
+    return targets
 
 
 def _module_names(plugin_dir: Path) -> set[str]:
@@ -13957,7 +14096,8 @@ def _reconcile_registered_runtimes(
     skip_modules: list[str] | None = None,
     *,
     force: bool = False,
-) -> None:
+    targets: dict[str, _RegisteredPluginTarget] | None = None,
+) -> bool:
     """Rebuild the runtime venv of every enabled plugin the other steps skip.
 
     ``update`` runs a runtime installer only for agent-worktrees (Step 3) and
@@ -13979,16 +14119,21 @@ def _reconcile_registered_runtimes(
       whose stamp lagged) is repaired. The installer force-reinstalls the
       package, so fresh bytes always land.
 
-    Best-effort and idempotent: a plugin's failure warns and continues. The
-    enabled set is identical to payload refresh: invocation-scoped,
-    repository-scoped, and user-global plugins are all included. Payload-only
-    plugins (``runtimeScope: none``) and the module/self runtimes are skipped.
+    Best-effort and idempotent within the loop: a plugin's failure warns and
+    remaining plugins continue, while the returned boolean keeps required
+    runtime failures hard for the overall update.
+    Invocation-scoped, repository-scoped, and user-global active plugins are
+    included. Installed-but-inactive inventory receives only the opportunistic
+    payload refresh; reconciling its runtime would turn inventory into an
+    implicit deployment requirement. Payload-only plugins (``runtimeScope:
+    none``) and the module/self runtimes are skipped.
     """
     # skip_modules semantics mirror _update_modules: [] => skip all.
     if skip_modules is not None and len(skip_modules) == 0:
-        return
+        return True
 
-    names = set(_registered_plugin_contexts())
+    targets = _registered_plugin_targets() if targets is None else targets
+    names = {name for name, target in targets.items() if target.required}
 
     # Exclude runtimes handled elsewhere (module services + agent-worktrees) and
     # any explicitly skipped names.
@@ -13997,7 +14142,7 @@ def _reconcile_registered_runtimes(
         excluded |= set(skip_modules)
     names -= excluded
     if not names:
-        return
+        return True
 
     results: list[tuple[str, str]] = []
     for name in sorted(names):
@@ -14013,6 +14158,11 @@ def _reconcile_registered_runtimes(
                 output.ok(f"{name} ({status})")
             else:
                 output.warn(f"{name}: {status}")
+    return all(
+        status.startswith("OK")
+        or status in {"SKIPPED (current)", "payload-only"}
+        for _, status in results
+    )
 
 
 def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
@@ -14030,31 +14180,13 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
     if scope == "none":
         return "payload-only"
 
-    # Classify the installer before applying receipt policy. ``install.*``
-    # runtimes participate in installation cells and remain fail-closed even
-    # when their deployed version is current. Legacy ``init.*`` bootstraps do
-    # not claim cell ownership and must not require or inherit a receipt.
-    install_name = "install.ps1" if platform == "windows" else "install.sh"
-    init_name = "init.ps1" if platform == "windows" else "init.sh"
-    install_script = pdir / "scripts" / install_name
-    init_script = pdir / "scripts" / init_name
-    if install_script.exists():
-        installer = install_script
-        requires_installation_context = True
-    elif init_script.exists():
-        installer = init_script
-        requires_installation_context = False
-    else:
-        return "installer not found"
-
-    if requires_installation_context:
-        try:
-            reconcile.runtime_installation_candidate(name, pdir)
-        except ValueError as error:
-            return f"installation context invalid: {error}"
-
-    runtime_root = reconcile.runtime_dir(name)
     pver = reconcile.payload_version(pdir)
+    try:
+        child_environment, runtime_root = reconcile.runtime_installer_environment(
+            name, pdir
+        )
+    except ValueError as error:
+        return f"installation context invalid: {error}"
     dver = reconcile.runtime_deployed_version(name, root=runtime_root)
     if not force and pver and dver and reconcile._versions_equal(dver, pver):
         return "SKIPPED (current)"
@@ -14069,38 +14201,50 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
     # path already advanced them. The bootstrap has no ``update``
     # subcommand, so a forced reconcile passes the installer's own force flag
     # (``--force`` / ``-Force``) to repair a same-version content drift.
-    if platform == "windows":
+    context = (
+        Path(child_environment["COPILOT_EXTENSIONS_CONTEXT"])
+        if "COPILOT_EXTENSIONS_CONTEXT" in child_environment
+        else None
+    )
+    if context is not None:
+        if force:
+            return "forced namespaced runtime reconciliation is unsupported"
+        try:
+            built = reconcile.runtime_installer_argv(
+                pdir,
+                context=context,
+            )
+        except ValueError as error:
+            return str(error)
+        if built is None:
+            return "installer not found"
+        _display, argv = built
+    elif platform == "windows":
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if not shell:
             return "powershell not found"
-        if requires_installation_context:
+        installer = pdir / "scripts" / "install.ps1"
+        if installer.exists():
             argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-File", str(installer), "update"]
         else:
+            installer = pdir / "scripts" / "init.ps1"
             argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-File", str(installer)] + (["-Force"] if force else [])
     else:
-        if requires_installation_context:
+        installer = pdir / "scripts" / "install.sh"
+        if installer.exists():
             # This argv is handed to bash even from Windows hosts when
             # reconciling non-Windows runtimes; backslashes are escapes/path
             # separators bash won't interpret as native filesystem separators.
             argv = ["bash", installer.as_posix(), "update"]
         else:
+            installer = pdir / "scripts" / "init.sh"
             # Same bash argv contract as install.sh: keep separators POSIX.
             argv = ["bash", installer.as_posix()] + (["--force"] if force else [])
 
-    try:
-        if requires_installation_context:
-            child_environment, _governed_root = (
-                reconcile.runtime_installer_environment(name, pdir)
-            )
-        else:
-            # Init-only runtimes predate installation cells and do not claim
-            # cell ownership. Scrub any caller context instead of fabricating a
-            # receipt that their bootstrap neither requires nor produces.
-            child_environment = reconcile.clean_runtime_installer_environment()
-    except ValueError as error:
-        return f"installation context invalid: {error}"
+    if context is None and not installer.exists():
+        return "installer not found"
 
     output.header(f"Reconciling Runtime: {name}"
                   + (" (forced)" if force else ""))
@@ -14245,11 +14389,14 @@ def _update_modules(
     platform: str,
     skip_modules: list[str] | None,
     force: bool = False,
-) -> None:
+    *,
+    targets: dict[str, _RegisteredPluginTarget] | None = None,
+) -> bool:
     """Update sibling modules registered in modules.json.
 
-    Modules are updated in the order listed in the manifest.  Failures
-    are warned but do not abort the overall update.
+    Modules are updated in the order listed in the manifest. Failures warn and
+    do not abort sibling attempts, but required-target failures make the
+    returned result false.
 
     Each module must follow the standard installer convention:
     - ``scripts/install.{ps1,sh}`` with ``install``, ``update``,
@@ -14262,25 +14409,27 @@ def _update_modules(
         platform: ``"windows"`` or ``"linux"``.
         skip_modules: ``None`` = update all, ``[]`` = skip all,
             ``["name", ...]`` = skip named modules.
+        targets: Pre-collected unified update targets. When supplied, inactive
+            installed inventory is not treated as a runtime deployment.
     """
     manifest = plugin_dir / "modules.json"
     if not manifest.exists():
-        return
+        return True
 
     try:
         data = json.loads(manifest.read_text())
     except Exception as exc:
         output.warn(f"Failed to parse modules.json: {exc}")
-        return
+        return False
 
     modules = data.get("modules", [])
     if not modules:
-        return
+        return True
 
     # --skip-modules with no names => skip all
     if skip_modules is not None and len(skip_modules) == 0:
         output.info("Skipping all module updates (--skip-modules)")
-        return
+        return True
 
     extensions_root = plugin_dir.parent
     results: list[tuple[str, str]] = []  # (name, "OK" | "SKIPPED" | error)
@@ -14293,30 +14442,40 @@ def _update_modules(
             results.append((name, "SKIPPED"))
             continue
 
+        target = targets.get(name) if targets is not None else None
+        if targets is not None and (target is None or not target.required):
+            output.info(
+                f"Skipping inactive module runtime: {name} "
+                "(payload inventory remains advisory)"
+            )
+            results.append((name, "SKIPPED (inactive inventory)"))
+            continue
+
         source = mod.get("source", name)
         module_dir = extensions_root / source
 
-        # Refresh the module's installed files via copilot plugin update.
-        # copilot plugin update only refreshes the named plugin, so sibling
-        # module directories go stale unless explicitly updated.
-        plugin_ref = f"{name}@copilot-extensions"
-        try:
-            r = subprocess.run(
-                [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
-                capture_output=True, text=True, timeout=120,
-            )
-            if r.returncode == 0:
-                for line in r.stdout.strip().splitlines():
-                    output.ok(line)
-            else:
-                output.warn(f"Plugin update for {name} returned non-zero "
-                            f"(continuing with installed version)")
-        except OSError:
-            output.warn("'copilot' CLI not found or not executable -- "
-                        "skipping plugin refresh")
-        except subprocess.TimeoutExpired:
-            output.warn(f"Plugin update for {name} timed out -- "
-                        "continuing with installed version")
+        # The unified update already refreshed every collected payload. Keep
+        # the standalone helper behavior for direct/internal callers that did
+        # not provide the collected target set.
+        if targets is None:
+            plugin_ref = f"{name}@copilot-extensions"
+            try:
+                r = subprocess.run(
+                    [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if r.returncode == 0:
+                    for line in r.stdout.strip().splitlines():
+                        output.ok(line)
+                else:
+                    output.warn(f"Plugin update for {name} returned non-zero "
+                                f"(continuing with installed version)")
+            except OSError:
+                output.warn("'copilot' CLI not found or not executable -- "
+                            "skipping plugin refresh")
+            except subprocess.TimeoutExpired:
+                output.warn(f"Plugin update for {name} timed out -- "
+                            "continuing with installed version")
 
         if not module_dir.is_dir():
             output.warn(f"Module '{name}' source not found: {module_dir}")
@@ -14331,7 +14490,7 @@ def _update_modules(
         # always re-deploys.
         from . import reconcile as _reconcile
         try:
-            runtime_root, context_selected = _reconcile._selected_runtime_root(
+            runtime_env, runtime_root = _reconcile.runtime_installer_environment(
                 name, module_dir
             )
         except ValueError as error:
@@ -14342,22 +14501,6 @@ def _update_modules(
         mod_deployed_ver = _reconcile.runtime_deployed_version(
             name, root=runtime_root
         )
-        if context_selected:
-            if (
-                mod_payload_ver
-                and mod_deployed_ver
-                and mod_payload_ver == mod_deployed_ver
-            ):
-                output.ok(f"{name} already at {mod_deployed_ver} -- "
-                          "skipping installer")
-                results.append((name, "SKIPPED (current)"))
-            else:
-                output.warn(
-                    f"{name}: selected context runtime is read-only; "
-                    "skipping legacy installer"
-                )
-                results.append((name, "SKIPPED (context runtime is read-only)"))
-            continue
         if (
             not force
             and mod_payload_ver
@@ -14414,7 +14557,7 @@ def _update_modules(
         try:
             r = subprocess.run(
                 [*shell_prefix, *update_args],
-                cwd=module_dir, timeout=300,
+                cwd=module_dir, timeout=300, env=runtime_env,
             )
             if r.returncode == 0:
                 results.append((name, "OK"))
@@ -14433,7 +14576,7 @@ def _update_modules(
         try:
             r = subprocess.run(
                 [*shell_prefix, "install"],
-                cwd=module_dir, timeout=300,
+                cwd=module_dir, timeout=300, env=runtime_env,
             )
             if r.returncode == 0:
                 results.append((name, "OK (installed)"))
@@ -14457,6 +14600,10 @@ def _update_modules(
                 output.info(f"{name} (skipped)")
             else:
                 output.warn(f"{name}: {status}")
+    return all(
+        status.startswith("OK") or status.startswith("SKIPPED")
+        for _, status in results
+    )
 
 
 def _find_installed_plugin_dir() -> Path | None:
@@ -17390,119 +17537,95 @@ def plan_pre_launch() -> dict:
     # Filter to bootstrap services only
     bootstrap = {s.name: s for s in all_services if s.name in _BOOTSTRAP_SERVICES}
     diagnostics: list[dict[str, str]] = []
-    aw_context_selected = False
+    bootstrap.pop("agent-worktrees", None)
     aw_plugin_dir = _reconcile.core_installed_payload_dir("agent-worktrees")
-    try:
-        explicit_context = _reconcile._explicit_context_target()
-    except ValueError as error:
-        explicit_context = None
-        aw_context_selected = True
-        diagnostics.append({
-            "service": "agent-worktrees",
-            "reason": "installation-context-invalid",
-            "message": str(error),
-        })
-    if explicit_context is not None:
-        if aw_plugin_dir is None:
-            aw_context_selected = True
+    aw_runtime_root: Path | None = None
+    aw_environment: dict[str, str] = {}
+    aw_resolution_failed = False
+    if aw_plugin_dir is None:
+        aw_resolution_failed = True
+        try:
+            explicit_context = _reconcile._explicit_context_target()
+        except ValueError as error:
             diagnostics.append({
                 "service": "agent-worktrees",
-                "reason": "installation-context-payload-missing",
-                "message": (
-                    "selected context cannot be validated because the "
-                    "agent-worktrees payload is not installed"
-                ),
+                "reason": "installation-context-invalid",
+                "message": str(error),
             })
         else:
-            aw_runtime_root = None
-            try:
-                aw_runtime_root, aw_context_selected = (
-                    _reconcile._selected_runtime_root(
-                        "agent-worktrees", aw_plugin_dir
-                    )
-                )
-            except ValueError as error:
-                aw_context_selected = True
+            if explicit_context is not None:
                 diagnostics.append({
                     "service": "agent-worktrees",
-                    "reason": "installation-context-invalid",
-                    "message": str(error),
+                    "reason": "installation-context-payload-missing",
+                    "message": (
+                        "selected context cannot be validated because the "
+                        "agent-worktrees payload is not installed"
+                    ),
                 })
-            else:
-                if not aw_context_selected:
-                    aw_runtime_root = None
-            if aw_context_selected and aw_runtime_root is not None:
-                payload_version = _reconcile.payload_version(aw_plugin_dir)
-                deployed_version = _reconcile.runtime_deployed_version(
-                    "agent-worktrees", root=aw_runtime_root
+    else:
+        try:
+            aw_environment, aw_runtime_root = (
+                _reconcile.runtime_installer_environment(
+                    "agent-worktrees",
+                    aw_plugin_dir,
+                    base={},
                 )
-                if (
-                    payload_version is None
-                    or not _reconcile._versions_equal(
-                        deployed_version, payload_version
-                    )
-                ):
-                    diagnostics.append({
-                        "service": "agent-worktrees",
-                        "reason": (
-                            "context-runtime-missing"
-                            if deployed_version is None
-                            else "context-runtime-version-drift"
-                        ),
-                        "message": (
-                            "selected namespaced runtime is read-only; "
-                            "legacy pre-launch installer suppressed"
-                        ),
-                    })
-    if aw_context_selected:
-        bootstrap.pop("agent-worktrees", None)
+            )
+        except ValueError as error:
+            aw_resolution_failed = True
+            diagnostics.append({
+                "service": "agent-worktrees",
+                "reason": "installation-context-invalid",
+                "message": str(error),
+            })
 
-    # Direct fallback for agent-worktrees: always deployed at a known
-    # location, but may be missing from service.yaml for this environment
-    if not aw_context_selected and "agent-worktrees" not in bootstrap:
-        wm_dir = cfg.install_dir()
+    # Agent-worktrees is always checked against the structured authoritative
+    # root, even when service discovery also knows about it.
+    if not aw_resolution_failed and aw_runtime_root is not None:
+        wm_dir = aw_runtime_root
         wm_manifest = wm_dir / "deploy-manifest.json"
-        if wm_manifest.exists():
-            staleness = svc.check_staleness(wm_manifest, repo_dir)
-            if staleness != "current":
-                # Find the installer -- check manifest's installer_path first,
-                # then known repo locations (current and legacy).
-                installer = None
-                manifest_data = svc._read_manifest(wm_manifest)
-                search_dirs = [Path("plugins/agent-worktrees/scripts")]
-                if manifest_data and manifest_data.get("installer_path"):
-                    manifest_installer = repo_dir / manifest_data["installer_path"]
-                    if manifest_installer.exists():
-                        installer = manifest_installer
-                if installer is None:
-                    for sdir in search_dirs:
-                        for iname in svc._preferred_installer_order():
-                            candidate = repo_dir / sdir / iname
-                            if candidate.exists():
-                                installer = candidate
-                                break
-                        if installer:
-                            break
-                result = None
-                if installer is not None:
-                    result = _build_installer_argv(installer)
-                if result is not None:
-                    cmd, cmd_argv = result
-                    updates: list[dict[str, str]] = [{
-                        "service": "agent-worktrees",
-                        "staleness": staleness,
-                        "command": cmd,
-                        "argv": cmd_argv,
-                    }]
-                    # Check discovered bootstrap services too
-                    for s in bootstrap.values():
-                        _append_update_if_stale(s, repo_dir, updates)
-                    result: dict = {"action": "self-update", "updates": updates}
-                    if diagnostics:
-                        result["diagnostics"] = diagnostics
-                    return result
+        staleness = (
+            svc.check_staleness(wm_manifest, repo_dir)
+            if wm_manifest.exists()
+            else "missing"
+        )
+        if staleness != "current":
+            installer = next(
+                (
+                    aw_plugin_dir / "scripts" / name
+                    for name in svc._preferred_installer_order()
+                    if (aw_plugin_dir / "scripts" / name).exists()
+                ),
+                None,
+            )
+            result = (
+                _build_installer_argv(
+                    installer,
+                    install_dir=aw_runtime_root,
+                )
+                if installer is not None
+                else None
+            )
+            if result is not None:
+                cmd, cmd_argv = result
+                updates: list[dict] = [{
+                    "service": "agent-worktrees",
+                    "staleness": staleness,
+                    "command": cmd,
+                    "argv": cmd_argv,
+                    "environment": aw_environment,
+                    "unset_environment": list(_reconcile._RUNTIME_ENV_UNSET),
+                    "runtime_root": str(aw_runtime_root),
+                }]
+                # Check discovered bootstrap services too
+                for s in bootstrap.values():
+                    _append_update_if_stale(s, repo_dir, updates)
+                result = {"action": "self-update", "updates": updates}
+                if diagnostics:
+                    result["diagnostics"] = diagnostics
+                return result
 
-    updates = []
+    updates: list[dict] = []
     for s in bootstrap.values():
         _append_update_if_stale(s, repo_dir, updates)
 
@@ -17523,7 +17646,11 @@ def cmd_pre_launch(args: argparse.Namespace) -> int:
     return 0
 
 
-def _build_installer_argv(installer: Path) -> tuple[str, list[str]] | None:
+def _build_installer_argv(
+    installer: Path,
+    *,
+    install_dir: Path | None = None,
+) -> tuple[str, list[str]] | None:
     """Build a (display_cmd, argv) pair for running an installer.
 
     On Windows, only ``.ps1`` installers are supported.  ``.sh`` installers
@@ -17542,10 +17669,14 @@ def _build_installer_argv(installer: Path) -> tuple[str, list[str]] | None:
         else:
             cmd = f"bash {installer} update"
             argv = ["bash", str(installer), "update"]
+            if install_dir is not None:
+                argv.extend(["--install-dir", str(install_dir)])
             return cmd, argv
     if installer.suffix == ".ps1":
         cmd = f"pwsh -File {installer} update"
         argv = ["pwsh", "-File", str(installer), "update"]
+        if install_dir is not None:
+            argv.extend(["-InstallDir", str(install_dir)])
         return cmd, argv
     return None
 

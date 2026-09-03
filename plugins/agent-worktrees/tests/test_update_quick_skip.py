@@ -63,7 +63,8 @@ def wired(monkeypatch, plugin_dir):
 
     monkeypatch.setattr(subprocess, "run", _run)
     monkeypatch.setattr(m.subprocess, "run", _run)
-    monkeypatch.setattr(m, "_update_registered_plugins", lambda: None)
+    monkeypatch.setattr(m, "_registered_plugin_targets", lambda: {})
+    monkeypatch.setattr(m, "_update_registered_plugins", lambda targets: None)
     monkeypatch.setattr(m, "_update_modules", lambda *a, **k: None)
     monkeypatch.setattr(m, "_fast_forward_project_anchors", lambda: None)
     monkeypatch.setattr(m, "_find_installed_plugin_dir", lambda: plugin_dir)
@@ -101,36 +102,108 @@ def test_force_reruns_installer_when_current(wired, monkeypatch):
     assert _installer_ran(wired), "--force must re-deploy even when current"
 
 
-def test_selected_context_never_runs_self_legacy_installer(
+def test_required_runtime_failure_makes_update_fail(wired, monkeypatch):
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_deployed_version",
+        lambda name, home=None, **kwargs: "1.5.3-dev9",
+    )
+    monkeypatch.setattr(m, "_update_modules", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        m,
+        "_reconcile_registered_runtimes",
+        lambda *args, **kwargs: True,
+    )
+
+    assert m.cmd_update(_args()) == 1
+
+
+@pytest.mark.parametrize("status", ["ready", "deactivation-required"])
+@pytest.mark.parametrize("inherited_context", [None, "/caller/install.json"])
+def test_selected_context_runs_self_installer_with_validated_environment(
     wired,
     monkeypatch,
     plugin_dir,
+    status,
+    inherited_context,
 ):
+    context = Path("/cell/agent-worktrees/install.json")
+    cell_root = context.parent
+    if inherited_context is None:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", inherited_context)
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/caller/payload")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python")
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev10")
     monkeypatch.setattr(
         reconcile,
-        "_selected_runtime_root",
-        lambda name, selected_plugin_dir: (Path("/cell/agent-worktrees"), True),
+        "resolve_runtime_installation",
+        lambda name, selected_plugin_dir, **kwargs: (
+            reconcile.RuntimeInstallationResolution(
+                runtime_root=cell_root,
+                context=context,
+                actual_mode="namespaced",
+                desired_mode=(
+                    "namespaced" if status == "ready" else "legacy"
+                ),
+                status=status,
+                reason=(
+                    "namespaced-active"
+                    if status == "ready"
+                    else "policy-disabled-active"
+                ),
+            )
+        ),
     )
     monkeypatch.setattr(
         reconcile,
         "runtime_deployed_version",
         lambda name, home=None, **kwargs: "1.5.3-dev9",
     )
+    installer_environments: list[dict[str, str]] = []
+    installer_argv: list[list[str]] = []
+
+    def run(argv, *args, **kwargs):
+        if "install.sh" in " ".join(argv):
+            installer_environments.append(kwargs["env"])
+            installer_argv.append(list(argv))
+        return _Completed()
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(m.subprocess, "run", run)
 
     assert m.cmd_update(_args(force=True)) == 0
 
-    assert not _installer_ran(wired)
+    assert installer_environments
+    environment = installer_environments[0]
+    assert environment["COPILOT_EXTENSIONS_CONTEXT"] == str(context)
+    assert "COPILOT_PLUGIN_ROOT" not in environment
+    assert "PYTHONPATH" not in environment
+    assert installer_argv[0][-2:] == ["--install-dir", str(cell_root)]
 
 
-def test_prelaunch_selected_context_suppresses_self_legacy_installer(
+@pytest.mark.parametrize("status", ["ready", "deactivation-required"])
+@pytest.mark.parametrize("inherited_context", [None, "/caller/install.json"])
+def test_prelaunch_selected_context_uses_validated_installer_environment(
     tmp_path,
     monkeypatch,
     plugin_dir,
+    status,
+    inherited_context,
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
     cell_root = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    cell_root.mkdir(parents=True)
+    context = cell_root / "install.json"
+    context.write_text("{}", encoding="utf-8")
+    (cell_root / "deploy-manifest.json").write_text("{}", encoding="utf-8")
+    if inherited_context is None:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", inherited_context)
     monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
     monkeypatch.setattr(
         cfg,
@@ -148,26 +221,89 @@ def test_prelaunch_selected_context_suppresses_self_legacy_installer(
     )
     monkeypatch.setattr(
         reconcile,
-        "_explicit_context_target",
-        lambda: (Path("/context/install.json"), "agent-worktrees"),
+        "resolve_runtime_installation",
+        lambda name, selected_plugin_dir, **kwargs: (
+            reconcile.RuntimeInstallationResolution(
+                runtime_root=cell_root,
+                context=context,
+                actual_mode="namespaced",
+                desired_mode=(
+                    "namespaced" if status == "ready" else "legacy"
+                ),
+                status=status,
+                reason=(
+                    "namespaced-active"
+                    if status == "ready"
+                    else "policy-disabled-active"
+                ),
+            )
+        ),
     )
-    monkeypatch.setattr(
-        reconcile,
-        "_selected_runtime_root",
-        lambda name, selected_plugin_dir: (cell_root, True),
-    )
-    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev10")
-    monkeypatch.setattr(
-        reconcile,
-        "runtime_deployed_version",
-        lambda name, home=None, **kwargs: "1.5.3-dev9",
-    )
+    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "behind")
 
     plan = m.plan_pre_launch()
 
-    assert plan["action"] == "continue"
-    assert plan["diagnostics"][0]["reason"] == "context-runtime-version-drift"
-    assert "updates" not in plan
+    assert plan["action"] == "self-update"
+    update = plan["updates"][0]
+    assert update["service"] == "agent-worktrees"
+    assert update["runtime_root"] == str(cell_root)
+    assert update["environment"] == {
+        "COPILOT_EXTENSIONS_CONTEXT": str(context)
+    }
+    assert update["unset_environment"] == list(reconcile._RUNTIME_ENV_UNSET)
+    expected_flag = "-InstallDir" if m.platform.system() == "Windows" else "--install-dir"
+    assert update["argv"][-2:] == [expected_flag, str(cell_root)]
+
+
+def test_prelaunch_legacy_default_uses_conventional_runtime(
+    tmp_path,
+    monkeypatch,
+    plugin_dir,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    legacy_root = tmp_path / "legacy"
+    legacy_root.mkdir()
+    (legacy_root / "deploy-manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(service_paths=None)
+        ),
+    )
+    monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
+    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: plugin_dir,
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "resolve_runtime_installation",
+        lambda name, selected_plugin_dir, **kwargs: (
+            reconcile.RuntimeInstallationResolution(
+                runtime_root=legacy_root,
+                context=None,
+                actual_mode="legacy",
+                desired_mode="legacy",
+                status="ready",
+                reason="policy-default-false",
+            )
+        ),
+    )
+    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "behind")
+
+    update = m.plan_pre_launch()["updates"][0]
+
+    assert update["runtime_root"] == str(legacy_root)
+    assert update["environment"] == {}
+    assert update["unset_environment"] == list(reconcile._RUNTIME_ENV_UNSET)
+    expected_flag = "-InstallDir" if m.platform.system() == "Windows" else "--install-dir"
+    assert update["argv"][-2:] == [expected_flag, str(legacy_root)]
 
 
 def test_prelaunch_invalid_other_context_fails_closed(
@@ -194,13 +330,8 @@ def test_prelaunch_invalid_other_context_fails_closed(
     )
     monkeypatch.setattr(
         reconcile,
-        "_explicit_context_target",
-        lambda: (Path("/context/install.json"), "agent-index"),
-    )
-    monkeypatch.setattr(
-        reconcile,
-        "_selected_runtime_root",
-        lambda name, selected_plugin_dir: (_ for _ in ()).throw(
+        "runtime_installer_environment",
+        lambda name, selected_plugin_dir, **kwargs: (_ for _ in ()).throw(
             ValueError("invalid cross-plugin context")
         ),
     )
