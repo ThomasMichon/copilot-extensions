@@ -80,7 +80,9 @@ CACHE_NAME = "plugin-reconcile-cache.json"
 VALID_SCOPES = ("universal", "machine-gated", "none")
 _RUNTIME_ENV_UNSET = (
     "COPILOT_EXTENSIONS_CONTEXT",
+    "COPILOT_PLUGIN_INSTALL_STAGED",
     "COPILOT_PLUGIN_ROOT",
+    "COPILOT_PLUGIN_STAGED_FROM",
     "PYTHONPATH",
 )
 
@@ -760,6 +762,17 @@ def runtime_installation_candidate(
     return receipt, receipt.parent
 
 
+def clean_runtime_installer_environment(
+    *,
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return an installer environment without inherited runtime ownership."""
+    child_environment = dict(os.environ if base is None else base)
+    for key in _RUNTIME_ENV_UNSET:
+        child_environment.pop(key, None)
+    return child_environment
+
+
 def runtime_installer_environment(
     plugin_name: str,
     plugin_dir: Path,
@@ -767,9 +780,7 @@ def runtime_installer_environment(
     base: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], Path | None]:
     """Build a clean installer environment and return its governed runtime root."""
-    child_environment = dict(os.environ if base is None else base)
-    for key in _RUNTIME_ENV_UNSET:
-        child_environment.pop(key, None)
+    child_environment = clean_runtime_installer_environment(base=base)
     context = runtime_installation_context(plugin_name, plugin_dir)
     if context is None:
         return child_environment, None

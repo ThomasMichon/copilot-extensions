@@ -170,10 +170,8 @@ def test_runtime_install_strips_caller_payload_environment(monkeypatch):
     assert captured["env"]["RECONCILE_KEEP"] == "present"
 
 
-@pytest.mark.parametrize("plugin_name", ["agent-index", "agent-machines"])
-def test_runtime_install_uses_matching_validated_context(
-    monkeypatch, plugin_name
-):
+def test_runtime_install_uses_matching_validated_context(monkeypatch):
+    plugin_name = "agent-index"
     _install_config(monkeypatch)
     _stub_reconcile(
         monkeypatch,
@@ -223,6 +221,32 @@ def test_current_runtime_is_skipped_without_force(monkeypatch):
     calls = _capture_installers(monkeypatch)
     m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
     assert "agent-codespaces" not in _installed_names(calls)
+
+
+def test_current_cell_runtime_still_requires_receipt(monkeypatch):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-index"],
+        scopes={"agent-index": "universal"},
+        deployed={"agent-index": "0.2.0"},
+        payload={"agent-index": "0.2.0"},
+    )
+    calls = _capture_installers(monkeypatch)
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_installation_candidate",
+        lambda name, pdir: (_ for _ in ()).throw(
+            ValueError("active installation receipt is missing")
+        ),
+    )
+
+    result = m._reconcile_one_runtime("agent-index", "linux", force=False)
+
+    assert result == (
+        "installation context invalid: active installation receipt is missing"
+    )
+    assert calls == []
 
 
 def test_force_reinstalls_even_when_current(monkeypatch):
@@ -450,6 +474,63 @@ def test_init_only_plugin_falls_back_to_init_sh(monkeypatch):
     assert "--force" not in argv
 
 
+def test_init_only_plugin_needs_no_receipt_and_strips_caller_context(
+    monkeypatch,
+):
+    """A legacy bootstrap runs receipt-free with inherited ownership removed."""
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-machines"],
+        scopes={"agent-machines": "machine-gated"},
+        deployed={"agent-machines": "0.1.0-dev18"},
+        payload={"agent-machines": "0.1.0-dev24"},
+    )
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(Path.cwd() / "foreign" / "install.json"),
+    )
+    monkeypatch.setenv("COPILOT_PLUGIN_INSTALL_STAGED", "1")
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/caller/payload")
+    monkeypatch.setenv("COPILOT_PLUGIN_STAGED_FROM", "/caller/staged-payload")
+    monkeypatch.setenv("RECONCILE_KEEP", "present")
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_installer_environment",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("init-only runtime must not request a receipt")
+        ),
+    )
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = list(argv)
+        captured["env"] = kwargs["env"]
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    real_exists = Path.exists
+
+    def fake_exists(self):
+        value = str(self)
+        if value.endswith("install.sh"):
+            return False
+        if value.endswith("init.sh"):
+            return True
+        return real_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert captured["argv"][-1].endswith("scripts/init.sh")
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in captured["env"]
+    assert "COPILOT_PLUGIN_INSTALL_STAGED" not in captured["env"]
+    assert "COPILOT_PLUGIN_ROOT" not in captured["env"]
+    assert "COPILOT_PLUGIN_STAGED_FROM" not in captured["env"]
+    assert captured["env"]["RECONCILE_KEEP"] == "present"
+
+
 def test_init_only_plugin_forced_passes_force_flag(monkeypatch):
     """A forced reconcile of an init-only runtime passes --force to the bootstrap."""
     _install_config(monkeypatch)
@@ -469,6 +550,32 @@ def test_init_only_plugin_forced_passes_force_flag(monkeypatch):
     assert argv[-1] == "--force"
     assert argv[-2].endswith("scripts/init.sh")
     assert "update" not in argv
+
+
+def test_current_init_only_plugin_skips_without_receipt(monkeypatch):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-machines"],
+        scopes={"agent-machines": "machine-gated"},
+        deployed={"agent-machines": "0.1.0-dev24"},
+        payload={"agent-machines": "0.1.0-dev24"},
+    )
+    calls = _capture_init_installers(monkeypatch)
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_installation_candidate",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("init-only runtime must not request a receipt")
+        ),
+    )
+
+    result = m._reconcile_one_runtime(
+        "agent-machines", "linux", force=False
+    )
+
+    assert result == "SKIPPED (current)"
+    assert calls == []
 
 
 def test_module_names_reads_manifest(tmp_path):
