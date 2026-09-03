@@ -1477,7 +1477,7 @@ class FilesystemTarget(Target):
                             ok=False,
                             detail=f"destination rescue lock is busy: {lock_file}",
                         )
-                    for attempt in range(2):
+                    for _ in range(2):
                         pass_copied, pass_bytes, cleanup_warning = (
                             _replace_selected_sessions(
                                 source,

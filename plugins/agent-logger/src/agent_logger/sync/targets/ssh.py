@@ -65,7 +65,7 @@ class SshTarget(Target):
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         remote = f"{host}:{self._remote_path()}/{machine}/"
         ssh_cmd = "ssh " + " ".join(self._ssh_opts())
-        for attempt in range(2):
+        for _ in range(2):
             cmd = [
                 "rsync",
                 "-az",
