@@ -365,3 +365,19 @@ per-plugin last-known-good rollout (#742).
   Python runtime with an empty `PYTHONPATH`, bounded the resident's per-project
   config cache by both TTL and entry count, and documented that session-start
   payload `cwd` outranks the plugin process directory for project resolution.
+- Pre-merge field validation found two daemon-only failures that unit tests had
+  not exposed. The monitor reused its own inherited handoff, profile-assignment,
+  pane, session, and launch environment when a request omitted those values;
+  resident registration now disables every ambient session-local fallback and
+  trusts only request metadata. The multi-session sweep could also repeatedly
+  reacquire the project-state lock ahead of a waiting lifecycle request;
+  lifecycle waiters now receive priority at each per-session and reconciliation
+  boundary.
+- With those fixes deployed from the source worktree, eight sequential resident
+  registration requests completed without fallback in 1.08-1.42 seconds. Four
+  simultaneous requests all completed through the resident path in
+  1.28-4.63 seconds, and the complete PowerShell hook had a representative
+  three-run median of 2.14 seconds. The deployed monitor retained one active
+  process tree. A 10-second sample during the live multi-session sweep consumed
+  about 2.05 CPU seconds, so sweep CPU remains an explicit follow-up signal for
+  the wider process audit rather than a reason to re-expand session startup.

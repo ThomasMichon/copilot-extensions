@@ -93,6 +93,48 @@ class TestRegisterSessionStdin:
         assert rec.handoffs[0].candidate == "new"
         assert rec.handoffs[0].state == "pending"
 
+    def test_resident_registration_ignores_monitor_session_environment(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-resident", "/tmp/src/wt-resident")
+        tracking.register_session("wt-resident", "old")
+        rec = load_record(tmp_tracking_dir / "wt-resident.yaml")
+        tracking.open_handoff(rec, "old", "task-123")
+        monkeypatch.setenv("AGENT_WORKTREES_HANDOFF_TOKEN", "task-123")
+        monkeypatch.setenv("TMUX_PANE", "%stale")
+        monkeypatch.setenv("WORKTREE_LAUNCH_ID", "stale-launch")
+        monkeypatch.setenv(
+            "AGENT_WORKTREES_PROFILE_ASSIGNMENT_TOKEN", "stale-assignment"
+        )
+        assignment_tokens = []
+        launch_ids = []
+        monkeypatch.setattr(
+            m.profile_assignment,
+            "bind",
+            lambda token, *_args: assignment_tokens.append(token),
+        )
+        monkeypatch.setattr(m.profile_assignment, "maintain", lambda: None)
+        monkeypatch.setattr(
+            m.activity,
+            "log_event",
+            lambda _event, **fields: launch_ids.append(fields.get("launch_id")),
+        )
+
+        rc = m.cmd_register_session(_args(
+            worktree_id="wt-resident",
+            session_id="new",
+            allow_ambient_session_environment=False,
+        ))
+
+        assert rc == 0
+        rec = load_record(tmp_tracking_dir / "wt-resident.yaml")
+        session = rec.session_entry("new")
+        assert session is not None
+        assert session.pane_id is None
+        assert rec.handoffs[0].candidate is None
+        assert assignment_tokens == [None]
+        assert launch_ids == [None]
+
     def test_resolves_worktree_from_stdin_cwd(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

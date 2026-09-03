@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import threading
+import time
 import types
 
 import agent_procutil
@@ -35,6 +37,22 @@ def test_resident_lifecycle_requests_wait_for_their_deadline():
     assert m._resident_hook_lock_timeout("projectResolve", 1.75) == 1.75
     assert m._resident_hook_lock_timeout("preToolUse", 1.75) == 0.05
     assert m._resident_hook_lock_timeout("postToolUse", 0.02) == 0.02
+
+
+def test_monitor_yields_to_waiting_lifecycle_request():
+    priority = threading.Event()
+    priority.set()
+
+    def release_priority():
+        time.sleep(0.05)
+        priority.clear()
+
+    released = threading.Thread(target=release_priority)
+    released.start()
+    started = time.monotonic()
+    m._wait_for_lifecycle_priority(priority)
+    released.join()
+    assert time.monotonic() - started >= 0.04
 
 
 def test_resident_session_context_inputs_are_cached(monkeypatch):
@@ -417,6 +435,7 @@ def test_resident_session_start_preserves_hook_metadata(monkeypatch):
     assert captured["handoff_candidate_token"] == "handoff-token"
     assert captured["assignment_token"] == "assignment-token"
     assert captured["launch_id"] == "launch-1"
+    assert captured["allow_ambient_session_environment"] is False
 
 
 def test_resident_session_start_ignores_unmatched_worktree_identity(monkeypatch):

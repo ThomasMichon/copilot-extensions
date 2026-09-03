@@ -7608,6 +7608,7 @@ def _monitor_sweep(
     published: dict[tuple[str, str], str] | None = None,
     incarnations: dict[str, str] | None = None,
     project_lock=None,
+    lifecycle_priority=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -7661,6 +7662,7 @@ def _monitor_sweep(
             pane_observer(sess, path)
         context_value = None
         segment_value = ""
+        _wait_for_lifecycle_priority(lifecycle_priority)
         with (
             project_lock
             if project_lock is not None
@@ -7703,6 +7705,7 @@ def _monitor_sweep(
             ctx_done.add(sess)
         _publish("@aw_seg", segment_value)
     for project, path in warm_projects.items():
+        _wait_for_lifecycle_priority(lifecycle_priority)
         with (
             project_lock
             if project_lock is not None
@@ -8000,6 +8003,7 @@ class _ResidentHookPolicy:
                 profile_assignment.ASSIGNMENT_TOKEN_ENV
             ),
             launch_id=environment.get("WORKTREE_LAUNCH_ID"),
+            allow_ambient_session_environment=False,
             context_config=(
                 self.context_config()
                 if self.hook_client is not None and has_project
@@ -8109,6 +8113,11 @@ def _resident_hook_lock_timeout(kind: str, remaining: float) -> float:
     return min(0.05, remaining)
 
 
+def _wait_for_lifecycle_priority(priority_event) -> None:
+    while priority_event is not None and priority_event.is_set():
+        time.sleep(0.01)
+
+
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 
@@ -8169,20 +8178,36 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
     state_lock = threading.RLock()
+    lifecycle_priority = threading.Event()
+    lifecycle_count_lock = threading.Lock()
+    lifecycle_count = 0
     hook_client = _load_hook_client_module()
     hook_policy = _ResidentHookPolicy(hook_client)
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
+        nonlocal lifecycle_count
+        is_lifecycle = kind in {"sessionStart", "projectResolve"}
+        if is_lifecycle:
+            with lifecycle_count_lock:
+                lifecycle_count += 1
+                lifecycle_priority.set()
         remaining = deadline - time.time()
         lock_timeout = _resident_hook_lock_timeout(kind, remaining)
-        if remaining <= 0 or not state_lock.acquire(timeout=lock_timeout):
-            raise HookUnavailable
         try:
-            return _resident_hook_decision(
-                kind, payload, segment_cache=segment_cache,
-                policy=hook_policy, deadline=deadline)
+            if remaining <= 0 or not state_lock.acquire(timeout=lock_timeout):
+                raise HookUnavailable
+            try:
+                return _resident_hook_decision(
+                    kind, payload, segment_cache=segment_cache,
+                    policy=hook_policy, deadline=deadline)
+            finally:
+                state_lock.release()
         finally:
-            state_lock.release()
+            if is_lifecycle:
+                with lifecycle_count_lock:
+                    lifecycle_count -= 1
+                    if lifecycle_count == 0:
+                        lifecycle_priority.clear()
 
     hook_server = None
     if hook_policy.ready():
@@ -8218,7 +8243,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 catalog_observer=reconciler.observe_mux,
                 pane_observer=pane_reconciler.observe,
                 segment_cache=segment_cache, published=published,
-                incarnations=incarnations, project_lock=state_lock)
+                incarnations=incarnations, project_lock=state_lock,
+                lifecycle_priority=lifecycle_priority)
+            _wait_for_lifecycle_priority(lifecycle_priority)
             with state_lock:
                 try:
                     reconciler.step()
@@ -19628,10 +19655,15 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     pid = getattr(args, "pid", None)
     event_at = getattr(args, "event_at", None)
     source = getattr(args, "source", None) or "hook"
+    allow_ambient = getattr(args, "allow_ambient_session_environment", True)
     pane_id = (
         getattr(args, "pane", None)
-        or os.environ.get("TMUX_PANE")
-        or os.environ.get("PSMUX_PANE")
+        or (
+            os.environ.get("TMUX_PANE")
+            or os.environ.get("PSMUX_PANE")
+            if allow_ambient
+            else None
+        )
         or None
     )
     if isinstance(pane_id, str):
@@ -19648,7 +19680,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 source = f"hook:{hook_source.strip()}"
 
     # Last-resort env fallback (set for tool subprocesses, not the hook).
-    if not session_id:
+    if not session_id and allow_ambient:
         session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     if not session_id:
         return 0  # nothing to register -- silent no-op
@@ -19723,7 +19755,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
 
     candidate_token = (
         getattr(args, "handoff_candidate_token", None)
-        or os.environ.get(_SESSION_HANDOFF_TOKEN)
+        or (
+            os.environ.get(_SESSION_HANDOFF_TOKEN)
+            if allow_ambient
+            else None
+        )
         or None
     )
     candidate_associated = False
@@ -19756,7 +19792,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         return 1
     profile_assignment.bind(
         getattr(args, "assignment_token", None)
-        or os.environ.get(profile_assignment.ASSIGNMENT_TOKEN_ENV),
+        or (
+            os.environ.get(profile_assignment.ASSIGNMENT_TOKEN_ENV)
+            if allow_ambient
+            else None
+        ),
         session_id,
         wt_id,
     )
@@ -19765,7 +19805,14 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         "session_started",
         worktree_id=wt_id,
         session_id=session_id,
-        launch_id=getattr(args, "launch_id", None) or os.environ.get("WORKTREE_LAUNCH_ID"),
+        launch_id=(
+            getattr(args, "launch_id", None)
+            or (
+                os.environ.get("WORKTREE_LAUNCH_ID")
+                if allow_ambient
+                else None
+            )
+        ),
     )
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
     # off-mux).  The launcher spawns it at psmux create/join, but an attached
