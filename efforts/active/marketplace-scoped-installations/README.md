@@ -219,6 +219,19 @@ because they provide tools or services.
     - [x] Add a deterministic cross-platform Tier-P Agent Machines scenario for
       two cells, isolated update/rollback, blocked governance states, and
       unrelated/payload-only eligibility negatives.
+    - [x] Implement the Agent Index service-bearing exemplar with
+      cell-local runtime, durable state, routing, endpoints, launchers, and
+      lifecycle identity, plus a deterministic dual-cell Tier-P scenario for
+      concurrent service, isolated update/rollback, fail-closed foreign control,
+      and isolated shutdown.
+    - [x] Harden Agent Index lifecycle transactions: atomic read drain
+      admission, promotion-gated passive services, durable marker+manifest
+      recovery, transaction-only namespaced deploy/recovery, exact instance-token
+      controls, ownership-attested orphan reconciliation, stale-lock claiming,
+      nonblocking session ensure, and PowerShell 5.1-safe launchers.
+    - [ ] Accept Agent Index as the operative service-bearing exemplar after the
+      full Linux lifecycle and Windows clean-room arms pass. Smoke mode is a fast
+      diagnostic only, not the acceptance lane.
     - [ ] Run the Agent Machines scenario in disposable Linux and Windows
       clean-room arms.
 
@@ -840,3 +853,26 @@ See [`design.md`](design.md).
 - Staged cell snapshot copy in an owned temporary sibling and made retry reclaim
   only marker-proven, still-unproven publications. POSIX and PowerShell tests
   cover injected interruption, retry, and preservation of unowned final state.
+
+### 2026-09-01 — Agent Index service-bearing implementation
+
+- Converted Agent Index to the explicit installation-context payload contract
+  while preserving absent/default/explicit-false policy as legacy and refusing
+  invalid, requested-only, foreign, maintenance, orphaned, or stale evidence
+  without legacy fallback.
+- Added serialized cell provisioning and runtime cutover with snapshot
+  provenance, immutable slot ownership/completion, schema-4 deploy manifests,
+  installation-local launchers, cell-local service/routing/state/log/cache/config
+  roots, OS-assigned endpoints, and no generic service/task/binstub publication.
+- Added a cross-platform Tier-P scenario that provisions and starts two
+  independently sourced Agent Index cells, updates and rolls one back without
+  changing its peer, rejects foreign control, and stops each service through its
+  own cell-local boundary.
+- The Linux disposable arm passed the source boundary and default/false policy
+  stage, then stopped at the classified `toolchain-uv` gate because the box
+  could not fetch `setuptools` from public PyPI (`HandshakeFailure`) and no
+  `CR_UV_INDEX` was configured. No namespaced state was created on a persistent
+  host; the Linux full lifecycle and Windows arm remain open, so the exemplar is
+  implementation-ready but not yet operative. Smoke mode remains a fast
+  diagnostic; full mode is the acceptance lane. The clean-room-only restriction
+  is rollout policy, not a host-detection security boundary.

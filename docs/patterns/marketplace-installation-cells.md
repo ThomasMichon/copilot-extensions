@@ -207,6 +207,28 @@ it never scans for a same-named coordinator or contributor in another cell.
 - A user-local maintenance marker can quiesce hooks, reconciliation,
   provisioning, service ensure/start, scheduled work, and dispatch while
   preserving read-only doctor and explicitly authorized repair surfaces.
+- Marker cutover and deploy-manifest publication are one durable transaction,
+  not independent writes. The installation records the exact prior selection,
+  validated completed target, and receipt generations before marker CAS;
+  retry/bootstrap either finishes the target or restores the prior
+  marker+manifest. Governance is rechecked immediately before marker mutation,
+  before service reconciliation, and -- for a service cutover -- after passive
+  health but immediately before target promotion and route publication. A
+  blocked final check retires the passive target and restores the prior
+  selection without draining, rerouting, or stopping the old service.
+- A namespaced passive service may publish an instance-specific ownership
+  receipt so recovery can address it, but it does not start/dequeue shared work
+  or publish shared active endpoint/version evidence. A transaction-authorized,
+  exact-instance promotion first starts adoption and proves read readiness;
+  only then may routing atomically select that PID/version. A crash before route
+  publication leaves the prior route active and the passive receipt available
+  for exact recovery. Random deploy/promotion/recovery authorization lives only
+  for that installation transaction; context alone is not management authority.
+- Control and cleanup are exact-instance operations. Clients validate route PID,
+  runtime version, installation identity, and the freshly attested instance
+  token before drain, undrain, shutdown, or promotion. Reconciliation shuts down
+  only matching instance receipts and converges a completed cutover to one owned
+  installation PID; it never sweeps by process name.
 
 Policy and maintenance resolve from the canonical OS user profile, not an
 ordinary `HOME`, durable-home override, or repository directory. Windows, native

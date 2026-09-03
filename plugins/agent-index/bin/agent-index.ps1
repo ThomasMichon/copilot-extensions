@@ -36,6 +36,7 @@ if (
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
+$env:AGENT_INDEX_PAYLOAD_ROOT = $_payloadRoot
 $_payloadDispatcher = Join-Path $_payloadRoot 'scripts\runtime-gate.ps1'
 & $_payloadDispatcher @args
 exit $LASTEXITCODE

@@ -1,0 +1,42 @@
+{
+  "name": "agent-index-installation-cells",
+  "description": "Tier-P F1 dual-cell service scenario: two independent marketplace sources carrying the same Agent Index name and version activate, provision, and serve from isolated installation cells on OS-assigned ports. One cell updates, rolls back, and recovers installer-driven cutover crashes at passive, flipped, draining, and committed phases through the current management payload without changing its peer; each transition converges to exactly one ownership-attested PID. Ordinary namespaced deploy/recovery, copied, foreign, mismatched, and cross-cell service evidence fail closed; default and explicit-false policy remain legacy and non-activating. Linux and Windows arms use the canonical installation-context runner and native payload wrappers.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "platforms": ["linux", "windows"],
+  "prereqs": {
+    "present": ["python3", "uv"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "none",
+    "gh": "none",
+    "ado": "none"
+  },
+  "inputs": {
+    "CR_PARTNER_PATH": "mounted copilot-extensions source tree",
+    "CR_UV_INDEX": "optional package index for a full lightweight-runtime build",
+    "CR_AGENT_INDEX_BUILD_MODE": "full (default), smoke, or auto (an alias for full); smoke is diagnostic-only and requires the lightweight service dependencies in the clean-room base interpreter"
+  },
+  "expected_artifacts": [
+    "$HOME/cr-report.json (phases + jams; ok iff failed==0)",
+    "two source-qualified Agent Index cells beneath ~/.copilot-extensions/marketplaces/",
+    "cell-local immutable runtime slots, state, run/routing, logs, cache, config, launchers, and service identities",
+    "two distinct ownership-attested loopback endpoints and durable state witnesses",
+    "per-instance ownership receipts plus graceful cleanup evidence proving every current, historical, passive, and demoted service PID exited"
+  ],
+  "stages": [
+    {"n": 0, "title": "source and clean fixture boundary"},
+    {"n": 1, "title": "default and false policy remain legacy and non-activating"},
+    {"n": 2, "title": "two active Agent Index cells provision and serve independently"},
+    {"n": 3, "title": "cell A updates and cuts over while cell B is unchanged"},
+    {"n": 4, "title": "current management rolls cell A back, recovers four cutover crash phases, and preserves reconciled source provenance"},
+    {"n": 5, "title": "ordinary payload deploy/recovery plus foreign and cross-cell control fail closed; shutdown and cleanup are isolated"}
+  ],
+  "notes": [
+    "All policies, receipts, runtimes, services, witnesses, and output live in the disposable clean-room account or runner-owned results directory.",
+    "The mounted source is copied only into disposable synthetic payloads; no host installation is selected.",
+    "Smoke mode is a fast diagnostic that imports and serves the real Agent Index package from the cell snapshot. Full mode installs the lightweight service dependencies, never provisions the embedding engine, and is the acceptance lane."
+  ]
+}

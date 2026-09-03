@@ -419,6 +419,9 @@ class TaskRunner:
         try:
             cmd = [
                 windowless_python(sys.executable),
+                "-I",
+                "-X",
+                "utf8",
                 "-m",
                 "agent_index",
                 "index-worker",
@@ -426,6 +429,12 @@ class TaskRunner:
                 task_id,
             ]
             kwargs: dict[str, Any] = {
+                "cwd": os.path.dirname(os.path.dirname(sys.executable)),
+                "env": {
+                    key: value
+                    for key, value in os.environ.items()
+                    if key not in {"PYTHONPATH", "PYTHONHOME"}
+                },
                 "stdout": logf,
                 "stderr": logf,
                 "stdin": subprocess.DEVNULL,

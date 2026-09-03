@@ -31,4 +31,9 @@ case "$PWD/" in
         ;;
 esac
 
-exec "$_payload_root/scripts/runtime-gate.sh" "$@"
+export AGENT_INDEX_PAYLOAD_ROOT="$_payload_root"
+if ! command -v bash >/dev/null 2>&1; then
+    printf '[agent-index] required payload dispatcher needs bash.\n' >&2
+    exit 126
+fi
+exec bash "$_payload_root/scripts/runtime-gate.sh" "$@"

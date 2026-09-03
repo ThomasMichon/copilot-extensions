@@ -12,6 +12,12 @@
 #      writes remain blocked until context-aware installers become operative.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
+if [ -f "$ScriptDir/runtime-gate.sh" ]; then
+  bash "$ScriptDir/runtime-gate.sh" __cell-bootstrap >/dev/null 2>&1
+  cell_status=$?
+  if [ "$cell_status" -eq 0 ]; then exit 0; fi
+  if [ "$cell_status" -ne 10 ]; then exit 0; fi
+fi
 legacy_mutation_allowed() {
   local probe="$ScriptDir/installation-context/legacy-entrypoint-probe.sh"
   [ -f "$probe" ] || {
@@ -21,7 +27,10 @@ legacy_mutation_allowed() {
   bash "$probe" --payload-root "$PluginDir" --legacy-root "$HOME/.$name"
 }
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
-name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
+name="$(CDPATH= cd -- "$PluginDir" &&
+  "$py" -I -X utf8 -c \
+    'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' \
+    "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || exit 0
 ContextSelected=0
 InstallDir="$HOME/.$name"
@@ -101,7 +110,10 @@ if [ ! -f "$Manifest" ]; then
   fi
   exit 0
 fi
-deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
+deployed="$(CDPATH= cd -- "$InstallDir" &&
+  "$py" -I -X utf8 -c \
+    'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' \
+    "$Manifest" 2>/dev/null)"
 current="$deployed"
 pyproj="$PluginDir/pyproject.toml"
 if [ -f "$pyproj" ]; then
@@ -140,6 +152,24 @@ fi
 # A current slot is provisioned only when the canonical resolver selects that
 # exact version and the package import succeeds. A Python-shaped partial slot is
 # never readiness.
+runtime_origin_under() {
+  local python="$1" slot="$2" origin="" origin_dir="" origin_abs="" slot_abs=""
+  [ -x "$python" ] && [ -d "$slot" ] || return 1
+  slot_abs="$(CDPATH= cd -- "$slot" 2>/dev/null && pwd -P)" || return 1
+  origin="$(CDPATH= cd -- "$slot_abs" 2>/dev/null &&
+    "$python" -I -X utf8 -c \
+      'from pathlib import Path; import agent_index; print(Path(agent_index.__file__).resolve())' \
+      2>/dev/null)" || return 1
+  [ -n "$origin" ] && [ -f "$origin" ] || return 1
+  origin_dir="$(dirname -- "$origin")"
+  origin_abs="$(CDPATH= cd -- "$origin_dir" 2>/dev/null && pwd -P)/$(basename -- "$origin")" ||
+    return 1
+  case "$origin_abs" in
+    "$slot_abs"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 provisioned=0
 if [ -f "$InstallDir/current-version" ]; then
   cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
@@ -149,7 +179,9 @@ if [ -f "$InstallDir/current-version" ]; then
     . "$ScriptDir/resolve-runtime.sh"
     case "${AGENT_RT_PY:-}" in
       "$InstallDir/versions/$current/"*)
-        "$AGENT_RT_PY" -c 'import agent_index' >/dev/null 2>&1 && provisioned=1
+        runtime_origin_under \
+          "$AGENT_RT_PY" "$InstallDir/versions/$current" &&
+          provisioned=1
         ;;
     esac
   fi
