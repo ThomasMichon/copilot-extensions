@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-08-25
+- **Last revised:** 2026-09-03
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -56,9 +56,16 @@ into a coordination problem.
 - **Endpoint discovery (rendezvous)** — how a client finds the *current*
   endpoint of a service without a human-managed constant. Discovery is the seam
   that makes endpoints collision-free and relocatable.
-- **Lifecycle supervision** — the platform-native mechanism that starts, keeps
-  alive, and restarts a service (a per-user OS service), so a service's presence
-  does not depend on an interactive session.
+- **Lifecycle supervision** — the platform-native mechanism that realizes a
+  service's declared availability contract, from user-session auto-run through
+  restart-on-failure and pre-login operation.
+- **Lifecycle tier** — the least-privileged supervision class that satisfies a
+  service's actual availability needs: user-mode ensure/auto-run, scheduled
+  activation, an installed system service, or a container whose orchestrator
+  owns lifecycle. Moving upward is an explicit escalation, not the default.
+- **Stable lifecycle launcher** — the durable invocation boundary registered
+  with a supervisor once. It remains at one stable location while resolving the
+  currently selected immutable runtime generation behind that boundary.
 - **Single-instance lease** — the host-local claim that makes "**one active
   daemon per service per host**" an *asserted, repairable* property rather than a
   hope: a process becomes the active endpoint only by holding the lease, and a
@@ -118,13 +125,29 @@ fully functional; adding or removing a plugin never breaks an unrelated one and
 never requires reconfiguring the survivors.
 
 ### platform-native-lifecycle
-A service is supervised by the host OS's own per-user service facility, giving
-auto-start, keep-alive, and restart-on-failure on every supported platform
-(Windows and Linux/WSL) through one coherent contract. This supervision is the
-plugin's **own** — a plugin brings up, keeps alive, and restarts **its own
-daemon** with **no installer/configurator control-plane in the loop**; the
-optional control-plane may *observe* and *true-up* daemons across the set, but a
-daemon's existence and liveness never depend on it running.
+A service's declared availability is realized by the host's native lifecycle
+facility through one coherent cross-platform contract. A user-session service
+starts with that user; a managed user service adds restart and logout-survival
+where declared; a system service adds pre-login or system-identity availability.
+For standalone host installation this supervision is the plugin's **own** — a
+plugin brings up and keeps alive **its own daemon** with **no
+installer/configurator control-plane in the loop**. An optional control-plane
+may observe and true-up daemons across the set, but a daemon's standalone
+existence and liveness never depend on it running.
+
+### least-privilege-lifecycle-tier
+Every service uses the **lowest lifecycle tier that satisfies its availability
+contract**. User-mode ensure/auto-run is the default because starting and
+keeping the process healthy needs no elevation; scheduled activation is an
+opt-in next step when login/startup triggers are required; an installed system
+service is reserved for system-wide or pre-login availability; and a container
+is used only when an external orchestrator explicitly owns lifecycle. The same
+platform facility may realize different tiers when its privilege and
+availability properties differ. Installation does not escalate merely because
+a more privileged mechanism is available, and routine updates never introduce a
+new privilege boundary. Container management is a consumer-selected deployment
+of the same portable service contract, not a dependency of the plugin's
+standalone host installation.
 
 ### self-provisioning-runtime
 **Enabling** a runtime plugin is the whole action a user takes — its runtime
@@ -325,6 +348,25 @@ request, double-runs a scheduled job, or opens a window with no live service.
 *How* the routing record and drain are implemented (a shared cutover primitive) is
 spec-level, not fixed here.
 
+### register-once-cutover-on-update
+A lifecycle supervisor is bound **once** to a stable launcher and remains
+unchanged across ordinary version updates. The launcher resolves the selected
+immutable runtime generation dynamically; an update installs the new generation
+beside the old one and uses *zero-downtime-cutover* to move work before retiring
+the predecessor. A routine version bump therefore requires neither
+re-registration nor renewed elevation, and changing runtime configuration does
+not rewrite the supervisor definition.
+
+### payload-remains-replaceable
+The marketplace payload remains replaceable while services and launchers are
+running. No long-lived **service, daemon, installer, or service launcher** may
+retain the payload directory as its working directory or depend on mutable files
+there for steady-state service execution. Runtime processes operate from their
+installed generation and durable state locations, so refreshing or replacing
+the payload cannot be blocked by a process the previous payload launched.
+Copilot CLI's own session-scoped loading of skills, hooks, and extensions from
+the payload remains outside this service-runtime guarantee.
+
 ### single-instance-lease
 At most **one live daemon owns a given service within one marketplace
 installation cell on a host at a time**, and that ownership is **explicit and
@@ -393,6 +435,16 @@ credentials.** Guarded by the *single-instance-lease*, cut over by
 
 ## Provenance
 
+- **2026-09-03** — Added the **lifecycle tier** and **stable lifecycle launcher**
+  concepts, the **least-privilege-lifecycle-tier** feature, and the
+  **register-once-cutover-on-update** and **payload-remains-replaceable**
+  behaviors. Mined from repeated Windows update failures in which long-lived
+  plugin processes retained the marketplace payload as their working directory,
+  plus the existing stable-launcher and graceful-cutover mechanisms. The intent
+  generalizes the fixes tracked by #621, #622, and #1550: select the least
+  privileged sufficient supervisor, register its stable boundary once, move
+  versions behind it without renewed elevation, and keep the distributable
+  payload disposable.
 - **2026-08-25** — Added the
   [Marketplace Installation Cells](installation-cells/README.md) child vision.
   It generalizes the requirement that independently versioned marketplaces can
