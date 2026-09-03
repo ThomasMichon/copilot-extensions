@@ -26,6 +26,7 @@ bodies.
 | One small lookup or a few known files | Handle directly |
 | One continuous trace where each step determines the next | Keep one owner and trace directly |
 | Multiple independent tracks whose combined sources are too large to read directly | Delegate before reading the source bodies when the context or elapsed-time savings repay coordination cost |
+| Three or more independent comparison/evaluation tracks, each needing multiple source bodies | Delegate one bounded evidence agent per track before reading those bodies |
 | Domain MCP or service-tool calls with verbose catalogs or payloads | Route to the domain-owning sub-agent |
 | Disjoint bulk edits with clear file ownership | Delegate by non-overlapping file or component scope |
 | Cohesive implementation with tightly coupled decisions | Keep coordinator-owned by default |
@@ -84,6 +85,13 @@ it.
 Give each delegate the same decision criteria and a distinct option or evidence
 track. The coordinator normalizes the results, resolves tradeoffs, and makes the
 decision.
+
+For three or more independent implementations or subsystems where each track
+requires multiple source bodies, this is a hard threshold: launch one bounded
+evidence agent per track before opening those bodies in coordinator context.
+Do not substitute a code-review or rubber-duck role for an evidence track;
+reviewers judge a completed artifact and do not perform the initial comparison.
+Small comparisons that fit a few direct reads remain coordinator-owned.
 
 ### Bulk code or file changes
 
