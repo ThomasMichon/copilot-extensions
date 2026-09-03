@@ -85,6 +85,7 @@ _TRANSIENT_CONCLUSION_REASONS = frozenset({"live-mux", "live-session"})
 _CONCLUSION_MAX_ATTEMPTS = 12
 _CONCLUSION_RETRY_BASE_SECONDS = 30
 _CONCLUSION_PER_CYCLE = 10
+_COLD_RESUME_RETRY_SECONDS = 300
 
 
 def _default_liveness(worktree: str, machine: str | None) -> dict | None:
@@ -631,6 +632,7 @@ class Supervisor:
         self.fleet_cold_fn = fleet_cold_fn or _default_fleet_cold
         self._cooled_reservations: set[str] = set()
         self._cold_retry_after: dict[str, float] = {}
+        self._resume_retry_after: dict[str, float] = {}
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
         #: Re-drive sender used when a spawned CLI body is alive but still has
@@ -927,12 +929,16 @@ class Supervisor:
                 )
         return bound
 
-    def release_resumed_cold_tasks(self) -> int:
+    def release_resumed_cold_tasks(self, *, now: float | None = None) -> int:
         """Resume each cold task in its existing ACP session."""
+        now = time.time() if now is None else now
         resumed = 0
         for res in self._pool_reservations(
             state=SpawnState.COLD, resume_requested=True
         ):
+            key = str(res.get("key") or "")
+            if not key or now < self._resume_retry_after.get(key, 0.0):
+                continue
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -960,6 +966,9 @@ class Supervisor:
                 try:
                     process_resumed = self.local_resume_fn(local_sid, prompt)
                 except Exception:
+                    self._resume_retry_after[key] = (
+                        now + _COLD_RESUME_RETRY_SECONDS
+                    )
                     log.exception(
                         "failed to resume cold local body %s for task %s",
                         local_sid,
@@ -967,6 +976,9 @@ class Supervisor:
                     )
                     continue
                 if not process_resumed:
+                    self._resume_retry_after[key] = (
+                        now + _COLD_RESUME_RETRY_SECONDS
+                    )
                     continue
                 self.client.resume(
                     task["id"],
@@ -976,6 +988,7 @@ class Supervisor:
                     expected_owner_session_id=task.get("owner_session_id"),
                     expected_generation=task.get("generation"),
                 )
+                self._resume_retry_after.pop(key, None)
                 resumed += 1
                 log.info(
                     "resumed cold task %s in existing ACP session %s",
@@ -983,6 +996,9 @@ class Supervisor:
                     local_sid,
                 )
             except DispatchError:
+                self._resume_retry_after[key] = (
+                    now + _COLD_RESUME_RETRY_SECONDS
+                )
                 log.exception(
                     "failed to release resumed cold task %s",
                     task.get("id"),
@@ -1873,7 +1889,7 @@ class Supervisor:
         self.bind_headless_owner_sessions()
         self.suspend_idle_headless_tasks()
         self.cool_dormant_bodies()
-        self.release_resumed_cold_tasks()
+        self.release_resumed_cold_tasks(now=now)
         if self.evaluator is not None:
             self.advance_via_evaluator()
         if self.heartbeat or self.publish_activity:
