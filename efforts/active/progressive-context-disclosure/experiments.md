@@ -186,6 +186,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FAIL | all required guides loaded | 3, 3, 2 | Reject this representation: structured metadata increased irrelevant reads, lost provenance in every run, and did not produce the required decision. |
 | F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FAIL | all required guides loaded | 2, 2, 2 | Reject this assembly: independent judges counted three direct irrelevant guide reads in every run and each returned the wrong blocked decision; two also invented configuration paths. |
 | F3 / backtick absolute contained / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 2, 3, 1 | Reject this representation: absolute paths removed resolution failures but did not prevent broad exploration, irrelevant reads, provenance loss, or CAP-1 failure. |
+| F3 / Markdown link / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded; none auto-loaded | 2, 0, 2 | Reject this representation: real links did not auto-load guide bodies, but every run broadened into repository or configuration discovery and failed CAP-1 or the bounded-flow gate. |
 
 Counts-only records:
 
@@ -219,6 +220,9 @@ Counts-only records:
 - [`evidence/f3-absolute-gated-flat-multi-guide-r1.json`](evidence/f3-absolute-gated-flat-multi-guide-r1.json)
 - [`evidence/f3-absolute-gated-flat-multi-guide-r2.json`](evidence/f3-absolute-gated-flat-multi-guide-r2.json)
 - [`evidence/f3-absolute-gated-flat-multi-guide-r3.json`](evidence/f3-absolute-gated-flat-multi-guide-r3.json)
+- [`evidence/f3-md-gated-flat-multi-guide-r1.json`](evidence/f3-md-gated-flat-multi-guide-r1.json)
+- [`evidence/f3-md-gated-flat-multi-guide-r2.json`](evidence/f3-md-gated-flat-multi-guide-r2.json)
+- [`evidence/f3-md-gated-flat-multi-guide-r3.json`](evidence/f3-md-gated-flat-multi-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -363,6 +367,22 @@ safety-gated emphasis, flat fragments, the multi-guide task, model, venue, and
 fresh boundary fixed while changing only the representation to a real Markdown
 link. This directly tests both guide discoverability and unintended eager
 loading.
+
+Real Markdown links did not auto-load any guide body in these ACP runs. Every
+observed canary followed an explicit agent-initiated read, so the representation
+passes the eager-load boundary for this venue. It nevertheless failed all three
+behavioral repetitions.
+
+Repetitions 1 and 3 broadened into repository enumeration and two irrelevant
+canary-bearing guides. Repetition 2 loaded only the three required guides but
+then performed four undeclared configuration-location reads instead of stopping
+at the missing destination locator. Tool-call counts were 12, 7, and 7; every
+run failed CAP-1 or the literal-mode bounded-flow gate.
+
+Reject `markdown-link` for the multi-guide cell despite the absence of eager
+loading. The next controlled comparison changes only the representation to
+`backtick-payload-relative`, testing whether an explicit payload resolution
+base improves bounded discovery without absolute paths.
 
 ## Clean-room shape
 
