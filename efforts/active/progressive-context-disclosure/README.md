@@ -435,3 +435,23 @@ enforcement before migrating the complete contributor stack.
   it also fails, do not strengthen wording further; compare the optional edge
   and then revisit deferral/reference shape without rewriting the frozen task
   around a preferred outcome.
+
+### 2026-09-03 - Safety-gated emphasis also rejected
+
+- Ran three independently generated fresh ACP repetitions with only the
+  emphasis coordinate changed from imperative to safety-gated.
+- Repetition 1 passed literally with one tool call and only the required
+  `runtime-diagnostics` guide. Repetitions 2 and 3 were false passes after broad
+  discovery and unrelated guide reads; repetition 2 also lost complete owner
+  provenance.
+- Preserved each run's generated scenario, result packet, and exact materialized
+  canary root before replacing the disposable container. The bundled writer
+  produced three schema-valid counts-only records.
+- The counts-only observation is canary-backed. For repetition 2 it records one
+  irrelevant guide while the independent transcript judge counted three direct
+  irrelevant document reads, including an encountered guide whose canary was
+  omitted from the final witness. The frozen evidence contract remains
+  unchanged during calibration.
+- Reject safety-gated emphasis for this cell. Next gate: test the optional edge
+  with every other coordinate fixed, then revisit deferral or reference shape
+  if optional is also unstable.

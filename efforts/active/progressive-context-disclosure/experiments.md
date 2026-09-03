@@ -178,6 +178,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 |------|-------------|--------------|-----------------|------------------|----------|
 | F2 / backtick repository-relative / conditional / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 1 | Reject this cell: conditional wording did not reliably prevent broad discovery or the unrelated `command-reference` read. |
 | F2 / backtick repository-relative / imperative / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 3, 3, 2 | Reject this cell: stronger imperative wording increased compensating exploration and unrelated guide reads. |
+| F2 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 2 | Reject this cell: the gate produced one exact one-guide run but did not reliably prevent broad discovery, irrelevant reads, or provenance loss; the repetition-2 transcript judge counted three direct irrelevant document reads. |
 
 Counts-only records:
 
@@ -187,17 +188,37 @@ Counts-only records:
 - [`evidence/f2-repo-imperative-flat-one-guide-r1.json`](evidence/f2-repo-imperative-flat-one-guide-r1.json)
 - [`evidence/f2-repo-imperative-flat-one-guide-r2.json`](evidence/f2-repo-imperative-flat-one-guide-r2.json)
 - [`evidence/f2-repo-imperative-flat-one-guide-r3.json`](evidence/f2-repo-imperative-flat-one-guide-r3.json)
+- [`evidence/f2-repo-gated-flat-one-guide-r1.json`](evidence/f2-repo-gated-flat-one-guide-r1.json)
+- [`evidence/f2-repo-gated-flat-one-guide-r2.json`](evidence/f2-repo-gated-flat-one-guide-r2.json)
+- [`evidence/f2-repo-gated-flat-one-guide-r3.json`](evidence/f2-repo-gated-flat-one-guide-r3.json)
 
-All three sessions retained owner provenance, loaded the required guide, avoided
-path invention and critical-rule violations, and reached the owned readiness
-decision. Repetitions 2 and 3 nevertheless enumerated the guide tree and loaded
-`command-reference`; literal mode therefore rejects the cell. Continue one axis
-at a time with stronger emphasis before changing the reference representation
-or deferral level.
+All three conditional sessions retained owner provenance, loaded the required
+guide, avoided path invention and critical-rule violations, and reached the
+owned readiness decision. Repetitions 2 and 3 nevertheless enumerated the guide
+tree and loaded `command-reference`; literal mode therefore rejects the cell.
+Continue one axis at a time with stronger emphasis before changing the
+reference representation or deferral level.
 
 Imperative emphasis did not recover the cell. All three imperative repetitions
 loaded at least two irrelevant guides, and two loaded three. The controlled
 next comparison is safety-gated emphasis with every other coordinate fixed.
+
+Safety-gated emphasis also failed the unanimous correctness gate. Repetition 1
+was the desired behavior: one tool call loaded only `runtime-diagnostics`, then
+returned the owned readiness decision with no irrelevant exploration.
+Repetitions 2 and 3 searched broadly and loaded unrelated guidance.
+Repetition 2 also omitted an encountered capability-guide canary and shifted its
+blocker to command discovery, losing complete owner provenance.
+
+The frozen counts-only writer derives observed guides from canaries present in
+the transcript. Its repetition-2 record therefore counts one irrelevant guide,
+while the independent judge counted three direct irrelevant document reads:
+the guide index, `capability-procedure`, and `command-reference`. Preserve that
+distinction rather than altering the frozen evidence contract mid-calibration.
+
+No stronger emphasis remains. The controlled next comparison is the optional
+edge with every other coordinate fixed; if it also fails, revisit deferral or
+reference shape rather than rewriting the task or guide.
 
 ## Clean-room shape
 
