@@ -2104,6 +2104,23 @@ def test_wait_for_turn_end_ignores_retired_reactive_flag(q, client):
     assert slept == [30.0]
 
 
+def test_wait_for_turn_end_zero_interval_yields(q, client):
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO)
+    slept: list[float] = []
+
+    assert sup.wait_for_turn_end(0.0, sleep=slept.append) is False
+    assert slept == [0.0]
+
+
+def test_wait_for_turn_end_rejects_negative_interval(q, client):
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO)
+    slept: list[float] = []
+
+    with pytest.raises(ValueError, match="interval must be non-negative"):
+        sup.wait_for_turn_end(-0.1, sleep=slept.append)
+    assert slept == []
+
+
 def test_serve_uses_one_full_interval_wait(q, client):
     sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
     polls = 0

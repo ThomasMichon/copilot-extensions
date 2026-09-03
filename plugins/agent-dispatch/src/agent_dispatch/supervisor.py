@@ -1725,8 +1725,8 @@ class Supervisor:
         fixed-interval reconciliation is the only safe fallback.
         """
         sleep = sleep or time.sleep
-        if timeout <= 0:
-            return False
+        if timeout < 0:
+            raise ValueError("supervisor interval must be non-negative")
         sleep(timeout)
         return False
 
