@@ -154,7 +154,12 @@ def test_binding_rejects_symlink_escape(tmp_path):
     (repo / "efforts" / "active").mkdir(parents=True)
     outside.mkdir()
     (outside / "README.md").write_text("outside", encoding="utf-8")
-    (repo / "efforts" / "active" / "linked").symlink_to(outside, target_is_directory=True)
+    try:
+        (repo / "efforts" / "active" / "linked").symlink_to(
+            outside, target_is_directory=True
+        )
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
 
     with pytest.raises(ef.EffortFocusError, match="link or reparse"):
         ef.resolve_effort_path(repo, "efforts/active/linked/README.md")

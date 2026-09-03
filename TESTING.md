@@ -10,8 +10,8 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 ## The turn-key runner
 
 `tools/run-plugin-tests.py` builds/reuses a cached dev venv per plugin under
-`.test-venvs/` (git-ignored; uses `uv`, so vendored `[tool.uv.sources]` path deps
-resolve) and runs `pytest`:
+`.test-venvs/<platform>/` (git-ignored; uses `uv`, so vendored
+`[tool.uv.sources]` path deps resolve) and runs `pytest`:
 
 ```bash
 python tools/run-plugin-tests.py agent-bridge           # one plugin, full suite

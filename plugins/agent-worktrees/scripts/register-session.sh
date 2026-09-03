@@ -37,7 +37,13 @@ fi
 if [[ -z "$producer_version" && -f "$HOME/.agent-worktrees/current-version" ]]; then
     producer_version="$(tr -d ' \t\r\n' < "$HOME/.agent-worktrees/current-version")"
 fi
-identity_python="$(command -v python3 || command -v python || true)"
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+PYTHON="${AW_PY:-}"
+identity_python="$PYTHON"
+if [[ ! -x "$identity_python" ]]; then
+    identity_python="$(command -v python3 || command -v python || true)"
+fi
 launch_key=""
 if [[ -n "$identity_python" && -n "$producer_version" ]]; then
     launch_key="$(
@@ -72,7 +78,7 @@ try:
     print(hashlib.sha256(identity).hexdigest(), end="")
 except Exception:
     pass
-' "$producer_version" 2>/dev/null
+' "$producer_version" 2>/dev/null || true
     )"
 fi
 context_dir="$HOME/.agent-worktrees/.session-context"
@@ -111,9 +117,6 @@ if (( context_only )); then
     publish "$stored"
 fi
 
-_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
-[ -f "$_awresolve" ] && . "$_awresolve"
-PYTHON="${AW_PY:-}"
 if [[ ! -x "$PYTHON" ]]; then
     _log SKIP "venv python not found"
     publish '{}'

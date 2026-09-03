@@ -121,7 +121,7 @@ Public-safe transcription of the operator request:
 - [x] Refuse writes into session trees identified as restored/foreign until
       current local session provenance is established.
 - [x] Never merge down or replace an unsupported newer projection schema.
-- [ ] Add POSIX and Windows containment, permissions, symlink/reparse, and
+- [x] Add POSIX and Windows containment, permissions, symlink/reparse, and
       atomic-replacement tests, including case-folding, extended paths, and
       short-name aliases.
 
@@ -183,7 +183,7 @@ Public-safe transcription of the operator request:
       reviewed [`rollout-schema-v2.md`](rollout-schema-v2.md) contract.
 - [x] Validate no regression in first-paint/list latency at large session
       counts.
-- [ ] Validate Linux, Windows, remote-control, handoff, and synchronized-session
+- [x] Validate Linux, Windows, remote-control, handoff, and synchronized-session
       scenarios.
 - [ ] Carve and close phase-specific issues; archive the effort only after the
       implementation and documentation match the revised vision.
@@ -195,10 +195,10 @@ Public-safe transcription of the operator request:
 - [ ] Relation-cap behavior preserves the bound relation and nonterminal
       controllers, evicts terminal relations deterministically, and reports
       overflow without losing authority.
-- [ ] Atomic writer tests for interruption, partial files, lock contention,
+- [x] Atomic writer tests for interruption, partial files, lock contention,
       symlink/reparse escapes, and private POSIX permissions.
-- [ ] A bound session remains distinct from a controller session.
-- [ ] One controller may reference multiple worktrees without becoming the
+- [x] A bound session remains distinct from a controller session.
+- [x] One controller may reference multiple worktrees without becoming the
       bound head of any child vessel.
 - [x] Multi-hop handoff chains resolve through explicit links to one terminal
       successor; cycles and forks remain unresolved.
@@ -213,7 +213,7 @@ Public-safe transcription of the operator request:
       finding rather than an invented recovery target.
 - [x] Remote controllers produce a navigable identity/action even when the
       local Picker cannot focus their session directly.
-- [ ] Existing session launch, resume, handoff, finalize, and Picker contract
+- [x] Existing session launch, resume, handoff, finalize, and Picker contract
       suites remain green on Windows and POSIX.
 
 ## Proposal
@@ -386,3 +386,17 @@ Adopt the authority and schema model in [`design.md`](design.md):
   remain well below the historical approximately seven-second active-paint
   regression, and the source guard still confines live session-root enumeration
   to explicit backfill and the bounded resident cursor.
+- Closed the remaining cross-platform baseline blockers found while recording
+  the scenario matrix. Lease Git subprocesses now discard inherited repository
+  configuration and run from a neutral directory; WSL project-local marketplace
+  fixtures use the resolver's WSL registry key; session-start registration uses
+  the resolved runtime interpreter before ambient PATH aliases; and the test
+  runner keeps Windows and POSIX virtual environments in separate caches.
+- The complete agent-worktrees suite passed on POSIX with 3,636 tests and 17
+  skips, and on Windows with 3,614 tests and 39 skips. Focused remote-controller,
+  handoff, projection, synchronization, and restricted-rescue matrices remain
+  green across both platforms.
+- Reader-floor observation for any supported writer not yet observed remains
+  tracked by #1712. Writer emission stays blocked until that issue records the
+  observation or an explicit scope transfer; this hardening increment does not
+  weaken the two-stage rollout gate.

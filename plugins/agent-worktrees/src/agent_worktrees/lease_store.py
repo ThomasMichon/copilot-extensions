@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import random
 import subprocess
 import tempfile
@@ -13,6 +12,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import git_ops
 from .lease_config import LeaseSettings
 from .lease_protocol import (
     LeaseRecord,
@@ -536,16 +536,7 @@ class GitLeaseStore:
         check: bool = True,
         extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        for name in (
-            "GIT_DIR",
-            "GIT_WORK_TREE",
-            "GIT_INDEX_FILE",
-            "GIT_COMMON_DIR",
-            "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        ):
-            env.pop(name, None)
+        env = git_ops.repository_identity_env()
         env.update({"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"})
         if extra_env:
             env.update(extra_env)
@@ -555,6 +546,7 @@ class GitLeaseStore:
         try:
             result = subprocess.run(
                 ["git", *call_args],
+                cwd=tempfile.gettempdir(),
                 input=input_text,
                 capture_output=True,
                 text=True,
