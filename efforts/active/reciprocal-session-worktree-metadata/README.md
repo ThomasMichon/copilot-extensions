@@ -366,3 +366,16 @@ Adopt the authority and schema model in [`design.md`](design.md):
   fence loss separately, uses deterministic byte-prefix retention, discards
   inflated v1 counts during migration, and never clears incompleteness from an
   ordinary incremental update.
+- The reviewed schema v2 contract landed through #1794. Two unrelated
+  current-main suite defects found during the reader-floor baseline were fixed
+  separately through #1806 and #1811 rather than expanding the permanent
+  exclusion list.
+- The schema v2 reader floor landed through #1813 as agent-worktrees
+  `1.5.3-dev737`. Readers validate explicit v2 completeness fields and compact
+  tombstones, normalize recovery/lineage/controller diagnostics, and block
+  every downgrade path while writers continue to emit v1.
+- Deployed and verified the reader floor on one Windows writer and its paired
+  Linux environment. One additional writer was unavailable and explicitly
+  skipped; an outbound-only writer remains on its launch-time self-heal path.
+  Writer emission remains gated until the remaining supported writer floor is
+  observed or its responsibility is explicitly transferred.
