@@ -190,6 +190,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | Epoch 3 F0 / full inline / safety-gated / flat fragments / command-guide / ACP fresh | 3 | 0 PASS, 3 FAIL -> CONFUNDED | all eight guides intentionally eager | 0, 0, 0 after eager subtraction | Control confirms no correctness ceiling: all three searched beyond the inline context and returned no option or attributable argv. The materialized stimulus is under-specified, so hold this boundary without changing freeze epoch 3. |
 | Epoch 3 F0 / full inline / safety-gated / flat fragments / capability-guide / ACP fresh | 3 | 3 PASS | all eight guides intentionally eager | 0, 0, 0 after eager subtraction | Retain as the task-local correctness ceiling: every run followed the bounded read, exact owned mutation, and objective confirmation in order with complete CAP-1 provenance and no guide rereads or broad exploration. |
 | Epoch 3 F3 / backtick repository-relative / safety-gated / flat fragments / capability-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS -> FAIL | 3/3 loaded `capability-procedure` | 2, 2, 0 | Reject this cell: two runs broadened into guide discovery and read both `publication-checks` and `destination-matrix` before mutation, violating CAP-1 despite reaching the correct end state. |
+| Epoch 3 F1 / backtick repository-relative / safety-gated / flat fragments / capability-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS -> FAIL | 3/3 loaded `capability-procedure` through the capability-owner index | 3, 4, 3 | Reject this cell: every run enumerated all eight owner indexes and loaded three or four irrelevant guides before mutation, violating CAP-1 despite retaining provenance and reaching the correct end state. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 0, 1, 2 | No elimination claim: the F0 control proved the execution task unsatisfiable. Retain only decision-independent read and exploration observations pending rerun. |
 | F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded | 3, 3, 2 | No elimination claim: retain the observed verbosity, reads, and provenance behavior pending rerun against the current freeze epoch. |
 | F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 2, 2, 2 | No elimination claim: retain the index overhead and traversal observations pending rerun against the current freeze epoch. |
@@ -310,6 +311,9 @@ The next independently testable boundary is `capability-guide`. Per the control
 rule, run its epoch-3 F0 full-inline cell before interpreting any deferred
 variant.
 
+- [`evidence/e3-f1-repo-gated-flat-capability-guide-r1.json`](evidence/e3-f1-repo-gated-flat-capability-guide-r1.json)
+- [`evidence/e3-f1-repo-gated-flat-capability-guide-r2.json`](evidence/e3-f1-repo-gated-flat-capability-guide-r2.json)
+- [`evidence/e3-f1-repo-gated-flat-capability-guide-r3.json`](evidence/e3-f1-repo-gated-flat-capability-guide-r3.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r1.json`](evidence/f2-repo-conditional-flat-one-guide-r1.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r2.json`](evidence/f2-repo-conditional-flat-one-guide-r2.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r3.json`](evidence/f2-repo-conditional-flat-one-guide-r3.json)
@@ -584,6 +588,27 @@ now rejected for the F3 safety-gated flat multi-guide coordinate. The next
 controlled comparison should return to the repository-relative representation
 and change only deferral from F3 to F1, testing whether one plugin-level index
 provides enough coherent orientation without the per-task F3 ambiguity.
+
+The epoch-3 F1 capability-guide cell did not provide that orientation. All
+three repetitions first enumerated every owner index, then loaded the required
+`capability-procedure` plus three, four, and three irrelevant guides before
+running the exact bounded operation. Tool-call counts were 18, 19, and 15;
+durations were 71, 70, and 62 seconds.
+
+Every run retained owner provenance, used the declared execution configuration
+and exact argv, preserved the required review gate, and reached the correct end
+state. Literal mode nevertheless rejects all three as false passes because the
+plugin-level indexes triggered broad compensating discovery and CAP-1
+violations. Reject F1 for this boundary. Together with the unanimous F0 ceiling
+and the earlier F3 rejection, this is evidence against both broad plugin-level
+orientation and task-filtered direct locators as a reliable capability-flow
+standard on the calibration model and ACP venue.
+
+Freeze epoch remains 3. The next controlled capability-guide comparison should
+change only deferral to F2, preserving repository-relative backticks,
+safety-gated emphasis, flat fragments, model, venue, and fresh sessions. That
+cell tests whether direct per-topic references behave differently from both the
+F1 index fan-out and the F3 task-filtered locator.
 
 ## Clean-room shape
 

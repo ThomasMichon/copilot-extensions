@@ -1,0 +1,53 @@
+{
+  "schema": "copilot-extensions.progressive-context-evidence",
+  "version": 1,
+  "runId": "e3-f1-repo-gated-flat-capability-guide-r3",
+  "variantId": "f1-repo-gated-flat",
+  "taskId": "capability-guide",
+  "model": "auto",
+  "venue": "acp",
+  "boundary": "fresh",
+  "repetition": 3,
+  "initialContext": {
+    "unicodeCharacters": 4798,
+    "utf8Bytes": 4798,
+    "estimatedTokens": 1200
+  },
+  "firstTurnCorrect": false,
+  "requiredGuideIds": [
+    "capability-procedure"
+  ],
+  "observedGuideIds": [
+    "capability-procedure",
+    "destination-matrix",
+    "environment-details",
+    "publication-checks"
+  ],
+  "autoLoadedGuideIds": [],
+  "irrelevantGuideReadCount": 3,
+  "turnCount": 1,
+  "toolCallCount": 15,
+  "elapsedMillisecondsBeforeGroundedAction": 62000,
+  "pathResolutionFailureCount": 0,
+  "missingPathCount": 0,
+  "inventedPathCount": 0,
+  "ownerProvenanceRetained": true,
+  "criticalRuleViolationIds": [
+    "CAP-1"
+  ],
+  "structuredRenderHash": "e02ab62de97107d88079ebd7a07c0d07af9fcf85362ff13e2ba287aa7a467616",
+  "selectedContributorIds": [
+    "synthetic-publication",
+    "synthetic-contribution-boundary",
+    "synthetic-continuity",
+    "synthetic-destination-routing",
+    "synthetic-runtime-readiness",
+    "synthetic-environment-grounding",
+    "synthetic-command-discovery",
+    "synthetic-capability-procedure"
+  ],
+  "judge": {
+    "verdict": "FAIL",
+    "jam": "repo-config"
+  }
+}
