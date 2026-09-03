@@ -54,6 +54,43 @@ def test_full_inline_baseline_is_larger_than_concise_kernel() -> None:
     )
 
 
+def test_f0_pass_allows_only_the_complete_eager_guide_set() -> None:
+    fixture = _fixture_module()
+    record = fixture.invalid_evidence_record(
+        deferral_level="F0",
+        reference_representation="backtick-repository-relative",
+        emphasis="safety-gated",
+        assembly="flat-fragments",
+        task_id="multi-guide",
+        model="calibration-model",
+        repetition=1,
+        venue="acp",
+        jam="setup",
+    )
+    corpus = fixture._load("corpus.json")
+    all_guides = sorted(
+        str(guide["id"])
+        for _, guide in fixture._guide_records(corpus["contributors"])
+    )
+    record.update(
+        {
+            "firstTurnCorrect": True,
+            "autoLoadedGuideIds": all_guides,
+            "turnCount": 1,
+            "ownerProvenanceRetained": True,
+            "judge": {"verdict": "PASS", "jam": None},
+        }
+    )
+    fixture.validate_evidence(record)
+
+    record["variantId"] = "f3-repo-gated-flat"
+    with pytest.raises(
+        ValueError,
+        match="cannot contain eager guide loading",
+    ):
+        fixture.validate_evidence(record)
+
+
 def test_negative_reference_stimuli_and_windows_escape_are_explicit() -> None:
     fixture = _fixture_module()
     corpus = fixture._load("corpus.json")

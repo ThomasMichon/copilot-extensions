@@ -46,6 +46,11 @@ fresh session after the scenario defect or venue failure is corrected. Real
 Markdown eager loading is recorded separately from agent-initiated guide reads;
 unexpected eager loading rejects that representation.
 
+F0 is the intentional full-inline control: all eight guides are declared eager
+by construction, and a PASS requires the complete eager set plus the
+task-required guides to be available. This exception does not permit eager
+loading for any deferred representation.
+
 ## Task-specific expectations
 
 - `no-guide`: act from the critical kernel without reading deferred material.
