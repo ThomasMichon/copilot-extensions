@@ -282,6 +282,24 @@ def test_session_start_forwards_session_environment(monkeypatch, tmp_path):
     assert "WORKTREE_ID" not in environment
 
 
+def test_session_start_supplies_current_directory(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        hook_client,
+        "_request",
+        lambda kind, payload, home: seen.update(
+            kind=kind, payload=payload
+        ) or {},
+    )
+
+    assert hook_client.decide(
+        "sessionStart", {"sessionId": "session-1"}, home=tmp_path
+    ) == {}
+    assert seen["kind"] == "sessionStart"
+    assert seen["payload"]["cwd"] == str(tmp_path)
+
+
 def test_project_resolve_supplies_current_directory(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.chdir(tmp_path)

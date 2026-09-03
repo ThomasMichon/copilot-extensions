@@ -217,7 +217,7 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
     ).strip():
         project_payload["cwd"] = os.getcwd()
     request_payload = (
-        _session_start_payload(payload)
+        _session_start_payload(project_payload)
         if kind == "sessionStart"
         else project_payload
         if kind == "projectResolve"
