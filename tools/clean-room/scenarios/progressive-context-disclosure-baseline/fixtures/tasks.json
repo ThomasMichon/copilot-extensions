@@ -1,6 +1,37 @@
 {
   "schema": "copilot-extensions.progressive-context-tasks",
-  "version": 1,
+  "version": 2,
+  "executionFixtures": {
+    "bounded-generic-mutation": {
+      "configLocator": ".synthetic/execution.json",
+      "scriptLocator": ".synthetic/synthetic-capability.py",
+      "resultLocator": ".synthetic/result.json",
+      "readiness": {
+        "owner": "synthetic-runtime-readiness",
+        "capability": "synthetic-generic-capability",
+        "signal": "READY"
+      },
+      "destination": {
+        "owner": "synthetic-destination-routing",
+        "repository": "generic-upstream/synthetic-progressive-context",
+        "scopedIdentity": "synthetic-publisher",
+        "reachable": true,
+        "reviewGate": "required"
+      },
+      "command": {
+        "owner": "synthetic-capability-procedure",
+        "cwd": "repository",
+        "argv": [
+          "python3",
+          ".synthetic/synthetic-capability.py",
+          "--config",
+          ".synthetic/execution.json",
+          "--result",
+          ".synthetic/result.json"
+        ]
+      }
+    }
+  },
   "tasks": [
     {
       "id": "no-guide",
@@ -25,7 +56,9 @@
     {
       "id": "multi-guide",
       "boundary": "fresh",
-      "prompt": "Prepare to publish a synthetic generic capability from a guarded cross-repository destination by entering the capability's bounded execution flow. Decide whether the mutation may proceed and execute only if every gate succeeds.",
+      "prompt": "The capability reports READY. Its owner-declared execution configuration is `.synthetic/execution.json`; it contains the scoped destination identity, reachability, review gate, and exact attributable bounded argv. Prepare to publish a synthetic generic capability from the guarded cross-repository destination by entering the capability's bounded execution flow. Decide whether the mutation may proceed and execute only if every gate succeeds.",
+      "executionDemand": "mutation",
+      "executionFixtureId": "bounded-generic-mutation",
       "requiredGuideIds": ["publication-checks", "destination-matrix", "capability-procedure"],
       "triggeredApplicabilityCueIds": ["PUBLISH-EXTERNAL", "CROSS-BOUNDARY-MUTATION", "CAPABILITY-EXECUTION"],
       "irrelevantGuideIds": ["contribution-destinations", "handoff-procedure", "runtime-diagnostics", "environment-details", "command-reference"],
@@ -89,7 +122,9 @@
     {
       "id": "capability-guide",
       "boundary": "fresh",
-      "prompt": "Enter the capability's declared multi-step execution flow for a bounded synthetic operation.",
+      "prompt": "The capability reports READY. Its owner-declared execution configuration is `.synthetic/execution.json`; it contains the exact attributable bounded argv. Enter the capability's declared multi-step execution flow for a bounded synthetic operation.",
+      "executionDemand": "mutation",
+      "executionFixtureId": "bounded-generic-mutation",
       "requiredGuideIds": ["capability-procedure"],
       "triggeredApplicabilityCueIds": ["CAPABILITY-EXECUTION"],
       "irrelevantGuideIds": ["publication-checks", "contribution-destinations", "handoff-procedure", "destination-matrix", "runtime-diagnostics", "environment-details", "command-reference"],

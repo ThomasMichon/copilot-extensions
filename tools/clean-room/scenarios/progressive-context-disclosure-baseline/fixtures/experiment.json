@@ -1,7 +1,9 @@
 {
   "schema": "copilot-extensions.progressive-context-experiment",
-  "version": 1,
+  "version": 2,
   "frozenBeforeBehavioralRuns": true,
+  "freezeEpoch": 2,
+  "refrozenReason": "Execution-demanding tasks now materialize affirmative readiness, scoped destination and review-gate grounding, and an exact bounded command after the F0 control exposed an unsatisfiable first stimulus.",
   "baselineIds": ["current-full-inline", "current-concise-kernel"],
   "taskIds": ["no-guide", "one-guide", "multi-guide", "conflict", "unavailable-guide", "unsafe-guide", "command-guide", "capability-guide", "resume", "compaction", "spill"],
   "primaryFreshTaskIds": ["no-guide", "one-guide", "multi-guide", "conflict", "unavailable-guide", "unsafe-guide", "command-guide", "capability-guide"],
