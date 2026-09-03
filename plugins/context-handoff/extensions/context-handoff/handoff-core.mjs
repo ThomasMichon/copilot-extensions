@@ -402,7 +402,9 @@ export function encodeHandoffPayload(promptText, metadata) {
 export function decodeHandoffPayload(raw) {
   const text = String(raw || "");
   const firstNewline = text.indexOf("\n");
-  const firstLine = firstNewline >= 0 ? text.slice(0, firstNewline) : text;
+  const firstLine = (
+    firstNewline >= 0 ? text.slice(0, firstNewline) : text
+  ).replace(/\r$/, "");
   if (!firstLine.startsWith(HANDOFF_META_PREFIX) || !firstLine.endsWith(HANDOFF_META_SUFFIX)) {
     return { metadata: null, text };
   }
@@ -880,7 +882,19 @@ function checkpointPath(metadata, token) {
   }
 
   function cliJson(bin, argv, cwd, timeout = 15000, execute = runCli) {
-    return JSON.parse(execute(bin, argv, { cwd, timeout }));
+    try {
+      return JSON.parse(execute(bin, argv, { cwd, timeout }));
+    } catch (error) {
+      const stdout = error?.stdout?.toString().trim();
+      if (stdout) {
+        try {
+          return JSON.parse(stdout);
+        } catch {
+          // Preserve the original command failure when stdout is not JSON.
+        }
+      }
+      throw error;
+    }
   }
 
   function predecessorIdentity(metadata) {
@@ -1000,9 +1014,12 @@ function checkpointPath(metadata, token) {
     }
 
     if (metadata?.title) {
-      cliJson("agent-worktrees", [
+      execute("agent-worktrees", [
         "status", "--worktree-id", worktree, "--title", metadata.title, "--json",
-      ], metadata.worktreeDir || cwd, 10000, execute);
+      ], {
+        cwd: metadata.worktreeDir || cwd,
+        timeout: 10000,
+      });
       result.titled = true;
     } else {
       result.titled = true;
@@ -1073,9 +1090,16 @@ function checkpointPath(metadata, token) {
     );
     if (!prepared.ok) return { ok: false, id: taskId, message: prepared.message };
     const checkpoint = prepared.checkpoint;
+    const checkpointPayload = decodeHandoffPayload(checkpoint.payload || "");
     let decoded = {
-      metadata: checkpoint.metadata || before.metadata || {},
-      text: checkpoint.payload || before.text || "",
+      metadata: {
+        ...(before.metadata || {}),
+        ...(checkpointPayload.metadata || {}),
+        ...(checkpoint.metadata || {}),
+      },
+      text: checkpointPayload.metadata
+        ? checkpointPayload.text
+        : checkpoint.payload || before.text || "",
     };
     if (!checkpoint.steps?.taskConsumed) {
       const retryingConsume = Boolean(checkpoint.steps?.consumeAttempted);
