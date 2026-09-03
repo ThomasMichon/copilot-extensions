@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Reciprocal Session-Worktree Metadata](active/reciprocal-session-worktree-metadata/README.md) | Draft | #1635 |
+| [Reciprocal Session-Worktree Metadata](active/reciprocal-session-worktree-metadata/README.md) | Active | #1635 |
 | [Reliable Context Handoff Cutover](active/reliable-context-handoff-cutover/README.md) | Draft | #1630 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
 | [Persistent SSH Carrier and Push Supervision](active/persistent-ssh-carrier/README.md) | Draft | #1763 |
