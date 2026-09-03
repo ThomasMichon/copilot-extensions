@@ -798,10 +798,10 @@ enforcement before migrating the complete contributor stack.
   reachable destination, a satisfied required review gate, and exact owned
   argv.
 - All three F1 repetitions loaded the required procedure and completed the
-  exact bounded operation, but every literal-mode judge returned a false pass.
-  Each run enumerated all eight owner indexes before loading three, four, and
-  three irrelevant guides. Tool-call counts were 18, 19, and 15; durations were
-  71, 70, and 62 seconds.
+  exact bounded operation, but every literal-mode judge returned `FAIL` after
+  classifying the run as a false pass. Each run enumerated all eight owner
+  indexes before loading three, four, and three irrelevant guides. Tool-call
+  counts were 18, 19, and 15; durations were 71, 70, and 62 seconds.
 - Owner provenance, contained paths, the required review gate, and the final
   objective remained intact. The failures are selection failures: broad
   compensating discovery violated CAP-1 before the otherwise-correct mutation.
