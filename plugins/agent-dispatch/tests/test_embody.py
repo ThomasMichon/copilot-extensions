@@ -314,6 +314,40 @@ def test_prepare_reusable_worktree_holds_on_indeterminate_resolution(
     assert created == []
 
 
+def test_resolve_worktree_bypasses_display_cache(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout='{"worktrees":[{"id":"wt-review","path":"/tmp/wt-review"}]}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        embody,
+        "_agent_worktrees_launch_prefix",
+        lambda: ["/usr/bin/agent-worktrees"],
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    resolved = embody.resolve_worktree("wt-review", project="widgets")
+
+    assert resolved == {
+        "worktree": "wt-review",
+        "path": "/tmp/wt-review",
+    }
+    assert captured["cmd"] == [
+        "/usr/bin/agent-worktrees",
+        "--project",
+        "widgets",
+        "list",
+        "--json",
+        "--fresh",
+    ]
+
+
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     captured = {}
     monkeypatch.setattr(

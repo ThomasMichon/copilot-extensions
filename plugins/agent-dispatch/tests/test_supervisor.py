@@ -2152,6 +2152,105 @@ def test_explicit_end_releases_live_exclusive_body(q, client):
     assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
 
 
+@pytest.mark.parametrize("verdict", ["live", "unknown"])
+def test_yielded_fleet_body_is_not_replaced_before_safe_teardown(
+    q, client, verdict
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="fleet-body:worker-host:session-live",
+    )
+    q.claim_one("fleet-owner", task_id=task.id)
+    q.start(task.id, "fleet-owner")
+    q.yield_task(task.id, "fleet-owner")
+    ended = []
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        fleet_verdict_fn=lambda _host, _sid: verdict,
+        fleet_end_fn=lambda host, sid: ended.append((host, sid)) or False,
+        nudge=False,
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert ended == (
+        [("worker-host", "session-live")] if verdict == "live" else []
+    )
+
+
+def test_yielded_fleet_body_respawns_only_after_explicit_end(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="fleet-body:worker-host:session-live",
+    )
+    q.claim_one("fleet-owner", task_id=task.id)
+    q.start(task.id, "fleet-owner")
+    q.yield_task(task.id, "fleet-owner")
+    ended = []
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        fleet_verdict_fn=lambda _host, _sid: "live",
+        fleet_end_fn=lambda host, sid: ended.append((host, sid)) or True,
+        nudge=False,
+    )
+
+    assert sup.poll_once() == [task.id]
+    assert ended == [("worker-host", "session-live")]
+    assert spawn.calls == [task.id]
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+    assert q.latest_reservation(task.id).attempt == 2
+
+
+def test_yielded_cli_worker_is_not_redriven_while_release_is_pending(
+    q, client
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="session-live",
+        worktree="wt-live",
+    )
+    q.claim_one("host/wt-live", task_id=task.id)
+    q.start(task.id, "host/wt-live")
+    q.yield_task(task.id, "host/wt-live", exclude="worktree:wt-live")
+    redriven = []
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        verdict_fn=lambda *_args: "live",
+        liveness_fn=lambda worktree, _machine: {
+            "session_id": "session-live",
+            "worktree_id": worktree,
+        },
+        redrive_fn=lambda *args: redriven.append(args) or True,
+        nudge=False,
+    )
+
+    assert sup.poll_once() == []
+    assert redriven == []
+    assert spawn.calls == []
+    active = q.get_reservation(reservation.key)
+    assert active.state == SpawnState.SPAWNED
+    assert active.release_requested is True
+
+
 def test_completed_idle_exclusive_body_is_carried_to_next_episode(q, client):
     task = q.create("old", exclusive_key="review:repo:42")
     reservation, _ = q.reserve_spawn(task.id)
@@ -2181,6 +2280,128 @@ def test_completed_idle_exclusive_body_is_carried_to_next_episode(q, client):
     assert acquired is True
     assert carried.worktree == "wt-review"
     assert carried.session_handle == "local-body:session-idle"
+
+
+def test_completed_live_exclusive_fleet_body_is_ended_before_release(
+    q, client
+):
+    task = q.create("old", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="fleet-body:worker-host:session-live",
+    )
+    q.claim_one("fleet-owner", task_id=task.id)
+    q.start(task.id, "fleet-owner")
+    q.complete(task.id, "fleet-owner", result_ref="result/1")
+    ended = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        fleet_verdict_fn=lambda _host, _sid: "live",
+        fleet_activity_fn=lambda _host, _sid: "IDLE",
+        fleet_end_fn=lambda host, sid: ended.append((host, sid)) or True,
+        nudge=False,
+    )
+
+    assert sup.reconcile() == 1
+    assert ended == [("worker-host", "session-live")]
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+
+
+@pytest.mark.parametrize(
+    ("verdict", "expected_state"),
+    [
+        ("gone", SpawnState.FAILED),
+        ("unknown", SpawnState.RESERVING),
+    ],
+)
+def test_reconcile_reserving_fails_only_confirmed_gone_worktree(
+    q, client, verdict, expected_state
+):
+    task = q.create("work", exclusive_key="resource:42")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(reservation.key, "wt-precreated")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        verdict_fn=lambda *_args: verdict,
+        nudge=False,
+    )
+
+    expected_count = 1 if verdict == "gone" else 0
+    assert sup.reconcile_reserving() == expected_count
+    assert q.get_reservation(reservation.key).state == expected_state
+
+
+def test_reconcile_reserving_adopts_confirmed_live_worktree(q, client):
+    task = q.create("work", exclusive_key="resource:42")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(reservation.key, "wt-precreated")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        verdict_fn=lambda *_args: "live",
+        liveness_fn=lambda worktree, _machine: {
+            "session_id": "session-live",
+            "worktree_id": worktree,
+        },
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 1
+    adopted = q.get_reservation(reservation.key)
+    assert adopted.state == SpawnState.SPAWNED
+    assert adopted.session_handle == "session-live"
+    assert adopted.worktree == "wt-precreated"
+
+
+def test_reconcile_reserving_rearms_idle_carried_local_session(q, client):
+    prior_task = q.create("old", exclusive_key="resource:42")
+    prior, _ = q.reserve_spawn(prior_task.id)
+    q.record_spawn(
+        prior.key,
+        session_handle="local-body:session-idle",
+        worktree="wt-review",
+    )
+    q.settle_spawn(prior.key)
+    task = q.create("new", exclusive_key="resource:42")
+    reservation, _ = q.reserve_spawn(task.id)
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
+    fresh, acquired = q.reserve_spawn(task.id)
+    assert acquired is True
+    assert fresh.worktree == "wt-review"
+    assert fresh.session_handle == "local-body:session-idle"
+
+
+def test_reconcile_reserving_without_durable_handle_stays_reserved(q, client):
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id)
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        verdict_fn=lambda *_args: pytest.fail(
+            "unbound reservation cannot be classified"
+        ),
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
 
 
 @pytest.mark.parametrize(

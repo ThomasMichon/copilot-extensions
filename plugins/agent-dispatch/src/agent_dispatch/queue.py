@@ -640,6 +640,7 @@ class SpawnReservation:
     reserved_by: str | None = None
     session_handle: str | None = None
     worktree: str | None = None
+    release_requested: bool = False
     detail: str | None = None
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
@@ -657,6 +658,7 @@ class SpawnReservation:
             reserved_by=row["reserved_by"],
             session_handle=row["session_handle"],
             worktree=row["worktree"],
+            release_requested=bool(row["release_requested"]),
             detail=row["detail"],
             conclusion_state=row["conclusion_state"],
             conclusion_detail=row["conclusion_detail"],
@@ -1050,6 +1052,7 @@ class TaskQueue:
                 "  reserved_by TEXT,"
                 "  session_handle TEXT,"
                 "  worktree TEXT,"
+                "  release_requested INTEGER NOT NULL DEFAULT 0,"
                 "  detail TEXT,"
                 "  conclusion_state TEXT,"
                 "  conclusion_detail TEXT,"
@@ -1086,6 +1089,15 @@ class TaskQueue:
                     conn.execute(
                         "ALTER TABLE spawn_reservations "
                         "ADD COLUMN exclusive_key TEXT"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            if "release_requested" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN release_requested INTEGER NOT NULL DEFAULT 0"
                     )
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
@@ -3453,8 +3465,9 @@ class TaskQueue:
         """Release a suspended task to ``queued`` for a replacement worker.
 
         Ownership and owner-session identity are cleared, and any active spawn
-        reservation for the former embodiment is released in the same
-        transaction so a supervisor may reserve a replacement.
+        reservation for the former embodiment receives a durable release
+        request in the same transaction. The supervisor settles it only after
+        liveness-safe teardown.
         """
         note = _clip(reason, PROGRESS_SUMMARY_MAX) or "release suspended task"
         return self._transition(
@@ -3501,6 +3514,10 @@ class TaskQueue:
         ``agent:<def>`` when it knows the exclusion generalizes). Because excludes
         only ever grow, the candidate set shrinks monotonically: the task either
         finds a taker or becomes unclaimable (surfaced for the operator).
+
+        ``release_spawn`` requests release of the current embodiment; it never
+        settles the reservation inline. The supervisor confirms or performs
+        teardown before making a replacement spawn eligible.
         """
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -4762,11 +4779,10 @@ class TaskQueue:
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
             if release_spawn:
                 conn.execute(
-                    "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
-                    " detail = COALESCE(detail, ?) WHERE task_id = ?"
+                    "UPDATE spawn_reservations SET release_requested = 1, "
+                    "updated_at = ?, detail = COALESCE(detail, ?) WHERE task_id = ?"
                     " AND state IN (?, ?, ?)",
                     (
-                        SpawnState.SETTLED,
                         ts,
                         release_spawn_detail,
                         task_id,

@@ -146,7 +146,7 @@ def resolve_worktree(
     cmd = list(exe_prefix)
     if project:
         cmd += ["--project", project]
-    cmd += ["list", "--json"]
+    cmd += ["list", "--json", "--fresh"]
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),

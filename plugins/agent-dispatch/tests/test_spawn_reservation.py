@@ -256,6 +256,24 @@ def test_record_replacement_worktree_clears_carried_session(q):
     assert updated.session_handle is None
 
 
+def test_yield_requests_release_without_settling_live_reservation(q):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="fleet-body:worker-host:session-live",
+    )
+    q.claim_one("fleet-owner", task_id=task.id)
+    q.start(task.id, "fleet-owner")
+
+    yielded = q.yield_task(task.id, "fleet-owner")
+    updated = q.get_reservation(reservation.key)
+
+    assert yielded.status == "queued"
+    assert updated.state == SpawnState.SPAWNED
+    assert updated.release_requested is True
+
+
 def test_supersede_exclusive_key_abandons_only_queued_or_proposed(q):
     queued = q.create("old queued", exclusive_key="review:repo:42")
     held = q.create("old held", exclusive_key="review:repo:42")

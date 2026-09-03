@@ -64,7 +64,7 @@ that represent successive episodes for one logical resource.
 
   | state       | meaning                                                        |
   |-------------|----------------------------------------------------------------|
-  | `reserving` | this spawner owns the (task, attempt) spawn; embody not yet confirmed launched. A restart reconciles a reservation stuck here. |
+  | `reserving` | this spawner owns the (task, attempt) spawn; embody not yet confirmed launched. A restart reconciles a pre-recorded worktree to `spawned`, `failed`, or held-unknown. |
   | `spawned`   | embody launched; the session/worktree handle is recorded.      |
   | `cold`      | the headless process is stopped while its resumable session, worktree, and task ownership remain bound. |
   | `settled`   | the reserved attempt reached a terminal outcome; no more spawning. Optional `conclusion_state` / structured `conclusion_detail` keep post-settlement disposable-worktree priming retryable and visible. |
@@ -143,7 +143,8 @@ double-spawned. Each cycle:
    (`completed`/`abandoned`). An exclusive reservation is not released merely
    because its task became terminal: live/unknown bodies remain bound, and only
    a confirmed-gone body or an explicit end/conclusion permits release. A
-   completed idle headless session may remain carried for the next task episode.
+   completed idle **local** headless session may remain carried for the next task
+   episode; a fleet body is ended because no remote carry/resume path exists.
    For
    labels explicitly opted into `--disposable-cli-label`, settlement releases
    the reservation first and durably marks conclusion pending, then asks
@@ -151,7 +152,15 @@ double-spawned. Each cycle:
    safe checkout for managed GC. A live worker or operational failure remains
    pending for a later reconcile; a preservation decision is held visibly.
    Neither outcome blocks settlement.
-2. **poll** — for each eligible queued task (in the lane, due, matching the
+2. **recover interrupted reservations** — a `reserving` row with a pre-recorded
+   worktree is promoted when that worker is confirmed live, failed when the
+   worktree is confirmed to have no live worker, and held when liveness is
+   unknown. An unbound reservation is never guessed away.
+3. **fulfill yield/release requests** — yielding marks the active reservation
+   for release but does not settle it transactionally. The supervisor ends a
+   confirmed-live headless body (or observes it gone) before settlement;
+   unknown bodies and live CLI worktrees remain reserved.
+4. **poll** — for each eligible queued task (in the lane, due, matching the
    optional **label opt-in**), up to `--max-concurrent` in-flight: `reserve_spawn`
    → if reserved, spawn embody → `record_spawn` (or `fail_spawn` on error, which
    releases a fresh attempt). A task that accumulates `--max-attempts` **failed**

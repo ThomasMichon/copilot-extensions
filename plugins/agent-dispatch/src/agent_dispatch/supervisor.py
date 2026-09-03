@@ -1075,6 +1075,226 @@ class Supervisor:
                 )
         return resumed
 
+    def reconcile_reserving(self) -> int:
+        """Recover pre-launch reservations after a supervisor interruption.
+
+        A worktree-backed reservation is safe to classify because the reusable
+        worktree id is recorded before launch. Confirmed-live worktrees are
+        promoted to ``spawned`` with their observed session; confirmed-gone
+        worktrees fail for a fresh attempt; unknown state remains reserved.
+        Reservations without a durable handle remain untouched.
+        """
+        reconciled = 0
+        for res in self._pool_reservations(state=SpawnState.RESERVING):
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if not self._matches_pool(task):
+                continue
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            if local_sid is not None:
+                try:
+                    verdict = self.local_body_verdict_fn(local_sid)
+                except Exception:
+                    verdict = _tracking().UNKNOWN
+                if verdict == _tracking().UNKNOWN:
+                    continue
+                if verdict == _tracking().LIVE:
+                    try:
+                        activity = self.local_body_activity_fn(local_sid)
+                    except Exception:
+                        activity = None
+                    if activity == "IDLE" and res.get("worktree"):
+                        try:
+                            self.client.fail_spawn(
+                                res["key"],
+                                detail=(
+                                    "carried local body is idle and ready "
+                                    "for safe resume"
+                                ),
+                            )
+                            reconciled += 1
+                        except DispatchError:
+                            log.exception(
+                                "failed to rearm idle reserving body %s",
+                                res["key"],
+                            )
+                        continue
+                    if activity not in {"ACTIVE", "STALLED"}:
+                        continue
+                    try:
+                        self.client.record_spawn(
+                            res["key"],
+                            session_handle=res.get("session_handle"),
+                            worktree=res.get("worktree"),
+                        )
+                        reconciled += 1
+                    except DispatchError:
+                        log.exception(
+                            "failed to promote live reserving body %s",
+                            res["key"],
+                        )
+                    continue
+                try:
+                    self.client.fail_spawn(
+                        res["key"],
+                        detail="carried local body confirmed gone while reserving",
+                    )
+                    reconciled += 1
+                except DispatchError:
+                    log.exception(
+                        "failed to release gone reserving body %s", res["key"]
+                    )
+                continue
+
+            worktree = _worktree_from_reservation(res, task.get("owner"))
+            if not worktree:
+                continue
+            try:
+                verdict = self.verdict_fn(
+                    worktree,
+                    _machine_from_owner(task.get("owner")),
+                    task.get("owner_session_id"),
+                )
+            except Exception:
+                verdict = _tracking().UNKNOWN
+            if verdict == _tracking().UNKNOWN:
+                continue
+            if verdict == _tracking().GONE:
+                try:
+                    self.client.fail_spawn(
+                        res["key"],
+                        detail="reserved worktree confirmed without a live worker",
+                    )
+                    reconciled += 1
+                except DispatchError:
+                    log.exception(
+                        "failed to release gone reserving worktree %s",
+                        res["key"],
+                    )
+                continue
+            try:
+                session = self.liveness_fn(
+                    worktree,
+                    _machine_from_owner(task.get("owner")),
+                )
+            except Exception:
+                session = None
+            if not session:
+                continue
+            session_id = session.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                continue
+            try:
+                self.client.record_spawn(
+                    res["key"],
+                    session_handle=session_id,
+                    worktree=session.get("worktree_id") or worktree,
+                )
+                reconciled += 1
+            except DispatchError:
+                log.exception(
+                    "failed to promote live reserving worktree %s",
+                    res["key"],
+                )
+        return reconciled
+
+    def release_requested_bodies(self) -> int:
+        """Fulfill durable yield/release requests after safe body teardown."""
+        released = 0
+        reservations = self._pool_reservations(
+            state=(
+                f"{SpawnState.RESERVING},{SpawnState.SPAWNED},"
+                f"{SpawnState.COLD}"
+            )
+        )
+        for res in reservations:
+            if not res.get("release_requested"):
+                continue
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if not self._matches_pool(task):
+                continue
+            can_release = False
+            fleet = _parse_fleet_body_handle(res.get("session_handle"))
+            if fleet is not None:
+                try:
+                    verdict = self.fleet_verdict_fn(*fleet)
+                except Exception:
+                    verdict = _tracking().UNKNOWN
+                if verdict == _tracking().UNKNOWN:
+                    continue
+                if verdict == _tracking().GONE:
+                    can_release = True
+                else:
+                    try:
+                        can_release = self.fleet_end_fn(*fleet)
+                    except Exception:
+                        log.exception(
+                            "failed to end release-requested fleet body %s",
+                            fleet,
+                        )
+            else:
+                local_sid = _parse_local_body_handle(
+                    res.get("session_handle")
+                )
+                if local_sid is not None:
+                    try:
+                        verdict = self.local_body_verdict_fn(local_sid)
+                    except Exception:
+                        verdict = _tracking().UNKNOWN
+                    if verdict == _tracking().UNKNOWN:
+                        continue
+                    if verdict == _tracking().GONE:
+                        can_release = True
+                    else:
+                        try:
+                            can_release = self.local_end_fn(local_sid)
+                        except Exception:
+                            log.exception(
+                                "failed to end release-requested local body %s",
+                                local_sid,
+                            )
+                else:
+                    worktree = _worktree_from_reservation(
+                        res,
+                        task.get("owner"),
+                    )
+                    if not worktree:
+                        can_release = (
+                            res.get("state") == SpawnState.RESERVING
+                            and not res.get("session_handle")
+                        )
+                    else:
+                        try:
+                            can_release = (
+                                self.verdict_fn(
+                                    worktree,
+                                    _machine_from_owner(task.get("owner")),
+                                    task.get("owner_session_id"),
+                                )
+                                == _tracking().GONE
+                            )
+                        except Exception:
+                            can_release = False
+            if not can_release:
+                continue
+            try:
+                self.client.settle_spawn(
+                    res["key"],
+                    detail=res.get("detail") or "spawn release requested",
+                )
+                released += 1
+            except DispatchError:
+                log.exception(
+                    "failed to settle release-requested reservation %s",
+                    res["key"],
+                )
+        return released
+
     # -- phases --------------------------------------------------------------
 
     def _completion_detail(self, task: dict) -> str:
@@ -1251,15 +1471,6 @@ class Supervisor:
                 return False, None
             if verdict == _tracking().GONE:
                 return True, None
-            if (
-                task.get("status") == Status.COMPLETED
-                and task.get("completed_by")
-            ):
-                try:
-                    if self.fleet_activity_fn(*fleet) == "IDLE":
-                        return True, None
-                except Exception:
-                    pass
             try:
                 return self.fleet_end_fn(*fleet), None
             except Exception:
@@ -1813,6 +2024,8 @@ class Supervisor:
             key = res.get("key")
             if not key or key in self._redriven_spawn_keys:
                 continue
+            if res.get("release_requested"):
+                continue
             if _parse_fleet_body_handle(res.get("session_handle")) is not None:
                 continue
             if _parse_local_body_handle(res.get("session_handle")) is not None:
@@ -2071,6 +2284,8 @@ class Supervisor:
         """
         now = time.time() if now is None else now
         self.reconcile()
+        self.reconcile_reserving()
+        self.release_requested_bodies()
         self.bind_headless_owner_sessions()
         self.suspend_idle_headless_tasks()
         self.cool_dormant_bodies()
