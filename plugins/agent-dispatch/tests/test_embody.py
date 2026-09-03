@@ -254,8 +254,11 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
         "--project",
         "widgets",
         "create",
+        "--origin",
+        "delegate",
         "--json",
     ]
+    assert "--interface" not in captured["cmd"]
 
 
 def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):

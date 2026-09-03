@@ -100,7 +100,9 @@ def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
 
 
 def create_worktree(
-    *, project: str | None = None, timeout: float | None = None
+    *,
+    project: str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
 
@@ -114,7 +116,14 @@ def create_worktree(
     cmd = list(exe_prefix)
     if project:
         cmd += ["--project", project]
-    cmd += ["create", "--json"]
+    # Keep the CLI interface required by disposable conclusion; delegated
+    # creation provenance alone hides this worker checkout from the Picker.
+    cmd += [
+        "create",
+        "--origin",
+        "delegate",
+        "--json",
+    ]
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd, check=False, capture_output=True, text=True, timeout=timeout,
         **no_window_kwargs(),
