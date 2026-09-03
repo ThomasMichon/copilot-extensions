@@ -185,6 +185,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 0, 1, 2 | Reject this variant: every behavioral run broadened beyond the bounded flow and violated CAP-1; two also loaded unrelated guides, and repetition 3 violated CMD-1. |
 | F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FAIL | all required guides loaded | 3, 3, 2 | Reject this representation: structured metadata increased irrelevant reads, lost provenance in every run, and did not produce the required decision. |
 | F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FAIL | all required guides loaded | 2, 2, 2 | Reject this assembly: independent judges counted three direct irrelevant guide reads in every run and each returned the wrong blocked decision; two also invented configuration paths. |
+| F3 / backtick absolute contained / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 2, 3, 1 | Reject this representation: absolute paths removed resolution failures but did not prevent broad exploration, irrelevant reads, provenance loss, or CAP-1 failure. |
 
 Counts-only records:
 
@@ -215,6 +216,9 @@ Counts-only records:
 - [`evidence/f3-repo-gated-index-multi-guide-r1.json`](evidence/f3-repo-gated-index-multi-guide-r1.json)
 - [`evidence/f3-repo-gated-index-multi-guide-r2.json`](evidence/f3-repo-gated-index-multi-guide-r2.json)
 - [`evidence/f3-repo-gated-index-multi-guide-r3.json`](evidence/f3-repo-gated-index-multi-guide-r3.json)
+- [`evidence/f3-absolute-gated-flat-multi-guide-r1.json`](evidence/f3-absolute-gated-flat-multi-guide-r1.json)
+- [`evidence/f3-absolute-gated-flat-multi-guide-r2.json`](evidence/f3-absolute-gated-flat-multi-guide-r2.json)
+- [`evidence/f3-absolute-gated-flat-multi-guide-r3.json`](evidence/f3-absolute-gated-flat-multi-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -340,6 +344,25 @@ multi-guide behavior. The next controlled comparison returns to flat fragments
 and changes only the reference representation to a contained absolute backtick
 path, testing whether eliminating relative-base discovery prevents the
 configuration and repository search failures.
+
+Contained absolute paths also failed all three multi-guide repetitions. Every
+run loaded the required guides and avoided missing, invented, malformed, or
+escaping paths, but each still broadened beyond the declared locators. The
+independent judges counted four, three, and five direct irrelevant document
+reads; the canary-backed records count two, three, and one irrelevant guides.
+Tool-call counts were 16, 13, and 10.
+
+Repetitions 1 and 2 violated CAP-1 and returned an inapplicable blocked
+decision. Repetition 3 preserved the critical rules but still failed literal
+mode after two broad searches, five unnecessary reads, and incomplete
+decision-owner provenance. Absolute containment therefore solves path
+resolution mechanically but does not solve task-applicable guide selection.
+
+Reject `backtick-absolute-contained`. The next controlled comparison keeps F3,
+safety-gated emphasis, flat fragments, the multi-guide task, model, venue, and
+fresh boundary fixed while changing only the representation to a real Markdown
+link. This directly tests both guide discoverability and unintended eager
+loading.
 
 ## Clean-room shape
 
