@@ -171,17 +171,17 @@ Tracked by #1449.
 
 ### Phase 1B — Make waits attention-oriented (#1450)
 
-- [ ] Let a retained caller or subscriber wait for selected attention boundaries
+- [x] Let a retained caller or subscriber wait for selected attention boundaries
       rather than only transport completion or one successful turn.
-- [ ] Return a bounded structured reason, durable position, and current target
+- [x] Return a bounded structured reason, durable position, and current target
       identity at settlement.
-- [ ] Resume ordinary transport interruptions by cursor inside the retained
+- [x] Resume ordinary transport interruptions by cursor inside the retained
       relationship instead of settling the wait prematurely.
-- [ ] Carry an attention subscription across a deliberate successor handoff
+- [x] Carry an attention subscription across a deliberate successor handoff
       only when the successor negotiates semantics compatible with the caller's
       retained contract. Otherwise settle with an explicit contract-changed
       attention reason and the successor identity.
-- [ ] Consume #22's terminal-event reconciliation for transport failure; #1450
+- [x] Consume #22's terminal-event reconciliation for transport failure; #1450
       owns wait settlement semantics, not the underlying terminal emission.
 
 ### Phase 2 — Make steering queue-first and handoff-safe (#1451)
@@ -371,3 +371,15 @@ ownership.
   permission correlation needed for an answerable live request.
 - Kept terminal-event emission with #22, handoff creation with #112, and durable
   contract registration and writer fencing with #1460/#1468.
+
+### 2026-09-03 — Phase 1B attention waits completed
+
+- Merged cursor-neutral selected-reason waits, attached streaming settlement,
+  permission correlation, failed-state publication, and compatible successor
+  following through #1899.
+- Archived the focused `agent-bridge-attention-waits` effort. Reachability
+  terminal-event production remains with #22, policy-event production with its
+  future owner, and replayable deliberate-end tombstones with a future
+  terminal-retention owner; the wait surface no longer overclaims those gates.
+- Phase 2 / #1451 is the next delegation-control slice once #1460/#1468 permit
+  its durable queue and admission writers.
