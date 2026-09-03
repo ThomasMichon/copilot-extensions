@@ -612,3 +612,18 @@ enforcement before migrating the complete contributor stack.
 - Reject the representation: exposing the payload resolution base encouraged
   inspection of delivery machinery instead of bounded guide selection. Next
   gate: change only the representation to `bare-labeled-path`.
+
+### 2026-09-03 - Bare labeled paths do not bound discovery
+
+- Ran three F3 safety-gated flat multi-guide repetitions with only the
+  reference representation changed to `bare-labeled-path`.
+- All three failed literal mode after broad guide, repository, or configuration
+  discovery. The canary-backed records count three, four, and two irrelevant
+  guides; tool-call counts were 9, 17, and 15.
+- Repetition 1 preserved the critical rules but returned an unsupported
+  settings-based blocker. Repetition 2 failed PUB-1, ROUTE-1, and CAP-1;
+  repetition 3 failed CAP-1 and continued through five broad exploration
+  actions after the first unresolved gate.
+- Reject the representation. Next gate: change only the representation to
+  `html-comment-locator`, completing the frozen reference-form sweep for this
+  multi-guide coordinate.
