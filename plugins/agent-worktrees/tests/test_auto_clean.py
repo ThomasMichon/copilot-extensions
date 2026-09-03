@@ -157,6 +157,42 @@ def test_non_dry_run_reaps_via_reap_worktree():
     assert [x["id"] for x in report["removed"]] == ["go"]
 
 
+def test_reap_host_owned_worktree_retires_tracking_only(tmp_path, monkeypatch):
+    worktree = tmp_path / "host-worktree"
+    worktree.mkdir()
+    tracking_dir = tmp_path / "tracking"
+    tracking_dir.mkdir()
+    rec = _rec("host", path=str(worktree))
+    rec.checkout_managed = False
+    tracking.save_record(rec, tracking_dir / "host.yaml")
+    monkeypatch.setattr(
+        cli.git_ops, "remove_worktree",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not remove")),
+    )
+    monkeypatch.setattr(
+        cli.git_ops, "delete_branch",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not delete")),
+    )
+    monkeypatch.setattr(
+        cli.procs, "terminate_processes_under",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not kill")),
+    )
+    monkeypatch.setattr(cli.disposition_history, "remove", lambda *_a, **_k: None)
+    monkeypatch.setattr(cli.activity, "log_event", lambda *_a, **_k: None)
+
+    failures, warnings = cli._reap_worktree(
+        rec,
+        types.SimpleNamespace(),
+        types.SimpleNamespace(anchor=str(tmp_path / "anchor")),
+        tracking_dir,
+    )
+
+    assert failures == 0
+    assert warnings == []
+    assert worktree.is_dir()
+    assert not (tracking_dir / "host.yaml").exists()
+
+
 # --- kill-switch + grace resolution -----------------------------------------
 
 def test_auto_clean_enabled_default(monkeypatch):

@@ -470,6 +470,9 @@ class WorktreeRecord:
     # resolved_origin, never these raw fields.
     interface: WorktreeInterface | None = None
     origin: WorktreeOrigin | None = None
+    # False when an external host created and owns the checkout. We may track
+    # its sessions, but cleanup must never remove its directory or branch.
+    checkout_managed: bool = True
     # #1029: the Copilot session that originated this worktree's work. Seeded at
     # creation (the spawning session) and backfilled at PR-create, so a
     # PR/feedback worktree whose own ``sessions`` list is empty can still resume
@@ -2131,6 +2134,7 @@ def load_record(path: Path) -> WorktreeRecord:
         owner=str(owner_raw) if owner_raw else None,
         interface=iface_val,
         origin=origin_val,
+        checkout_managed=data.get("checkout_managed", True) is not False,
         parent_session=(str(data["parent_session"])
                         if data.get("parent_session") else None),
         head_session=(str(data["head_session"])
@@ -2390,6 +2394,8 @@ def _save_record_unlocked(
         content += f"interface: {record.interface}\n"
     if record.origin in ("user", "system", "delegate"):
         content += f"origin: {record.origin}\n"
+    if not record.checkout_managed:
+        content += "checkout_managed: false\n"
 
     # worktree-status-core: the agent-asserted disposition overlay -- emitted
     # only when explicitly set, so an un-annotated session YAML stays
@@ -3773,6 +3779,53 @@ def create_new_record(
     path = tracking_path / f"{worktree_id}.yaml"
     save_record(record, path)
     return record
+
+
+def create_new_record_if_absent(
+    worktree_id: str,
+    branch: str,
+    worktree_path: str,
+    repo: str,
+    machine: str,
+    platform_name: str,
+    tracking_path: Path,
+    *,
+    kind: WorktreeKind = "session",
+    owner: str | None = None,
+    interface: WorktreeInterface | None = None,
+    origin: WorktreeOrigin | None = None,
+    checkout_managed: bool = True,
+) -> tuple[WorktreeRecord, bool]:
+    """Create a tracking record once, preserving a concurrent creator's row."""
+    path = tracking_path / f"{worktree_id}.yaml"
+    tracking_path.mkdir(parents=True, exist_ok=True)
+    with _RecordLock(path, require_sidecar=True):
+        if path.exists():
+            return load_record(path), False
+        now = _now_iso()
+        record = WorktreeRecord(
+            worktree_id=worktree_id,
+            branch=branch,
+            worktree_path=worktree_path,
+            repo=repo,
+            machine=machine,
+            platform=platform_name,
+            started_at=now,
+            last_resumed_at=now,
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+            kind=kind,
+            owner=owner,
+            interface=interface,
+            origin=origin,
+            checkout_managed=checkout_managed,
+        )
+        _save_record_unlocked(record, path)
+    _flush_session_projections(record)
+    return record, True
 
 
 def load_or_create_anchor_record(
