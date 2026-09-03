@@ -33,7 +33,10 @@ keeps working.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 
 from . import git_ops, pr_ops, tracking
 from .config import Config
@@ -50,13 +53,47 @@ def _is_exact_squash_result(
     )
     if parent.returncode != 0 or not parent.stdout.strip():
         return False
-    merged = git_ops.git(
-        "merge-tree", "--write-tree", "--merge-base", effective_base,
-        parent.stdout.strip(), pr_head, cwd=cwd, check=False,
+    patch = git_ops.git(
+        "diff", "--binary", "--full-index", effective_base, pr_head,
+        cwd=cwd, check=False,
     )
-    if merged.returncode != 0:
+    if patch.returncode != 0 or not patch.stdout:
         return False
-    merged_tree = merged.stdout.splitlines()[0].strip() if merged.stdout else ""
+
+    env = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    try:
+        with tempfile.TemporaryDirectory(prefix="aw-pr-complete-") as tmp:
+            env["GIT_INDEX_FILE"] = str(Path(tmp) / "index")
+            read = subprocess.run(
+                ["git", "read-tree", parent.stdout.strip()],
+                cwd=cwd, env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=30,
+            )
+            if read.returncode != 0:
+                return False
+            apply = subprocess.run(
+                [
+                    "git", "apply", "--cached", "--3way",
+                    "--whitespace=nowarn",
+                ],
+                cwd=cwd, env=env, input=patch.stdout, capture_output=True,
+                text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
+            if apply.returncode != 0:
+                return False
+            written = subprocess.run(
+                ["git", "write-tree"],
+                cwd=cwd, env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=30,
+            )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if written.returncode != 0:
+        return False
+    merged_tree = written.stdout.strip()
     candidate_tree = git_ops.git(
         "rev-parse", f"{candidate}^{{tree}}", cwd=cwd, check=False,
     )
@@ -74,9 +111,11 @@ def _merged_pr_head(
 
     A recorded PR boundary lets reconciliation exclude the PR's original
     commits and replay only later local work. The boundary is trusted only when
-    its effective aggregate patch-id matches one commit reachable on upstream.
-    The effective base is recomputed from the current upstream: a PR's recorded
-    creation-time base can become stale while the open PR remains mergeable.
+    its effective aggregate patch-id shortlists a commit reachable on upstream
+    and applying that PR diff to the candidate's parent produces the candidate's
+    exact tree. The effective base is recomputed from the current upstream: a
+    PR's recorded creation-time base can become stale while the open PR remains
+    mergeable.
     """
     record = tracking.load_record_by_id(worktree_id)
     if record is None:
