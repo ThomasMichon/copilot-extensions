@@ -187,6 +187,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FAIL | all required guides loaded | 2, 2, 2 | Reject this assembly: independent judges counted three direct irrelevant guide reads in every run and each returned the wrong blocked decision; two also invented configuration paths. |
 | F3 / backtick absolute contained / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 2, 3, 1 | Reject this representation: absolute paths removed resolution failures but did not prevent broad exploration, irrelevant reads, provenance loss, or CAP-1 failure. |
 | F3 / Markdown link / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded; none auto-loaded | 2, 0, 2 | Reject this representation: real links did not auto-load guide bodies, but every run broadened into repository or configuration discovery and failed CAP-1 or the bounded-flow gate. |
+| F3 / backtick payload-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded; none auto-loaded | 3, 2, 3 | Reject this representation: every run reread the prohibited generated context source, violated CAP-1, and broadened into irrelevant payload or repository discovery. |
 
 Counts-only records:
 
@@ -223,6 +224,9 @@ Counts-only records:
 - [`evidence/f3-md-gated-flat-multi-guide-r1.json`](evidence/f3-md-gated-flat-multi-guide-r1.json)
 - [`evidence/f3-md-gated-flat-multi-guide-r2.json`](evidence/f3-md-gated-flat-multi-guide-r2.json)
 - [`evidence/f3-md-gated-flat-multi-guide-r3.json`](evidence/f3-md-gated-flat-multi-guide-r3.json)
+- [`evidence/f3-payload-gated-flat-multi-guide-r1.json`](evidence/f3-payload-gated-flat-multi-guide-r1.json)
+- [`evidence/f3-payload-gated-flat-multi-guide-r2.json`](evidence/f3-payload-gated-flat-multi-guide-r2.json)
+- [`evidence/f3-payload-gated-flat-multi-guide-r3.json`](evidence/f3-payload-gated-flat-multi-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -383,6 +387,24 @@ Reject `markdown-link` for the multi-guide cell despite the absence of eager
 loading. The next controlled comparison changes only the representation to
 `backtick-payload-relative`, testing whether an explicit payload resolution
 base improves bounded discovery without absolute paths.
+
+Payload-relative locators failed all three repetitions and introduced a
+distinct prohibited-source failure. Every run explicitly reread the generated
+payload `context.md`, even though the frozen task forbids using the generated
+context source as an answer source. No guide body auto-loaded; all observed
+canaries followed agent-initiated reads.
+
+The runs loaded two or three irrelevant guides, used 17, 15, and 20 tool calls,
+and violated CAP-1. Repetition 2 also manually invoked the session-start hook
+with an unset payload root and manufactured a `/scripts/emit-context.py`
+blocker. Repetition 3 began with an invented relative guide glob before
+broadening into the payload and repository trees.
+
+Reject `backtick-payload-relative`: naming the payload base encouraged agents to
+reinspect delivery machinery rather than follow only the declared guide
+locators. The next controlled comparison changes only the representation to
+`bare-labeled-path`; `html-comment-locator` remains the final untested
+representation for this multi-guide cell.
 
 ## Clean-room shape
 

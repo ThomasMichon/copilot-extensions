@@ -596,3 +596,19 @@ enforcement before migrating the complete contributor stack.
 - Reject the representation for this cell: discoverability was sufficient, but
   the links did not enforce task-applicable bounded flow. Next gate: change
   only the representation to `backtick-payload-relative`.
+
+### 2026-09-03 - Payload-relative locators expose delivery machinery
+
+- Ran three F3 safety-gated flat multi-guide repetitions with only the
+  reference representation changed to `backtick-payload-relative`.
+- All three were literal-mode false passes and explicitly reread the prohibited
+  generated payload `context.md`. No guide body auto-loaded; every observed
+  canary followed an agent-initiated read.
+- The runs loaded two or three irrelevant guides, used 17, 15, and 20 tool
+  calls, and violated CAP-1. Repetition 2 manually invoked the session-start
+  hook with an unset payload root and manufactured a
+  `/scripts/emit-context.py` blocker; repetition 3 began with an invented guide
+  glob.
+- Reject the representation: exposing the payload resolution base encouraged
+  inspection of delivery machinery instead of bounded guide selection. Next
+  gate: change only the representation to `bare-labeled-path`.
