@@ -224,7 +224,7 @@ Rules:
    When it later starts, the admission record gains the turn/current-session
    correlation that a waiter and bounded-result reader follow.
 
-The current explicit implementation is HTTP protocol v8. Human CLI mode uses
+The current explicit implementation is HTTP protocol v10. Human CLI mode uses
 the existing SSE stream as its only wait channel and probes the shared
 cursor-neutral evaluator after rendered events are acknowledged. JSON mode uses
 only the bounded attention request. The server scans durable evidence before

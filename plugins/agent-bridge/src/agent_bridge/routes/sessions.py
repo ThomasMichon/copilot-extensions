@@ -849,11 +849,23 @@ async def wait_for_attention(
     """Wait for the earliest selected durable attention boundary."""
     mgr: SessionManager = request.app.state.session_manager
     try:
-        session = (
-            mgr.get_session(attention_position_session_id(position))
-            if position is not None
-            else _resolve_result_session(mgr, session_ref)
-        )
+        if position is None:
+            session = _resolve_result_session(mgr, session_ref)
+        else:
+            observed_session_id = attention_position_session_id(position)
+            session = mgr.get_session(observed_session_id)
+            if (
+                session is not None
+                and session_ref != session.target.worktree_id
+            ):
+                requested_session = _resolve_result_session(mgr, session_ref)
+                if (
+                    requested_session is None
+                    or requested_session.session_id != session.session_id
+                ):
+                    raise AttentionTokenError(
+                        "attention position targets a different delegate"
+                    )
     except AttentionTokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if session is None:

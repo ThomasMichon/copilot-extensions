@@ -432,6 +432,30 @@ def test_attention_route_resumes_predecessor_position_across_handoff(
     assert response.json()["identity"]["successor_id"] == "sess-2"
 
 
+def test_attention_route_rejects_position_for_different_session(
+    client, app
+) -> None:
+    predecessor = _app_session(app)
+    predecessor.event_log.append("agent_message", {"text": "working"})
+    initial = client.get(
+        "/api/v1/sessions/sess-1/attention",
+        params={"reason": "input_required", "timeout_seconds": 0},
+    ).json()
+    _app_session(app, "sess-2")
+
+    response = client.get(
+        "/api/v1/sessions/sess-2/attention",
+        params={
+            "reason": "input_required",
+            "position": initial["position"],
+            "timeout_seconds": 0,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "different delegate" in response.json()["detail"]
+
+
 @pytest.mark.asyncio
 async def test_permission_request_has_live_correlation_and_resolution() -> None:
     events: list[tuple[str, dict]] = []
