@@ -1,0 +1,56 @@
+{
+  "schema": "copilot-extensions.progressive-context-evidence",
+  "version": 1,
+  "runId": "e3-f0-repo-gated-flat-conflict-r1",
+  "variantId": "f0-repo-gated-flat",
+  "taskId": "conflict",
+  "model": "auto",
+  "venue": "acp",
+  "boundary": "fresh",
+  "repetition": 1,
+  "initialContext": {
+    "unicodeCharacters": 6154,
+    "utf8Bytes": 6154,
+    "estimatedTokens": 1539
+  },
+  "firstTurnCorrect": true,
+  "requiredGuideIds": [
+    "contribution-destinations",
+    "publication-checks"
+  ],
+  "observedGuideIds": [],
+  "autoLoadedGuideIds": [
+    "capability-procedure",
+    "command-reference",
+    "contribution-destinations",
+    "destination-matrix",
+    "environment-details",
+    "handoff-procedure",
+    "publication-checks",
+    "runtime-diagnostics"
+  ],
+  "irrelevantGuideReadCount": 0,
+  "turnCount": 1,
+  "toolCallCount": 0,
+  "elapsedMillisecondsBeforeGroundedAction": 53000,
+  "pathResolutionFailureCount": 0,
+  "missingPathCount": 0,
+  "inventedPathCount": 0,
+  "ownerProvenanceRetained": true,
+  "criticalRuleViolationIds": [],
+  "structuredRenderHash": "cb5095fc99e3bfdfc2a37d74a4c5d7256d1d87a73311ad9f112d69746a8c2839",
+  "selectedContributorIds": [
+    "synthetic-publication",
+    "synthetic-contribution-boundary",
+    "synthetic-continuity",
+    "synthetic-destination-routing",
+    "synthetic-runtime-readiness",
+    "synthetic-environment-grounding",
+    "synthetic-command-discovery",
+    "synthetic-capability-procedure"
+  ],
+  "judge": {
+    "verdict": "PASS",
+    "jam": null
+  }
+}
