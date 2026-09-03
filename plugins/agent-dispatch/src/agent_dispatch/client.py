@@ -53,8 +53,13 @@ class DispatchClient:
         tunnel: Any = None,
     ):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
+        verify = not base_url.lower().startswith("http://")
         self._http = httpx.Client(
-            base_url=base_url.rstrip("/"), headers=headers, timeout=timeout, transport=transport
+            base_url=base_url.rstrip("/"),
+            headers=headers,
+            timeout=timeout,
+            transport=transport,
+            verify=verify,
         )
         self._control_token = control_token
         # An optional owned resource (e.g. an SSH failover port-forward) closed
