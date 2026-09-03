@@ -209,6 +209,145 @@ def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
     assert "--verify-timeout" not in cmd
 
 
+def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.spawn_embodied_worker(
+        "task-9", worker_id="embody-1", worktree_id="wt-reviewer",
+    )
+
+    cmd = captured["cmd"]
+    assert "--new" not in cmd
+    assert cmd[cmd.index("--worktree-id") + 1] == "wt-reviewer"
+
+
+def test_create_worktree_returns_id_and_path(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout='{"worktree": {"id": "wt-new", "path": "/tmp/wt-new"}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    result = embody.create_worktree(project="widgets")
+
+    assert result == {"session": None, "worktree": "wt-new", "path": "/tmp/wt-new"}
+    assert captured["cmd"] == [
+        "/usr/bin/agent-worktrees",
+        "--project",
+        "widgets",
+        "create",
+        "--json",
+    ]
+
+
+def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
+    monkeypatch.setattr(
+        embody,
+        "resolve_worktree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            embody.WorktreeNotFound("missing")
+        ),
+    )
+    monkeypatch.setattr(
+        embody,
+        "create_worktree",
+        lambda **_kwargs: {
+            "worktree": "wt-fresh",
+            "path": "/tmp/wt-fresh",
+        },
+    )
+
+    prepared = embody.prepare_reusable_worktree(
+        {"repo": "example.com/acme/widgets"},
+        {"worktree": "wt-missing"},
+    )
+
+    assert prepared == {
+        "worktree": "wt-fresh",
+        "path": "/tmp/wt-fresh",
+        "created": True,
+        "replaced": True,
+    }
+
+
+def test_prepare_reusable_worktree_holds_on_indeterminate_resolution(
+    monkeypatch,
+):
+    created = []
+    monkeypatch.setattr(
+        embody,
+        "resolve_worktree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            embody.EmbodyUnavailable("registry unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        embody,
+        "create_worktree",
+        lambda **_kwargs: created.append(True),
+    )
+
+    with pytest.raises(embody.EmbodyUnavailable, match="registry unavailable"):
+        embody.prepare_reusable_worktree(
+            {"repo": "example.com/acme/widgets"},
+            {"worktree": "wt-unknown"},
+        )
+
+    assert created == []
+
+
+def test_resolve_worktree_bypasses_display_cache(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout='{"worktrees":[{"id":"wt-review","path":"/tmp/wt-review"}]}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        embody,
+        "_agent_worktrees_launch_prefix",
+        lambda: ["/usr/bin/agent-worktrees"],
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    resolved = embody.resolve_worktree("wt-review", project="widgets")
+
+    assert resolved == {
+        "worktree": "wt-review",
+        "path": "/tmp/wt-review",
+    }
+    assert captured["cmd"] == [
+        "/usr/bin/agent-worktrees",
+        "--project",
+        "widgets",
+        "list",
+        "--json",
+        "--fresh",
+    ]
+
+
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     captured = {}
     monkeypatch.setattr(

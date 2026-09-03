@@ -101,6 +101,8 @@ class SpawnTarget:
     copilot_args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     project: str | None = None  # agent-worktrees project (binstub name)
+    explicit_cwd: bool = False  # caller supplied cwd; do not resolve/create a
+    #                              second checkout through the project transport
     ssh_shell: str | None = None  # remote shell (e.g. "pwsh", "bash")
     worktree_id: str | None = None  # resume a specific worktree
     caller_worktree: str | None = None  # #2178: caller worktree that requested a
@@ -382,7 +384,7 @@ async def _resolve_worktree(
     env["PYTHONUTF8"] = "1"
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
-    if target.project:
+    if target.project and not target.explicit_cwd:
         env["WORKTREE_PROJECT"] = target.project
 
     # Pass the project as the global --project flag (before the subcommand).
@@ -392,7 +394,7 @@ async def _resolve_worktree(
     # inside the target repo, so without --project it fails "could not resolve a
     # project".
     base_args = [python, "-m", "agent_worktrees"]
-    if target.project:
+    if target.project and not target.explicit_cwd:
         base_args += ["--project", target.project]
     base_args += ["resolve", "--json", "--no-resume"]
     creating_new = not target.worktree_id
@@ -691,7 +693,7 @@ async def resolve_local_launch(
     env.pop("PYTHONHOME", None)
     env.update(target.env)
 
-    if target.project:
+    if target.project and not target.explicit_cwd:
         # Stage 6: create/resume the worktree. Failures propagate (no retry).
         with tracker.stage(ConnectStage.WORKTREE, f"project={target.project}"):
             plan = await _resolve_worktree(target, env)
@@ -799,7 +801,7 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     copilot = target.copilot_path or "copilot"
     breadcrumb = _breadcrumb_prelude(session_id)
 
-    if target.project:
+    if target.project and not target.explicit_cwd:
         # ``--json`` marks the launch as non-interactive: it forces the
         # binstub's ``resolve`` step to skip the TTY picker and resolve the
         # worktree deterministically (by ``--worktree-id`` or ``--new``).
@@ -1080,7 +1082,11 @@ async def spawn_ssh(
     # legacy direct --new launch path but surface the failure as a connection
     # checkpoint and probe the target for an existing cwd so ACP validation does
     # not fail on a templated, non-existent home directory.
-    if target.project and (not target.worktree_id or not target.cwd):
+    if (
+        target.project
+        and not target.explicit_cwd
+        and (not target.worktree_id or not target.cwd)
+    ):
         tracker.started(ConnectStage.WORKTREE, f"resolve project={target.project}")
         try:
             plan = await _resolve_worktree_remote(manager, target)

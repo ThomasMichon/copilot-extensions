@@ -560,6 +560,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             target.worktree_id = req.worktree_id
         if req.target_dir:
             target.cwd = req.target_dir
+            target.explicit_cwd = True
     else:
         target = SpawnTarget(
             type="local",

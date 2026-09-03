@@ -31,6 +31,18 @@ from .procutil import (
 DEFAULT_DRIVER = "agent-dispatch"
 
 
+class EmbodyUnavailable(RuntimeError):
+    """Raised when the ``agent-worktrees`` CLI is unavailable or indeterminate."""
+
+
+class WorktreeNotFound(EmbodyUnavailable):
+    """Raised when agent-worktrees positively confirms a worktree is absent."""
+
+
+class DisposableConclusionError(RuntimeError):
+    """Raised when safe terminal conclusion cannot be executed."""
+
+
 def project_for_task(task: dict) -> str | None:
     """Resolve a task's lane to a local **project name** for embody's ``--project``.
 
@@ -87,12 +99,133 @@ def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
     return handle
 
 
-class EmbodyUnavailable(RuntimeError):
-    """Raised when the ``agent-worktrees`` CLI is not available on this host."""
+def create_worktree(
+    *, project: str | None = None, timeout: float | None = None
+) -> dict[str, str | None]:
+    """Create a worktree without launching Copilot and return its id/path.
+
+    This is the first half of create -> record -> spawn -> bind. Capturing the
+    worktree id before any Copilot/ACP setup means a failed or hung launch still
+    leaves the host with a durable worktree binding to retry or inspect.
+    """
+    exe_prefix = _agent_worktrees_launch_prefix()
+    if exe_prefix is None:
+        raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
+    cmd = list(exe_prefix)
+    if project:
+        cmd += ["--project", project]
+    cmd += ["create", "--json"]
+    result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise EmbodyUnavailable(detail or f"agent-worktrees create exited {result.returncode}")
+    handle = parse_handle(result)
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError):
+        data = {}
+    worktree = data.get("worktree") if isinstance(data, dict) else {}
+    if isinstance(worktree, dict):
+        handle["worktree"] = handle.get("worktree") or worktree.get("id")
+        handle["path"] = worktree.get("path")
+    if not handle.get("worktree"):
+        raise EmbodyUnavailable("agent-worktrees create returned no worktree id")
+    return handle
 
 
-class DisposableConclusionError(RuntimeError):
-    """Raised when safe terminal conclusion cannot be executed."""
+def resolve_worktree(
+    worktree_id: str, *, project: str | None = None, timeout: float | None = None
+) -> dict[str, str | None]:
+    """Resolve a tracked worktree id to its current path."""
+    exe_prefix = _agent_worktrees_launch_prefix()
+    if exe_prefix is None:
+        raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
+    cmd = list(exe_prefix)
+    if project:
+        cmd += ["--project", project]
+    cmd += ["list", "--json", "--fresh"]
+    result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise EmbodyUnavailable(detail or f"agent-worktrees list exited {result.returncode}")
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError) as exc:
+        raise EmbodyUnavailable("agent-worktrees list returned invalid JSON") from exc
+    worktrees = data.get("worktrees") if isinstance(data, dict) else None
+    if not isinstance(worktrees, list):
+        raise EmbodyUnavailable("agent-worktrees list returned no worktree list")
+    for row in worktrees:
+        if not isinstance(row, dict):
+            continue
+        if row.get("id") == worktree_id:
+            return {"worktree": worktree_id, "path": row.get("path")}
+    raise WorktreeNotFound(f"worktree not found: {worktree_id}")
+
+
+def prepare_reusable_worktree(
+    task: dict,
+    reservation: dict,
+    *,
+    timeout: float | None = None,
+) -> dict[str, object]:
+    """Resolve or create the worktree carried by an exclusive reservation.
+
+    A successful lookup reuses the existing checkout. A positively missing
+    carried id falls back to a fresh worktree. Any indeterminate failure
+    propagates without creating a replacement, so a possibly live binding is
+    never overwritten.
+    """
+    project = project_for_task(task)
+    carried = reservation.get("worktree")
+    if isinstance(carried, str) and carried:
+        try:
+            resolved = resolve_worktree(
+                carried,
+                project=project,
+                timeout=timeout,
+            )
+        except WorktreeNotFound:
+            created = create_worktree(project=project, timeout=timeout)
+            path = created.get("path")
+            if not isinstance(path, str) or not path:
+                raise EmbodyUnavailable(
+                    "agent-worktrees create returned no worktree path"
+                )
+            return {
+                "worktree": created["worktree"],
+                "path": path,
+                "created": True,
+                "replaced": True,
+            }
+        path = resolved.get("path")
+        if not isinstance(path, str) or not path:
+            raise EmbodyUnavailable(
+                f"agent-worktrees resolved {carried!r} without a path"
+            )
+        return {
+            "worktree": carried,
+            "path": path,
+            "created": False,
+            "replaced": False,
+        }
+
+    created = create_worktree(project=project, timeout=timeout)
+    path = created.get("path")
+    if not isinstance(path, str) or not path:
+        raise EmbodyUnavailable("agent-worktrees create returned no worktree path")
+    return {
+        "worktree": created["worktree"],
+        "path": path,
+        "created": True,
+        "replaced": False,
+    }
 
 
 def _agent_worktrees_launch_prefix() -> list[str] | None:
@@ -325,6 +458,7 @@ def spawn_embodied_worker(
     worker_id: str,
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
+    worktree_id: str | None = None,
     route: str = "",
     repo: str | None = None,
     all_repos: bool = False,
@@ -365,7 +499,12 @@ def spawn_embodied_worker(
         # `embody` subcommand. It lets a CWD-neutral caller name the target
         # project instead of relying on git-like CWD discovery.
         cmd += ["--project", project]
-    cmd += ["embody", "--new", "--seed", seed, "--driver", driver, "--json"]
+    cmd += ["embody"]
+    if worktree_id:
+        cmd += ["--worktree-id", worktree_id]
+    else:
+        cmd += ["--new"]
+    cmd += ["--seed", seed, "--driver", driver, "--json"]
     if verify_timeout:
         cmd += ["--verify-timeout", str(verify_timeout)]
     return subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally

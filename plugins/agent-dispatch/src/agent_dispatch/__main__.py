@@ -814,6 +814,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
             target_machine=args.target_machine,
             target_worktree=args.target_worktree,
             target_repo=args.target_repo,
+            exclusive_key=args.exclusive_key,
+            supersede_exclusive_key=args.supersede_exclusive_key,
             source=args.source,
             origin_ref=args.origin_ref,
             evaluator_ref=args.evaluator_ref,
@@ -968,8 +970,41 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
         )
         return
 
-    key = resp["reservation"]["key"]
-    spawned = _do_spawn(args, task, route=route)
+    reservation = resp["reservation"]
+    key = reservation["key"]
+    spawn_task = task
+    if task.get("exclusive_key"):
+        from . import embody
+
+        try:
+            prepared = embody.prepare_reusable_worktree(task, reservation)
+            worktree = str(prepared["worktree"])
+            if reservation.get("worktree") != worktree:
+                with _client(args) as c:
+                    c.record_spawn_worktree(key, worktree)
+            spawn_task = {
+                **task,
+                "spawn_worktree": worktree,
+                "spawn_worktree_path": prepared["path"],
+                "spawn_session_handle": (
+                    None
+                    if prepared.get("replaced")
+                    else reservation.get("session_handle")
+                ),
+            }
+        except (DispatchError, embody.EmbodyUnavailable) as exc:
+            try:
+                with _client(args) as c:
+                    c.fail_spawn(key, detail=f"worktree create failed: {exc}")
+            except DispatchError:
+                pass
+            print(
+                f"agent-dispatch: --spawn skipped (could not create worktree: {exc}); "
+                f"task {task_id} left queued for any worker to claim",
+                file=sys.stderr,
+            )
+            return
+    spawned = _do_spawn(args, spawn_task, route=route)
     try:
         with _client(args) as c:
             if spawned is None:
@@ -1043,6 +1078,10 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
                     task["id"],
                     worker_id=worker_id,
                     route=route,
+                    worktree_id=(
+                        task.get("target_worktree")
+                        or task.get("spawn_worktree")
+                    ),
                     verify_timeout=getattr(args, "verify_timeout", 0) or 0,
                 )
             except embody.EmbodyUnavailable as exc:
@@ -1062,15 +1101,32 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
         )
 
     from . import bridge
+    from . import embody
 
     worker_id = f"spawn-{uuid.uuid4().hex[:8]}"
+    prompt = bridge.worker_prompt(
+        task["id"],
+        worker_id=worker_id,
+        route=route,
+    )
+    prior_session = None
+    session_handle = task.get("spawn_session_handle")
+    if isinstance(session_handle, str) and session_handle.startswith(
+        "local-body:"
+    ):
+        prior_session = session_handle.removeprefix("local-body:") or None
     try:
-        result = bridge.spawn_worker(
+        result = bridge.spawn_or_resume_worker(
             task["id"],
             agent=args.spawn_agent,
             worker_id=worker_id,
-            route=route,
+            prompt=prompt,
+            prior_session_id=prior_session,
+            liveness_fn=embody.local_body_verdict,
+            target_dir=task.get("spawn_worktree_path"),
+            worktree_id=task.get("spawn_worktree"),
             wait=not args.run_async,
+            json_output=bool(task.get("spawn_worktree")),
         )
     except bridge.BridgeUnavailable as exc:
         print(
@@ -1080,7 +1136,16 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
         )
         return None
     _report_spawn_result(result, task["id"], "agent-bridge")
-    return result, "agent-bridge", {"session": worker_id, "worktree": None}
+    session = embody.parse_fleet_body_session(result)
+    handle = (
+        f"local-body:{session}"
+        if session and task.get("spawn_worktree")
+        else worker_id
+    )
+    return result, "agent-bridge", {
+        "session": handle,
+        "worktree": task.get("spawn_worktree"),
+    }
 
 
 def _report_spawn_result(result, task_id: str, via: str) -> None:
@@ -4127,6 +4192,16 @@ def _create_args_parent() -> argparse.ArgumentParser:
     )
     cp.add_argument("--target-worktree")
     cp.add_argument("--target-repo")
+    cp.add_argument(
+        "--exclusive-key",
+        help="logical resource whose spawned worker must be singleton across tasks",
+    )
+    cp.add_argument(
+        "--supersede-exclusive-key",
+        action="store_true",
+        help="when creating a task with --exclusive-key, abandon older queued/"
+             "proposed tasks carrying the same key",
+    )
     cp.add_argument("--source")
     cp.add_argument("--origin-ref")
     cp.add_argument("--evaluator-ref")

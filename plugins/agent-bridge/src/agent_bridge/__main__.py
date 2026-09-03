@@ -2943,6 +2943,8 @@ def _resolve_target(
     force: bool = False,
     model: str | None = None,
     effort: str | None = None,
+    target_dir: str | None = None,
+    worktree_id: str | None = None,
 ) -> str:
     """Resolve a target string to a session ID.
 
@@ -3040,6 +3042,8 @@ def _resolve_target(
             force=force,
             model=model,
             effort=effort,
+            target_dir=target_dir,
+            worktree_id=worktree_id,
         )
 
     # Not in the cached agent list -- hand the target to the server as-is so its
@@ -3053,6 +3057,8 @@ def _resolve_target(
             force=force,
             model=model,
             effort=effort,
+            target_dir=target_dir,
+            worktree_id=worktree_id,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -3137,6 +3143,8 @@ def _cmd_create(args: argparse.Namespace) -> None:
             client, target, force_new=True, refuse_on_conflict=True,
             model=getattr(args, "model", None),
             effort=getattr(args, "effort", None),
+            target_dir=getattr(args, "target_dir", None),
+            worktree_id=getattr(args, "worktree_id", None),
         )
     except _AgentSessionConflict as conflict:
         sid = conflict.existing_session_id
@@ -3557,6 +3565,8 @@ def _start_agent_session(
     force: bool = False,
     model: str | None = None,
     effort: str | None = None,
+    target_dir: str | None = None,
+    worktree_id: str | None = None,
 ) -> str:
     """Start or reuse a session for a named agent.
 
@@ -3614,9 +3624,12 @@ def _start_agent_session(
     print(f"[>] Starting session for agent '{agent_name}'...")
     try:
         resp = client.start_session(
-            agent=agent_name, caller_id=caller_id,
+            agent=agent_name,
+            target_dir=target_dir,
+            caller_id=caller_id,
             sender_repo=_sender_repo(), force_new=force_new,
             caller_owner_ref=_worktrees_get("owner-ref"),
+            worktree_id=worktree_id,
             model=model, effort=effort,
             request_timeout=_startup_request_timeout(),
         )
@@ -5200,6 +5213,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--effort", dest="effort", default=None, metavar="EFFORT",
         help="Reasoning-effort override for THIS session (e.g. low|medium|high), "
              "applied the same per-session way as --model.",
+    )
+    create_p.add_argument(
+        "--target-dir", dest="target_dir", default=None, metavar="PATH",
+        help="Run this agent session in an existing checkout directory.",
+    )
+    create_p.add_argument(
+        "--worktree-id", dest="worktree_id", default=None, metavar="ID",
+        help="Bind the created session to an existing agent-worktrees worktree id.",
     )
     _add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)

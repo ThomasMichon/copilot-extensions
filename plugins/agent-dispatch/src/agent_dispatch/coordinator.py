@@ -308,6 +308,8 @@ class CreateBody(BaseModel):
     target_machine: str | None = None
     target_worktree: str | None = None
     target_repo: str | None = None
+    exclusive_key: str | None = None
+    supersede_exclusive_key: bool = False
     source: str | None = None
     origin_ref: str | None = None
     evaluator_ref: str | None = None
@@ -370,6 +372,7 @@ class YieldBody(BaseModel):
     worker_id: str
     note: str | None = None
     exclude: str | None = None
+    release_spawn: bool = True
 
 
 class SuspendBody(BaseModel):
@@ -451,6 +454,10 @@ class RecordSpawnBody(BaseModel):
     worktree: str | None = None
 
 
+class RecordSpawnWorktreeBody(BaseModel):
+    worktree: str
+
+
 class ReservationDetailBody(BaseModel):
     detail: str | None = None
     conclusion_state: str | None = None
@@ -523,6 +530,14 @@ class DirectoryHeartbeatBody(BaseModel):
 
 def _task_dict(task: Task) -> dict:
     return asdict(task)
+
+
+def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
+    result = asdict(task)
+    latest = queue.latest_reservation(task.id)
+    if latest is not None:
+        result["spawn_reservation"] = asdict(latest)
+    return result
 
 
 def _bulk_task_dict(task: Task) -> dict:
@@ -1082,6 +1097,8 @@ def create_app(
             raise HTTPException(
                 status_code=status, detail=exc.detail(operation="create")
             ) from exc
+        except TaskError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if outcome.event_type is not None:
             _emit(outcome.event_type, task)
         return task
@@ -1126,7 +1143,7 @@ def create_app(
 
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict:
-        return _task_dict(_require(queue.get(task_id)))
+        return _task_with_spawn_dict(queue, _require(queue.get(task_id)))
 
     @app.get("/tasks/{task_id}/result")
     def get_result(task_id: str) -> dict:
@@ -1277,7 +1294,11 @@ def create_app(
     def yield_task(task_id: str, body: YieldBody) -> dict:
         return _guard(
             lambda: queue.yield_task(
-                task_id, body.worker_id, note=body.note, exclude=body.exclude
+                task_id,
+                body.worker_id,
+                note=body.note,
+                exclude=body.exclude,
+                release_spawn=body.release_spawn,
             ),
             "task.yielded",
         )
@@ -1507,6 +1528,14 @@ def create_app(
             )
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/worktree")
+    def record_spawn_worktree(key: str, body: RecordSpawnWorktreeBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.record_spawn_worktree(key, body.worktree)
+        )
+        bus.publish({"type": "spawn.worktree_recorded", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/fail")

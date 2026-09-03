@@ -61,6 +61,7 @@ def test_task_lifecycle_event_carries_state_only() -> None:
         "source": "context-handoff",
         "target_machine": "host-a",
         "target_worktree": "wt-1",
+        "exclusive_key": "resource:42",
         "owner": "wt-1",
         "attempts": 1,
         # Sensitive fields that must NOT appear in the telemetry record:
@@ -75,6 +76,7 @@ def test_task_lifecycle_event_carries_state_only() -> None:
     assert ev["id"] == "abc123"
     assert ev["repo"] == "example.com/acme/widget"
     assert ev["target_machine"] == "host-a"
+    assert ev["exclusive_key"] == "resource:42"
     # Redact-by-construction: prompt/payload never surface.
     assert "prompt" not in ev
     assert "payload_inline" not in ev

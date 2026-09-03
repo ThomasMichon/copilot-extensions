@@ -193,6 +193,8 @@ def build_coordinator_mcp(
         source: str | None = None,
         origin_ref: str | None = None,
         evaluator_ref: str | None = None,
+        exclusive_key: str | None = None,
+        supersede_exclusive_key: bool = False,
         dedup_key: str | None = None,
         producer_scope: dict[str, str] | None = None,
         producer_id: str | None = None,
@@ -237,6 +239,8 @@ def build_coordinator_mcp(
                 source=source,
                 origin_ref=origin_ref,
                 evaluator_ref=evaluator_ref,
+                exclusive_key=exclusive_key,
+                supersede_exclusive_key=supersede_exclusive_key,
                 dedup_key=dedup_key,
                 producer_scope=producer_scope,
                 producer_id=producer_id,
@@ -260,6 +264,8 @@ def build_coordinator_mcp(
                 "task.create_rejected", exc.event(operation="create")
             )
             return {"error": detail}
+        except TaskError as exc:
+            return {"error": str(exc)}
         result = asdict(outcome.task)
         if outcome.event_type is not None:
             _emit(outcome.event_type, result)

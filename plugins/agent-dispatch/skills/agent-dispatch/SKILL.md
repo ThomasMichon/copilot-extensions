@@ -52,8 +52,8 @@ queue of *tasks*, so multiple agents coordinate without racing through
 
 A **task** is a graduated handoff: a title + `prompt` + optional Markdown
 `payload`. It carries routing (`requires` / `affinity`), targeting
-(`target_machine` / `target_worktree` / `target_repo`, `labels`), and moves
-through an eight-state lifecycle.
+(`target_machine` / `target_worktree` / `target_repo`, `labels`), optional
+spawn exclusivity (`exclusive_key`), and moves through an eight-state lifecycle.
 
 ## When to reach for it
 
@@ -320,6 +320,7 @@ context. The coordinator also backstops with a unique `dedup_key`.
   --label media \
   --target-repo copilot-extensions \ # OPTIONAL: the cross-repo *code* target (stays in THIS lane)
   --dedup-key narration-seg42 \      # makes create idempotent
+  --exclusive-key review:repo:42 \   # optional: one spawned worker for this logical resource
   --goal "segment 42 has a merged narration track" \  # durable objective (see Goal-loop tasks)
   --done-criteria "track rendered, reviewed, merged"  # when --goal is met
 ```
@@ -390,6 +391,21 @@ Defer with `--not-before <epoch>` (scheduled creation). Attach a payload with
 `--payload-inline` (small), `--payload-file <path>` (reads a file; a large one
 spills to a content-addressed blob automatically), or `--payload-ref` (an
 external pointer like `pr/123`).
+
+**Spawn exclusivity (`--exclusive-key`).** Use this when several task episodes
+represent the same logical resource and only one spawned worker may ever hold it
+at a time -- for example a PR review whose task key includes the changing head
+SHA, but whose reviewer worktree must stay singular for the PR. The ordinary
+`--dedup-key` still answers "is this exact task already present?"; the
+`--exclusive-key` answers "is a worker already spawned for this resource?". A
+new spawn reservation is refused while any active reservation with the same key
+exists, even if it belongs to a different task id. When a prior reservation for
+that key recorded a worktree, the next spawn first reuses that worktree so the
+worker resumes the same durable context; if that soft reuse is gone/reaped, the
+spawner may fall back to a fresh worktree under the same exclusive reservation.
+Add `--supersede-exclusive-key` when the latest episode replaces older queued or
+proposed episodes with the same key. It never yanks a claimed/started/suspended
+worker; the active reservation is the hard no-second-worker guard.
 
 ### Goal-loop tasks — a durable goal a worker loops toward *(the norm for delegated work)*
 
@@ -796,6 +812,10 @@ to `machine` only when the mismatch is machine-wide.
   leader election.
 - **`affinity`** (repeatable `--affinity key=value`) -- soft *preferences*
   (preferred agent/worktree) that order candidates but **never exclude**.
+- **`exclusive_key`** (`--exclusive-key`) -- hard spawn singleton for one logical
+  resource across several task ids. It prevents two active spawn reservations
+  from existing for that resource and carries the previous worktree as the next
+  spawn's reuse target.
 - A **hard pin** is just a target promoted into `requires`; `detach <id>` demotes
   a hard worktree pin to a soft affinity (e.g. once local work is pushed, a bound
   handoff becomes portable).

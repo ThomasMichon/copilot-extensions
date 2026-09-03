@@ -221,12 +221,17 @@ class DispatchClient:
 
     def yield_task(
         self, task_id: str, worker_id: str, *, note: str | None = None,
-        exclude: str | None = None,
+        exclude: str | None = None, release_spawn: bool = True,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/yield",
-                json={"worker_id": worker_id, "note": note, "exclude": exclude},
+                json={
+                    "worker_id": worker_id,
+                    "note": note,
+                    "exclude": exclude,
+                    "release_spawn": release_spawn,
+                },
             )
         )
 
@@ -572,6 +577,15 @@ class DispatchClient:
             self._http.post(
                 f"/spawn-reservations/{key}/spawned",
                 json={"session_handle": session_handle, "worktree": worktree},
+            )
+        )
+
+    def record_spawn_worktree(self, key: str, worktree: str) -> dict:
+        """Record the reserved worktree before launching the worker session."""
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/worktree",
+                json={"worktree": worktree},
             )
         )
 

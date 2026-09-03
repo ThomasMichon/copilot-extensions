@@ -524,7 +524,7 @@ def test_fenced_suspended_completion_loses_concurrent_resume(q):
     assert q.get(t.id).status == Status.STARTED
 
 
-def test_release_suspended_clears_owner_and_spawn_reservation(q):
+def test_release_suspended_clears_owner_and_requests_spawn_release(q):
     t = q.create("replace me")
     reservation, _ = q.reserve_spawn(t.id)
     q.record_spawn(
@@ -542,7 +542,9 @@ def test_release_suspended_clears_owner_and_spawn_reservation(q):
     assert released.owner is None
     assert released.owner_session_id is None
     assert released.claimed_at is None
-    assert q.get_reservation(reservation.key).state == "settled"
+    active = q.get_reservation(reservation.key)
+    assert active.state == "spawned"
+    assert active.release_requested is True
     replacement = q.claim_one("host-b/wt-2", task_id=t.id)
     assert replacement is not None
     assert replacement.owner == "host-b/wt-2"

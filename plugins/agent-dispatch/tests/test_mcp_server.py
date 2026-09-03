@@ -62,8 +62,14 @@ def tools(server_url):
 
 
 def test_create_find_show(tools):
-    t = tools.create("do a thing", prompt="go", dedup_key="k1")
+    t = tools.create(
+        "do a thing",
+        prompt="go",
+        dedup_key="k1",
+        exclusive_key="resource:42",
+    )
     assert t["status"] == Status.QUEUED
+    assert t["exclusive_key"] == "resource:42"
     assert any(r["id"] == t["id"] for r in tools.find("thing"))
     assert tools.show(t["id"])["title"] == "do a thing"
 

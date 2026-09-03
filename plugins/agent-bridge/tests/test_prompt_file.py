@@ -42,6 +42,22 @@ def test_create_accepts_prompt_file():
     assert args.prompt_file == "-"
 
 
+def test_create_accepts_worktree_targeting_flags():
+    args = _parse([
+        "create",
+        "--target-dir",
+        "/tmp/worktree",
+        "--worktree-id",
+        "wt-1",
+        "agent-x",
+        "--prompt-file",
+        "-",
+    ])
+    assert args.target == "agent-x"
+    assert args.target_dir == "/tmp/worktree"
+    assert args.worktree_id == "wt-1"
+
+
 def test_create_allows_no_prompt_at_all():
     args = _parse(["create", "agent-x"])
     assert args.prompt is None
