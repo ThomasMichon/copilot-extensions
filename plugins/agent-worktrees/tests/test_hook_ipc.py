@@ -218,6 +218,26 @@ def test_project_resolve_supplies_current_directory(monkeypatch, tmp_path):
     }
 
 
+def test_project_resolve_preserves_session_start_worktree(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        hook_client,
+        "_request",
+        lambda kind, payload, home: seen.update(
+            kind=kind, payload=payload
+        ) or {},
+    )
+
+    assert hook_client.decide(
+        "projectResolve", {"cwd": "/session-worktree"}, home=tmp_path
+    ) == {}
+    assert seen == {
+        "kind": "projectResolve",
+        "payload": {"cwd": "/session-worktree"},
+    }
+
+
 def test_session_start_requests_fallback_when_monitor_is_absent(
     monkeypatch, tmp_path
 ):

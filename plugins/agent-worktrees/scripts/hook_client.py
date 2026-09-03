@@ -205,10 +205,17 @@ def _session_start_payload(payload: dict) -> dict:
 
 def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
     home = home or Path.home()
+    project_payload = dict(payload)
+    # Copilot's sessionStart cwd is the worktree; the hook process itself may
+    # run from the plugin directory. Use process cwd only for manual callers.
+    if not isinstance(project_payload.get("cwd"), str) or not str(
+        project_payload["cwd"]
+    ).strip():
+        project_payload["cwd"] = os.getcwd()
     request_payload = (
         _session_start_payload(payload)
         if kind == "sessionStart"
-        else {"cwd": os.getcwd(), **payload}
+        else project_payload
         if kind == "projectResolve"
         else payload
     )
