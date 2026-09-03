@@ -834,8 +834,13 @@ def _run_installation_mode_helper(
             f"installation-mode resolver could not run for {plugin_name}: {error}"
         ) from error
     if process.returncode not in {0, 3}:
+        detail = " ".join(
+            (process.stderr.strip() or process.stdout.strip()).split()
+        )[:240]
+        suffix = f": {detail}" if detail else ""
         raise ValueError(
-            f"installation-mode resolver failed for {plugin_name}"
+            f"installation-mode resolver failed for {plugin_name} "
+            f"(exit {process.returncode}){suffix}"
         )
     try:
         result = json.loads(

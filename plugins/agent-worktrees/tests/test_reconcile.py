@@ -323,6 +323,36 @@ def test_same_path_resolves_symlink_alias(tmp_path):
     assert reconcile._same_path(alias, target)
 
 
+def test_installation_mode_helper_failure_includes_bounded_detail(
+    env, monkeypatch
+):
+    monkeypatch.setattr(
+        reconcile.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=[],
+            returncode=7,
+            stdout="fallback detail",
+            stderr="specific policy failure\nwith context",
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"installation-mode resolver failed for agent-machines "
+            r"\(exit 7\): specific policy failure with context"
+        ),
+    ):
+        reconcile._run_installation_mode_helper(
+            "agent-machines",
+            env.repo / "payload",
+            INSTALLATION_CONTEXT,
+            env.home / ".agent-machines",
+            context=None,
+        )
+
+
 # ---------------------------------------------------------------------------
 # read_enabled_plugins
 # ---------------------------------------------------------------------------
