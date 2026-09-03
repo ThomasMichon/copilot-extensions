@@ -153,6 +153,18 @@ jobs:
           echo "running ${#suites[@]} JS test file(s): ${suites[*]}"
           node --test "${suites[@]}"
 
+  windows-hooks:
+    name: Git hooks (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tools/test_hook_interpreter.py
+
   worktree-manager:
     name: worktree-manager (out-of-plugin)
     # The Worktree Manager is delivered OUTSIDE the plugin pipe, so the
