@@ -7,8 +7,11 @@ synthesis, integration, and completion while moving broad separable work into
 bounded sub-agent contexts before it consumes the coordinator's context window.
 It is model-neutral and independently enableable.
 
-The ambient kernel is deliberately concise. Detailed routing guidance loads
-only when the `delegating-work` skill is invoked or matched.
+The ambient kernel is deliberately concise and ordered into the spill
+compatibility engine's bounded first-turn kernel before continuity guidance, so
+broad routing decisions do not depend on the model loading deferred context.
+Detailed routing guidance loads only when the `delegating-work` skill is invoked
+or matched.
 
 ## What it does (and how to use it)
 

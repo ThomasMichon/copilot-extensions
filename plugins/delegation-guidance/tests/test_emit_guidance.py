@@ -17,6 +17,7 @@ POWERSHELL_PRODUCER = PLUGIN / "scripts" / "emit-guidance.ps1"
 BASH_PRODUCER = PLUGIN / "scripts" / "emit-guidance.sh"
 SKILL = PLUGIN / "skills" / "delegating-work" / "SKILL.md"
 README = PLUGIN / "README.md"
+SESSION_CONTEXT = PLUGIN / "session-context.json"
 
 
 def _hook_input() -> str:
@@ -95,6 +96,14 @@ def test_manifest_registers_cross_platform_session_start_hook() -> None:
     assert "CLAUDE_PLUGIN_ROOT" in entry["bash"]
     assert "invoke-context-contributor.sh" in entry["bash"]
     assert "emit-guidance.sh" in entry["bash"]
+
+
+def test_delegation_guidance_is_first_turn_critical() -> None:
+    declaration = json.loads(SESSION_CONTEXT.read_text(encoding="utf-8"))
+    contributor = declaration["contributors"][0]
+
+    assert contributor["id"] == "delegation-guidance"
+    assert contributor["order"] == 90
 
 
 @pytest.mark.skipif(_powershell() is None, reason="PowerShell is not installed")
