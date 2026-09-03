@@ -847,10 +847,9 @@ def main() -> int:
     if (
         not isinstance(destination, dict)
         or destination.get("owner") != "synthetic-destination-routing"
-        or not isinstance(destination.get("repository"), str)
-        or not destination.get("repository")
-        or not isinstance(destination.get("scopedIdentity"), str)
-        or not destination.get("scopedIdentity")
+        or destination.get("repository")
+        != "generic-upstream/synthetic-progressive-context"
+        or destination.get("scopedIdentity") != "synthetic-publisher"
         or destination.get("destinationApproved") is not True
         or destination.get("reachable") is not True
         or destination.get("reviewGate") != "required"
@@ -1938,8 +1937,9 @@ def _validate_corpus_and_tasks() -> None:
                 or not isinstance(destination, dict)
                 or destination.get("owner")
                 != "synthetic-destination-routing"
-                or not destination.get("repository")
-                or not destination.get("scopedIdentity")
+                or destination.get("repository")
+                != "generic-upstream/synthetic-progressive-context"
+                or destination.get("scopedIdentity") != "synthetic-publisher"
                 or destination.get("destinationApproved") is not True
                 or destination.get("reachable") is not True
                 or destination.get("reviewGate") != "required"
