@@ -24,7 +24,8 @@
   (vault cutover), #744
   (coalescing tier + mcp multiplexer).
 - **Related:** #625 (lifecycle pecking order), #438 (bridge cutover-on-update),
-  #396 (dispatch hot-reconciled supervision), #229 (worktree state store).
+  #396 (dispatch hot-reconciled supervision), #229 (worktree state store),
+  #918 (resident status monitor), #1788 (session lifecycle hook coalescing).
 
 ## Guiding Intent
 
@@ -109,6 +110,21 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   all sessions, refcounted per session, reaped on last-consumer exit, with an
   inline poll fallback — retiring the per-session updater fan-out (#739).
 
+### Phase 4b — agent-worktrees: coalesced session lifecycle hooks (#1788)
+
+- Replace the nine independent `sessionStart` command trees with one bounded
+  lifecycle client path for behavior that can safely reuse the resident
+  monitor's warm project, repository, and session state.
+- Preserve project-owned session-start hooks, provisioning, registration,
+  anchor hygiene, and marketplace reconciliation semantics without repeatedly
+  importing the full CLI or performing nested repository discovery.
+- Keep a bounded monitor-down fallback that preserves required registration and
+  safety behavior, and retain cross-platform parity for hook ordering and
+  side-effect-only context production.
+- Measure the remaining extension-host and lifecycle-event surface after
+  deployment; route any separate hot path to its own issue rather than widening
+  the combined client into an unbounded startup coordinator.
+
 ### Phase 5 — agent-mcp: version GC + optional multiplexer (#741, #744)
 
 - Call `versioned_runtime.gc()` on successful activation (prune non-current,
@@ -149,6 +165,10 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   process count, per-service daemon count (assert exactly one active per service),
   count of coexisting versioned installs, and session-launch latency under a burst
   of concurrent launches.
+- **Session lifecycle performance** for Phase 4b: focused composition, timeout,
+  IPC, and monitor-down fallback tests; process-count and wall-time benchmarks
+  proving that the healthy path uses one client launch instead of nine command
+  trees; deployed multi-session measurements after cutover.
 - **Regression guards:** `check-install-contract.py` clean; version-consistency
   guards green.
 
@@ -242,3 +262,19 @@ per-plugin last-known-good rollout (#742).
 - A 20-process local benchmark of the final pre-tool client measured 76.6 ms
   median / 108.7 ms p95, replacing three separate roughly 109-130 ms guard
   launches. The full post-tool CLI import is removed from the hook path.
+
+### 2026-09-02 — Phase 4b session lifecycle audit proposal (#1788)
+
+- The post-deployment baseline showed three dedicated plugin extension hosts per
+  active Copilot session (`agent-worktrees`, `agent-bridge`, and
+  `context-handoff`), each carrying a full extension-host process. Resident
+  `agent-worktrees` monitor idle CPU remained low.
+- `agent-worktrees` still declares nine separate `sessionStart` commands.
+  Synthetic warm-runtime invocation through the same separate PowerShell
+  process boundary measured about 21 seconds in aggregate. The largest paths
+  were project-hook discovery (~8.4 seconds), session registration
+  (~4.7 seconds), and provisioning preview (~3.0 seconds); each imported or
+  discovered state independently.
+- Filed #1788 and added Phase 4b before implementation. The next slice is to
+  design the smallest combined lifecycle request and explicit monitor-down
+  fallback, then land focused tests and deployed before/after evidence.
