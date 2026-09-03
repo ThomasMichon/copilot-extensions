@@ -1,0 +1,99 @@
+name: Trusted self-hosted CI
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - ".github/workflows/trusted-ci.yml"
+      - "libs/**"
+      - "plugins/agent-bridge/**"
+      - "tools/**"
+
+concurrency:
+  group: trusted-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  authorize:
+    name: authorize current collaborator
+    if: vars.TRUSTED_SELF_HOSTED_CI == 'enabled'
+    runs-on: ubuntu-latest
+    outputs:
+      trusted: ${{ steps.permission.outputs.trusted }}
+    steps:
+      - id: permission
+        name: Check current repository permission
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const sameRepository =
+              context.payload.pull_request.head.repo.full_name ===
+              context.payload.repository.full_name;
+            if (!sameRepository) {
+              core.setOutput("trusted", false);
+              return;
+            }
+            async function hasWriteAccess(username) {
+              let data;
+              try {
+                ({ data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username,
+                }));
+              } catch (error) {
+                if (error.status === 404) {
+                  return false;
+                }
+                throw error;
+              }
+              const permissions = data.user?.permissions ?? {};
+              return permissions.admin === true ||
+                permissions.maintain === true ||
+                permissions.push === true;
+            }
+            try {
+              const authorTrusted = await hasWriteAccess(
+                context.payload.pull_request.user.login,
+              );
+              const senderTrusted = await hasWriteAccess(
+                context.payload.sender.login,
+              );
+              core.setOutput("trusted", authorTrusted && senderTrusted);
+            } catch (error) {
+              core.setOutput("trusted", false);
+              core.setFailed(
+                `Unable to resolve current repository permission: ${error.status ?? "unknown"}`,
+              );
+            }
+
+  agent-bridge:
+    name: agent-bridge trusted suite
+    needs: authorize
+    if: >-
+      needs.authorize.outputs.trusted == 'true' &&
+      vars.TRUSTED_SELF_HOSTED_CI == 'enabled'
+    runs-on: copilot-extensions-ci
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - name: Check out immutable pull-request revision without credentials
+        env:
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin \
+            "https://github.com/${{ github.repository }}.git"
+          git -C "$GITHUB_WORKSPACE" fetch --depth=1 origin "$PR_SHA"
+          git -C "$GITHUB_WORKSPACE" checkout --detach FETCH_HEAD
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Run agent-bridge suite
+        run: python tools/run-plugin-tests.py agent-bridge
