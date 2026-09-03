@@ -517,6 +517,41 @@ def test_cold_resume_process_exception_is_recoolable(q, client):
     assert q.get_reservation(reservation.key).state == SpawnState.COLD
 
 
+def test_cold_resume_process_failure_backs_off_before_retry(q, client):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+    attempts: list[str] = []
+
+    def fail_process_resume(sid, _prompt):
+        attempts.append(sid)
+        raise OSError("bridge unavailable")
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_resume_fn=fail_process_resume,
+        local_cold_fn=lambda _sid: True,
+    )
+
+    assert sup.release_resumed_cold_tasks(now=1000) == 0
+    assert sup.cool_dormant_bodies() == 1
+    assert sup.release_resumed_cold_tasks(now=1299) == 0
+    assert attempts == ["blocked-session"]
+    assert sup.release_resumed_cold_tasks(now=1300) == 0
+    assert attempts == ["blocked-session", "blocked-session"]
+
+
 def test_idle_headless_turn_auto_suspends_and_cools(q, client):
     task = q.create("review turn", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
