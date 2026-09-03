@@ -2694,19 +2694,28 @@ def _save_record_unlocked(
 def _flush_session_projections(record: WorktreeRecord) -> None:
     """Flush exact dirty session projections after authoritative persistence."""
     dirty_sessions = getattr(record, "_session_projection_dirty", set())
+    initial_sessions = getattr(
+        record, "_session_projection_initial_registration", set()
+    )
     dirty_controllers = getattr(
         record, "_controller_projection_dirty", set()
     )
     if dirty_sessions or dirty_controllers:
         remaining_sessions = set(dirty_sessions)
+        remaining_initial_sessions = set(initial_sessions)
         remaining_controllers = set(dirty_controllers)
         try:
             from . import session_projection
 
             for session_id in sorted(dirty_sessions):
-                outcome = session_projection.sync_bound(record, session_id)
+                outcome = session_projection.sync_bound(
+                    record,
+                    session_id,
+                    initial_registration=session_id in initial_sessions,
+                )
                 if outcome in {"written", "current", "blocked"}:
                     remaining_sessions.discard(session_id)
+                    remaining_initial_sessions.discard(session_id)
             for session_id in sorted(dirty_controllers):
                 outcome = session_projection.sync_controller(
                     record, session_id
@@ -2717,6 +2726,9 @@ def _flush_session_projections(record: WorktreeRecord) -> None:
             pass
         finally:
             record._session_projection_dirty = remaining_sessions
+            record._session_projection_initial_registration = (
+                remaining_initial_sessions
+            )
             record._controller_projection_dirty = remaining_controllers
 
 
@@ -4588,6 +4600,7 @@ def register_session(
     source: str = "hook",
     recorded_at: str | None = None,
     handoff_token: str | None = None,
+    initial_projection: bool = False,
 ) -> None:
     """Register a Copilot session against a worktree (called from sessionStart hook)."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -4662,6 +4675,17 @@ def register_session(
         )
         record.sessions.append(new_entry)
         _next_lifecycle_revision(record, session_id)
+        if (
+            initial_projection
+            and record.controller_for_session(session_id) is None
+        ):
+            initial_sessions = set(getattr(
+                record,
+                "_session_projection_initial_registration",
+                set(),
+            ))
+            initial_sessions.add(session_id)
+            record._session_projection_initial_registration = initial_sessions
         # A successor claims one exact, previously opened handoff token. Merely
         # starting another session never steals the head.
         if handoff_token:

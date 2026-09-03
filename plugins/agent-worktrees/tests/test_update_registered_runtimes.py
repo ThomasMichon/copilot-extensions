@@ -203,6 +203,7 @@ def test_runtime_install_uses_matching_validated_context(
     monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: payload)
     monkeypatch.setattr(reconcile, "manifest_runtime_scope", lambda pdir: "universal")
     monkeypatch.setattr(reconcile, "payload_version", lambda pdir: "0.2.0")
+    monkeypatch.setattr(reconcile.platform, "system", lambda: "Linux")
     monkeypatch.setattr(
         reconcile,
         "runtime_deployed_version",
@@ -233,12 +234,6 @@ def test_runtime_install_uses_matching_validated_context(
         return _ok()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    real_exists = Path.exists
-    monkeypatch.setattr(
-        Path,
-        "exists",
-        lambda self: True if str(self).endswith("install.sh") else real_exists(self),
-    )
 
     m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
 

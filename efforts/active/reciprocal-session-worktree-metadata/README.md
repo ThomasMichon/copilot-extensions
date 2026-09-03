@@ -179,7 +179,7 @@ Public-safe transcription of the operator request:
 - [x] Update agent-worktrees architecture and CLI documentation.
 
 ### Phase 7 - Rollout and convergence
-- [ ] Ship schema-version migration and mixed-version behavior under the
+- [x] Ship schema-version migration and mixed-version behavior under the
       reviewed [`rollout-schema-v2.md`](rollout-schema-v2.md) contract.
 - [x] Validate no regression in first-paint/list latency at large session
       counts.
@@ -190,9 +190,9 @@ Public-safe transcription of the operator request:
 
 ## Validation Plan
 
-- [ ] Schema round-trip, deterministic serialization, bounded size, and unknown
+- [x] Schema round-trip, deterministic serialization, bounded size, and unknown
       future-field compatibility.
-- [ ] Relation-cap behavior preserves the bound relation and nonterminal
+- [x] Relation-cap behavior preserves the bound relation and nonterminal
       controllers, evicts terminal relations deterministically, and reports
       overflow without losing authority.
 - [x] Atomic writer tests for interruption, partial files, lock contention,
@@ -400,3 +400,22 @@ Adopt the authority and schema model in [`design.md`](design.md):
   tracked by #1712. Writer emission stays blocked until that issue records the
   observation or an explicit scope transfer; this hardening increment does not
   weaken the two-stage rollout gate.
+
+### 2026-09-03 - Schema v2 writer release implemented
+- Responsibility for unobserved downstream reader-floor environments was
+  transferred to private tracked objectives. No unobserved environment remains
+  a public writer-release gate, so schema v2 emission is authorized.
+- Advanced the writer to schema v2 with explicit fresh-registration creation
+  and conservative reconstruction, valid v1 migrate-on-write, sticky relation
+  and tombstone incompleteness, complete revision-vector arbitration, digest
+  tombstones with projection-local sequencing, deterministic count/byte
+  priority retention, and compact canonical encoding.
+- Repair, backfill, resident reconciliation, and ordinary lifecycle paths now
+  treat v2 as current and migrate v1 only through safe writes. Restored trees
+  remain read-only, oversized projections remain untouched, future major
+  versions remain fenced, and a bound relation that cannot fit blocks the
+  projection update.
+- After rebasing and selecting agent-worktrees `1.5.3-dev743`, the complete
+  suite passed on POSIX with 3,729 tests and 17 skips. The complete Windows
+  suite passed with 3,706 tests and 40 skips after correcting one unrelated
+  platform-mocked runtime-installer fixture.
