@@ -287,19 +287,23 @@ def test_repo_session_env_passthrough_on_bad_placeholder():
     assert out["K"] == "{unknown_placeholder}/x"  # passed through, no crash
 
 
-def test_cmd_launch_exports_active_project(monkeypatch, tmp_path):
-    """cmd_launch must bridge the resolved project to the launcher via
-    WORKTREE_PROJECT, so a bare `<project>` launched from outside the anchor
-    (e.g. $HOME) still resolves -- the dotfiles/book2 "WORKTREE_PROJECT is not
-    set" regression. We stop before the exec by pointing install_dir at a dir
-    with no launch script; the env is set first, which is what we assert."""
+def test_cmd_launch_passes_active_project_explicitly(monkeypatch, tmp_path):
+    """A bare project launch carries explicit identity into the shell launcher."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "dotfiles")
     monkeypatch.setattr(m.cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "linux")
+    launch_script = tmp_path / "bin" / "launch-session.sh"
+    launch_script.parent.mkdir()
+    launch_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(m.os, "execvp", lambda exe, argv: calls.append((exe, argv)))
     rc = m.cmd_launch([])
-    assert rc == 1  # launch-session.sh not found under tmp_path -> early return
-    assert os.environ.get("WORKTREE_PROJECT") == "dotfiles"
+    assert rc == 1
+    assert calls == [
+        ("bash", ["bash", str(launch_script), "--project", "dotfiles"])
+    ]
+    assert "WORKTREE_PROJECT" not in os.environ
 
 
 # ---------------------------------------------------------------------------

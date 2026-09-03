@@ -116,7 +116,7 @@ def test_launcher_reads_args_not_param_block():
     makes PowerShell's parameter binder reject unknown Copilot flags such as
     --acp/--stdio before the split ever runs."""
     text = _LAUNCH_PS1.read_text(encoding="utf-8")
-    assert "$CopilotArgs = $args" in text
+    assert "$CopilotArgs = @($args)" in text
 
 
 def test_launcher_still_splits_and_forwards_passthrough():

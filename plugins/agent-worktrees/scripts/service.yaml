@@ -11,8 +11,6 @@ level: user
 
 runtime:
   install_dir: "${HOME}/.agent-worktrees"
-  config_dir: "${HOME}/.${WORKTREE_PROJECT}"
-  config_file: config.yaml
 
 prereqs:
   - name: git

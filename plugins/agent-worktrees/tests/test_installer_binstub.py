@@ -43,8 +43,7 @@ def test_platform_installers_honor_structured_runtime_root():
 
 def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
     """A project binstub names its project via ``--project`` (context otherwise
-    resolves from CWD, git-like). It must NOT set an ambient WORKTREE_PROJECT on
-    the primary path, nor scrub WORKTREE_ID (identity now comes purely from CWD)."""
+    resolves from CWD, git-like). It must not set ambient identity variables."""
     lb = tmp_path / "bin"
     monkeypatch.setattr(inst, "local_bin", lambda: lb)
 
@@ -56,14 +55,16 @@ def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
     # No longer scrubs the inherited worktree id -- it is simply ignored.
     assert "WORKTREE_ID" not in content
     assert "APERTURE_WORKTREE_ID" not in content
-    # WORKTREE_PROJECT survives ONLY in the recovery (venv-missing) branch,
-    # never on the primary CLI path.
+    assert "WORKTREE_PROJECT" not in content
+    assert "agent-worktrees project binstub" in content
     if platform.system() == "Windows":
         assert "bin\\payload\\agent-worktrees.cmd" in content
         assert "--project demoproj" in content
+        assert "launch-session.cmd\" --project demoproj" in content
     else:
         assert "bin/payload/agent-worktrees" in content
         assert "--project demoproj" in content
+        assert "launch-session.sh\" --project demoproj" in content
         assert ".local/bin/agent-worktrees" not in content
 
 
@@ -252,6 +253,12 @@ def test_posix_binstub_launch_trace_uses_portable_date(monkeypatch, tmp_path: Pa
     assert "%N" not in content
 
 
+def test_wsl_binstub_refuses_legacy_launcher():
+    install_ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    assert "grep -q -- 'elif \\[\\[ \"`$arg\" == \"--project\" \\]\\]'" in install_ps1
+    assert "agent-worktrees in WSL is too old for explicit project routing." in install_ps1
+
+
 def _reg(monkeypatch, names: list[str]) -> None:
     monkeypatch.setattr(
         inst, "read_projects_registry",
@@ -269,7 +276,7 @@ def test_reconcile_adds_registered_and_removes_stale(monkeypatch, tmp_path: Path
 
     # Pre-seed a stale receipt-owned stub for a project no longer registered.
     inst._deploy_project_binstub("staleproj")
-    # And a foreign stub from another tool (no WORKTREE_PROJECT / --project marker).
+    # And a foreign stub from another tool (no project-addressed payload marker).
     foreign = lb / ("othertool.cmd" if platform.system() == "Windows" else "othertool")
     foreign.write_text("@echo off\r\necho not ours\r\n", newline="")
 
@@ -434,6 +441,15 @@ def test_project_binstub_requires_transfer_for_exact_legacy_signature(
     assert inst._read_receipt("demo") is not None
     content = target.read_text(encoding="utf-8").replace("\\", "/")
     assert "bin/payload/agent-worktrees" in content
+
+
+def test_legacy_environment_binstub_remains_detectable_for_migration():
+    content = (
+        "#!/usr/bin/env bash\n"
+        "export WORKTREE_PROJECT=demo\n"
+        "exec \"$HOME/.agent-worktrees/bin/launch-session.sh\"\n"
+    )
+    assert inst._is_project_binstub(content)
 
 
 def test_registration_preflight_rejects_transfer_before_registry_mutation(
