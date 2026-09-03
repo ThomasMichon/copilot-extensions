@@ -36,6 +36,7 @@ Copilot CLI sessions (multiple)
 | FastAPI app | `app.py` | HTTP server, routing, auth middleware |
 | Session manager | `session_manager.py` | Session lifecycle, turn tracking |
 | Transport | `transport.py` | Local + SSH subprocess spawning |
+| SSH carrier | `carrier.py` + vendored `ssh-manager` | One bounded, reconnecting framed stdio carrier per normalized SSH connection identity |
 | ACP agent | `acp_agent.py` | Upstream ACP agent interface (stdio mode) |
 | ACP client | `acp_client.py` | Downstream ACP client (subprocess comms) |
 | Events | `events.py` | SSE event log with durable IDs; content-free session, conversation, and tool-call telemetry reduction. Owned and represented sources are labeled; represented turn completion supplies its terminal idle boundary. |
@@ -100,6 +101,23 @@ evicts -- the primary's relay; local elevated agents reuse the primary's relay o
 the same host. The `enable_credential_relay` config flag (default `true`) gates
 relay startup in the `app.py` lifespan.
 
+## Persistent SSH Carrier Foundation
+
+Agent Bridge owns a persistent SSH carrier pool through the same
+`ssh-manager.ConnectionManager` that owns ordinary SSH connections. A carrier
+is keyed by the complete normalized SSH connection identity, not a display
+alias, and opens exactly one long-lived `agent-bridge carrier --stdio` process
+through `open_stdio_channel`. This gives native Windows and POSIX hosts the same
+application-level multiplexing contract without depending on ControlMaster.
+
+The versioned protocol uses bounded, length-prefixed frames for hello, request,
+response, event, heartbeat, cancellation, and error envelopes. It supports
+concurrent request IDs and replay-shaped subscriptions, detects heartbeat and
+subscription staleness, reconnects with bounded backoff, bounds output queues,
+retires after an idle interval with no logical clients, and closes stdin before
+reaping the SSH process tree. The endpoint currently exposes only this protocol
+foundation; remote session operations are added separately.
+
 ## HTTP API
 
 All endpoints require `Authorization: Bearer <token>` (except `/health`).
@@ -133,7 +151,7 @@ in the README for the consumer model.
 ### Health
 
 ```
-GET    /health                           # Service health (no auth); reports {status, service, draining}, plus a drain{} detail block while draining
+GET    /health                           # Service health (no auth); includes aggregate ssh_carriers health/counts, never payloads or SSH details
 ```
 
 ### Admin / Deployment

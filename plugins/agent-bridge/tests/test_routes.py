@@ -132,6 +132,17 @@ class TestHealthEndpoint:
             assert resp.json()["version"] == __version__
             assert resp.json()["topology_error_count"] == 0
             assert resp.json()["topology_warning_count"] == 0
+            carrier_health = resp.json()["ssh_carriers"]
+            assert {
+                "total",
+                "healthy",
+                "degraded",
+                "logical_clients",
+                "active_requests",
+                "active_subscriptions",
+                "queued_frames",
+                "buffered_bytes",
+            } == set(carrier_health)
 
 
 class TestAuthMiddleware:

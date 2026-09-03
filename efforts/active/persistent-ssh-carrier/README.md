@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal PR followed by serial per-phase implementation PRs
 - **Created:** 2026-09-02
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** closes
   [`visions/plugins/agent-dispatch`](../../../visions/plugins/agent-dispatch/README.md)
   §Behaviors/`react-to-turn-end` and advances
@@ -85,44 +85,44 @@ The repository's ownership and independence patterns require:
 
 ### Phase 1 — Review the carrier and ownership contract
 
-- [ ] Land this proposal before implementation.
-- [ ] Fix the ownership boundary: one Agent Bridge daemon owns one carrier per
+- [x] Land this proposal before implementation.
+- [x] Fix the ownership boundary: one Agent Bridge daemon owns one carrier per
       normalized SSH connection identity; Dispatch owns subscriptions and wake
       policy, never SSH processes.
-- [ ] Fix the protocol boundary: a versioned framed stdio protocol over one
+- [x] Fix the protocol boundary: a versioned framed stdio protocol over one
       long-lived `ssh <host> agent-bridge carrier --stdio` process supports
       concurrent request/response operations and event subscriptions without
       exposing Bridge Python internals.
-- [ ] Keep this contract distinct from #1450: that effort defines general
+- [x] Keep this contract distinct from #1450: that effort defines general
       attention settlement, while this effort transports exact durable session
       events and wakes Dispatch to reconcile.
 
 ### Phase 2 — Add the persistent host carrier (#1777)
 
-- [ ] Extend `ssh-manager`'s existing connection ownership rather than adding a
+- [x] Extend `ssh-manager`'s existing connection ownership rather than adding a
       second host registry. Key the carrier by the complete normalized SSH
       connection identity, not a display alias alone.
-- [ ] Add a small versioned hello plus length-prefixed binary request, response,
+- [x] Add a small versioned hello plus length-prefixed binary request, response,
       event, heartbeat, cancellation, and error envelopes with bounded frame
       sizes and request IDs.
-- [ ] Start one remote `agent-bridge carrier --stdio` endpoint through
+- [x] Start one remote `agent-bridge carrier --stdio` endpoint through
       `ssh-manager.open_stdio_channel`; multiplex concurrent logical operations
       over that process on every platform, including native Windows. Resolve and
       quote the remote entrypoint through a cross-platform helper rather than
       POSIX-only shell quoting.
-- [ ] Reconnect with bounded backoff after transport loss, fail pending
+- [x] Reconnect with bounded backoff after transport loss, fail pending
       non-replayable requests explicitly, and let replayable event subscribers
       resume from their last durable event position.
-- [ ] Emit protocol heartbeats and mark a carrier degraded when its heartbeat or
+- [x] Emit protocol heartbeats and mark a carrier degraded when its heartbeat or
       a subscription's progress deadline expires, even if the SSH process has
       not exited.
-- [ ] Bound per-request queues and total buffered output so one slow subscriber
+- [x] Bound per-request queues and total buffered output so one slow subscriber
       cannot stall unrelated requests or grow memory without limit.
-- [ ] Make the remote endpoint exit on stdin EOF or parent-carrier loss. Retire
+- [x] Make the remote endpoint exit on stdin EOF or parent-carrier loss. Retire
       the local carrier after a bounded idle period with no requests or
       subscriptions, and reap both process trees deterministically on daemon
       shutdown or cutover.
-- [ ] Expose carrier health and active request/subscription counts through
+- [x] Expose carrier health and active request/subscription counts through
       Agent Bridge diagnostics without logging prompts, event payloads, tokens,
       or SSH secrets.
 
@@ -213,7 +213,7 @@ The repository's ownership and independence patterns require:
 
 ## Validation Plan
 
-- [ ] Carrier unit tests cover framing, concurrent request correlation,
+- [x] Carrier unit tests cover framing, concurrent request correlation,
       cancellation, bounded queues, malformed/oversized frames, clean shutdown,
       child failure, heartbeat/staleness expiry, reconnect backoff, remote
       exit-on-EOF, local idle teardown, and protocol mismatch.
@@ -238,7 +238,7 @@ The repository's ownership and independence patterns require:
 - [ ] `python tools/run-plugin-tests.py agent-bridge --max-processes 32
       --max-memory-mb 4096` and the equivalent Agent Dispatch suite pass for
       every implementation slice.
-- [ ] Shared-library tests, version consistency, generated payload guards, and
+- [x] Shared-library tests, version consistency, generated payload guards, and
       `python tools/check-install-contract.py` pass before publication.
 - [ ] Deployed evidence shows negligible idle supervisor CPU, no visible console
       creation, one persistent SSH carrier per active host, bounded transient
@@ -297,6 +297,30 @@ end-to-end slice small enough to validate while establishing the ownership and
 transport foundation #1763 requires.
 
 ## Journal
+
+### 2026-09-02 — Persistent carrier foundation
+
+- Marked the reviewed ownership and protocol proposal complete and activated
+  implementation.
+- Added a bounded, versioned framed carrier protocol to `ssh-manager`, with one
+  lifecycle per normalized connection identity, concurrent request correlation,
+  replay-shaped subscriptions, cancellation, heartbeat/progress staleness,
+  bounded buffering, reconnect backoff, idle retirement, and deterministic
+  process-tree teardown.
+- Added the Agent Bridge-owned `carrier --stdio` endpoint, cross-platform remote
+  command construction, aggregate payload-free health diagnostics, focused
+  unit/process coverage, and synchronized the vendored library copies.
+- Independent bug reviews drove regression coverage for startup and retirement
+  races, alias and tunnel identity, cancellation and buffer cleanup, negotiated
+  frame direction, replay cursor correctness, complete reconnect restoration,
+  stale transport generations, and independent-host startup. The final
+  stop-ship review reported no findings.
+- The focused shared-library suite passes 62 tests and the authoritative Agent
+  Bridge runner passes all five sub-suites. The process-heavy Agent Codespaces
+  installer-recovery file passes in isolation; its full Windows shard can exceed
+  the existing per-subprocess timeout after cumulative host contention.
+- Kept remote session operations and Agent Dispatch consumption out of this
+  phase; those remain owned by #1778 and #1779.
 
 ### 2026-09-02 — Proposal
 

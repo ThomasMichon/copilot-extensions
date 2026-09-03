@@ -19,6 +19,24 @@ Usage::
 """
 
 from .codespace_source import CodespaceConfigSource
+from .carrier import (
+    CarrierBackpressure,
+    CarrierError,
+    CarrierLease,
+    CarrierProtocolError,
+    CarrierStale,
+    CarrierSubscription,
+    CarrierUnavailable,
+    Envelope,
+    EnvelopeType,
+    PersistentCarrier,
+    StdioCarrierServer,
+    decode_envelope,
+    encode_envelope,
+    hello_envelope,
+    read_envelope,
+    validate_hello,
+)
 from .config_sources import ConfigSource, SSHConfig, SSHProfileSource
 from .forward import LocalForward, build_forward_ssh_args, pick_free_local_port
 from .health import HealthStatus, check_health, ensure_healthy
@@ -33,25 +51,41 @@ from .platform import MultiplexMode, PlatformInfo, detect_platform
 
 __all__ = [
     "CommandResult",
+    "CarrierBackpressure",
+    "CarrierError",
+    "CarrierLease",
+    "CarrierProtocolError",
+    "CarrierStale",
+    "CarrierSubscription",
+    "CarrierUnavailable",
     "ConfigSource",
     "CodespaceConfigSource",
     "ConnectionInfo",
     "ConnectionManager",
     "HealthStatus",
+    "Envelope",
+    "EnvelopeType",
     "LockHolder",
     "LocalForward",
     "MultiplexMode",
     "PlatformInfo",
+    "PersistentCarrier",
     "SSHConfig",
     "SSHProfileSource",
     "TargetBusyError",
     "TargetLock",
+    "StdioCarrierServer",
     "build_forward_ssh_args",
     "check_health",
+    "decode_envelope",
     "detect_platform",
     "ensure_healthy",
+    "encode_envelope",
     "get_default_manager",
+    "hello_envelope",
     "locks_dir",
     "pick_free_local_port",
     "pid_alive",
+    "read_envelope",
+    "validate_hello",
 ]
