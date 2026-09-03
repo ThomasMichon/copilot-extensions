@@ -174,6 +174,7 @@ def _reset_active_project():
     from agent_worktrees import config as _cfg
 
     _saved = os.environ.get("WORKTREE_PROJECT")
+    _saved_handoff = os.environ.get("AGENT_WORKTREES_HANDOFF_TOKEN")
     _cfg.set_active_project(None)
     # Also clear the WORKTREE_PROJECT env fallback that project_name() consults.
     # Otherwise a value leaked from the launching shell (or a prior test that
@@ -181,6 +182,7 @@ def _reset_active_project():
     # depending on the ambient environment / test order. Tests that need a
     # project set it explicitly (e.g. via monkeypatch_config or set_active_project).
     os.environ.pop("WORKTREE_PROJECT", None)
+    os.environ.pop("AGENT_WORKTREES_HANDOFF_TOKEN", None)
     yield
     _cfg.set_active_project(None)
     # main() writes WORKTREE_PROJECT into os.environ directly (for legacy shell
@@ -189,6 +191,10 @@ def _reset_active_project():
         os.environ.pop("WORKTREE_PROJECT", None)
     else:
         os.environ["WORKTREE_PROJECT"] = _saved
+    if _saved_handoff is None:
+        os.environ.pop("AGENT_WORKTREES_HANDOFF_TOKEN", None)
+    else:
+        os.environ["AGENT_WORKTREES_HANDOFF_TOKEN"] = _saved_handoff
 
 # ---------------------------------------------------------------------------
 # Path fixtures — redirect config helpers to tmp dirs
