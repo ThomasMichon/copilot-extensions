@@ -179,7 +179,8 @@ Public-safe transcription of the operator request:
 - [x] Update agent-worktrees architecture and CLI documentation.
 
 ### Phase 7 - Rollout and convergence
-- [ ] Ship schema-version migration and mixed-version behavior.
+- [ ] Ship schema-version migration and mixed-version behavior under the
+      reviewed [`rollout-schema-v2.md`](rollout-schema-v2.md) contract.
 - [ ] Validate no regression in first-paint/list latency at large session
       counts.
 - [ ] Validate Linux, Windows, remote-control, handoff, and synchronized-session
@@ -358,3 +359,10 @@ Adopt the authority and schema model in [`design.md`](design.md):
   between validation and commit. No projection format change will land until
   readmission, saturation, deterministic serialization, and old/new writer
   interleavings are covered together.
+- Drafted [`rollout-schema-v2.md`](rollout-schema-v2.md) to make the incremental
+  information boundary explicit: a writer cannot count identities it discarded
+  without storing them or scanning authority. The proposed v2 contract reports
+  relation overflow with an unknown (`null`) count, tracks bounded deletion-
+  fence loss separately, uses deterministic byte-prefix retention, discards
+  inflated v1 counts during migration, and never clears incompleteness from an
+  ordinary incremental update.
