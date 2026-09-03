@@ -520,7 +520,7 @@ possibly-dynamic endpoint into the body); route by the default local
 coordinator, `--shared`, or fleet mode (`--pool`/`--origin`, which routes by
 machine alias).
 
-### Disposable CLI conclusion (built) — opt-in priming, conservative deletion
+### Disposable local-worker conclusion (built) — opt-in priming, conservative deletion
 
 An isolated local worker worktree may be disposable for a declared task class
 even though arbitrary sessions are not. Both CLI and local headless ACP bodies
