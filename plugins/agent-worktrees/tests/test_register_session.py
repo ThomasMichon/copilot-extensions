@@ -106,6 +106,29 @@ class TestRegisterSessionStdin:
         rec = load_record(tmp_tracking_dir / "wt-x.yaml")
         assert [s.session_id for s in rec.sessions] == ["sess-1"]
 
+    def test_only_new_session_source_requests_complete_projection_creation(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-x", "/tmp/src/wt-x")
+        original = m.tracking.register_session
+        observed: list[bool] = []
+
+        def capture(*args, **kwargs):
+            observed.append(kwargs["initial_projection"])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(m.tracking, "register_session", capture)
+        for source in ("new", "resume"):
+            payload = json.dumps({
+                "sessionId": f"sess-{source}",
+                "cwd": "/tmp/src/wt-x/sub",
+                "source": source,
+            })
+            monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+            assert m.cmd_register_session(_args(stdin=True)) == 0
+
+        assert observed == [True, False]
+
     def test_adopts_host_created_linked_worktree(
         self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

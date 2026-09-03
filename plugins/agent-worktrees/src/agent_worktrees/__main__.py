@@ -19597,6 +19597,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             started_at=event_at,
             source=source,
             handoff_token=getattr(args, "handoff_token", None),
+            initial_projection=source == "hook:new",
         )
         if candidate_token:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
