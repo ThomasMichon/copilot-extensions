@@ -466,8 +466,8 @@ enforcement before migrating the complete contributor stack.
   also lost complete owner provenance.
 - The frozen counts-only records report irrelevant guide counts of 1, 1, and 2.
   Independent transcript judges counted 1, 2, and 2 direct irrelevant guide
-  reads. Repetition 2 malformed one encountered canary in its final witness,
-  explaining the canary-backed undercount.
+  reads. Repetition 2 malformed the encountered `command-reference` canary in
+  its final witness, explaining the canary-backed undercount.
 - All four F2 emphasis levels are rejected for this one-guide cell. Next gate:
   change only deferral from F2 to F3, keeping repository-relative backticks,
   safety-gated emphasis, flat fragments, task, model, ACP venue, and fresh
