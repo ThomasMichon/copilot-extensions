@@ -5,7 +5,7 @@
 - **Branch(es):** one proposal PR followed by independently reviewable
   implementation and archive PRs from the delegation-contract driver worktree
 - **Created:** 2026-09-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   §Features/`attention-boundary-subscriptions` and
@@ -90,85 +90,85 @@ a scheduler or callback service.
 
 ### Phase 1 — Define authoritative reason and position semantics
 
-- [ ] Add one stable attention-reason enum and response model covering
+- [x] Add one stable attention-reason enum and response model covering
       `turn_complete`, `turn_cancelled`, `failed`, `input_required`,
       `permission_required`, `unreachable`, `policy_required`,
       `contract_changed`, `stopped`, and `ended`.
-- [ ] Publish a reason-source matrix naming each reason's authoritative durable
+- [x] Publish a reason-source matrix naming each reason's authoritative durable
       event or row, correlation identity, withdrawal/resolution signal, restart
       behavior, bounded reference, current availability, and prerequisite
       owner.
-- [ ] Define settlement as the earliest selected durable boundary after the
+- [x] Define settlement as the earliest selected durable boundary after the
       supplied attention position, so retrying from the same position returns
       the same logical settlement even if current state has since advanced.
-- [ ] Add a distinct opaque attention position containing the logical delegate,
+- [x] Add a distinct opaque attention position containing the logical delegate,
       observed session/continuity/event boundary, and current lineage segment;
       do not reinterpret a session-local result position as cross-session.
-- [ ] Keep settlement stateless: no subscription row, delivery cursor owner,
+- [x] Keep settlement stateless: no subscription row, delivery cursor owner,
       lifecycle status, succession fact, or compatibility selection is added.
-- [ ] Define timeout as a non-settled bounded response, not a false attention
+- [x] Define timeout as a non-settled bounded response, not a false attention
       reason or a terminal verdict.
 
 ### Phase 2 — Add the authenticated attention wait
 
-- [ ] Add a protocol-gated authenticated session attention endpoint that first
+- [x] Add a protocol-gated authenticated session attention endpoint that first
       scans already-durable boundaries, then performs one bounded long-poll on
       the current event log until a selected reason settles or the request
       timeout expires.
-- [ ] Accept a caller-selected reason set and a cursor-neutral opaque starting
+- [x] Accept a caller-selected reason set and a cursor-neutral opaque starting
       position without advancing any delivery cursor.
-- [ ] Return the observed session and exact settlement boundary needed for a
+- [x] Return the observed session and exact settlement boundary needed for a
       rendering client to flush through that event before exiting.
-- [ ] Make daemon/frontend reconnect a client responsibility: re-resolve and
+- [x] Make daemon/frontend reconnect a client responsibility: re-resolve and
       reissue the bounded request from the last attention position until
       recovery succeeds or authoritative terminal evidence maps to `failed` or
       `unreachable`.
-- [ ] Map parked elicitation to its existing stable tool-call reference. Add a
+- [x] Map parked elicitation to its existing stable tool-call reference. Add a
       stable live permission-request correlation and authenticated resolver only
       for the currently unresolved request; emit durable request and resolution
       events without adding a separate permission store.
 
 ### Phase 3 — Follow compatible succession
 
-- [ ] On `session_handoff`, resolve the authoritative successor and continue
+- [x] On `session_handoff`, resolve the authoritative successor and continue
       from the successor's event-log origin when the retained client can prove
       the successor serves the selected attention protocol.
-- [ ] Give successor resolution precedence over the predecessor's later
+- [x] Give successor resolution precedence over the predecessor's later
       `stopped` transition, so a compatible handoff does not settle as a stop.
-- [ ] Settle with `contract_changed`, the successor identity, and the last
+- [x] Settle with `contract_changed`, the successor identity, and the last
       durable predecessor boundary only when client capability re-probing
       explicitly rejects the selected protocol or reason set.
-- [ ] Treat an unavailable or inconclusive compatibility probe as recoverable
+- [x] Treat an unavailable or inconclusive compatibility probe as recoverable
       transport uncertainty: retry within policy, then await authoritative
       `failed` or `unreachable` evidence rather than inventing
       `contract_changed`.
-- [ ] Keep this compatibility result client-synthesized and ephemeral until
+- [x] Keep this compatibility result client-synthesized and ephemeral until
       #1460 provides registered, session-pinned generations; do not claim that a
       daemon-wide HTTP version is a durable per-session contract selection.
 
 ### Phase 4 — Make the CLI wait attention-oriented
 
-- [ ] Refactor `agent-bridge wait` around one coordinator/state machine that
+- [x] Refactor `agent-bridge wait` around one coordinator/state machine that
       shares the attention evaluator with the HTTP endpoint; do not run an
       independent long-poll beside the SSE delivery loop.
-- [ ] In human mode, retain the low-noise SSE feed and do not exit until content
+- [x] In human mode, retain the low-noise SSE feed and do not exit until content
       through the settlement boundary is flushed and acknowledged. In JSON
       mode, use the cursor-neutral attention request only and never open or
       acknowledge the delivery stream.
-- [ ] Add repeatable reason selection and machine-readable JSON settlement.
+- [x] Add repeatable reason selection and machine-readable JSON settlement.
       Keep bare `wait` turn-only across protocol generations; require explicit
       `--attention REASON` or `--all-attention` for the new semantics until
       #1460/#1506 gate a default change.
-- [ ] Preserve a tolerant legacy path for bare turn-only wait against an older
+- [x] Preserve a tolerant legacy path for bare turn-only wait against an older
       daemon; new attention options fail before waiting when the protocol is
       unavailable.
-- [ ] Render each reason distinctly and identify the current or successor
+- [x] Render each reason distinctly and identify the current or successor
       session plus the returned durable position without exposing raw event
       protocol details.
 
 ### Phase 5 — Document and reconcile
 
-- [ ] Update the delegation contract and agent-bridge CLI/API documentation with
+- [x] Update the delegation contract and agent-bridge CLI/API documentation with
       selected reasons, timeout semantics, cursor neutrality, retained versus
       detached behavior, and the temporary compatibility rule.
 - [ ] Reconcile #1450 and the parent
@@ -179,31 +179,31 @@ a scheduler or callback service.
 
 ## Validation Plan
 
-- [ ] Focused model and route tests cover every currently authoritative
+- [x] Focused model and route tests cover every currently authoritative
       attention reason, immediate durable settlement, selected-reason
       filtering, timeout, bounded references, deterministic retry from the same
       position, and exact JSON shape.
-- [ ] CLI tests cover distinct human output for every reason and exact JSON
+- [x] CLI tests cover distinct human output for every reason and exact JSON
       output without consuming another caller's delivery cursor.
-- [ ] Streaming tests prove recoverable daemon/session interruption resumes
+- [x] Streaming tests prove recoverable daemon/session interruption resumes
       by reissuing from the retained position and does not settle prematurely.
-- [ ] Terminal tests prove one authoritative failed/unreachable transition
+- [x] Terminal tests prove one authoritative failed/unreachable transition
       settles exactly once and later replay returns the same bounded outcome.
-- [ ] Handoff tests prove a compatible successor continues the wait and an
+- [x] Handoff tests prove a compatible successor continues the wait and an
       incompatible successor returns `contract_changed` with successor identity.
-- [ ] Input and permission tests prove parked requests release the caller with
+- [x] Input and permission tests prove parked requests release the caller with
       an answerable live request reference while the underlying turn remains
       parked, and prove replay after resolution reports the original boundary
       plus current request availability honestly.
-- [ ] Race tests cover attention-first, feed-first, process interruption,
+- [x] Race tests cover attention-first, feed-first, process interruption,
       reconnect, and handoff switching without lost output or cursor movement
       for undelivered content.
-- [ ] Mixed-version tests prove legacy turn-only wait remains available where
+- [x] Mixed-version tests prove legacy turn-only wait remains available where
       safe and new attention options fail before waiting against an older
       daemon.
-- [ ] The focused agent-bridge test selection, Python lint, version consistency,
+- [x] The focused agent-bridge test selection, Python lint, version consistency,
       generated payload, and install-contract gates pass.
-- [ ] Required pull-request CI remains within its fast contract lane; any
+- [x] Required pull-request CI remains within its fast contract lane; any
       subprocess-heavy reconnect matrix stays in focused or scheduled coverage.
 
 ## Proposal
@@ -271,7 +271,7 @@ The authoritative reason-source matrix begins with these ownership rules:
 | `policy_required` | a dedicated durable policy-boundary event with action correlation, bounded decision reference, and resolution event | gated until such an owning event exists; never inferred from `context_critical` or generic warnings |
 | `contract_changed` | client capability failure while following an explicit successor | client-synthesized until #1460 supplies session-pinned selection |
 | `stopped` | durable deliberate stopped transition, except a predecessor superseded by compatible handoff | implemented |
-| `ended` | durable deliberate ended transition | implemented |
+| `ended` | retained deliberate-retirement tombstone | gated because current `end` deletes the session and event history; no replayable authority exists yet |
 
 ## Journal
 
@@ -286,3 +286,28 @@ The authoritative reason-source matrix begins with these ownership rules:
   lineage-aware position, and one coordinated HTTP/CLI evaluator. Kept terminal
   emission, scheduling, contract registration, and succession ownership outside
   the slice.
+
+### 2026-09-03 — Implementation and validation
+
+- Added HTTP protocol v10 attention positions, bounded authenticated long-poll,
+  client and CLI coordination, durable permission correlation, successor
+  following, cursor-neutral JSON waits, and attached human rendering.
+- Fixed publication and race defects found in review: permission requests are
+  live before publication, finite waits retain their real deadline, database
+  succession links cannot outrun the durable handoff event, event waiter
+  registration is atomic, worktree positions resume on their predecessor
+  segment, and continuity plus durable rows are snapshotted from one history.
+- Published authoritative failed transitions from every existing
+  `SessionManager` failure write. `unreachable` remains gated on #22's terminal
+  producer, `policy_required` on a dedicated future policy event, and `ended`
+  on a future retained terminal tombstone because current deliberate end
+  deletes the session and history.
+- Focused attention/event/protocol validation passed with 66 tests; affected
+  protocol/route/client/stream/result/ACP selection passed with 406 tests; the
+  complete agent-bridge suite passed in five contained groups (2,019 tests).
+  Lint, install-contract, version-consistency, payload-generation, and
+  installation-context synchronization gates passed.
+- The repository-wide installer-readiness suite remains blocked on Windows by
+  the unrelated deterministic stable-read defect tracked in #1680
+  (`st_ctime_ns` differs between handle and path metadata); 40 tests pass,
+  1 skips, and 6 fail at that known boundary.

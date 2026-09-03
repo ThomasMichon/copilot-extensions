@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 9
+HTTP_PROTOCOL_VERSION = 10
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -59,6 +59,9 @@ PROVIDER_TARGET_REFRESH_PROTOCOL_VERSION = 8
 
 # First version that projects completed ACP turns as at rest on read surfaces.
 AT_REST_PROJECTION_PROTOCOL_VERSION = 9
+
+# First version that exposes cursor-neutral attention evaluation and waits.
+ATTENTION_WAIT_PROTOCOL_VERSION = 10
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

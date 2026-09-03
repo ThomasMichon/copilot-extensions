@@ -134,6 +134,43 @@ a new position scope; PID-mismatched re-registration is rejected. Empty logs
 return no position until the first event establishes an observable origin.
 Result detail expansion never returns reasoning or nested-agent events.
 
+### Attention waits
+
+Bare `wait` keeps its historical meaning: stream the current turn until it
+settles. Explicit attention flags opt into the cursor-neutral attention
+contract:
+
+```bash
+agent-bridge wait <session> --attention input_required
+agent-bridge wait <session> --attention failed --attention stopped
+agent-bridge wait <session> --all-attention
+agent-bridge wait <session> --all-attention --json
+agent-bridge wait <session> --all-attention --position <opaque-position>
+```
+
+The selected stable reasons are `turn_complete`, `turn_cancelled`, `failed`,
+`input_required`, `permission_required`, `unreachable`, `policy_required`,
+`contract_changed`, `stopped`, and `ended`. `ended` is reserved but does not
+settle in the current production lifecycle because deliberate retirement
+deletes the session and its history; callers that need a replayable terminal
+boundary should select `stopped` until terminal-retention ownership lands.
+
+Human mode retains one SSE delivery loop, renders and acknowledges through the
+settlement boundary, then exits. JSON mode uses only the authenticated bounded
+attention request and never reads or advances a delivery cursor. A service
+restart is retried from the opaque attention position. A deliberate handoff
+continues on a compatible successor; explicit protocol rejection settles as
+`contract_changed`, while inconclusive discovery/reachability remains
+recoverable. Timeout returns `settled: false` with the latest position rather
+than inventing a timeout reason.
+
+The authenticated API is
+`GET /api/v1/sessions/{session-or-worktree}/attention` with repeatable `reason`,
+optional `position`, and bounded `timeout_seconds` query parameters. A live
+manual permission can be resolved through
+`POST /api/v1/sessions/{session}/permission` using the correlated `request_id`
+and one advertised `option_id`.
+
 ### Phased timeouts
 
 `send` distinguishes phases so a slow codespace cold-start is not mistaken for a

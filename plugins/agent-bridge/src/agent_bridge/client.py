@@ -219,7 +219,7 @@ class BridgeClient:
         path: str,
         body: dict[str, Any] | None = None,
         *,
-        params: dict[str, str] | None = None,
+        params: dict[str, Any] | list[tuple[str, Any]] | None = None,
         request_timeout: float | None = None,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
@@ -228,8 +228,14 @@ class BridgeClient:
         def _build_request() -> urllib.request.Request:
             url = f"{self._base}{path}"
             if params:
+                pairs = (
+                    list(params.items())
+                    if isinstance(params, dict)
+                    else params
+                )
                 qs = urllib.parse.urlencode(
-                    {k: v for k, v in params.items() if v is not None}
+                    [(key, value) for key, value in pairs if value is not None],
+                    doseq=True,
                 )
                 if qs:
                     url = f"{url}?{qs}"
@@ -759,6 +765,52 @@ class BridgeClient:
             "GET",
             f"/api/v1/sessions/{session_ref}/result/detail",
             params={"ref": ref},
+        ) or {}
+
+    def _require_attention_waits(self) -> None:
+        from .protocol import ATTENTION_WAIT_PROTOCOL_VERSION
+
+        if not self.daemon_supports(ATTENTION_WAIT_PROTOCOL_VERSION):
+            version, _minimum = self.daemon_protocol()
+            raise BridgeClientError(
+                426,
+                "attention waits require agent-bridge HTTP protocol "
+                f"v{ATTENTION_WAIT_PROTOCOL_VERSION}; the daemon advertises "
+                f"v{version}. Update the agent-bridge plugin + runtime.",
+            )
+
+    def wait_for_attention(
+        self,
+        session_ref: str,
+        *,
+        reasons: list[str],
+        position: str | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """Return one cursor-neutral bounded attention wait result."""
+        self._require_attention_waits()
+        params: list[tuple[str, Any]] = [
+            ("reason", reason) for reason in reasons
+        ]
+        params.append(("timeout_seconds", timeout_seconds))
+        if position:
+            params.append(("position", position))
+        return self._request(
+            "GET",
+            f"/api/v1/sessions/{session_ref}/attention",
+            params=params,
+            request_timeout=max(self._timeout, timeout_seconds + 5.0),
+        ) or {}
+
+    def answer_permission(
+        self, session_id: str, request_id: str, option_id: str
+    ) -> dict[str, Any]:
+        """Resolve one correlated permission request."""
+        self._require_attention_waits()
+        return self._request(
+            "POST",
+            f"/api/v1/sessions/{session_id}/permission",
+            body={"request_id": request_id, "option_id": option_id},
         ) or {}
 
     def _require_represented_result_snapshots(self) -> None:

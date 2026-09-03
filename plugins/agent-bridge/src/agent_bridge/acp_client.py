@@ -16,6 +16,7 @@ import os
 import re
 import signal
 import sys
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -488,6 +489,8 @@ class AcpClient:
         self._prompt_error: str | None = None
         self._stop_reason: str | None = None
         self._pending_permission_future: asyncio.Future[RequestPermissionResponse] | None = None
+        self._pending_permission_id: str | None = None
+        self._pending_permission_options: set[str] = set()
 
         # Parked ``ask_user`` elicitations, keyed by tool_call_id. Each future
         # resolves to a CreateElicitationResponse once a human answers (via
@@ -1317,15 +1320,69 @@ class AcpClient:
                 outcome={"outcome": "selected", "optionId": option_id}
             )
 
-        # Manual mode -- emit event and block
-        self._emit("permission_request", {
-            "title": title,
-            "options": option_dicts,
-        })
+        # Manual mode -- emit a correlated event and block. The correlation is
+        # process-live for resolution and durable in the event log for replay.
+        request_id = uuid.uuid4().hex
         loop = asyncio.get_running_loop()
-        self._pending_permission_future = loop.create_future()
+        future: asyncio.Future[RequestPermissionResponse] = loop.create_future()
+        self._pending_permission_future = future
+        self._pending_permission_id = request_id
+        self._pending_permission_options = {
+            str(option["optionId"])
+            for option in option_dicts
+            if option.get("optionId")
+        }
+        try:
+            self._emit("permission_request", {
+                "request_id": request_id,
+                "title": title,
+                "options": option_dicts,
+            })
+        except Exception:
+            self._pending_permission_future = None
+            self._pending_permission_id = None
+            self._pending_permission_options = set()
+            raise
         self._completion_event.set()
-        return await self._pending_permission_future
+        try:
+            result = await future
+            outcome = getattr(result, "outcome", None)
+            if hasattr(outcome, "model_dump"):
+                outcome = outcome.model_dump(by_alias=True, mode="json")
+            self._emit("permission_resolved", {
+                "request_id": request_id,
+                "outcome": outcome,
+                "auto": False,
+            })
+            return result
+        finally:
+            if self._pending_permission_future is future:
+                self._pending_permission_future = None
+                self._pending_permission_id = None
+                self._pending_permission_options = set()
+
+    def has_pending_permission(self, request_id: str) -> bool:
+        """Whether ``request_id`` is the currently answerable permission."""
+        return bool(
+            request_id
+            and request_id == self._pending_permission_id
+            and self._pending_permission_future
+            and not self._pending_permission_future.done()
+        )
+
+    def resolve_permission(self, request_id: str, option_id: str) -> bool:
+        """Resolve the current manual permission request with one offered option."""
+        if not self.has_pending_permission(request_id):
+            return False
+        if option_id not in self._pending_permission_options:
+            raise ValueError(f"Unknown permission option {option_id}")
+        assert self._pending_permission_future is not None
+        self._pending_permission_future.set_result(
+            RequestPermissionResponse(
+                outcome={"outcome": "selected", "optionId": option_id}
+            )
+        )
+        return True
 
     async def _handle_elicitation(
         self, message: str, mode: Any
@@ -1466,6 +1523,8 @@ class AcpClient:
         self._prompt_error = None
         self._stop_reason = None
         self._pending_permission_future = None
+        self._pending_permission_id = None
+        self._pending_permission_options = set()
         self._completion_event = asyncio.Event()
 
     def _build_turn_result(self) -> dict[str, Any]:

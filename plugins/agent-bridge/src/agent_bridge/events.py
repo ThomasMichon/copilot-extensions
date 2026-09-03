@@ -64,7 +64,7 @@ class EventLog:
         self._open_tool_calls: dict[str, SseEvent] = {}
         self._lock = Lock()
         self._next_id = 1
-        self._waiters: list[asyncio.Event] = []
+        self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._db = db
         self._session_id = session_id
         self._telemetry = telemetry.SessionTraceReducer(
@@ -135,8 +135,9 @@ class EventLog:
                 event_type, data, event_id=event_id
             )
 
-        for waiter in waiters:
-            waiter.set()
+        for loop, waiter in waiters:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(waiter.set)
         if self._db is not None and self._session_id is not None:
             self._db.append_event(
                 self._session_id, event_id, event_type, data, ts,
@@ -172,6 +173,22 @@ class EventLog:
             if after == 0:
                 return list(self._events)
             return [e for e in self._events if e.id > after]
+
+    def snapshot_history(
+        self, *, durable: bool = False
+    ) -> tuple[str | None, list[SseEvent]]:
+        """Atomically snapshot one event-log history and its continuity."""
+        with self._lock:
+            visible_count = len(self._events)
+            if durable and self._db is not None and self._session_id is not None:
+                durable_head = self._db.get_max_event_id(self._session_id)
+                visible_count = min(visible_count, max(0, durable_head))
+            continuity = (
+                (self._telemetry.log_epoch or None)
+                if visible_count > 0
+                else None
+            )
+            return (continuity, list(self._events[:visible_count]))
 
     def rebuild(self, events: list[tuple[str, dict[str, Any]]]) -> int:
         """Replace the entire log with ``events`` (event_type, data) pairs.
@@ -219,8 +236,9 @@ class EventLog:
             rebuild_marker = self._telemetry.complete_rebuild(
                 prior_epoch, count
             )
-        for waiter in self._waiters:
-            waiter.set()
+        for loop, waiter in self._waiters:
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(waiter.set)
         telemetry.emit(rebuild_marker)
         return count
 
@@ -359,16 +377,20 @@ class EventLog:
         self, after: int, timeout: float = 30.0
     ) -> list[SseEvent]:
         """Wait until events with ID > ``after`` are available, or timeout."""
-        events = self.get_events(after)
-        if events:
-            return events
-
+        loop = asyncio.get_running_loop()
         waiter = asyncio.Event()
-        self._waiters.append(waiter)
+        registration = (loop, waiter)
+        with self._lock:
+            events = [event for event in self._events if event.id > after]
+            if events:
+                return events
+            self._waiters.append(registration)
         try:
             await asyncio.wait_for(waiter.wait(), timeout=timeout)
             return self.get_events(after)
         except (TimeoutError, asyncio.TimeoutError):
             return []
         finally:
-            self._waiters.remove(waiter)
+            with self._lock:
+                if registration in self._waiters:
+                    self._waiters.remove(registration)

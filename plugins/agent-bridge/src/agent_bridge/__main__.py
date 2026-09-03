@@ -3824,7 +3824,9 @@ def _stream_feed(
     caller_id: str | None,
     renderer,
     command_timeout: float = 0.0,
-) -> str:
+    attention_reasons: list[str] | None = None,
+    attention_position: str | None = None,
+) -> str | dict[str, Any]:
     """Stream the remote conversation as a collapsed live feed.
 
     Resumes from the caller's last-acked delivery cursor and renders each
@@ -3862,6 +3864,17 @@ def _stream_feed(
     # event or clean reconnect; only a 404 that persists past _STREAM_404_GRACE_S
     # is reported (dotfiles#1713).
     first_404_at: float | None = None
+    attention_result: dict[str, Any] | None = None
+
+    def _probe_attention() -> dict[str, Any] | None:
+        if not attention_reasons:
+            return None
+        return client.wait_for_attention(
+            session_id,
+            reasons=attention_reasons,
+            position=attention_position,
+            timeout_seconds=0,
+        )
 
     def _ack(up_to: int) -> None:
         # Best-effort: a failed ack just means a future read re-delivers
@@ -3873,6 +3886,16 @@ def _stream_feed(
 
     for _attempt in range(max_attempts):
         try:
+            attention_result = _probe_attention()
+            if attention_result and attention_result.get("settled"):
+                boundary = int(attention_result.get("boundary_event_id") or 0)
+                if boundary <= cursor:
+                    return attention_result
+            if (
+                attention_result
+                and attention_result.get("identity", {}).get("successor_id")
+            ):
+                return attention_result
             for evt in client.stream_events(
                 session_id, after=cursor, caller_id=caller_id
             ):
@@ -3930,6 +3953,17 @@ def _stream_feed(
                     cursor = new_id
                     _ack(cursor)
                     first_404_at = None  # delivered event -> session exists
+
+                attention_result = _probe_attention()
+                if attention_result and attention_result.get("settled"):
+                    boundary = int(attention_result.get("boundary_event_id") or 0)
+                    if boundary <= cursor:
+                        return attention_result
+                if (
+                    attention_result
+                    and attention_result.get("identity", {}).get("successor_id")
+                ):
+                    return attention_result
 
                 # The terminal turn event: stop emitting liveness lines, and
                 # return as soon as the session has settled (idle/terminal, no
@@ -3998,6 +4032,15 @@ def _cmd_wait(args: argparse.Namespace) -> None:
     """Wait for the current turn on a session to complete (streaming)."""
     client = _get_client()
     caller_id = _caller_id_for(args)
+    selected = list(getattr(args, "attention", None) or [])
+    if getattr(args, "all_attention", False):
+        from .models import AttentionReason
+
+        selected = [reason.value for reason in AttentionReason]
+    if selected:
+        _cmd_attention_wait(client, args, caller_id, selected)
+        return
+
     session = client.get_session(args.session_id)
     status = session.get("status", "")
 
@@ -4017,6 +4060,175 @@ def _cmd_wait(args: argparse.Namespace) -> None:
         renderer=renderer,
         command_timeout=timeouts.command,
     )
+
+
+def _render_attention_result(result: dict[str, Any]) -> str:
+    """Render one bounded attention result without exposing event internals."""
+    identity = result.get("identity") or {}
+    current = identity.get("current_session_id") or identity.get(
+        "observed_session_id"
+    )
+    if not result.get("settled"):
+        return f"[>] Attention wait timed out; current session {current}"
+    reason = str(result.get("reason") or "attention")
+    reference = result.get("reference") or {}
+    availability = reference.get("availability")
+    suffix = f"; request is {availability}" if availability else ""
+    line = f"[>] Attention required: {reason} on session {current}{suffix}"
+    if reason == "permission_required":
+        value = reference.get("value") or {}
+        request_id = value.get("request_id")
+        choices = [
+            f"{option.get('option_id')} ({option.get('name') or option.get('kind') or 'option'})"
+            for option in value.get("options") or []
+        ]
+        if request_id:
+            line += f"\n    request: {request_id}"
+        if choices:
+            line += "\n    choices: " + ", ".join(choices)
+    return line
+
+
+def _contract_changed_result(
+    prior: dict[str, Any], successor_id: str
+) -> dict[str, Any]:
+    identity = dict(prior.get("identity") or {})
+    identity["current_session_id"] = successor_id
+    identity["successor_id"] = successor_id
+    return {
+        "settled": True,
+        "reason": "contract_changed",
+        "identity": identity,
+        "position": prior.get("position"),
+        "boundary_event_id": None,
+        "reference": {
+            "kind": "successor",
+            "ref": successor_id,
+            "availability": "available",
+        },
+        "limitations": [
+            "the successor daemon explicitly rejected the selected attention protocol"
+        ],
+    }
+
+
+def _cmd_attention_wait(
+    client,
+    args: argparse.Namespace,
+    caller_id: str | None,
+    reasons: list[str],
+) -> None:
+    """Run explicit attention semantics in JSON or rendered attached mode."""
+    import time
+
+    from .client import BridgeConnectionError
+    from .protocol import ATTENTION_WAIT_PROTOCOL_VERSION
+
+    if not client.daemon_supports(ATTENTION_WAIT_PROTOCOL_VERSION):
+        version, _minimum = client.daemon_protocol()
+        print(
+            "[FAIL] Explicit attention waits require agent-bridge HTTP protocol "
+            f"v{ATTENTION_WAIT_PROTOCOL_VERSION}; daemon advertises v{version}.",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
+    timeouts = _phased_timeouts()
+    deadline = time.monotonic() + timeouts.command if timeouts.command else None
+    session_id = args.session_id
+    position = getattr(args, "position", None)
+    renderer = _make_renderer(args)
+    last_result: dict[str, Any] | None = None
+
+    while True:
+        remaining = (
+            deadline - time.monotonic() if deadline is not None else None
+        )
+        if remaining is not None and remaining <= 0:
+            result = last_result or {
+                "settled": False,
+                "reason": None,
+                "identity": {
+                    "observed_session_id": session_id,
+                    "current_session_id": session_id,
+                    "successor_id": None,
+                },
+                "position": position,
+                "limitations": ["the command timeout elapsed during recovery"],
+            }
+            if getattr(args, "json", False):
+                print(json.dumps(result, sort_keys=True))
+            else:
+                print(_render_attention_result(result))
+            return
+        if getattr(args, "json", False):
+            try:
+                result = client.wait_for_attention(
+                    session_id,
+                    reasons=reasons,
+                    position=position,
+                    timeout_seconds=min(30.0, remaining or 30.0),
+                )
+            except BridgeConnectionError:
+                client.refresh_endpoint()
+                time.sleep(_RECONNECT_BACKOFF)
+                continue
+        else:
+            print(f"[>] Waiting for attention from session {session_id}...")
+            result = _stream_feed(
+                client,
+                session_id,
+                caller_id=caller_id,
+                renderer=renderer,
+                command_timeout=max(0.0, remaining) if remaining is not None else 0,
+                attention_reasons=reasons,
+                attention_position=position,
+            )
+            if isinstance(result, str):
+                if result == "timeout":
+                    result = client.wait_for_attention(
+                        session_id,
+                        reasons=reasons,
+                        position=position,
+                        timeout_seconds=0,
+                    )
+                else:
+                    return
+        last_result = result
+
+        successor_id = str(
+            (result.get("identity") or {}).get("successor_id") or ""
+        )
+        if successor_id and not result.get("settled"):
+            try:
+                client.refresh_endpoint()
+                version, _minimum = client.daemon_protocol(refresh=True)
+                compatible = version >= ATTENTION_WAIT_PROTOCOL_VERSION
+            except BridgeConnectionError:
+                compatible = None
+            if compatible is False:
+                result = _contract_changed_result(result, successor_id)
+            elif compatible is None:
+                if deadline is not None and time.monotonic() >= deadline:
+                    if getattr(args, "json", False):
+                        print(json.dumps(result, sort_keys=True))
+                    else:
+                        print(_render_attention_result(result))
+                    return
+                time.sleep(_RECONNECT_BACKOFF)
+                continue
+            else:
+                session_id = successor_id
+                position = None
+                continue
+
+        if not result.get("settled"):
+            continue
+        if getattr(args, "json", False):
+            print(json.dumps(result, sort_keys=True))
+        else:
+            print(_render_attention_result(result))
+        return
 
 
 def _cmd_read(args: argparse.Namespace) -> None:
@@ -5252,6 +5464,38 @@ def build_parser() -> argparse.ArgumentParser:
         "wait", help="Wait for current turn to complete"
     )
     wait_p.add_argument("session_id", help="Session ID")
+    wait_p.add_argument(
+        "--attention",
+        action="append",
+        choices=[
+            "turn_complete",
+            "turn_cancelled",
+            "failed",
+            "input_required",
+            "permission_required",
+            "unreachable",
+            "policy_required",
+            "contract_changed",
+            "stopped",
+            "ended",
+        ],
+        help="Settle on this attention reason (repeatable); omitted keeps the "
+             "legacy turn-only wait",
+    )
+    wait_p.add_argument(
+        "--all-attention",
+        action="store_true",
+        help="Settle on any stable attention reason",
+    )
+    wait_p.add_argument(
+        "--position",
+        help="Resume from an opaque cursor-neutral attention position",
+    )
+    wait_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Print one structured settlement without opening the delivery stream",
+    )
     _add_stream_args(wait_p)
     wait_p.set_defaults(func=_cmd_wait)
 

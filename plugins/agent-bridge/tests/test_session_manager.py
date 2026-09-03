@@ -280,6 +280,11 @@ class TestStartSession:
 
             session = await session_manager.start_session(spawn_target)
             assert session.status == SessionStatus.FAILED
+            assert any(
+                event.event == "session_state_changed"
+                and event.data["status"] == SessionStatus.FAILED.value
+                for event in session.event_log.get_events()
+            )
 
 
 class TestConcurrencyGuard:
