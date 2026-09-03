@@ -454,6 +454,10 @@ class RecordSpawnBody(BaseModel):
     worktree: str | None = None
 
 
+class RecordSpawnWorktreeBody(BaseModel):
+    worktree: str
+
+
 class ReservationDetailBody(BaseModel):
     detail: str | None = None
     conclusion_state: str | None = None
@@ -1522,6 +1526,14 @@ def create_app(
             )
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/worktree")
+    def record_spawn_worktree(key: str, body: RecordSpawnWorktreeBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.record_spawn_worktree(key, body.worktree)
+        )
+        bus.publish({"type": "spawn.worktree_recorded", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/fail")

@@ -230,6 +230,34 @@ def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch):
     assert cmd[cmd.index("--worktree-id") + 1] == "wt-reviewer"
 
 
+def test_create_worktree_returns_id_and_path(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout='{"worktree": {"id": "wt-new", "path": "/tmp/wt-new"}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    result = embody.create_worktree(project="widgets")
+
+    assert result == {"session": None, "worktree": "wt-new", "path": "/tmp/wt-new"}
+    assert captured["cmd"] == [
+        "/usr/bin/agent-worktrees",
+        "--project",
+        "widgets",
+        "create",
+        "--json",
+    ]
+
+
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     captured = {}
     monkeypatch.setattr(

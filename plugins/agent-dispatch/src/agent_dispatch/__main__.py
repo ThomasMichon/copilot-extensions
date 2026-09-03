@@ -973,6 +973,34 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     reservation = resp["reservation"]
     key = reservation["key"]
     spawn_task = {**task, "spawn_worktree": reservation.get("worktree")}
+    if (
+        getattr(args, "spawn_backend", "bridge") == "embody"
+        and not spawn_task.get("spawn_worktree")
+    ):
+        from . import embody
+
+        try:
+            created = embody.create_worktree(project=embody.project_for_task(task))
+            worktree = created.get("worktree")
+            if not worktree:
+                raise embody.EmbodyUnavailable("agent-worktrees create returned no worktree id")
+            with _client(args) as c:
+                c.record_spawn_worktree(key, worktree)
+            spawn_task["spawn_worktree"] = worktree
+            if created.get("path"):
+                spawn_task["spawn_worktree_path"] = created.get("path")
+        except (DispatchError, embody.EmbodyUnavailable) as exc:
+            try:
+                with _client(args) as c:
+                    c.fail_spawn(key, detail=f"worktree create failed: {exc}")
+            except DispatchError:
+                pass
+            print(
+                f"agent-dispatch: --spawn skipped (could not create worktree: {exc}); "
+                f"task {task_id} left queued for any worker to claim",
+                file=sys.stderr,
+            )
+            return
     spawned = _do_spawn(args, spawn_task, route=route)
     try:
         with _client(args) as c:

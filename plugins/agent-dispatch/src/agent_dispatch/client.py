@@ -580,6 +580,15 @@ class DispatchClient:
             )
         )
 
+    def record_spawn_worktree(self, key: str, worktree: str) -> dict:
+        """Record the reserved worktree before launching the worker session."""
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/worktree",
+                json={"worktree": worktree},
+            )
+        )
+
     def fail_spawn(self, key: str, *, detail: str | None = None) -> dict:
         return self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/fail", json={"detail": detail})

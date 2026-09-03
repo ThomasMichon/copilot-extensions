@@ -102,6 +102,8 @@ def spawn_worker(
     worker_id: str,
     prompt: str | None = None,
     route: str = "",
+    target_dir: str | None = None,
+    worktree_id: str | None = None,
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
@@ -134,7 +136,12 @@ def spawn_worker(
     cmd = [*exe]
     if json_output:
         cmd.append("--json")
-    cmd += ["create", agent, prompt]
+    cmd += ["create"]
+    if target_dir:
+        cmd += ["--target-dir", target_dir]
+    if worktree_id:
+        cmd += ["--worktree-id", worktree_id]
+    cmd += [agent, prompt]
     if not wait:
         cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which

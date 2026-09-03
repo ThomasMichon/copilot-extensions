@@ -196,6 +196,22 @@ def test_exclusive_key_can_take_affinity_as_initial_resume_target(q):
     assert reservation.worktree == "wt-recorded"
 
 
+def test_record_spawn_worktree_does_not_mark_spawned(q):
+    t = q.create("work")
+    reservation, reserved = q.reserve_spawn(t.id)
+    assert reserved is True
+
+    updated = q.record_spawn_worktree(reservation.key, "wt-created")
+
+    assert updated.state == SpawnState.RESERVING
+    assert updated.worktree == "wt-created"
+    q.record_spawn(updated.key, session_handle="sess-created")
+    final = q.get_reservation(updated.key)
+    assert final.state == SpawnState.SPAWNED
+    assert final.worktree == "wt-created"
+    assert final.session_handle == "sess-created"
+
+
 def test_supersede_exclusive_key_abandons_only_queued_or_proposed(q):
     queued = q.create("old queued", exclusive_key="review:repo:42")
     held = q.create("old held", exclusive_key="review:repo:42")

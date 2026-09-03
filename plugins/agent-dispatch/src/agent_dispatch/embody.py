@@ -87,6 +87,76 @@ def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
     return handle
 
 
+def create_worktree(
+    *, project: str | None = None, timeout: float | None = None
+) -> dict[str, str | None]:
+    """Create a worktree without launching Copilot and return its id/path.
+
+    This is the first half of create -> record -> spawn -> bind. Capturing the
+    worktree id before any Copilot/ACP setup means a failed or hung launch still
+    leaves the host with a durable worktree binding to retry or inspect.
+    """
+    exe_prefix = _agent_worktrees_launch_prefix()
+    if exe_prefix is None:
+        raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
+    cmd = list(exe_prefix)
+    if project:
+        cmd += ["--project", project]
+    cmd += ["create", "--json"]
+    result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise EmbodyUnavailable(detail or f"agent-worktrees create exited {result.returncode}")
+    handle = parse_handle(result)
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError):
+        data = {}
+    worktree = data.get("worktree") if isinstance(data, dict) else {}
+    if isinstance(worktree, dict):
+        handle["worktree"] = handle.get("worktree") or worktree.get("id")
+        handle["path"] = worktree.get("path")
+    if not handle.get("worktree"):
+        raise EmbodyUnavailable("agent-worktrees create returned no worktree id")
+    return handle
+
+
+def resolve_worktree(
+    worktree_id: str, *, project: str | None = None, timeout: float | None = None
+) -> dict[str, str | None]:
+    """Resolve a tracked worktree id to its current path."""
+    exe_prefix = _agent_worktrees_launch_prefix()
+    if exe_prefix is None:
+        raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
+    cmd = list(exe_prefix)
+    if project:
+        cmd += ["--project", project]
+    cmd += ["list", "--json"]
+    result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+        cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise EmbodyUnavailable(detail or f"agent-worktrees list exited {result.returncode}")
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError) as exc:
+        raise EmbodyUnavailable("agent-worktrees list returned invalid JSON") from exc
+    worktrees = data.get("worktrees") if isinstance(data, dict) else None
+    if not isinstance(worktrees, list):
+        raise EmbodyUnavailable("agent-worktrees list returned no worktree list")
+    for row in worktrees:
+        if not isinstance(row, dict):
+            continue
+        if row.get("id") == worktree_id:
+            return {"worktree": worktree_id, "path": row.get("path")}
+    raise EmbodyUnavailable(f"worktree not found: {worktree_id}")
+
+
 class EmbodyUnavailable(RuntimeError):
     """Raised when the ``agent-worktrees`` CLI is not available on this host."""
 
