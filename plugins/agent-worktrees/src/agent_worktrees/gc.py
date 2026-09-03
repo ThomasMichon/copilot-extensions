@@ -229,7 +229,7 @@ def _on_rm_error(func, path, _exc):
         raise
 
 
-def _remove_tree(d: Path) -> tuple[bool, str]:
+def remove_tree(d: Path) -> tuple[bool, str]:
     """Remove *d*, retrying once on a lock (the Windows transient-handle case)."""
     for attempt in range(2):
         try:
@@ -239,7 +239,12 @@ def _remove_tree(d: Path) -> tuple[bool, str]:
             if attempt == 0:
                 time.sleep(0.5)
                 continue
-            return False, f"locked ({type(exc).__name__}) -- skipped, retry later"
+            locked_path = exc.filename or str(d)
+            return (
+                False,
+                f"locked ({type(exc).__name__} at {locked_path})"
+                " -- skipped, retry later",
+            )
         except OSError as exc:
             return False, f"error: {exc}"
     return False, "locked -- skipped, retry later"
@@ -260,7 +265,24 @@ def sweep_orphans(
     """
     from . import git_ops
 
-    registered = git_ops.list_worktree_paths(cwd=repo.anchor)
+    roots = candidate_roots(repo)
+    try:
+        registered = git_ops.list_worktree_paths(
+            cwd=repo.anchor,
+            fail_on_error=True,
+        )
+    except RuntimeError as exc:
+        return {
+            "roots": [str(root) for root in roots],
+            "scanned": 0,
+            "removed": [],
+            "skipped": [
+                {
+                    "path": str(repo.anchor),
+                    "reason": f"worktree registration probe failed: {exc}",
+                }
+            ],
+        }
     tracked = [r.worktree_path for r in records if getattr(r, "worktree_path", None)]
     orphans = find_orphans(repo, registered, tracked)
 
@@ -272,13 +294,21 @@ def sweep_orphans(
             skipped.append({"path": verdict.path, "reason": verdict.reason})
             continue
         if dry_run:
-            removed.append({"path": verdict.path, "reason": "would remove (effectively empty)"})
+            removed.append(
+                {
+                    "path": verdict.path,
+                    "reason": (
+                        "would remove if unlocked "
+                        "(effectively empty; lock status not checked)"
+                    ),
+                }
+            )
             continue
-        ok, reason = _remove_tree(d)
+        ok, reason = remove_tree(d)
         (removed if ok else skipped).append({"path": str(d), "reason": reason})
 
     return {
-        "roots": [str(r) for r in candidate_roots(repo)],
+        "roots": [str(root) for root in roots],
         "scanned": len(orphans),
         "removed": removed,
         "skipped": skipped,
@@ -296,5 +326,6 @@ __all__ = [
     "classify_managed_worktree",
     "classify_orphan",
     "find_orphans",
+    "remove_tree",
     "sweep_orphans",
 ]

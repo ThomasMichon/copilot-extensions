@@ -9272,15 +9272,27 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
                    f"(kind={rec.kind}); refusing")
         return 1
 
-    if rec.worktree_path and Path(rec.worktree_path).exists():
-        git_ops.remove_worktree(repo.anchor, rec.worktree_path)
-    if rec.branch:
-        git_ops.git("branch", "-D", rec.branch, cwd=repo.anchor, check=False)
-    try:
-        yaml_path.unlink()
-    except OSError:
-        pass
-    disposition_history.remove(rec.worktree_id)
+    removed, warnings = _remove_managed_worktree(
+        rec,
+        repo,
+        tracking_path,
+        force=True,
+    )
+    if not removed:
+        location = (
+            f"; worktree path: {rec.worktree_path}"
+            if rec.worktree_path
+            else ""
+        )
+        message = (
+            f"failed to fully remove system worktree {wt_id}: "
+            f"{'; '.join(warnings) or 'removal failed'}{location}; "
+            "tracking record retained for retry"
+        )
+        if getattr(args, "json", False):
+            return _json_error(message)
+        output.err(message)
+        return 1
     activity.log_event("system_worktree_removed", worktree_id=wt_id)
     if getattr(args, "json", False):
         _json_output({"removed": wt_id})
@@ -10433,6 +10445,8 @@ def _remove_managed_worktree(
     rec,
     repo,
     tracking_path: Path,
+    *,
+    force: bool = False,
 ) -> tuple[bool, list[str]]:
     """Tear down one managed (system/bridge) worktree: mux, git worktree,
     branch, tracking record. Mirrors ``cmd_remove_system``'s removal steps.
@@ -10443,17 +10457,57 @@ def _remove_managed_worktree(
         sessions.kill_tmux_session(rec.worktree_id)  # normally none for a reap
     except Exception:
         pass
-    if rec.worktree_path and Path(rec.worktree_path).exists():
+    if rec.worktree_path:
+        from . import gc as gc_mod
+
         try:
-            removed = git_ops.git(
-                "worktree",
-                "remove",
+            worktree_path = Path(rec.worktree_path)
+            path_key = os.path.normcase(os.path.abspath(rec.worktree_path))
+            if force and git_ops.remove_worktree(
+                repo.anchor,
                 rec.worktree_path,
-                cwd=repo.anchor,
-                check=False,
-            ).returncode == 0
+            ):
+                removed = True
+                reason = ""
+            else:
+                registered_paths = {
+                    os.path.normcase(os.path.abspath(str(path)))
+                    for path in git_ops.list_worktree_paths(
+                        cwd=repo.anchor,
+                        fail_on_error=True,
+                    )
+                }
+                if path_key in registered_paths:
+                    if force:
+                        removed = False
+                    else:
+                        removed = git_ops.git(
+                            "worktree",
+                            "remove",
+                            rec.worktree_path,
+                            cwd=repo.anchor,
+                            check=False,
+                        ).returncode == 0
+                    reason = "worktree remove failed"
+                else:
+                    if not worktree_path.exists():
+                        removed = True
+                        reason = ""
+                    else:
+                        verdict = gc_mod.classify_orphan(
+                            worktree_path,
+                            min_settle_secs=0,
+                        )
+                        if verdict.action != "remove":
+                            removed = False
+                            reason = f"unregistered path {verdict.reason}"
+                        else:
+                            removed, detail = gc_mod.remove_tree(worktree_path)
+                            reason = (
+                                f"unregistered path removal failed: {detail}"
+                            )
             if not removed:
-                warns.append("worktree remove failed")
+                warns.append(reason)
         except Exception as exc:
             warns.append(f"worktree remove failed: {exc}")
         if warns:
@@ -10484,8 +10538,8 @@ def _remove_managed_worktree(
     yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
     try:
         yaml_path.unlink()
-    except OSError:
-        pass
+    except OSError as exc:
+        return False, [f"tracking record remove failed: {exc}"]
     disposition_history.remove(rec.worktree_id)
     return True, warns
 
@@ -10699,10 +10753,9 @@ def sweep_managed_worktrees(*, dry_run: bool = False,
                                reason=fresh_verdict.reason)
         except Exception:
             pass
-        reason = fresh_verdict.reason + (
-            f"; {'; '.join(warns)}" if warns else ""
+        result["removed"].append(
+            {"id": rec.worktree_id, "reason": fresh_verdict.reason}
         )
-        result["removed"].append({"id": rec.worktree_id, "reason": reason})
 
     return result
 
