@@ -359,9 +359,10 @@ policy, version decision, and exception ledger live in
 
 ### 2026-09-02 — Trusted self-hosted CI gate
 
-- Added a default-branch `pull_request_target` workflow that authorizes only
-  the pull-request author's current `write`, `maintain`, or `admin` repository
-  permission on a GitHub-hosted runner.
+- Added a default-branch `pull_request_target` workflow that accepts only
+  same-repository pull requests whose author and current event sender both have
+  effective `write`, `maintain`, or `admin` repository authority, checked on a
+  GitHub-hosted runner.
 - The self-hosted job uses only the dedicated `copilot-extensions-ci` label,
   checks out the immutable pull-request head SHA without persisting a
   credential, receives no secret, and remains disabled behind the explicit
