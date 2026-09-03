@@ -286,9 +286,11 @@ load only the owned command reference and preserve CMD-1.
 The F3 command-guide cell loaded `command-reference` in all three repetitions
 but passed none. Repetition 1 performed four tool calls, including broad
 repository and guide discovery, before returning no command. Repetitions 2 and
-3 made one exact guide read and stopped honestly because the promised
-structured-output option and catalog argv were absent. Initial context was
-2,865 characters / 717 estimated tokens.
+3 made one exact guide read and stopped because the promised structured-output
+option and catalog argv were absent. Repetition 2 nevertheless lost
+command-owner provenance and violated CMD-1; repetition 3 retained provenance
+and introduced no critical-rule violation. Initial context was 2,865 characters
+/ 717 estimated tokens.
 
 The task-local F0 controls also passed none. Despite all eight guide bodies
 being inline, they used five, eight, and nine tool calls, broadened into

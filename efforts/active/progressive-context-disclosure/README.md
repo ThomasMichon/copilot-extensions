@@ -752,10 +752,11 @@ enforcement before migrating the complete contributor stack.
 
 - Ran three epoch-3 F3 command-guide repetitions and the required three F0
   task-local controls.
-- The F3 runs all loaded `command-reference`, but none could select the
-  promised structured-output option or exact catalog argv. One repetition also
-  broadened into repository discovery; the other two stopped at the missing
-  grounding.
+- All three F3 runs loaded `command-reference`, but none could select the
+  promised structured-output option or exact catalog argv. Repetition 1
+  broadened into repository discovery and violated CMD-1. Repetition 2 stopped
+  at the missing grounding but lost command-owner provenance and also violated
+  CMD-1; repetition 3 stopped cleanly with provenance intact.
 - The F0 controls also passed 0/3. They performed five, eight, and nine tool
   calls, including broad repository discovery and irrelevant explicit rereads,
   without producing an option or attributable command.
