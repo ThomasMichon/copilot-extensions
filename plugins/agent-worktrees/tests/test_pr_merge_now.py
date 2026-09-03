@@ -23,7 +23,16 @@ def _args(**over):
 
 
 def _prcfg(**over):
-    base = dict(provider="github", api_base="", prefer_auto_merge=False)
+    base = dict(
+        provider="github",
+        api_base="",
+        prefer_auto_merge=False,
+        automerge_label="",
+        squash=True,
+        delete_source_branch=True,
+        bypass_policy=False,
+        bypass_reason="",
+    )
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -42,6 +51,7 @@ class _FakeProvider:
         self._auto_err = auto_err
         self.calls = []
         self.auto_calls = []
+        self.complete_calls = []
 
     def merge_pull(self, repo, number, *, squash=True, admin=False,
                    api_base="", token=None):
@@ -52,6 +62,24 @@ class _FakeProvider:
     def enable_auto_merge(self, repo, number, *, squash=True,
                           api_base="", token=None):
         self.auto_calls.append(dict(repo=repo, number=number, squash=squash))
+        return self._auto_err
+
+    def request_auto_complete(
+        self, repo, number, *, api_base="", token=None, automerge_label="",
+        squash=True, delete_source_branch=True, bypass_policy=False,
+        bypass_reason="",
+    ):
+        self.complete_calls.append(dict(
+            repo=repo,
+            number=number,
+            api_base=api_base,
+            token=token,
+            automerge_label=automerge_label,
+            squash=squash,
+            delete_source_branch=delete_source_branch,
+            bypass_policy=bypass_policy,
+            bypass_reason=bypass_reason,
+        ))
         return self._auto_err
 
 
@@ -187,3 +215,77 @@ def test_prefer_auto_merge_dry_run_previews_auto(monkeypatch, capsys):
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["prefer_auto_merge"] is True
     assert "auto-merge" in out["would"]
+
+
+def test_ado_self_merge_uses_native_completion(monkeypatch, capsys):
+    import json as _json
+
+    fake = _FakeProvider(auto_err="")
+    fake.name = "azure-devops"
+    _patch_provider(monkeypatch, fake)
+    prcfg = _prcfg(
+        provider="azure-devops",
+        api_base="https://example.visualstudio.com",
+        automerge_label="",
+        prefer_auto_merge=True,
+        delete_source_branch=False,
+        bypass_policy=True,
+        bypass_reason="Self-complete owned repo.",
+    )
+    flow = pc.classify_pr_flow(
+        enabled=True,
+        required=True,
+        provider="azure-devops",
+        automerge_label="",
+        merge_actor="submitter-direct",
+    )
+
+    rc = m._pr_merge_now(
+        _args(repo="Project/repo", json=True),
+        prcfg,
+        flow,
+        apply=True,
+    )
+
+    assert rc == 0
+    assert fake.complete_calls == [{
+        "repo": "Project/repo",
+        "number": 7,
+        "api_base": "https://example.visualstudio.com",
+        "token": "tok",
+        "automerge_label": "",
+        "squash": True,
+        "delete_source_branch": False,
+        "bypass_policy": True,
+        "bypass_reason": "Self-complete owned repo.",
+    }]
+    assert fake.auto_calls == []
+    assert fake.calls == []
+    out = _json.loads(capsys.readouterr().out.strip())
+    assert out["action"] == "auto-complete"
+    assert out["applied"] is True
+
+
+def test_ado_self_merge_surfaces_completion_failure(monkeypatch):
+    fake = _FakeProvider(auto_err="ADO completion failed")
+    fake.name = "azure-devops"
+    _patch_provider(monkeypatch, fake)
+    flow = pc.classify_pr_flow(
+        enabled=True,
+        required=True,
+        provider="azure-devops",
+        automerge_label="",
+        merge_actor="submitter-direct",
+    )
+
+    rc = m._pr_merge_now(
+        _args(repo="Project/repo"),
+        _prcfg(provider="azure-devops"),
+        flow,
+        apply=True,
+    )
+
+    assert rc == 1
+    assert fake.complete_calls
+    assert fake.auto_calls == []
+    assert fake.calls == []
