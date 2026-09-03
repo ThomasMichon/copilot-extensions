@@ -213,6 +213,7 @@ def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
 
     log_process: subprocess.Popen[bytes] | None = None
     patch_process: subprocess.Popen[str] | None = None
+    env = git_ops.repository_identity_env()
     try:
         log_process = subprocess.Popen(
             [
@@ -220,6 +221,7 @@ def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
                 f"{base}..{head}",
             ],
             cwd=cwd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
@@ -230,6 +232,7 @@ def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
         patch_process = subprocess.Popen(
             ["git", "patch-id", "--stable"],
             cwd=cwd,
+            env=env,
             stdin=log_process.stdout,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

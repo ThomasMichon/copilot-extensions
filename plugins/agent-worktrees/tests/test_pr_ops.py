@@ -515,7 +515,7 @@ class TestPatchId:
         assert pr_ops._patch_id(base, "HEAD", cwd=str(d)) == ""  # no diff
         assert pr_ops._patch_id("", "HEAD", cwd=str(d)) == ""    # no base
 
-    def test_commit_patch_ids_batches_range(self, tmp_path):
+    def test_commit_patch_ids_batches_range(self, tmp_path, monkeypatch):
         d, base = self._repo(tmp_path)
         (d / "a.txt").write_text("one\ntwo\n")
         self._git(d, "commit", "-aqm", "c1")
@@ -524,13 +524,16 @@ class TestPatchId:
         self._git(d, "add", "-A")
         self._git(d, "commit", "-qm", "c2")
         second = _git("rev-parse", "HEAD", cwd=d)
-
-        patch_ids = pr_ops._commit_patch_ids(base, "HEAD", cwd=str(d))
-
-        assert patch_ids == {
+        expected = {
             pr_ops._patch_id(base, first, cwd=str(d)): {first},
             pr_ops._patch_id(first, second, cwd=str(d)): {second},
         }
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "wrong.git"))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "wrong-index"))
+
+        patch_ids = pr_ops._commit_patch_ids(base, "HEAD", cwd=str(d))
+
+        assert patch_ids == expected
 
 
 class TestReconcileActivePrSelfHeal:
