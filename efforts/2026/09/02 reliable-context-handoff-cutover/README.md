@@ -381,3 +381,23 @@ for binding, succession, head, title, and verified retirement.
 - Updated deterministic and Tier-E checks to reject executable source in the
   seed and recorded ThomasMichon/copilot-extensions#1757 as the public
   coordination issue.
+
+### 2026-09-02 — Deployed compact takeover verified
+- A fresh live cutover on deployed `context-handoff` `0.1.0-dev67` completed
+  the full successor-driven path. The startup seed was one 143-character ASCII
+  line with exactly the task, `/consume-handoff` recommendation, and opaque task
+  locator; it contained no executable source or installed path.
+- The task-backed checkpoint preserved the complete standalone baton and its
+  Windows metadata with 44 CRLF boundaries, no lone CR/LF, no truncation, and
+  the full ordered successor roster and completion gates.
+- Authoritative lifecycle evidence showed one-way ordering: task consumption,
+  successor bind, succession link, head verification, title update, then
+  identity-verified predecessor retirement. The predecessor pane, process
+  binding, and session lock were gone while the successor remained live and
+  head.
+- A preceding invalid trial reinforced the fail-closed boundaries: the
+  predecessor continued after launching the successor and consumed its own
+  one-time baton, so the resulting checkpoint could not count as takeover
+  evidence and same-state retry correctly refused to replay the spent task. A
+  fresh baton was required; the canonical rule remains that the predecessor
+  stops immediately after cutover and only the actual successor consumes.
