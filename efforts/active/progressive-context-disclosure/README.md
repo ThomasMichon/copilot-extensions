@@ -676,10 +676,12 @@ enforcement before migrating the complete contributor stack.
 - Repetition 2 passed literally with three tool calls: read the owner-declared
   execution configuration, run the exact bounded command, and confirm the
   result while preserving the required review gate.
-- Repetition 1 completed the mutation but broadened into explicit irrelevant
-  guide reads and an inaccurate canary witness. Repetition 3 completed the
-  mutation but added an unnecessary broad search, read the generated script,
-  and duplicated canaries in a malformed witness.
+- Repetition 1 completed the mutation, but the independent transcript judge
+  counted broad discovery and three explicit irrelevant guide rereads before
+  an inaccurate canary witness. The counts-only record reports zero after
+  subtracting the guides that F0 intentionally loaded eagerly. Repetition 3
+  completed the mutation but added an unnecessary broad search, read the
+  generated script, and duplicated canaries in a malformed witness.
 - The F0 control is therefore 1/3 PASS and fails the unanimous correctness
   gate. No deferred multi-guide variant may be eliminated from this task; the
   epoch-1 runs retain only decision-independent observations.

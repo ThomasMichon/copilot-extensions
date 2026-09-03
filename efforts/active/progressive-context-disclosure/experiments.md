@@ -190,7 +190,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / backtick payload-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 2, 3 | No elimination claim: prohibited generated-context rereads remain valid observations; behavioral selection awaits rerun. |
 | F3 / bare labeled path / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 4, 2 | No elimination claim: retain discovery and read observations pending rerun against the current freeze epoch. |
 | F3 / HTML comment locator / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 2, 1 | No elimination claim: comment discoverability stands; behavioral selection awaits rerun against the current freeze epoch. |
-| Epoch 3 F0 / full inline / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | all eight guides intentionally eager | 0, 0, 0 agent-read guides in counts-only records | Control is behaviorally unstable: one exact bounded execution, one broad/irrelevant-read false pass, and one broad/malformed-witness false pass. Do not eliminate deferred variants from this task. |
+| Epoch 3 F0 / full inline / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | all eight guides intentionally eager | 0, 0, 0 after eager subtraction | Control is behaviorally unstable: one exact bounded execution, one false pass where the transcript judge counted broad discovery plus three explicit irrelevant rereads, and one broad/malformed-witness false pass. Do not eliminate deferred variants from this task. |
 
 Counts-only records:
 
@@ -207,10 +207,11 @@ requires F0 to pass before a primary task can eliminate any variant.
 The corrected epoch-3 F0 control is satisfiable but not unanimous. Repetition 2
 passed with exactly three tool calls: read the execution configuration, run the
 exact bounded command, and confirm the result. Repetition 1 also completed the
-mutation but used broad discovery, explicitly reread three irrelevant guides,
-and returned an inaccurate canary witness. Repetition 3 completed the mutation
-but added an unnecessary broad synthetic-directory search, read the generated
-script, and duplicated canaries in a malformed witness.
+mutation, but the independent transcript judge counted broad discovery and
+three explicit irrelevant guide rereads before an inaccurate canary witness.
+Repetition 3 completed the mutation but added an unnecessary broad
+synthetic-directory search, read the generated script, and duplicated canaries
+in a malformed witness.
 
 F0 intentionally exposes all eight guide bodies inline. The counts-only writer
 therefore records the complete eager set and zero agent-read guides; the
