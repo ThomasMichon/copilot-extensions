@@ -394,6 +394,7 @@ def test_resident_session_start_preserves_hook_metadata(monkeypatch):
         "source": "startup",
         "timestamp": 123,
         "_agentWorktreesEnvironment": {
+            "WORKTREE_ID": "stale-worktree",
             "AGENT_WORKTREES_BIND_WORKTREE_ID": "wt-bound",
             "AGENT_WORKTREES_BIND_SESSION_ID": "session-1",
             "AGENT_WORKTREES_HANDOFF_TOKEN": "handoff-token",
@@ -416,6 +417,29 @@ def test_resident_session_start_preserves_hook_metadata(monkeypatch):
     assert captured["handoff_candidate_token"] == "handoff-token"
     assert captured["assignment_token"] == "assignment-token"
     assert captured["launch_id"] == "launch-1"
+
+
+def test_resident_session_start_ignores_unmatched_worktree_identity(monkeypatch):
+    captured = {}
+
+    def register(args):
+        captured.update(vars(args))
+        return 0
+
+    monkeypatch.setattr(m, "cmd_register_session", register)
+    policy = m._ResidentHookPolicy(None)
+    monkeypatch.setattr(policy, "project_hook", lambda: {})
+
+    assert policy.session_start({
+        "sessionId": "session-1",
+        "cwd": "/worktree",
+        "_agentWorktreesEnvironment": {
+            "WORKTREE_ID": "stale-worktree",
+            "AGENT_WORKTREES_BIND_WORKTREE_ID": "other-worktree",
+            "AGENT_WORKTREES_BIND_SESSION_ID": "other-session",
+        },
+    }) == {}
+    assert captured["worktree_id"] is None
 
 
 def test_resident_session_start_skips_project_cache_when_untracked(monkeypatch):

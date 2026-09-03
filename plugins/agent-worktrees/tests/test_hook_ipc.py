@@ -263,6 +263,7 @@ def test_session_start_forwards_session_environment(monkeypatch, tmp_path):
         return {"additionalContext": "bound"}
 
     monkeypatch.setenv("TMUX_PANE", "%7")
+    monkeypatch.setenv("WORKTREE_ID", "stale-worktree")
     monkeypatch.setenv("AGENT_WORKTREES_HANDOFF_TOKEN", "handoff-token")
     monkeypatch.setattr(hook_client, "_request", request)
 
@@ -278,6 +279,7 @@ def test_session_start_forwards_session_environment(monkeypatch, tmp_path):
     environment = seen["payload"]["_agentWorktreesEnvironment"]
     assert environment["TMUX_PANE"] == "%7"
     assert environment["AGENT_WORKTREES_HANDOFF_TOKEN"] == "handoff-token"
+    assert "WORKTREE_ID" not in environment
 
 
 def test_project_resolve_supplies_current_directory(monkeypatch, tmp_path):

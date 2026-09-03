@@ -190,7 +190,6 @@ def _session_start_payload(payload: dict) -> dict:
     enriched = dict(payload)
     environment = {}
     for name in (
-        "WORKTREE_ID",
         "TMUX_PANE",
         "PSMUX_PANE",
         "WORKTREE_LAUNCH_ID",

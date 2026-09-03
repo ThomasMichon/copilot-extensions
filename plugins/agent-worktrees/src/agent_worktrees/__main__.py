@@ -7970,9 +7970,9 @@ class _ResidentHookPolicy:
             environment = {}
         session_id = payload.get("sessionId")
         bound_session = environment.get(_SESSION_BIND_SESSION)
-        worktree_id = environment.get("WORKTREE_ID")
+        worktree_id = None
         if session_id and bound_session == session_id:
-            worktree_id = environment.get(_SESSION_BIND_WORKTREE) or worktree_id
+            worktree_id = environment.get(_SESSION_BIND_WORKTREE)
         pane_id = (
             environment.get("TMUX_PANE")
             or environment.get("PSMUX_PANE")
