@@ -179,6 +179,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F2 / backtick repository-relative / conditional / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 1 | Reject this cell: conditional wording did not reliably prevent broad discovery or the unrelated `command-reference` read. |
 | F2 / backtick repository-relative / imperative / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 3, 3, 2 | Reject this cell: stronger imperative wording increased compensating exploration and unrelated guide reads. |
 | F2 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 2 | Reject this cell: the gate produced one exact one-guide run but did not reliably prevent broad discovery, irrelevant reads, or provenance loss; the repetition-2 transcript judge counted three direct irrelevant document reads. |
+| F2 / backtick repository-relative / optional / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 1, 1, 2 | Reject this cell: optional wording never produced a literal pass and every repetition broadened beyond the task-applicable guide. |
 
 Counts-only records:
 
@@ -191,6 +192,9 @@ Counts-only records:
 - [`evidence/f2-repo-gated-flat-one-guide-r1.json`](evidence/f2-repo-gated-flat-one-guide-r1.json)
 - [`evidence/f2-repo-gated-flat-one-guide-r2.json`](evidence/f2-repo-gated-flat-one-guide-r2.json)
 - [`evidence/f2-repo-gated-flat-one-guide-r3.json`](evidence/f2-repo-gated-flat-one-guide-r3.json)
+- [`evidence/f2-repo-optional-flat-one-guide-r1.json`](evidence/f2-repo-optional-flat-one-guide-r1.json)
+- [`evidence/f2-repo-optional-flat-one-guide-r2.json`](evidence/f2-repo-optional-flat-one-guide-r2.json)
+- [`evidence/f2-repo-optional-flat-one-guide-r3.json`](evidence/f2-repo-optional-flat-one-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -219,6 +223,22 @@ distinction rather than altering the frozen evidence contract mid-calibration.
 No stronger emphasis remains. The controlled next comparison is the optional
 edge with every other coordinate fixed; if it also fails, revisit deferral or
 reference shape rather than rewriting the task or guide.
+
+Optional emphasis failed all three repetitions. Every session loaded the
+required `runtime-diagnostics` guide and preserved READY-1, but all three also
+enumerated or searched beyond the task-applicable locator. The frozen
+canary-backed records count irrelevant guides as 1, 1, and 2; the independent
+transcript judges counted direct irrelevant guide reads as 1, 2, and 2.
+Repetition 1 also lost complete owner provenance. Repetition 2 malformed the
+`command-reference` canary in its witness, so that direct read is intentionally
+absent from the canary-backed observed set.
+
+All four F2 emphasis forms are now rejected for this one-guide cell. The next
+controlled comparison changes only deferral from F2 to F3 while retaining the
+backtick repository-relative representation, safety-gated emphasis, flat
+fragments, task, model, venue, and fresh boundary. F3 emits only the task-required
+guide reference, directly testing whether the surplus F2 per-topic references
+caused compensating exploration.
 
 ## Clean-room shape
 
