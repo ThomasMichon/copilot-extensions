@@ -81,7 +81,11 @@ _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 _CONCLUSION_PENDING = "pending"
 _CONCLUSION_COMPLETE = "complete"
 _CONCLUSION_HELD = "held"
-_TRANSIENT_CONCLUSION_REASONS = frozenset({"live-mux", "live-session"})
+_TRANSIENT_CONCLUSION_REASONS = frozenset({
+    "live-mux",
+    "live-session",
+    "session-identity-unavailable",
+})
 _CONCLUSION_MAX_ATTEMPTS = 12
 _CONCLUSION_RETRY_BASE_SECONDS = 30
 _CONCLUSION_PER_CYCLE = 10
@@ -263,6 +267,7 @@ FleetEndFn = Callable[[str, str], bool]
 #: Injectable so tests drive verdicts deterministically.
 LocalBodyVerdictFn = Callable[[str], str]
 LocalBodyActivityFn = Callable[[str], str | None]
+LocalAcpSessionFn = Callable[[str], str | None]
 LocalEndFn = Callable[[str], bool]
 LocalResumeFn = Callable[[str, str], bool]
 
@@ -340,6 +345,17 @@ def _default_local_body_activity(bridge_session_id: str) -> str | None:
     for session in tracking.list_local_body_sessions():
         if str(session.get("session_id") or "") == bridge_session_id:
             return tracking.session_activity(session)
+    return None
+
+
+def _default_local_acp_session(bridge_session_id: str) -> str | None:
+    from . import tracking
+
+    for session in tracking.list_local_body_sessions():
+        if str(session.get("session_id") or "") != bridge_session_id:
+            continue
+        acp_session_id = session.get("acp_session_id")
+        return str(acp_session_id) if acp_session_id else None
     return None
 
 
@@ -594,6 +610,7 @@ class Supervisor:
         fleet_activity_fn: FleetActivityFn | None = None,
         local_body_verdict_fn: LocalBodyVerdictFn | None = None,
         local_body_activity_fn: LocalBodyActivityFn | None = None,
+        local_acp_session_fn: LocalAcpSessionFn | None = None,
         local_cold_fn: LocalColdFn | None = None,
         local_end_fn: LocalEndFn | None = None,
         local_resume_fn: LocalResumeFn | None = None,
@@ -659,6 +676,9 @@ class Supervisor:
         )
         self.local_body_activity_fn = (
             local_body_activity_fn or _default_local_body_activity
+        )
+        self.local_acp_session_fn = (
+            local_acp_session_fn or _default_local_acp_session
         )
         self.local_cold_fn = local_cold_fn or _default_local_cold
         self.local_end_fn = local_end_fn or _default_local_end
@@ -1339,10 +1359,28 @@ class Supervisor:
         if not isinstance(worktree, str) or not worktree:
             return {"action": "skipped", "reason": "reservation-has-no-worktree"}
         session = reservation.get("session_handle")
+        bridge_session: str | None = None
         if not isinstance(session, str) or not session:
             session = None
+        elif decoded_bridge_session := _parse_local_body_handle(session):
+            bridge_session = decoded_bridge_session
+            retry_payload = self._conclusion_retry_payload(reservation)
+            recorded_acp = retry_payload.get("acp_session_id")
+            session = (
+                str(recorded_acp)
+                if recorded_acp
+                else self.local_acp_session_fn(bridge_session)
+            )
+            if not session:
+                return {
+                    "action": "failed",
+                    "reason": "session-identity-unavailable",
+                }
         try:
-            return self.conclusion_fn(worktree, session)
+            outcome = self.conclusion_fn(worktree, session)
+            if bridge_session and session:
+                outcome = {**outcome, "acp_session_id": session}
+            return outcome
         except Exception as exc:
             log.exception(
                 "terminal conclusion failed for task %s reservation %s",
@@ -1350,6 +1388,30 @@ class Supervisor:
                 reservation.get("key"),
             )
             return {"action": "failed", "reason": str(exc)[:300]}
+
+    def _nudge_terminal_conclusion(self, reservation: dict, task: dict) -> bool:
+        """Reawaken the exact local body once to finish its worktree lifecycle."""
+        session_id = _parse_local_body_handle(reservation.get("session_handle"))
+        worktree = reservation.get("worktree")
+        if session_id is None or not isinstance(worktree, str) or not worktree:
+            return False
+        prompt = (
+            f"Task {task.get('id')} is already terminal, but managed worktree "
+            f"{worktree} is not FINAL. Conclude this same worktree now: finalize "
+            "landed work, or explicitly unwind/transfer any outstanding work to "
+            "a named tracked objective. Do not create a replacement worktree. "
+            "End the turn after the worktree reaches FINAL or the tracked "
+            "transfer/blocker is recorded."
+        )
+        try:
+            return bool(self.local_resume_fn(session_id, prompt))
+        except Exception:
+            log.exception(
+                "failed to nudge terminal conclusion for task %s session %s",
+                task.get("id"),
+                session_id,
+            )
+            return False
 
     def _refresh_terminal_session(
         self, reservation: dict, task: dict
@@ -1366,23 +1428,30 @@ class Supervisor:
         ):
             return reservation
         durable_session = task.get("owner_session_id")
-        completed_by = _worktree_from_owner(task.get("completed_by"))
+        raw_completed_by = task.get("completed_by")
+        completed_by = _worktree_from_owner(raw_completed_by)
         if (
             isinstance(durable_session, str)
             and durable_session
             and (completed_by is None or completed_by == worktree)
         ):
+            session_handle = durable_session
+            if (
+                isinstance(raw_completed_by, str)
+                and raw_completed_by.startswith("headless-")
+            ):
+                session_handle = f"{_LOCAL_BODY_PREFIX}{durable_session}"
             try:
                 self.client.record_spawn(
                     reservation["key"],
-                    session_handle=durable_session,
+                    session_handle=session_handle,
                     worktree=worktree,
                 )
             except DispatchError:
                 return reservation
             return {
                 **reservation,
-                "session_handle": durable_session,
+                "session_handle": session_handle,
                 "worktree": worktree,
             }
         try:
@@ -1433,16 +1502,21 @@ class Supervisor:
         return f"{detail}; {suffix}"
 
     @staticmethod
-    def _conclusion_retry_meta(reservation: dict) -> tuple[int, float]:
+    def _conclusion_retry_payload(reservation: dict) -> dict:
         raw = reservation.get("conclusion_detail")
         if not isinstance(raw, str) or not raw:
-            return 0, 0.0
+            return {}
         try:
             payload = json.loads(raw)
         except (TypeError, ValueError):
-            return 0, 0.0
+            return {}
         if not isinstance(payload, dict):
-            return 0, 0.0
+            return {}
+        return payload
+
+    @classmethod
+    def _conclusion_retry_meta(cls, reservation: dict) -> tuple[int, float]:
+        payload = cls._conclusion_retry_payload(reservation)
         try:
             attempts = max(0, int(payload.get("attempts", 0)))
             next_at = max(0.0, float(payload.get("next_attempt_at", 0)))
@@ -1493,6 +1567,13 @@ class Supervisor:
                 return False, None
             if verdict == _tracking().GONE:
                 return True, None
+            if policy_applies:
+                try:
+                    if self.local_body_activity_fn(local_sid) == "IDLE":
+                        return True, None
+                except Exception:
+                    pass
+                return False, None
             if (
                 task.get("status") == Status.COMPLETED
                 and task.get("completed_by")
@@ -1561,6 +1642,7 @@ class Supervisor:
             except DispatchError:
                 continue  # task vanished; leave the reservation for a human
             if task.get("status") in _TERMINAL:
+                prior_attempts = 0
                 exclusive = bool(res.get("exclusive_key"))
                 if res.get("state") == SpawnState.RESERVING and not exclusive:
                     continue
@@ -1569,11 +1651,99 @@ class Supervisor:
                         task.get("labels") or []
                     )
                 )
-                ready, preconcluded = self._exclusive_terminal_release_ready(
-                    res,
-                    task,
-                    policy_applies=policy_applies,
-                )
+                if (
+                    policy_applies
+                    and res.get("state") != SpawnState.SETTLED
+                    and res.get("conclusion_state") in {
+                        _CONCLUSION_PENDING,
+                        _CONCLUSION_HELD,
+                    }
+                ):
+                    prior_attempts, next_attempt_at = self._conclusion_retry_meta(res)
+                    if res.get("conclusion_state") == _CONCLUSION_HELD:
+                        continue
+                    if next_attempt_at > now:
+                        continue
+                    if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
+                        try:
+                            self.client.record_spawn_conclusion(
+                                res["key"],
+                                conclusion_state=_CONCLUSION_HELD,
+                                conclusion_detail=res.get("conclusion_detail") or "{}",
+                            )
+                        except DispatchError:
+                            pass
+                        continue
+                if (
+                    policy_applies
+                    and res.get("state") != SpawnState.SETTLED
+                ):
+                    res = self._refresh_terminal_session(res, task)
+                local_sid = _parse_local_body_handle(res.get("session_handle"))
+                if (
+                    policy_applies
+                    and local_sid is not None
+                    and res.get("state") != SpawnState.SETTLED
+                ):
+                    try:
+                        body_verdict = self.local_body_verdict_fn(local_sid)
+                    except Exception:
+                        body_verdict = _tracking().UNKNOWN
+                    try:
+                        body_activity = self.local_body_activity_fn(local_sid)
+                    except Exception:
+                        body_activity = None
+                    if (
+                        body_verdict != _tracking().GONE
+                        and body_activity != "IDLE"
+                    ):
+                        attempts = prior_attempts + 1
+                        checkpoint = {
+                            **self._conclusion_retry_payload(res),
+                            "action": "skipped",
+                            "reason": (
+                                "body-not-idle"
+                                if body_verdict == _tracking().LIVE
+                                else "body-liveness-unknown"
+                            ),
+                            "liveness": body_verdict,
+                            "activity": body_activity,
+                            "attempts": attempts,
+                            "next_attempt_at": now + min(
+                                300,
+                                _CONCLUSION_RETRY_BASE_SECONDS
+                                * (2 ** max(0, attempts - 1)),
+                            ),
+                        }
+                        state = (
+                            _CONCLUSION_HELD
+                            if attempts >= _CONCLUSION_MAX_ATTEMPTS
+                            else _CONCLUSION_PENDING
+                        )
+                        try:
+                            self.client.record_spawn_conclusion(
+                                res["key"],
+                                conclusion_state=state,
+                                conclusion_detail=json.dumps(
+                                    checkpoint,
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ),
+                            )
+                        except DispatchError:
+                            pass
+                        continue
+                if (
+                    res.get("state") == SpawnState.SETTLED
+                    and res.get("conclusion_state") == _CONCLUSION_PENDING
+                ):
+                    ready, preconcluded = True, None
+                else:
+                    ready, preconcluded = self._exclusive_terminal_release_ready(
+                        res,
+                        task,
+                        policy_applies=policy_applies,
+                    )
                 if not ready:
                     continue
                 local_sid = _parse_local_body_handle(res.get("session_handle"))
@@ -1581,6 +1751,7 @@ class Supervisor:
                     not exclusive
                     and local_sid is not None
                     and res.get("state") != SpawnState.SETTLED
+                    and not policy_applies
                 ):
                     try:
                         verdict = self.local_body_verdict_fn(local_sid)
@@ -1621,9 +1792,115 @@ class Supervisor:
                             pass
                         continue
                 else:
-                    prior_attempts = 0
                     if policy_applies:
-                        res = self._refresh_terminal_session(res, task)
+                        local_sid = _parse_local_body_handle(
+                            res.get("session_handle")
+                        )
+                    if (
+                        policy_applies
+                        and local_sid is not None
+                        and preconcluded is None
+                    ):
+                        preconcluded = self._conclude_terminal_worker(res, task)
+                        if (
+                            preconcluded is not None
+                            and self._conclusion_state(preconcluded)
+                            == _CONCLUSION_PENDING
+                        ):
+                            retry_key = f"conclusion:{res['key']}"
+                            if now < self._resume_retry_after.get(retry_key, 0.0):
+                                continue
+                            prior_payload = self._conclusion_retry_payload(res)
+                            if prior_payload.get("same_owner_nudge") == "delivered":
+                                attempts = prior_attempts + 1
+                                checkpoint = {
+                                    **preconcluded,
+                                    "attempts": attempts,
+                                    "next_attempt_at": now + min(
+                                        300,
+                                        _CONCLUSION_RETRY_BASE_SECONDS
+                                        * (2 ** max(0, attempts - 1)),
+                                    ),
+                                    "same_owner_nudge": "delivered",
+                                }
+                                state = (
+                                    _CONCLUSION_HELD
+                                    if attempts >= _CONCLUSION_MAX_ATTEMPTS
+                                    else _CONCLUSION_PENDING
+                                )
+                                try:
+                                    self.client.record_spawn_conclusion(
+                                        res["key"],
+                                        conclusion_state=state,
+                                        conclusion_detail=json.dumps(
+                                            checkpoint,
+                                            sort_keys=True,
+                                            separators=(",", ":"),
+                                        ),
+                                    )
+                                except DispatchError:
+                                    pass
+                                if exclusive:
+                                    continue
+                                preconcluded = checkpoint
+                            elif not self._nudge_terminal_conclusion(res, task):
+                                attempts = prior_attempts + 1
+                                conclusion_payload = {
+                                    **preconcluded,
+                                    "attempts": attempts,
+                                    "next_attempt_at": now + min(
+                                        300,
+                                        _CONCLUSION_RETRY_BASE_SECONDS
+                                        * (2 ** max(0, attempts - 1)),
+                                    ),
+                                    "same_owner_nudge": "unavailable",
+                                }
+                                state = (
+                                    _CONCLUSION_HELD
+                                    if attempts >= _CONCLUSION_MAX_ATTEMPTS
+                                    else _CONCLUSION_PENDING
+                                )
+                                try:
+                                    self.client.record_spawn_conclusion(
+                                        res["key"],
+                                        conclusion_state=state,
+                                        conclusion_detail=json.dumps(
+                                            conclusion_payload,
+                                            sort_keys=True,
+                                            separators=(",", ":"),
+                                        ),
+                                    )
+                                except DispatchError:
+                                    pass
+                                self._resume_retry_after[retry_key] = (
+                                    now + _CONCLUSION_RETRY_BASE_SECONDS
+                                )
+                                continue
+                            else:
+                                self._resume_retry_after[retry_key] = (
+                                    now + _CONCLUSION_RETRY_BASE_SECONDS
+                                )
+                                preconcluded = {
+                                    **preconcluded,
+                                    "attempts": prior_attempts + 1,
+                                    "next_attempt_at": 0,
+                                    "same_owner_nudge": "delivered",
+                                }
+                                try:
+                                    res = self.client.record_spawn_conclusion(
+                                        res["key"],
+                                        conclusion_state=_CONCLUSION_PENDING,
+                                        conclusion_detail=json.dumps(
+                                            preconcluded,
+                                            sort_keys=True,
+                                            separators=(",", ":"),
+                                        ),
+                                    )
+                                except DispatchError:
+                                    continue
+                                self._resume_retry_after.pop(retry_key, None)
+                                if exclusive:
+                                    continue
                     try:
                         # Release the process slot before priming the worktree.
                         # A durable pending marker keeps transient liveness or
@@ -1655,6 +1932,12 @@ class Supervisor:
                         300,
                         _CONCLUSION_RETRY_BASE_SECONDS * (2 ** (attempts - 1)),
                     )
+                    if attempts == 1 and "same_owner_nudge" not in conclusion_payload:
+                        conclusion_payload["same_owner_nudge"] = (
+                            "delivered"
+                            if self._nudge_terminal_conclusion(res, task)
+                            else "unavailable"
+                        )
                     if attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         conclusion_state = _CONCLUSION_HELD
                 try:

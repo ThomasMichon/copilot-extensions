@@ -101,15 +101,6 @@ def test_validate_accepts_each_kind():
             {
                 "repo": TEST_REPO,
                 "labels": ["review"],
-                "disposable_cli_labels": ["review"],
-            },
-            "not routed to CLI",
-        ),
-        (
-            RegistrationKind.SUPERVISED_LANE,
-            {
-                "repo": TEST_REPO,
-                "labels": ["review"],
                 "embody_backend": "cli",
                 "disposable_cli_labels": ["other"],
             },
@@ -124,7 +115,7 @@ def test_validate_accepts_each_kind():
                 "fleet": {"pool": ["host-a"]},
                 "disposable_cli_labels": ["review"],
             },
-            "only for local worker bodies",
+            "only for local bodies",
         ),
     ],
 )
