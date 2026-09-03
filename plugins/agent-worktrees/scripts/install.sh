@@ -661,10 +661,30 @@ PY
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
 # uv does not read pip.conf, so derive index-url from pip config / the pip.conf
-# files and export it. No-op where pip has no index (e.g. pristine -- the index
+# files and export it. Preserve uv's own configured index; the pip-derived value
+# is only a fallback. No-op where pip has no index (e.g. pristine -- the index
 # then arrives via env / the clean-room fixture).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
+    local uv_config configured
+    local -a uv_configs
+    if [[ -n "${UV_CONFIG_FILE:-}" ]]; then
+        uv_configs=("$UV_CONFIG_FILE")
+    else
+        uv_configs=("${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv.toml" /etc/uv/uv.toml /etc/xdg/uv/uv.toml)
+    fi
+    for uv_config in "${uv_configs[@]}"; do
+        [[ -n "$uv_config" && -f "$uv_config" ]] || continue
+        configured="$(awk '
+            /^[[:space:]]*index-url[[:space:]]*=/ { print 1; exit }
+            /^[[:space:]]*\[\[index\]\][[:space:]]*(#.*)?$/ { in_index=1; next }
+            /^[[:space:]]*\[/ { in_index=0 }
+            in_index && /^[[:space:]]*default[[:space:]]*=[[:space:]]*true[[:space:]]*(#.*)?$/ { print 1; exit }
+        ' "$uv_config")"
+        if [[ "$configured" == "1" ]]; then
+            return 0
+        fi
+    done
     local idx=""
     if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
     if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
