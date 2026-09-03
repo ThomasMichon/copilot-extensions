@@ -9,18 +9,25 @@ post-tool advisory work falls back to nudge_status and bind_nudge.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
+import math
+import os
+import signal
+import shutil
 import socket
+import struct
+import subprocess
 import sys
 import time
 from functools import cache
 from pathlib import Path
 
 _CONNECT_TIMEOUT_S = 0.5
+_SESSION_START_TIMEOUT_S = 12.0
+_SESSION_START_DECISION_S = 10.0
 _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
-
-
 def _read_json(path: Path) -> dict | None:
     try:
         value = json.loads(path.read_text("utf-8"))
@@ -42,21 +49,31 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         return None
     if not isinstance(token, str) or not token:
         return None
+    timeout = (
+        _SESSION_START_TIMEOUT_S
+        if kind == "sessionStart"
+        else _CONNECT_TIMEOUT_S
+    )
+    decision_timeout = (
+        _SESSION_START_DECISION_S
+        if kind == "sessionStart"
+        else timeout
+    )
     request = json.dumps(
         {
             "version": 1,
             "token": token,
             "kind": kind,
             "payload": payload,
-            "deadline": time.time() + _CONNECT_TIMEOUT_S,
+            "deadline": time.time() + decision_timeout,
         },
         separators=(",", ":"),
     ).encode("utf-8") + b"\n"
     try:
         with socket.create_connection(
-            (host, int(port_text)), timeout=_CONNECT_TIMEOUT_S
+            (host, int(port_text)), timeout=min(_CONNECT_TIMEOUT_S, timeout)
         ) as conn:
-            conn.settimeout(_CONNECT_TIMEOUT_S)
+            conn.settimeout(timeout)
             conn.sendall(request)
             chunks: list[bytes] = []
             size = 0
@@ -81,8 +98,328 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         or value.get("fallback") is True
     ):
         return None
+    capabilities = value.get("capabilities")
+    if kind == "sessionStart" and (
+        not isinstance(capabilities, list)
+        or "session-lifecycle-v1" not in capabilities
+    ):
+        return None
     result = value.get("result")
     return result if isinstance(result, dict) else {}
+
+
+def _plugin_version() -> str:
+    try:
+        value = json.loads(
+            (Path(__file__).resolve().parents[1] / "plugin.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, UnicodeError, ValueError, TypeError):
+        try:
+            return (
+                Path.home()
+                .joinpath(".agent-worktrees", "current-version")
+                .read_text(encoding="utf-8")
+                .strip()
+            )
+        except (OSError, UnicodeError):
+            return ""
+    version = value.get("version") if isinstance(value, dict) else None
+    return version if isinstance(version, str) else ""
+
+
+def _enrich_session_payload(payload: dict) -> dict:
+    enriched = dict(payload)
+    enriched["_agentWorktrees"] = {
+        "pluginVersion": _plugin_version(),
+        "environment": dict(os.environ),
+    }
+    return enriched
+
+
+def _session_launch_key(payload: dict) -> str:
+    metadata = payload.get("_agentWorktrees")
+    if not isinstance(metadata, dict):
+        return ""
+    version = metadata.get("pluginVersion")
+    session_id = payload.get("sessionId")
+    cwd = payload.get("cwd")
+    source = payload.get("source", "")
+    timestamp = payload.get("timestamp")
+    if (
+        not isinstance(version, str)
+        or not version
+        or not isinstance(session_id, str)
+        or not session_id
+        or not isinstance(cwd, str)
+        or not os.path.isabs(cwd)
+        or not isinstance(source, str)
+        or isinstance(timestamp, bool)
+        or not isinstance(timestamp, (int, float))
+        or not math.isfinite(timestamp)
+    ):
+        return ""
+    timestamp_text = (
+        str(timestamp)
+        if isinstance(timestamp, int)
+        else f"f64:{struct.pack('>d', timestamp).hex()}"
+    )
+    identity = json.dumps(
+        [session_id, os.path.realpath(cwd), source, version, timestamp_text],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(identity).hexdigest()
+
+
+def _resident_started(payload: dict, home: Path) -> bool:
+    launch_key = _session_launch_key(payload)
+    if not launch_key:
+        return False
+    receipt = (
+        home
+        / ".agent-worktrees"
+        / ".session-context"
+        / f"lifecycle-{launch_key}.json"
+    )
+    try:
+        value = json.loads(receipt.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return False
+    return (
+        isinstance(value, dict)
+        and value.get("launchKey") == launch_key
+        and value.get("state") in {"started", "completed"}
+    )
+
+
+def _complete_runtime_python(runtime: Path, version: str) -> Path | None:
+    if not version or "\\" in version or "/" in version:
+        return None
+    slot = runtime / "versions" / version
+    try:
+        marker = json.loads(
+            (slot / ".install-complete.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return None
+    if not isinstance(marker, dict) or marker.get("version") != version:
+        return None
+    for relative in (
+        Path("Scripts") / "python.exe",
+        Path("bin") / "python",
+    ):
+        executable = slot / relative
+        if executable.is_file():
+            return executable
+    return None
+
+
+def _version_key(version: str) -> tuple:
+    import re
+
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", version)
+    if match:
+        major, minor, patch, dev = match.groups()
+        return (0, int(major), int(minor), int(patch), dev is None, int(dev or 0))
+    return (1, version.lower())
+
+
+def _runtime_python(home: Path) -> Path | None:
+    runtime = home / ".agent-worktrees"
+    for marker_name in ("current-version", "last-known-good"):
+        try:
+            version = (runtime / marker_name).read_text("utf-8").strip()
+        except (OSError, UnicodeError):
+            continue
+        executable = _complete_runtime_python(runtime, version)
+        if executable is not None:
+            return executable
+    try:
+        versions = sorted(
+            (
+                path.name
+                for path in (runtime / "versions").iterdir()
+                if path.is_dir()
+            ),
+            key=_version_key,
+            reverse=True,
+        )
+    except OSError:
+        return None
+    for version in versions:
+        executable = _complete_runtime_python(runtime, version)
+        if executable is not None:
+            return executable
+    return None
+
+
+def _bootstrap_first_install(payload: dict) -> dict:
+    scripts = Path(__file__).resolve().parent
+    if os.name == "nt":
+        script = scripts / "bootstrap-check.ps1"
+        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        argv = [shell, "-NoLogo", "-NoProfile", "-File", str(script)] if shell else []
+    else:
+        script = scripts / "bootstrap-check.sh"
+        shell = shutil.which("bash")
+        argv = [shell, str(script)] if shell else []
+    if not argv or not script.is_file():
+        return {}
+    try:
+        subprocess.run(
+            argv,
+            input=json.dumps(payload, separators=(",", ":")),
+            text=True,
+            timeout=_SESSION_START_TIMEOUT_S,
+            check=False,
+            capture_output=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {}
+
+
+def _fallback_legacy_session_start(payload: dict) -> dict:
+    scripts = Path(__file__).resolve().parent
+    if os.name == "nt":
+        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        suffix = ".ps1"
+        prefix = [shell, "-NoLogo", "-NoProfile", "-File"] if shell else []
+    else:
+        shell = shutil.which("bash")
+        suffix = ".sh"
+        prefix = [shell] if shell else []
+    if not prefix:
+        return {}
+    specs = (
+        ("bootstrap-check", ()),
+        ("project-hooks", ()),
+        ("register-nudge", ("--side-effect-only",)),
+        ("register-session", ("--side-effect-only",)),
+        ("anchor-hygiene-check", ()),
+        ("marketplace-overrides", ("--side-effect-only",)),
+        ("provision-check", ()),
+    )
+    encoded = json.dumps(payload, separators=(",", ":"))
+    processes = []
+    group_kwargs = (
+        {"start_new_session": True}
+        if os.name == "posix"
+        else {
+            "creationflags": getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+            )
+        }
+    )
+    for name, extra in specs:
+        script = scripts / f"{name}{suffix}"
+        if not script.is_file():
+            continue
+        try:
+            processes.append(
+                subprocess.Popen(
+                    [*prefix, str(script), *extra],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env={**os.environ, "PYTHONPATH": ""},
+                    **group_kwargs,
+                )
+            )
+        except OSError:
+            continue
+    deadline = time.monotonic() + _SESSION_START_TIMEOUT_S
+    result: dict = {}
+    diagnostics = []
+    for process in processes:
+        try:
+            stdout, stderr = process.communicate(
+                encoded,
+                timeout=max(0.1, deadline - time.monotonic()),
+            )
+        except subprocess.TimeoutExpired:
+            try:
+                if os.name == "posix":
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                else:
+                    process.send_signal(signal.CTRL_BREAK_EVENT)
+            except (OSError, ProcessLookupError):
+                process.kill()
+            try:
+                stdout, stderr = process.communicate(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = "", ""
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+        if stderr:
+            diagnostics.append(stderr)
+        try:
+            value = json.loads(stdout.strip() or "{}")
+        except ValueError:
+            if stdout:
+                diagnostics.append(stdout)
+            continue
+        if isinstance(value, dict) and value.get("additionalContext"):
+            result = value
+    if diagnostics:
+        result["_stderr"] = "".join(diagnostics)
+    return result
+
+
+def _fallback_session_start(payload: dict, home: Path) -> dict:
+    python = _runtime_python(home)
+    if python is None:
+        return _bootstrap_first_install(payload)
+    metadata = payload.get("_agentWorktrees")
+    payload_version = (
+        metadata.get("pluginVersion")
+        if isinstance(metadata, dict)
+        else ""
+    )
+    runtime_version = python.parents[1].name
+    if (
+        isinstance(payload_version, str)
+        and payload_version
+        and _version_key(runtime_version) < _version_key(payload_version)
+    ):
+        return _fallback_legacy_session_start(payload)
+    try:
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = ""
+        result = subprocess.run(
+            [
+                str(python),
+                "-m",
+                "agent_worktrees",
+                "session-lifecycle",
+                "--stdin",
+                "--timeout-seconds",
+                str(_SESSION_START_DECISION_S),
+            ],
+            input=json.dumps(payload, separators=(",", ":")),
+            capture_output=True,
+            text=True,
+            timeout=_SESSION_START_TIMEOUT_S,
+            check=False,
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if result.returncode != 0:
+        return _fallback_legacy_session_start(payload)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    try:
+        value = json.loads(result.stdout or "{}")
+    except (TypeError, ValueError):
+        return _fallback_legacy_session_start(payload)
+    return value if isinstance(value, dict) else {}
 
 
 @cache
@@ -176,20 +513,26 @@ def _fallback_post(payload: dict, home: Path) -> dict:
 
 def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
     home = home or Path.home()
+    if kind == "sessionStart":
+        payload = _enrich_session_payload(payload)
     remote = _request(kind, payload, home)
     if remote is not None:
         return remote
+    if kind == "sessionStart" and _resident_started(payload, home):
+        return {}
     if kind == "preToolUse":
         return _fallback_pre(payload, home)
     if kind == "postToolUse":
         return _fallback_post(payload, home)
+    if kind == "sessionStart":
+        return _fallback_session_start(payload, home)
     return {}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     kind = argv[0] if argv else ""
-    if kind not in {"preToolUse", "postToolUse"}:
+    if kind not in {"preToolUse", "postToolUse", "sessionStart"}:
         return 0
     try:
         raw = sys.stdin.read()
@@ -197,8 +540,13 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(payload, dict):
             payload = {}
         result = decide(kind, payload)
+        diagnostic = result.pop("_stderr", None)
+        if diagnostic:
+            sys.stderr.write(str(diagnostic))
         if result:
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
+        elif kind == "sessionStart":
+            sys.stdout.write("{}")
     except Exception:
         pass
     return 0

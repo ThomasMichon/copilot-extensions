@@ -31,7 +31,7 @@ class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         try:
             self.request.settimeout(_READ_TIMEOUT_S)
-            raw = self.rfile.readline(256 * 1024)
+            raw = self.rfile.readline(2 * 1024 * 1024)
             request = json.loads(raw.decode("utf-8"))
             if (
                 not isinstance(request, dict)
@@ -49,11 +49,13 @@ class _Handler(socketserver.StreamRequestHandler):
             if deadline <= time.time():
                 raise HookUnavailable
             result = self.server.decide(kind, payload, deadline)
-            if deadline <= time.time():
-                raise HookUnavailable
             if not isinstance(result, dict):
                 result = {}
-            response = {"version": 1, "result": result}
+            response = {
+                "version": 1,
+                "capabilities": ["session-lifecycle-v1"],
+                "result": result,
+            }
             self.wfile.write(
                 json.dumps(response, separators=(",", ":")).encode("utf-8")
                 + b"\n"

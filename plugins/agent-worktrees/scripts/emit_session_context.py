@@ -282,7 +282,10 @@ def _read_fresh_binding_snapshot(
                 context = _context(output) if separator else ""
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
-        if not context.startswith("## agent-worktrees session command catalog"):
+        if not (
+            context.startswith("## agent-worktrees session command catalog")
+            or context.startswith("[agent-worktrees] This Copilot session")
+        ):
             continue
         checkout_line = next(
             (
