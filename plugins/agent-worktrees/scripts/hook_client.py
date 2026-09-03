@@ -61,7 +61,7 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
     ).encode("utf-8") + b"\n"
     try:
         with socket.create_connection(
-            (host, int(port_text)), timeout=timeout
+            (host, int(port_text)), timeout=_CONNECT_TIMEOUT_S
         ) as conn:
             conn.settimeout(timeout)
             conn.sendall(request)
