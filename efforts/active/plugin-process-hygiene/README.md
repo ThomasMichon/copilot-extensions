@@ -361,3 +361,7 @@ per-plugin last-known-good rollout (#742).
 - Added focused IPC, metadata-preservation, locking, cache, process-hygiene, and
   Bash 3 compatibility guards. The healthy path keeps project-owned hooks in
   the current shell process and preserves their original session-start payload.
+- Review hardening made the resident clients use only the verified managed
+  Python runtime with an empty `PYTHONPATH`, bounded the resident's per-project
+  config cache by both TTL and entry count, and documented that session-start
+  payload `cwd` outranks the plugin process directory for project resolution.
