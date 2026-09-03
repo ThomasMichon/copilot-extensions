@@ -11,6 +11,7 @@ import json
 import os
 import posixpath
 import re
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -64,6 +65,15 @@ class MachineIdentity:
     name: str
     platform: str
     role: str | None = None
+
+    def __post_init__(self) -> None:
+        for field_name, value in (("name", self.name), ("platform", self.platform)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"machine {field_name} must be a non-empty string")
+        if self.role is not None and (
+            not isinstance(self.role, str) or not self.role.strip()
+        ):
+            raise ValueError("machine role must be null or a non-empty string")
 
     def as_dict(self) -> dict[str, str | None]:
         return {"name": self.name, "platform": self.platform, "role": self.role}
@@ -388,6 +398,7 @@ class CheckoutDescriptor:
     checkout: Path
     repository: str
     declaration_path: Path
+    read_from_head: bool = False
 
     def __post_init__(self) -> None:
         if not self.checkout.is_absolute() or not self.declaration_path.is_absolute():
@@ -412,11 +423,11 @@ class FileSystemAggregateInputProvider:
         *,
         machine: MachineIdentity,
         home: Path,
-        checkouts: Sequence[CheckoutDescriptor],
+        checkouts: Sequence[CheckoutDescriptor] | None = None,
     ) -> None:
         self.machine = machine
         self.home = home
-        self.checkouts = tuple(checkouts)
+        self.checkouts = tuple(checkouts) if checkouts is not None else None
 
     def load(self) -> AggregateInputs:
         config_path = self.home / "config.yaml"
@@ -430,7 +441,7 @@ class FileSystemAggregateInputProvider:
 
         try:
             mode = ExecutionMode(str(aggregate.get("mode", ExecutionMode.OBSERVE.value)))
-        except ValueError as exc:
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             raise ValueError("aggregate.mode must be observe or enforce") from exc
 
         raw_admissions = aggregate.get("admissions", [])
@@ -527,11 +538,21 @@ class FileSystemAggregateInputProvider:
                 )
             admissions.append(admission)
 
+        descriptors = self.checkouts
+        if descriptors is None:
+            descriptors, descriptor_failures = _discover_admitted_checkouts(admissions)
+            failures.extend(descriptor_failures)
+
         discoveries: list[DiscoveredDeclaration] = []
-        for descriptor in self.checkouts:
+        for descriptor in descriptors:
             try:
+                data = (
+                    _load_head_declaration(descriptor)
+                    if descriptor.read_from_head
+                    else _load_yaml_mapping(descriptor.declaration_path)
+                )
                 declaration = _parse_declaration(
-                    _load_yaml_mapping(descriptor.declaration_path),
+                    data,
                     descriptor.declaration_path,
                 )
             except (OSError, ValueError, yaml.YAMLError) as exc:
@@ -688,12 +709,132 @@ def compile_from_provider(provider: AggregateInputProvider) -> ResolvedPlan:
 
 
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return _load_yaml_text_mapping(path.read_text(encoding="utf-8"), str(path))
+
+
+def _load_yaml_text_mapping(text: str, location: str) -> dict[str, Any]:
+    data = yaml.safe_load(text)
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise ValueError(f"{path} must contain a mapping")
+        raise ValueError(f"{location} must contain a mapping")
     return data
+
+
+def _load_head_declaration(descriptor: CheckoutDescriptor) -> dict[str, Any]:
+    relative = descriptor.declaration_path.relative_to(descriptor.checkout)
+    result = _run_git(
+        descriptor.checkout,
+        "show",
+        f"HEAD:{relative.as_posix()}",
+    )
+    return _load_yaml_text_mapping(result.stdout, str(descriptor.declaration_path))
+
+
+def _discover_admitted_checkouts(
+    admissions: Sequence[Admission],
+) -> tuple[tuple[CheckoutDescriptor, ...], tuple[DiscoveryFailure, ...]]:
+    descriptors: list[CheckoutDescriptor] = []
+    failures: list[DiscoveryFailure] = []
+    for admission in admissions:
+        if not admission.enabled or admission.quarantine_reason:
+            continue
+        declaration_path = (
+            admission.authoritative_checkout
+            / ".copilot-extensions"
+            / "agent-logger"
+            / "config.yaml"
+        )
+        try:
+            repository = repository_identity_from_checkout(
+                admission.authoritative_checkout
+            )
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            failures.append(
+                DiscoveryFailure(
+                    repository=admission.repository,
+                    path=str(admission.authoritative_checkout),
+                    reason=str(exc),
+                    kind="admission",
+                    checkout=admission.authoritative_checkout,
+                )
+            )
+            continue
+        descriptors.append(
+            CheckoutDescriptor(
+                checkout=admission.authoritative_checkout,
+                repository=repository,
+                declaration_path=declaration_path,
+                read_from_head=True,
+            )
+        )
+    return tuple(descriptors), tuple(failures)
+
+
+def repository_identity_from_checkout(checkout: Path) -> str:
+    """Read and normalize the authoritative checkout's ``origin`` remote."""
+    if not checkout.is_absolute():
+        raise ValueError("checkout path must be absolute")
+    _verify_authoritative_checkout(checkout)
+    result = _run_git(checkout, "remote", "get-url", "origin")
+    if not result.stdout.strip():
+        raise ValueError("authoritative checkout has no readable origin remote")
+    return canonical_repository_identity(result.stdout.strip())
+
+
+def _verify_authoritative_checkout(checkout: Path) -> None:
+    result = _run_git(
+        checkout,
+        "rev-parse",
+        "--show-toplevel",
+        "--git-dir",
+        "--git-common-dir",
+        "HEAD",
+        "refs/remotes/origin/HEAD",
+    )
+    lines = [line.strip() for line in result.stdout.splitlines()]
+    if len(lines) != 5:
+        raise ValueError("authoritative checkout metadata is incomplete")
+    top_level, git_dir, common_dir, head, remote_head = lines
+    if _canonical_checkout(Path(top_level)) != _canonical_checkout(checkout):
+        raise ValueError("admitted path is not the checkout root")
+
+    resolved_git_dir = Path(git_dir)
+    if not resolved_git_dir.is_absolute():
+        resolved_git_dir = checkout / resolved_git_dir
+    resolved_common_dir = Path(common_dir)
+    if not resolved_common_dir.is_absolute():
+        resolved_common_dir = checkout / resolved_common_dir
+    if _canonical_checkout(resolved_git_dir) != _canonical_checkout(
+        resolved_common_dir
+    ):
+        raise ValueError("secondary worktrees cannot be authoritative checkouts")
+    if head != remote_head:
+        raise ValueError("authoritative checkout is not at the remote default branch")
+
+def _run_git(checkout: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    for key in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_PREFIX",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ):
+        env.pop(key, None)
+    result = subprocess.run(
+        ["git", "-C", str(checkout), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise ValueError("authoritative checkout metadata is unavailable")
+    return result
 
 
 def _parse_declaration(
@@ -1501,7 +1642,7 @@ def _detect_destination_conflicts(plan: ResolvedPlan) -> None:
 
 
 def _canonical_checkout(path: Path) -> str:
-    return os.path.normcase(os.path.abspath(path))
+    return os.path.normcase(os.path.realpath(path))
 
 
 def _canonical_resource_identity(kind: str, identity: str) -> str:

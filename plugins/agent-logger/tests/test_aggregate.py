@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agent_logger import __main__ as cli_module
 from agent_logger.aggregate import (
     Admission,
     AggregateInputs,
@@ -24,6 +25,7 @@ from agent_logger.aggregate import (
     SourceSet,
     canonical_repository_identity,
     compile_aggregate,
+    compile_from_provider,
 )
 
 MACHINE = MachineIdentity(name="worker-1", platform="windows", role="developer")
@@ -457,6 +459,76 @@ def test_filesystem_provider_loads_admission_declaration_and_override(
     assert plan.claims == []
     assert plan.selected_policies[-1]["policy_id"] == "local"
     assert str(tmp_path).replace("\\", "/") not in plan.canonical_json()
+
+
+def test_filesystem_provider_discovers_admitted_checkout_by_default(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    checkout = tmp_path / "owner"
+    declaration_path = checkout / ".copilot-extensions" / "agent-logger" / "config.yaml"
+    declaration_path.parent.mkdir(parents=True)
+    home.mkdir()
+    (home / "config.yaml").write_text(
+        "\n".join(
+            [
+                "aggregate:",
+                "  admissions:",
+                "    - repository: github.com/example/owner",
+                f"      checkout: {checkout.as_posix()}",
+                "      collection_targets:",
+                "        corpus:",
+                "          kind: filesystem",
+                "          identity: /stores/sessions",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    declaration_path.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "repository: github.com/example/owner",
+                "default:",
+                "  claims:",
+                "    - id: collect",
+                "      sources:",
+                "        repositories: [github.com/example/owner]",
+                "      collection_target: corpus",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_logger.aggregate.repository_identity_from_checkout",
+        lambda _checkout: "github.com/example/owner",
+    )
+    monkeypatch.setattr(
+        "agent_logger.aggregate._load_head_declaration",
+        lambda descriptor: {
+            "schema_version": 1,
+            "repository": descriptor.repository,
+            "default": {
+                "claims": [
+                    {
+                        "id": "collect",
+                        "sources": {
+                            "repositories": ["github.com/example/owner"],
+                        },
+                        "collection_target": "corpus",
+                    }
+                ]
+            },
+        },
+    )
+
+    plan = compile_from_provider(
+        FileSystemAggregateInputProvider(machine=MACHINE, home=home)
+    )
+
+    assert plan.authorized is True
+    assert [claim.claim_id for claim in plan.claims] == ["collect"]
 
 
 def test_filesystem_provider_preserves_invalid_override_diagnostic(
@@ -913,3 +985,134 @@ def test_default_remote_ports_canonicalize_to_same_destination(
 
     assert plan.authorized is False
     assert "destination-policy-conflict" in {finding.code for finding in plan.findings}
+
+
+def test_config_resolved_json_reports_passive_plan(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
+
+    assert cli_module.main(["config", "--resolved", "--json"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["authorized"] is True
+    assert result["passive"] is True
+    assert result["schema_version"] == 1
+
+
+def test_doctor_json_fails_closed_for_unreadable_authoritative_checkout(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    checkout = tmp_path / "not-a-checkout"
+    (tmp_path / "config.yaml").write_text(
+        "\n".join(
+            [
+                "aggregate:",
+                "  admissions:",
+                "    - repository: github.com/example/owner",
+                f"      checkout: {checkout.as_posix()}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
+
+    assert cli_module.main(["doctor", "--json"]) == 2
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["authorized"] is False
+    assert result["findings"][0]["code"] == "invalid-admission"
+
+
+def test_chronicle_status_includes_same_aggregate_plan(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
+
+    assert cli_module.main(["chronicle", "status"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["aggregate"]["authorized"] is True
+    assert result["aggregate"]["passive"] is True
+
+
+def test_malformed_aggregate_config_still_emits_doctor_json(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    (tmp_path / "config.yaml").write_text(
+        "aggregate:\n  mode: unexpected\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
+
+    assert cli_module.main(["doctor", "--json"]) == 2
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["authorized"] is False
+    assert result["findings"][0]["code"] == "invalid-machine-configuration"
+
+
+def test_chronicle_status_remains_readable_when_aggregate_is_invalid(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    (tmp_path / "config.yaml").write_text(
+        "aggregate:\n  mode: unexpected\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
+
+    assert cli_module.main(["chronicle", "status"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["enabled"] is False
+    assert result["aggregate"]["authorized"] is False
+
+
+def test_cli_machine_identity_uses_bounded_platform_and_role(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    (tmp_path / "config.yaml").write_text(
+        "machine:\n  name: worker-1\n  role: developer\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
+    monkeypatch.setattr(cli_module.platform, "system", lambda: "Windows")
+
+    assert cli_module.main(["config", "--resolved", "--json"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["machine"] == {
+        "name": "worker-1",
+        "platform": "windows",
+        "role": "developer",
+    }
+
+
+def test_malformed_machine_identity_emits_unauthorized_plan(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    (tmp_path / "config.yaml").write_text(
+        "machine:\n  role: [developer]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path))
+
+    assert cli_module.main(["doctor", "--json"]) == 2
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["authorized"] is False
+    assert result["findings"][0]["code"] == "invalid-machine-configuration"

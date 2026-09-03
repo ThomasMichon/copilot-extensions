@@ -72,37 +72,37 @@ particular control-repository name, machine inventory, or private topology.
 
 ### Phase 1 — [Specify the resolution contract](resolution-contract.md)
 
-- [ ] Define the versioned repository declaration and repository-scoped local-override contracts without overloading the existing log-presentation-only file.
-- [ ] Define a portable discovery-provider seam and the first concrete discovery path, including stable repository identity, declaration provenance, and an explicit machine-local admission registry.
-- [ ] Require one admitted authoritative checkout per canonical repository identity; treat declarations from unadmitted repositories and secondary worktrees as inert but diagnosable.
-- [ ] Define source selectors with canonical repository identities and an anchored, decidable pattern grammar; retire substring matching from ownership claims and specify how legacy substring lists map during compatibility.
-- [ ] Define explicit exclusions or cession, machine selectors, collection claims, rendered-log claims, targets, profiles, and landing policies.
-- [ ] Define deterministic same-repository precedence and reject equally specific or otherwise ambiguous machine matches.
-- [ ] Model the machine-default fallback as a first-class bounded claim that participates in overlap analysis rather than an implicit catch-all.
-- [ ] Define declaration-schema compatibility, including how unknown versions are quarantined or disabled machine-locally without granting another repository precedence.
-- [ ] Make aggregate resolution independent of process cwd and ordinary environment overrides; only admitted, provenance-bearing inputs may create or suppress claims.
-- [ ] Define canonical normalization, overlap witnesses, error taxonomy, and the versioned resolved-plan JSON contract.
-- [ ] Define ownership-change semantics for already-rendered records and reservation state; default to applying new ownership only to newly due work unless an explicit migration is requested.
+- [x] Define the versioned repository declaration and repository-scoped local-override contracts without overloading the existing log-presentation-only file.
+- [x] Define a portable discovery-provider seam and the first concrete discovery path, including stable repository identity, declaration provenance, and an explicit machine-local admission registry.
+- [x] Require one admitted authoritative checkout per canonical repository identity; treat declarations from unadmitted repositories and secondary worktrees as inert but diagnosable.
+- [x] Define source selectors with canonical repository identities and an anchored, decidable pattern grammar; retire substring matching from ownership claims and specify how legacy substring lists map during compatibility.
+- [x] Define explicit exclusions or cession, machine selectors, collection claims, rendered-log claims, targets, profiles, and landing policies.
+- [x] Define deterministic same-repository precedence and reject equally specific or otherwise ambiguous machine matches.
+- [x] Model the machine-default fallback as a first-class bounded claim that participates in overlap analysis rather than an implicit catch-all.
+- [x] Define declaration-schema compatibility, including how unknown versions are quarantined or disabled machine-locally without granting another repository precedence.
+- [x] Make aggregate resolution independent of process cwd and ordinary environment overrides; only admitted, provenance-bearing inputs may create or suppress claims.
+- [x] Define canonical normalization, overlap witnesses, error taxonomy, and the versioned resolved-plan JSON contract.
+- [x] Define ownership-change semantics for already-rendered records and reservation state; default to applying new ownership only to newly due work unless an explicit migration is requested.
 - [x] Carve implementation slices into public sub-issues before code changes begin.
 
 ### Phase 2 — Build the aggregate compiler
 
-- [ ] Add typed declaration, provenance, selector, claim, target, and resolved-plan models.
-- [ ] Load committed declarations and repository-scoped machine-local overrides through the discovery seam.
-- [ ] Resolve each repository independently, then aggregate declarations without cross-repository precedence.
-- [ ] Deduplicate multiple checkouts and worktrees of one admitted repository identity against its authoritative checkout before claim analysis.
-- [ ] Canonicalize repository and target identity so basename aliases or path spelling cannot evade collision checks.
-- [ ] Detect exact, wildcard, exclusion, target, and ownership-dimension collisions with actionable witnesses.
-- [ ] Produce byte-stable normalized JSON for equivalent inputs independent of discovery order.
+- [x] Add typed declaration, provenance, selector, claim, target, and resolved-plan models.
+- [x] Load committed declarations and repository-scoped machine-local overrides through the discovery seam.
+- [x] Resolve each repository independently, then aggregate declarations without cross-repository precedence.
+- [x] Deduplicate multiple checkouts and worktrees of one admitted repository identity against its authoritative checkout before claim analysis.
+- [x] Canonicalize repository and target identity so basename aliases or path spelling cannot evade collision checks.
+- [x] Detect exact, wildcard, exclusion, target, and ownership-dimension collisions with actionable witnesses.
+- [x] Produce byte-stable normalized JSON for equivalent inputs independent of discovery order.
 
 ### Phase 3 — Add diagnostics and operator surfaces
 
-- [ ] Extend `agent-logger config` with an explicit resolved aggregate JSON surface while preserving compatibility for existing callers.
-- [ ] Add an aggregate `agent-logger doctor` command that uses the compiler result rather than reinterpreting configuration.
-- [ ] Report declaration provenance, selected and inactive machine clauses, overrides, normalized claims, canonical targets, sink readiness, and conflicts.
-- [ ] Define stable exit behavior for empty/passive, valid/authorized, invalid, unavailable, and conflicting plans.
-- [ ] Repoint or deprecate `agent-logger chronicle status` so it reports the same compiler result rather than a third interpretation of configuration.
-- [ ] Keep diagnostics read-only and safe to run while scheduled work is disabled or maintenance-gated.
+- [x] Extend `agent-logger config` with an explicit resolved aggregate JSON surface while preserving compatibility for existing callers.
+- [x] Add an aggregate `agent-logger doctor` command that uses the compiler result rather than reinterpreting configuration.
+- [x] Report declaration provenance, selected and inactive machine clauses, overrides, normalized claims, canonical targets, sink readiness, and conflicts.
+- [x] Define stable exit behavior for empty/passive, valid/authorized, invalid, unavailable, and conflicting plans.
+- [x] Repoint or deprecate `agent-logger chronicle status` so it reports the same compiler result rather than a third interpretation of configuration.
+- [x] Keep diagnostics read-only and safe to run while scheduled work is disabled or maintenance-gated.
 
 ### Phase 4 — Preserve compatibility and observe the delta
 
@@ -185,3 +185,13 @@ Reviewed and merged in #1828. Implementation is authorized against this plan.
   configuration homes, trust and admission, authoritative checkouts, stable
   identity, claim algebra, deterministic machine selection, collision
   witnesses, diagnostics, observe-only rollout, and ownership changes.
+
+### 2026-09-03 — Compiler and diagnostics
+
+- Merged the typed aggregate compiler, injectable admission/discovery seam,
+  deterministic normalization, collision analysis, and secret-free resolved
+  plan in #1852, closing #1832.
+- Added read-only resolved-config, doctor, and chronicle-status surfaces for
+  #1833. Diagnostics verify that admitted checkouts are clean default-branch
+  anchors, preserve legacy status output, and return a structured unauthorized
+  plan for malformed aggregate configuration.

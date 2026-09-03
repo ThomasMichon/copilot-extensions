@@ -137,6 +137,25 @@ agent-logger config
 Inspect the repository organization fields exactly as they enter a writer
 manifest with `agent-logger organization`.
 
+Aggregate operational policy is a separate surface. Machine admission lives
+under `aggregate:` in `$AGENT_LOGGER_HOME/config.yaml`; each admitted
+authoritative checkout may publish
+`.copilot-extensions/agent-logger/config.yaml`. Inspect the same compiled plan
+used by aggregate diagnostics with:
+
+```
+agent-logger config --resolved --json
+agent-logger doctor --json
+agent-logger chronicle status
+```
+
+These commands are read-only. `config --resolved` and `doctor` exit non-zero
+when the complete plan is unauthorized; `chronicle status` remains a successful
+status read and exposes the decision under its `aggregate` field. Checkout
+identity, default-branch state, declaration provenance, machine selectors,
+normalized claims, resource readiness, and conflicts are resolved before any
+later execution integration can perform side effects.
+
 Repository files use schema version 1 (an omitted version is accepted as v1
 for compatibility) and may set only `log.root`, `log.path_template`,
 `log.timezone`, `log.note_marker`, `log.template`, `log.narration_style`,
