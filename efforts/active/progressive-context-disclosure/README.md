@@ -627,3 +627,17 @@ enforcement before migrating the complete contributor stack.
 - Reject the representation. Next gate: change only the representation to
   `html-comment-locator`, completing the frozen reference-form sweep for this
   multi-guide coordinate.
+
+### 2026-09-03 - Comment locators complete the rejected F3 reference sweep
+
+- Ran three F3 safety-gated flat multi-guide repetitions with only the
+  reference representation changed to `html-comment-locator`.
+- Comment locators were discoverable and no guide body auto-loaded, but every
+  run broadened into guide, repository, or configuration discovery and loaded
+  one to three irrelevant guides. Tool-call counts were 17, 9, and 16.
+- Repetitions 1 and 3 preserved the critical rules but continued beyond the
+  first unresolved gate; repetition 2 violated CAP-1 and substituted an
+  unrelated readiness rule.
+- Reject the representation. All seven frozen reference forms are now rejected
+  for the F3 multi-guide coordinate. Next gate: return to repository-relative
+  references and change only deferral from F3 to F1.
