@@ -23,7 +23,10 @@ session-to-log pipeline out of any single bespoke service:
   allow/deny lists, and can fire a target-independent best-effort HTTP notify
   after a successful push. `session-sync health` classifies freshness and
   repeated partial passes for one machine or a filesystem-backed fleet, with
-  JSON output and alert-friendly exit status. Its `rescue-push` source adapter validates
+  JSON output and alert-friendly exit status. A bounded detritus policy detects
+  Chromium-family user-data roots captured under session `files/`, excludes
+  them from every transport, and removes stale copies from filesystem-backed
+  targets without deleting the local source evidence. Its `rescue-push` source adapter validates
   provider-owned rescue captures, accepts only independently complete sessions,
   and projects them into the same target layout under stable venue keys, with
   host-authoritative generic per-session provenance. Configure with
@@ -101,6 +104,8 @@ optional background-chronicling core with its session-source + log-sink seams.
    one-off partial result is degraded but exits successfully; stale metadata,
    unreadable/missing metadata, and a partial streak at the threshold are
    unhealthy and exit nonzero.
+   `session-sync status` reports the number, size, and bounded path sample of
+   generated browser-profile roots omitted by the latest filesystem sync.
 4. For takeover, use `ramp-up-session`; it delegates the transcript-heavy read
    to the neutral `session-rampup` agent by default.
 

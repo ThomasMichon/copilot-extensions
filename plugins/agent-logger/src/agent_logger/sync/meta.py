@@ -16,6 +16,7 @@ from typing import Iterable
 
 SYNC_VERSION = "1.0.0"
 MAX_DEFERRED_FILE_SAMPLES = 10
+MAX_EXCLUDED_ROOT_SAMPLES = 10
 MAX_DEFERRED_PATH_CHARS = 512
 MAX_META_FIELD_CHARS = 256
 MAX_SYNC_META_BYTES = 64 * 1024
@@ -32,10 +33,15 @@ def write_sync_meta(
     status: str,
     session_count: int = 0,
     deferred_files: Iterable[str] = (),
+    excluded_roots: Iterable[str] = (),
+    excluded_file_count: int = 0,
+    excluded_byte_count: int = 0,
+    excluded_measurement_complete: bool = True,
 ) -> None:
     """Atomically write ``sync-meta.json`` into *dest* (best-effort)."""
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     deferred = [str(path) for path in deferred_files]
+    excluded = [str(path) for path in excluded_roots]
     partial_streak = 0
     if status == "partial":
         partial_streak = 1
@@ -60,6 +66,16 @@ def write_sync_meta(
             "deferred_files": [
                 path[:MAX_DEFERRED_PATH_CHARS]
                 for path in deferred[:MAX_DEFERRED_FILE_SAMPLES]
+            ],
+            "excluded_detritus_root_count": len(excluded),
+            "excluded_detritus_file_count": excluded_file_count,
+            "excluded_detritus_byte_count": excluded_byte_count,
+            "excluded_detritus_measurement_complete": (
+                excluded_measurement_complete
+            ),
+            "excluded_detritus_roots": [
+                path[:MAX_DEFERRED_PATH_CHARS]
+                for path in excluded[:MAX_EXCLUDED_ROOT_SAMPLES]
             ],
         },
         indent=2,

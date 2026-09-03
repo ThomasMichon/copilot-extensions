@@ -23,6 +23,12 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from agent_logger import sessions
 from agent_logger.sessions import SessionRef
+from agent_logger.sync.detritus import (
+    DetritusSummary,
+    discover_session_detritus,
+    discover_session_tree_detritus,
+    is_excluded,
+)
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.meta import read_sync_meta, write_sync_meta
 from agent_logger.sync.provenance import (
@@ -439,10 +445,19 @@ def _snapshot_matches_source(
     source: Path,
     source_provenance: Path,
     snapshot: Path,
+    excluded_roots: tuple[Path, ...] = (),
 ) -> bool:
     """Verify immutable snapshot bytes plus its capture provenance."""
-    source_files = _session_files(source, source=True)
-    destination_files = _session_files(snapshot, source=False)
+    source_files = _session_files(
+        source,
+        source=True,
+        excluded_roots=excluded_roots,
+    )
+    destination_files = _session_files(
+        snapshot,
+        source=False,
+        excluded_roots=excluded_roots,
+    )
     snapshot_provenance = destination_files.pop(
         Path(RESCUE_SNAPSHOT_PROVENANCE),
         None,
@@ -611,7 +626,12 @@ def _remove_path_checked(path: Path) -> None:
     _remove_tree_checked(path)
 
 
-def _session_files(root: Path, *, source: bool) -> dict[Path, Path]:
+def _session_files(
+    root: Path,
+    *,
+    source: bool,
+    excluded_roots: tuple[Path, ...] = (),
+) -> dict[Path, Path]:
     """Return regular session members keyed by relative path."""
     files: dict[Path, Path] = {}
     pending = [root]
@@ -627,16 +647,23 @@ def _session_files(root: Path, *, source: bool) -> dict[Path, Path]:
                         continue
                     raise OSError(f"unsafe session destination member: {path}")
                 if stat.S_ISDIR(mode):
-                    pending.append(path)
+                    if not is_excluded(relative, excluded_roots):
+                        pending.append(path)
                 elif stat.S_ISREG(mode):
-                    if not source or not _is_excluded_name(path.name):
+                    if (
+                        not is_excluded(relative, excluded_roots)
+                        and (not source or not _is_excluded_name(path.name))
+                    ):
                         files[relative] = path
                 elif not source:
                     raise OSError(f"unsafe session destination member: {path}")
     return files
 
 
-def _iter_regular_source_files(root: Path):
+def _iter_regular_source_files(
+    root: Path,
+    excluded_roots: tuple[Path, ...] = (),
+):
     """Yield regular source files without descending through links/reparse points."""
     pending = [root]
     while pending:
@@ -647,19 +674,26 @@ def _iter_regular_source_files(root: Path):
                 mode = entry.stat(follow_symlinks=False).st_mode
                 if is_link_or_reparse(path, mode):
                     continue
+                relative = path.relative_to(root)
+                if is_excluded(relative, excluded_roots):
+                    continue
                 if stat.S_ISDIR(mode):
                     pending.append(path)
                 elif stat.S_ISREG(mode):
                     yield path
 
 
-def _copy_session_tree(source: Path, destination: Path) -> tuple[int, int]:
+def _copy_session_tree(
+    source: Path,
+    destination: Path,
+    excluded_roots: tuple[Path, ...] = (),
+) -> tuple[int, int]:
     """Copy one session tree without following links or relying on MAX_PATH."""
     _ensure_real_directory(destination)
     parents: dict[Path, Path] = {Path("."): destination}
     copied = 0
     nbytes = 0
-    for src_file in _iter_regular_source_files(source):
+    for src_file in _iter_regular_source_files(source, excluded_roots):
         if _is_excluded_name(src_file.name):
             continue
         relative = src_file.relative_to(source)
@@ -673,11 +707,19 @@ def _copy_session_tree(source: Path, destination: Path) -> tuple[int, int]:
     return copied, nbytes
 
 
-def _session_needs_replace(source: Path, destination: Path) -> bool:
+def _session_needs_replace(
+    source: Path,
+    destination: Path,
+    excluded_roots: tuple[Path, ...] = (),
+) -> bool:
     """Return whether the selected destination differs from the safe source tree."""
     if not _is_real_directory(destination) or not _is_real_directory(source):
         return True
-    source_files = _session_files(source, source=True)
+    source_files = _session_files(
+        source,
+        source=True,
+        excluded_roots=excluded_roots,
+    )
     destination_files = _session_files(destination, source=False)
     if source_files.keys() != destination_files.keys():
         return True
@@ -969,6 +1011,7 @@ def _replace_selected_sessions(
     source: Path,
     dest: Path,
     include_sessions: set[str],
+    detritus: DetritusSummary,
 ) -> tuple[int, int, str | None]:
     """Publish selected sessions and provenance as one rollback-capable batch."""
     replacement_root = _ensure_relative_directory(
@@ -989,6 +1032,7 @@ def _replace_selected_sessions(
     try:
         for sid in sorted(include_sessions):
             src_session = source / "session-state" / sid
+            session_roots = detritus.roots_below(Path("session-state") / sid)
             session_item: tuple[Path, Path, Path] | None = None
             snapshot_item: tuple[Path, Path, Path] | None = None
             provenance_item: tuple[Path, Path, Path] | None = None
@@ -997,12 +1041,14 @@ def _replace_selected_sessions(
                 and _session_needs_replace(
                     src_session,
                     dest / "session-state" / sid,
+                    session_roots,
                 )
             ):
                 staged_session = staged_root / "session-state" / sid
                 session_count, session_bytes = _copy_session_tree(
                     src_session,
                     staged_session,
+                    session_roots,
                 )
                 copied += session_count
                 nbytes += session_bytes
@@ -1027,6 +1073,7 @@ def _replace_selected_sessions(
                     sid,
                     receipt_payload["capture_id"],
                 )
+                write_snapshot = False
                 if _path_exists(snapshot_dest):
                     if (
                         existing_rescue_snapshot_path(
@@ -1043,11 +1090,17 @@ def _replace_selected_sessions(
                         src_session,
                         src_provenance,
                         snapshot_dest,
+                        session_roots,
                     ):
                         raise OSError(
                             f"immutable rescue snapshot changed for {sid}"
                         )
+                    write_snapshot = bool(
+                        discover_session_tree_detritus(snapshot_dest).roots
+                    )
                 else:
+                    write_snapshot = True
+                if write_snapshot:
                     staged_snapshot = rescue_snapshot_path(
                         staged_root,
                         sid,
@@ -1056,6 +1109,7 @@ def _replace_selected_sessions(
                     snapshot_count, snapshot_bytes = _copy_session_tree(
                         src_session,
                         staged_snapshot,
+                        session_roots,
                     )
                     snapshot_provenance = (
                         staged_snapshot / RESCUE_SNAPSHOT_PROVENANCE
@@ -1398,6 +1452,10 @@ class FilesystemTarget(Target):
             return PushResult(ok=False, detail=f"source not found: {source}")
         source = safe_source
         try:
+            detritus = discover_session_detritus(source, include_sessions)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
+        try:
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine))
         except OSError as exc:
@@ -1411,6 +1469,7 @@ class FilesystemTarget(Target):
         locked_paths: list[Path] = []
         if include_sessions is not None:
             lock_file = dest / ".session-sync-rescue.lock"
+            cleanup_warnings = []
             try:
                 with sync_lock(lock_file, timeout=30) as acquired:
                     if not acquired:
@@ -1418,26 +1477,84 @@ class FilesystemTarget(Target):
                             ok=False,
                             detail=f"destination rescue lock is busy: {lock_file}",
                         )
-                    copied, nbytes, cleanup_warning = _replace_selected_sessions(
-                        source,
-                        dest,
-                        include_sessions,
-                    )
+                    for _ in range(2):
+                        pass_copied, pass_bytes, cleanup_warning = (
+                            _replace_selected_sessions(
+                                source,
+                                dest,
+                                include_sessions,
+                                detritus,
+                            )
+                        )
+                        copied += pass_copied
+                        nbytes += pass_bytes
+                        if cleanup_warning:
+                            cleanup_warnings.append(cleanup_warning)
+                        latest_detritus = discover_session_detritus(
+                            source,
+                            include_sessions,
+                        )
+                        if latest_detritus.roots == detritus.roots:
+                            detritus = latest_detritus
+                            break
+                        detritus = latest_detritus
+                    else:
+                        return PushResult(
+                            ok=False,
+                            detail="source detritus changed during publication; retry",
+                        )
             except OSError as exc:
                 return PushResult(ok=False, detail=f"session replace failed: {exc}")
             session_count = _count_sessions(dest)
-            write_sync_meta(dest, machine, self.name, "ok", session_count)
+            write_sync_meta(
+                dest,
+                machine,
+                self.name,
+                "ok",
+                session_count,
+                excluded_roots=(str(root) for root in detritus.roots),
+                excluded_file_count=detritus.file_count,
+                excluded_byte_count=detritus.byte_count,
+                excluded_measurement_complete=detritus.measurement_complete,
+            )
             detail = f"-> {dest}"
-            if cleanup_warning:
-                detail += f" (replacement cleanup deferred: {cleanup_warning})"
+            if cleanup_warnings:
+                detail += (
+                    " (replacement cleanup deferred: "
+                    f"{'; '.join(cleanup_warnings)})"
+                )
             return PushResult(
                 ok=True,
                 detail=detail,
                 file_count=copied,
                 byte_count=nbytes,
+                excluded_file_count=detritus.file_count,
+                excluded_byte_count=detritus.byte_count,
+                excluded_roots=tuple(str(root) for root in detritus.roots),
+                excluded_measurement_complete=detritus.measurement_complete,
             )
         try:
-            source_files = _iter_regular_source_files(source)
+            destination_detritus = discover_session_detritus(dest, None)
+        except OSError as exc:
+            return PushResult(
+                ok=False,
+                detail=f"destination detritus discovery failed: {exc}",
+            )
+        try:
+            cleanup_roots = sorted(
+                set(detritus.roots) | set(destination_detritus.roots)
+            )
+            for relative in cleanup_roots:
+                stale = _existing_relative_directory(dest, relative)
+                if stale is not None:
+                    _remove_path_checked(stale)
+        except OSError as exc:
+            return PushResult(
+                ok=False,
+                detail=f"detritus cleanup failed for {relative}: {exc}",
+            )
+        try:
+            source_files = _iter_regular_source_files(source, detritus.roots)
             for src_file in source_files:
                 if _is_excluded_name(src_file.name):
                     continue
@@ -1474,6 +1591,30 @@ class FilesystemTarget(Target):
         except OSError as exc:
             return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
 
+        try:
+            latest_detritus = discover_session_detritus(source, None)
+        except OSError as exc:
+            return PushResult(
+                ok=False,
+                detail=f"detritus revalidation failed: {exc}",
+            )
+        if latest_detritus.roots != detritus.roots:
+            new_roots = set(latest_detritus.roots) - set(detritus.roots)
+            try:
+                for relative in sorted(new_roots):
+                    stale = _existing_relative_directory(dest, relative)
+                    if stale is not None:
+                        _remove_path_checked(stale)
+            except OSError as exc:
+                return PushResult(
+                    ok=False,
+                    detail=f"new detritus cleanup failed for {relative}: {exc}",
+                )
+            return PushResult(
+                ok=False,
+                detail="source detritus changed during publication; retry",
+            )
+
         session_count = _count_sessions(dest)
         status = "partial" if locked_paths else "ok"
         write_sync_meta(
@@ -1483,6 +1624,10 @@ class FilesystemTarget(Target):
             status,
             session_count,
             deferred_files=(str(path) for path in locked_paths),
+            excluded_roots=(str(root) for root in detritus.roots),
+            excluded_file_count=detritus.file_count,
+            excluded_byte_count=detritus.byte_count,
+            excluded_measurement_complete=detritus.measurement_complete,
         )
         detail = f"-> {dest}"
         if locked_paths:
@@ -1496,6 +1641,10 @@ class FilesystemTarget(Target):
             detail=detail,
             file_count=copied,
             byte_count=nbytes,
+            excluded_file_count=detritus.file_count,
+            excluded_byte_count=detritus.byte_count,
+            excluded_roots=tuple(str(root) for root in detritus.roots),
+            excluded_measurement_complete=detritus.measurement_complete,
         )
 
     def sync_status(self, machine: str) -> SyncStatus:

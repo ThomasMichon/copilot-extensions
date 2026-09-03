@@ -17,6 +17,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from agent_logger.sync.detritus import discover_session_detritus
 from agent_logger.sync.notify import post_notify
 from agent_logger.sync.targets.base import (
     NO_WINDOW_KWARGS,
@@ -59,29 +60,63 @@ class IngestTarget(Target):
             return PushResult(ok=False, detail="ingest target requires a url")
         if shutil.which("rsync") is None:
             return PushResult(ok=False, detail="rsync not found on PATH")
-        dest = f"{url}/{machine}/"
-        cmd = ["rsync", "-az", "--delete", *rsync_session_filters(include_sessions)]
-        pw = self._password_file()
-        if pw:
-            cmd += [f"--password-file={pw}"]
-        cmd += [f"{source}/", dest]
         try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT,
-                env=self._rsync_env(),
-                check=False,
-                **NO_WINDOW_KWARGS,
+            detritus = discover_session_detritus(source, include_sessions)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
+        dest = f"{url}/{machine}/"
+        pw = self._password_file()
+        for _ in range(2):
+            cmd = [
+                "rsync",
+                "-az",
+                "--delete",
+                *(["--delete-excluded"] if include_sessions is None else []),
+                *rsync_session_filters(include_sessions, detritus.roots),
+            ]
+            if pw:
+                cmd += [f"--password-file={pw}"]
+            cmd += [f"{source}/", dest]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=_TIMEOUT,
+                    env=self._rsync_env(),
+                    check=False,
+                    **NO_WINDOW_KWARGS,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return PushResult(ok=False, detail=f"rsync failed: {exc}")
+            if proc.returncode != 0:
+                return PushResult(ok=False, detail=proc.stderr.strip()[:300])
+            try:
+                latest = discover_session_detritus(source, include_sessions)
+            except OSError as exc:
+                return PushResult(
+                    ok=False,
+                    detail=f"detritus revalidation failed: {exc}",
+                )
+            if latest.roots == detritus.roots:
+                detritus = latest
+                break
+            detritus = latest
+        else:
+            return PushResult(
+                ok=False,
+                detail="source detritus changed during publication; retry",
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return PushResult(ok=False, detail=f"rsync failed: {exc}")
-        if proc.returncode != 0:
-            return PushResult(ok=False, detail=proc.stderr.strip()[:300])
 
         self._notify(machine)
-        return PushResult(ok=True, detail=f"-> {dest}")
+        return PushResult(
+            ok=True,
+            detail=f"-> {dest}",
+            excluded_file_count=detritus.file_count,
+            excluded_byte_count=detritus.byte_count,
+            excluded_roots=tuple(str(root) for root in detritus.roots),
+            excluded_measurement_complete=detritus.measurement_complete,
+        )
 
     def _notify(self, machine: str) -> None:
         """Best-effort HTTP ping so the consumer can crunch immediately."""

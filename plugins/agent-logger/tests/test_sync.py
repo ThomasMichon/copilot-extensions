@@ -34,6 +34,19 @@ def _make_source(root: Path) -> Path:
     return src
 
 
+def _add_chromium_profile(session: Path, name: str = "browser-run") -> Path:
+    profile = session / "files" / "tool-output" / name
+    default = profile / "Default"
+    network = default / "Network"
+    network.mkdir(parents=True)
+    (profile / "Local State").write_text("{}", encoding="utf-8")
+    (default / "Preferences").write_text("{}", encoding="utf-8")
+    (network / "Cookies").write_bytes(b"cookies")
+    (profile / "component_crx_cache").mkdir()
+    (profile / "component_crx_cache" / "large").write_bytes(b"x" * 1024)
+    return profile
+
+
 def test_registry_names_and_classes() -> None:
     assert TARGET_NAMES == ("local", "onedrive", "ssh", "ssh-tunnel", "ingest")
     assert isinstance(build_target("local", {"path": "/tmp/x"}), LocalTarget)
@@ -66,6 +79,291 @@ def test_local_target_push_excludes_lock_and_writes_meta(tmp_path: Path) -> None
     assert not (machine_dir / "session-state" / "abc-123" / ".lock").exists()
     assert not (machine_dir / "session-state" / "abc-123" / "LOCK").exists()
     assert (machine_dir / "sync-meta.json").is_file()
+
+
+def test_local_target_excludes_and_removes_chromium_profile(
+    tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    profile = _add_chromium_profile(session)
+    lookalike = session / "files" / "lookalike"
+    (lookalike / "Default").mkdir(parents=True)
+    (lookalike / "Local State").write_text("keep", encoding="utf-8")
+    dest_root = tmp_path / "dest"
+    stale_profile = (
+        dest_root
+        / "m1"
+        / profile.relative_to(src)
+    )
+    stale_profile.mkdir(parents=True)
+    (stale_profile / "stale.bin").write_bytes(b"stale")
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert result.ok
+    assert result.excluded_file_count == 4
+    assert result.excluded_byte_count == 1035
+    assert result.excluded_roots == (
+        str(profile.relative_to(src)),
+    )
+    machine = dest_root / "m1"
+    assert not (machine / profile.relative_to(src)).exists()
+    assert (
+        machine / lookalike.relative_to(src) / "Local State"
+    ).read_text(encoding="utf-8") == "keep"
+    metadata = json.loads((machine / "sync-meta.json").read_text())
+    assert metadata["excluded_detritus_root_count"] == 1
+    assert metadata["excluded_detritus_file_count"] == 4
+    assert metadata["excluded_detritus_byte_count"] == 1035
+    assert metadata["excluded_detritus_measurement_complete"] is True
+    assert metadata["excluded_detritus_roots"] == [
+        str(profile.relative_to(src))
+    ]
+
+
+def test_local_target_removes_destination_only_chromium_profile(
+    tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    dest_root = tmp_path / "dest"
+    destination_session = dest_root / "m1" / "session-state" / "old"
+    profile = _add_chromium_profile(destination_session)
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert result.ok
+    assert not profile.exists()
+    assert (src / "session-state" / "abc-123" / "events.jsonl").is_file()
+
+
+def test_chromium_signature_requires_expected_names_and_types(
+    tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    files = src / "session-state" / "abc-123" / "files"
+    bad_name = files / "bad-name"
+    (bad_name / "Profile backup" / "Network").mkdir(parents=True)
+    (bad_name / "Local State").write_text("keep", encoding="utf-8")
+    (bad_name / "Profile backup" / "Preferences").write_text(
+        "keep",
+        encoding="utf-8",
+    )
+    bad_types = files / "bad-types"
+    (bad_types / "Local State").mkdir(parents=True)
+    (bad_types / "Default" / "Preferences").mkdir(parents=True)
+    (bad_types / "Default" / "Network").write_text("keep", encoding="utf-8")
+    dest_root = tmp_path / "dest"
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert result.ok
+    published = dest_root / "m1" / "session-state" / "abc-123" / "files"
+    assert (published / "bad-name" / "Local State").is_file()
+    assert (published / "bad-types" / "Default" / "Network").is_file()
+    assert result.excluded_roots == ()
+
+
+def test_detritus_measurement_race_does_not_block_exclusion(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import detritus
+
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    profile = _add_chromium_profile(session)
+    real_scan = detritus._scan_entries
+
+    def fail_cache(path: Path):
+        if path.name == "component_crx_cache":
+            raise FileNotFoundError(path)
+        return real_scan(path)
+
+    monkeypatch.setattr(detritus, "_scan_entries", fail_cache)
+    dest_root = tmp_path / "dest"
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert result.ok
+    assert result.excluded_roots == (str(profile.relative_to(src)),)
+    assert result.excluded_measurement_complete is False
+    assert not (dest_root / "m1" / profile.relative_to(src)).exists()
+
+
+def test_new_detritus_during_copy_is_removed_and_retried(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import detritus
+    from agent_logger.sync.targets import filesystem
+
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    profile = _add_chromium_profile(session)
+    actual = detritus.discover_session_detritus(src, None)
+    calls = 0
+
+    def discover(_source: Path, _included):
+        nonlocal calls
+        calls += 1
+        return detritus.DetritusSummary() if calls == 1 else actual
+
+    monkeypatch.setattr(filesystem, "discover_session_detritus", discover)
+    dest_root = tmp_path / "dest"
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert not result.ok
+    assert "changed during publication" in result.detail
+    assert not (dest_root / "m1" / profile.relative_to(src)).exists()
+
+
+def test_detritus_cleanup_rejects_symlinked_destination_ancestor(
+    tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    profile = _add_chromium_profile(session)
+    dest_root = tmp_path / "dest"
+    outside = tmp_path / "outside"
+    outside_profile = outside / profile.name
+    outside_profile.mkdir(parents=True)
+    marker = outside_profile / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    linked_parent = (
+        dest_root
+        / "m1"
+        / "session-state"
+        / "abc-123"
+        / "files"
+        / "tool-output"
+    )
+    linked_parent.parent.mkdir(parents=True)
+    try:
+        linked_parent.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlink creation is unavailable")
+
+    result = LocalTarget({"path": str(dest_root)}).push(src, "m1")
+
+    assert not result.ok
+    assert "detritus cleanup failed" in result.detail
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_selected_session_replacement_removes_chromium_profile(
+    tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    profile = _add_chromium_profile(session)
+    dest_root = tmp_path / "dest"
+    destination_profile = dest_root / "m1" / profile.relative_to(src)
+    destination_profile.mkdir(parents=True)
+    (destination_profile / "stale.bin").write_bytes(b"stale")
+
+    result = LocalTarget({"path": str(dest_root)}).push(
+        src,
+        "m1",
+        {"abc-123"},
+    )
+
+    assert result.ok
+    assert not destination_profile.exists()
+    assert (
+        dest_root / "m1" / "session-state" / "abc-123" / "events.jsonl"
+    ).is_file()
+
+
+def test_selected_session_retries_when_detritus_appears(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import detritus
+    from agent_logger.sync.targets import filesystem
+
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    profile = _add_chromium_profile(session)
+    actual = detritus.discover_session_detritus(src, {"abc-123"})
+    calls = 0
+
+    def discover(_source: Path, _included):
+        nonlocal calls
+        calls += 1
+        return detritus.DetritusSummary() if calls == 1 else actual
+
+    monkeypatch.setattr(filesystem, "discover_session_detritus", discover)
+    dest_root = tmp_path / "dest"
+
+    result = LocalTarget({"path": str(dest_root)}).push(
+        src,
+        "m1",
+        {"abc-123"},
+    )
+
+    assert result.ok, result.detail
+    assert not (dest_root / "m1" / profile.relative_to(src)).exists()
+    assert calls >= 3
+
+
+def test_selected_session_migrates_legacy_rescue_snapshot_detritus(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import detritus, provenance
+    from agent_logger.sync.targets import filesystem
+
+    src = _make_source(tmp_path)
+    session = src / "session-state" / "abc-123"
+    profile = _add_chromium_profile(session)
+    provenance_dir = src / "provenance"
+    provenance_dir.mkdir()
+    (provenance_dir / "abc-123.json").write_text(
+        json.dumps(
+            {
+                "provider": "agent-containers",
+                "session_id": "abc-123",
+                "capture_id": "capture-1",
+                "captured_at": "2026-09-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    dest_root = tmp_path / "dest"
+    real_discover = filesystem.discover_session_detritus
+    monkeypatch.setattr(
+        filesystem,
+        "discover_session_detritus",
+        lambda _source, _included: detritus.DetritusSummary(),
+    )
+    first = LocalTarget({"path": str(dest_root)}).push(
+        src,
+        "m1",
+        {"abc-123"},
+    )
+    assert first.ok
+    snapshot = provenance.rescue_snapshot_path(
+        dest_root / "m1",
+        "abc-123",
+        "capture-1",
+    )
+    snapshot_profile = snapshot / profile.relative_to(session)
+    assert os.path.isdir(provenance._windows_extended_path(snapshot_profile))
+
+    monkeypatch.setattr(filesystem, "discover_session_detritus", real_discover)
+    second = LocalTarget({"path": str(dest_root)}).push(
+        src,
+        "m1",
+        {"abc-123"},
+    )
+
+    assert second.ok, second.detail
+    assert not os.path.exists(provenance._windows_extended_path(snapshot_profile))
+    assert os.path.isfile(
+        provenance._windows_extended_path(snapshot / "events.jsonl")
+    )
 
 
 def test_local_target_push_is_incremental(tmp_path: Path) -> None:
@@ -699,12 +997,14 @@ def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> 
     for key, val in base.NO_WINDOW_KWARGS.items():
         assert captured.get(key) == val
     assert "--include=provenance/abc-123.json" in captured_commands[-1]
+    assert "--delete-excluded" not in captured_commands[-1]
 
     monkeypatch.setattr(ingest.subprocess, "run", _fake_run)
     IngestTarget({"url": "rsync://h/mod"}).push(tmp_path, "m1", {"abc-123"})
     for key, val in base.NO_WINDOW_KWARGS.items():
         assert captured.get(key) == val
     assert "--include=provenance/abc-123.json" in captured_commands[-1]
+    assert "--delete-excluded" not in captured_commands[-1]
 
 
 def _cfg(home: Path, source: Path, dest: Path) -> Config:
@@ -1440,6 +1740,27 @@ def test_rsync_session_filters_scope_without_allowlist() -> None:
     # session-store.db is dropped when filtering by repo.
     assert "--include=session-store.db" not in filtered
     assert filtered[-1] == "--exclude=*"
+
+
+def test_rsync_session_filters_exclude_detected_detritus_first() -> None:
+    from agent_logger.sync.targets.base import rsync_session_filters
+
+    root = Path("session-state") / "abc-123" / "files" / "tool" / "browser"
+    filters = rsync_session_filters(None, (root,))
+
+    assert filters[0] == f"--exclude=/{root.as_posix()}/***"
+    assert filters.index(filters[0]) < filters.index("--include=session-state/***")
+
+
+def test_rsync_session_filters_escape_pattern_characters() -> None:
+    from agent_logger.sync.targets.base import rsync_session_filters
+
+    root = Path("session-state") / "abc" / "files" / "run[1]*?"
+    filters = rsync_session_filters(None, (root,))
+
+    assert filters[0] == (
+        "--exclude=/session-state/abc/files/run\\[1\\]\\*\\?/***"
+    )
 
 
 def test_local_target_push_includes_only_selected_provenance(tmp_path: Path) -> None:
