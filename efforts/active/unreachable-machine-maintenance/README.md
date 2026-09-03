@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial pull requests from one worktree
 - **Created:** 2026-09-03
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** vision-extending for
   [`visions/agent-fabric`](../../../visions/agent-fabric/README.md)
   - durable maintenance handoff when live reach is unavailable
@@ -68,54 +68,54 @@ reproducible. The workflow needs:
 ### Phase 1 - Intent and maintenance-handoff contract
 - [x] Extend the agent-fabric vision with the unreachable-machine maintenance
       handoff.
-- [ ] Define the provider-neutral queue locator and maintenance issue contract:
+- [x] Define the provider-neutral queue locator and maintenance issue contract:
       provider, explicit user repository, canonical machine identity,
       maintenance classification, requested outcome, safety gates, verification,
       and closure evidence.
-- [ ] Keep ownership singular: agent-ssh reports the routing boundary,
+- [x] Keep ownership singular: agent-ssh reports the routing boundary,
       agent-machines owns declarative convergence and target-local execution,
       agent-dispatch owns optional claims, and the user's tracker owns queued
       work.
 
 ### Phase 2 - Emitted guidance and target-local skill
-- [ ] Extend the agent-ssh mesh pointer with a concise unreachable-target rule
+- [x] Extend the agent-ssh mesh pointer with a concise unreachable-target rule
       and a pointer to the companion skill.
-- [ ] Add `performing-machine-maintenance` to agent-machines with source-side
+- [x] Add `performing-machine-maintenance` to agent-machines with source-side
       queueing and target-side draining workflows.
-- [ ] Treat issue instructions as advisory: require trusted repository
+- [x] Treat issue instructions as advisory: require trusted repository
       authority, re-read the issue revision before apply, re-derive commands
       from repository state, and preserve destructive/elevation/restart gates.
-- [ ] Use a deduplicated agent-dispatch task as the execution claim when that
+- [x] Use a deduplicated agent-dispatch task as the execution claim when that
       layer is available; otherwise require the issue provider to expose a
       single-owner claim before mutation.
-- [ ] Update agent-ssh and agent-machines documentation without hard-coding a
+- [x] Update agent-ssh and agent-machines documentation without hard-coding a
       forge, repository, machine roster, or organization-specific labels.
 
 ### Phase 3 - Validation and release
-- [ ] Add cross-platform assertions for the emitted guidance and skill
+- [x] Add cross-platform assertions for the emitted guidance and skill
       structure.
-- [ ] Validate version surfaces and install contracts for both changed plugins.
+- [x] Validate version surfaces and install contracts for both changed plugins.
 - [ ] Land, deploy through the normal marketplace path, close #1891, and
       archive the effort.
 
 ## Validation Plan
 
-- [ ] The emitted context says not to retry indefinitely or bypass the normal
+- [x] The emitted context says not to retry indefinitely or bypass the normal
       installer when a verified SSH target is unreachable.
-- [ ] The guidance prioritizes agent-machines requirement packages or another
+- [x] The guidance prioritizes agent-machines requirement packages or another
       declared auto-update mechanism before a maintenance issue.
-- [ ] The issue contract is provider-neutral and resolves the user repository
+- [x] The issue contract is provider-neutral and resolves the user repository
       and canonical machine identity from an explicit durable locator.
-- [ ] The target-local skill discovers only maintenance work assigned to the
+- [x] The target-local skill discovers only maintenance work assigned to the
       current machine, previews changes, preserves confirmation gates, verifies
       outcomes, and records closure evidence.
-- [ ] Transient transport, authentication, and configuration failures remain
+- [x] Transient transport, authentication, and configuration failures remain
       diagnosis paths rather than automatically creating maintenance work.
-- [ ] Concurrent drainers cannot both apply one issue, and an issue edited after
+- [x] Concurrent drainers cannot both apply one issue, and an issue edited after
       preview is re-evaluated before mutation.
-- [ ] The workflow degrades safely when agent-machines or an issue-provider tool
+- [x] The workflow degrades safely when agent-machines or an issue-provider tool
       is unavailable.
-- [ ] Bash and PowerShell context emitters remain semantically equivalent.
+- [x] Bash and PowerShell context emitters remain semantically equivalent.
 
 ## Proposal
 
@@ -139,3 +139,22 @@ not imported into any plugin.
 - Plan review moved standing intent from the transport leaf to the agent-fabric
   branch, made the queue locator explicit, kept issue prose advisory, and reused
   agent-dispatch claims instead of inventing a parallel ownership model.
+
+### 2026-09-03 - Maintenance handoff implemented
+- Extended the repository-gated agent-ssh mesh pointer with the bounded
+  unreachable-route decision and a namespaced pointer to the target-local skill.
+- Added agent-machines `performing-machine-maintenance` with explicit queue
+  location, declarative-first source handoff, trusted-state re-derivation,
+  revision recheck, single-claim ownership, safety gates, verification, and
+  evidence-based closure.
+- Added provider-neutral structural assertions for both plugin surfaces.
+- Full validation passed with 88 agent-ssh tests (8 skipped) and 305
+  agent-machines tests; install-contract, version-consistency, and focused lint
+  gates are green.
+- Implementation review required shared or target-authoritative dispatch,
+  explicit provider queue predicates, revision-bound claims with a final
+  mutation-boundary check, the `claimed` to `started` lifecycle transition, and
+  an agent-ssh fallback that remains safe when agent-machines is absent.
+- Re-review made the dispatch exclusion stable at issue identity rather than
+  issue revision, limited suspension to owners with a durable resume path, and
+  made the no-agent-machines fallback unconditionally inspection-only.

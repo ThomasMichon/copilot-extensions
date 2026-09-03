@@ -43,6 +43,17 @@ optional static machine metadata shared with agent-worktrees and agent-bridge:
 purpose, and `capabilities` is an ordered list of broad discovery hints. These
 fields describe topology, not live machine state.
 
+The repository-gated mesh pointer also names the maintenance fallback for a
+machine that remains unreachable after bounded diagnosis. Repeatable state
+belongs in agent-machines requirement packages or another declared auto-update
+owner; residual local execution becomes a machine-scoped maintenance issue in
+an explicitly identified user repository. The target drains that queue with
+the optional `agent-machines:performing-machine-maintenance` skill when that
+plugin is active. The emitted rule remains self-contained when it is absent:
+maintenance becomes inspection-only and mutation stops until an equivalent
+trusted workflow is available. agent-ssh reports the routing boundary but does
+not own the queue or execute issue instructions.
+
 ## Minimal setup
 
 When the plugin is enabled, its skills and hook are available immediately. The

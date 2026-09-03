@@ -155,7 +155,17 @@ so use `<catalog argv[0]> verify <alias>` to probe a host live.
 A cwd-gated `sessionStart` hook (`scripts/emit-mesh-pointer.*`) emits only a
 **succinct pointer** to this command when the repo has a `machines.yaml`, rather
 than injecting the whole table every session — run `mesh-status` on demand for
-the detail.
+the detail. The same pointer defines the unreachable-route handoff: after every
+declared route remains unavailable following bounded diagnosis, put repeatable
+state in agent-machines or another declared auto-update owner and queue residual
+local work in the explicitly identified user repository. Target-local execution
+uses the optional cross-plugin `agent-machines:performing-machine-maintenance`
+skill when active. Without it, maintenance is inspection-only: preserve the
+machine-scoped issue and do not mutate until an equivalent trusted workflow
+supplies queue location, atomic claim, revision, confirmation, and verification
+semantics.
+Authentication, host-key, profile, and transport-configuration failures remain
+diagnosis paths rather than maintenance queue entries.
 
 ## Writing a transport
 
