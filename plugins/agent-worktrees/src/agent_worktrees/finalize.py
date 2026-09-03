@@ -1400,7 +1400,6 @@ def validate_and_finalize(
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
-    branch = f"worktree/{worktree_id}"
     upstream = f"{repo.remote}/{repo.default_branch}"
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
 
@@ -1416,6 +1415,8 @@ def validate_and_finalize(
                 f"Cannot finalize {worktree_id}: its existing claim ledger is "
                 f"unreadable ({exc}). Creator ownership is preserved.")
             return False
+    branch = _worktree_branch(record, worktree_id)
+    checkout_managed = record is None or record.checkout_managed
 
     try:
         from . import claim_handoffs
@@ -1622,10 +1623,10 @@ def validate_and_finalize(
         # rendering as diverged in the picker (#1106).
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
 
-        if not record.checkout_managed or inside_worktree or has_live_session:
+        if not checkout_managed or inside_worktree or has_live_session:
             reason = (
                 "the checkout is owned by an external session host"
-                if not record.checkout_managed
+                if not checkout_managed
                 else (
                     "this shell is running inside the worktree"
                     if inside_worktree
@@ -1651,7 +1652,7 @@ def validate_and_finalize(
                 branch=branch,
                 reason=(
                     "external_checkout"
-                    if not record.checkout_managed
+                    if not checkout_managed
                     else ("inside_worktree" if inside_worktree else "live_session")
                 ),
             )
@@ -1705,7 +1706,7 @@ def validate_and_finalize(
 
             git_ops.prune_worktrees(cwd=anchor)
 
-        if record is None or record.checkout_managed:
+        if checkout_managed:
             merged = permissions.merge_permissions(anchor, worktree_path)
             if merged:
                 for m in merged:
