@@ -7,7 +7,9 @@
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends [`visions/plugin-services`](../../../visions/plugin-services/README.md)
   — **vision-extending**: adds the `single-instance-lease` and
-  `work-coalescing-singleton` behaviors (written in first, Phase 1). Also
+  `work-coalescing-singleton` behaviors (written in first, Phase 1), plus the
+  least-privilege lifecycle tier, stable register-once launcher, and disposable
+  payload guarantees (#625). Also
   **closes** [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
   §*The warm-cache accelerator — optional, on-demand, refcounted, losable* (the
   resident tracker), which is stated-but-unbuilt.
@@ -22,8 +24,13 @@
   (mcp version GC), #742
   (marker atomicity), #743
   (vault cutover), #744
-  (coalescing tier + mcp multiplexer).
-- **Related:** #625 (lifecycle pecking order), #438 (bridge cutover-on-update),
+  (coalescing tier + mcp multiplexer), #1836
+  (vault user-mode ensure + stable launcher/register-once), #1837
+  (dispatch register-once under elevated update), #1841
+  (declare service lifecycle tiers and reconcile user-mode ensure).
+- **Lifecycle-policy slice:** #625 (lifecycle pecking order and conformance
+  audit).
+- **Related:** #438 (bridge cutover-on-update),
   #396 (dispatch hot-reconciled supervision), #229 (worktree state store),
   #918 (resident status monitor), #1788 (session lifecycle hook coalescing).
 
@@ -82,6 +89,22 @@ cross-checked against a live host running ~7 concurrent sessions) found:
 - No implementation; the reviewed intent lands before any code. Reconciled:
   vision-extending (lease + coalescing tier), vision-closing (worktrees resident
   tracker), the rest below-altitude conformance.
+
+### Phase 1c — Lifecycle supervision policy and conformance audit (#625)
+
+- Extend `visions/plugin-services` with the least-privilege lifecycle pecking
+  order, stable register-once launcher, cutover-on-update, and disposable
+  payload guarantees.
+- Extend `service-lifecycle-supervision` with the four-tier decision rule, the
+  stable-launcher update path, and the Windows process-current-directory trap.
+- Audit agent-dispatch, agent-bridge, and agent-vault against those guarantees.
+  Record conforming evidence, absorb gaps into an existing tracker where one
+  exists, and file a focused follow-up only for an untracked gap before closing
+  #625. Treat agent-worktrees #1550 as the already-closed hook-launch precedent
+  for the payload-working-directory rule. Track the pattern's newly required
+  per-plugin tier declarations and user-mode-ensure adoption in #1841.
+- Keep this slice intent/documentation-only until its reviewed PR lands; any
+  conformance implementation follows in later PRs under the tracked gaps.
 
 ### Phase 2 — Shared single-instance lease + reaper primitive (#737)
 
@@ -171,6 +194,12 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   trees; deployed multi-session measurements after cutover.
 - **Regression guards:** `check-install-contract.py` clean; version-consistency
   guards green.
+- **Lifecycle-policy checks (#625):** docs-consistency guards pass; each named
+  plugin has cited evidence for stable launcher, register-once update,
+  cutover-on-update, and payload-working-directory safety; every failed item is
+  represented by an existing or newly filed public follow-up issue. The new
+  declared-tier/escalation-rationale requirement is adopted through #1841 rather
+  than treated as evidence that predates the pattern.
 
 ## Journal
 
@@ -278,3 +307,36 @@ per-plugin last-known-good rollout (#742).
 - Filed #1788 and added Phase 4b before implementation. The next slice is to
   design the smallest combined lifecycle request and explicit monitor-down
   fallback, then land focused tests and deployed before/after evidence.
+
+### 2026-09-03 — Lifecycle supervision policy and conformance audit (#625)
+
+- Extended the plugin-services vision with a four-tier, least-privilege
+  lifecycle hierarchy: user-mode ensure/auto-run, scheduled activation, system
+  service, and consumer-selected container management. Added the stable
+  register-once launcher, cutover-on-update, and disposable-payload guarantees.
+- Extended `service-lifecycle-supervision` with the capability-based tier
+  decision, alignment to the install contract's non-elevated user-mode ensure,
+  stable runtime-resolving launchers, and the Windows distinction between
+  PowerShell provider location and the inherited Win32 process cwd.
+- Audited the three service exemplars:
+  - **agent-bridge:** conforms to #625's original four checks: stable launcher,
+    register-once, cutover-on-version-update, and payload-cwd safety. Its
+    documented stop-and-swap path is only the permitted cutover-failure
+    fallback.
+  - **agent-dispatch:** the coordinator's stable launcher, ZDD cutover, and
+    payload-cwd safety conform. The supervisor task also uses the stable
+    launcher, but an ordinary update launched from an elevated shell can still
+    force-register an already-correct task; filed #1837.
+  - **agent-vault:** payload-cwd safety conforms. Its start path is gated on
+    Scheduled Task registration, its lifecycle definitions embed concrete
+    runtime slots, and they are rewritten during updates; filed #1836. Its
+    separate drain-safe cutover gap remains tracked by #743.
+- None of the three architecture docs yet declares the selected tier,
+  availability contract, platform mapping, and escalation rationale required by
+  the revised pattern. Filed the cross-plugin adoption pass as #1841.
+- Self-staged installer copies are intentionally disposable and do not count as
+  the original marketplace payload: each audited installer first releases the
+  original payload cwd before running from its external staging copy.
+- Next: land this reviewed intent/pattern PR, report the evidence and follow-up
+  trackers on #625, then close #625 while #1836, #1837, #1841, and #743 carry
+  the remaining implementation.
