@@ -7804,6 +7804,8 @@ def _load_hook_client_module():
 class _ResidentHookPolicy:
     """Warm hook policy inputs that previously required per-event discovery."""
 
+    _MAX_CONTEXT_CONFIGS = 16
+
     def __init__(self, hook_client, ttl: float = 300.0):
         self.hook_client = hook_client
         self.ttl = ttl
@@ -7883,9 +7885,22 @@ class _ResidentHookPolicy:
     def context_config(self):
         project = cfg.active_project() or ""
         now = time.monotonic()
+        stale = [
+            key
+            for key, (cached_at, _) in self._context_configs.items()
+            if now - cached_at >= self.context_ttl
+        ]
+        for key in stale:
+            self._context_configs.pop(key, None)
         cached = self._context_configs.get(project)
-        if cached and now - cached[0] < self.context_ttl:
+        if cached:
             return cached[1]
+        if len(self._context_configs) >= self._MAX_CONTEXT_CONFIGS:
+            oldest = min(
+                self._context_configs,
+                key=lambda key: self._context_configs[key][0],
+            )
+            self._context_configs.pop(oldest, None)
         value = cfg.load_config()
         self._context_configs[project] = (now, value)
         return value

@@ -66,6 +66,27 @@ def test_resident_session_context_inputs_are_cached(monkeypatch):
     assert calls == {"config": 1, "anchors": 1}
 
 
+def test_resident_session_context_config_cache_is_bounded(monkeypatch):
+    now = [0.0]
+    project = [""]
+
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(m.cfg, "active_project", lambda: project[0])
+    monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+    policy = m._ResidentHookPolicy(object(), ttl=300)
+
+    for index in range(policy._MAX_CONTEXT_CONFIGS + 4):
+        project[0] = f"project-{index}"
+        now[0] += 1
+        policy.context_config()
+    assert len(policy._context_configs) == policy._MAX_CONTEXT_CONFIGS
+
+    now[0] += policy.context_ttl
+    project[0] = "fresh-project"
+    policy.context_config()
+    assert list(policy._context_configs) == ["fresh-project"]
+
+
 def test_reconcile_sessions_registered():
     assert m.COMMAND_MAP["reconcile-sessions"] is m.cmd_reconcile_sessions
     assert m._WORKTREE_VERBS["reconcile-sessions"] == "reconcile-sessions"
