@@ -1292,6 +1292,56 @@ def test_successful_headless_nudge_holds_fence_until_conclusion(q, client):
     assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
 
 
+def test_successful_nudge_counts_after_legacy_pending_attempts(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:session-exact",
+        worktree="worktree-exact",
+    )
+    q.record_spawn_conclusion(
+        reservation.key,
+        conclusion_state="pending",
+        conclusion_detail=json.dumps(
+            {
+                "action": "failed",
+                "reason": "session-identity-unavailable",
+                "attempts": 3,
+                "next_attempt_at": 0,
+            }
+        ),
+    )
+    q.claim_one("headless-worker", task_id=task.id)
+    q.start(task.id, "headless-worker", owner_session_id="session-exact")
+    q.complete(task.id, "headless-worker")
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        conclusion_fn=lambda *_args: {
+            "action": "skipped",
+            "reason": "live-session",
+        },
+        local_body_verdict_fn=lambda _sid: tracking.LIVE,
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_acp_session_fn=lambda _sid: "acp-session-exact",
+        local_resume_fn=lambda _sid, _prompt: True,
+    )
+
+    assert sup.reconcile() == 0
+    detail = json.loads(
+        q.get_reservation(reservation.key).conclusion_detail or "{}"
+    )
+    assert detail["attempts"] == 4
+    assert detail["same_owner_nudge"] == "delivered"
+
+
 def test_nonexclusive_headless_conclusion_nudges_before_settlement(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)

@@ -1882,7 +1882,7 @@ class Supervisor:
                                 )
                                 preconcluded = {
                                     **preconcluded,
-                                    "attempts": max(1, prior_attempts),
+                                    "attempts": prior_attempts + 1,
                                     "next_attempt_at": 0,
                                     "same_owner_nudge": "delivered",
                                 }

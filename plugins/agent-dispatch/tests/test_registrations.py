@@ -115,7 +115,7 @@ def test_validate_accepts_each_kind():
                 "fleet": {"pool": ["host-a"]},
                 "disposable_cli_labels": ["review"],
             },
-            "only for local worker bodies",
+            "only for local bodies",
         ),
     ],
 )

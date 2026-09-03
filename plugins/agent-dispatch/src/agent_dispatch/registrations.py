@@ -88,7 +88,7 @@ def _validate_disposable_cli_labels(spec: dict) -> None:
         raise RegistrationError("'fleet' must be a JSON object")
     if fleet.get("pool"):
         raise RegistrationError(
-            "disposable CLI conclusion is supported only for local worker bodies"
+            "disposable worker conclusion is supported only for local bodies"
         )
     for key, routed in (
         ("headless_labels", spec.get("headless_labels") or []),
