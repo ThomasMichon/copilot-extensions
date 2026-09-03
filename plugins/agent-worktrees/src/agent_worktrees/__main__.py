@@ -16317,6 +16317,7 @@ def _related_usage() -> None:
     print("Commands:")
     print("  --conduct                             Emit merged session guidance")
     print("  list [--role R] [--json]            List related repos (and the primary)")
+    print("       [--require-managed]             Fail outside an adopted project")
     print("  show <name> [--json]                Show a related repo (+ registry context)")
     print("  add <name>                          Link a related repo + scaffold its doc")
     print("     [--role R] [--summary S] [--doc PATH] [--delegate D]")
@@ -17120,6 +17121,11 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             project, _assumed = _resolve_active_project(None)
             if project:
                 cfg.set_active_project(project)
+    if "--require-managed" in rest and not cfg.active_project():
+        output.err(
+            "The current repo is not an adopted agent-worktrees project."
+        )
+        return 1
 
     anchor = _related_anchor(rest)
     if not anchor:
