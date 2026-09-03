@@ -768,3 +768,24 @@ enforcement before migrating the complete contributor stack.
 - Freeze epoch remains 3. Hold command-guide variants rather than repairing the
   stimulus inline. Next gate: establish the F0 `capability-guide` control before
   interpreting its deferred form.
+
+### 2026-09-03 - Capability-guide F0 passes and F3 fails selection
+
+- Ran three epoch-3 F0 full-inline `capability-guide` controls after verifying
+  that each task-local `.synthetic/execution.json` materialized READY state,
+  publication-safe synthetic material, an approved reachable destination, a
+  satisfied required review gate, and exact owned argv.
+- All three F0 runs passed literally. They completed the bounded read, validated
+  mutation, and objective confirmation in order with three, two, and two tool
+  calls, zero guide rereads after eager subtraction, zero broad exploration,
+  complete CAP-1 provenance, and durations of 66, 77, and 75 seconds.
+- The corresponding F3 repository-relative, safety-gated, flat-fragment cell
+  passed only 1/3. Repetitions 1 and 2 loaded the required
+  `capability-procedure`, then broadened into guide discovery and read the
+  irrelevant `publication-checks` and `destination-matrix` guides before
+  mutation. The independent judges classified both as false passes with CAP-1
+  violations; repetition 3 passed with only the required guide.
+- Reject this F3 capability-guide cell. The full-inline control establishes a
+  unanimous task-local correctness ceiling, while the deferred form introduces
+  unstable compensating exploration and four irrelevant guide reads across
+  three repetitions. Freeze epoch remains 3.
