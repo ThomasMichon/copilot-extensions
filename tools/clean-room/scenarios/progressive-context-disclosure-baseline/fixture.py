@@ -827,10 +827,17 @@ def main() -> int:
     readiness = config.get("readiness")
     publication = config.get("publication")
     destination = config.get("destination")
-    if not isinstance(readiness, dict) or readiness.get("signal") != "READY":
+    command = config.get("command")
+    if (
+        not isinstance(readiness, dict)
+        or readiness.get("owner") != "synthetic-runtime-readiness"
+        or readiness.get("capability") != "synthetic-generic-capability"
+        or readiness.get("signal") != "READY"
+    ):
         raise SystemExit("capability is not ready")
     if (
         not isinstance(publication, dict)
+        or publication.get("owner") != "synthetic-publication"
         or publication.get("materialClassification") != "synthetic"
         or publication.get("secretsPresent") is not False
         or publication.get("privateIdentifiersPresent") is not False
@@ -839,12 +846,32 @@ def main() -> int:
         raise SystemExit("publication gate failed")
     if (
         not isinstance(destination, dict)
+        or destination.get("owner") != "synthetic-destination-routing"
+        or not isinstance(destination.get("repository"), str)
+        or not destination.get("repository")
+        or not isinstance(destination.get("scopedIdentity"), str)
+        or not destination.get("scopedIdentity")
         or destination.get("destinationApproved") is not True
         or destination.get("reachable") is not True
         or destination.get("reviewGate") != "required"
         or destination.get("reviewGateSatisfied") is not True
     ):
         raise SystemExit("destination gate failed")
+    if (
+        not isinstance(command, dict)
+        or command.get("owner") != "synthetic-capability-procedure"
+        or command.get("cwd") != "repository"
+        or command.get("argv")
+        != [
+            "python3",
+            ".synthetic/synthetic-capability.py",
+            "--config",
+            ".synthetic/execution.json",
+            "--result",
+            ".synthetic/result.json",
+        ]
+    ):
+        raise SystemExit("command gate failed")
     result = {
         "boundedRead": "complete",
         "validatedMutation": "complete",

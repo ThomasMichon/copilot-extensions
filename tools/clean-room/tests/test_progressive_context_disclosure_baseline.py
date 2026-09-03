@@ -309,6 +309,22 @@ def test_execution_tasks_materialize_satisfiable_grounding(
         root / "repository" / ".synthetic" / "result.json"
     ).exists()
 
+    execution["destination"]["destinationApproved"] = True
+    execution["destination"]["owner"] = "wrong-owner"
+    (
+        root / "repository" / ".synthetic" / "execution.json"
+    ).write_text(json.dumps(execution), encoding="utf-8")
+    wrong_owner = subprocess.run(
+        [sys.executable, *execution["command"]["argv"][1:]],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert wrong_owner.returncode != 0
+    assert not (
+        root / "repository" / ".synthetic" / "result.json"
+    ).exists()
+
 
 def test_spill_materializes_the_full_aggregate_artifact(
     tmp_path: Path,
