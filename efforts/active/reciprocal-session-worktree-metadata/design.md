@@ -40,7 +40,9 @@ The worktree record remains authoritative for:
 The session projection is authoritative for nothing outside its own successful
 write receipt. It is a reciprocal index and recovery breadcrumb. A missing,
 stale, corrupt, restored, or future-version projection may reduce convenience,
-but it cannot change the worktree's lifecycle by itself.
+but it cannot change the worktree's lifecycle by itself. Rebuilding missing or
+corrupt state may conservatively preserve individually validated relations
+without claiming that the reconstructed set contains all historical relations.
 
 This preserves **derive, don't duplicate**: there is one owned fact and a
 versioned materialized projection carrying enough source revision data to prove
@@ -99,10 +101,11 @@ The exact schema is a Phase 1 decision, but these constraints are binding:
 - A session may have one bound relation and multiple controller relations.
 - The projection retains at most 128 relations. The bound relation and
   nonterminal controller relations win retention; oldest terminal/finalized
-  controller relations are evicted by authoritative revision. If protected
-  relations alone exceed the cap, the writer sets `overflow: true`, preserves
-  the newest representable subset, records the excluded count in
-  `omitted_relations`, and leaves the complete truth in the worktree records.
+  controller relations are evicted by authoritative revision. Schema v1
+  records a best-effort excluded count. Schema v2 supersedes that count contract
+  with `omitted_relations: null` whenever overflow is known, because an
+  incremental writer cannot count identities it no longer retains. The complete
+  truth remains in the worktree records.
 - Raw handoff capabilities, credentials, prompts, transcript text, and
   unrestricted command arguments are never stored.
 - Portable identity is separated from machine-local hints. Absolute paths, PIDs,
@@ -334,11 +337,12 @@ produced during synchronization, not by enumerating the live session-state root.
 The live agent-worktrees paths remain limited to exact-ID reads, explicit
 backfill, and the existing fixed-budget resident cursor.
 
-When `overflow: true`, the projection is explicitly incomplete and reports the
-number of omitted relations. Reverse lookup then degrades to agent-worktrees'
-record-side controller query or a prebuilt synchronized-corpus index; consumers
-must not present the retained projection subset as the session's complete
-controller set.
+When `overflow: true`, the projection is explicitly incomplete. Schema v1
+reports a best-effort omitted count; schema v2 reports
+`omitted_relations: null` rather than asserting an unknowable cardinality.
+Reverse lookup then degrades to agent-worktrees' record-side controller query or
+a prebuilt synchronized-corpus index; consumers must not present the retained
+projection subset as the session's complete controller set.
 
 ## Open design decisions
 
