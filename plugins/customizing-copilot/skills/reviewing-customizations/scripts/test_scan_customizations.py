@@ -612,6 +612,119 @@ def test_task_capable_project_agent_requires_self_guard(tmp_path: Path):
     assert "`worker` agent" in finding.message
 
 
+def test_explicit_owned_agent_root_adds_blocking_agent_checks(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / "services" / "document-intake-bureau" / "agents"
+    agents.mkdir(parents=True)
+    agent = agents / "document-intake-processor.agent.md"
+    agent.write_text("# Missing frontmatter\n", encoding="utf-8")
+
+    assert not any(
+        finding.check == "agent-frontmatter"
+        for finding in scan.run(repo).findings
+    )
+
+    roots = scan.resolve_owned_agent_roots(
+        repo, ["services/document-intake-bureau/agents"],
+    )
+    report = scan.run(repo, owned_agent_roots=roots)
+
+    finding = next(
+        finding
+        for finding in report.findings
+        if finding.check == "agent-frontmatter"
+    )
+    assert finding.severity == scan.BLOCKING
+    assert finding.path == str(agent.resolve())
+
+
+def test_owned_agent_root_is_shallow_and_agent_only(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / "services" / "example" / "agents"
+    nested = agents / "nested"
+    nested.mkdir(parents=True)
+    (agents / "reader.agent.md").write_text(
+        "---\ndescription: Reader.\ntools: ['read']\n---\n\n# Reader\n",
+        encoding="utf-8",
+    )
+    (nested / "ignored.agent.md").write_text(
+        "# Missing frontmatter\n", encoding="utf-8",
+    )
+    (agents / "README.md").write_text(
+        "# Not an agent\n", encoding="utf-8",
+    )
+
+    roots = scan.resolve_owned_agent_roots(
+        repo, ["services/example/agents"],
+    )
+    report = scan.run(repo, owned_agent_roots=roots)
+
+    assert not any(
+        finding.check == "agent-frontmatter"
+        for finding in report.findings
+    )
+
+
+def test_owned_agent_root_rejects_traversal(
+    tmp_path: Path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert scan.main([
+        str(repo),
+        "--owned-agent-root",
+        "../outside",
+    ]) == 2
+    assert "--owned-agent-root" in capsys.readouterr().err
+
+
+def test_owned_agent_root_reports_missing_directory(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert scan.main([
+        str(repo),
+        "--owned-agent-root",
+        "missing",
+    ]) == 2
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_owned_agent_root_rejects_absolute_path(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+
+    assert scan.main([
+        str(repo),
+        "--owned-agent-root",
+        str(outside.resolve()),
+    ]) == 2
+    assert "repository-relative" in capsys.readouterr().err
+
+
+def test_owned_agent_root_rejects_symlink_escape(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+    link = repo / "service-agents"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    assert scan.main([
+        str(repo),
+        "--owned-agent-root",
+        "service-agents",
+    ]) == 2
+    assert "must not be a symlink" in capsys.readouterr().err
+
+
 def test_task_disabled_agent_is_exempt_from_self_guard(tmp_path: Path):
     repo = tmp_path / "repo"
     agents = repo / ".github" / "agents"
@@ -2192,6 +2305,61 @@ def test_metadata_inventory_covers_supported_repo_surfaces(tmp_path: Path):
         "<plugin:local/local-plugin>/skills/plugin-skill/SKILL.md"
         in paths
     )
+
+
+def test_owned_agent_root_joins_context_budget_metadata(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / "services" / "document-intake-bureau" / "agents"
+    docs = repo / "services" / "document-intake-bureau" / "docs"
+    agents.mkdir(parents=True)
+    docs.mkdir(parents=True)
+    _agent(
+        agents,
+        "document-intake-processor",
+        desc="Document intake processor.",
+    )
+    (docs / "README.md").write_text(
+        "# Service documentation\n", encoding="utf-8",
+    )
+    roots = scan.resolve_owned_agent_roots(
+        repo, ["services/document-intake-bureau/agents"],
+    )
+
+    budget = scan.build_context_budget(
+        repo,
+        home=tmp_path / "home",
+        owned_agent_roots=roots,
+    )
+    paths = {
+        entry["path"]
+        for entry in budget["metadata_upper_bounds"]["files"]
+    }
+
+    assert (
+        "services/document-intake-bureau/agents/"
+        "document-intake-processor.agent.md"
+    ) in paths
+    assert "services/document-intake-bureau/docs/README.md" not in paths
+
+
+def test_default_budget_does_not_add_unenabled_repo_plugin_agents(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _agent(
+        repo / "plugins" / "local-plugin" / "agents",
+        "local-agent",
+        desc="Local plugin agent.",
+    )
+
+    budget = scan.build_context_budget(repo, home=tmp_path / "home")
+    paths = {
+        entry["path"]
+        for entry in budget["metadata_upper_bounds"]["files"]
+    }
+
+    assert "plugins/local-plugin/agents/local-agent.agent.md" not in paths
 
 
 def test_custom_instruction_dirs_accept_comma_separator(
