@@ -824,6 +824,8 @@ def main() -> int:
     ):
         raise SystemExit("execution paths escape the bounded repository")
     config = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise SystemExit("execution configuration is not an object")
     readiness = config.get("readiness")
     publication = config.get("publication")
     destination = config.get("destination")
@@ -1927,6 +1929,10 @@ def _validate_corpus_and_tasks() -> None:
                     for locator in locators
                 )
                 or not isinstance(readiness, dict)
+                or readiness.get("owner")
+                != "synthetic-runtime-readiness"
+                or readiness.get("capability")
+                != "synthetic-generic-capability"
                 or readiness.get("signal") != "READY"
                 or not isinstance(publication, dict)
                 or publication.get("owner") != "synthetic-publication"
@@ -1964,8 +1970,9 @@ def _validate_corpus_and_tasks() -> None:
                 != 1
             ):
                 raise ValueError(
-                    f"execution-demanding task lacks satisfiable readiness, "
-                    f"destination, review-gate, or mutation grounding: "
+                    f"execution-demanding task lacks satisfiable owned "
+                    f"readiness, publication, destination, review-gate, "
+                    f"or mutation grounding: "
                     f"{task_id}"
                 )
         special = task.get("referenceFixture")
