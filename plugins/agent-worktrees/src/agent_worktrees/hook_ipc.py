@@ -53,7 +53,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 raise HookUnavailable
             if not isinstance(result, dict):
                 result = {}
-            response = {"version": 1, "result": result}
+            response = {"version": 1, "kind": kind, "result": result}
             self.wfile.write(
                 json.dumps(response, separators=(",", ":")).encode("utf-8")
                 + b"\n"

@@ -22,6 +22,7 @@ _SESSION_START_TIMEOUT_S = 6.0
 _PROJECT_RESOLVE_TIMEOUT_S = 3.0
 _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
+_LIFECYCLE_KINDS = {"sessionStart", "projectResolve"}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -86,6 +87,10 @@ def _request(kind: str, payload: dict, home: Path) -> dict | None:
         not isinstance(value, dict)
         or value.get("version") != 1
         or value.get("fallback") is True
+        or (
+            kind in _LIFECYCLE_KINDS
+            and value.get("kind") != kind
+        )
     ):
         return None
     result = value.get("result")

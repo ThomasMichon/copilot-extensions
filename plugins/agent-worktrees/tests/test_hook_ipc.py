@@ -47,7 +47,7 @@ def test_lifecycle_request_keeps_connect_timeout_bounded(monkeypatch, tmp_path):
             return None
 
         def recv(self, _size):
-            return b'{"version":1,"result":{}}\n'
+            return b'{"version":1,"kind":"sessionStart","result":{}}\n'
 
     def connect(address, timeout):
         seen.update(address=address, connect_timeout=timeout)
@@ -61,6 +61,45 @@ def test_lifecycle_request_keeps_connect_timeout_bounded(monkeypatch, tmp_path):
         "connect_timeout": hook_client._CONNECT_TIMEOUT_S,
         "read_timeout": hook_client._SESSION_START_TIMEOUT_S,
     }
+
+
+def test_lifecycle_request_falls_back_when_monitor_does_not_echo_kind(
+    monkeypatch, tmp_path
+):
+    state = tmp_path / ".agent-worktrees"
+    state.mkdir()
+    (state / "status-monitor.lock").write_text(
+        json.dumps({
+            "hook_transport": "tcp",
+            "hook_endpoint": "127.0.0.1:12345",
+            "hook_token": "token",
+        }),
+        encoding="utf-8",
+    )
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def settimeout(self, _timeout):
+            return None
+
+        def sendall(self, _request):
+            return None
+
+        def recv(self, _size):
+            return b'{"version":1,"result":{}}\n'
+
+    monkeypatch.setattr(
+        hook_client.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: Connection(),
+    )
+
+    assert hook_client._request("sessionStart", {}, tmp_path) is None
 
 
 def test_dynamic_loopback_endpoint_roundtrip(tmp_path):
