@@ -1049,6 +1049,52 @@ def test_health_fleet_scan_is_globally_bounded(
     assert "fleet scan exceeds 1 entries" in capsys.readouterr().err
 
 
+def test_health_fleet_keeps_other_machines_when_one_directory_is_unreadable(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+    from agent_logger.sync.targets import filesystem
+
+    source = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    meta.write_sync_meta(dest / "healthy", "healthy", "local", "ok", 10)
+    (dest / "unreadable").mkdir(parents=True)
+    real_scandir = filesystem.os.scandir
+
+    def fail_one_directory(path):
+        if str(path).endswith("unreadable"):
+            raise PermissionError("blocked")
+        return real_scandir(path)
+
+    monkeypatch.setattr(filesystem.os, "scandir", fail_one_directory)
+    cfg = _cfg(tmp_path / "home", source, dest)
+
+    assert engine.do_health(
+        cfg,
+        fleet=True,
+        machines=[],
+        max_age_hours=12,
+        partial_threshold=3,
+        json_output=True,
+    ) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"] == {
+        "healthy": 1,
+        "degraded": 0,
+        "unhealthy": 1,
+    }
+    assert {
+        machine["machine"]: machine["reason"]
+        for machine in payload["machines"]
+    } == {
+        "healthy": "fresh_complete",
+        "unreadable": "unreadable_metadata",
+    }
+
+
 @pytest.mark.parametrize("threshold", ["nan", "inf", "-inf", "0"])
 def test_health_cli_rejects_invalid_freshness_threshold(
     monkeypatch,

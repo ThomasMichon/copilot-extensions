@@ -74,6 +74,10 @@ class _LockedSourceFile(OSError):
     pass
 
 
+class _FleetScanLimitError(OSError):
+    pass
+
+
 def _rmdir_replace_target(path: Path) -> None:
     """Remove an empty directory, clearing Windows read-only if needed."""
     io_path = _windows_extended_path(path)
@@ -1520,7 +1524,7 @@ class FilesystemTarget(Target):
                 directory, relative = pending.pop()
                 visited_directories += 1
                 if visited_directories > _MAX_FLEET_DIRECTORIES:
-                    raise OSError(
+                    raise _FleetScanLimitError(
                         f"fleet scan exceeds {_MAX_FLEET_DIRECTORIES} directories"
                     )
                 metadata_path = directory / "sync-meta.json"
@@ -1530,6 +1534,14 @@ class FilesystemTarget(Target):
                     ).st_mode
                 except FileNotFoundError:
                     metadata_mode = None
+                except OSError as exc:
+                    if not relative.parts:
+                        raise
+                    machines[relative.as_posix()] = SyncStatus(
+                        supported=True,
+                        error=str(exc),
+                    )
+                    continue
                 if relative.parts and metadata_mode is not None and (
                     stat.S_ISREG(metadata_mode)
                     and not is_link_or_reparse(metadata_path, metadata_mode)
@@ -1554,18 +1566,29 @@ class FilesystemTarget(Target):
                 if len(relative.parts) >= _MAX_FLEET_MACHINE_DEPTH:
                     continue
                 children: list[tuple[str, int]] = []
-                with os.scandir(_windows_extended_path(directory)) as entries:
-                    for entry in entries:
-                        visited_entries += 1
-                        if visited_entries > _MAX_FLEET_ENTRIES:
-                            raise OSError(
-                                f"fleet scan exceeds {_MAX_FLEET_ENTRIES} entries"
-                            )
-                        try:
-                            mode = entry.stat(follow_symlinks=False).st_mode
-                        except OSError:
-                            continue
-                        children.append((entry.name, mode))
+                try:
+                    with os.scandir(_windows_extended_path(directory)) as entries:
+                        for entry in entries:
+                            visited_entries += 1
+                            if visited_entries > _MAX_FLEET_ENTRIES:
+                                raise _FleetScanLimitError(
+                                    f"fleet scan exceeds {_MAX_FLEET_ENTRIES} entries"
+                                )
+                            try:
+                                mode = entry.stat(follow_symlinks=False).st_mode
+                            except OSError:
+                                continue
+                            children.append((entry.name, mode))
+                except _FleetScanLimitError:
+                    raise
+                except OSError as exc:
+                    if not relative.parts:
+                        raise
+                    machines[relative.as_posix()] = SyncStatus(
+                        supported=True,
+                        error=str(exc),
+                    )
+                    continue
                 if relative and any(
                     name in {"session-state", "provenance", "archived"}
                     for name, _mode in children
