@@ -178,7 +178,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 |------|-------------|--------------|-----------------|------------------|----------|
 | F2 / backtick repository-relative / conditional / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 1 | Reject this cell: conditional wording did not reliably prevent broad discovery or the unrelated `command-reference` read. |
 | F2 / backtick repository-relative / imperative / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 3, 3, 2 | Reject this cell: stronger imperative wording increased compensating exploration and unrelated guide reads. |
-| F2 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1 canary-backed (3 direct), 2 | Reject this cell: the gate produced one exact one-guide run but did not reliably prevent broad discovery, irrelevant reads, or provenance loss. |
+| F2 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 2 | Reject this cell: the gate produced one exact one-guide run but did not reliably prevent broad discovery, irrelevant reads, or provenance loss; the repetition-2 transcript judge counted three direct irrelevant document reads. |
 
 Counts-only records:
 
@@ -192,12 +192,12 @@ Counts-only records:
 - [`evidence/f2-repo-gated-flat-one-guide-r2.json`](evidence/f2-repo-gated-flat-one-guide-r2.json)
 - [`evidence/f2-repo-gated-flat-one-guide-r3.json`](evidence/f2-repo-gated-flat-one-guide-r3.json)
 
-All three sessions retained owner provenance, loaded the required guide, avoided
-path invention and critical-rule violations, and reached the owned readiness
-decision. Repetitions 2 and 3 nevertheless enumerated the guide tree and loaded
-`command-reference`; literal mode therefore rejects the cell. Continue one axis
-at a time with stronger emphasis before changing the reference representation
-or deferral level.
+All three conditional sessions retained owner provenance, loaded the required
+guide, avoided path invention and critical-rule violations, and reached the
+owned readiness decision. Repetitions 2 and 3 nevertheless enumerated the guide
+tree and loaded `command-reference`; literal mode therefore rejects the cell.
+Continue one axis at a time with stronger emphasis before changing the
+reference representation or deferral level.
 
 Imperative emphasis did not recover the cell. All three imperative repetitions
 loaded at least two irrelevant guides, and two loaded three. The controlled
