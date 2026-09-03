@@ -94,6 +94,9 @@ Deletion-fence completeness:
 - Once true, tombstone overflow cannot be cleared by an incremental write.
 - Tombstone overflow does not by itself imply that retained relations are
   incomplete. Consumers expose it as a separate diagnostic.
+- Tombstone digests and sequence values are unique within one projection.
+- A retained relation and a deletion tombstone for the same identity cannot
+  coexist.
 
 `tombstone_sequence` is projection-local and monotonic. It gives tombstones from
 different worktree records a comparable retention order without treating their
@@ -147,7 +150,8 @@ Authoritative relation removal:
    strictly advances.
 4. Increments the projection's `tombstone_sequence` counter once and assigns
    the new value to that changed tombstone.
-5. Retains the 128 highest sequence values, breaking ties by ascending digest.
+5. Retains the 128 highest unique sequence values and serializes equal-priority
+   records by ascending digest.
 6. Sets `tombstone_overflow: true` if any tombstone is evicted.
 
 Repeated removal at the same revision is a semantic no-op. A newer
@@ -207,11 +211,14 @@ whole projection history:
 - V1 tombstones beyond 128 retain the final 128 array entries and set
   `tombstone_overflow: true`. Malformed entries are dropped and set the same
   flag.
-- A missing, corrupt, or oversized projection rebuilt from one incremental
+- A missing or corrupt projection rebuilt from one incremental
   relation starts with `history_complete: false`, `overflow: false`,
   `omitted_relations: 0`, and `tombstone_overflow: true`; prior relation and
   deletion history is unknown, but the current retention pass omitted no known
   candidate.
+- An oversized projection is conservatively blocked because its schema version
+  cannot be established within the bounded read. It is never replaced by a
+  lower-version writer.
 - Restored or synchronized trees remain read-only through migration and
   validation. V2 does not add or imply a restored-session adoption transition.
 - A v1 writer leaves v2 untouched as an unsupported newer schema.
@@ -279,6 +286,7 @@ after import.
 - Reader release continues to emit v1.
 - V1 writer refusal to replace v2; v2 refusal to replace a future major.
 - Maximum retained relations and compact tombstones fit `131072` bytes.
+- Oversized existing projections remain byte-identical and blocked on write.
 - Long valid identities and escaped content trigger deterministic byte-prefix
   retention rather than encode failure.
 - Bound and nonterminal controller relations win retention over terminal

@@ -1227,6 +1227,70 @@ def test_controller_lineage_reports_missing_session_tree(
     assert findings[0]["status"] == "missing-session-tree"
 
 
+def test_controller_lineage_does_not_resolve_incomplete_v2_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    relation = tracking.ControllerRelation(
+        kind="session",
+        source="explicit",
+        relation_revision=1,
+        created_at="2026-01-01T00:00:00",
+        controller_session_id="controller-session",
+    )
+    child = tracking.WorktreeRecord(
+        worktree_id="child",
+        branch="worktree/child",
+        worktree_path="/tmp/child",
+        repo="example",
+        machine="host",
+        platform="windows",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        controllers=[relation],
+    )
+    projection = {
+        "version": 2,
+        "session_id": "controller-session",
+        "relations": [{
+            "project": "example",
+            "worktree_id": "parent",
+            "role": "bound",
+            "relation_revision": 1,
+            "head_revision": 1,
+        }],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": False,
+        "overflow": False,
+        "omitted_relations": 0,
+        "tombstone_overflow": False,
+    }
+    monkeypatch.setattr(
+        session_projection,
+        "is_restored",
+        lambda _session_id: False,
+    )
+
+    target = controller_lineage._controller_target(
+        child,
+        relation,
+        record_loader=lambda _project, _worktree_id: None,
+        projection_reader=lambda _session_id: projection,
+        local_machine="host",
+    )
+
+    assert target == (
+        "incomplete-projection",
+        "example",
+        None,
+        "controller-session",
+    )
+
+
 def test_remote_controller_is_not_reported_as_resolved() -> None:
     child = tracking.WorktreeRecord(
         worktree_id="child",
