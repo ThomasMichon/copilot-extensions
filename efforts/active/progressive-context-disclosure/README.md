@@ -747,3 +747,23 @@ enforcement before migrating the complete contributor stack.
   access.
 - Retain this safety boundary. Next gate: run the F3 `command-guide` boundary
   with the same coordinates and require only the owned command reference.
+
+### 2026-09-03 - Command-guide control exposes missing grounding
+
+- Ran three epoch-3 F3 command-guide repetitions and the required three F0
+  task-local controls.
+- The F3 runs all loaded `command-reference`, but none could select the
+  promised structured-output option or exact catalog argv. One repetition also
+  broadened into repository discovery; the other two stopped at the missing
+  grounding.
+- The F0 controls also failed 0/3. They performed five, eight, and nine tool
+  calls, including broad repository discovery and irrelevant explicit rereads,
+  without producing an option or attributable command.
+- Inspection of the frozen materialized context confirms the task stimulus is
+  under-specified: it says the catalog and guide supply concrete values, while
+  the synthetic command owner provides only the abstract rule to append
+  documented arguments. Record the runs as confounded and make no deferral
+  elimination claim.
+- Freeze epoch remains 3. Hold command-guide variants rather than repairing the
+  stimulus inline. Next gate: establish the F0 `capability-guide` control before
+  interpreting its deferred form.
