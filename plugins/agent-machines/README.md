@@ -138,6 +138,21 @@ logical surface (`settings`, `permissions`, `trustedFolders`) or module name.
 Module stdout is shown by default in dry-runs, hidden during apply unless
 `--verbose`, and always present in `--json`.
 
+## Unreachable-machine maintenance
+
+The `performing-machine-maintenance` skill connects declarative convergence to
+machine-scoped maintenance issues. When an SSH target is unavailable, recurring
+state belongs in a requirement package (or another explicitly declared
+auto-update owner) before residual local work is filed in an explicitly
+identified user repository. A later session on the target uses the skill to
+resolve the exact queue, acquire one execution claim, re-derive the action from
+trusted repository state, preview, preserve confirmation gates, apply through
+the normal owner, verify, and close the issue.
+
+The issue is a tracker, not executable input. agent-dispatch supplies the
+optional atomic claim lifecycle; without it, the issue provider must expose an
+unambiguous single-owner claim before mutation.
+
 Modules may also reference another active plugin's declared payload command
 without embedding its installed path:
 

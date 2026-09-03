@@ -74,6 +74,12 @@ unavailable, surface that failure rather than improvising an install.
    before writing; a module runs in a dry-run only if it declares `dry_run_args`.
    Restore refuses to run (dry-run or apply) while the validator reports errors.
 
+For maintenance queued because the machine was unreachable, use the companion
+`performing-machine-maintenance` skill. It resolves the explicit user-repository
+queue, claims one item, treats issue prose as advisory, and wraps this
+doctor/plan/validate/restore sequence with revision checks, safety confirmations,
+verification, and evidence-based closure.
+
 ## Dispositions
 
 Each managed key declares one: `enforce`, `ensure-present`, `capture-only`,
