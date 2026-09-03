@@ -12,7 +12,6 @@ real mux.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import types
 
@@ -379,7 +378,7 @@ def test_resident_session_start_preserves_hook_metadata(monkeypatch):
 
     def register(args):
         captured.update(vars(args))
-        print(json.dumps({"additionalContext": "bound"}))
+        args.context_result.update({"additionalContext": "bound"})
         return 0
 
     monkeypatch.setattr(m, "cmd_register_session", register)
@@ -424,7 +423,6 @@ def test_resident_session_start_skips_project_cache_when_untracked(monkeypatch):
 
     def register(args):
         captured.update(vars(args))
-        print("{}")
         return 0
 
     monkeypatch.setattr(m, "cmd_register_session", register)

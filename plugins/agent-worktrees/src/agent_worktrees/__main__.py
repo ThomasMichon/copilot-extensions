@@ -53,7 +53,6 @@ import argparse
 import contextlib
 import dataclasses
 import enum
-import io
 import json
 import os
 import platform
@@ -8011,18 +8010,12 @@ class _ResidentHookPolicy:
                 if self.hook_client is not None and has_project
                 else None
             ),
+            context_result={},
         )
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
-            rc = cmd_register_session(args)
+        rc = cmd_register_session(args)
         if rc != 0:
             raise RuntimeError("session registration failed")
-        try:
-            result = json.loads(stdout.getvalue().strip() or "{}")
-        except ValueError:
-            result = {}
-        if not isinstance(result, dict):
-            result = {}
+        result = dict(args.context_result)
         result.update(self.project_hook())
         return result
 
@@ -19607,6 +19600,15 @@ def _hook_event_timestamp(payload: dict | None) -> str | None:
     return None
 
 
+def _emit_registration_context(args: argparse.Namespace, result: dict) -> None:
+    sink = getattr(args, "context_result", None)
+    if isinstance(sink, dict):
+        sink.clear()
+        sink.update(result)
+        return
+    print(json.dumps(result, separators=(",", ":")))
+
+
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked).
 
@@ -19698,11 +19700,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 cwd=cwd,
             )
             message = session_projection.render_recovery_context(report)
-            print(
-                json.dumps(
-                    {"additionalContext": message} if message else {},
-                    separators=(",", ":"),
-                )
+            _emit_registration_context(
+                args,
+                {"additionalContext": message} if message else {},
             )
         return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
     if not cfg.active_project():
@@ -19860,7 +19860,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 "remains head until this successor explicitly consumes and "
                 "acknowledges the handoff."
             )
-        print(json.dumps({"additionalContext": message}, separators=(",", ":")))
+        _emit_registration_context(args, {"additionalContext": message})
     return 0
 
 
