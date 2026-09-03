@@ -19,8 +19,8 @@
     Lifecycle action to perform.
 
 .PARAMETER ProjectName
-    Project name (e.g. 'my-project'). Defaults to: WORKTREE_PROJECT env var,
-    then inferred from existing config, then basename of CWD repo.
+    Project name (e.g. 'my-project'). Defaults to an existing config matching
+    the basename of the current directory.
 
 .PARAMETER InstallDir
     Exact runtime installation root. Structured context callers must supply the
@@ -407,8 +407,7 @@ $LegacyBinstubs = @(
 # RepoDir: detect from existing config, then CWD.
 $RepoDir = $null
 
-# Infer project name: explicit parameter > env var > existing config > basename of CWD repo
-if (-not $ProjectName) { $ProjectName = $env:WORKTREE_PROJECT }
+# Infer project name: explicit parameter > existing config matching CWD
 if (-not $ProjectName) {
     # Try to infer from existing config directories (find any .{name}/config.yaml)
     if ((Get-Location).Path -match '[\\/]([^\\/]+)$') {
@@ -1720,6 +1719,7 @@ function Deploy-Binstub {
 
     $content = @"
 @echo off
+rem agent-worktrees project binstub
 set "PYTHONUTF8=1"
 set "AGENT_WORKTREES_LAUNCH_ID=$ProjectName-%RANDOM%-%RANDOM%"
 set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"
@@ -1728,8 +1728,7 @@ if not exist "%USERPROFILE%\.agent-worktrees\logs" mkdir "%USERPROFILE%\.agent-w
 (>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"$ProjectName"}) 2>nul
 set "AGENT_WORKTREES_BINSTUB_TRACED=1"
 if "%~1"=="" (
-  set "WORKTREE_PROJECT=$ProjectName"
-  call "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd"
+  call "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" --project $ProjectName
   exit /b %ERRORLEVEL%
 )
 rem Context resolves from CWD / --project (git-like); the binstub names its
@@ -1749,6 +1748,7 @@ exit /b %ERRORLEVEL%
     # launchers. Both route through the signed venv python via -m, falling back
     # to launch-session when the venv is missing (recovery).
     $ps1Content = (@'
+# agent-worktrees project binstub
 $env:PYTHONUTF8 = '1'
 if (-not $env:AGENT_WORKTREES_BINSTUB_TRACED) {
     $env:AGENT_WORKTREES_LAUNCH_ID = '%%PROJECT%%-' + [guid]::NewGuid().ToString('N')
@@ -1762,20 +1762,13 @@ if (-not $env:AGENT_WORKTREES_BINSTUB_TRACED) {
     } catch {}
 }
 if ($args.Count -eq 0) {
-    $_savedProj = $env:WORKTREE_PROJECT
-    $env:WORKTREE_PROJECT = '%%PROJECT%%'
-    try {
-        & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.ps1"
-        $_rc = $LASTEXITCODE
-    } finally {
-        if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }
-    }
-    exit $_rc
+    & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.ps1" --project '%%PROJECT%%'
+    exit $LASTEXITCODE
 }
 # Context resolves from CWD / --project (git-like). This .ps1 runs in-process in
 # the caller's session, so it names its project via --project (not an ambient
 # env var), leaving the live session env untouched. Recovery (venv missing)
-# passes the project to launch-session via a scoped, restored WORKTREE_PROJECT.
+# uses the same explicit launcher argument.
 # Resolve the runtime slot python via the junction-free current-version marker
 # (the .venv junction is retired -- #637/#1085/#1106).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
@@ -1787,15 +1780,8 @@ if (Test-Path $_py) {
     & $_py -m agent_worktrees --project '%%PROJECT%%' @args
     exit $LASTEXITCODE
 }
-$_savedProj = $env:WORKTREE_PROJECT
-$env:WORKTREE_PROJECT = '%%PROJECT%%'
-try {
-    & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.cmd" @args
-    $_rc = $LASTEXITCODE
-} finally {
-    if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }
-}
-exit $_rc
+& "$env:USERPROFILE\.agent-worktrees\bin\launch-session.cmd" --project '%%PROJECT%%' @args
+exit $LASTEXITCODE
 '@).Replace('%%PROJECT%%', $ProjectName)
     $ps1Dst = Join-Path $LocalBin "$ProjectName.ps1"
     [System.IO.File]::WriteAllText($ps1Dst, $ps1Content, (New-Object System.Text.UTF8Encoding($false)))
@@ -2405,14 +2391,19 @@ function Deploy-WslBinstub {
     # Generate thin launcher with helpful error when not yet installed
     $binstubScript = @"
 #!/usr/bin/env bash
+# agent-worktrees project binstub
 # Thin binstub for $ProjectName - deployed by agent-worktrees (Windows)
 # Requires agent-worktrees to be installed in WSL via the copilot-extensions plugin.
 # This thin launcher only starts a session (no CLI dispatch), so it passes the
-# project to launch-session via WORKTREE_PROJECT.
-export WORKTREE_PROJECT="$ProjectName"
+# project directly to the shared launcher.
 _launcher="`$HOME/.agent-worktrees/bin/launch-session.sh"
 if [[ -x "`$_launcher" ]]; then
-    exec "`$_launcher" "`$@"
+    if grep -q -- 'elif \[\[ "`$arg" == "--project" \]\]' "`$_launcher"; then
+        exec "`$_launcher" --project "$ProjectName" "`$@"
+    fi
+    echo "agent-worktrees in WSL is too old for explicit project routing." >&2
+    echo "Update the copilot-extensions plugins in WSL, then retry." >&2
+    exit 1
 else
     echo "agent-worktrees is not installed in WSL." >&2
     echo "To set up:" >&2

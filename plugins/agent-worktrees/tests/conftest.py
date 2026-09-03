@@ -173,24 +173,11 @@ def _reset_active_project():
 
     from agent_worktrees import config as _cfg
 
-    _saved = os.environ.get("WORKTREE_PROJECT")
     _saved_handoff = os.environ.get("AGENT_WORKTREES_HANDOFF_TOKEN")
     _cfg.set_active_project(None)
-    # Also clear the WORKTREE_PROJECT env fallback that project_name() consults.
-    # Otherwise a value leaked from the launching shell (or a prior test that
-    # ran main()) satisfies project_name() and makes tests pass or fail
-    # depending on the ambient environment / test order. Tests that need a
-    # project set it explicitly (e.g. via monkeypatch_config or set_active_project).
-    os.environ.pop("WORKTREE_PROJECT", None)
     os.environ.pop("AGENT_WORKTREES_HANDOFF_TOKEN", None)
     yield
     _cfg.set_active_project(None)
-    # main() writes WORKTREE_PROJECT into os.environ directly (for legacy shell
-    # consumers); restore the pre-test value so it never leaks between tests.
-    if _saved is None:
-        os.environ.pop("WORKTREE_PROJECT", None)
-    else:
-        os.environ["WORKTREE_PROJECT"] = _saved
     if _saved_handoff is None:
         os.environ.pop("AGENT_WORKTREES_HANDOFF_TOKEN", None)
     else:
@@ -254,7 +241,9 @@ def tmp_session_state_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
     """Patch config helpers to use tmp dirs."""
-    monkeypatch.setenv("WORKTREE_PROJECT", "test-project")
+    from agent_worktrees import config as _cfg
+
+    _cfg.set_active_project("test-project")
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tmp_tracking_dir)
     monkeypatch.setattr("agent_worktrees.config.project_dir", lambda: tmp_path / ".test-project")
     monkeypatch.setattr(

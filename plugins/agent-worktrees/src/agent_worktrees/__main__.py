@@ -146,18 +146,12 @@ def cmd_launch(argv: list[str]) -> int:
         else:
             passthrough.append(arg)
 
-    # Bridge the resolved project to the launcher process. The python-first
-    # binstub routes bare `<project>` -> `python -m agent_worktrees --project
-    # <name>`, whose no-args path lands here; launch-session then runs as a
-    # *fresh* process that can only learn the project from the environment or by
-    # git-resolving its cwd. From a directory outside the anchor (e.g. $HOME) the
-    # cwd resolution fails, so without this a bare `<project>` dead-ends in the
-    # launcher with "WORKTREE_PROJECT is not set" (dotfiles/book2). Export it --
-    # exactly what the binstub's venv-missing fallback already does -- so a bare
-    # launch works from anywhere, not only from inside a worktree/anchor.
-    _launch_project = cfg.active_project()
-    if _launch_project:
-        _env_set("WORKTREE_PROJECT", _launch_project)
+    launch_project = cfg.active_project()
+    launcher_args = (
+        ["--project", launch_project, *passthrough]
+        if launch_project
+        else passthrough
+    )
 
     # Resolve launch script path from installed location
     inst_dir = cfg.install_dir()
@@ -195,10 +189,10 @@ def cmd_launch(argv: list[str]) -> int:
         is_stdio = "--stdio" in passthrough or "--acp" in passthrough
         ps1 = launch_script.with_name("launch-session.ps1")
         if is_stdio or not ps1.exists():
-            argv = ["cmd.exe", "/c", str(launch_script), *passthrough]
+            argv = ["cmd.exe", "/c", str(launch_script), *launcher_args]
         else:
             argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File",
-                    str(ps1), *passthrough]
+                    str(ps1), *launcher_args]
         # Popen + wait (never os.exec on Windows, which has no true exec and
         # would detach the child from the console): hold the console and catch
         # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
@@ -220,7 +214,7 @@ def cmd_launch(argv: list[str]) -> int:
                 rc = 130  # 128 + SIGINT(2)
         sys.exit(rc)
     else:
-        os.execvp("bash", ["bash", str(launch_script), *passthrough])
+        os.execvp("bash", ["bash", str(launch_script), *launcher_args])
     return 1  # unreachable -- os.execvp replaces process
 
 
@@ -550,6 +544,9 @@ def _emit_plan(plan: dict) -> None:
     to the project dir so machine+repo-specific instructions are loaded
     without polluting other repos on the same machine.
     """
+    project = cfg.active_project()
+    if project:
+        plan.setdefault("project", project)
     if plan.get("action") == "exec":
         env = plan.setdefault("env", {})
         env.setdefault(
@@ -1375,6 +1372,9 @@ def _create_worktree_core(
             "post_exit": True,
             "no_mux": no_mux,
     }
+    project = cfg.active_project()
+    if project:
+        result["launch"]["project"] = project
     if selection.assignment is not None:
         result["launch"]["profile_assignment"] = profile_assignment.metadata(
             selection.assignment
@@ -2739,6 +2739,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 launch["profile_assignment"] = profile_assignment.metadata(
                     selection.assignment
                 )
+            project = cfg.active_project()
+            if project:
+                launch["project"] = project
             _json_output({
                 "worktree": _worktree_to_dict(record),
                 "launch": launch,

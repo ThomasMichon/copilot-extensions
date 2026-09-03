@@ -101,7 +101,6 @@ trap cleanup EXIT
 export AGENT_HOME="$sandbox"
 export AGENT_WORKTREES_PLUGINS_DIR="$plugins_dir"
 export WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE=1
-export WORKTREE_PROJECT="$project"
 export WORKTREE_MANAGER_AGENT_WORKTREES_SRC="$aw_plugin/src"
 export WORKTREE_MANAGER_ENGINE_ARGV="$engine_argv"
 export PATH="$preview_path:$PATH"

@@ -12,7 +12,7 @@
 #
 # The launcher (launch-session.sh) sets the working directory before calling
 # this script. Context (project) resolves from CWD, git-like -- no ambient
-# WORKTREE_PROJECT is required.
+# Project identity is resolved from the worktree path.
 
 set -euo pipefail
 

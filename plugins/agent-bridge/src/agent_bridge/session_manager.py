@@ -550,7 +550,6 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
     if os.path.isdir(aw_lib):
         env["PYTHONPATH"] = aw_lib
     env["PYTHONUTF8"] = "1"
-    env["WORKTREE_PROJECT"] = target.project
 
     # Global --project (before the subcommand); the ambient $WORKTREE_PROJECT
     # identity fallback was retired (cwd-resolution Phase 3) and this cleanup
