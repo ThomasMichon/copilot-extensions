@@ -35,10 +35,60 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import git_ops, tracking
+from . import git_ops, pr_ops, tracking
 from .config import Config
 
 BACKUP_REF = "refs/pre-complete-backup"
+
+
+def _merged_pr_head(
+    worktree_id: str, branch: str, upstream: str, *, cwd: str
+) -> str | None:
+    """Return a verified merged PR head that is an ancestor of ``branch``.
+
+    A recorded PR boundary lets reconciliation exclude the PR's original
+    commits and replay only later local work. The boundary is trusted only when
+    its aggregate patch-id matches one commit reachable on upstream.
+    """
+    record = tracking.load_record_by_id(worktree_id)
+    if record is None:
+        return None
+
+    candidates: list[tuple[int, str]] = []
+    for pr in record.prs:
+        if (
+            pr.state != "merged"
+            or not pr.base_sha
+            or not pr.head_sha
+            or not pr.patch_id
+        ):
+            continue
+        if git_ops.git(
+            "merge-base", "--is-ancestor", pr.head_sha, branch,
+            cwd=cwd, check=False,
+        ).returncode != 0:
+            continue
+
+        commits = git_ops.git(
+            "rev-list", f"{pr.base_sha}..{upstream}", cwd=cwd, check=False,
+        )
+        if commits.returncode != 0:
+            continue
+        for commit in commits.stdout.splitlines():
+            parent = git_ops.git(
+                "rev-parse", f"{commit}^", cwd=cwd, check=False,
+            )
+            if parent.returncode != 0:
+                continue
+            if pr_ops._patch_id(
+                parent.stdout.strip(), commit, cwd=cwd,
+            ) == pr.patch_id:
+                distance = git_ops._rev_count(
+                    f"{pr.head_sha}..{branch}", cwd=cwd,
+                )
+                candidates.append((distance, pr.head_sha))
+                break
+    return min(candidates)[1] if candidates else None
 
 
 def _branch_fully_merged(
@@ -158,8 +208,26 @@ def complete_worktree(
     # upstream (a squash-merge folded it)?  Used only to decide the *fallback*
     # below -- the primary move is a non-destructive rebase.
     fully_merged = _branch_fully_merged(merge_base, branch, upstream, cwd=worktree_path)
+    merged_pr_head = _merged_pr_head(
+        worktree_id, branch, upstream, cwd=worktree_path,
+    )
+    post_merge_commits = (
+        git_ops._rev_count(f"{merged_pr_head}..{branch}", cwd=worktree_path)
+        if merged_pr_head
+        else 0
+    )
 
     if dry_run:
+        if merged_pr_head:
+            action = "rebased" if post_merge_commits else "reset-past-squash"
+            return {**base, "success": True, "action": action,
+                    "kept": post_merge_commits,
+                    "dropped": ahead - post_merge_commits,
+                    "message": (
+                        f"Would reconcile {branch} onto {upstream} from the "
+                        f"verified merged PR head {merged_pr_head[:12]}, "
+                        f"preserving {post_merge_commits} post-merge commit(s)."
+                    )}
         if fully_merged:
             return {**base, "success": True, "action": "reset-past-squash",
                     "dropped": ahead,
@@ -175,7 +243,61 @@ def complete_worktree(
     # whichever path is taken below.
     pre = git_ops.git("rev-parse", branch, cwd=worktree_path, check=False).stdout.strip()
     if pre:
-        git_ops.git("update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False)
+        backup = git_ops.git(
+            "update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False,
+        )
+        if backup.returncode != 0:
+            return {**base, "action": "error",
+                    "error": (
+                        f"Could not create recovery ref {BACKUP_REF}; "
+                        "the branch is unchanged."
+                    )}
+
+    # A tracked merged PR gives us the exact boundary between the squashed PR
+    # commits and later local work. Rebase only the latter; replaying the former
+    # can conflict after subsequent upstream edits even though their aggregate
+    # patch is already present.
+    if merged_pr_head:
+        if post_merge_commits == 0:
+            reset = git_ops.git(
+                "reset", "--hard", upstream, cwd=worktree_path, check=False,
+            )
+            if reset.returncode != 0:
+                return {**base, "action": "error",
+                        "error": (
+                            f"Reset of {branch} to {upstream} failed: "
+                            f"{reset.stderr.strip()}"
+                        )}
+            return {**base, "success": True, "action": "reset-past-squash",
+                    "dropped": ahead, "backup_ref": BACKUP_REF,
+                    "head": _short_head(worktree_path),
+                    "message": (
+                        f"{branch} reconciled past the verified squash-merge; "
+                        f"HEAD now {_short_head(worktree_path)} == {upstream}. "
+                        f"(pre-complete state saved at {BACKUP_REF})"
+                    )}
+        replay = git_ops.git(
+            "rebase", "--onto", upstream, merged_pr_head, branch,
+            cwd=worktree_path, check=False, no_hooks=True,
+        )
+        if replay.returncode != 0:
+            git_ops.git("rebase", "--abort", cwd=worktree_path, check=False)
+            return {**base, "action": "error",
+                    "error": (
+                        f"Rebase of {post_merge_commits} post-merge commit(s) "
+                        f"from {merged_pr_head[:12]} onto {upstream} hit a "
+                        "conflict and was aborted; the branch is unchanged."
+                    )}
+        return {**base, "success": True, "action": "rebased",
+                "kept": post_merge_commits,
+                "dropped": ahead - post_merge_commits,
+                "backup_ref": BACKUP_REF,
+                "head": _short_head(worktree_path),
+                "message": (
+                    f"{branch} reconciled past the verified squash-merge, "
+                    f"preserving {post_merge_commits} post-merge commit(s); "
+                    f"HEAD now {_short_head(worktree_path)}."
+                )}
 
     # PRIMARY: rebase forward. This is non-destructive -- it drops commits that
     # are already applied upstream (by patch-id) while PRESERVING any commit that

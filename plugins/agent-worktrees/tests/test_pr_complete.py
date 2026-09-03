@@ -9,8 +9,9 @@ worktree's work lands as one upstream commit, and pr-complete must fast-forward
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
-from agent_worktrees import git_ops, pr_complete
+from agent_worktrees import git_ops, pr_complete, pr_ops, tracking
 
 
 def _git(*args: str, cwd) -> str:
@@ -127,6 +128,73 @@ class TestPrComplete:
         # The new commit is preserved on top of the updated upstream.
         assert (wt_path / "new.txt").exists()
         assert _ahead(f"worktree/{wid}", "origin/master", cwd=wt_path) == 1
+
+    def test_recorded_pr_boundary_skips_merged_commits_after_overlap(self, pr_repo):
+        """Replay only post-PR commits after later upstream edits overlap."""
+        config, wid, wt_path, _ = pr_repo
+        anchor = Path(config.default_repo.anchor)
+        branch = f"worktree/{wid}"
+        base = _git("merge-base", "origin/master", branch, cwd=wt_path)
+        pr_head = _git("rev-parse", branch, cwd=wt_path)
+        rec = tracking.load_record_by_id(wid)
+        assert rec is not None
+        rec.pr = tracking.PRRecord(
+            state="merged",
+            base_sha=base,
+            head_sha=pr_head,
+            patch_id=pr_ops._patch_id(base, pr_head, cwd=str(wt_path)),
+        )
+        rec.prs.append(tracking.PRRecord(
+            state="open",
+            base_sha=pr_head,
+            head_sha=pr_head,
+            patch_id="not-merged",
+        ))
+        tracking.save_record(rec)
+
+        _squash_merge_upstream(
+            anchor, files={"a.txt": "one\n", "b.txt": "two\n"}, msg="squash")
+        (anchor / "a.txt").write_text("later upstream edit\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "later overlapping upstream edit", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+
+        (wt_path / "status.txt").write_text("local follow-up\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "record follow-up status", cwd=wt_path)
+
+        res = pr_complete.complete_worktree(wid, config)
+
+        assert res["success"] is True, res
+        assert res["action"] == "rebased"
+        assert res["kept"] == 1
+        assert res["dropped"] == 2
+        assert (wt_path / "a.txt").read_text() == "later upstream edit\n"
+        assert (wt_path / "status.txt").read_text() == "local follow-up\n"
+        assert _ahead(branch, "origin/master", cwd=wt_path) == 1
+
+    def test_backup_ref_failure_leaves_branch_unchanged(self, pr_repo, monkeypatch):
+        """History mutation requires a durable recovery ref."""
+        config, wid, wt_path, _ = pr_repo
+        anchor = Path(config.default_repo.anchor)
+        _squash_merge_upstream(
+            anchor, files={"a.txt": "one\n", "b.txt": "two\n"}, msg="squash")
+        before = _git("rev-parse", "HEAD", cwd=wt_path)
+        real_git = git_ops.git
+
+        def fail_backup(*args, **kwargs):
+            if args[:2] == ("update-ref", pr_complete.BACKUP_REF):
+                return subprocess.CompletedProcess(args, 1, "", "ref locked")
+            return real_git(*args, **kwargs)
+
+        monkeypatch.setattr(git_ops, "git", fail_backup)
+
+        res = pr_complete.complete_worktree(wid, config)
+
+        assert res["success"] is False
+        assert res["action"] == "error"
+        assert "recovery ref" in res["error"]
+        assert _git("rev-parse", "HEAD", cwd=wt_path) == before
 
     def test_reconcile_preserves_post_merge_divergence_net_zero(self, pr_repo):
         """A post-merge commit that diverges from upstream but nets to the
