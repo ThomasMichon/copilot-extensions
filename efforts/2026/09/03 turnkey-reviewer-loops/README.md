@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees and pull requests
 - **Created:** 2026-08-30
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/plugins/agent-dispatch` — `loop-recipes`,
   `side-load-through-an-emitter`, `registered-supervision`,
   `pools-are-filters-with-a-cap`, `a-loop-runs-with-or-without-a-service`
@@ -85,9 +85,10 @@ The missing capability is composition, not another bespoke reviewer.
       every effective recipe/config parameter, so an upgrade or guidance edit
       cannot fork a live review while a later review generation remains
       possible after terminal completion.
-- [ ] Declare the acting forge identity and its permissions. An identity that
-      cannot approve or land must degrade to a visible recorded outcome rather
-      than looping indefinitely.
+- [x] Deferred to `ThomasMichon/copilot-extensions#1846`: Declare the acting
+      forge identity and its permissions. An identity that cannot approve or
+      land must degrade to a visible recorded outcome rather than looping
+      indefinitely.
 - [x] Keep credentials outside the repository declaration and resolve them
       through the runtime's existing secret/auth boundaries; declarations may
       name an identity but never carry tokens.
@@ -113,7 +114,7 @@ The missing capability is composition, not another bespoke reviewer.
 - [x] Define the non-response path for `land=author` (continued suspension,
       superseding change, or explicit expiry/abandon) so dormant reviews do not
       hold worker capacity or remain ambiguous forever.
-- [ ] Make review guidance, target reference, and optional result/card contract
+- [x] Make review guidance, target reference, and optional result/card contract
       declarative inputs without embedding any forge or repository policy.
 - [x] Add on-demand emitter side-load: a registered emitter accepts one change
       reference and authors the same provenance/evaluator-bound task it would
@@ -166,7 +167,7 @@ The missing capability is composition, not another bespoke reviewer.
 - [x] Prove discovery creates one review task for an eligible
       repository-policy-selected pull request and creates none for an excluded
       pull request.
-- [ ] Prove a task survives worker or frontend interruption, resumes from its
+- [x] Prove a task survives worker or frontend interruption, resumes from its
       durable state, and completes without duplicate review actions.
 - [x] Feed portability findings back into the generic contract before declaring
       the effort done.
@@ -177,28 +178,33 @@ The missing capability is composition, not another bespoke reviewer.
       materializes the intended emitter/evaluator/pool set.
 - [x] Recipe tests cover `land=self`, `land=author`, invalid combinations, CLI,
       local MCP, and hosted MCP.
-- [ ] Landing-model tests prove `land=author` completion cannot trigger a
-      self-land/conflict evaluator rule and that its non-response path releases
-      active worker capacity.
+- [x] Deferred to `ThomasMichon/copilot-extensions#1846`: Landing-model tests
+      prove `land=author` completion cannot trigger a self-land/conflict
+      evaluator rule and that its non-response path releases active worker
+      capacity.
 - [x] Dedup tests preserve one live target identity across version/config drift
       while allowing a deterministic later review generation after terminal
       completion.
-- [ ] Emitter tests prove discovery and side-load author byte-equivalent task
-      contracts with emitter-owned evaluator association.
+- [x] Deferred to `ThomasMichon/copilot-extensions#1846`: Emitter tests prove
+      discovery and side-load author byte-equivalent task contracts with
+      emitter-owned evaluator association.
 - [x] Registrar/supervisor tests prove repeated discovery produces one
       effective reviewer loop and operator disable remains higher precedence.
-- [ ] Filter tests prove two compatible pools do not receive an emitter-to-pool
-      wire; the atomic claim alone selects one consumer.
-- [ ] Concurrency tests prove dedup plus reservation state never embodies two
-      reviewers for one change.
-- [ ] Trust-boundary tests prove excluded authors/forks create no task,
-      untrusted change code is not executed by default, and insufficient forge
-      permissions surface a terminal/blocked outcome.
-- [ ] Self-hosted copilot-extensions proof records one eligible external review
+- [x] Deferred to `ThomasMichon/copilot-extensions#1846`: Filter tests prove
+      two compatible pools do not receive an emitter-to-pool wire; the atomic
+      claim alone selects one consumer.
+- [x] Deferred to `ThomasMichon/copilot-extensions#1846`: Concurrency tests
+      prove dedup plus reservation state never embodies two reviewers for one
+      change.
+- [x] Deferred to `ThomasMichon/copilot-extensions#1846`: Trust-boundary tests
+      prove excluded authors/forks create no task, untrusted change code is not
+      executed by default, and insufficient forge permissions surface a
+      terminal/blocked outcome.
+- [x] Self-hosted copilot-extensions proof records one eligible external review
       end to end and one excluded change producing no task.
 - [x] Second-repository proof uses the same generic runtime and differs only in
       repository-owned declaration/policy.
-- [ ] Recovery proof covers service restart, worker interruption, visible
+- [x] Recovery proof covers service restart, worker interruption, visible
       blocked state, atomic rearm, and continuation from durable card/progress.
 - [x] Doctor proof reports a syntactically valid declaration with no serving
       host/pointer as inactive and actionable rather than silently healthy.
@@ -384,3 +390,20 @@ declarative expansion follows only after that composition is proven.
   remains author-gated: the live validation changes require conflict resolution
   or requested documentation updates before the durable tasks can resume and
   reach terminal completion.
+
+### 2026-09-03 — Portability closure
+
+- The second-repository interruption proof completed on one canonical reviewer
+  task through three worker attempts. The final worker resumed the same durable
+  identity, observed the target change was closed, recorded the exact
+  `github-review-state` revision marker, and terminally reconciled it without a
+  duplicate task or repository write.
+- Merged [PR 1830](https://github.com/ThomasMichon/copilot-extensions/pull/1830)
+  and deployed `agent-worktrees` `1.5.3-dev738`, removing the validation
+  repository's remaining Windows ambient-`PATH` dependency. Focused shim,
+  guard, installer-readiness, CI, and contract gates passed. Seven unrelated
+  current-main session-context test failures are tracked in #1829.
+- The validation repository merged its maintainer opt-in and recovery
+  hardening after 33 focused tests and a clean live no-write sweep. The
+  remaining contract-level test matrix is transferred to #1846 so it remains
+  visible independently of this completed adoption campaign.
