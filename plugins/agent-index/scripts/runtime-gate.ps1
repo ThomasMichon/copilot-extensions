@@ -153,27 +153,32 @@ if (
 elseif (
     -not $env:COPILOT_EXTENSIONS_CONTEXT -and
     $ResolutionStatus -ceq 'provenance-blocked' -and
-    [string]$resolution.policy.state -ceq 'valid' -and
-    $resolution.policy.enabled -is [bool] -and
-    -not $resolution.policy.enabled
+    [string]$resolution.policy.state -ceq 'valid'
 ) {
     try {
         $policyDocument = Get-Content -LiteralPath $Policy -Raw |
             ConvertFrom-Json
-        $installationMode = @(
-            $policyDocument.PSObject.Properties |
-                Where-Object { $_.Name -ceq 'installationMode' }
-        )
-        $marketplaces = @()
-        if ($installationMode.Count -eq 1) {
-            $marketplaces = @(
-                $installationMode[0].Value.PSObject.Properties |
-                    Where-Object { $_.Name -ceq 'marketplaces' }
-            )
+        $installationMode = $policyDocument.PSObject.Properties[
+            'installationMode'
+        ]
+        $enabled = if ($null -ne $installationMode) {
+            $installationMode.Value.PSObject.Properties['enabled']
+        } else {
+            $null
+        }
+        $marketplaces = if ($null -ne $installationMode) {
+            $installationMode.Value.PSObject.Properties['marketplaces']
+        } else {
+            $null
         }
         $simplePolicyLegacy = (
-            $marketplaces.Count -eq 0 -or
-            $marketplaces[0].Value.PSObject.Properties.Count -eq 0
+            $null -ne $enabled -and
+            $enabled.Value -is [bool] -and
+            -not $enabled.Value -and
+            (
+                $null -eq $marketplaces -or
+                $marketplaces.Value.PSObject.Properties.Count -eq 0
+            )
         )
     } catch {
         $simplePolicyLegacy = $false
