@@ -381,7 +381,7 @@ Adopt the authority and schema model in [`design.md`](design.md):
   observed or its responsibility is explicitly transferred.
 - Large-history latency validation passed on the deployed reader floor. A
   Windows corpus with 1,661 session directories measured a 0.52-second median
-  cache-only first paint and 0.55-second median fresh list. A Linux corpus with
+  cache-only first-paint and 0.55-second median fresh list. A Linux corpus with
   6,276 session directories measured 0.77 and 1.07 seconds respectively. Both
   remain well below the historical approximately seven-second active-paint
   regression, and the source guard still confines live session-root enumeration
