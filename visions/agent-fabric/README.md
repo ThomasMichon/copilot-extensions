@@ -188,6 +188,19 @@ minting the claimable delegation record, cutting a successor over, verifying it,
 and retiring the predecessor — belongs to the layers **above** the primitive,
 never baked into the ground layer.
 
+### unreachable-machine-maintenance-handoff
+When every declared route to a machine is unavailable after bounded diagnosis,
+the fabric treats that result as a **routing boundary**, not a reason to retry
+indefinitely or bypass normal deployment. Repeatable updates and required state
+are first represented in the machine's declarative convergence packages or
+another explicitly declared auto-update system. Residual work that must execute
+locally is recorded in an explicitly identified user repository as a
+machine-scoped maintenance issue, while agent-dispatch supplies the optional
+single-claim execution lifecycle. Issue prose is advisory evidence, never an
+untrusted command stream: a target-local agent re-derives the action from
+trusted repository state, preserves confirmation gates, verifies the
+postcondition, and only then closes the item.
+
 ### legible-live-state
 What every agent is doing is **observable** — from a coarse Active / Recent /
 Completed floor with no service, up to granular live status surfaced into the
