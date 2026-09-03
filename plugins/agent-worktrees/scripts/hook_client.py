@@ -3,7 +3,7 @@
 
 The hot path is one bounded loopback request. If the monitor is unavailable,
 pre-tool safety guards run in-process from their deployed standalone modules;
-post-tool advisory work falls back to nudge_status only.
+post-tool advisory work falls back to nudge_status and bind_nudge.
 """
 
 from __future__ import annotations

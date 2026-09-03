@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 
 Decision = Callable[[str, dict, float], dict]
+_READ_TIMEOUT_S = 1.0
 
 
 class HookUnavailable(Exception):
@@ -29,6 +30,7 @@ class _Server(socketserver.ThreadingTCPServer):
 class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         try:
+            self.request.settimeout(_READ_TIMEOUT_S)
             raw = self.rfile.readline(256 * 1024)
             request = json.loads(raw.decode("utf-8"))
             if (

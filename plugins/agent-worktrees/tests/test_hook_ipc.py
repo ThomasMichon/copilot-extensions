@@ -71,6 +71,19 @@ def test_bad_token_gets_no_response(tmp_path):
         server.close()
 
 
+def test_stalled_connection_is_closed_after_read_timeout():
+    server = HookIpcServer(lambda kind, payload, deadline: {})
+    server.start()
+    try:
+        endpoint = server.rendezvous()
+        host, port = endpoint["hook_endpoint"].split(":")
+        with socket.create_connection((host, int(port)), timeout=1) as conn:
+            conn.settimeout(2)
+            assert conn.recv(100) == b""
+    finally:
+        server.close()
+
+
 def test_busy_server_explicitly_requests_fallback(tmp_path):
     def unavailable(kind, payload, deadline):
         raise HookUnavailable
