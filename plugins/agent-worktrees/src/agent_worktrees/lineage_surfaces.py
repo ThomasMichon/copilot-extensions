@@ -284,6 +284,8 @@ def _projection_health(
         "repairable": False,
         "repaired": False,
         "restored": False,
+        "relation_set_incomplete": None,
+        "tombstone_overflow": None,
     }
     if role not in {"bound", "controller"}:
         item["status"] = "invalid-role"
@@ -472,8 +474,10 @@ def _projection_read(
         "status": "missing-projection",
         "restored": False,
         "schema_version": None,
-        "overflow": False,
-        "omitted_relations": 0,
+        "history_complete": None,
+        "overflow": None,
+        "omitted_relations": None,
+        "tombstone_overflow": None,
         "returned_relations": 0,
         "surface_omitted_relations": 0,
         "returned_tombstones": 0,
@@ -493,16 +497,22 @@ def _projection_read(
         return None, status
     if projection is None:
         return None, status
-    overflow = projection.get("overflow", False)
-    omitted = projection.get("omitted_relations", 0)
-    if not isinstance(overflow, bool) or type(omitted) is not int or omitted < 0:
+    try:
+        metadata = session_projection.projection_metadata(projection)
+    except session_projection.ProjectionError:
         status["status"] = "invalid"
         return None, status
     status.update({
-        "status": "incomplete" if overflow or omitted else "available",
-        "schema_version": projection.get("version"),
-        "overflow": overflow,
-        "omitted_relations": omitted,
+        "status": (
+            "incomplete"
+            if metadata["relation_set_incomplete"]
+            else "available"
+        ),
+        "schema_version": metadata["version"],
+        "history_complete": metadata["history_complete"],
+        "overflow": metadata["overflow"],
+        "omitted_relations": metadata["omitted_relations"],
+        "tombstone_overflow": metadata["tombstone_overflow"],
     })
     return projection, status
 

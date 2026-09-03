@@ -380,7 +380,10 @@ Projection persistence is fail-open: a missing session directory, unsafe
 link/reparse target, restored rescue marker, corrupt path, lock failure, or I/O
 error cannot roll back the authoritative lifecycle operation. Corrupt
 same-version JSON can be rebuilt from the record; an unsupported newer schema
-is preserved untouched. Exact session-directory identity rejects case-folded
+is preserved untouched. The current reader release accepts schema v2
+completeness metadata and compact tombstones while continuing to emit schema
+v1; encountering v2 on a write path is an explicit blocked projection update,
+never a downgrade. Exact session-directory identity rejects case-folded
 or short-name aliases as well as link/reparse escapes while accepting canonical
 extended Windows paths. Reads are capped before allocation, writes are
 deterministic and skip semantic no-ops, POSIX files and runtime directories are
@@ -389,6 +392,17 @@ Additive unknown fields survive same-version relation updates. The writer report
 `written`, `current`, `blocked`, or `deferred`; only deferred relations remain
 dirty for a later save retry, while a newer unsupported schema is deliberately
 blocked without repeated write attempts.
+
+Schema v2 requires explicit `history_complete`, `overflow`,
+`omitted_relations`, `tombstone_overflow`, `tombstone_sequence`, and
+`relation_tombstones` fields. Overflow uses `omitted_relations: null`; complete
+relation sets use zero. V2 tombstones are opaque
+`{key_sha256, relation_revision, sequence}` records. `key_sha256` is SHA-256 of
+the UTF-8 compact JSON array `[project,worktree_id,role]`, encoded with
+`ensure_ascii=true`, separators `(",", ":")`, and no trailing newline.
+`tombstone_sequence` is at least the maximum retained tombstone sequence.
+Readers validate these fields and expose relation-set and tombstone-fence
+completeness separately.
 
 Controller identity is a separate, bounded authority on `WorktreeRecord`.
 `controllers[]` holds at most 32 typed relations; each carries a worktree or
