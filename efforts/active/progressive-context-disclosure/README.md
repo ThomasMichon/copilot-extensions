@@ -656,10 +656,15 @@ enforcement before migrating the complete contributor stack.
   conclusion. Earlier merged multi-guide records remain as historical
   counts-only artifacts, with [`experiments.md`](experiments.md) now carrying
   the superseding classification.
-- Refroze the task as epoch 2 without changing required guides, applicability
-  cues, critical rules, or expected decision. Execution tasks now materialize
+- Refroze the task without changing required guides, applicability cues,
+  critical rules, or expected decision. Execution tasks now materialize
   owner-declared READY, scoped destination/review-gate grounding, and an exact
   synthetic bounded command; Tier-P validation rejects an unsatisfiable
   execution task before behavioral runs.
-- Next gate: land the reviewed fixture correction, then require the corrected
+- The first local epoch-2 F0 control exposed one remaining ambiguity:
+  `reviewGate: required` was interpreted as missing approval and publication
+  eligibility was not explicit. No epoch-2 behavioral evidence was published.
+  Epoch 3 adds affirmative publication checks and a review gate explicitly
+  satisfied for the bounded mutation while remaining required afterward.
+- Next gate: land the epoch-3 fixture clarification, then require the corrected
   F0 multi-guide control to pass before rerunning any deferred variant.

@@ -824,12 +824,55 @@ def main() -> int:
     ):
         raise SystemExit("execution paths escape the bounded repository")
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    readiness = config["readiness"]
-    destination = config["destination"]
-    if readiness["signal"] != "READY":
+    if not isinstance(config, dict):
+        raise SystemExit("execution configuration is not an object")
+    readiness = config.get("readiness")
+    publication = config.get("publication")
+    destination = config.get("destination")
+    command = config.get("command")
+    if (
+        not isinstance(readiness, dict)
+        or readiness.get("owner") != "synthetic-runtime-readiness"
+        or readiness.get("capability") != "synthetic-generic-capability"
+        or readiness.get("signal") != "READY"
+    ):
         raise SystemExit("capability is not ready")
-    if not destination["reachable"] or destination["reviewGate"] != "required":
+    if (
+        not isinstance(publication, dict)
+        or publication.get("owner") != "synthetic-publication"
+        or publication.get("materialClassification") != "synthetic"
+        or publication.get("secretsPresent") is not False
+        or publication.get("privateIdentifiersPresent") is not False
+        or publication.get("rawTranscriptPresent") is not False
+    ):
+        raise SystemExit("publication gate failed")
+    if (
+        not isinstance(destination, dict)
+        or destination.get("owner") != "synthetic-destination-routing"
+        or destination.get("repository")
+        != "generic-upstream/synthetic-progressive-context"
+        or destination.get("scopedIdentity") != "synthetic-publisher"
+        or destination.get("destinationApproved") is not True
+        or destination.get("reachable") is not True
+        or destination.get("reviewGate") != "required"
+        or destination.get("reviewGateSatisfied") is not True
+    ):
         raise SystemExit("destination gate failed")
+    if (
+        not isinstance(command, dict)
+        or command.get("owner") != "synthetic-capability-procedure"
+        or command.get("cwd") != "repository"
+        or command.get("argv")
+        != [
+            "python3",
+            ".synthetic/synthetic-capability.py",
+            "--config",
+            ".synthetic/execution.json",
+            "--result",
+            ".synthetic/result.json",
+        ]
+    ):
+        raise SystemExit("command gate failed")
     result = {
         "boundedRead": "complete",
         "validatedMutation": "complete",
@@ -837,6 +880,7 @@ def main() -> int:
         "destination": destination["repository"],
         "scopedIdentity": destination["scopedIdentity"],
         "reviewGate": destination["reviewGate"],
+        "reviewGateSatisfied": destination["reviewGateSatisfied"],
     }
     result_path.write_text(
         json.dumps(result, sort_keys=True) + "\\n",
@@ -1863,6 +1907,11 @@ def _validate_corpus_and_tasks() -> None:
                 if execution_fixture is not None
                 else None
             )
+            publication = (
+                execution_fixture.get("publication")
+                if execution_fixture is not None
+                else None
+            )
             locators = (
                 [
                     str(execution_fixture["configLocator"]),
@@ -1880,14 +1929,27 @@ def _validate_corpus_and_tasks() -> None:
                     for locator in locators
                 )
                 or not isinstance(readiness, dict)
+                or readiness.get("owner")
+                != "synthetic-runtime-readiness"
+                or readiness.get("capability")
+                != "synthetic-generic-capability"
                 or readiness.get("signal") != "READY"
+                or not isinstance(publication, dict)
+                or publication.get("owner") != "synthetic-publication"
+                or publication.get("materialClassification") != "synthetic"
+                or publication.get("secretsPresent") is not False
+                or publication.get("privateIdentifiersPresent") is not False
+                or publication.get("rawTranscriptPresent") is not False
                 or not isinstance(destination, dict)
                 or destination.get("owner")
                 != "synthetic-destination-routing"
-                or not destination.get("repository")
-                or not destination.get("scopedIdentity")
+                or destination.get("repository")
+                != "generic-upstream/synthetic-progressive-context"
+                or destination.get("scopedIdentity") != "synthetic-publisher"
+                or destination.get("destinationApproved") is not True
                 or destination.get("reachable") is not True
                 or destination.get("reviewGate") != "required"
+                or destination.get("reviewGateSatisfied") is not True
                 or not isinstance(command, dict)
                 or command.get("owner")
                 != "synthetic-capability-procedure"
@@ -1908,8 +1970,9 @@ def _validate_corpus_and_tasks() -> None:
                 != 1
             ):
                 raise ValueError(
-                    f"execution-demanding task lacks satisfiable readiness, "
-                    f"destination, review-gate, or mutation grounding: "
+                    f"execution-demanding task lacks satisfiable owned "
+                    f"readiness, publication, destination, review-gate, "
+                    f"or mutation grounding: "
                     f"{task_id}"
                 )
         special = task.get("referenceFixture")

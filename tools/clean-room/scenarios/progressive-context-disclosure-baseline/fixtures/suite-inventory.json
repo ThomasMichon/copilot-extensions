@@ -1,7 +1,7 @@
 {
   "schema": "copilot-extensions.session-context-inventory",
   "version": 1,
-  "sourceRevision": "9b13ba8c",
+  "sourceRevision": "a5e255cd",
   "measurement": {
     "platform": "windows-powershell",
     "payload": {
