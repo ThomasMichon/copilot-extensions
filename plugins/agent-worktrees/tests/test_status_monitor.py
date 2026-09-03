@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import threading
-import time
 import types
 
 import agent_procutil
@@ -39,20 +37,15 @@ def test_resident_lifecycle_requests_wait_for_their_deadline():
     assert m._resident_hook_lock_timeout("postToolUse", 0.02) == 0.02
 
 
-def test_monitor_yields_to_waiting_lifecycle_request():
-    priority = threading.Event()
-    priority.set()
+def test_monitor_yields_to_waiting_lifecycle_request(monkeypatch):
+    states = iter((True, True, False))
+    priority = types.SimpleNamespace(is_set=lambda: next(states))
+    sleeps = []
+    monkeypatch.setattr(m.time, "sleep", sleeps.append)
 
-    def release_priority():
-        time.sleep(0.05)
-        priority.clear()
-
-    released = threading.Thread(target=release_priority)
-    released.start()
-    started = time.monotonic()
     m._wait_for_lifecycle_priority(priority)
-    released.join()
-    assert time.monotonic() - started >= 0.04
+
+    assert sleeps == [0.01, 0.01]
 
 
 def test_resident_session_context_inputs_are_cached(monkeypatch):
