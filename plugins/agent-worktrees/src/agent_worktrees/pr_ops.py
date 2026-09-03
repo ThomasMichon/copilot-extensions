@@ -203,32 +203,56 @@ def _patch_id(base: str, head: str, *, cwd: str) -> str:
 def _commit_patch_ids(base: str, head: str, *, cwd: str) -> set[str]:
     """Patch IDs for non-merge commits in ``base..head``, or an empty set.
 
-    Compute the range in one ``git log`` + ``git patch-id`` batch. This avoids
-    spawning a diff and patch-id process per commit when an old PR base has a
-    long upstream history.
+    Stream one ``git log`` process into one ``git patch-id`` process. This
+    avoids both per-commit process spawning and buffering a long patch history
+    in memory.
     """
     if not base:
         return set()
-    log = git_ops.git(
-        "log", "--no-merges", "--format=commit %H", "-p",
-        f"{base}..{head}", cwd=cwd, check=False,
-    )
-    if log.returncode != 0 or not log.stdout:
-        return set()
+    import subprocess
+
+    log_process: subprocess.Popen[bytes] | None = None
+    patch_process: subprocess.Popen[str] | None = None
     try:
-        import subprocess
-        result = subprocess.run(
-            ["git", "patch-id", "--stable"],
-            input=log.stdout, cwd=cwd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=30,
+        log_process = subprocess.Popen(
+            [
+                "git", "log", "--no-merges", "--format=commit %H", "-p",
+                f"{base}..{head}",
+            ],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
+        if log_process.stdout is None:
+            log_process.kill()
+            log_process.wait()
+            return set()
+        patch_process = subprocess.Popen(
+            ["git", "patch-id", "--stable"],
+            cwd=cwd,
+            stdin=log_process.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        log_process.stdout.close()
+        output, _ = patch_process.communicate(timeout=30)
+        log_returncode = log_process.wait(timeout=5)
     except (OSError, subprocess.SubprocessError):
+        if patch_process is not None and patch_process.poll() is None:
+            patch_process.kill()
+            patch_process.communicate()
+        if log_process is not None and log_process.poll() is None:
+            log_process.kill()
+            log_process.wait()
         return set()
-    if result.returncode != 0:
+    if patch_process.returncode != 0 or log_returncode != 0:
         return set()
     return {
         line.split()[0]
-        for line in result.stdout.splitlines()
+        for line in output.splitlines()
         if line.split()
     }
 
