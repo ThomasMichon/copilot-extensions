@@ -177,12 +177,16 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | Cell | Repetitions | Judge result | Required guides | Irrelevant reads | Decision |
 |------|-------------|--------------|-----------------|------------------|----------|
 | F2 / backtick repository-relative / conditional / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 1 | Reject this cell: conditional wording did not reliably prevent broad discovery or the unrelated `command-reference` read. |
+| F2 / backtick repository-relative / imperative / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 3, 3, 2 | Reject this cell: stronger imperative wording increased compensating exploration and unrelated guide reads. |
 
 Counts-only records:
 
 - [`evidence/f2-repo-conditional-flat-one-guide-r1.json`](evidence/f2-repo-conditional-flat-one-guide-r1.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r2.json`](evidence/f2-repo-conditional-flat-one-guide-r2.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r3.json`](evidence/f2-repo-conditional-flat-one-guide-r3.json)
+- [`evidence/f2-repo-imperative-flat-one-guide-r1.json`](evidence/f2-repo-imperative-flat-one-guide-r1.json)
+- [`evidence/f2-repo-imperative-flat-one-guide-r2.json`](evidence/f2-repo-imperative-flat-one-guide-r2.json)
+- [`evidence/f2-repo-imperative-flat-one-guide-r3.json`](evidence/f2-repo-imperative-flat-one-guide-r3.json)
 
 All three sessions retained owner provenance, loaded the required guide, avoided
 path invention and critical-rule violations, and reached the owned readiness
@@ -190,6 +194,10 @@ decision. Repetitions 2 and 3 nevertheless enumerated the guide tree and loaded
 `command-reference`; literal mode therefore rejects the cell. Continue one axis
 at a time with stronger emphasis before changing the reference representation
 or deferral level.
+
+Imperative emphasis did not recover the cell. All three imperative repetitions
+loaded at least two irrelevant guides, and two loaded three. The controlled
+next comparison is safety-gated emphasis with every other coordinate fixed.
 
 ## Clean-room shape
 
