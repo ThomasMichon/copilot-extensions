@@ -195,6 +195,30 @@ class TestRegisterSessionStdin:
         record = load_record(tmp_tracking_dir / "app-session.yaml")
         assert Path(record.worktree_path) == tmp_path / "different-path"
 
+    def test_does_not_adopt_detached_worktree(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, _foreign = _repo_with_worktree(tmp_path)
+        detached = tmp_path / "detached-worktree"
+        git_ops.git("worktree", "add", "--detach", str(detached), "master", cwd=anchor)
+        config = cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="test-project",
+            repos={
+                "test-project": cfg.RepoConfig(
+                    anchor=str(anchor),
+                    worktree_root=str(tmp_path / "anchor.worktrees"),
+                )
+            },
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+        m.cfg.set_active_project(config.repo_name)
+
+        assert m._adopt_linked_worktree(detached) is None
+        assert not (tmp_tracking_dir / "detached-worktree.yaml").exists()
+
     def test_explicit_worktree_id_takes_precedence(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

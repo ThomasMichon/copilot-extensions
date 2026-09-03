@@ -4781,7 +4781,9 @@ def _adopt_linked_worktree(cwd: str | Path) -> str | None:
             == git_ops._normalize_wt_path(str(anchor))
         ):
             return None
-        branch = git_ops.get_current_branch(root)
+        branch = git_ops.current_branch(root)
+        if not branch:
+            return None
         record, _created = tracking.create_new_record_if_absent(
             worktree_id=worktree_id,
             branch=branch,
