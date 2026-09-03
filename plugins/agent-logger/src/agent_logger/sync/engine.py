@@ -158,6 +158,14 @@ def run_sync(
             print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
             return 1
         print(f"session-sync: ok {result.detail} ({result.file_count} files)")
+        if result.excluded_roots:
+            mib = result.excluded_byte_count / (1024 * 1024)
+            qualifier = "" if result.excluded_measurement_complete else "at least "
+            print(
+                f"session-sync: excluded {qualifier}"
+                f"{result.excluded_file_count} detritus "
+                f"file(s) in {len(result.excluded_roots)} root(s) ({mib:.1f} MiB)"
+            )
 
         if prune:
             removed = target.prune(machine, cfg.sync_retention_days)
@@ -247,6 +255,14 @@ def run_push(
         print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
         return 1
     print(f"session-sync: ok {result.detail} ({result.file_count} files)")
+    if result.excluded_roots:
+        mib = result.excluded_byte_count / (1024 * 1024)
+        qualifier = "" if result.excluded_measurement_complete else "at least "
+        print(
+            f"session-sync: excluded {qualifier}"
+            f"{result.excluded_file_count} detritus "
+            f"file(s) in {len(result.excluded_roots)} root(s) ({mib:.1f} MiB)"
+        )
     return 0
 
 
@@ -287,6 +303,25 @@ def do_status(cfg: Config) -> int:
                 )
         elif deferred_files is not None:
             print("  - (invalid deferred_files metadata)")
+        excluded_count = metadata.get("excluded_detritus_root_count", 0)
+        excluded_files = metadata.get("excluded_detritus_file_count", 0)
+        excluded_bytes = metadata.get("excluded_detritus_byte_count", 0)
+        excluded_complete = metadata.get(
+            "excluded_detritus_measurement_complete",
+            True,
+        )
+        print(f"detritus_roots: {_status_text(excluded_count)}")
+        print(f"detritus_files: {_status_text(excluded_files)}")
+        print(f"detritus_bytes: {_status_text(excluded_bytes)}")
+        print(f"detritus_complete: {_status_text(excluded_complete)}")
+        excluded_roots = metadata.get("excluded_detritus_roots")
+        if isinstance(excluded_roots, list):
+            for path in excluded_roots[:MAX_DEFERRED_FILE_SAMPLES]:
+                print(
+                    f"  - {_status_text(path, '(invalid)', MAX_DEFERRED_PATH_CHARS)}"
+                )
+        elif excluded_roots is not None:
+            print("  - (invalid excluded_detritus_roots metadata)")
     return 0
 
 

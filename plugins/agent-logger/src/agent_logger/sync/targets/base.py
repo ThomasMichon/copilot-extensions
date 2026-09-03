@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
+from agent_logger.sync.detritus import rsync_exclude
 
 # On Windows, child processes (rsync, ssh) launched from a windowless parent --
 # e.g. pythonw.exe under a Scheduled Task -- each allocate a fresh console
@@ -42,6 +43,10 @@ class PushResult:
     detail: str = ""
     file_count: int = 0
     byte_count: int = 0
+    excluded_file_count: int = 0
+    excluded_byte_count: int = 0
+    excluded_roots: tuple[str, ...] = ()
+    excluded_measurement_complete: bool = True
 
 
 @dataclass
@@ -62,7 +67,10 @@ class FleetSyncStatus:
     error: str = ""
 
 
-def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
+def rsync_session_filters(
+    include_sessions: set[str] | None,
+    detritus_roots: tuple[Path, ...] = (),
+) -> list[str]:
     """Build rsync include/exclude args restricting the transfer to session data.
 
     session-sync archives session data only -- never the rest of the source
@@ -77,8 +85,10 @@ def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
     transferred; the global session-store.db is excluded so other repos'
     sessions never leak to the destination.
     """
+    exclusions = [rsync_exclude(root) for root in detritus_roots]
     if include_sessions is None:
         return [
+            *exclusions,
             "--include=session-state/",
             "--include=session-state/***",
             "--include=provenance/",
@@ -88,7 +98,7 @@ def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
             "--include=session-store.db-shm",
             "--exclude=*",
         ]
-    filters = ["--include=session-state/"]
+    filters = [*exclusions, "--include=session-state/"]
     for sid in sorted(include_sessions):
         filters.append(f"--include=session-state/{sid}/")
         filters.append(f"--include=session-state/{sid}/***")
