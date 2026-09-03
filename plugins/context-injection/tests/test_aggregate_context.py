@@ -205,6 +205,11 @@ def _run_native_producer_wrapper(
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.update(extra_env or {})
+    environment["PATH"] = (
+        str(Path(sys.executable).parent)
+        + os.pathsep
+        + environment.get("PATH", "")
+    )
     environment["COPILOT_PLUGIN_ROOT"] = str(plugin)
     if os.name == "nt":
         powershell = powershell or shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -1474,6 +1479,7 @@ def _run(
     tmp_path: Path,
     plugins: list[tuple[str, Path]],
     *,
+    repo: Path | None = None,
     cwd: Path | None = None,
     authority: str | None = None,
     session_id: str = "s",
@@ -1484,11 +1490,14 @@ def _run(
     staged: list[str | Path] | None = None,
     ancestry: list[list[str]] | None = None,
     enabled_overrides: dict[str, bool] | None = None,
+    repo_enabled_names: set[str] | None = None,
+    trusted_folders: list[Path] | None = None,
     via_wrapper: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     home = tmp_path / "home"
-    repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True, exist_ok=True)
+    repo = repo or tmp_path / "repo"
+    if not (repo / ".git").exists():
+        (repo / ".git").mkdir(parents=True, exist_ok=True)
     installed = home / ".copilot" / "installed-plugins" / "copilot-extensions"
     installed.mkdir(parents=True, exist_ok=True)
     for name, source in plugins:
@@ -1521,6 +1530,7 @@ def _run(
             f"{name}@copilot-extensions": True
             for name, _ in plugins
             if name != "context-injection"
+            and (repo_enabled_names is None or name in repo_enabled_names)
         },
     }
     settings["enabledPlugins"][authority_source] = True
@@ -1584,11 +1594,23 @@ def _run(
             config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     copilot = home / ".copilot"
     (copilot / "config.json").write_text(
-        json.dumps({"trustedFolders": [str(repo)]}), encoding="utf-8"
+        json.dumps(
+            {
+                "trustedFolders": [
+                    str(path) for path in (trusted_folders or [repo])
+                ]
+            }
+        ),
+        encoding="utf-8",
     )
     environment = os.environ.copy()
     environment["HOME"] = str(home)
     environment["USERPROFILE"] = str(home)
+    environment["PATH"] = (
+        str(Path(sys.executable).parent)
+        + os.pathsep
+        + environment.get("PATH", "")
+    )
     environment["COPILOT_PLUGIN_ROOT"] = str(
         installed / producer.partition("@")[0] if producer else engine
     )
@@ -1661,6 +1683,59 @@ def _run(
         env=environment,
         check=True,
     )
+
+
+def _linked_worktree(tmp_path: Path) -> tuple[Path, Path]:
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is required")
+    anchor = tmp_path / "anchor"
+    linked = tmp_path / "linked"
+    anchor.mkdir()
+    subprocess.run(
+        [git, "-C", str(anchor), "init", "--quiet"],
+        check=True,
+        capture_output=True,
+    )
+    (anchor / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(
+        [git, "-C", str(anchor), "add", "seed.txt"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            git,
+            "-C",
+            str(anchor),
+            "-c",
+            "user.name=Test User",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "seed",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            git,
+            "-C",
+            str(anchor),
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "linked",
+            str(linked),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return anchor.resolve(), linked.resolve()
 
 
 def test_aggregates_complete_active_stack_in_stable_order(tmp_path: Path) -> None:
@@ -1890,6 +1965,120 @@ def test_staged_authority_and_producers_form_the_active_stack(
     context = json.loads(result.stdout)["additionalContext"]
     assert "POLICY" in context
     assert "CATALOG" in context
+
+
+def test_linked_worktree_uses_exact_trusted_anchor_local_plugin_identity(
+    tmp_path: Path,
+) -> None:
+    anchor, linked = _linked_worktree(tmp_path)
+    sources = tmp_path / "sources"
+    policy = _plugin(sources, "mkt", "a-policy", context="POLICY")
+    overlay = _plugin(sources, "mkt", "overlay-policy", context="OVERLAY")
+    local_settings = anchor / ".github" / "copilot" / "settings.local.json"
+    local_settings.parent.mkdir(parents=True)
+    local_settings.write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {
+                    "overlay-policy@copilot-extensions": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache = tmp_path / "cache"
+    plugins = [
+        ("a-policy", policy),
+        ("overlay-policy", overlay),
+        ("context-injection", PLUGIN),
+    ]
+    common = {
+        "repo": linked,
+        "repo_enabled_names": {"a-policy"},
+        "trusted_folders": [linked, anchor],
+        "staged": ["context-injection", "a-policy", "overlay-policy"],
+        "session_id": "linked-worktree",
+        "cache_dir": cache,
+    }
+
+    outputs = [
+        _run(tmp_path, plugins, **common),
+        _run(
+            tmp_path,
+            plugins,
+            producer="a-policy@copilot-extensions/main",
+            via_wrapper=True,
+            **common,
+        ),
+        _run(
+            tmp_path,
+            plugins,
+            producer="overlay-policy@copilot-extensions/main",
+            via_wrapper=True,
+            **common,
+        ),
+    ]
+
+    assert len({result.stdout for result in outputs}) == 1
+    context = json.loads(outputs[0].stdout)["additionalContext"]
+    assert context.count(
+        "[context-contributor: overlay-policy@copilot-extensions/main]"
+    ) == 1
+    assert "OVERLAY" in context
+    assert len(list(cache.glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize("settings_owner", ["unrelated", "untrusted-anchor"])
+def test_linked_worktree_rejects_unqualified_anchor_local_plugin_identity(
+    tmp_path: Path,
+    settings_owner: str,
+) -> None:
+    anchor, linked = _linked_worktree(tmp_path)
+    overlay = _plugin(
+        tmp_path / "sources",
+        "mkt",
+        "overlay-policy",
+        context="OVERLAY",
+    )
+    owner = anchor
+    trusted = [linked]
+    if settings_owner == "unrelated":
+        owner = tmp_path / "unrelated"
+        owner.mkdir()
+        trusted.extend([anchor, owner])
+    local_settings = owner / ".github" / "copilot" / "settings.local.json"
+    local_settings.parent.mkdir(parents=True)
+    local_settings.write_text(
+        json.dumps(
+            {
+                "enabledPlugins": {
+                    "overlay-policy@copilot-extensions": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache = tmp_path / "cache"
+
+    result = _run(
+        tmp_path,
+        [
+            ("overlay-policy", overlay),
+            ("context-injection", PLUGIN),
+        ],
+        repo=linked,
+        repo_enabled_names=set(),
+        trusted_folders=trusted,
+        staged=["context-injection", "overlay-policy"],
+        producer="overlay-policy@copilot-extensions/main",
+        via_wrapper=True,
+        session_id=settings_owner,
+        cache_dir=cache,
+    )
+
+    assert json.loads(result.stdout) == {"additionalContext": "OVERLAY"}
+    assert "staged plugin source is missing or ambiguous" in result.stderr
+    assert not list(cache.glob("*.json"))
 
 
 def test_staged_inventory_ignores_enabled_but_unstaged_plugins(
