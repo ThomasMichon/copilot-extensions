@@ -110,6 +110,7 @@ def test_negative_reference_stimuli_and_windows_escape_are_explicit() -> None:
     assert "/repository/../outside/unsafe-guide.md" in absolute
 
     assert fixture._safe_guide_path(r"guides\sub\..\..\secret.md") is False
+    assert fixture._safe_repository_path("C:escape.json") is False
 
 
 def test_phase2_renderer_covers_frozen_axes_and_preserves_baselines() -> None:

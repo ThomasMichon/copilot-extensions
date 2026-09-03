@@ -478,7 +478,7 @@ def _safe_guide_path(value: str) -> bool:
 
 
 def _safe_repository_path(value: str) -> bool:
-    if "\\" in value:
+    if "\\" in value or re.match(r"^[A-Za-z]:", value):
         return False
     path = PurePosixPath(value)
     return (
