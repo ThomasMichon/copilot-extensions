@@ -72,6 +72,8 @@ jobs:
         run: python tools/check-marketplace-isolation.py
       - name: Marketplace isolation guard tests
         run: python -m pytest -q tools/test_check_marketplace_isolation.py
+      - name: Git hook interpreter tests
+        run: python -m pytest -q tools/test_hook_interpreter.py
       - name: Payload invocation generated files
         run: python libs/payload-invocation/generate.py --all --check
       - name: Payload invocation foundation tests

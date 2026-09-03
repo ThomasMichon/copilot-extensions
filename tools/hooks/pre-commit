@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 # pre-commit hook: high-signal, staged-only guards for this repo.
 # Enable with:  git config core.hooksPath tools/hooks   (or: tools/setup-hooks.sh)
 #
