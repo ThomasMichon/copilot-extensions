@@ -563,3 +563,21 @@ enforcement before migrating the complete contributor stack.
   overhead without restoring bounded behavior. Next gate: return to flat
   fragments and change only the reference representation to
   `backtick-absolute-contained`.
+
+### 2026-09-03 - Absolute contained paths do not recover multi-guide
+
+- Ran three F3 safety-gated flat multi-guide repetitions with only the
+  reference representation changed to `backtick-absolute-contained`.
+- All three were literal-mode false passes. Every run loaded the required
+  guides and remained path-contained, but independent judges counted four,
+  three, and five direct irrelevant document reads after broad compensating
+  exploration. The canary-backed records count two, three, and one irrelevant
+  guides.
+- Repetitions 1 and 2 violated CAP-1 and returned an inapplicable blocked
+  decision. Repetition 3 preserved the critical rules but lost complete
+  decision-owner provenance after two broad searches and five unnecessary
+  reads.
+- Reject the representation: absolute locators removed path-resolution
+  ambiguity but did not restore bounded selection. Next gate: change only the
+  representation to `markdown-link` and explicitly inspect eager-loading
+  evidence.
