@@ -50,6 +50,17 @@ def test_py_hooks_are_nonempty_and_exist():
         assert (_SCRIPTS / g).is_file(), f"hooks.json wires {g} but scripts/{g} is missing"
 
 
+def test_python_hook_runners_recover_from_invalid_windows_cwd():
+    data = json.loads(_HOOKS.read_text("utf-8"))
+    for event in _PY_HOOK_EVENTS:
+        hooks = data["hooks"][event]
+        assert len(hooks) == 1
+        command = hooks[0]["powershell"]
+        assert "Set-Location -LiteralPath $env:USERPROFILE" in command
+        assert "[IO.Path]::GetPathRoot((Get-Location).Path)" in command
+        assert "[IO.Directory]::SetCurrentDirectory((Get-Location).Path)" in command
+
+
 def test_all_installers_deploy_every_py_hook():
     scripts = _py_hook_scripts() | {
         "statelessness_guard.py",

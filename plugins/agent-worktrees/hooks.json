@@ -4,7 +4,7 @@
     "preToolUse": [
       {
         "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch {}; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\"; if ($py -and (Test-Path $s)) { & $py $s preToolUse } } catch {}; exit 0",
+        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\"; if ($py -and (Test-Path $s)) { & $py $s preToolUse } } catch {}; exit 0",
         "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/hook_client.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" preToolUse || true; fi; exit 0",
         "timeoutSec": 30
       }
@@ -12,7 +12,7 @@
     "postToolUse": [
       {
         "type": "command",
-        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch {}; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\"; if ($py -and (Test-Path $s)) { & $py $s postToolUse } } catch {}; exit 0",
+        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; try { $py=(Get-Command python -ErrorAction SilentlyContinue).Source; $s=\"$env:USERPROFILE\\.agent-worktrees\\bin\\hook_client.py\"; if ($py -and (Test-Path $s)) { & $py $s postToolUse } } catch {}; exit 0",
         "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/hook_client.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" postToolUse || true; fi; exit 0",
         "timeoutSec": 10
       }
