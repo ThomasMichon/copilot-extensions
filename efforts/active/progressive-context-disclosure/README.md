@@ -789,3 +789,23 @@ enforcement before migrating the complete contributor stack.
   unanimous task-local correctness ceiling, while the deferred form introduces
   unstable compensating exploration and four irrelevant guide reads across
   three repetitions. Freeze epoch remains 3.
+
+### 2026-09-03 - Capability-owner indexes amplify broad discovery
+
+- Verified the epoch-3 F1 materialization before running it. The capability
+  owner index points to `capability-procedure`, and the task-local execution
+  configuration supplies READY state, publication-safe material, an approved
+  reachable destination, a satisfied required review gate, and exact owned
+  argv.
+- All three F1 repetitions loaded the required procedure and completed the
+  exact bounded operation, but every literal-mode judge returned a false pass.
+  Each run enumerated all eight owner indexes before loading three, four, and
+  three irrelevant guides. Tool-call counts were 18, 19, and 15; durations were
+  71, 70, and 62 seconds.
+- Owner provenance, contained paths, the required review gate, and the final
+  objective remained intact. The failures are selection failures: broad
+  compensating discovery violated CAP-1 before the otherwise-correct mutation.
+- Reject F1 for the capability-guide boundary. Freeze epoch remains 3. The next
+  one-axis comparison changes only deferral to F2 while preserving
+  repository-relative backticks, safety-gated emphasis, flat fragments, model,
+  ACP venue, and fresh sessions.
