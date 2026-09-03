@@ -665,17 +665,31 @@ def test_owned_agent_root_is_shallow_and_agent_only(tmp_path: Path):
     )
 
 
-@pytest.mark.parametrize("value", ["../outside", "missing"])
-def test_owned_agent_root_rejects_unsafe_or_missing_paths(
+def test_owned_agent_root_rejects_traversal(
     tmp_path: Path,
     capsys,
-    value: str,
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
 
-    assert scan.main([str(repo), "--owned-agent-root", value]) == 2
+    assert scan.main([
+        str(repo),
+        "--owned-agent-root",
+        "../outside",
+    ]) == 2
     assert "--owned-agent-root" in capsys.readouterr().err
+
+
+def test_owned_agent_root_reports_missing_directory(tmp_path: Path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert scan.main([
+        str(repo),
+        "--owned-agent-root",
+        "missing",
+    ]) == 2
+    assert "does not exist" in capsys.readouterr().err
 
 
 def test_owned_agent_root_rejects_absolute_path(tmp_path: Path, capsys):

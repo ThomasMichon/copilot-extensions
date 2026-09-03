@@ -1524,6 +1524,10 @@ def resolve_owned_agent_roots(
                 "repository-relative directory without '..'"
             )
         candidate = repo / relative
+        if not candidate.exists():
+            raise ValueError(
+                f"--owned-agent-root {raw!r} does not exist"
+            )
         if candidate.is_symlink():
             raise ValueError(
                 f"--owned-agent-root {raw!r} must not be a symlink"
