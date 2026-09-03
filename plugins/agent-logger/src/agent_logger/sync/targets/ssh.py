@@ -15,6 +15,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from agent_logger.sync.detritus import discover_session_detritus
 from agent_logger.sync.targets.base import (
     NO_WINDOW_KWARGS,
     DoctorResult,
@@ -58,32 +59,61 @@ class SshTarget(Target):
             return PushResult(ok=False, detail="ssh target requires a host")
         if shutil.which("rsync") is None:
             return PushResult(ok=False, detail="rsync not found on PATH")
+        try:
+            detritus = discover_session_detritus(source, include_sessions)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         remote = f"{host}:{self._remote_path()}/{machine}/"
         ssh_cmd = "ssh " + " ".join(self._ssh_opts())
-        cmd = [
-            "rsync",
-            "-az",
-            "--delete",
-            *rsync_session_filters(include_sessions),
-            "-e",
-            ssh_cmd,
-            f"{source}/",
-            remote,
-        ]
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT,
-                check=False,
-                **NO_WINDOW_KWARGS,
+        for attempt in range(2):
+            cmd = [
+                "rsync",
+                "-az",
+                "--delete",
+                *(["--delete-excluded"] if include_sessions is None else []),
+                *rsync_session_filters(include_sessions, detritus.roots),
+                "-e",
+                ssh_cmd,
+                f"{source}/",
+                remote,
+            ]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=_TIMEOUT,
+                    check=False,
+                    **NO_WINDOW_KWARGS,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return PushResult(ok=False, detail=f"rsync failed: {exc}")
+            if proc.returncode != 0:
+                return PushResult(ok=False, detail=proc.stderr.strip()[:300])
+            try:
+                latest = discover_session_detritus(source, include_sessions)
+            except OSError as exc:
+                return PushResult(
+                    ok=False,
+                    detail=f"detritus revalidation failed: {exc}",
+                )
+            if latest.roots == detritus.roots:
+                detritus = latest
+                break
+            detritus = latest
+        else:
+            return PushResult(
+                ok=False,
+                detail="source detritus changed during publication; retry",
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return PushResult(ok=False, detail=f"rsync failed: {exc}")
-        if proc.returncode != 0:
-            return PushResult(ok=False, detail=proc.stderr.strip()[:300])
-        return PushResult(ok=True, detail=f"-> {remote}")
+        return PushResult(
+            ok=True,
+            detail=f"-> {remote}",
+            excluded_file_count=detritus.file_count,
+            excluded_byte_count=detritus.byte_count,
+            excluded_roots=tuple(str(root) for root in detritus.roots),
+            excluded_measurement_complete=detritus.measurement_complete,
+        )
 
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)
