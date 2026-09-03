@@ -69,6 +69,11 @@ def _merged_pr_head(
             cwd=cwd, check=False,
         ).returncode != 0:
             continue
+        if git_ops.git(
+            "merge-base", "--is-ancestor", pr.base_sha, upstream,
+            cwd=cwd, check=False,
+        ).returncode != 0:
+            continue
 
         if pr.base_sha not in upstream_patch_ids:
             upstream_patch_ids[pr.base_sha] = pr_ops._commit_patch_ids(
@@ -234,18 +239,29 @@ def complete_worktree(
 
     # Back up the pre-reconcile tip so any dropped commit stays recoverable,
     # whichever path is taken below.
-    pre = git_ops.git("rev-parse", branch, cwd=worktree_path, check=False).stdout.strip()
-    if pre:
-        backup = git_ops.git(
-            "update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False,
-        )
-        if backup.returncode != 0:
-            detail = (backup.stderr or backup.stdout or "unknown Git error").strip()
-            return {**base, "action": "error",
-                    "error": (
-                        f"Could not create recovery ref {BACKUP_REF}; "
-                        f"the branch is unchanged: {detail}"
-                    )}
+    pre_result = git_ops.git(
+        "rev-parse", branch, cwd=worktree_path, check=False,
+    )
+    pre = pre_result.stdout.strip()
+    if pre_result.returncode != 0 or not pre:
+        detail = (
+            pre_result.stderr or pre_result.stdout or "unknown Git error"
+        ).strip()
+        return {**base, "action": "error",
+                "error": (
+                    f"Could not read branch tip for {branch}; "
+                    f"the branch is unchanged: {detail}"
+                )}
+    backup = git_ops.git(
+        "update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False,
+    )
+    if backup.returncode != 0:
+        detail = (backup.stderr or backup.stdout or "unknown Git error").strip()
+        return {**base, "action": "error",
+                "error": (
+                    f"Could not create recovery ref {BACKUP_REF}; "
+                    f"the branch is unchanged: {detail}"
+                )}
 
     # A tracked merged PR gives us the exact boundary between the squashed PR
     # commits and later local work. Rebase only the latter; replaying the former

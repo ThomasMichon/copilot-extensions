@@ -197,6 +197,60 @@ class TestPrComplete:
         assert "ref locked" in res["error"]
         assert _git("rev-parse", "HEAD", cwd=wt_path) == before
 
+    def test_unreadable_branch_tip_leaves_branch_unchanged(self, pr_repo, monkeypatch):
+        """A recovery ref cannot be optional when the branch tip is unreadable."""
+        config, wid, wt_path, _ = pr_repo
+        anchor = Path(config.default_repo.anchor)
+        branch = f"worktree/{wid}"
+        (anchor / "upstream.txt").write_text("advance\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "upstream advance", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+        before = _git("rev-parse", "HEAD", cwd=wt_path)
+        real_git = git_ops.git
+
+        def fail_branch_tip(*args, **kwargs):
+            if args == ("rev-parse", branch):
+                return subprocess.CompletedProcess(args, 1, "", "bad ref")
+            return real_git(*args, **kwargs)
+
+        monkeypatch.setattr(git_ops, "git", fail_branch_tip)
+
+        res = pr_complete.complete_worktree(wid, config)
+
+        assert res["success"] is False
+        assert res["action"] == "error"
+        assert "Could not read branch tip" in res["error"]
+        assert "bad ref" in res["error"]
+        assert _git("rev-parse", "HEAD", cwd=wt_path) == before
+
+    def test_merged_boundary_requires_base_on_upstream(self, pr_repo, monkeypatch):
+        """A stale or foreign PR base cannot authorize dropping commits."""
+        _config, wid, wt_path, _ = pr_repo
+        branch = f"worktree/{wid}"
+        rec = tracking.load_record_by_id(wid)
+        assert rec is not None
+        rec.pr = tracking.PRRecord(
+            state="merged",
+            base_sha="deadbeef",
+            head_sha=_git("rev-parse", branch, cwd=wt_path),
+            patch_id="matching-patch",
+        )
+        tracking.save_record(rec)
+        called = False
+
+        def unexpected_scan(*args, **kwargs):
+            nonlocal called
+            called = True
+            return {"matching-patch"}
+
+        monkeypatch.setattr(pr_ops, "_commit_patch_ids", unexpected_scan)
+
+        assert pr_complete._merged_pr_head(
+            wid, branch, "origin/master", cwd=str(wt_path),
+        ) is None
+        assert called is False
+
     def test_reconcile_preserves_post_merge_divergence_net_zero(self, pr_repo):
         """A post-merge commit that diverges from upstream but nets to the
         merge-base MUST survive the reconcile (test-chamber #2854).
