@@ -81,20 +81,28 @@ def _controller_target(
         return "invalid-projection", child.repo, None, session_id
     if projection is None:
         return "missing-projection", child.repo, None, session_id
+    try:
+        metadata = session_projection.projection_metadata(projection)
+    except session_projection.ProjectionError:
+        return "invalid-projection", child.repo, None, session_id
     if restored:
         validation = session_projection.validate_restored_hint(
             session_id,
             projection,
             record_loader=record_loader,
         )
-        if validation["status"] != "restored-validated":
+        if validation["status"] not in session_projection.RESTORED_VALIDATED_STATUSES:
             return str(validation["status"]), child.repo, None, session_id
+        if metadata["relation_set_incomplete"]:
+            return "incomplete-projection", child.repo, None, session_id
         return (
             "local",
             str(validation["project"]),
             str(validation["worktree_id"]),
             session_id,
         )
+    if metadata["relation_set_incomplete"]:
+        return "incomplete-projection", child.repo, None, session_id
     bound = [
         item
         for item in projection.get("relations", [])

@@ -144,12 +144,220 @@ def test_newer_projection_is_left_untouched(
     session_dir = _session_root(tmp_path, monkeypatch)
     record = _record(tmp_tracking_dir)
     sidecar = session_dir / session_projection.SIDECAR_NAME
-    original = '{"version": 2, "session_id": "session-a", "relations": []}\n'
+    original = json.dumps({
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": True,
+        "overflow": False,
+        "omitted_relations": 0,
+        "tombstone_overflow": False,
+    }) + "\n"
     sidecar.write_text(original, encoding="utf-8")
 
     tracking.set_head_session(record, "session-a")
 
     assert sidecar.read_text(encoding="utf-8") == original
+    assert session_projection.read("session-a")["version"] == 2
+    assert session_projection.sync_bound(record, "session-a") == "blocked"
+
+
+def test_future_projection_is_unsupported(tmp_path, monkeypatch):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        '{"version": 3, "session_id": "session-a", "relations": []}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(session_projection.UnsupportedProjectionVersion):
+        session_projection.read("session-a")
+
+
+@pytest.mark.parametrize(
+    ("history_complete", "overflow", "omitted", "tombstone_overflow"),
+    [
+        ("true", False, 0, False),
+        (True, "false", 0, False),
+        (True, True, 0, False),
+        (True, True, None, False),
+        (True, False, None, False),
+        (True, False, 1, False),
+        (True, False, 0, "false"),
+    ],
+)
+def test_v2_projection_rejects_invalid_completeness_fields(
+    tmp_path,
+    monkeypatch,
+    history_complete,
+    overflow,
+    omitted,
+    tombstone_overflow,
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    projection = {
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": history_complete,
+        "overflow": overflow,
+        "omitted_relations": omitted,
+        "tombstone_overflow": tombstone_overflow,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(session_projection.ProjectionError):
+        session_projection.read("session-a")
+
+
+def test_v2_projection_accepts_opaque_tombstones(tmp_path, monkeypatch):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    projection = {
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": [{
+            "key_sha256": "a" * 64,
+            "relation_revision": 4,
+            "sequence": 2,
+        }],
+        "tombstone_sequence": 2,
+        "history_complete": False,
+        "overflow": True,
+        "omitted_relations": None,
+        "tombstone_overflow": True,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    assert session_projection.read("session-a") == projection
+    assert session_projection.projection_metadata(projection) == {
+        "version": 2,
+        "overflow": True,
+        "omitted_relations": None,
+        "history_complete": False,
+        "tombstone_overflow": True,
+        "relation_set_incomplete": True,
+    }
+
+
+def test_v2_projection_requires_explicit_fields(tmp_path, monkeypatch):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 2,
+            "session_id": "session-a",
+            "relations": [],
+            "history_complete": True,
+            "tombstone_overflow": False,
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        session_projection.ProjectionError,
+        match="missing required field",
+    ):
+        session_projection.read("session-a")
+
+
+def test_v2_tombstone_classifies_matching_relation_without_repair(
+    tmp_tracking_dir,
+):
+    record = _record(tmp_tracking_dir)
+    relation_key = ("example", "wt-a", "bound")
+    projection = {
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": [{
+            "key_sha256": session_projection._relation_key_sha256(relation_key),
+            "relation_revision": 0,
+            "sequence": 1,
+        }],
+        "tombstone_sequence": 1,
+        "history_complete": True,
+        "overflow": False,
+        "omitted_relations": 0,
+        "tombstone_overflow": False,
+    }
+
+    item = session_projection._classify_relation(
+        record,
+        "session-a",
+        role="bound",
+        projection=projection,
+        restored=False,
+        record_loader=lambda _project, _worktree_id: record,
+    )
+
+    assert item["status"] == "collision"
+    assert item["repairable"] is False
+
+
+def test_v2_missing_relation_is_report_only(tmp_tracking_dir):
+    record = _record(tmp_tracking_dir)
+    projection = {
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": True,
+        "overflow": False,
+        "omitted_relations": 0,
+        "tombstone_overflow": False,
+    }
+
+    item = session_projection._classify_relation(
+        record,
+        "session-a",
+        role="bound",
+        projection=projection,
+        restored=False,
+        record_loader=lambda _project, _worktree_id: record,
+    )
+
+    assert item["status"] == "missing"
+    assert item["repairable"] is False
+
+
+def test_v2_tombstone_digest_has_canonical_fixture():
+    assert session_projection._relation_key_sha256(
+        ("example", "wt-a", "bound")
+    ) == "1abcfb014ee9c38e384adf080bb22779b166c456331b2846abd9e4aa282236dd"
+
+
+def test_v2_recoverable_reader_refuses_writer_downgrade(
+    tmp_path, monkeypatch
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    projection = {
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": True,
+        "overflow": False,
+        "omitted_relations": 0,
+        "tombstone_overflow": False,
+    }
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps(projection),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(session_projection.UnsupportedProjectionVersion):
+        session_projection._read_recoverable("session-a")
 
 
 def test_older_projection_is_rebuilt_from_authority(
@@ -1151,20 +1359,46 @@ def test_corrupt_projection_is_rebuilt(
     assert loaded["relations"][0]["worktree_id"] == "wt-a"
 
 
-def test_oversized_projection_is_rebuilt_with_bounded_read(
+def test_oversized_projection_is_blocked_without_replacement(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
     session_dir = _session_root(tmp_path, monkeypatch)
     record = _record(tmp_tracking_dir)
-    (session_dir / session_projection.SIDECAR_NAME).write_bytes(
-        b"x" * (session_projection.MAX_BYTES + 4096)
-    )
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    original = b"x" * (session_projection.MAX_BYTES + 4096)
+    sidecar.write_bytes(original)
 
     tracking.set_head_session(record, "session-a")
 
-    loaded = session_projection.read("session-a")
-    assert loaded is not None
-    assert loaded["relations"][0]["worktree_id"] == "wt-a"
+    assert sidecar.read_bytes() == original
+    assert session_projection.sync_bound(record, "session-a") == "blocked"
+
+
+def test_oversized_projection_race_is_blocked_under_sidecar_lock(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    oversized = b"x" * (session_projection.MAX_BYTES + 1)
+
+    class GrowOnEnter:
+        acquired = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            sidecar.write_bytes(oversized)
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(tracking, "_RecordLock", GrowOnEnter)
+
+    assert session_projection.sync_bound(record, "session-a") == "blocked"
+    assert sidecar.read_bytes() == oversized
 
 
 def test_handoff_updates_predecessor_when_it_is_not_head(

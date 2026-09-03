@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 from pathlib import Path
@@ -12,6 +14,7 @@ from typing import Any, Callable, Literal
 from . import sessions
 
 SCHEMA_VERSION = 1
+MAX_SUPPORTED_SCHEMA_VERSION = 2
 SIDECAR_NAME = "agent-worktrees.json"
 MAX_BYTES = 128 * 1024
 MAX_RELATIONS = 128
@@ -19,6 +22,11 @@ MAX_RELATION_TOMBSTONES = 128
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 SyncOutcome = Literal["written", "current", "blocked", "deferred"]
 RecordLoader = Callable[[str, str], Any | None]
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+RESTORED_VALIDATED_STATUSES = {
+    "restored-validated",
+    "restored-validated-incomplete",
+}
 
 
 class ProjectionError(ValueError):
@@ -168,11 +176,12 @@ def read(session_id: str) -> dict[str, Any] | None:
     version = loaded.get("version")
     if not isinstance(version, int):
         raise ProjectionError("projection version must be an integer")
-    if version > SCHEMA_VERSION:
+    if version > MAX_SUPPORTED_SCHEMA_VERSION:
         raise UnsupportedProjectionVersion(
-            f"projection version {version} is newer than supported {SCHEMA_VERSION}"
+            "projection version "
+            f"{version} is newer than supported {MAX_SUPPORTED_SCHEMA_VERSION}"
         )
-    if version != SCHEMA_VERSION:
+    if version not in {1, 2}:
         raise ProjectionError(f"unsupported projection version {version}")
     if loaded.get("session_id") != session_id:
         raise ProjectionError("projection session_id does not match its directory")
@@ -181,6 +190,22 @@ def read(session_id: str) -> dict[str, Any] | None:
         raise ProjectionError("projection relations must be an array")
     if any(not isinstance(relation, dict) for relation in relations):
         raise ProjectionError("projection relations must contain JSON objects")
+    if version == 2:
+        required = {
+            "relations",
+            "relation_tombstones",
+            "tombstone_sequence",
+            "history_complete",
+            "overflow",
+            "omitted_relations",
+            "tombstone_overflow",
+        }
+        missing = sorted(required - loaded.keys())
+        if missing:
+            raise ProjectionError(
+                "v2 projection is missing required field(s): "
+                + ", ".join(missing)
+            )
     tombstones = loaded.get("relation_tombstones", [])
     if not isinstance(tombstones, list):
         raise ProjectionError("projection relation_tombstones must be an array")
@@ -188,7 +213,111 @@ def read(session_id: str) -> dict[str, Any] | None:
         raise ProjectionError(
             "projection relation_tombstones must contain JSON objects"
         )
+    if version == 2:
+        projection_metadata(loaded)
+        if len(relations) > MAX_RELATIONS:
+            raise ProjectionError(
+                f"projection relations exceed the v2 cap of {MAX_RELATIONS}"
+            )
+        if len(tombstones) > MAX_RELATION_TOMBSTONES:
+            raise ProjectionError(
+                "projection relation_tombstones exceed the v2 cap of "
+                f"{MAX_RELATION_TOMBSTONES}"
+            )
+        digests: set[str] = set()
+        sequences: set[int] = set()
+        for tombstone in tombstones:
+            digest = tombstone.get("key_sha256")
+            revision = tombstone.get("relation_revision")
+            sequence = tombstone.get("sequence")
+            if (
+                not isinstance(digest, str)
+                or _SHA256_RE.fullmatch(digest) is None
+                or type(revision) is not int
+                or revision < 0
+                or type(sequence) is not int
+                or sequence < 0
+            ):
+                raise ProjectionError("invalid v2 projection tombstone")
+            if digest in digests or sequence in sequences:
+                raise ProjectionError("duplicate v2 projection tombstone")
+            digests.add(digest)
+            sequences.add(sequence)
+        relation_digests = {
+            _relation_key_sha256(_relation_key(relation))
+            for relation in relations
+        }
+        if relation_digests & digests:
+            raise ProjectionError(
+                "v2 relation cannot also have a deletion tombstone"
+            )
+        tombstone_sequence = loaded.get("tombstone_sequence")
+        if (
+            type(tombstone_sequence) is not int
+            or tombstone_sequence < max(
+                (item["sequence"] for item in tombstones),
+                default=0,
+            )
+        ):
+            raise ProjectionError("invalid v2 projection tombstone_sequence")
     return loaded
+
+
+def projection_metadata(projection: dict[str, Any]) -> dict[str, Any]:
+    """Normalize versioned completeness fields without changing stored data."""
+    version = projection.get("version")
+    overflow = projection.get("overflow", False)
+    omitted = projection.get("omitted_relations", 0)
+    if not isinstance(overflow, bool):
+        raise ProjectionError("projection overflow must be a boolean")
+    if version == 1:
+        if type(omitted) is not int or omitted < 0:
+            raise ProjectionError(
+                "v1 projection omitted_relations must be a non-negative integer"
+            )
+        return {
+            "version": 1,
+            "overflow": overflow,
+            "omitted_relations": omitted,
+            "history_complete": None,
+            "tombstone_overflow": None,
+            "relation_set_incomplete": bool(overflow or omitted),
+        }
+    if version == 2:
+        history_complete = projection.get("history_complete")
+        tombstone_overflow = projection.get("tombstone_overflow")
+        if not isinstance(history_complete, bool):
+            raise ProjectionError(
+                "v2 projection history_complete must be a boolean"
+            )
+        if not isinstance(tombstone_overflow, bool):
+            raise ProjectionError(
+                "v2 projection tombstone_overflow must be a boolean"
+            )
+        if overflow:
+            if omitted is not None:
+                raise ProjectionError(
+                    "v2 overflow requires omitted_relations to be null"
+                )
+            if history_complete:
+                raise ProjectionError(
+                    "v2 overflow requires history_complete to be false"
+                )
+        elif type(omitted) is not int or omitted != 0:
+            raise ProjectionError(
+                "complete v2 projection requires omitted_relations to be zero"
+            )
+        return {
+            "version": 2,
+            "overflow": overflow,
+            "omitted_relations": omitted,
+            "history_complete": history_complete,
+            "tombstone_overflow": tombstone_overflow,
+            "relation_set_incomplete": bool(
+                overflow or not history_complete
+            ),
+        }
+    raise ProjectionError(f"unsupported projection version {version}")
 
 
 def _read_recoverable(session_id: str) -> dict[str, Any]:
@@ -362,15 +491,12 @@ def validate_restored_hint(
         projection = read(session_id)
     if projection is None:
         return {"status": "restored-missing-projection"}
-    overflow = projection.get("overflow", False)
-    omitted = projection.get("omitted_relations", 0)
-    if (
-        not isinstance(overflow, bool)
-        or type(omitted) is not int
-        or omitted < 0
-    ):
+    try:
+        metadata = projection_metadata(projection)
+    except ProjectionError:
         return {"status": "restored-invalid"}
-    if overflow or omitted:
+    relation_set_incomplete = bool(metadata["relation_set_incomplete"])
+    if metadata["version"] == 1 and relation_set_incomplete:
         return {"status": "restored-incomplete"}
     bound = [
         relation
@@ -378,7 +504,13 @@ def validate_restored_hint(
         if isinstance(relation, dict) and relation.get("role") == "bound"
     ]
     if not bound:
-        return {"status": "restored-unbound"}
+        return {
+            "status": (
+                "restored-incomplete"
+                if relation_set_incomplete
+                else "restored-unbound"
+            )
+        }
     if len(bound) != 1:
         return {"status": "restored-ambiguous"}
     relation = bound[0]
@@ -455,7 +587,11 @@ def validate_restored_hint(
             "worktree_id": worktree_id,
         }
     return {
-        "status": "restored-validated",
+        "status": (
+            "restored-validated-incomplete"
+            if relation_set_incomplete
+            else "restored-validated"
+        ),
         "project": project,
         "worktree_id": worktree_id,
         "record": record,
@@ -468,6 +604,36 @@ def _relation_key(relation: dict[str, Any]) -> tuple[str, str, str]:
         str(relation.get("worktree_id") or ""),
         str(relation.get("role") or ""),
     )
+
+
+def _relation_key_sha256(relation_key: tuple[str, str, str]) -> str:
+    encoded = json.dumps(
+        list(relation_key),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _matching_tombstones(
+    projection: dict[str, Any],
+    relation_key: tuple[str, str, str],
+) -> list[dict[str, Any]]:
+    tombstones = [
+        item
+        for item in projection.get("relation_tombstones", [])
+        if isinstance(item, dict)
+    ]
+    if projection.get("version") == 2:
+        digest = _relation_key_sha256(relation_key)
+        return [
+            item for item in tombstones
+            if item.get("key_sha256") == digest
+        ]
+    return [
+        item for item in tombstones
+        if _relation_key(item) == relation_key
+    ]
 
 
 def _relation_revision(relation: dict[str, Any]) -> int:
@@ -726,6 +892,8 @@ def _sync_relation(
         ) as lock:
             if not lock.acquired:
                 return "deferred"
+            if target.exists() and target.stat().st_size > MAX_BYTES:
+                return "blocked"
             try:
                 current = read(session_id) or _empty_projection(session_id)
             except UnsupportedProjectionVersion:
@@ -743,6 +911,8 @@ def _sync_relation(
                     if relation is None:
                         return "deferred"
                     current = _empty_projection(session_id)
+            if current.get("version") != SCHEMA_VERSION:
+                return "blocked"
             if relation is None:
                 if not remove_missing:
                     return "current"
@@ -846,6 +1016,8 @@ def _audit_item(
         "repairable": False,
         "repaired": False,
         "restored": False,
+        "relation_set_incomplete": None,
+        "tombstone_overflow": None,
     }
 
 
@@ -874,7 +1046,7 @@ def _classify_relation(
             projection,
             record_loader=record_loader,
         )
-        if validation["status"] != "restored-validated":
+        if validation["status"] not in RESTORED_VALIDATED_STATUSES:
             item["status"] = validation["status"]
             return item
     if projection is None:
@@ -883,16 +1055,16 @@ def _classify_relation(
         )
         item["repairable"] = not restored
         return item
-    overflow = projection.get("overflow", False)
-    omitted = projection.get("omitted_relations", 0)
-    if (
-        not isinstance(overflow, bool)
-        or type(omitted) is not int
-        or omitted < 0
-    ):
+    try:
+        metadata = projection_metadata(projection)
+    except ProjectionError:
         item["status"] = "restored-invalid" if restored else "invalid"
         return item
-    if overflow or omitted:
+    relation_set_incomplete = bool(metadata["relation_set_incomplete"])
+    writable_projection = metadata["version"] == SCHEMA_VERSION
+    item["relation_set_incomplete"] = relation_set_incomplete
+    item["tombstone_overflow"] = metadata["tombstone_overflow"]
+    if metadata["version"] == 1 and relation_set_incomplete:
         item["status"] = "restored-incomplete" if restored else "incomplete"
         return item
 
@@ -907,12 +1079,7 @@ def _classify_relation(
         item["status"] = "restored-ambiguous" if restored else "ambiguous"
         return item
     if not relations:
-        tombstones = [
-            tombstone
-            for tombstone in projection.get("relation_tombstones", [])
-            if isinstance(tombstone, dict)
-            and _relation_key(tombstone) == relation_key
-        ]
+        tombstones = _matching_tombstones(projection, relation_key)
         if len(tombstones) > 1:
             item["status"] = "restored-ambiguous" if restored else "ambiguous"
             return item
@@ -930,7 +1097,7 @@ def _classify_relation(
                 )
                 return item
             item["status"] = "restored-stale" if restored else "stale"
-            item["repairable"] = not restored
+            item["repairable"] = not restored and writable_projection
             return item
         if role == "bound":
             other_bound = [
@@ -944,8 +1111,13 @@ def _classify_relation(
                     "restored-collision" if restored else "collision"
                 )
                 return item
+        if relation_set_incomplete:
+            item["status"] = (
+                "restored-incomplete" if restored else "incomplete"
+            )
+            return item
         item["status"] = "restored-missing-relation" if restored else "missing"
-        item["repairable"] = not restored
+        item["repairable"] = not restored and writable_projection
         return item
 
     current = relations[0]
@@ -953,7 +1125,7 @@ def _classify_relation(
     expected_vector = _revision_vector(expected)
     if current_vector is None or expected_vector is None:
         item["status"] = "restored-invalid" if restored else "invalid"
-        item["repairable"] = not restored
+        item["repairable"] = not restored and writable_projection
         return item
     revision_status = _compare_revision_vectors(
         current_vector,
@@ -967,7 +1139,7 @@ def _classify_relation(
         return item
     if revision_status == "stale":
         item["status"] = "restored-stale" if restored else "stale"
-        item["repairable"] = not restored
+        item["repairable"] = not restored and writable_projection
         return item
     if _known_relation(current) != _known_relation(expected):
         item["status"] = "restored-collision" if restored else "collision"
@@ -1002,6 +1174,10 @@ def _repair_relation(
                 blocking=True,
                 require_sidecar=True,
             ):
+                if target.exists() and target.stat().st_size > MAX_BYTES:
+                    item = _audit_item(record, session_id, role)
+                    item["status"] = "repair-blocked"
+                    return item
                 try:
                     current = read(session_id) or _empty_projection(session_id)
                 except UnsupportedProjectionVersion:
@@ -1025,6 +1201,10 @@ def _repair_relation(
                         return item
                     except ProjectionError:
                         current = _empty_projection(session_id)
+                if current.get("version") != SCHEMA_VERSION:
+                    item = _audit_item(record, session_id, role)
+                    item["status"] = "newer-schema"
+                    return item
 
                 locked = _classify_relation(
                     authoritative,
@@ -1232,6 +1412,11 @@ def recovery_report(
         "session_id": session_id,
         "status": "missing-projection",
         "restored": False,
+        "schema_version": None,
+        "history_complete": None,
+        "overflow": None,
+        "omitted_relations": None,
+        "tombstone_overflow": None,
         "relations": [],
         "recommended_action": "none",
     }
@@ -1252,17 +1437,21 @@ def recovery_report(
     report["restored"] = restored
     if projection is None:
         return report
-    overflow = projection.get("overflow", False)
-    omitted = projection.get("omitted_relations", 0)
-    if (
-        not isinstance(overflow, bool)
-        or type(omitted) is not int
-        or omitted < 0
-    ):
+    try:
+        metadata = projection_metadata(projection)
+    except ProjectionError:
         report["status"] = "invalid"
         report["recommended_action"] = "inspect"
         return report
-    if overflow or omitted:
+    report.update({
+        "schema_version": metadata["version"],
+        "history_complete": metadata["history_complete"],
+        "overflow": metadata["overflow"],
+        "omitted_relations": metadata["omitted_relations"],
+        "tombstone_overflow": metadata["tombstone_overflow"],
+    })
+    relation_set_incomplete = bool(metadata["relation_set_incomplete"])
+    if metadata["version"] == 1 and relation_set_incomplete:
         report["status"] = "incomplete"
         report["recommended_action"] = "inspect"
         return report
@@ -1272,7 +1461,7 @@ def recovery_report(
             projection,
             record_loader=record_loader,
         )
-        if validation["status"] != "restored-validated":
+        if validation["status"] not in RESTORED_VALIDATED_STATUSES:
             report["status"] = validation["status"]
             report["recommended_action"] = "inspect"
             return report
@@ -1386,6 +1575,10 @@ def recovery_report(
         item["status"] = relation_status
         validated.append(item)
     report["relations"] = validated
+    if relation_set_incomplete:
+        report["status"] = "incomplete"
+        report["recommended_action"] = "inspect"
+        return report
 
     bound = [
         item

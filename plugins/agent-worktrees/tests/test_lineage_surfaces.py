@@ -296,8 +296,10 @@ def test_session_lineage_preserves_restored_overflow_and_retained_relations() ->
         "status": "incomplete",
         "restored": True,
         "schema_version": 1,
+        "history_complete": None,
         "overflow": True,
         "omitted_relations": 3,
+        "tombstone_overflow": None,
         "returned_relations": 1,
         "surface_omitted_relations": 0,
         "returned_tombstones": 1,
@@ -306,6 +308,79 @@ def test_session_lineage_preserves_restored_overflow_and_retained_relations() ->
     assert result["relations"][0]["authority"]["status"] == "restored-incomplete"
     assert result["relations"][0]["lineage"]["status"] == "resolved"
     assert result["relation_tombstones"][0]["worktree_id"] == "old"
+
+
+def test_session_lineage_normalizes_v2_completeness_and_tombstones() -> None:
+    projection = {
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": [{
+            "key_sha256": "b" * 64,
+            "relation_revision": 7,
+            "sequence": 3,
+        }],
+        "tombstone_sequence": 3,
+        "history_complete": False,
+        "overflow": True,
+        "omitted_relations": None,
+        "tombstone_overflow": True,
+    }
+
+    result = lineage_surfaces.session_lineage(
+        "session-a",
+        projection_reader=lambda _session_id: projection,
+        restored_reader=lambda _session_id: False,
+    )
+
+    assert result["projection"] == {
+        "status": "incomplete",
+        "restored": False,
+        "schema_version": 2,
+        "history_complete": False,
+        "overflow": True,
+        "omitted_relations": None,
+        "tombstone_overflow": True,
+        "returned_relations": 0,
+        "surface_omitted_relations": 0,
+        "returned_tombstones": 1,
+        "surface_omitted_tombstones": 0,
+    }
+    assert result["relation_tombstones"] == projection["relation_tombstones"]
+
+
+def test_session_lineage_validates_retained_v2_relation_when_history_unknown() -> None:
+    record = _record(sessions=[
+        tracking.SessionEntry(
+            "session-a",
+            "2026-01-01T00:00:00",
+            relation_revision=2,
+        )
+    ])
+    record.head_revision = 4
+    relation = session_projection.bound_relation(record, "session-a")
+    projection = {
+        "version": 2,
+        "session_id": "session-a",
+        "relations": [relation],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": False,
+        "overflow": False,
+        "omitted_relations": 0,
+        "tombstone_overflow": False,
+    }
+
+    result = lineage_surfaces.session_lineage(
+        "session-a",
+        projection_reader=lambda _session_id: projection,
+        restored_reader=lambda _session_id: False,
+        record_loader=lambda _project, _worktree_id: record,
+    )
+
+    assert result["projection"]["status"] == "incomplete"
+    assert result["relations"][0]["authority"]["status"] == "current"
+    assert result["relations"][0]["authority"]["relation_set_incomplete"] is True
 
 
 def test_session_lineage_reports_missing_record_without_guessing() -> None:
