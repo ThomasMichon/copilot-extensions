@@ -641,3 +641,17 @@ enforcement before migrating the complete contributor stack.
 - Reject the representation. All seven frozen reference forms are now rejected
   for the F3 multi-guide coordinate. Next gate: return to repository-relative
   references and change only deferral from F3 to F1.
+
+### 2026-09-03 - F1 plugin-level indexes fail multi-guide
+
+- Ran three F1 repository-relative safety-gated flat multi-guide repetitions,
+  changing only deferral from F3.
+- All three failed literal mode. The plugin-level indexes drove broad owner and
+  aggregate-index traversal, two or three irrelevant guide reads, and 17-23
+  tool calls per run.
+- Repetition 1 preserved the critical rules but applied an untriggered readiness
+  blocker. Repetition 2 failed PUB-1, ROUTE-1, and CAP-1; repetition 3 violated
+  CAP-1 and discovered an undeclared settings path through seven broad
+  exploration actions.
+- Reject F1 for this coordinate. Next gate: change only deferral to the F0 full
+  inline baseline before testing the F4 under-grounded edge.
