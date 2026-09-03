@@ -585,6 +585,97 @@ class TestControlPlaneRelatedPRTier:
             },
         }  # entries without a pr block are omitted
 
+    def test_cp_related_pr_map_includes_knowledge_overlay(
+        self, tmp_path, monkeypatch
+    ):
+        from agent_worktrees import related as _related
+        from agent_worktrees import repos
+        from agent_worktrees import state_root
+
+        cp = tmp_path / "harness"
+        knowledge = tmp_path / "knowledge"
+        cp.mkdir()
+        knowledge.mkdir()
+        _related.write_related(cp, _related.RelatedConfig(related={
+            "ext": _related.RelatedEntry(name="ext", role="tooling", pr={
+                "enabled": True,
+                "required": True,
+                "provider": "azure-devops",
+            }),
+        }))
+        _related.write_related(knowledge, _related.RelatedConfig(related={
+            "ext": _related.RelatedEntry(name="ext", role="tooling", pr={
+                "enabled": True,
+                "required": True,
+                "provider": "azure-devops",
+                "merge_actor": "submitter-direct",
+            }),
+        }))
+
+        def _paths(path):
+            value = str(path)
+            return {"windows": value, "linux": value, "wsl": value}
+
+        monkeypatch.setattr(repos, "list_repos", lambda class_filter=None: [
+            repos.RepoEntry(name="harness", repo_class="worktree", paths=_paths(cp)),
+        ])
+        monkeypatch.setattr(_related, "find_control_plane_anchor", lambda: str(cp))
+        monkeypatch.setattr(
+            _related, "installed_plugin_related_anchors", lambda *a, **k: [])
+        monkeypatch.setattr(
+            state_root,
+            "config_source_anchors",
+            lambda config, **kwargs: [
+                state_root.ConfigSource(anchor=str(cp), origin="harness"),
+                state_root.ConfigSource(anchor=str(knowledge), origin="knowledge"),
+            ],
+        )
+        seen = {}
+
+        def _load_config(*args, **kwargs):
+            seen.update(kwargs)
+            return object()
+
+        monkeypatch.setattr(cfg, "load_config", _load_config)
+
+        got = cfg._control_plane_related_pr_map()
+
+        assert seen == {
+            "include_control_plane_related_pr": False,
+            "project": "harness",
+        }
+        assert got["ext"]["merge_actor"] == "submitter-direct"
+
+    def test_cp_related_pr_map_does_not_load_unproven_project(
+        self, tmp_path, monkeypatch
+    ):
+        from agent_worktrees import related as _related
+        from agent_worktrees import repos
+
+        cp = tmp_path / "unregistered-control-plane"
+        cp.mkdir()
+        _related.write_related(cp, _related.RelatedConfig(related={
+            "ext": _related.RelatedEntry(name="ext", role="tooling", pr={
+                "enabled": True,
+                "merge_actor": "submitter-direct",
+            }),
+        }))
+        monkeypatch.setattr(_related, "find_control_plane_anchor", lambda: str(cp))
+        monkeypatch.setattr(
+            _related, "installed_plugin_related_anchors", lambda *a, **k: [])
+        monkeypatch.setattr(repos, "list_repos", lambda class_filter=None: [])
+        monkeypatch.setattr(
+            cfg,
+            "load_config",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("unproven project must not be loaded")
+            ),
+        )
+
+        got = cfg._control_plane_related_pr_map()
+
+        assert got["ext"]["merge_actor"] == "submitter-direct"
+
 
 class TestLayeredConfig:
     """Three-tier merge: global < in-repo < machine-local; optional machine file."""
