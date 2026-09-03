@@ -419,3 +419,19 @@ enforcement before migrating the complete contributor stack.
   controlled comparison keeps F2, repository-relative backticks, flat
   fragments, the one-guide task, model, venue, and boundary fixed while raising
   emphasis from conditional to imperative.
+
+### 2026-09-03 - Imperative emphasis also rejected
+
+- Ran three independently generated fresh ACP repetitions with only the
+  emphasis coordinate changed from conditional to imperative.
+- All three literal-mode judges returned FALSE-PASS failures. Every run loaded
+  `runtime-diagnostics`, retained provenance, and avoided path invention, but
+  each continued into broad compensating exploration and loaded two or three
+  irrelevant guides.
+- Imperative wording is worse than conditional for this one-guide cell: it
+  produced zero clean runs and a higher irrelevant-read count. The validated
+  counts-only records are linked from [`experiments.md`](experiments.md).
+- Next gate: test safety-gated emphasis with every other coordinate fixed. If
+  it also fails, do not strengthen wording further; compare the optional edge
+  and then revisit deferral/reference shape without rewriting the frozen task
+  around a preferred outcome.
