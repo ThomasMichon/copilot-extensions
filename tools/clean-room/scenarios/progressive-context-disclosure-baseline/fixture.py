@@ -1631,10 +1631,25 @@ def validate_evidence(record: dict[str, object]) -> None:
             raise ValueError("PASS evidence requires owner provenance")
         if record["criticalRuleViolationIds"]:
             raise ValueError("PASS evidence cannot contain critical violations")
-        if record["autoLoadedGuideIds"]:
+        is_full_inline = str(record["variantId"]).startswith("f0-")
+        if record["autoLoadedGuideIds"] and not is_full_inline:
             raise ValueError("PASS evidence cannot contain eager guide loading")
+        if is_full_inline:
+            corpus = _load("corpus.json")
+            assert isinstance(corpus, dict)
+            all_guides = {
+                str(guide["id"])
+                for _, guide in _guide_records(corpus["contributors"])
+            }
+            if set(record["autoLoadedGuideIds"]) != all_guides:
+                raise ValueError(
+                    "F0 PASS evidence must declare every guide eager"
+                )
+        available_guides = set(record["observedGuideIds"]) | (
+            set(record["autoLoadedGuideIds"]) if is_full_inline else set()
+        )
         if not set(record["requiredGuideIds"]) <= set(
-            record["observedGuideIds"]
+            available_guides
         ):
             raise ValueError("PASS evidence is missing required guide reads")
         if record["inventedPathCount"] != 0:
