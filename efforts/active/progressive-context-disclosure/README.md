@@ -581,3 +581,18 @@ enforcement before migrating the complete contributor stack.
   ambiguity but did not restore bounded selection. Next gate: change only the
   representation to `markdown-link` and explicitly inspect eager-loading
   evidence.
+
+### 2026-09-03 - Markdown links do not recover multi-guide
+
+- Ran three F3 safety-gated flat multi-guide repetitions with only the
+  reference representation changed to `markdown-link`.
+- No guide body was auto-loaded in ACP. Every observed canary followed an
+  explicit agent read, so real links passed the eager-load boundary in this
+  venue.
+- All three runs still failed literal mode. Repetitions 1 and 3 enumerated the
+  repository and loaded two irrelevant canary-bearing guides; repetition 2
+  loaded only the required guides but performed four undeclared
+  configuration-location reads. Tool-call counts were 12, 7, and 7.
+- Reject the representation for this cell: discoverability was sufficient, but
+  the links did not enforce task-applicable bounded flow. Next gate: change
+  only the representation to `backtick-payload-relative`.
