@@ -809,3 +809,20 @@ enforcement before migrating the complete contributor stack.
   one-axis comparison changes only deferral to F2 while preserving
   repository-relative backticks, safety-gated emphasis, flat fragments, model,
   ACP venue, and fresh sessions.
+
+### 2026-09-03 - Per-topic references also fail capability selection
+
+- Ran three epoch-3 F2 capability-guide repetitions with only deferral changed
+  from F1. Every session loaded `capability-procedure` and completed the exact
+  bounded operation, but began with broad guide discovery and loaded four, two,
+  and two irrelevant guides.
+- Literal-mode judges returned `FAIL` after classifying all three runs as false
+  passes. Tool-call counts were 11, 9, and 7; durations were 63, 62, and 63
+  seconds. Each failure violated CAP-1's bounded-task rule.
+- Owner provenance, contained paths, the exact owned argv, the required review
+  gate, and the final objective remained intact. The failure is again guide
+  selection, not task satisfiability or execution grounding.
+- Reject F2 for the capability-guide boundary. F0 remains the only unanimous
+  deferral level; F1, F2, and F3 are rejected. Freeze epoch remains 3. Run the
+  remaining F4 edge with every other coordinate fixed before publishing the
+  capability-guide deferral decision.
