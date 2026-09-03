@@ -293,10 +293,11 @@ def test_controller_end_and_removal_preserve_bound_relation(
         for relation in removed["relations"]
     } == {("parent", "bound")}
     assert removed["relation_tombstones"] == [{
-        "project": "example",
-        "worktree_id": "child",
-        "role": "controller",
+        "key_sha256": session_projection._relation_key_sha256(
+            ("example", "child", "controller")
+        ),
         "relation_revision": child.controller_revision,
+        "sequence": 1,
     }]
     reloaded = tracking.load_record(child_path)
     assert reloaded.controllers == []
@@ -724,10 +725,9 @@ def test_removal_preserves_newer_existing_tombstone() -> None:
 
     assert removed["relations"] == []
     assert removed["relation_tombstones"] == [{
-        "project": key[0],
-        "worktree_id": key[1],
-        "role": key[2],
+        "key_sha256": session_projection._relation_key_sha256(key),
         "relation_revision": 7,
+        "sequence": 1,
     }]
 
 
@@ -756,11 +756,11 @@ def test_new_tombstone_survives_cap_with_record_local_revision() -> None:
         session_projection.MAX_RELATION_TOMBSTONES
     )
     assert removed["relation_tombstones"][-1] == {
-        "project": "example",
-        "worktree_id": "new-child",
-        "role": "controller",
+        "key_sha256": session_projection._relation_key_sha256(key),
         "relation_revision": 2,
+        "sequence": session_projection.MAX_RELATION_TOMBSTONES + 1,
     }
+    assert removed["tombstone_overflow"] is True
     stale = {
         "project": "example",
         "worktree_id": "new-child",

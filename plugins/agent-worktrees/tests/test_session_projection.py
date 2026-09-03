@@ -62,10 +62,14 @@ def test_lifecycle_revision_writes_bound_projection(
     loaded = json.loads(
         (session_dir / session_projection.SIDECAR_NAME).read_text(encoding="utf-8")
     )
-    assert loaded["version"] == 1
+    assert loaded["version"] == 2
     assert loaded["session_id"] == "session-a"
+    assert loaded["history_complete"] is False
     assert loaded["overflow"] is False
     assert loaded["omitted_relations"] == 0
+    assert loaded["relation_tombstones"] == []
+    assert loaded["tombstone_sequence"] == 0
+    assert loaded["tombstone_overflow"] is True
     assert loaded["relations"] == [{
         "head_revision": record.head_revision,
         "is_head": True,
@@ -106,14 +110,55 @@ def test_delayed_writer_cannot_roll_back_secondary_revision():
     delayed = dict(existing)
     delayed["head_revision"] = 1
     projection = {
-        "version": 1,
+        "version": 2,
         "session_id": "session-a",
         "relations": [existing],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": False,
         "overflow": False,
         "omitted_relations": 0,
+        "tombstone_overflow": True,
     }
 
     assert session_projection._merge_relation(projection, delayed) is projection
+
+
+def test_complete_revision_vectors_reject_incomparable_and_accept_dominating():
+    existing = {
+        "project": "example",
+        "worktree_id": "wt-a",
+        "role": "bound",
+        "relation_revision": 5,
+        "head_revision": 1,
+        "future_field": {"preserve": True},
+    }
+    projection = _v2_projection(history_complete=False)
+    projection["relations"] = [existing]
+    incomparable = dict(
+        existing,
+        relation_revision=4,
+        head_revision=2,
+        lifecycle_state="handed-off",
+    )
+
+    assert session_projection._merge_relation(
+        projection,
+        incomparable,
+    ) is projection
+
+    dominating = {
+        "project": "example",
+        "worktree_id": "wt-a",
+        "role": "bound",
+        "relation_revision": 6,
+        "head_revision": 2,
+        "lifecycle_state": "handed-off",
+    }
+    merged = session_projection._merge_relation(projection, dominating)
+    assert merged["relations"][0]["relation_revision"] == 6
+    assert merged["relations"][0]["head_revision"] == 2
+    assert merged["relations"][0]["future_field"] == {"preserve": True}
 
 
 def test_handoff_projects_per_worktree_lineage(
@@ -138,7 +183,7 @@ def test_handoff_projects_per_worktree_lineage(
     assert (session_b / session_projection.SIDECAR_NAME).is_file()
 
 
-def test_newer_projection_is_left_untouched(
+def test_v2_projection_is_updated_as_current_schema(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
     session_dir = _session_root(tmp_path, monkeypatch)
@@ -159,9 +204,9 @@ def test_newer_projection_is_left_untouched(
 
     tracking.set_head_session(record, "session-a")
 
-    assert sidecar.read_text(encoding="utf-8") == original
+    assert sidecar.read_text(encoding="utf-8") != original
     assert session_projection.read("session-a")["version"] == 2
-    assert session_projection.sync_bound(record, "session-a") == "blocked"
+    assert session_projection.sync_bound(record, "session-a") == "current"
 
 
 def test_future_projection_is_unsupported(tmp_path, monkeypatch):
@@ -327,7 +372,7 @@ def test_v2_missing_relation_is_report_only(tmp_tracking_dir):
     )
 
     assert item["status"] == "missing"
-    assert item["repairable"] is False
+    assert item["repairable"] is True
 
 
 def test_v2_tombstone_digest_has_canonical_fixture():
@@ -336,7 +381,7 @@ def test_v2_tombstone_digest_has_canonical_fixture():
     ) == "1abcfb014ee9c38e384adf080bb22779b166c456331b2846abd9e4aa282236dd"
 
 
-def test_v2_recoverable_reader_refuses_writer_downgrade(
+def test_v2_recoverable_reader_returns_current_writable_schema(
     tmp_path, monkeypatch
 ):
     session_dir = _session_root(tmp_path, monkeypatch)
@@ -356,8 +401,13 @@ def test_v2_recoverable_reader_refuses_writer_downgrade(
         encoding="utf-8",
     )
 
-    with pytest.raises(session_projection.UnsupportedProjectionVersion):
-        session_projection._read_recoverable("session-a")
+    recovered = session_projection._read_recoverable("session-a")
+    assert recovered["version"] == 2
+    assert recovered["relations"] == []
+    assert recovered["history_complete"] is False
+    assert recovered["overflow"] is False
+    assert recovered["omitted_relations"] == 0
+    assert recovered["tombstone_overflow"] is True
 
 
 def test_older_projection_is_rebuilt_from_authority(
@@ -583,7 +633,10 @@ def test_backfill_repairs_stale_secondary_revision(
     )
 
     assert report["items"][0]["status"] == "repaired"
-    assert session_projection.read("session-a")["relations"][0] == expected
+    repaired = session_projection.read("session-a")
+    assert repaired["version"] == 2
+    assert repaired["history_complete"] is False
+    assert repaired["relations"][0] == expected
 
 
 def test_backfill_preserves_newer_relation_tombstone(
@@ -619,7 +672,7 @@ def test_backfill_preserves_newer_relation_tombstone(
     assert session_projection.read("session-a")["relations"] == []
 
 
-def test_backfill_preserves_incomplete_local_projection(
+def test_backfill_migrates_incomplete_v1_and_preserves_sticky_overflow(
     tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
 ):
     session_dir = _session_root(tmp_path, monkeypatch)
@@ -640,9 +693,16 @@ def test_backfill_preserves_incomplete_local_projection(
         budget=1,
     )
 
-    assert report["items"][0]["status"] == "incomplete"
-    assert report["items"][0]["repaired"] is False
-    assert session_projection.read("session-a") == original
+    assert report["items"][0]["status"] == "repaired"
+    assert report["items"][0]["repaired"] is True
+    migrated = session_projection.read("session-a")
+    assert migrated["version"] == 2
+    assert migrated["overflow"] is True
+    assert migrated["omitted_relations"] is None
+    assert migrated["history_complete"] is False
+    assert migrated["relations"] == [
+        session_projection.bound_relation(record, "session-a")
+    ]
 
 
 def test_backfill_revalidates_collision_under_projection_lock(
@@ -1163,12 +1223,13 @@ def test_relation_cap_never_evicts_bound_relation():
     assert len(merged["relations"]) == session_projection.MAX_RELATIONS
     assert bound in merged["relations"]
     assert merged["overflow"] is True
-    assert merged["omitted_relations"] == 1
+    assert merged["omitted_relations"] is None
+    assert merged["history_complete"] is False
 
     updated_bound = dict(bound, relation_revision=2)
     merged_again = session_projection._merge_relation(merged, updated_bound)
     assert merged_again["overflow"] is True
-    assert merged_again["omitted_relations"] == 1
+    assert merged_again["omitted_relations"] is None
 
     extra = {
         "project": "example",
@@ -1177,7 +1238,7 @@ def test_relation_cap_never_evicts_bound_relation():
     }
     merged_extra = session_projection._merge_relation(merged_again, extra)
     assert merged_extra["overflow"] is True
-    assert merged_extra["omitted_relations"] == 2
+    assert merged_extra["omitted_relations"] is None
     retained_ids = {
         relation["worktree_id"] for relation in merged_extra["relations"]
     }
@@ -1339,7 +1400,9 @@ def test_stale_relation_revision_cannot_replace_newer():
 
     stale = dict(newer, relation_revision=4, lifecycle_state="handed-off")
 
-    assert session_projection._merge_relation(projection, stale) == projection
+    migrated = session_projection._merge_relation(projection, stale)
+    assert migrated["version"] == 2
+    assert migrated["relations"] == [newer]
 
 
 def test_corrupt_projection_is_rebuilt(
@@ -1610,7 +1673,7 @@ def test_deferred_projection_remains_dirty_for_next_save(
     monkeypatch.setattr(
         session_projection,
         "sync_bound",
-        lambda _record, _session_id: next(outcomes),
+        lambda _record, _session_id, **_kwargs: next(outcomes),
     )
     tracking._next_lifecycle_revision(record, "session-a")
 
@@ -1657,8 +1720,15 @@ def test_controller_retraction_salvages_parseable_projection(
     rebuilt = session_projection.read("session-a")
     assert rebuilt is not None
     assert rebuilt["relations"] == [unrelated_relation]
-    assert unrelated_tombstone in rebuilt["relation_tombstones"]
+    assert rebuilt["relation_tombstones"][0] == {
+        "key_sha256": session_projection._relation_key_sha256(
+            ("example", "removed", "controller")
+        ),
+        "relation_revision": 8,
+        "sequence": 1,
+    }
     assert len(rebuilt["relation_tombstones"]) == 2
+    assert rebuilt["tombstone_overflow"] is True
     assert rebuilt["future_metadata"] == {"preserve": True}
 
 
@@ -1673,3 +1743,603 @@ def test_controller_retraction_defers_unparseable_json(
     )
 
     assert session_projection.sync_controller(record, "session-a") == "deferred"
+
+
+def _v2_projection(
+    session_id: str = "session-a",
+    *,
+    history_complete: bool = True,
+    overflow: bool = False,
+    tombstone_overflow: bool = False,
+) -> dict:
+    return {
+        "version": 2,
+        "session_id": session_id,
+        "relations": [],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": history_complete,
+        "overflow": overflow,
+        "omitted_relations": None if overflow else 0,
+        "tombstone_overflow": tombstone_overflow,
+    }
+
+
+def _controller(
+    worktree_id: str,
+    revision: int,
+    *,
+    state: str = "active",
+    payload_size: int = 0,
+) -> dict:
+    relation = {
+        "project": "example",
+        "worktree_id": worktree_id,
+        "role": "controller",
+        "relation_revision": revision,
+        "controller_revision": revision,
+        "relation_state": state,
+    }
+    if payload_size:
+        relation["future_payload"] = "\\" * payload_size
+    return relation
+
+
+def test_explicit_new_registration_is_the_only_complete_creation_path(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    _session_root(tmp_path, monkeypatch, "fresh")
+    record = _record(tmp_tracking_dir, "existing")
+    record.sessions = []
+    tracking.save_record(record, tmp_tracking_dir / "wt-a.yaml")
+
+    tracking.register_session(
+        "wt-a",
+        "fresh",
+        source="hook:new",
+        initial_projection=True,
+    )
+
+    projection = session_projection.read("fresh")
+    assert projection is not None
+    assert projection["history_complete"] is True
+    assert projection["overflow"] is False
+    assert projection["omitted_relations"] == 0
+    assert projection["tombstone_overflow"] is False
+
+    _session_root(tmp_path, monkeypatch, "resume")
+    tracking.register_session(
+        "wt-a",
+        "resume",
+        source="hook:resume",
+        initial_projection=False,
+    )
+    resumed = session_projection.read("resume")
+    assert resumed is not None
+    assert resumed["history_complete"] is False
+    assert resumed["tombstone_overflow"] is True
+
+
+def test_v1_migration_preserves_additive_fields_and_hashes_tombstones():
+    relation = _controller("child", 4)
+    relation["future_relation"] = {"preserve": True}
+    v1 = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [relation],
+        "relation_tombstones": [{
+            "project": "example",
+            "worktree_id": "removed",
+            "role": "controller",
+            "relation_revision": 7,
+        }],
+        "overflow": False,
+        "omitted_relations": 0,
+        "future_projection": {"preserve": True},
+    }
+
+    migrated = session_projection._migrate_v1_projection(v1)
+
+    assert migrated["version"] == 2
+    assert migrated["history_complete"] is False
+    assert migrated["overflow"] is False
+    assert migrated["omitted_relations"] == 0
+    assert migrated["tombstone_overflow"] is False
+    assert migrated["tombstone_sequence"] == 1
+    assert migrated["future_projection"] == {"preserve": True}
+    assert migrated["relations"][0]["future_relation"] == {"preserve": True}
+    assert migrated["relation_tombstones"] == [{
+        "key_sha256": session_projection._relation_key_sha256(
+            ("example", "removed", "controller")
+        ),
+        "relation_revision": 7,
+        "sequence": 1,
+    }]
+
+
+def test_v1_overflow_and_tombstone_loss_migrate_conservatively():
+    tombstones = [
+        {
+            "project": "example",
+            "worktree_id": f"removed-{index:03d}",
+            "role": "controller",
+            "relation_revision": index,
+        }
+        for index in range(130)
+    ]
+    tombstones.insert(4, {"project": "malformed"})
+    v1 = {
+        "version": 1,
+        "session_id": "session-a",
+        "relations": [],
+        "relation_tombstones": tombstones,
+        "overflow": True,
+        "omitted_relations": 999999,
+    }
+
+    migrated = session_projection._migrate_v1_projection(v1)
+
+    assert migrated["history_complete"] is False
+    assert migrated["overflow"] is True
+    assert migrated["omitted_relations"] is None
+    assert migrated["tombstone_sequence"] == 130
+    assert migrated["tombstone_overflow"] is True
+    assert len(migrated["relation_tombstones"]) == 128
+    assert [
+        item["sequence"] for item in migrated["relation_tombstones"]
+    ] == list(range(3, 131))
+
+
+def test_v1_migrates_on_lifecycle_write(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    expected = session_projection.bound_relation(record, "session-a")
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    sidecar.write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [expected],
+            "overflow": False,
+            "omitted_relations": 0,
+        }),
+        encoding="utf-8",
+    )
+
+    assert session_projection.sync_bound(record, "session-a") == "written"
+    migrated = session_projection.read("session-a")
+    assert migrated is not None
+    assert migrated["version"] == 2
+    assert migrated["history_complete"] is False
+
+
+def test_apply_backfill_migrates_current_v1_projection(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    expected = session_projection.bound_relation(record, "session-a")
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [expected],
+            "overflow": False,
+            "omitted_relations": 0,
+        }),
+        encoding="utf-8",
+    )
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=True,
+        budget=1,
+    )
+
+    assert report["items"][0]["status"] == "repaired"
+    assert session_projection.read("session-a")["version"] == 2
+
+
+def test_apply_backfill_reconstructs_corrupt_projection_conservatively(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        "{not-json",
+        encoding="utf-8",
+    )
+
+    report = session_projection.backfill_relations(
+        [record],
+        apply=True,
+        budget=1,
+    )
+
+    assert report["items"][0]["status"] == "repaired"
+    rebuilt = session_projection.read("session-a")
+    assert rebuilt["relations"] == [
+        session_projection.bound_relation(record, "session-a")
+    ]
+    assert rebuilt["history_complete"] is False
+    assert rebuilt["overflow"] is False
+    assert rebuilt["omitted_relations"] == 0
+    assert rebuilt["tombstone_overflow"] is True
+
+
+def test_compact_encoder_has_exact_canonical_bytes():
+    projection = _v2_projection(
+        history_complete=False,
+        tombstone_overflow=True,
+    )
+
+    assert session_projection._encode(projection) == (
+        b'{"history_complete":false,"omitted_relations":0,"overflow":false,'
+        b'"relation_tombstones":[],"relations":[],"session_id":"session-a",'
+        b'"tombstone_overflow":true,"tombstone_sequence":0,"version":2}\n'
+    )
+
+
+def test_count_retention_uses_contract_priority_and_stored_order():
+    candidates = [
+        _controller(
+            f"terminal-{index:03d}",
+            index,
+            state="ended",
+        )
+        for index in range(128)
+    ]
+    nonterminal = _controller("nonterminal", 0)
+    bound = {
+        "project": "example",
+        "worktree_id": "bound",
+        "role": "bound",
+        "relation_revision": 0,
+        "head_revision": 0,
+    }
+    result = session_projection._select_relations(
+        _v2_projection(),
+        [*candidates, nonterminal, bound],
+        [],
+    )
+
+    retained = {
+        relation["worktree_id"] for relation in result["relations"]
+    }
+    assert len(retained) == session_projection.MAX_RELATIONS
+    assert "bound" in retained
+    assert "nonterminal" in retained
+    assert "terminal-000" not in retained
+    assert result["overflow"] is True
+    assert result["history_complete"] is False
+    assert result["omitted_relations"] is None
+    assert result["relations"] == sorted(
+        result["relations"],
+        key=session_projection._relation_sort_key,
+    )
+
+
+def test_byte_retention_is_a_deterministic_priority_prefix():
+    bound = {
+        "project": "example",
+        "worktree_id": "bound",
+        "role": "bound",
+        "relation_revision": 1,
+        "head_revision": 1,
+        "future_payload": "\\" * 1024,
+    }
+    candidates = [
+        bound,
+        *[
+            _controller(
+                f"controller-{index}",
+                100 - index,
+                payload_size=20_000,
+            )
+            for index in range(10)
+        ],
+    ]
+    base = _v2_projection()
+
+    forward = session_projection._select_relations(base, candidates, [])
+    reverse = session_projection._select_relations(
+        base,
+        list(reversed(candidates)),
+        [],
+    )
+
+    assert session_projection._encode(forward) == session_projection._encode(
+        reverse
+    )
+    assert len(session_projection._encode(forward)) <= session_projection.MAX_BYTES
+    assert forward["overflow"] is True
+    retained = {
+        relation["worktree_id"] for relation in forward["relations"]
+    }
+    priority = [
+        relation["worktree_id"]
+        for relation in sorted(
+            candidates,
+            key=session_projection._relation_priority_key,
+        )
+    ]
+    assert retained == set(priority[:len(retained)])
+
+
+def test_repeated_omitted_update_is_byte_stable_and_can_reenter():
+    retained = [
+        _controller(f"retained-{index:03d}", 1000 - index)
+        for index in range(session_projection.MAX_RELATIONS)
+    ]
+    omitted = _controller("omitted", 1, state="ended")
+    projection = session_projection._select_relations(
+        _v2_projection(),
+        [*retained, omitted],
+        [],
+    )
+    before = session_projection._encode(projection)
+
+    repeated = session_projection._merge_relation(projection, omitted)
+    assert session_projection._encode(repeated) == before
+
+    promoted = dict(
+        omitted,
+        relation_revision=2000,
+        controller_revision=2000,
+        relation_state="active",
+    )
+    reentered = session_projection._merge_relation(repeated, promoted)
+    assert any(
+        relation["worktree_id"] == "omitted"
+        for relation in reentered["relations"]
+    )
+    assert reentered["overflow"] is True
+    assert reentered["history_complete"] is False
+
+
+def test_relation_and_tombstone_incompleteness_are_sticky():
+    projection = _v2_projection(
+        history_complete=False,
+        overflow=True,
+        tombstone_overflow=True,
+    )
+    projection["relations"] = [_controller("child", 3)]
+
+    removed = session_projection._remove_relation(
+        projection,
+        ("example", "child", "controller"),
+        3,
+    )
+
+    assert removed["overflow"] is True
+    assert removed["omitted_relations"] is None
+    assert removed["history_complete"] is False
+    assert removed["tombstone_overflow"] is True
+
+
+def test_tombstone_sequence_noop_fencing_and_newer_reassignment():
+    key = ("example", "child", "controller")
+    projection = _v2_projection()
+    projection["relations"] = [_controller("child", 5)]
+
+    removed = session_projection._remove_relation(projection, key, 5)
+    assert removed["tombstone_sequence"] == 1
+    assert removed["relation_tombstones"] == [{
+        "key_sha256": session_projection._relation_key_sha256(key),
+        "relation_revision": 5,
+        "sequence": 1,
+    }]
+    assert session_projection._remove_relation(removed, key, 5) == removed
+
+    stale = _controller("child", 5)
+    assert session_projection._merge_relation(removed, stale) == removed
+
+    reassigned = _controller("child", 6)
+    restored = session_projection._merge_relation(removed, reassigned)
+    assert restored["relation_tombstones"] == []
+    assert restored["relations"] == [reassigned]
+    assert restored["tombstone_sequence"] == 1
+
+
+def test_tombstone_overflow_retains_latest_sequences_deterministically():
+    projection = _v2_projection()
+    for index in range(130):
+        projection = session_projection._remove_relation(
+            projection,
+            ("example", f"child-{index:03d}", "controller"),
+            index,
+        )
+
+    assert projection["tombstone_sequence"] == 130
+    assert projection["tombstone_overflow"] is True
+    assert len(projection["relation_tombstones"]) == 128
+    assert [
+        item["sequence"] for item in projection["relation_tombstones"]
+    ] == list(range(3, 131))
+
+    last = session_projection._encode(projection)
+    same = session_projection._remove_relation(
+        projection,
+        ("example", "child-129", "controller"),
+        129,
+    )
+    assert session_projection._encode(same) == last
+
+
+def test_tombstone_growth_reruns_byte_retention():
+    low = 0
+    high = 40_000
+    best = None
+    while low <= high:
+        size = (low + high) // 2
+        candidates = [
+            _controller("higher", 2, payload_size=size),
+            _controller("lower", 1, payload_size=size),
+        ]
+        selected = session_projection._select_relations(
+            _v2_projection(),
+            candidates,
+            [],
+        )
+        if not selected["overflow"] and len(selected["relations"]) == 2:
+            best = selected
+            low = size + 1
+        else:
+            high = size - 1
+    assert best is not None
+
+    with_tombstone = session_projection._remove_relation(
+        best,
+        ("example", "unrelated", "controller"),
+        1,
+    )
+
+    assert with_tombstone["overflow"] is True
+    assert len(with_tombstone["relations"]) == 1
+    assert with_tombstone["relations"][0]["worktree_id"] == "higher"
+
+
+def test_corrupt_incremental_reconstruction_uses_conservative_flags(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    sidecar.write_text("{not-json", encoding="utf-8")
+
+    assert session_projection.sync_bound(record, "session-a") == "written"
+    rebuilt = session_projection.read("session-a")
+    assert rebuilt is not None
+    assert rebuilt["history_complete"] is False
+    assert rebuilt["overflow"] is False
+    assert rebuilt["omitted_relations"] == 0
+    assert rebuilt["tombstone_overflow"] is True
+
+
+def test_parseable_corrupt_v1_reconstructs_conservatively(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    expected = session_projection.bound_relation(record, "session-a")
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [expected],
+            "overflow": "false",
+            "omitted_relations": -1,
+        }),
+        encoding="utf-8",
+    )
+
+    assert session_projection.sync_bound(record, "session-a") == "written"
+    rebuilt = session_projection.read("session-a")
+    assert rebuilt["relations"] == [expected]
+    assert rebuilt["history_complete"] is False
+    assert rebuilt["overflow"] is False
+    assert rebuilt["omitted_relations"] == 0
+    assert rebuilt["tombstone_overflow"] is True
+
+
+def test_parseable_corrupt_v1_preserves_valid_sticky_overflow(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    expected = session_projection.bound_relation(record, "session-a")
+    (session_dir / session_projection.SIDECAR_NAME).write_text(
+        json.dumps({
+            "version": 1,
+            "session_id": "session-a",
+            "relations": [expected],
+            "overflow": True,
+            "omitted_relations": -1,
+        }),
+        encoding="utf-8",
+    )
+
+    assert session_projection.sync_bound(record, "session-a") == "written"
+    rebuilt = session_projection.read("session-a")
+    assert rebuilt["history_complete"] is False
+    assert rebuilt["overflow"] is True
+    assert rebuilt["omitted_relations"] is None
+    assert rebuilt["tombstone_overflow"] is True
+
+
+def test_recoverable_v2_preserves_valid_sticky_overflow():
+    duplicate = _controller("duplicate", 1)
+    projection = _v2_projection(
+        history_complete=False,
+        overflow=True,
+    )
+    projection["relations"] = [duplicate, duplicate]
+    recovered = session_projection._recover_v2_projection(projection)
+
+    assert recovered["history_complete"] is False
+    assert recovered["overflow"] is True
+    assert recovered["omitted_relations"] is None
+    assert recovered["tombstone_overflow"] is True
+
+
+def test_maximum_shape_is_within_the_hard_byte_limit():
+    projection = _v2_projection(history_complete=False)
+    projection["relations"] = [
+        _controller(
+            f"controller-{index:03d}",
+            index,
+            state="ended" if index % 2 else "active",
+            payload_size=256,
+        )
+        for index in range(session_projection.MAX_RELATIONS)
+    ]
+    projection["relation_tombstones"] = [
+        {
+            "key_sha256": f"{index:064x}",
+            "relation_revision": index,
+            "sequence": index + 1,
+        }
+        for index in range(session_projection.MAX_RELATION_TOMBSTONES)
+    ]
+    projection["tombstone_sequence"] = session_projection.MAX_RELATION_TOMBSTONES
+
+    encoded = session_projection._encode(projection)
+    assert len(encoded) <= session_projection.MAX_BYTES
+
+
+def test_future_schema_write_is_blocked_and_byte_identical(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    original = (
+        b'{"version":3,"session_id":"session-a","relations":[],"future":true}\n'
+    )
+    sidecar.write_bytes(original)
+
+    assert session_projection.sync_bound(record, "session-a") == "blocked"
+    assert sidecar.read_bytes() == original
+
+
+def test_bound_relation_that_cannot_fit_blocks_without_replacement(
+    tmp_path, tmp_tracking_dir, monkeypatch, monkeypatch_config
+):
+    session_dir = _session_root(tmp_path, monkeypatch)
+    record = _record(tmp_tracking_dir)
+    sidecar = session_dir / session_projection.SIDECAR_NAME
+    original_projection = _v2_projection(history_complete=False)
+    original = session_projection._encode(original_projection)
+    sidecar.write_bytes(original)
+    huge = session_projection.bound_relation(record, "session-a")
+    huge["future_payload"] = "x" * session_projection.MAX_BYTES
+    monkeypatch.setattr(
+        session_projection,
+        "bound_relation",
+        lambda _record, _session_id: huge,
+    )
+
+    assert session_projection.sync_bound(record, "session-a") == "blocked"
+    assert sidecar.read_bytes() == original

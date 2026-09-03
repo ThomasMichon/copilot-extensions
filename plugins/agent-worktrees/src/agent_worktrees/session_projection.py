@@ -13,7 +13,7 @@ from typing import Any, Callable, Literal
 
 from . import sessions
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_SUPPORTED_SCHEMA_VERSION = 2
 SIDECAR_NAME = "agent-worktrees.json"
 MAX_BYTES = 128 * 1024
@@ -134,13 +134,22 @@ def _session_paths(
     return target, lock_base, temp_dir
 
 
-def _empty_projection(session_id: str) -> dict[str, Any]:
+def _empty_projection(
+    session_id: str,
+    *,
+    history_complete: bool = False,
+    tombstone_overflow: bool = True,
+) -> dict[str, Any]:
     return {
         "version": SCHEMA_VERSION,
         "session_id": session_id,
         "relations": [],
+        "relation_tombstones": [],
+        "tombstone_sequence": 0,
+        "history_complete": history_complete,
         "overflow": False,
         "omitted_relations": 0,
+        "tombstone_overflow": tombstone_overflow,
     }
 
 
@@ -243,6 +252,9 @@ def read(session_id: str) -> dict[str, Any] | None:
                 raise ProjectionError("duplicate v2 projection tombstone")
             digests.add(digest)
             sequences.add(sequence)
+        relation_keys = [_relation_key(relation) for relation in relations]
+        if len(set(relation_keys)) != len(relation_keys):
+            raise ProjectionError("duplicate v2 projection relation")
         relation_digests = {
             _relation_key_sha256(_relation_key(relation))
             for relation in relations
@@ -321,7 +333,7 @@ def projection_metadata(projection: dict[str, Any]) -> dict[str, Any]:
 
 
 def _read_recoverable(session_id: str) -> dict[str, Any]:
-    """Read parseable same-version state while dropping malformed list items."""
+    """Read parseable supported state into conservative writable v2 form."""
     target, _lock_base, _temp_dir = _session_paths(session_id)
     if not target.exists():
         return _empty_projection(session_id)
@@ -341,11 +353,12 @@ def _read_recoverable(session_id: str) -> dict[str, Any]:
     version = loaded.get("version")
     if not isinstance(version, int):
         raise ProjectionError("projection version must be an integer")
-    if version > SCHEMA_VERSION:
+    if version > MAX_SUPPORTED_SCHEMA_VERSION:
         raise UnsupportedProjectionVersion(
-            f"projection version {version} is newer than supported {SCHEMA_VERSION}"
+            "projection version "
+            f"{version} is newer than supported {MAX_SUPPORTED_SCHEMA_VERSION}"
         )
-    if version != SCHEMA_VERSION:
+    if version not in {1, 2}:
         raise ProjectionError(f"unsupported projection version {version}")
     if loaded.get("session_id") != session_id:
         raise ProjectionError("projection session_id does not match its directory")
@@ -360,7 +373,12 @@ def _read_recoverable(session_id: str) -> dict[str, Any]:
     recovered["relation_tombstones"] = [
         tombstone for tombstone in tombstones if isinstance(tombstone, dict)
     ]
-    return recovered
+    if version == 1:
+        return _migrate_v1_projection(
+            recovered,
+            conservative_reconstruction=True,
+        )
+    return _recover_v2_projection(recovered)
 
 
 def _handoff_ordinal(record: Any, session_id: str) -> int | None:
@@ -654,6 +672,18 @@ def _protected_relation(relation: dict[str, Any]) -> bool:
     return state not in {"handed-off", "concluded", "ended", "finalized", "terminal"}
 
 
+def _relation_priority_key(
+    relation: dict[str, Any],
+) -> tuple[int, int, tuple[str, str, str]]:
+    if relation.get("role") == "bound":
+        rank = 0
+    elif _protected_relation(relation):
+        rank = 1
+    else:
+        rank = 2
+    return (rank, -_relation_revision(relation), _relation_key(relation))
+
+
 def _merge_additive_relation_fields(
     existing: dict[str, Any],
     incoming: dict[str, Any],
@@ -671,19 +701,343 @@ def _merge_additive_relation_fields(
     return merged
 
 
+def _canonical_json_text(value: Any) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+
+
+def _dedupe_relations(
+    relations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for relation in relations:
+        grouped.setdefault(_relation_key(relation), []).append(relation)
+    retained = []
+    for relation_key in sorted(grouped):
+        choices = grouped[relation_key]
+        retained.append(max(
+            choices,
+            key=lambda item: (
+                _relation_revision(item),
+                (_revision_vector(item) or (-1, -1))[1],
+                _canonical_json_text(item),
+            ),
+        ))
+    return retained
+
+
+def _valid_v2_tombstone(item: dict[str, Any]) -> bool:
+    return bool(
+        isinstance(item.get("key_sha256"), str)
+        and _SHA256_RE.fullmatch(item["key_sha256"]) is not None
+        and type(item.get("relation_revision")) is int
+        and item["relation_revision"] >= 0
+        and type(item.get("sequence")) is int
+        and item["sequence"] >= 0
+    )
+
+
+def _compact_tombstones(
+    tombstones: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], bool]:
+    dropped = False
+    by_digest: dict[str, dict[str, Any]] = {}
+    for item in tombstones:
+        if not _valid_v2_tombstone(item):
+            dropped = True
+            continue
+        normalized = {
+            "key_sha256": item["key_sha256"],
+            "relation_revision": item["relation_revision"],
+            "sequence": item["sequence"],
+        }
+        existing = by_digest.get(normalized["key_sha256"])
+        if existing is not None:
+            dropped = True
+            if (
+                normalized["sequence"],
+                normalized["relation_revision"],
+            ) <= (
+                existing["sequence"],
+                existing["relation_revision"],
+            ):
+                continue
+        by_digest[normalized["key_sha256"]] = normalized
+
+    by_sequence: dict[int, dict[str, Any]] = {}
+    for item in sorted(by_digest.values(), key=lambda value: value["key_sha256"]):
+        existing = by_sequence.get(item["sequence"])
+        if existing is not None:
+            dropped = True
+            continue
+        by_sequence[item["sequence"]] = item
+
+    newest = sorted(
+        by_sequence.values(),
+        key=lambda item: (-item["sequence"], item["key_sha256"]),
+    )
+    if len(newest) > MAX_RELATION_TOMBSTONES:
+        dropped = True
+        newest = newest[:MAX_RELATION_TOMBSTONES]
+    newest.sort(key=lambda item: (item["sequence"], item["key_sha256"]))
+    return newest, dropped
+
+
+def _projection_envelope(
+    projection: dict[str, Any],
+    *,
+    relations: list[dict[str, Any]],
+    tombstones: list[dict[str, Any]],
+    history_complete: bool,
+    overflow: bool,
+    tombstone_overflow: bool,
+) -> dict[str, Any]:
+    result = dict(projection)
+    result.update({
+        "version": SCHEMA_VERSION,
+        "session_id": projection["session_id"],
+        "relations": sorted(relations, key=_relation_sort_key),
+        "relation_tombstones": tombstones,
+        "tombstone_sequence": max(
+            projection.get("tombstone_sequence", 0)
+            if type(projection.get("tombstone_sequence")) is int
+            else 0,
+            max((item["sequence"] for item in tombstones), default=0),
+        ),
+        "history_complete": history_complete,
+        "overflow": overflow,
+        "omitted_relations": None if overflow else 0,
+        "tombstone_overflow": tombstone_overflow,
+    })
+    return result
+
+
+def _encode_unchecked(projection: dict[str, Any]) -> bytes:
+    try:
+        text = json.dumps(
+            projection,
+            sort_keys=True,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProjectionError(f"projection is not JSON encodable: {exc}") from exc
+    return (text + "\n").encode("utf-8")
+
+
+def _select_relations(
+    projection: dict[str, Any],
+    relations: list[dict[str, Any]],
+    tombstones: list[dict[str, Any]],
+) -> dict[str, Any]:
+    compact_tombstones, tombstones_dropped = _compact_tombstones(tombstones)
+    tombstone_overflow = bool(
+        projection.get("tombstone_overflow") or tombstones_dropped
+    )
+    tombstone_by_digest = {
+        item["key_sha256"]: item for item in compact_tombstones
+    }
+    candidates = []
+    cleared_digests: set[str] = set()
+    for relation in _dedupe_relations(relations):
+        digest = _relation_key_sha256(_relation_key(relation))
+        tombstone = tombstone_by_digest.get(digest)
+        if tombstone is None:
+            candidates.append(relation)
+        elif _relation_revision(relation) > tombstone["relation_revision"]:
+            candidates.append(relation)
+            cleared_digests.add(digest)
+    if cleared_digests:
+        compact_tombstones = [
+            item
+            for item in compact_tombstones
+            if item["key_sha256"] not in cleared_digests
+        ]
+
+    prioritized = sorted(candidates, key=_relation_priority_key)
+    count_excluded = len(prioritized) > MAX_RELATIONS
+    prior_overflow = projection.get("overflow") is True
+    history_complete = projection.get("history_complete") is True
+
+    if not prior_overflow and not count_excluded:
+        complete = _projection_envelope(
+            projection,
+            relations=prioritized,
+            tombstones=compact_tombstones,
+            history_complete=history_complete,
+            overflow=False,
+            tombstone_overflow=tombstone_overflow,
+        )
+        if len(_encode_unchecked(complete)) <= MAX_BYTES:
+            return complete
+
+    base = _projection_envelope(
+        projection,
+        relations=[],
+        tombstones=compact_tombstones,
+        history_complete=False,
+        overflow=True,
+        tombstone_overflow=tombstone_overflow,
+    )
+    if len(_encode_unchecked(base)) > MAX_BYTES:
+        raise ProjectionError(
+            "projection fixed envelope and tombstones exceed the byte budget"
+        )
+
+    retained: list[dict[str, Any]] = []
+    for candidate in prioritized[:MAX_RELATIONS]:
+        trial = _projection_envelope(
+            projection,
+            relations=[*retained, candidate],
+            tombstones=compact_tombstones,
+            history_complete=False,
+            overflow=True,
+            tombstone_overflow=tombstone_overflow,
+        )
+        if len(_encode_unchecked(trial)) <= MAX_BYTES:
+            retained.append(candidate)
+            continue
+        if candidate.get("role") == "bound":
+            raise ProjectionError("bound relation exceeds the projection byte budget")
+        break
+    if any(
+        candidate.get("role") == "bound"
+        for candidate in prioritized[len(retained):]
+    ):
+        raise ProjectionError("bound relation exceeds the projection byte budget")
+    return _projection_envelope(
+        projection,
+        relations=retained,
+        tombstones=compact_tombstones,
+        history_complete=False,
+        overflow=True,
+        tombstone_overflow=tombstone_overflow,
+    )
+
+
+def _valid_v1_tombstone(item: dict[str, Any]) -> bool:
+    return bool(
+        isinstance(item.get("project"), str)
+        and item["project"]
+        and isinstance(item.get("worktree_id"), str)
+        and item["worktree_id"]
+        and item.get("role") in {"bound", "controller"}
+        and type(item.get("relation_revision")) is int
+        and item["relation_revision"] >= 0
+    )
+
+
+def _migrate_v1_projection(
+    projection: dict[str, Any],
+    *,
+    conservative_reconstruction: bool = False,
+) -> dict[str, Any]:
+    if projection.get("version") != 1:
+        raise ProjectionError("v1 migration requires a version 1 projection")
+    if conservative_reconstruction:
+        overflow = projection.get("overflow") is True
+    else:
+        overflow = bool(projection_metadata(projection)["overflow"])
+
+    sequence = 0
+    malformed_tombstone = False
+    migrated_tombstones = []
+    for item in projection.get("relation_tombstones", []):
+        if not isinstance(item, dict) or not _valid_v1_tombstone(item):
+            malformed_tombstone = True
+            continue
+        sequence += 1
+        migrated_tombstones.append({
+            "key_sha256": _relation_key_sha256(_relation_key(item)),
+            "relation_revision": item["relation_revision"],
+            "sequence": sequence,
+        })
+
+    migrated = dict(projection)
+    migrated.update({
+        "version": SCHEMA_VERSION,
+        "relations": [
+            item
+            for item in projection.get("relations", [])
+            if isinstance(item, dict)
+        ],
+        "relation_tombstones": migrated_tombstones,
+        "tombstone_sequence": sequence,
+        "history_complete": False,
+        "overflow": overflow,
+        "omitted_relations": None if overflow else 0,
+        "tombstone_overflow": bool(
+            conservative_reconstruction or malformed_tombstone
+        ),
+    })
+    return _select_relations(
+        migrated,
+        migrated["relations"],
+        migrated_tombstones,
+    )
+
+
+def _recover_v2_projection(projection: dict[str, Any]) -> dict[str, Any]:
+    overflow = projection.get("overflow") is True
+    tombstones = [
+        item
+        for item in projection.get("relation_tombstones", [])
+        if isinstance(item, dict) and _valid_v2_tombstone(item)
+    ]
+    sequence = max(
+        projection.get("tombstone_sequence", 0)
+        if type(projection.get("tombstone_sequence")) is int
+        and projection.get("tombstone_sequence", 0) >= 0
+        else 0,
+        max((item["sequence"] for item in tombstones), default=0),
+    )
+    recovered = dict(projection)
+    recovered.update({
+        "version": SCHEMA_VERSION,
+        "relations": [
+            item
+            for item in projection.get("relations", [])
+            if isinstance(item, dict)
+        ],
+        "relation_tombstones": tombstones,
+        "tombstone_sequence": sequence,
+        "history_complete": False,
+        "overflow": overflow,
+        "omitted_relations": None if overflow else 0,
+        "tombstone_overflow": True,
+    })
+    return _select_relations(
+        recovered,
+        recovered["relations"],
+        tombstones,
+    )
+
+
 def _merge_relation(
     projection: dict[str, Any],
     relation: dict[str, Any],
 ) -> dict[str, Any]:
+    original = projection
+    if projection.get("version") == 1:
+        projection = _migrate_v1_projection(projection)
+    elif projection.get("version") != SCHEMA_VERSION:
+        raise ProjectionError(
+            f"unsupported projection version {projection.get('version')}"
+        )
     relation_key = _relation_key(relation)
+    digest = _relation_key_sha256(relation_key)
     tombstones = [
-        item for item in projection.get("relation_tombstones", [])
-        if isinstance(item, dict)
+        item
+        for item in projection.get("relation_tombstones", [])
+        if isinstance(item, dict) and _valid_v2_tombstone(item)
     ]
     tombstone = next(
         (
-            item for item in tombstones
-            if _relation_key(item) == relation_key
+            item for item in tombstones if item.get("key_sha256") == digest
         ),
         None,
     )
@@ -692,10 +1046,10 @@ def _merge_relation(
         tombstone is not None
         and _relation_revision(tombstone) >= incoming_revision
     ):
-        return projection
+        return projection if projection is not original else original
     tombstones = [
         item for item in tombstones
-        if _relation_key(item) != relation_key
+        if item.get("key_sha256") != digest
     ]
     existing = next(
         (
@@ -713,60 +1067,20 @@ def _merge_relation(
                 incoming_vector,
             )
             if ordering in {"newer", "collision"}:
-                return projection
+                return projection if projection is not original else original
         existing_revision = existing.get("relation_revision", 0)
         if (
             isinstance(existing_revision, int)
             and existing_revision > incoming_revision
         ):
-            return projection
+            return projection if projection is not original else original
         relation = _merge_additive_relation_fields(existing, relation)
     relations = [
         item for item in projection.get("relations", [])
         if isinstance(item, dict) and _relation_key(item) != relation_key
     ]
     relations.append(relation)
-    relations.sort(key=_relation_sort_key)
-    prior_omitted = projection.get("omitted_relations", 0)
-    if not isinstance(prior_omitted, int) or prior_omitted < 0:
-        prior_omitted = 0
-    newly_omitted = max(0, len(relations) - MAX_RELATIONS)
-    omitted = (
-        prior_omitted + newly_omitted
-        if existing is None
-        else max(prior_omitted, newly_omitted)
-    )
-    if newly_omitted:
-        bound = [item for item in relations if item.get("role") == "bound"]
-        nonterminal = [
-            item for item in relations
-            if item.get("role") != "bound" and _protected_relation(item)
-        ]
-        terminal = [item for item in relations if not _protected_relation(item)]
-        for group in (bound, nonterminal, terminal):
-            group.sort(key=_relation_sort_key)
-        retained = bound[-MAX_RELATIONS:]
-        remaining = MAX_RELATIONS - len(retained)
-        if remaining:
-            retained = retained + nonterminal[-remaining:]
-            remaining = MAX_RELATIONS - len(retained)
-        if remaining:
-            retained = retained + terminal[-remaining:]
-        relations = retained
-        relations.sort(key=_relation_sort_key)
-    result = dict(projection)
-    result.update({
-        "version": SCHEMA_VERSION,
-        "session_id": projection["session_id"],
-        "relations": relations,
-        "overflow": bool(omitted or projection.get("overflow")),
-        "omitted_relations": omitted,
-    })
-    if tombstones:
-        result["relation_tombstones"] = tombstones
-    else:
-        result.pop("relation_tombstones", None)
-    return result
+    return _select_relations(projection, relations, tombstones)
 
 
 def _remove_relation(
@@ -774,6 +1088,14 @@ def _remove_relation(
     relation_key: tuple[str, str, str],
     relation_revision: int,
 ) -> dict[str, Any]:
+    original = projection
+    if projection.get("version") == 1:
+        projection = _migrate_v1_projection(projection)
+    elif projection.get("version") != SCHEMA_VERSION:
+        raise ProjectionError(
+            f"unsupported projection version {projection.get('version')}"
+        )
+    digest = _relation_key_sha256(relation_key)
     existing = next(
         (
             item for item in projection.get("relations", [])
@@ -785,19 +1107,25 @@ def _remove_relation(
         existing is not None
         and _relation_revision(existing) > relation_revision
     ):
-        return projection
+        return projection if projection is not original else original
     relations = [
         item for item in projection.get("relations", [])
         if isinstance(item, dict) and _relation_key(item) != relation_key
     ]
     tombstones = [
-        item for item in projection.get("relation_tombstones", [])
-        if isinstance(item, dict) and _relation_key(item) != relation_key
+        item
+        for item in projection.get("relation_tombstones", [])
+        if isinstance(item, dict)
+        and _valid_v2_tombstone(item)
+        and item.get("key_sha256") != digest
     ]
     current_tombstone = next(
         (
-            item for item in projection.get("relation_tombstones", [])
-            if isinstance(item, dict) and _relation_key(item) == relation_key
+            item
+            for item in projection.get("relation_tombstones", [])
+            if isinstance(item, dict)
+            and _valid_v2_tombstone(item)
+            and item.get("key_sha256") == digest
         ),
         None,
     )
@@ -806,29 +1134,30 @@ def _remove_relation(
         and _relation_revision(current_tombstone) >= relation_revision
         and len(relations) == len(projection.get("relations", []))
     ):
-        return projection
-    tombstone_revision = max(
-        relation_revision,
-        _relation_revision(current_tombstone)
-        if current_tombstone is not None else 0,
-    )
+        return projection if projection is not original else original
+    if (
+        current_tombstone is not None
+        and current_tombstone["relation_revision"] >= relation_revision
+    ):
+        tombstones.append(current_tombstone)
+        return _select_relations(projection, relations, tombstones)
+
+    sequence = projection.get("tombstone_sequence", 0)
+    if type(sequence) is not int or sequence < 0:
+        raise ProjectionError("invalid v2 projection tombstone_sequence")
+    sequence += 1
     tombstones.append({
-        "project": relation_key[0],
-        "worktree_id": relation_key[1],
-        "role": relation_key[2],
-        "relation_revision": tombstone_revision,
+        "key_sha256": digest,
+        "relation_revision": relation_revision,
+        "sequence": sequence,
     })
-    tombstones = tombstones[-MAX_RELATION_TOMBSTONES:]
-    result = dict(projection)
-    result["relations"] = relations
-    result["relation_tombstones"] = tombstones
-    return result
+    updated = dict(projection)
+    updated["tombstone_sequence"] = sequence
+    return _select_relations(updated, relations, tombstones)
 
 
 def _encode(projection: dict[str, Any]) -> bytes:
-    encoded = (
-        json.dumps(projection, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
-    ).encode("utf-8")
+    encoded = _encode_unchecked(projection)
     if len(encoded) > MAX_BYTES:
         raise ProjectionError(f"projection exceeds {MAX_BYTES} bytes")
     return encoded
@@ -872,6 +1201,56 @@ def _atomic_replace(target: Path, temp_dir: Path, content: bytes) -> None:
         raise
 
 
+def _load_writable_projection(
+    session_id: str,
+    target: Path,
+    *,
+    initial_registration: bool = False,
+    reconstruct_corrupt: bool = False,
+) -> tuple[dict[str, Any], bool, bool]:
+    target_was_missing = not target.exists()
+    try:
+        current = read(session_id)
+    except ProjectionError:
+        try:
+            return _read_recoverable(session_id), True, False
+        except (UnsupportedProjectionVersion, ProjectionUnavailable):
+            raise
+        except ProjectionError:
+            if not reconstruct_corrupt:
+                raise
+            return _empty_projection(session_id), True, False
+    if current is None:
+        return (
+            _empty_projection(
+                session_id,
+                history_complete=initial_registration and target_was_missing,
+                tombstone_overflow=not (
+                    initial_registration and target_was_missing
+                ),
+            ),
+            False,
+            target_was_missing,
+        )
+    if current.get("version") == 1:
+        try:
+            migrated = _migrate_v1_projection(current)
+        except ProjectionError:
+            if not reconstruct_corrupt:
+                raise
+            migrated = _migrate_v1_projection(
+                current,
+                conservative_reconstruction=True,
+            )
+        return migrated, True, False
+    if current.get("version") != SCHEMA_VERSION:
+        raise UnsupportedProjectionVersion(
+            "projection version "
+            f"{current.get('version')} is newer than supported {SCHEMA_VERSION}"
+        )
+    return current, False, False
+
+
 def _sync_relation(
     record: Any,
     session_id: str,
@@ -880,6 +1259,7 @@ def _sync_relation(
     role: str,
     remove_missing: bool,
     blocking: bool,
+    initial_registration: bool = False,
 ) -> SyncOutcome:
     try:
         target, lock_base, temp_dir = _session_paths(session_id, writing=True)
@@ -895,24 +1275,20 @@ def _sync_relation(
             if target.exists() and target.stat().st_size > MAX_BYTES:
                 return "blocked"
             try:
-                current = read(session_id) or _empty_projection(session_id)
+                current, rewrite_required, _missing_projection = (
+                    _load_writable_projection(
+                        session_id,
+                        target,
+                        initial_registration=initial_registration,
+                        reconstruct_corrupt=relation is not None,
+                    )
+                )
             except UnsupportedProjectionVersion:
                 return "blocked"
             except ProjectionUnavailable:
                 return "deferred"
             except ProjectionError:
-                try:
-                    current = _read_recoverable(session_id)
-                except UnsupportedProjectionVersion:
-                    return "blocked"
-                except ProjectionUnavailable:
-                    return "deferred"
-                except ProjectionError:
-                    if relation is None:
-                        return "deferred"
-                    current = _empty_projection(session_id)
-            if current.get("version") != SCHEMA_VERSION:
-                return "blocked"
+                return "deferred" if relation is None else "blocked"
             if relation is None:
                 if not remove_missing:
                     return "current"
@@ -923,7 +1299,7 @@ def _sync_relation(
                 )
             else:
                 updated = _merge_relation(current, relation)
-            if updated == current:
+            if updated == current and not rewrite_required:
                 return "current"
             encoded = _encode(updated)
             _atomic_replace(target, temp_dir, encoded)
@@ -941,6 +1317,7 @@ def sync_bound(
     session_id: str,
     *,
     blocking: bool = True,
+    initial_registration: bool = False,
 ) -> SyncOutcome:
     """Best-effort projection of one bound session after record persistence."""
     return _sync_relation(
@@ -950,6 +1327,7 @@ def sync_bound(
         role="bound",
         remove_missing=False,
         blocking=blocking,
+        initial_registration=initial_registration,
     )
 
 
@@ -1061,11 +1439,11 @@ def _classify_relation(
         item["status"] = "restored-invalid" if restored else "invalid"
         return item
     relation_set_incomplete = bool(metadata["relation_set_incomplete"])
-    writable_projection = metadata["version"] == SCHEMA_VERSION
+    writable_projection = metadata["version"] in {1, SCHEMA_VERSION}
     item["relation_set_incomplete"] = relation_set_incomplete
     item["tombstone_overflow"] = metadata["tombstone_overflow"]
-    if metadata["version"] == 1 and relation_set_incomplete:
-        item["status"] = "restored-incomplete" if restored else "incomplete"
+    if restored and metadata["version"] == 1 and relation_set_incomplete:
+        item["status"] = "restored-incomplete"
         return item
 
     relation_key = _relation_key(expected)
@@ -1179,7 +1557,13 @@ def _repair_relation(
                     item["status"] = "repair-blocked"
                     return item
                 try:
-                    current = read(session_id) or _empty_projection(session_id)
+                    current, rewrite_required, missing_projection = (
+                        _load_writable_projection(
+                            session_id,
+                            target,
+                            reconstruct_corrupt=True,
+                        )
+                    )
                 except UnsupportedProjectionVersion:
                     item = _audit_item(record, session_id, role)
                     item["status"] = "newer-schema"
@@ -1189,33 +1573,31 @@ def _repair_relation(
                     item["status"] = "repair-deferred"
                     return item
                 except ProjectionError:
-                    try:
-                        current = _read_recoverable(session_id)
-                    except UnsupportedProjectionVersion:
-                        item = _audit_item(record, session_id, role)
-                        item["status"] = "newer-schema"
-                        return item
-                    except ProjectionUnavailable:
-                        item = _audit_item(record, session_id, role)
-                        item["status"] = "repair-deferred"
-                        return item
-                    except ProjectionError:
-                        current = _empty_projection(session_id)
-                if current.get("version") != SCHEMA_VERSION:
                     item = _audit_item(record, session_id, role)
-                    item["status"] = "newer-schema"
+                    item["status"] = "repair-blocked"
                     return item
 
-                locked = _classify_relation(
-                    authoritative,
-                    session_id,
-                    role=role,
-                    projection=current,
-                    restored=False,
-                    record_loader=record_loader,
-                )
-                if not locked["repairable"]:
-                    return locked
+                if not missing_projection:
+                    locked = _classify_relation(
+                        authoritative,
+                        session_id,
+                        role=role,
+                        projection=current,
+                        restored=False,
+                        record_loader=record_loader,
+                    )
+                    rewrite_with_relation = (
+                        rewrite_required
+                        and locked["status"] in {
+                            "current",
+                            "incomplete",
+                            "missing",
+                        }
+                    )
+                    if not locked["repairable"] and not rewrite_with_relation:
+                        return locked
+                else:
+                    locked = _audit_item(authoritative, session_id, role)
                 expected = (
                     bound_relation(authoritative, session_id)
                     if role == "bound"
@@ -1236,7 +1618,7 @@ def _repair_relation(
                 )
                 if final["status"] != "current":
                     return final
-                if updated != current:
+                if updated != current or rewrite_required:
                     _atomic_replace(target, temp_dir, _encode(updated))
                 final["status"] = "repaired"
                 final["repairable"] = True
@@ -1292,7 +1674,13 @@ def audit_relation(
         restored=restored,
         record_loader=record_loader,
     )
-    if apply and item["repairable"]:
+    migrate_v1 = bool(
+        apply
+        and not restored
+        and projection is not None
+        and projection.get("version") == 1
+    )
+    if apply and (item["repairable"] or migrate_v1):
         return _repair_relation(
             record,
             session_id,
