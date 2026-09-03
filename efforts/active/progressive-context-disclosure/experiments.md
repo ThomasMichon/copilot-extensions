@@ -181,6 +181,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F2 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 2 | Reject this cell: the gate produced one exact one-guide run but did not reliably prevent broad discovery, irrelevant reads, or provenance loss; the repetition-2 transcript judge counted three direct irrelevant document reads. |
 | F2 / backtick repository-relative / optional / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 1, 1, 2 | Reject this cell: optional wording never produced a literal pass and every repetition broadened beyond the task-applicable guide. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 3 PASS | 3/3 loaded only `runtime-diagnostics` | 0, 0, 0 | Retain as a surviving cell: task-applicable references removed the F2 exploration failure while reducing initial context from 4,379 to 2,862 characters. |
+| F3 / backtick repository-relative / safety-gated / flat fragments / no-guide / ACP fresh | 3 | 3 PASS | no guide required or loaded | 0, 0, 0 | Retain as a surviving boundary: the critical kernel completed the task with zero tool calls and zero deferred reads. |
 
 Counts-only records:
 
@@ -199,6 +200,9 @@ Counts-only records:
 - [`evidence/f3-repo-gated-flat-one-guide-r1.json`](evidence/f3-repo-gated-flat-one-guide-r1.json)
 - [`evidence/f3-repo-gated-flat-one-guide-r2.json`](evidence/f3-repo-gated-flat-one-guide-r2.json)
 - [`evidence/f3-repo-gated-flat-one-guide-r3.json`](evidence/f3-repo-gated-flat-one-guide-r3.json)
+- [`evidence/f3-repo-gated-flat-no-guide-r1.json`](evidence/f3-repo-gated-flat-no-guide-r1.json)
+- [`evidence/f3-repo-gated-flat-no-guide-r2.json`](evidence/f3-repo-gated-flat-no-guide-r2.json)
+- [`evidence/f3-repo-gated-flat-no-guide-r3.json`](evidence/f3-repo-gated-flat-no-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -260,6 +264,17 @@ The next controlled task boundary is the F3 safety-gated no-guide cell, with all
 variant, representation, assembly, model, venue, and fresh-session coordinates
 fixed. It must complete from the critical kernel without reading any deferred
 material.
+
+F3 safety-gated passed all three no-guide repetitions. Every session completed
+from the critical kernel in one turn with zero tool calls, no observed or eager
+guide loads, no invented paths or canaries, complete owner provenance, and no
+critical-rule violation. Initial context was 2,646 characters / 662 estimated
+tokens.
+
+The next controlled task boundary is multi-guide, keeping F3,
+repository-relative backticks, safety-gated emphasis, flat fragments, model,
+ACP venue, and fresh sessions fixed. It must read exactly the two required
+guides, preserve both owners, and avoid every unrelated guide.
 
 ## Clean-room shape
 
