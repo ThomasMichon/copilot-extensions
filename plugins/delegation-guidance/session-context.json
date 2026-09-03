@@ -6,7 +6,7 @@
     {
       "id": "delegation-guidance",
       "pure": true,
-      "order": 120,
+      "order": 90,
       "timeoutSeconds": 1,
       "maxBytes": 1024,
       "bash": [
