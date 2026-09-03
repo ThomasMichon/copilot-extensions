@@ -824,23 +824,25 @@ def main() -> int:
     ):
         raise SystemExit("execution paths escape the bounded repository")
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    readiness = config["readiness"]
-    publication = config["publication"]
-    destination = config["destination"]
-    if readiness["signal"] != "READY":
+    readiness = config.get("readiness")
+    publication = config.get("publication")
+    destination = config.get("destination")
+    if not isinstance(readiness, dict) or readiness.get("signal") != "READY":
         raise SystemExit("capability is not ready")
     if (
-        publication["materialClassification"] != "synthetic"
-        or publication["secretsPresent"]
-        or publication["privateIdentifiersPresent"]
-        or publication["rawTranscriptPresent"]
+        not isinstance(publication, dict)
+        or publication.get("materialClassification") != "synthetic"
+        or publication.get("secretsPresent") is not False
+        or publication.get("privateIdentifiersPresent") is not False
+        or publication.get("rawTranscriptPresent") is not False
     ):
         raise SystemExit("publication gate failed")
     if (
-        not destination["destinationApproved"]
-        or not destination["reachable"]
-        or destination["reviewGate"] != "required"
-        or not destination["reviewGateSatisfied"]
+        not isinstance(destination, dict)
+        or destination.get("destinationApproved") is not True
+        or destination.get("reachable") is not True
+        or destination.get("reviewGate") != "required"
+        or destination.get("reviewGateSatisfied") is not True
     ):
         raise SystemExit("destination gate failed")
     result = {

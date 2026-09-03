@@ -293,6 +293,22 @@ def test_execution_tasks_materialize_satisfiable_grounding(
     )
     assert alternate_spelling.returncode != 0
 
+    (root / "repository" / ".synthetic" / "result.json").unlink()
+    execution["destination"]["destinationApproved"] = "true"
+    (
+        root / "repository" / ".synthetic" / "execution.json"
+    ).write_text(json.dumps(execution), encoding="utf-8")
+    malformed_gate = subprocess.run(
+        [sys.executable, *execution["command"]["argv"][1:]],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert malformed_gate.returncode != 0
+    assert not (
+        root / "repository" / ".synthetic" / "result.json"
+    ).exists()
+
 
 def test_spill_materializes_the_full_aggregate_artifact(
     tmp_path: Path,
