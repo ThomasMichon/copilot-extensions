@@ -22,7 +22,8 @@ fence completeness are explicit, independent, and sticky once lost.
 - Maximum retained relations: `128`.
 - Maximum retained deletion tombstones: `128`.
 - Encoding: UTF-8 JSON, lexicographically sorted object keys,
-  `ensure_ascii=true`, separators `(",", ":")`, and one trailing newline.
+  `ensure_ascii=true`, separators `(",", ":")`, no indentation or other
+  insignificant whitespace, and one trailing newline.
 - Relation identity: `(project, worktree_id, role)`.
 - Tombstone identity token: lowercase SHA-256 hex of the canonical JSON encoding
   of `[project, worktree_id, role]` using the same encoder settings without the
@@ -38,8 +39,8 @@ worktree state.
 - Lifecycle writes target one exact known session ID.
 - Ordinary writes never enumerate worktree records or the session-state root.
 - Every encoded projection remains at or below `131072` bytes.
-- Bound relations outrank nonterminal controllers, which outrank terminal
-  relations.
+- Bound relations outrank nonterminal controller relations, which outrank
+  terminal controller relations.
 - Omission is not deletion and never creates a relation tombstone.
 - Unknown future major versions remain byte-for-byte untouched.
 - Restored projections remain read-only evidence after validation and become
@@ -116,8 +117,8 @@ For an incoming relation:
 3. Add or replace it in the candidate relation set.
 4. Sort candidates by:
    1. bound relation;
-   2. nonterminal controller;
-   3. terminal controller;
+   2. nonterminal controller relation;
+   3. terminal controller relation;
    4. descending relation revision;
    5. ascending `(project, worktree_id, role)`.
 5. Retain a deterministic priority prefix under the byte budget.
@@ -280,7 +281,8 @@ after import.
 - Maximum retained relations and compact tombstones fit `131072` bytes.
 - Long valid identities and escaped content trigger deterministic byte-prefix
   retention rather than encode failure.
-- Bound and nonterminal relations win retention over terminal relations.
+- Bound and nonterminal controller relations win retention over terminal
+  controller relations.
 - Repeated omitted updates do not change bytes.
 - An omitted relation can be retained when its priority changes.
 - Incremental relation removal does not clear prior relation overflow.
