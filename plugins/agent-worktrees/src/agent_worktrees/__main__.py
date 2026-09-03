@@ -7984,6 +7984,7 @@ class _ResidentHookPolicy:
             if isinstance(source, str) and source.strip()
             else "hook"
         )
+        has_project = bool(cfg.active_project())
         args = argparse.Namespace(
             worktree_id=worktree_id,
             session_id=session_id,
@@ -8001,11 +8002,14 @@ class _ResidentHookPolicy:
             ),
             launch_id=environment.get("WORKTREE_LAUNCH_ID"),
             context_config=(
-                self.context_config() if self.hook_client is not None else None
+                self.context_config()
+                if self.hook_client is not None and has_project
+                else None
             ),
             plugin_related_anchors=(
                 self.plugin_related_anchors()
-                if self.hook_client is not None else None
+                if self.hook_client is not None and has_project
+                else None
             ),
         )
         stdout = io.StringIO()

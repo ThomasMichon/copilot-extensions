@@ -411,6 +411,36 @@ def test_resident_session_start_preserves_hook_metadata(monkeypatch):
     assert captured["launch_id"] == "launch-1"
 
 
+def test_resident_session_start_skips_project_cache_when_untracked(monkeypatch):
+    captured = {}
+
+    def register(args):
+        captured.update(vars(args))
+        print("{}")
+        return 0
+
+    monkeypatch.setattr(m, "cmd_register_session", register)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+    policy = m._ResidentHookPolicy(object())
+    monkeypatch.setattr(
+        policy,
+        "context_config",
+        lambda: pytest.fail("untracked session loaded project config"),
+    )
+    monkeypatch.setattr(
+        policy,
+        "plugin_related_anchors",
+        lambda: pytest.fail("untracked session loaded plugin anchors"),
+    )
+
+    assert policy.session_start({
+        "sessionId": "session-1",
+        "cwd": "/outside-project",
+    }) == {}
+    assert captured["context_config"] is None
+    assert captured["plugin_related_anchors"] is None
+
+
 def test_hook_mutation_targets_are_target_aware():
     class Guard:
         _WRITE_VERBS = re.compile(r"Set-Content|git\s+commit", re.IGNORECASE)
