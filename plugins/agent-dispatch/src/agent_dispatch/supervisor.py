@@ -566,7 +566,6 @@ class Supervisor:
         fleet_cold_fn: FleetColdFn | None = None,
         nudge_fn: NudgeFn | None = None,
         redrive_fn: RedriveFn | None = None,
-        turn_state_fn: Callable[[str, str | None], str | None] | None = None,
         disposable_cli_labels: Sequence[str] | None = None,
         conclusion_fn: ConclusionFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
@@ -644,10 +643,6 @@ class Supervisor:
         self.reactive = reactive
         #: Retained for declaration/CLI compatibility; never drives polling.
         self.reactive_interval = max(0.25, float(reactive_interval))
-        # Retain the constructor keyword for callers upgrading across the polling
-        # removal, but never invoke it. Push delivery will use a distinct stream
-        # subscription seam rather than a state resolver.
-        _ = turn_state_fn
         #: Explicit label-scoped terminal conclusion policy. Only a terminal
         #: task carrying one of these labels is handed to the disposable CLI
         #: conclusion path; arbitrary CLI worktrees remain untouched.
@@ -1721,7 +1716,6 @@ class Supervisor:
         timeout: float,
         *,
         sleep: Callable[[float], None] | None = None,
-        clock: Callable[[], float] | None = None,
     ) -> bool:
         """Sleep for the full reconciliation interval without probing workers.
 

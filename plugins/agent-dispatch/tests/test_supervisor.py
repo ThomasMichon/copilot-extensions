@@ -13,6 +13,7 @@ from dataclasses import asdict
 
 import pytest
 
+from agent_dispatch import tracking
 from agent_dispatch.client import DispatchError
 from agent_dispatch.queue import SpawnState, Status
 from agent_dispatch.supervisor import Supervisor
@@ -2070,18 +2071,26 @@ def test_nudge_skips_when_not_confirmed_alive(q, client):
 # -- retired turn-state polling ----------------------------------------------
 
 
-def test_wait_for_turn_end_never_polls_workers(q, client):
+def test_wait_for_turn_end_never_polls_workers(q, client, monkeypatch):
     """The compatibility path performs one full sleep and no bridge/SSH probes."""
+    task = q.create("work")
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         max_concurrent=5,
         reactive=True,
-        turn_state_fn=lambda *_args: pytest.fail("turn-state polling is forbidden"),
+    )
+    sup.poll_once()
+    q.claim_one("m/wt-1", task_id=task.id, machine="m", worktree="wt-1")
+    q.start(task.id, "m/wt-1")
+    monkeypatch.setattr(
+        tracking,
+        "resolve_live_session",
+        lambda *_args, **_kwargs: pytest.fail("turn-state polling is forbidden"),
     )
     slept: list[float] = []
-    assert sup.wait_for_turn_end(30.0, sleep=slept.append, clock=lambda: 0.0) is False
+    assert sup.wait_for_turn_end(30.0, sleep=slept.append) is False
     assert slept == [30.0]
 
 
@@ -2091,7 +2100,7 @@ def test_wait_for_turn_end_ignores_retired_reactive_flag(q, client):
         client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5, reactive=False
     )
     slept: list[float] = []
-    assert sup.wait_for_turn_end(30.0, sleep=slept.append, clock=lambda: 0.0) is False
+    assert sup.wait_for_turn_end(30.0, sleep=slept.append) is False
     assert slept == [30.0]
 
 
