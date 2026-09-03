@@ -180,6 +180,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F2 / backtick repository-relative / imperative / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 3, 3, 2 | Reject this cell: stronger imperative wording increased compensating exploration and unrelated guide reads. |
 | F2 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 2 | Reject this cell: the gate produced one exact one-guide run but did not reliably prevent broad discovery, irrelevant reads, or provenance loss; the repetition-2 transcript judge counted three direct irrelevant document reads. |
 | F2 / backtick repository-relative / optional / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 1, 1, 2 | Reject this cell: optional wording never produced a literal pass and every repetition broadened beyond the task-applicable guide. |
+| F3 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 3 PASS | 3/3 loaded only `runtime-diagnostics` | 0, 0, 0 | Retain as a surviving cell: task-applicable references removed the F2 exploration failure while reducing initial context from 4,379 to 2,862 characters. |
 
 Counts-only records:
 
@@ -195,6 +196,9 @@ Counts-only records:
 - [`evidence/f2-repo-optional-flat-one-guide-r1.json`](evidence/f2-repo-optional-flat-one-guide-r1.json)
 - [`evidence/f2-repo-optional-flat-one-guide-r2.json`](evidence/f2-repo-optional-flat-one-guide-r2.json)
 - [`evidence/f2-repo-optional-flat-one-guide-r3.json`](evidence/f2-repo-optional-flat-one-guide-r3.json)
+- [`evidence/f3-repo-gated-flat-one-guide-r1.json`](evidence/f3-repo-gated-flat-one-guide-r1.json)
+- [`evidence/f3-repo-gated-flat-one-guide-r2.json`](evidence/f3-repo-gated-flat-one-guide-r2.json)
+- [`evidence/f3-repo-gated-flat-one-guide-r3.json`](evidence/f3-repo-gated-flat-one-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -239,6 +243,23 @@ backtick repository-relative representation, safety-gated emphasis, flat
 fragments, task, model, venue, and fresh boundary. F3 emits only the task-required
 guide reference, directly testing whether the surplus F2 per-topic references
 caused compensating exploration.
+
+F3 safety-gated passed all three one-guide repetitions. Every session loaded
+only `runtime-diagnostics`, preserved READY-1 and owner provenance, avoided path
+invention and prohibited sources, and performed no capability operation or
+compensating exploration. Tool-call counts were 1, 1, and 2; the third run used
+one exact locator glob before reading the same required guide.
+
+The F3 render reduced initial context from 4,379 characters / 1,095 estimated
+tokens for F2 safety-gated to 2,862 characters / 716 estimated tokens, a 34.6%
+reduction, while moving correctness from 1/3 to 3/3 and irrelevant reads from
+0/1/2 to 0/0/0. Retain this cell for further task-boundary replication; it is
+not yet a selected standard.
+
+The next controlled task boundary is the F3 safety-gated no-guide cell, with all
+variant, representation, assembly, model, venue, and fresh-session coordinates
+fixed. It must complete from the critical kernel without reading any deferred
+material.
 
 ## Clean-room shape
 
