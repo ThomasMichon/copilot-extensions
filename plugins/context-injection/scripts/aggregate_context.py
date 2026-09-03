@@ -493,6 +493,57 @@ def _repo_is_trusted(repo: Path) -> bool:
     return False
 
 
+def _clean_git_env() -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    return environment
+
+
+def _git_path(repo: Path, argument: str) -> Path | None:
+    git = shutil.which("git")
+    if git is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                git,
+                "-C",
+                str(repo),
+                "rev-parse",
+                "--path-format=absolute",
+                argument,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+            env=_clean_git_env(),
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return Path(result.stdout.strip()).resolve(strict=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _trusted_linked_worktree_anchor(repo: Path) -> Path | None:
+    common_dir = _git_path(repo, "--git-common-dir")
+    if common_dir is None or not common_dir.is_dir():
+        return None
+    anchor = common_dir.parent
+    if anchor == repo.resolve() or not _repo_is_trusted(anchor):
+        return None
+    if (
+        _git_path(anchor, "--show-toplevel") != anchor
+        or _git_path(anchor, "--git-common-dir") != common_dir
+    ):
+        return None
+    return anchor
+
+
 def _windows_command_line_argv(command_line: str) -> tuple[str, ...] | None:
     if os.name != "nt":
         return None
@@ -719,13 +770,22 @@ def _settings(repo: Path) -> tuple[dict[str, bool], dict[str, tuple[dict, Path]]
     marketplaces: dict[str, tuple[dict, Path]] = {}
     layers = [(Path.home() / ".copilot" / "settings.json", Path.home())]
     if _repo_is_trusted(repo):
+        anchor = _trusted_linked_worktree_anchor(repo)
+        layers.append((repo / ".claude" / "settings.json", repo))
+        if anchor is not None:
+            layers.append((anchor / ".claude" / "settings.local.json", anchor))
         layers.extend(
-            (
-                (repo / ".claude" / "settings.json", repo),
+            [
                 (repo / ".claude" / "settings.local.json", repo),
                 (repo / ".github" / "copilot" / "settings.json", repo),
-                (repo / ".github" / "copilot" / "settings.local.json", repo),
+            ]
+        )
+        if anchor is not None:
+            layers.append(
+                (anchor / ".github" / "copilot" / "settings.local.json", anchor)
             )
+        layers.append(
+            (repo / ".github" / "copilot" / "settings.local.json", repo)
         )
     for path, base in layers:
         if not path.exists():
