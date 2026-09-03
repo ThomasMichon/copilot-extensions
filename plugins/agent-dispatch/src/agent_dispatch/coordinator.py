@@ -481,6 +481,26 @@ class ReleaseLeaseBody(BaseModel):
     force: bool = False
 
 
+class AcquireResourceReservationBody(BaseModel):
+    key: str
+    owner: str
+    ttl: float
+    token: str | None = None
+
+
+class BindResourceReservationBody(BaseModel):
+    key: str
+    owner: str
+    token: str
+    task_id: str
+
+
+class ReleaseResourceReservationBody(BaseModel):
+    key: str
+    owner: str
+    token: str
+
+
 class RegistrationBody(BaseModel):
     kind: str
     spec: dict
@@ -1111,6 +1131,9 @@ def create_app(
         target_repo: str | None = None,
         label: str | None = None,
         evaluator_ref: str | None = None,
+        source: str | None = None,
+        origin_ref: str | None = None,
+        exclusive_key: str | None = None,
         q: str | None = None,
         sweep: bool = False,
         limit: int = 200,
@@ -1132,6 +1155,9 @@ def create_app(
             target_repo=target_repo,
             label=label,
             evaluator_ref=evaluator_ref,
+            source=source,
+            origin_ref=origin_ref,
+            exclusive_key=exclusive_key,
             limit=limit,
         )
         return [_bulk_task_dict(t) for t in tasks]
@@ -1749,6 +1775,58 @@ def create_app(
     def get_lease(scope: str) -> dict | None:
         lease = queue.get_schedule_lease(scope)
         return asdict(lease) if lease else None
+
+    # -- external producer resource reservations ----------------------------
+
+    @app.post("/resource-reservations/acquire")
+    def acquire_resource_reservation(
+        body: AcquireResourceReservationBody,
+    ) -> dict:
+        try:
+            reservation, granted = queue.acquire_resource_reservation(
+                body.key, body.owner, ttl=body.ttl, token=body.token
+            )
+        except TaskError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        payload = asdict(reservation)
+        if not granted:
+            payload.pop("token", None)
+        return {"granted": granted, "reservation": payload}
+
+    @app.post("/resource-reservations/bind")
+    def bind_resource_reservation(body: BindResourceReservationBody) -> dict:
+        try:
+            return asdict(
+                queue.bind_resource_reservation(
+                    body.key, body.owner, body.token, body.task_id
+                )
+            )
+        except TaskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/resource-reservations/release")
+    def release_resource_reservation(
+        body: ReleaseResourceReservationBody,
+    ) -> dict:
+        try:
+            released = queue.release_resource_reservation(
+                body.key, body.owner, body.token
+            )
+        except TaskError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"released": released, "key": body.key}
+
+    @app.get("/resource-reservations")
+    def list_resource_reservations(
+        owner_prefix: str | None = None,
+        task_id: str | None = None,
+    ) -> list[dict]:
+        return [
+            asdict(reservation)
+            for reservation in queue.list_resource_reservations(
+                owner_prefix=owner_prefix, task_id=task_id
+            )
+        ]
 
     if mcp_app is not None:
         # Mounted last so the coordinator's own routes take precedence.

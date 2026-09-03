@@ -302,6 +302,10 @@ def read_declaration_file_set(
         from .reviewer_loops import expand_reviewer_loop
 
         declarations = expand_reviewer_loop(data)
+    elif data.get("kind") == "repository-issue-loop":
+        from .repository_issue_loops import expand_repository_issue_loop
+
+        declarations = expand_repository_issue_loop(data)
     else:
         declarations = (load_declaration(data),)
     return tuple(
