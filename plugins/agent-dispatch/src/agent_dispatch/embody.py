@@ -116,6 +116,7 @@ def create_worktree(
     cmd = list(exe_prefix)
     if project:
         cmd += ["--project", project]
+    # This is agent-worktrees creation provenance, not dispatch fleet routing.
     cmd += [
         "create",
         "--origin",
