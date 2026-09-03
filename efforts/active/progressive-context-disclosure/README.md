@@ -502,4 +502,23 @@ enforcement before migrating the complete contributor stack.
 - Initial context was 2,646 characters / 662 estimated tokens. Retain the
   no-guide boundary as additional support for F3, not as a final selection.
 - Next gate: run the multi-guide task with every other coordinate fixed and
-  require exactly the two task-applicable guides with both owners preserved.
+  require all three task-applicable guides with both owners preserved.
+
+### 2026-09-03 - F3 repository-relative multi-guide cell rejected
+
+- The frozen task requires three guides across two owners:
+  `publication-checks`, `destination-matrix`, and `capability-procedure`.
+- The first repetition attempt timed out at 300 seconds and was recorded as
+  transport `INVALID`; a fresh independently generated retry supplied the
+  behavioral repetition with new canaries.
+- All three behavioral repetitions loaded every required guide but were
+  literal-mode false passes after broad compensating exploration. Each violated
+  CAP-1's bounded-task rule; repetitions 2 and 3 also loaded unrelated guides,
+  and repetition 3 violated CMD-1 by loading `command-reference` without a
+  required non-kernel command option.
+- Reject the F3 repository-relative safety-gated flat variant despite its
+  unanimous no-guide and one-guide cells. Per the frozen protocol, one critical
+  violation eliminates the variant.
+- Next gate: keep F3, safety-gated emphasis, flat fragments, multi-guide task,
+  model, ACP venue, and fresh boundary fixed while changing only the reference
+  representation to `structured-reference`.

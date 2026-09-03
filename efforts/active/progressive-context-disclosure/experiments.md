@@ -182,6 +182,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F2 / backtick repository-relative / optional / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 1, 1, 2 | Reject this cell: optional wording never produced a literal pass and every repetition broadened beyond the task-applicable guide. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 3 PASS | 3/3 loaded only `runtime-diagnostics` | 0, 0, 0 | Retain as a surviving cell: task-applicable references removed the F2 exploration failure while reducing initial context from 4,379 to 2,862 characters. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / no-guide / ACP fresh | 3 | 3 PASS | no guide required or loaded | 0, 0, 0 | Retain as a surviving boundary: the critical kernel completed the task with zero tool calls and zero deferred reads. |
+| F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 0, 1, 2 | Reject this variant: every behavioral run broadened beyond the bounded flow and violated CAP-1; two also loaded unrelated guides. |
 
 Counts-only records:
 
@@ -203,6 +204,9 @@ Counts-only records:
 - [`evidence/f3-repo-gated-flat-no-guide-r1.json`](evidence/f3-repo-gated-flat-no-guide-r1.json)
 - [`evidence/f3-repo-gated-flat-no-guide-r2.json`](evidence/f3-repo-gated-flat-no-guide-r2.json)
 - [`evidence/f3-repo-gated-flat-no-guide-r3.json`](evidence/f3-repo-gated-flat-no-guide-r3.json)
+- [`evidence/f3-repo-gated-flat-multi-guide-r1.json`](evidence/f3-repo-gated-flat-multi-guide-r1.json)
+- [`evidence/f3-repo-gated-flat-multi-guide-r2.json`](evidence/f3-repo-gated-flat-multi-guide-r2.json)
+- [`evidence/f3-repo-gated-flat-multi-guide-r3.json`](evidence/f3-repo-gated-flat-multi-guide-r3.json)
 
 All three conditional sessions retained owner provenance, loaded the required
 guide, avoided path invention and critical-rule violations, and reached the
@@ -273,8 +277,26 @@ tokens.
 
 The next controlled task boundary is multi-guide, keeping F3,
 repository-relative backticks, safety-gated emphasis, flat fragments, model,
-ACP venue, and fresh sessions fixed. It must read exactly the two required
-guides, preserve both owners, and avoid every unrelated guide.
+ACP venue, and fresh sessions fixed. It must read the three required guides,
+preserve both owners, and avoid every unrelated guide.
+
+The frozen multi-guide task requires three guides across two owners:
+`publication-checks`, `destination-matrix`, and `capability-procedure`. The
+first attempt timed out at 300 seconds and remains transport `INVALID`; an
+independent fresh retry supplied repetition 1.
+
+All three behavioral repetitions loaded every required guide but failed literal
+mode. Each enumerated or searched beyond the exact locators and violated CAP-1's
+bounded-task rule. Repetitions 2 and 3 additionally loaded one and two unrelated
+guides; repetition 3 also loaded `command-reference` without a required
+non-kernel command option, violating CMD-1. The repository-relative F3 variant
+is therefore eliminated despite its unanimous no-guide and one-guide cells.
+
+The next controlled comparison keeps F3, safety-gated emphasis, flat fragments,
+the multi-guide task, model, ACP venue, and fresh sessions fixed while changing
+only the reference representation from backtick repository-relative paths to
+the frozen structured-reference form. It tests whether explicit structured
+metadata can keep a multi-guide flow bounded without adding an assembly index.
 
 ## Clean-room shape
 
