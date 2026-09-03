@@ -27,6 +27,146 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# A structured caller supplies both the validated context and its exact root.
+# Validate them again before any installer staging or runtime mutation.
+CONTEXTUAL_INSTALL=false
+__aw_action="${1:-status}"
+__aw_install_dir_arg=""
+__aw_args=("$@")
+for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
+    if [[ "${__aw_args[$__aw_i]}" == "--install-dir" ]]; then
+        ((__aw_i + 1 < ${#__aw_args[@]})) || {
+            printf '%s\n' "ERROR: --install-dir requires a value" >&2
+            exit 1
+        }
+        __aw_install_dir_arg="${__aw_args[$((__aw_i + 1))]}"
+    fi
+done
+if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    CONTEXTUAL_INSTALL=true
+    case "$__aw_action" in
+        install|update|status) ;;
+        *)
+            printf '%s\n' \
+                "ERROR: structured installation context does not support action '$__aw_action'" >&2
+            exit 1
+            ;;
+    esac
+    [[ -n "$__aw_install_dir_arg" && "$__aw_install_dir_arg" == /* ]] || {
+        printf '%s\n' \
+            "ERROR: structured installation context requires an absolute --install-dir" >&2
+        exit 1
+    }
+    [[ -f "$COPILOT_EXTENSIONS_CONTEXT" ]] || {
+        printf '%s\n' "ERROR: structured installation context is unavailable" >&2
+        exit 1
+    }
+    __aw_context_helper="$SCRIPT_DIR/installation-context/installation-context.sh"
+    __aw_json_query="$SCRIPT_DIR/installation-context/json-query.awk"
+    [[ -f "$__aw_context_helper" && -f "$__aw_json_query" ]] || {
+        printf '%s\n' "ERROR: installation-context validator is unavailable" >&2
+        exit 1
+    }
+    __aw_durable_home="$COPILOT_EXTENSIONS_CONTEXT"
+    for _ in 1 2 3 4 5; do
+        __aw_durable_home="$(dirname -- "$__aw_durable_home")"
+    done
+    __aw_validated_context="$(
+        bash "$__aw_context_helper" validate \
+            --context "$COPILOT_EXTENSIONS_CONTEXT" \
+            --durable-home "$__aw_durable_home" \
+            --expected-plugin-id agent-worktrees \
+            --expected-payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    )" || exit $?
+    __aw_context_root="$(
+        LC_ALL=C awk -f "$__aw_json_query" \
+            -v mode=get -v query_path=pluginRoot \
+            - <<<"$__aw_validated_context"
+    )" || {
+        printf '%s\n' "ERROR: validated context omitted pluginRoot" >&2
+        exit 1
+    }
+    __aw_context_root="$(cd -P -- "$__aw_context_root" && pwd)"
+    __aw_install_root="$(cd -P -- "$__aw_install_dir_arg" && pwd)"
+    [[ "$__aw_install_root" == "$__aw_context_root" ]] || {
+        printf '%s\n' \
+            "ERROR: --install-dir does not match validated installation context" >&2
+        exit 1
+    }
+
+    # The standard self-stage block is intentionally byte-identical across
+    # plugins and stages beneath the legacy root. Context installs stage here
+    # instead, inside the selected installation, then mark the child staged so
+    # the standard block remains inert.
+    if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
+        cd "$HOME"
+        __aw_stage_root="$__aw_install_root/.install-stage"
+        __aw_stage="$__aw_stage_root/$(date -u +%Y%m%dT%H%M%S)-$$"
+        mkdir -p "$__aw_stage"
+        cp -a "$PLUGIN_DIR" "$__aw_stage/"
+        __aw_staged_payload="$__aw_stage/$(basename "$PLUGIN_DIR")"
+        for __aw_sibling in "$__aw_stage_root"/*; do
+            [[ -d "$__aw_sibling" && "$__aw_sibling" != "$__aw_stage" ]] ||
+                continue
+            __aw_owner="${__aw_sibling##*-}"
+            if [[ "$__aw_owner" =~ ^[0-9]+$ ]] &&
+                    kill -0 "$__aw_owner" 2>/dev/null; then
+                continue
+            fi
+            rm -rf "$__aw_sibling" 2>/dev/null || true
+        done
+        __aw_deadline=480
+        __aw_deadline_raw="${AGENT_WORKTREES_INSTALL_DEADLINE_SEC:-${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}}"
+        if [[ "$__aw_deadline_raw" =~ ^-?[0-9]+$ ]]; then
+            __aw_deadline="$__aw_deadline_raw"
+        fi
+        export COPILOT_PLUGIN_INSTALL_STAGED=context-install
+        export COPILOT_PLUGIN_STAGED_FROM="$PLUGIN_DIR"
+        set -m
+        (
+            cd "$__aw_staged_payload"
+            exec bash \
+                "$__aw_staged_payload/scripts/$(basename "${BASH_SOURCE[0]}")" \
+                "$@"
+        ) &
+        __aw_child=$!
+        set +m
+        if [[ "$__aw_deadline" -gt 0 ]]; then
+            (
+                __aw_waited=0
+                while kill -0 "$__aw_child" 2>/dev/null; do
+                    sleep 1
+                    __aw_waited=$((__aw_waited + 1))
+                    if [[ "$__aw_waited" -ge "$__aw_deadline" ]]; then
+                        : >"$__aw_stage/.watchdog-fired"
+                        kill -- -"$__aw_child" 2>/dev/null ||
+                            kill "$__aw_child" 2>/dev/null || true
+                        printf '[%sZ] WATCHDOG-KILL agent-worktrees context install exceeded %ss deadline (child pid %s); killed tree. Stage: %s\n' \
+                            "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+                            "$__aw_deadline" "$__aw_child" "$__aw_stage" \
+                            >>"$__aw_install_root/reconcile.err.log" 2>/dev/null ||
+                            true
+                        break
+                    fi
+                done
+            ) &
+            __aw_watcher=$!
+        else
+            __aw_watcher=""
+        fi
+        if wait "$__aw_child"; then __aw_rc=0; else __aw_rc=$?; fi
+        if [[ -n "$__aw_watcher" ]]; then
+            kill "$__aw_watcher" 2>/dev/null || true
+            wait "$__aw_watcher" 2>/dev/null || true
+        fi
+        if [[ -e "$__aw_stage/.watchdog-fired" ]]; then
+            __aw_rc=124
+        fi
+        rm -rf "$__aw_stage"
+        exit "$__aw_rc"
+    fi
+fi
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -177,6 +317,7 @@ FORCE=false
 REMOVE_CONFIG=false
 MACHINE=""
 PROJECT_NAME_ARG=""
+INSTALL_DIR_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -184,6 +325,7 @@ while [[ $# -gt 0 ]]; do
         --remove-config) REMOVE_CONFIG=true; shift ;;
         --machine)       MACHINE="$2"; shift 2 ;;
         --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
+        --install-dir)   INSTALL_DIR_ARG="$2"; shift 2 ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -253,7 +395,11 @@ fi
 # ── Metadata ─────────────────────────────────────────────────────────────
 
 SERVICE_NAME="Worktree Session Manager"
-INSTALL_DIR="$HOME/.agent-worktrees"
+INSTALL_DIR="${INSTALL_DIR_ARG:-$HOME/.agent-worktrees}"
+if [[ "$INSTALL_DIR" != /* ]]; then
+    echo "ERROR: --install-dir must be absolute" >&2
+    exit 1
+fi
 BIN_DIR="$INSTALL_DIR/bin"
 LOCAL_BIN="$HOME/.local/bin"
 SERVICE_YAML="$SCRIPT_DIR/service.yaml"
@@ -364,7 +510,9 @@ _versioned_activate() {
     # the superseded monitor + spawn the current one now (from the NEW slot's
     # python), so every live session's bar is re-served with no session restart.
     # Best-effort, never fatal.
-    "$VENV_PYTHON" -m agent_worktrees status-monitor-restart 2>&1 | sed 's/^/  → monitor: /' || true
+    if ! $CONTEXTUAL_INSTALL; then
+        "$VENV_PYTHON" -m agent_worktrees status-monitor-restart 2>&1 | sed 's/^/  → monitor: /' || true
+    fi
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.sh tier 2) prefers it over a
     # newest-slot guess. Atomic (temp + rename); best-effort, never fatal.
@@ -1631,10 +1779,14 @@ case "$ACTION" in
             exit 1
         fi
 
-        # Create directories (runtime always; project only if adopting)
-        mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
-        if $HAS_PROJECT; then
-            mkdir -p "$PROJECT_DIR" "$WORKTREES_DIR"
+        # Create only installation-local paths for a structured context.
+        if $CONTEXTUAL_INSTALL; then
+            mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+        else
+            mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
+            if $HAS_PROJECT; then
+                mkdir -p "$PROJECT_DIR" "$WORKTREES_DIR"
+            fi
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
@@ -1642,6 +1794,12 @@ case "$ACTION" in
         deploy_package || exit 1
         deploy_wrappers || exit 1
         _versioned_activate || exit 1
+        if $CONTEXTUAL_INSTALL; then
+            remove_legacy_scripts
+            write_deploy_manifest
+            ok "Context runtime installed at $INSTALL_DIR"
+            exit 0
+        fi
         remove_legacy_scripts
         remove_legacy_binstubs
         reconcile_binstubs
@@ -1896,6 +2054,18 @@ case "$ACTION" in
     update)
         header "Updating $SERVICE_NAME"
 
+        if $CONTEXTUAL_INSTALL; then
+            mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+            deploy_venv || exit 1
+            deploy_package || exit 1
+            deploy_wrappers || exit 1
+            _versioned_activate || exit 1
+            remove_legacy_scripts
+            write_deploy_manifest
+            ok "Context runtime updated at $INSTALL_DIR"
+            exit 0
+        fi
+
         if [[ ! -d "$BIN_DIR" ]]; then
             err "Not installed -- run 'install' first"
             exit 1
@@ -1947,7 +2117,7 @@ case "$ACTION" in
         ;;
 
     *)
-        echo "Usage: $0 {install|stamp|provision|uninstall|start|stop|status|update-config|update} [--project-name NAME] [--force] [--remove-config] [--machine NAME]" >&2
+        echo "Usage: $0 {install|stamp|provision|uninstall|start|stop|status|update-config|update} [--project-name NAME] [--install-dir DIR] [--force] [--remove-config] [--machine NAME]" >&2
         exit 1
         ;;
 esac

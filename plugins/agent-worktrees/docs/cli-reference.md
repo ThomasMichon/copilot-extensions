@@ -437,7 +437,7 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `install` | Full deploy: runtime + project config + binstubs + terminal profiles |
 | `register` | Register a new project (create config + binstub without full reinstall) |
 | `uninstall` | Remove worktree manager |
-| `update` | Re-deploy runtime from repo source + refresh **every** registered plugin payload and sibling module, then fast-forward the managed repo anchor(s) so in-repo config bindings deploy alongside the plugin. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all; `--no-anchor-sync` skips the anchor sync) |
+| `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime and opportunistically refresh installed-but-inactive payload inventory, then update sibling modules and fast-forward the managed repo anchor(s). An inactive inventory refresh failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--no-anchor-sync` skips the anchor sync) |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Retire migrated managed instruction files (machine identity now via the `session-machine` sessionStart hook) |
 | `machine-context` | sessionStart hook entrypoint: emit machine identity as `additionalContext` (cwd-gated) |
@@ -487,6 +487,14 @@ direct-dispatch boundary (plain subcommands never trigger it); opt out with
 [`docs/install-contract.md`](../../../docs/install-contract.md#automatic-reconciliation-at-launch-runtimescope) § "Automatic
 reconciliation at launch" for the full policy. Headless `copilot -p` launches do
 **not** reconcile (repo settings aren't merged there).
+
+For an installation-cell-aware runtime, agent-worktrees delegates actual mode,
+desired mode, and mutation authorization to the plugin's vendored
+installation-context helper. An authoritative legacy runtime reconciles at its
+legacy root without an `install.json` receipt. Namespaced active or
+deactivation-required state reconciles only after the helper validates the exact
+plugin receipt and root; activation-required, maintenance, invalid, foreign,
+orphaned, revalidation, and provenance-uncertain states remain read-only.
 
 ### Deployment ownership (`extensions.agent-worktrees.auto_update`)
 

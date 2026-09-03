@@ -20,6 +20,27 @@ def _project_binstub(lb: Path, project: str) -> str:
     return (lb / name).read_text()
 
 
+def test_platform_installers_honor_structured_runtime_root():
+    posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "--install-dir" in posix
+    assert "CONTEXTUAL_INSTALL=true" in posix
+    assert "does not match validated installation context" in posix
+    assert "structured installation context does not support action" in posix
+    assert "__aw_child" in posix
+    assert "__aw_watcher" in posix
+    assert 'ok "Context runtime updated at $INSTALL_DIR"' in posix
+
+    assert "[string]$InstallDir" in powershell
+    assert "$ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT" in powershell
+    assert "-InstallDir does not match validated installation context." in powershell
+    assert "Structured installation context does not support action" in powershell
+    assert "$contextChild.WaitForExit" in powershell
+    assert "taskkill.exe /PID $contextChild.Id /T /F" in powershell
+    assert 'Write-ServiceOk "Context runtime updated at $InstallDir"' in powershell
+
+
 def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
     """A project binstub names its project via ``--project`` (context otherwise
     resolves from CWD, git-like). It must NOT set an ambient WORKTREE_PROJECT on

@@ -85,3 +85,96 @@ def test_non_windows_never_adds_flag(tmp_path, recorded):
     m._update_modules(plugin_dir, "linux", None, force=True)
     for c in recorded:
         assert "-ZeroDowntime" not in c
+
+
+def test_unified_update_skips_inactive_module_runtime(tmp_path, recorded):
+    plugin_dir = _make_tree(tmp_path, zero_downtime=True, unix=True)
+    targets = {
+        "agent-bridge": m._RegisteredPluginTarget(
+            context=None,
+            activation=m._PluginActivation.INACTIVE,
+        ),
+    }
+
+    m._update_modules(
+        plugin_dir,
+        "linux",
+        None,
+        force=True,
+        targets=targets,
+    )
+
+    assert recorded == []
+
+
+def test_unified_update_does_not_refresh_active_module_payload_twice(
+    tmp_path,
+    recorded,
+):
+    plugin_dir = _make_tree(tmp_path, zero_downtime=True, unix=True)
+    targets = {
+        "agent-bridge": m._RegisteredPluginTarget(
+            context=None,
+            activation=m._PluginActivation.ACTIVE,
+        ),
+    }
+
+    m._update_modules(
+        plugin_dir,
+        "linux",
+        None,
+        force=True,
+        targets=targets,
+    )
+
+    assert _installer_update_argv(recorded) is not None
+    assert not any(call[:3] == ["copilot", "plugin", "update"] for call in recorded)
+
+
+def test_unified_update_reconciles_activation_unknown_module(
+    tmp_path,
+    recorded,
+):
+    plugin_dir = _make_tree(tmp_path, zero_downtime=True, unix=True)
+    targets = {
+        "agent-bridge": m._RegisteredPluginTarget(
+            context=None,
+            activation=m._PluginActivation.UNKNOWN,
+        ),
+    }
+
+    m._update_modules(
+        plugin_dir,
+        "linux",
+        None,
+        force=True,
+        targets=targets,
+    )
+
+    assert _installer_update_argv(recorded) is not None
+
+
+def test_required_module_failure_returns_false(tmp_path, monkeypatch):
+    plugin_dir = _make_tree(tmp_path, zero_downtime=True, unix=True)
+    targets = {
+        "agent-bridge": m._RegisteredPluginTarget(
+            context=None,
+            activation=m._PluginActivation.UNKNOWN,
+        ),
+    }
+    monkeypatch.setattr(
+        m.subprocess,
+        "run",
+        lambda *args, **kwargs: _Completed(1),
+    )
+
+    assert (
+        m._update_modules(
+            plugin_dir,
+            "linux",
+            None,
+            force=True,
+            targets=targets,
+        )
+        is False
+    )
