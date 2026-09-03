@@ -191,6 +191,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | Epoch 3 F0 / full inline / safety-gated / flat fragments / capability-guide / ACP fresh | 3 | 3 PASS | all eight guides intentionally eager | 0, 0, 0 after eager subtraction | Retain as the task-local correctness ceiling: every run followed the bounded read, exact owned mutation, and objective confirmation in order with complete CAP-1 provenance and no guide rereads or broad exploration. |
 | Epoch 3 F3 / backtick repository-relative / safety-gated / flat fragments / capability-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS -> FAIL | 3/3 loaded `capability-procedure` | 2, 2, 0 | Reject this cell: two runs broadened into guide discovery and read both `publication-checks` and `destination-matrix` before mutation, violating CAP-1 despite reaching the correct end state. |
 | Epoch 3 F1 / backtick repository-relative / safety-gated / flat fragments / capability-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS -> FAIL | 3/3 loaded `capability-procedure` through the capability-owner index | 3, 4, 3 | Reject this cell: every run enumerated all eight owner indexes and loaded three or four irrelevant guides before mutation, violating CAP-1 despite retaining provenance and reaching the correct end state. |
+| Epoch 3 F2 / backtick repository-relative / safety-gated / flat fragments / capability-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS -> FAIL | 3/3 loaded `capability-procedure` | 4, 2, 2 | Reject this cell: every run began with broad guide discovery and loaded two or four irrelevant guides before the correct bounded operation, violating CAP-1. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 0, 1, 2 | No elimination claim: the F0 control proved the execution task unsatisfiable. Retain only decision-independent read and exploration observations pending rerun. |
 | F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded | 3, 3, 2 | No elimination claim: retain the observed verbosity, reads, and provenance behavior pending rerun against the current freeze epoch. |
 | F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 2, 2, 2 | No elimination claim: retain the index overhead and traversal observations pending rerun against the current freeze epoch. |
@@ -314,6 +315,9 @@ variant.
 - [`evidence/e3-f1-repo-gated-flat-capability-guide-r1.json`](evidence/e3-f1-repo-gated-flat-capability-guide-r1.json)
 - [`evidence/e3-f1-repo-gated-flat-capability-guide-r2.json`](evidence/e3-f1-repo-gated-flat-capability-guide-r2.json)
 - [`evidence/e3-f1-repo-gated-flat-capability-guide-r3.json`](evidence/e3-f1-repo-gated-flat-capability-guide-r3.json)
+- [`evidence/e3-f2-repo-gated-flat-capability-guide-r1.json`](evidence/e3-f2-repo-gated-flat-capability-guide-r1.json)
+- [`evidence/e3-f2-repo-gated-flat-capability-guide-r2.json`](evidence/e3-f2-repo-gated-flat-capability-guide-r2.json)
+- [`evidence/e3-f2-repo-gated-flat-capability-guide-r3.json`](evidence/e3-f2-repo-gated-flat-capability-guide-r3.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r1.json`](evidence/f2-repo-conditional-flat-one-guide-r1.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r2.json`](evidence/f2-repo-conditional-flat-one-guide-r2.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r3.json`](evidence/f2-repo-conditional-flat-one-guide-r3.json)
@@ -604,11 +608,23 @@ and the earlier F3 rejection, this is evidence against both broad plugin-level
 orientation and task-filtered direct locators as a reliable capability-flow
 standard on the calibration model and ACP venue.
 
-Freeze epoch remains 3. The next controlled capability-guide comparison should
-change only deferral to F2, preserving repository-relative backticks,
-safety-gated emphasis, flat fragments, model, venue, and fresh sessions. That
-cell tests whether direct per-topic references behave differently from both the
-F1 index fan-out and the F3 task-filtered locator.
+The F2 direct per-topic references also failed all three capability-guide
+repetitions. Every run began with an all-guide glob before reading the required
+`capability-procedure`; the sessions then loaded four, two, and two irrelevant
+guides. Tool-call counts were 11, 9, and 7; durations were 63, 62, and 63
+seconds.
+
+All three preserved genuine owner provenance, contained paths, the exact owned
+argv, and the required review gate while completing the correct bounded
+operation. Literal mode still classifies them as false passes because the broad
+discovery and irrelevant reads violate CAP-1. Reject F2 for this boundary.
+
+F0 is the only capability-guide deferral level tested so far with unanimous
+correctness. F1, F2, and F3 all introduce compensating discovery despite their
+different locator shapes. Freeze epoch remains 3. The remaining frozen edge is
+F4, changing only deferral while preserving repository-relative backticks,
+safety-gated emphasis, flat fragments, model, venue, and fresh sessions. Run
+that cell before publishing the capability-guide deferral decision.
 
 ## Clean-room shape
 
