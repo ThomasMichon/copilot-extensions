@@ -1302,7 +1302,7 @@ class Supervisor:
         tracking = _tracking()
         local_by_id: dict[str, dict] | None = None
         held = 0
-        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+        for res in self._pool_reservations(state=SpawnState.SPAWNED):
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -1454,7 +1454,7 @@ class Supervisor:
         from . import tracking
 
         recovered = 0
-        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+        for res in self._pool_reservations(state=SpawnState.SPAWNED):
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -1624,7 +1624,7 @@ class Supervisor:
         worktree session is re-driven; unknown bridge state is left untouched.
         """
         redriven = 0
-        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+        for res in self._pool_reservations(state=SpawnState.SPAWNED):
             key = res.get("key")
             if not key or key in self._redriven_spawn_keys:
                 continue
@@ -1690,7 +1690,7 @@ class Supervisor:
             return 0
         now = time.time() if now is None else now
         nudged = 0
-        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+        for res in self._pool_reservations(state=SpawnState.SPAWNED):
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -1827,7 +1827,7 @@ class Supervisor:
     def _failed_spawn_counts(self) -> dict[str, int]:
         """Count FAILED spawn reservations per task id (the dead-letter signal)."""
         counts: dict[str, int] = {}
-        for res in self.client.list_reservations(state=SpawnState.FAILED, limit=1000):
+        for res in self._pool_reservations(state=SpawnState.FAILED):
             counts[res["task_id"]] = counts.get(res["task_id"], 0) + 1
         return counts
 
