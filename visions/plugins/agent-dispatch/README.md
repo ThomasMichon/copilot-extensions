@@ -585,8 +585,9 @@ periodic reconcile remains the **floor** that catches missed signals, workers wh
 turn stream is unavailable, and workers with no live session at all. Correctness
 never depends on receiving a turn signal — only *promptness* improves — and the
 loop **degrades cleanly** to exactly the periodic reconcile where no turn signal is
-observable. *Which* signal (a raw event subscription, a derived turn-state sample)
-carries the turn boundary is spec-level, not fixed here.
+observable. A turn boundary is delivered by a cursor-based push subscription over
+a persistent shared carrier; repeated state sampling, especially per-owner SSH
+polling, is not event-driven supervision and is never an acceptable substitute.
 
 ### suspend-idle-resume-same-session
 A headless worker that settles a turn without completing its task is
@@ -920,7 +921,8 @@ does **not** quietly undo it.
   *layered on* the *liveness-not-lease* periodic reconcile (which stays the correctness
   floor and the degrade-clean fallback), so a completed goal is settled and the next
   task embodied without waiting out an interval. The signal carrying the turn boundary
-  (raw event subscription vs derived turn-state sample) is left spec-level. Mined from
+  is a cursor-based push subscription; repeated derived-state sampling does not satisfy
+  this behavior. Mined from
   the operator's "reactive-on-turn-end" steer as the fourth full-auto piece.
   Mined from an operator design conversation refining the recovery flow (heartbeat +
   state payloads → verify-or-mitigate on a bad "done" → nudge/re-embody on a stalled

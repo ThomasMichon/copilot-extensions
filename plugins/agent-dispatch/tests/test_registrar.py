@@ -25,9 +25,13 @@ def test_minimal_declaration_defaults():
     assert d.interval == 30.0
     assert d.max_attempts == 3
     assert d.heartbeat is True
-    assert d.reactive is True
+    assert d.reactive is False
     assert d.body == Body()  # embody / task-worker
     assert d.fleet == Fleet()
+
+
+def test_reactive_compatibility_value_is_normalized_off():
+    assert load_declaration({"name": "general", "reactive": True}).reactive is False
 
 
 def test_full_general_pool_declaration():

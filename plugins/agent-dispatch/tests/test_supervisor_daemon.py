@@ -496,6 +496,31 @@ def test_reconcile_restarts_on_spec_change():
     assert launcher.proc_for("a") is not first
 
 
+def test_reconcile_ignores_retired_reactive_spec_changes():
+    client = FakeClient([_reg("a", spec={
+        "repo": TEST_REPO,
+        "max_concurrent": 1,
+        "reactive": True,
+        "reactive_interval": 0.1,
+    })])
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher)
+    d.reconcile_once()
+    first = launcher.proc_for("a")
+
+    client.set_regs([_reg("a", spec={
+        "repo": TEST_REPO,
+        "max_concurrent": 1,
+        "reactive": False,
+        "reactive_interval": 300,
+    })])
+    summary = d.reconcile_once()
+
+    assert summary.restarted == []
+    assert first.terminated is False
+    assert launcher.proc_for("a") is first
+
+
 def test_reconcile_revives_crashed_unit_with_backoff_and_cap():
     clock = Clock(0.0)
     client = FakeClient([_reg("a")])

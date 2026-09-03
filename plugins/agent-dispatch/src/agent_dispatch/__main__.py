@@ -3419,7 +3419,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             ),
             heartbeat=not args.no_heartbeat,
             publish_activity=True,
-            reactive=not getattr(args, "no_reactive", False),
+            reactive=False,
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             disposable_cli_labels=disposable_cli_labels,
             capacity_gate=capacity_gate,
@@ -5054,15 +5054,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--no-reactive", action="store_true",
-        help="don't wake the serve loop on a worker turn-end; wait the full "
-             "--interval each cycle (default: react to an embodied worker settling "
-             "a turn so a completed goal is reconciled and the next task embodied "
-             "promptly; the poll interval stays the floor)",
+        help="compatibility flag; supervision already waits the full --interval "
+             "until push-driven turn events replace the retired polling path",
     )
     p.add_argument(
         "--reactive-interval", type=float, default=2.0,
-        help="how often (seconds) the reactive wait re-samples embodied workers' "
-             "turn state within one --interval (default: 2)",
+        help="deprecated compatibility value; never used for polling",
     )
     p.add_argument(
         "--once", action="store_true", help="run a single supervision cycle and exit"

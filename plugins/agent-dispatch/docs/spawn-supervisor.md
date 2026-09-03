@@ -8,7 +8,7 @@ the exact `argv[0]` from the agent-dispatch session command catalog.
 Status: **in progress** — the spawn-reservation primitive, the supervisor loop
 (spawn-at-most-once), the liveness-gated lease heartbeat, **confirmed-gone
 auto-recovery** (local CLI worktree bodies, local headless bodies, and headless
-fleet bodies), **nudge-before-recover**, reactive turn-end polling, and **fleet
+fleet bodies), **nudge-before-recover**, fixed-interval reconciliation, and **fleet
 dispatch (a health-gated remote embody pool, Model C)** are built. Label-scoped
 **disposable CLI conclusion** is also built: a registration may opt selected
 CLI worker classes into safe terminal session conclusion and managed-worktree
@@ -157,6 +157,10 @@ agent-dispatch reservations fail|settle <key> [--detail ...]
 agent-dispatch reservations rearm <task> --permit --reason "transport repaired" \
     [--min-failures 3]
 ```
+
+`--no-reactive` and `--reactive-interval` remain accepted for configuration
+compatibility but do not enable a sub-interval watcher. Supervisors reconcile on
+`--interval` until turn-end acceleration is backed by a persistent push stream.
 
 The rearm is one coordinator write transaction. It succeeds only while the
 task is still queued and unowned, no `reserving`/`spawned` reservation exists,
