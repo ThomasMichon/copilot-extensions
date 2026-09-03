@@ -116,7 +116,8 @@ def create_worktree(
     cmd = list(exe_prefix)
     if project:
         cmd += ["--project", project]
-    # This is agent-worktrees creation provenance, not dispatch fleet routing.
+    # Keep the CLI interface required by disposable conclusion; delegated
+    # creation provenance alone hides this worker checkout from the Picker.
     cmd += [
         "create",
         "--origin",
