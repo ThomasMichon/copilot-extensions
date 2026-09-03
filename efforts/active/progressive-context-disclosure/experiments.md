@@ -182,6 +182,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F2 / backtick repository-relative / optional / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 1, 1, 2 | Reject this cell: optional wording never produced a literal pass and every repetition broadened beyond the task-applicable guide. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 3 PASS | 3/3 loaded only `runtime-diagnostics` | 0, 0, 0 | Retain as a surviving cell: task-applicable references removed the F2 exploration failure while reducing initial context from 4,379 to 2,862 characters. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / no-guide / ACP fresh | 3 | 3 PASS | no guide required or loaded | 0, 0, 0 | Retain as a surviving boundary: the critical kernel completed the task with zero tool calls and zero deferred reads. |
+| Epoch 3 F3 / backtick repository-relative / safety-gated / flat fragments / conflict / ACP fresh | 3 | 2 PASS, 1 FALSE-PASS -> provisional FAIL | all required guides loaded | 0, 1, 0 | Do not eliminate yet: two runs followed exactly the two task locators, while one began with broad guide/repository discovery and read `destination-matrix`. Require the epoch-3 F0 conflict control before interpreting the instability. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 0, 1, 2 | No elimination claim: the F0 control proved the execution task unsatisfiable. Retain only decision-independent read and exploration observations pending rerun. |
 | F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded | 3, 3, 2 | No elimination claim: retain the observed verbosity, reads, and provenance behavior pending rerun against the current freeze epoch. |
 | F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 2, 2, 2 | No elimination claim: retain the index overhead and traversal observations pending rerun against the current freeze epoch. |
@@ -222,6 +223,21 @@ decision-independent observations, but do not rerun or eliminate deferred
 multi-guide variants until the task/model interaction is redesigned or a
 tracked decision explicitly accepts a different control rule.
 
+The tracked control decision continued Phase 2 on independently satisfiable
+task boundaries, beginning with the F3 conflict cell. Repetitions 1 and 3 each
+used exactly two tool calls to read only `publication-checks` and
+`contribution-destinations`, retained both owners, and refused publication from
+private operator state. Repetition 2 reached the same decision and preserved
+the critical rules, but first enumerated the guide directory and repository,
+then read the unrelated `destination-matrix`; the independent judge therefore
+classified it as a false pass. The canary-backed irrelevant-read counts are
+0, 1, and 0, with tool-call counts 2, 5, and 2.
+
+Treat the F3 conflict cell as provisionally failed, not eliminated. The next
+gate is three epoch-3 F0 full-inline conflict repetitions to establish whether
+the calibration model and ACP venue provide a unanimous task-local correctness
+ceiling.
+
 - [`evidence/f2-repo-conditional-flat-one-guide-r1.json`](evidence/f2-repo-conditional-flat-one-guide-r1.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r2.json`](evidence/f2-repo-conditional-flat-one-guide-r2.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r3.json`](evidence/f2-repo-conditional-flat-one-guide-r3.json)
@@ -240,6 +256,9 @@ tracked decision explicitly accepts a different control rule.
 - [`evidence/f3-repo-gated-flat-no-guide-r1.json`](evidence/f3-repo-gated-flat-no-guide-r1.json)
 - [`evidence/f3-repo-gated-flat-no-guide-r2.json`](evidence/f3-repo-gated-flat-no-guide-r2.json)
 - [`evidence/f3-repo-gated-flat-no-guide-r3.json`](evidence/f3-repo-gated-flat-no-guide-r3.json)
+- [`evidence/e3-f3-repo-gated-flat-conflict-r1.json`](evidence/e3-f3-repo-gated-flat-conflict-r1.json)
+- [`evidence/e3-f3-repo-gated-flat-conflict-r2.json`](evidence/e3-f3-repo-gated-flat-conflict-r2.json)
+- [`evidence/e3-f3-repo-gated-flat-conflict-r3.json`](evidence/e3-f3-repo-gated-flat-conflict-r3.json)
 - [`evidence/f3-repo-gated-flat-multi-guide-r1.json`](evidence/f3-repo-gated-flat-multi-guide-r1.json)
 - [`evidence/f3-repo-gated-flat-multi-guide-r2.json`](evidence/f3-repo-gated-flat-multi-guide-r2.json)
 - [`evidence/f3-repo-gated-flat-multi-guide-r3.json`](evidence/f3-repo-gated-flat-multi-guide-r3.json)
