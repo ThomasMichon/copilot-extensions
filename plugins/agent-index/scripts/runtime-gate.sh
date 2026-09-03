@@ -91,7 +91,9 @@ PROFILE_HOME="$(_profile_home)" || {
 }
 POLICY="$PROFILE_HOME/.copilot-extensions/installation-mode.json"
 POLICY_PRESENT=0
-[ -e "$POLICY" ] || [ -L "$POLICY" ] && POLICY_PRESENT=1
+if [ -e "$POLICY" ] || [ -L "$POLICY" ]; then
+    POLICY_PRESENT=1
+fi
 PROVENANCE_BOUNDARY=0
 case "${PAYLOAD_ROOT//\\//}" in
     */.copilot/installed-plugins/*/*) PROVENANCE_BOUNDARY=1 ;;

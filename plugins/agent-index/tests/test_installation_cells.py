@@ -4153,13 +4153,16 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
             newline="\n",
         )
         fake_python.chmod(0o700)
+        shutil.copy2(fake_python, fake_bin / "python3")
 
+    profile = tmp_path / "profile"
+    profile.mkdir()
     environment = {
         **os.environ,
         "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
         "CAPTURE": str(capture),
-        "HOME": str(tmp_path / "profile"),
-        "USERPROFILE": str(tmp_path / "profile"),
+        "HOME": str(profile),
+        "USERPROFILE": str(profile),
         "PYTHONPATH": str(tmp_path / "malicious-pythonpath"),
         "PYTHONHOME": str(tmp_path / "malicious-pythonhome"),
     }

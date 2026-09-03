@@ -942,6 +942,50 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
     assert not (profile / ".copilot-extensions" / "marketplaces").exists()
 
 
+def test_posix_existing_regular_policy_is_not_treated_as_absent(
+    tmp_path: Path,
+) -> None:
+    if os.name == "nt" or shutil.which("bash") is None:
+        pytest.skip("POSIX runtime-gate test")
+    script, env = _fixture(tmp_path, "bash")
+    assert (
+        'if [ -e "$POLICY" ] || [ -L "$POLICY" ]; then\n'
+        "    POLICY_PRESENT=1\n"
+        "fi"
+    ) in script.read_text(encoding="utf-8")
+    profile = tmp_path / "profile"
+    policy = profile / ".copilot-extensions" / "installation-mode.json"
+    policy.parent.mkdir(parents=True)
+    policy.write_text("{}\n", encoding="utf-8")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    getent = fake_bin / "getent"
+    getent.write_text(
+        "#!/bin/sh\n"
+        'printf "tester:x:1:1::%s:/bin/sh\\n" "$TEST_PROFILE_HOME"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    getent.chmod(0o700)
+    env["PATH"] = f"{fake_bin.as_posix()}:{env.get('PATH', '')}"
+    env["TEST_PROFILE_HOME"] = profile.as_posix()
+    env["TEST_INSTALLATION_STATUS"] = json.dumps(
+        {
+            "status": "provenance-blocked",
+            "reason": "policy-invalid",
+            "actualMode": "legacy",
+            "desiredMode": "namespaced",
+            "policy": {"state": "invalid", "enabled": False},
+            "installationMode": {"marketplaces": {}},
+        }
+    )
+
+    result = _run("bash", script, env, "status", cwd=tmp_path)
+
+    assert result.returncode == 126
+    assert "installation context blocks invocation" in result.stderr
+
+
 @pytest.mark.parametrize(
     ("status", "reason"),
     [
