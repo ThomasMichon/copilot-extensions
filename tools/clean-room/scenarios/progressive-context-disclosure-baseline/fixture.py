@@ -627,6 +627,40 @@ def _reset_materialized_root(root: Path) -> None:
     root.mkdir(parents=True)
 
 
+def _bundle_configured_scenario(output: Path) -> None:
+    baseline = output / "_baseline"
+    baseline.mkdir()
+    shutil.copy2(Path(__file__), baseline / "fixture.py")
+    shutil.copy2(ROOT / "expected.md", baseline / "expected.md")
+    shutil.copytree(FIXTURES, baseline / "fixtures")
+
+    source = output / "_source" / "plugins"
+    source.mkdir(parents=True)
+    source_root = next(
+        (
+            candidate
+            for candidate in ROOT.parents
+            if (candidate / "plugins").is_dir()
+            and (candidate / "tools" / "clean-room").is_dir()
+        ),
+        None,
+    )
+    if source_root is None:
+        raise ValueError("could not resolve the source checkout for bundling")
+    for context_path in sorted(
+        (source_root / "plugins").glob("*/session-context.json")
+    ):
+        target = source / context_path.parent.name / context_path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(context_path, target)
+    verify(output / "_source")
+
+
+def _normalize_configured_scenario_permissions(output: Path) -> None:
+    for path in (output, *output.rglob("*")):
+        path.chmod(0o755 if path.is_dir() else 0o644)
+
+
 def _guide_records(
     contributors: list[dict[str, object]],
 ) -> list[tuple[str, dict[str, object]]]:
@@ -902,13 +936,14 @@ def configure_scenario(
         raise ValueError("Tier-E scenario template has no manifest.json")
     _reset_materialized_root(output)
     for source_path in template.iterdir():
-        if source_path.name == "manifest.json":
+        if source_path.name in {"manifest.json", "__pycache__"}:
             continue
         target = output / source_path.name
         if source_path.is_dir():
             shutil.copytree(source_path, target)
         else:
             shutil.copy2(source_path, target)
+    _bundle_configured_scenario(output)
     manifest = json.loads(
         (template / "manifest.json").read_text(encoding="utf-8")
     )
@@ -940,6 +975,7 @@ def configure_scenario(
     manifest["eval"]["model"] = model
     manifest["runs"]["count"] = 1
     _write_json(output / "manifest.json", manifest)
+    _normalize_configured_scenario_permissions(output)
     return {
         "ok": True,
         "scenario": manifest["name"],

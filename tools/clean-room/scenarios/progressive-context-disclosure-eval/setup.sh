@@ -6,8 +6,8 @@ source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 
 : "${CR_SCENARIO_NAME:=progressive-context-disclosure-eval}"
 export CR_SCENARIO_NAME
-SOURCE="${CR_HARNESS_MOUNT:-/harness}"
-FIXTURE="$SOURCE/tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py"
+SOURCE="/home/operator/scenario/_source"
+FIXTURE="/home/operator/scenario/_baseline/fixture.py"
 ROOT="/home/operator/progressive-context-disclosure-eval"
 MANIFEST="/home/operator/scenario/manifest.json"
 EVIDENCE="/home/operator/out/eval/progressive-context-evidence.json"
@@ -58,8 +58,8 @@ fi
 phase 0 "materialize one isolated progressive-context cell"
 if [ ! -f "$FIXTURE" ]; then
     write_invalid "repo-config"
-    jam "repo-config" "the frozen source fixture is not mounted at /harness" \
-        "run the eval with -HarnessMount or --harness-mount pointing at this checkout"
+    jam "repo-config" "the generated scenario has no bundled frozen fixture" \
+        "run fixture.py configure-scenario from a current source checkout and pass its output to the clean-room runner"
 elif [ "${#CELL[@]}" -ne 7 ]; then
     write_invalid "scenario-fixture"
     jam "scenario-fixture" "manifest experiment coordinates are incomplete" \

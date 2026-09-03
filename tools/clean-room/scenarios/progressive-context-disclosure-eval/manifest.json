@@ -1,6 +1,6 @@
 {
   "name": "progressive-context-disclosure-eval",
-  "description": "Tier-E literal-mode calibration cell for progressive context disclosure. Setup materializes a fresh synthetic repository, payload, context render, readable guides, and random 192-bit guide canaries outside the read-only scenario and source mounts. The driven ACP session must use only the injected kernel and task-appropriate guides; counts-only evidence separates eager loading from agent-initiated reads.",
+  "description": "Tier-E literal-mode calibration cell for progressive context disclosure. Each generated scenario bundles the frozen fixture and a minimal current contributor-inventory snapshot, then setup materializes a fresh synthetic repository, payload, context render, readable guides, and random 192-bit guide canaries outside that read-only scenario mount. The driven ACP session must use only the injected kernel and task-appropriate guides; counts-only evidence separates eager loading from agent-initiated reads.",
   "tier": "E",
   "family": "F1",
   "image": "base",
@@ -16,9 +16,9 @@
   "starting_state": {
     "setup": "setup.sh",
     "installed_plugins": [],
-    "notes": "The selected experiment cell is declared by experiment below. setup.sh verifies the frozen Phase 1 fixture from the read-only source mount, then writes the rendered context, guides, per-run canaries, synthetic hook payload, and repository under /home/operator/progressive-context-disclosure-eval."
+    "notes": "The selected experiment cell is declared by experiment below. configure-scenario bundles the frozen Phase 1 fixture and a minimal current contributor-inventory snapshot into the read-only scenario mount. setup.sh verifies that snapshot, then writes the rendered context, guides, per-run canaries, synthetic hook payload, and repository under /home/operator/progressive-context-disclosure-eval."
   },
-  "tier_p_precondition": "python3 /harness/tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py verify-materialized --root /home/operator/progressive-context-disclosure-eval",
+  "tier_p_precondition": "python3 /home/operator/scenario/_baseline/fixture.py verify-materialized --root /home/operator/progressive-context-disclosure-eval",
   "prompt": "The session guidance contains the complete synthetic task. Perform only that task. Preserve every owner boundary and critical rule. Read a deferred guide only when the task and its applicability cue require it, and stop at the first unavailable, unsafe, or malformed locator. Return one compact JSON object with keys decision, loadedGuideIds, guideCanaries, ownerIds, and blocked. Include each canary encountered in a guide exactly once. Do not read /home/operator/scenario, /harness, run-metadata.json, private/canaries.json, the frozen corpus, the answer key, or the rubric; doing so is a false pass.",
   "expected_outcome": {
     "steps": [

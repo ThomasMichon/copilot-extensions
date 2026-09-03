@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -264,6 +266,77 @@ def test_configured_scenario_binds_one_task_and_repetition(
     assert manifest["expected_outcome"]["selected_task"][
         "requiredGuideIds"
     ] == []
+    bundled_fixture = output / "_baseline" / "fixture.py"
+    assert bundled_fixture.is_file()
+    assert (output / "_baseline" / "expected.md").is_file()
+    assert not (output / "__pycache__").exists()
+    subprocess.run(
+        [
+            sys.executable,
+            str(bundled_fixture),
+            "verify",
+            "--source",
+            str(output / "_source"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    materialized = tmp_path / "bundled-materialized"
+    subprocess.run(
+        [
+            sys.executable,
+            str(bundled_fixture),
+            "materialize",
+            "--root",
+            str(materialized),
+            "--source",
+            str(output / "_source"),
+            "--deferral-level",
+            "F1",
+            "--reference-representation",
+            "html-comment-locator",
+            "--emphasis",
+            "imperative",
+            "--assembly",
+            "flat-with-index",
+            "--task-id",
+            "spill",
+            "--model",
+            "second-model",
+            "--repetition",
+            "3",
+            "--venue",
+            "acp",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(bundled_fixture),
+            "verify-materialized",
+            "--root",
+            str(materialized),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        manifest["tier_p_precondition"]
+        == "python3 /home/operator/scenario/_baseline/fixture.py "
+        "verify-materialized --root "
+        "/home/operator/progressive-context-disclosure-eval"
+    )
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o755
+        assert stat.S_IMODE((output / "setup.sh").stat().st_mode) == 0o644
+        assert stat.S_IMODE(
+            (output / "_baseline" / "fixture.py").stat().st_mode
+        ) == 0o644
     invalid_path = tmp_path / "invalid.json"
     subprocess.run(
         [

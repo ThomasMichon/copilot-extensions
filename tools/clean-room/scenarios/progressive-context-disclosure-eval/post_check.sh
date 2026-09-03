@@ -6,8 +6,7 @@ source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 
 : "${CR_SCENARIO_NAME:=progressive-context-disclosure-eval}"
 export CR_SCENARIO_NAME
-SOURCE="${CR_HARNESS_MOUNT:-/harness}"
-FIXTURE="$SOURCE/tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py"
+FIXTURE="/home/operator/scenario/_baseline/fixture.py"
 ROOT="/home/operator/progressive-context-disclosure-eval"
 RESULTS="/home/operator/out"
 EVIDENCE="$RESULTS/eval/progressive-context-evidence.json"
