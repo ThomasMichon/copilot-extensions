@@ -178,7 +178,7 @@ def test_knowledge_checkout_is_writable_but_harness_sibling_is_not(
     monkeypatch.setattr(
         session_context,
         "_related_summary",
-        lambda *_a: ("application", ""),
+        lambda *_a, **_k: ("application", ""),
     )
 
     context = session_context.render_registry_context(
@@ -239,7 +239,7 @@ def test_anchor_pair_does_not_change_current_worktree_kind(
     monkeypatch.setattr(
         session_context,
         "_related_summary",
-        lambda *_a: ("application", ""),
+        lambda *_a, **_k: ("application", ""),
     )
     record = _record(checkout)
     record.pair_kind = "anchor"
@@ -281,7 +281,9 @@ def test_context_fails_closed_when_state_and_pair_are_unavailable(
             error="current worktree is not paired",
         ),
     )
-    monkeypatch.setattr(session_context, "_related_summary", lambda *_a: ("-", ""))
+    monkeypatch.setattr(
+        session_context, "_related_summary", lambda *_a, **_k: ("-", "")
+    )
 
     context = session_context.render_registry_context(
         SimpleNamespace(),
@@ -321,7 +323,9 @@ def test_context_preserves_fresh_queries_under_path_pressure(
             error="not paired",
         ),
     )
-    monkeypatch.setattr(session_context, "_related_summary", lambda *_a: ("-", ""))
+    monkeypatch.setattr(
+        session_context, "_related_summary", lambda *_a, **_k: ("-", "")
+    )
 
     context = session_context.render_registry_context(
         SimpleNamespace(),

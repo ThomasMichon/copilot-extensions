@@ -17,7 +17,7 @@ if [[ ! -x "$PYTHON" ]]; then exit 0; fi
 hook=""
 resolved_by_monitor=0
 client="$HOME/.agent-worktrees/bin/hook_client.py"
-client_python="$(command -v python3 || true)"
+client_python="$(command -v python3 || command -v python || true)"
 if [[ -n "$client_python" && -f "$client" ]]; then
     resolved="$(
         printf '%s' "$payload" |

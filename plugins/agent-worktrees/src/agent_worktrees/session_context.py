@@ -159,12 +159,8 @@ def render_registry_context(
     state += pairing
 
     try:
-        primary, entries = (
-            _related_summary(config, cwd)
-            if plugin_anchors is None
-            else _related_summary(
-                config, cwd, plugin_anchors=plugin_anchors
-            )
+        primary, entries = _related_summary(
+            config, cwd, plugin_anchors=plugin_anchors
         )
     except Exception:
         primary, entries = "-", ""
