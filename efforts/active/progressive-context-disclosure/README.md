@@ -641,3 +641,25 @@ enforcement before migrating the complete contributor stack.
 - Reject the representation. All seven frozen reference forms are now rejected
   for the F3 multi-guide coordinate. Next gate: return to repository-relative
   references and change only deferral from F3 to F1.
+
+### 2026-09-03 - F0 exposes an unsatisfiable multi-guide stimulus
+
+- Ran the F0 full-inline control after the F3 reference sweep. Even with every
+  guide body already inline, the task could not reach its expected execution:
+  the materialized world had no affirmative READY signal, scoped destination
+  identity, review-gate state, or attributable bounded command.
+- Reclassified every freeze-epoch-1 multi-guide elimination as confounded. Raw
+  read counts, Markdown no-eager-load behavior, payload generated-context
+  rereads, and index overhead remain useful decision-independent observations;
+  no representation, assembly, or deferral is eliminated by those runs.
+- Closed #1868 without merge rather than publishing the confounded F1
+  conclusion. Earlier merged multi-guide records remain as historical
+  counts-only artifacts, with [`experiments.md`](experiments.md) now carrying
+  the superseding classification.
+- Refroze the task as epoch 2 without changing required guides, applicability
+  cues, critical rules, or expected decision. Execution tasks now materialize
+  owner-declared READY, scoped destination/review-gate grounding, and an exact
+  synthetic bounded command; Tier-P validation rejects an unsatisfiable
+  execution task before behavioral runs.
+- Next gate: land the reviewed fixture correction, then require the corrected
+  F0 multi-guide control to pass before rerunning any deferred variant.

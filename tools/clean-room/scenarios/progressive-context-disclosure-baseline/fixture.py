@@ -477,6 +477,17 @@ def _safe_guide_path(value: str) -> bool:
     )
 
 
+def _safe_repository_path(value: str) -> bool:
+    if "\\" in value or re.match(r"^[A-Za-z]:", value):
+        return False
+    path = PurePosixPath(value)
+    return (
+        not path.is_absolute()
+        and bool(path.parts)
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
+
+
 def _declared_inventory(source: Path) -> dict[tuple[str, str], tuple[int, int]]:
     declared: dict[tuple[str, str], tuple[int, int]] = {}
     for declaration_path in sorted(
@@ -748,6 +759,101 @@ print(json.dumps({"additionalContext": context}, separators=(",", ":")), end="")
     (payload / "context.md").write_text(context, encoding="utf-8")
 
 
+def _execution_fixture(task: dict[str, object]) -> dict[str, object] | None:
+    fixture_id = task.get("executionFixtureId")
+    if fixture_id is None:
+        return None
+    tasks = _load("tasks.json")
+    assert isinstance(tasks, dict)
+    fixtures = tasks.get("executionFixtures")
+    if not isinstance(fixtures, dict) or fixture_id not in fixtures:
+        raise ValueError(
+            f"task has unknown execution fixture: {task['id']}: {fixture_id}"
+        )
+    fixture = fixtures[fixture_id]
+    if not isinstance(fixture, dict):
+        raise ValueError(f"invalid execution fixture: {fixture_id}")
+    return fixture
+
+
+def _freeze_epoch() -> int:
+    experiment = _load("experiment.json")
+    assert isinstance(experiment, dict)
+    epoch = experiment.get("freezeEpoch", 1)
+    if not isinstance(epoch, int) or epoch < 1:
+        raise ValueError("invalid experiment freeze epoch")
+    return epoch
+
+
+def _materialize_execution_fixture(
+    repository: Path,
+    fixture: dict[str, object],
+) -> None:
+    _write_json(
+        repository / PurePosixPath(str(fixture["configLocator"])),
+        fixture,
+    )
+    script = """\
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--result", required=True)
+    args = parser.parse_args()
+    if (
+        args.config != ".synthetic/execution.json"
+        or args.result != ".synthetic/result.json"
+    ):
+        raise SystemExit("execution arguments do not match the exact argv")
+    repository = Path(__file__).resolve().parent.parent
+    config_path = (repository / args.config).resolve()
+    result_path = (repository / args.result).resolve()
+    expected_config = repository / ".synthetic" / "execution.json"
+    expected_result = repository / ".synthetic" / "result.json"
+    if (
+        not config_path.is_relative_to(repository)
+        or not result_path.is_relative_to(repository)
+        or config_path != expected_config
+        or result_path != expected_result
+    ):
+        raise SystemExit("execution paths escape the bounded repository")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    readiness = config["readiness"]
+    destination = config["destination"]
+    if readiness["signal"] != "READY":
+        raise SystemExit("capability is not ready")
+    if not destination["reachable"] or destination["reviewGate"] != "required":
+        raise SystemExit("destination gate failed")
+    result = {
+        "boundedRead": "complete",
+        "validatedMutation": "complete",
+        "objectiveConfirmation": "complete",
+        "destination": destination["repository"],
+        "scopedIdentity": destination["scopedIdentity"],
+        "reviewGate": destination["reviewGate"],
+    }
+    result_path.write_text(
+        json.dumps(result, sort_keys=True) + "\\n",
+        encoding="utf-8",
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+    path = repository / PurePosixPath(str(fixture["scriptLocator"]))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(script, encoding="utf-8")
+
+
 def materialize(
     *,
     root: Path,
@@ -854,6 +960,9 @@ def materialize(
         path = repository / PurePosixPath(str(artifact["locator"]))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(guidance, encoding="utf-8")
+    execution_fixture = _execution_fixture(task)
+    if execution_fixture is not None:
+        _materialize_execution_fixture(repository, execution_fixture)
     _materialized_plugin_files(payload, context)
     private = root / "private"
     _write_json(private / "canaries.json", canaries)
@@ -869,10 +978,14 @@ def materialize(
         emphasis,
         assembly,
     )
+    freeze_epoch = _freeze_epoch()
     metadata = {
         "schema": "copilot-extensions.progressive-context-run",
         "version": 1,
-        "runId": f"{current_variant}-{task_id}-r{repetition}",
+        "freezeEpoch": freeze_epoch,
+        "runId": (
+            f"e{freeze_epoch}-{current_variant}-{task_id}-r{repetition}"
+        ),
         "variantId": current_variant,
         "coordinates": coordinates,
         "taskId": task_id,
@@ -953,10 +1066,13 @@ def configure_scenario(
         emphasis,
         assembly,
     )
+    freeze_epoch = _freeze_epoch()
     manifest["name"] = (
-        f"progressive-context-{current_variant}-{task_id}-r{repetition}"
+        f"progressive-context-e{freeze_epoch}-"
+        f"{current_variant}-{task_id}-r{repetition}"
     )
     manifest["experiment"] = {
+        "freezeEpoch": freeze_epoch,
         "deferralLevel": deferral_level,
         "referenceRepresentation": reference_representation,
         "emphasis": emphasis,
@@ -983,6 +1099,7 @@ def configure_scenario(
         "variantId": current_variant,
         "taskId": task_id,
         "boundary": task["boundary"],
+        "freezeEpoch": freeze_epoch,
         "repetition": repetition,
     }
 
@@ -1084,6 +1201,24 @@ def verify_materialized(root: Path) -> dict[str, object]:
         )
         if artifact_path.read_text(encoding="utf-8") != guidance:
             raise ValueError("materialized boundary artifact drifted")
+    execution_fixture = _execution_fixture(task)
+    if execution_fixture is not None:
+        config_path = root / "repository" / PurePosixPath(
+            str(execution_fixture["configLocator"])
+        )
+        actual_fixture = json.loads(config_path.read_text(encoding="utf-8"))
+        if actual_fixture != execution_fixture:
+            raise ValueError("materialized execution configuration drifted")
+        script_path = root / "repository" / PurePosixPath(
+            str(execution_fixture["scriptLocator"])
+        )
+        if not script_path.is_file():
+            raise ValueError("materialized execution command is missing")
+        result_path = root / "repository" / PurePosixPath(
+            str(execution_fixture["resultLocator"])
+        )
+        if result_path.exists():
+            raise ValueError("materialized execution result is not fresh")
     expected_cwd = repository_root.as_posix()
     if (root / "acp-cwd").read_text(encoding="utf-8").strip() != expected_cwd:
         raise ValueError("materialized ACP cwd drifted")
@@ -1091,6 +1226,7 @@ def verify_materialized(root: Path) -> dict[str, object]:
         raise ValueError("materialized ACP cwd does not exist")
     return {
         "ok": True,
+        "freezeEpoch": metadata.get("freezeEpoch", 1),
         "runId": metadata["runId"],
         "variantId": metadata["variantId"],
         "taskId": metadata["taskId"],
@@ -1578,6 +1714,7 @@ def invalid_evidence_record(
     jam: str,
 ) -> dict[str, object]:
     task = _task_by_id(task_id)
+    freeze_epoch = _freeze_epoch()
     current_variant = variant_id(
         deferral_level,
         reference_representation,
@@ -1587,7 +1724,9 @@ def invalid_evidence_record(
     record = {
         "schema": "copilot-extensions.progressive-context-evidence",
         "version": 1,
-        "runId": f"{current_variant}-{task_id}-r{repetition}",
+        "runId": (
+            f"e{freeze_epoch}-{current_variant}-{task_id}-r{repetition}"
+        ),
         "variantId": current_variant,
         "taskId": task_id,
         "model": model,
@@ -1674,6 +1813,7 @@ def _validate_corpus_and_tasks() -> None:
         "command-guide",
         "capability-guide",
     }
+    execution_task_ids: set[str] = set()
     for task in tasks["tasks"]:
         task_id = task["id"]
         if task_id in task_ids:
@@ -1699,6 +1839,79 @@ def _validate_corpus_and_tasks() -> None:
             )
         if not required_rules <= critical_rule_ids:
             raise ValueError(f"task has unknown critical rule: {task_id}")
+        execution_demand = task.get("executionDemand")
+        execution_fixture = _execution_fixture(task)
+        if execution_demand is None:
+            if execution_fixture is not None:
+                raise ValueError(
+                    f"non-execution task has an execution fixture: {task_id}"
+                )
+        else:
+            execution_task_ids.add(task_id)
+            readiness = (
+                execution_fixture.get("readiness")
+                if execution_fixture is not None
+                else None
+            )
+            destination = (
+                execution_fixture.get("destination")
+                if execution_fixture is not None
+                else None
+            )
+            command = (
+                execution_fixture.get("command")
+                if execution_fixture is not None
+                else None
+            )
+            locators = (
+                [
+                    str(execution_fixture["configLocator"]),
+                    str(execution_fixture["scriptLocator"]),
+                    str(execution_fixture["resultLocator"]),
+                ]
+                if execution_fixture is not None
+                else []
+            )
+            if (
+                execution_demand != "mutation"
+                or execution_fixture is None
+                or any(
+                    not _safe_repository_path(locator)
+                    for locator in locators
+                )
+                or not isinstance(readiness, dict)
+                or readiness.get("signal") != "READY"
+                or not isinstance(destination, dict)
+                or destination.get("owner")
+                != "synthetic-destination-routing"
+                or not destination.get("repository")
+                or not destination.get("scopedIdentity")
+                or destination.get("reachable") is not True
+                or destination.get("reviewGate") != "required"
+                or not isinstance(command, dict)
+                or command.get("owner")
+                != "synthetic-capability-procedure"
+                or command.get("cwd") != "repository"
+                or not isinstance(command.get("argv"), list)
+                or command["argv"]
+                != [
+                    "python3",
+                    execution_fixture.get("scriptLocator"),
+                    "--config",
+                    execution_fixture.get("configLocator"),
+                    "--result",
+                    execution_fixture.get("resultLocator"),
+                ]
+                or task["prompt"].count(
+                    str(execution_fixture["configLocator"])
+                )
+                != 1
+            ):
+                raise ValueError(
+                    f"execution-demanding task lacks satisfiable readiness, "
+                    f"destination, review-gate, or mutation grounding: "
+                    f"{task_id}"
+                )
         special = task.get("referenceFixture")
         if special:
             disposition = special["disposition"]
@@ -1737,6 +1950,10 @@ def _validate_corpus_and_tasks() -> None:
                 raise ValueError(f"invalid required artifact: {task_id}")
     if task_ids != expected_task_ids:
         raise ValueError(f"task class set drifted: {sorted(task_ids)}")
+    if execution_task_ids != {"multi-guide", "capability-guide"}:
+        raise ValueError(
+            f"execution task set drifted: {sorted(execution_task_ids)}"
+        )
     _validate_rubric(tasks["tasks"])
 
 

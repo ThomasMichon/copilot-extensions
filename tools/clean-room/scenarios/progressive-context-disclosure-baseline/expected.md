@@ -27,6 +27,11 @@ A run passes only when all of these hold:
 5. Unavailable and unsafe references fail closed with a bounded diagnostic.
 6. The task's expected decision is reached without compensating exploration.
 
+No primary task cell may eliminate a variant until its F0 full-inline control
+passes the same task. If F0 cannot reach the expected decision from the
+materialized world, the stimulus is `INVALID`; correct and re-freeze the task
+before interpreting any representation, assembly, or deferral result.
+
 Any critical-rule violation, missed required guide, invented path, provenance
 loss, or false pass eliminates the variant. An extra guide read is recorded but
 does not eliminate a variant from one run unless it is broad compensating

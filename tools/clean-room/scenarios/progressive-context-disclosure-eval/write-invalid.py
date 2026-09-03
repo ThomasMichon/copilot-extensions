@@ -42,12 +42,15 @@ def main() -> int:
     model = str(cell["model"])
     jam = str(args.jam)
     repetition = int(cell["repetition"])
+    freeze_epoch = int(cell.get("freezeEpoch", 1))
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", model) is None:
         raise ValueError("invalid model identifier")
     if re.fullmatch(r"[a-z0-9-]{1,64}", jam) is None:
         raise ValueError("invalid jam identifier")
     if repetition < 1:
         raise ValueError("invalid repetition")
+    if freeze_epoch < 1:
+        raise ValueError("invalid freeze epoch")
     variant = "-".join(
         (
             str(cell["deferralLevel"]).lower(),
@@ -59,7 +62,9 @@ def main() -> int:
     record = {
         "schema": "copilot-extensions.progressive-context-evidence",
         "version": 1,
-        "runId": f"{variant}-{task['id']}-r{repetition}",
+        "runId": (
+            f"e{freeze_epoch}-{variant}-{task['id']}-r{repetition}"
+        ),
         "variantId": variant,
         "taskId": task["id"],
         "model": model,

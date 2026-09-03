@@ -1,7 +1,7 @@
 {
   "schema": "copilot-extensions.session-context-inventory",
   "version": 1,
-  "sourceRevision": "20d2426c",
+  "sourceRevision": "9b13ba8c",
   "measurement": {
     "platform": "windows-powershell",
     "payload": {
@@ -264,7 +264,7 @@
     {
       "owner": "delegation-guidance",
       "id": "delegation-guidance",
-      "order": 120,
+      "order": 90,
       "declaredMaxBytes": 1024,
       "purpose": "Separate coordinator work from broad or domain-specific delegated work.",
       "volatility": "plugin-version",
