@@ -1541,6 +1541,10 @@ class FilesystemTarget(Target):
                         supported=True,
                         error=str(exc),
                     )
+                    if len(machines) > _MAX_FLEET_MACHINES:
+                        raise OSError(
+                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
+                        )
                     continue
                 if relative.parts and metadata_mode is not None and (
                     stat.S_ISREG(metadata_mode)
@@ -1588,6 +1592,10 @@ class FilesystemTarget(Target):
                         supported=True,
                         error=str(exc),
                     )
+                    if len(machines) > _MAX_FLEET_MACHINES:
+                        raise OSError(
+                            f"fleet metadata exceeds {_MAX_FLEET_MACHINES} machines"
+                        )
                     continue
                 if relative and any(
                     name in {"session-state", "provenance", "archived"}

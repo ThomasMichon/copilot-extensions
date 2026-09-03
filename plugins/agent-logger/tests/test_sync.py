@@ -756,13 +756,18 @@ def test_sync_meta_tracks_and_resets_consecutive_partial_count(
     assert meta.read_sync_meta(tmp_path)["consecutive_partial_count"] == 0
 
 
-def test_sync_meta_rejects_parser_recursion_payload(tmp_path: Path) -> None:
+def test_sync_meta_rejects_parser_recursion_payload(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     from agent_logger.sync import meta
 
-    (tmp_path / "sync-meta.json").write_text(
-        ("[" * 2000) + "0" + ("]" * 2000),
-        encoding="utf-8",
-    )
+    (tmp_path / "sync-meta.json").write_text("{}", encoding="utf-8")
+
+    def raise_recursion_error(_raw):
+        raise RecursionError
+
+    monkeypatch.setattr(meta.json, "loads", raise_recursion_error)
 
     with pytest.raises(OSError, match="invalid sync metadata"):
         meta.read_sync_meta(tmp_path)
