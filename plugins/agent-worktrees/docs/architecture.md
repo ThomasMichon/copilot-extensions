@@ -380,9 +380,12 @@ Projection persistence is fail-open: a missing session directory, unsafe
 link/reparse target, restored rescue marker, corrupt path, lock failure, or I/O
 error cannot roll back the authoritative lifecycle operation. Corrupt
 same-version JSON can be rebuilt from the record; an unsupported newer schema
-is preserved untouched. Reads are capped before allocation, writes are
-deterministic and skip semantic no-ops, POSIX files are private, and temporary
-staging lives outside synchronized session directories. The writer reports
+is preserved untouched. Exact session-directory identity rejects case-folded
+or short-name aliases as well as link/reparse escapes while accepting canonical
+extended Windows paths. Reads are capped before allocation, writes are
+deterministic and skip semantic no-ops, POSIX files and runtime directories are
+private, and temporary staging lives outside synchronized session directories.
+Additive unknown fields survive same-version relation updates. The writer reports
 `written`, `current`, `blocked`, or `deferred`; only deferred relations remain
 dirty for a later save retry, while a newer unsupported schema is deliberately
 blocked without repeated write attempts.
