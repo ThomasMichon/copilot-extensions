@@ -216,8 +216,8 @@ def test_execution_tasks_materialize_satisfiable_grounding(
         model="calibration-model",
         repetition=1,
     )
-    assert metadata["freezeEpoch"] == 2
-    assert str(metadata["runId"]).startswith("e2-")
+    assert metadata["freezeEpoch"] == 3
+    assert str(metadata["runId"]).startswith("e3-")
 
     execution = json.loads(
         (
@@ -225,12 +225,21 @@ def test_execution_tasks_materialize_satisfiable_grounding(
         ).read_text(encoding="utf-8")
     )
     assert execution["readiness"]["signal"] == "READY"
+    assert execution["publication"] == {
+        "owner": "synthetic-publication",
+        "materialClassification": "synthetic",
+        "secretsPresent": False,
+        "privateIdentifiersPresent": False,
+        "rawTranscriptPresent": False,
+    }
     assert execution["destination"] == {
         "owner": "synthetic-destination-routing",
         "repository": "generic-upstream/synthetic-progressive-context",
         "scopedIdentity": "synthetic-publisher",
+        "destinationApproved": True,
         "reachable": True,
         "reviewGate": "required",
+        "reviewGateSatisfied": True,
     }
     assert execution["command"]["argv"] == [
         "python3",
@@ -283,6 +292,69 @@ def test_execution_tasks_materialize_satisfiable_grounding(
         text=True,
     )
     assert alternate_spelling.returncode != 0
+
+    (root / "repository" / ".synthetic" / "result.json").unlink()
+    execution["destination"]["destinationApproved"] = "true"
+    (
+        root / "repository" / ".synthetic" / "execution.json"
+    ).write_text(json.dumps(execution), encoding="utf-8")
+    malformed_gate = subprocess.run(
+        [sys.executable, *execution["command"]["argv"][1:]],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert malformed_gate.returncode != 0
+    assert not (
+        root / "repository" / ".synthetic" / "result.json"
+    ).exists()
+
+    execution["destination"]["destinationApproved"] = True
+    execution["destination"]["owner"] = "wrong-owner"
+    (
+        root / "repository" / ".synthetic" / "execution.json"
+    ).write_text(json.dumps(execution), encoding="utf-8")
+    wrong_owner = subprocess.run(
+        [sys.executable, *execution["command"]["argv"][1:]],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert wrong_owner.returncode != 0
+    assert not (
+        root / "repository" / ".synthetic" / "result.json"
+    ).exists()
+
+    execution["destination"]["owner"] = "synthetic-destination-routing"
+    execution["destination"]["repository"] = "other/repository"
+    execution["destination"]["scopedIdentity"] = "other-identity"
+    (
+        root / "repository" / ".synthetic" / "execution.json"
+    ).write_text(json.dumps(execution), encoding="utf-8")
+    wrong_destination = subprocess.run(
+        [sys.executable, *execution["command"]["argv"][1:]],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert wrong_destination.returncode != 0
+    assert not (
+        root / "repository" / ".synthetic" / "result.json"
+    ).exists()
+
+    (
+        root / "repository" / ".synthetic" / "execution.json"
+    ).write_text("[]\n", encoding="utf-8")
+    non_object = subprocess.run(
+        [sys.executable, *execution["command"]["argv"][1:]],
+        cwd=root / "repository",
+        capture_output=True,
+        text=True,
+    )
+    assert non_object.returncode != 0
+    assert not (
+        root / "repository" / ".synthetic" / "result.json"
+    ).exists()
 
 
 def test_spill_materializes_the_full_aggregate_artifact(
@@ -443,7 +515,7 @@ def test_configured_scenario_binds_one_task_and_repetition(
     )
     invalid = json.loads(invalid_path.read_text(encoding="utf-8"))
     fixture.validate_evidence(invalid)
-    assert invalid["runId"].startswith("e2-")
+    assert invalid["runId"].startswith("e3-")
     with pytest.raises(ValueError, match="resume boundary is not runnable"):
         fixture.configure_scenario(
             template=template,

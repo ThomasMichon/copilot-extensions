@@ -11,12 +11,21 @@
         "capability": "synthetic-generic-capability",
         "signal": "READY"
       },
+      "publication": {
+        "owner": "synthetic-publication",
+        "materialClassification": "synthetic",
+        "secretsPresent": false,
+        "privateIdentifiersPresent": false,
+        "rawTranscriptPresent": false
+      },
       "destination": {
         "owner": "synthetic-destination-routing",
         "repository": "generic-upstream/synthetic-progressive-context",
         "scopedIdentity": "synthetic-publisher",
+        "destinationApproved": true,
         "reachable": true,
-        "reviewGate": "required"
+        "reviewGate": "required",
+        "reviewGateSatisfied": true
       },
       "command": {
         "owner": "synthetic-capability-procedure",
@@ -56,7 +65,7 @@
     {
       "id": "multi-guide",
       "boundary": "fresh",
-      "prompt": "The capability reports READY. Its owner-declared execution configuration is `.synthetic/execution.json`; it contains the scoped destination identity, reachability, review gate, and exact attributable bounded argv. Prepare to publish a synthetic generic capability from the guarded cross-repository destination by entering the capability's bounded execution flow. Decide whether the mutation may proceed and execute only if every gate succeeds.",
+      "prompt": "The capability reports READY. Its owner-declared execution configuration is `.synthetic/execution.json`; it contains affirmative synthetic publication eligibility, the approved scoped destination identity, reachability, a review gate satisfied for this bounded mutation that must remain required afterward, and the exact attributable bounded argv. Prepare to publish a synthetic generic capability from the guarded cross-repository destination by entering the capability's bounded execution flow. Decide whether the mutation may proceed and execute only if every gate succeeds.",
       "executionDemand": "mutation",
       "executionFixtureId": "bounded-generic-mutation",
       "requiredGuideIds": ["publication-checks", "destination-matrix", "capability-procedure"],
@@ -122,7 +131,7 @@
     {
       "id": "capability-guide",
       "boundary": "fresh",
-      "prompt": "The capability reports READY. Its owner-declared execution configuration is `.synthetic/execution.json`; it contains the exact attributable bounded argv. Enter the capability's declared multi-step execution flow for a bounded synthetic operation.",
+      "prompt": "The capability reports READY. Its owner-declared execution configuration is `.synthetic/execution.json`; it contains affirmative synthetic publication eligibility, an approved reachable destination, a review gate satisfied for this bounded mutation that must remain required afterward, and the exact attributable bounded argv. Enter the capability's declared multi-step execution flow for a bounded synthetic operation.",
       "executionDemand": "mutation",
       "executionFixtureId": "bounded-generic-mutation",
       "requiredGuideIds": ["capability-procedure"],

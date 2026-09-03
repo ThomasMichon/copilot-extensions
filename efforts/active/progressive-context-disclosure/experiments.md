@@ -183,13 +183,13 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / backtick repository-relative / safety-gated / flat fragments / one-guide / ACP fresh | 3 | 3 PASS | 3/3 loaded only `runtime-diagnostics` | 0, 0, 0 | Retain as a surviving cell: task-applicable references removed the F2 exploration failure while reducing initial context from 4,379 to 2,862 characters. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / no-guide / ACP fresh | 3 | 3 PASS | no guide required or loaded | 0, 0, 0 | Retain as a surviving boundary: the critical kernel completed the task with zero tool calls and zero deferred reads. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 0, 1, 2 | No elimination claim: the F0 control proved the execution task unsatisfiable. Retain only decision-independent read and exploration observations pending rerun. |
-| F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded | 3, 3, 2 | No elimination claim: retain the observed verbosity, reads, and provenance behavior pending rerun against freeze epoch 2. |
-| F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 2, 2, 2 | No elimination claim: retain the index overhead and traversal observations pending rerun against freeze epoch 2. |
+| F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded | 3, 3, 2 | No elimination claim: retain the observed verbosity, reads, and provenance behavior pending rerun against the current freeze epoch. |
+| F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | CONFUNDED (pre-fix stimulus) | all required guides loaded | 2, 2, 2 | No elimination claim: retain the index overhead and traversal observations pending rerun against the current freeze epoch. |
 | F3 / backtick absolute contained / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded | 2, 3, 1 | No elimination claim: absolute paths removed resolution failures, but the behavioral decision remains confounded pending rerun. |
-| F3 / Markdown link / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 2, 0, 2 | No elimination claim: the ACP no-eager-load observation stands; behavioral selection awaits rerun against freeze epoch 2. |
+| F3 / Markdown link / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 2, 0, 2 | No elimination claim: the ACP no-eager-load observation stands; behavioral selection awaits rerun against the current freeze epoch. |
 | F3 / backtick payload-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 2, 3 | No elimination claim: prohibited generated-context rereads remain valid observations; behavioral selection awaits rerun. |
-| F3 / bare labeled path / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 4, 2 | No elimination claim: retain discovery and read observations pending rerun against freeze epoch 2. |
-| F3 / HTML comment locator / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 2, 1 | No elimination claim: comment discoverability stands; behavioral selection awaits rerun against freeze epoch 2. |
+| F3 / bare labeled path / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 4, 2 | No elimination claim: retain discovery and read observations pending rerun against the current freeze epoch. |
+| F3 / HTML comment locator / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | CONFUNDED (pre-fix stimulus) | all required guides loaded; none auto-loaded | 3, 2, 1 | No elimination claim: comment discoverability stands; behavioral selection awaits rerun against the current freeze epoch. |
 
 Counts-only records:
 
@@ -197,9 +197,11 @@ The multi-guide rows above were generated under freeze epoch 1. Their raw
 counts remain factual, but their behavioral elimination conclusions are
 superseded: the F0 full-inline control exposed that the task required execution
 without materializing affirmative readiness, a scoped destination and review
-gate, or an attributable command. Freeze epoch 2 adds those task premises,
-keeps the required guide/rule sets unchanged, and requires F0 to pass before a
-primary task can eliminate any variant.
+gate, or an attributable command. Freeze epoch 2 added those premises, but its
+local F0 control exposed an ambiguous review-gate state and incomplete explicit
+publication eligibility before any evidence was published. Freeze epoch 3
+removes that ambiguity, keeps the required guide/rule sets unchanged, and
+requires F0 to pass before a primary task can eliminate any variant.
 
 - [`evidence/f2-repo-conditional-flat-one-guide-r1.json`](evidence/f2-repo-conditional-flat-one-guide-r1.json)
 - [`evidence/f2-repo-conditional-flat-one-guide-r2.json`](evidence/f2-repo-conditional-flat-one-guide-r2.json)
