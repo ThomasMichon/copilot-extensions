@@ -174,7 +174,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 
 ## Phase 2 evidence ledger
 
-| Cell | Repetitions | Judge result | Required guides | Irrelevant reads | Decision |
+| Cell | Repetitions | Judge result | Required guides | Canary-backed irrelevant reads | Decision |
 |------|-------------|--------------|-----------------|------------------|----------|
 | F2 / backtick repository-relative / conditional / flat fragments / one-guide / ACP fresh | 3 | 1 PASS, 2 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 0, 1, 1 | Reject this cell: conditional wording did not reliably prevent broad discovery or the unrelated `command-reference` read. |
 | F2 / backtick repository-relative / imperative / flat fragments / one-guide / ACP fresh | 3 | 0 PASS, 3 FALSE-PASS → FAIL | 3/3 loaded `runtime-diagnostics` | 3, 3, 2 | Reject this cell: stronger imperative wording increased compensating exploration and unrelated guide reads. |
@@ -184,7 +184,7 @@ the result is “no standard yet,” not permission to choose the smallest promp
 | F3 / backtick repository-relative / safety-gated / flat fragments / no-guide / ACP fresh | 3 | 3 PASS | no guide required or loaded | 0, 0, 0 | Retain as a surviving boundary: the critical kernel completed the task with zero tool calls and zero deferred reads. |
 | F3 / backtick repository-relative / safety-gated / flat fragments / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FALSE-PASS → FAIL | all required guides loaded | 0, 1, 2 | Reject this variant: every behavioral run broadened beyond the bounded flow and violated CAP-1; two also loaded unrelated guides, and repetition 3 violated CMD-1. |
 | F3 / structured reference / safety-gated / flat fragments / multi-guide / ACP fresh | 3 | 0 PASS, 3 FAIL | all required guides loaded | 3, 3, 2 | Reject this representation: structured metadata increased irrelevant reads, lost provenance in every run, and did not produce the required decision. |
-| F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FAIL | all required guides loaded | 2, 2, 2 | Reject this assembly: every run broadened into three direct irrelevant guide reads and returned the wrong blocked decision; two also invented configuration paths. |
+| F3 / backtick repository-relative / safety-gated / flat with generated index / multi-guide / ACP fresh | 3 behavioral + 1 INVALID timeout | 0 PASS, 3 FAIL | all required guides loaded | 2, 2, 2 | Reject this assembly: independent judges counted three direct irrelevant guide reads in every run and each returned the wrong blocked decision; two also invented configuration paths. |
 
 Counts-only records:
 
@@ -320,12 +320,12 @@ can provide ordering without the structured-reference verbosity.
 
 The generated index also failed all three multi-guide repetitions. Every run
 loaded the required guides, but each performed broad repository discovery,
-directly read three irrelevant guides, lost exact owner provenance, used 20
-tool calls, and returned an incorrect blocked decision. Repetitions 1 and 2
-also invented `.git/config` or settings-based destination locators; both
-violated ROUTE-1 and CAP-1. The canary-backed records count two irrelevant
-guides in each run because the third directly read guide's canary was absent or
-malformed in the final witness.
+and independent judges counted three direct irrelevant guide reads, lost exact
+owner provenance, used 20 tool calls, and returned an incorrect blocked
+decision. Repetitions 1 and 2 also invented `.git/config` or settings-based
+destination locators; both violated ROUTE-1 and CAP-1. The canary-backed
+records count two irrelevant guides in each run because the third directly
+read guide's canary was absent or malformed in the final witness.
 
 One initial repetition timed out and remains transport `INVALID`. A separate
 setup attempt after fast-forwarding the evaluation checkout was also `INVALID`

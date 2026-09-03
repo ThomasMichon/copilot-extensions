@@ -546,10 +546,10 @@ enforcement before migrating the complete contributor stack.
   repetition-3 attempt timed out and remains transport `INVALID`; an
   independently generated retry supplied the behavioral repetition.
 - All three literal-mode judges failed the cell. Every run loaded the required
-  guides but broadened into three direct irrelevant guide reads, lost exact
-  owner provenance, used 20 tool calls, and returned an incorrect blocked
-  decision. Repetitions 1 and 2 also invented configuration paths and violated
-  ROUTE-1 and CAP-1.
+  guides, but independent judges counted three direct irrelevant guide reads,
+  lost exact owner provenance, used 20 tool calls, and returned an incorrect
+  blocked decision. Repetitions 1 and 2 also invented configuration paths and
+  violated ROUTE-1 and CAP-1.
 - The frozen canary-backed evidence records two irrelevant guides per run
   because one directly read guide canary was absent or malformed in each final
   witness. Preserve the independent transcript count rather than changing the
