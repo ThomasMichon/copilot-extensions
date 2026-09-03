@@ -490,3 +490,16 @@ enforcement before migrating the complete contributor stack.
 - Retain F3 repository-relative safety-gated flat fragments as a surviving
   one-guide cell, not a selected standard. Next gate: run the no-guide task with
   every other coordinate fixed and require zero deferred-guide reads.
+
+### 2026-09-03 - F3 safety-gated no-guide cell passes unanimously
+
+- Ran three independently generated fresh ACP repetitions with the surviving F3
+  coordinates and changed only the task boundary from one-guide to no-guide.
+- All three literal-mode judges passed. Each session completed from the critical
+  kernel in one turn with zero tool calls and zero deferred-guide reads.
+- Every run retained all owner provenance, preserved READY-1 and CMD-1, avoided
+  prohibited sources and path invention, and returned no guide canary.
+- Initial context was 2,646 characters / 662 estimated tokens. Retain the
+  no-guide boundary as additional support for F3, not as a final selection.
+- Next gate: run the multi-guide task with every other coordinate fixed and
+  require exactly the two task-applicable guides with both owners preserved.
