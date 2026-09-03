@@ -22,12 +22,14 @@ python3 tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixtu
 ```
 
 Then pass the generated directory to `run.sh --scenario` or
-`run.ps1 -Scenario` together with the source checkout as the harness mount.
-Each configured scenario contains exactly one task and one repetition; primary
-replication uses three independently generated and run scenarios rather than
-combining transcripts. Fresh and spill cells are runnable. Resume and
-compaction cells are rejected until the clean-room runner has real drivers for
-those transitions.
+`run.ps1 -Scenario`. The generated directory is self-contained: it carries the
+frozen fixture plus the minimal current contributor-inventory snapshot needed
+by setup, with normalized read-only-container permissions. Each configured
+scenario contains exactly one task and one repetition; primary replication
+uses three independently generated and run scenarios rather than combining
+transcripts. Fresh and spill cells are runnable. Resume and compaction cells
+are rejected until the clean-room runner has real drivers for those
+transitions.
 
 ## Starting state
 
@@ -37,6 +39,8 @@ payload under `/home/operator/progressive-context-disclosure-eval`.
 
 Every run receives new random 192-bit guide canaries. Readable guide files exist
 under the generated repository and payload roots, never in the scenario mount.
+The driven agent remains forbidden from reading the bundled fixture, inventory
+snapshot, corpus, task answer key, or rubric.
 The ACP session starts in the generated repository and loads only the generated
 synthetic plugin directory.
 
