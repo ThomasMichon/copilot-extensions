@@ -229,8 +229,9 @@ required `runtime-diagnostics` guide and preserved READY-1, but all three also
 enumerated or searched beyond the task-applicable locator. The frozen
 canary-backed records count irrelevant guides as 1, 1, and 2; the independent
 transcript judges counted direct irrelevant guide reads as 1, 2, and 2.
-Repetition 2 also malformed the `command-reference` canary in its witness, so
-that direct read is intentionally absent from the canary-backed observed set.
+Repetition 1 also lost complete owner provenance. Repetition 2 malformed the
+`command-reference` canary in its witness, so that direct read is intentionally
+absent from the canary-backed observed set.
 
 All four F2 emphasis forms are now rejected for this one-guide cell. The next
 controlled comparison changes only deferral from F2 to F3 while retaining the
