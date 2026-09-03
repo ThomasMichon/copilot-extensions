@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 # pre-push hook: enforce the install contract and the internal-identifier guard
 # before pushing.
 # Enable with:  git config core.hooksPath tools/hooks
