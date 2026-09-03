@@ -510,6 +510,15 @@ function Invoke-VersionedActivate {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
+    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & $VenvPython -m agent_worktrees.picker_tui.prewarm 2>$null
+    $pickerWarm = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if (-not $pickerWarm) {
+        Write-ServiceErr "Fresh runtime slot failed its Picker prewarm gate (versions/$SrcVersion) -- not activating"
+        return $false
+    }
+    Write-ServiceOk "Picker import path prewarmed in runtime version $SrcVersion"
     Invoke-VersionedMarkComplete
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |

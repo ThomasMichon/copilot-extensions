@@ -496,6 +496,11 @@ _versioned_activate() {
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
+    if ! PYTHONPATH= "$VENV_PYTHON" -m agent_worktrees.picker_tui.prewarm 2>/dev/null; then
+        err "Fresh runtime slot failed its Picker prewarm gate (versions/$SRC_VERSION) -- not activating"
+        return 1
+    fi
+    ok "Picker import path prewarmed in runtime version $SRC_VERSION"
     _versioned_mark_complete
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
