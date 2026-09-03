@@ -397,3 +397,25 @@ enforcement before migrating the complete contributor stack.
   calibration attempt starts only after the merged versions are deployed
   through the normal machine update flow and the host reports one healthy,
   published, accepting bridge endpoint. No Tier-E behavioral result exists yet.
+
+### 2026-09-03 - First behavioral cell rejected
+
+- Bootstrapped a disposable Linux CodeSpace through the documented setup path,
+  then ran the unified machine update. The durable acceptance check found
+  agent-bridge `0.4.0-dev419` healthy, published, and accepting on Linux Docker.
+- The first configured eval exposed a host-UID/umask portability defect before
+  ACP. #1767 and #1768 fixed it at source: generated cells now bundle the frozen
+  fixture plus the minimal current contributor inventory and normalize their
+  own read-only permissions instead of depending on source-checkout traversal.
+- Ran three independent fresh ACP repetitions for F2 / backtick
+  repository-relative / conditional / flat fragments / one-guide. Every run
+  loaded the required `runtime-diagnostics` guide, retained owner provenance,
+  preserved the critical rule, and avoided path invention.
+- Literal-mode judges returned one PASS and two FALSE-PASS failures.
+  Repetitions 2 and 3 broadly enumerated guides and loaded the unrelated
+  `command-reference` guide. The counts-only evidence is recorded under
+  [`evidence/`](evidence/).
+- Reject this cell rather than selecting from its one clean run. The next
+  controlled comparison keeps F2, repository-relative backticks, flat
+  fragments, the one-guide task, model, venue, and boundary fixed while raising
+  emphasis from conditional to imperative.
