@@ -14,7 +14,8 @@ import json
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import session_projection, tracking
+from agent_worktrees import config as cfg
+from agent_worktrees import git_ops, session_projection, tracking
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -53,6 +54,23 @@ def _args(**kw) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
+def _repo_with_worktree(tmp_path: Path, name: str = "anchor") -> tuple[Path, Path]:
+    anchor = tmp_path / name
+    worktree = tmp_path / f"{name}-worktrees" / "app-session"
+    git_ops.git("init", "-b", "master", str(anchor))
+    git_ops.git("config", "user.email", "t@example.com", cwd=anchor)
+    git_ops.git("config", "user.name", "Test", cwd=anchor)
+    (anchor / "f.txt").write_text("x\n")
+    git_ops.git("add", "-A", cwd=anchor)
+    git_ops.git("commit", "-m", "init", cwd=anchor)
+    worktree.parent.mkdir()
+    git_ops.git(
+        "worktree", "add", str(worktree), "-b", "app-session", "master",
+        cwd=anchor,
+    )
+    return anchor, worktree
+
+
 class TestRegisterSessionStdin:
     def test_session_start_associates_candidate_without_moving_head(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
@@ -87,6 +105,119 @@ class TestRegisterSessionStdin:
 
         rec = load_record(tmp_tracking_dir / "wt-x.yaml")
         assert [s.session_id for s in rec.sessions] == ["sess-1"]
+
+    def test_adopts_host_created_linked_worktree(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, foreign = _repo_with_worktree(tmp_path)
+        config = cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="test-project",
+            repos={
+                "test-project": cfg.RepoConfig(
+                    anchor=str(anchor),
+                    worktree_root=str(tmp_path / "anchor.worktrees"),
+                    default_branch="master",
+                )
+            },
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda *_a, **_k: "test")
+        m.cfg.set_active_project(config.repo_name)
+        payload = json.dumps({
+            "sessionId": "app-session-id",
+            "cwd": str(foreign / "subdir"),
+            "source": "github-app",
+        })
+        (foreign / "subdir").mkdir()
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+
+        rc = m.cmd_register_session(_args(stdin=True))
+
+        assert rc == 0
+        record = load_record(tmp_tracking_dir / "app-session.yaml")
+        assert Path(record.worktree_path).resolve() == foreign.resolve()
+        assert record.branch == "app-session"
+        assert record.repo == config.repo_name
+        assert record.interface == "cli"
+        assert record.origin == "user"
+        assert record.checkout_managed is False
+        assert [entry.session_id for entry in record.sessions] == ["app-session-id"]
+
+    def test_does_not_adopt_worktree_from_different_anchor(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        configured_anchor, _ = _repo_with_worktree(tmp_path, "configured")
+        _other_anchor, foreign = _repo_with_worktree(tmp_path, "other")
+        config = cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="test-project",
+            repos={
+                "test-project": cfg.RepoConfig(
+                    anchor=str(configured_anchor),
+                    worktree_root=str(tmp_path / "configured.worktrees"),
+                )
+            },
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+        m.cfg.set_active_project(config.repo_name)
+
+        assert m._adopt_linked_worktree(foreign) is None
+        assert not (tmp_tracking_dir / "app-session.yaml").exists()
+
+    def test_does_not_adopt_colliding_worktree_id(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, foreign = _repo_with_worktree(tmp_path)
+        config = cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="test-project",
+            repos={
+                "test-project": cfg.RepoConfig(
+                    anchor=str(anchor),
+                    worktree_root=str(tmp_path / "anchor.worktrees"),
+                )
+            },
+        )
+        _save_record(
+            tmp_tracking_dir, "app-session", str(tmp_path / "different-path")
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+        m.cfg.set_active_project(config.repo_name)
+
+        assert m._adopt_linked_worktree(foreign) is None
+        record = load_record(tmp_tracking_dir / "app-session.yaml")
+        assert Path(record.worktree_path) == tmp_path / "different-path"
+
+    def test_does_not_adopt_detached_worktree(
+        self, tmp_path: Path, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        anchor, _foreign = _repo_with_worktree(tmp_path)
+        detached = tmp_path / "detached-worktree"
+        git_ops.git("worktree", "add", "--detach", str(detached), "master", cwd=anchor)
+        config = cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="test-project",
+            repos={
+                "test-project": cfg.RepoConfig(
+                    anchor=str(anchor),
+                    worktree_root=str(tmp_path / "anchor.worktrees"),
+                )
+            },
+        )
+        monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+        m.cfg.set_active_project(config.repo_name)
+
+        assert m._adopt_linked_worktree(detached) is None
+        assert not (tmp_tracking_dir / "detached-worktree.yaml").exists()
 
     def test_explicit_worktree_id_takes_precedence(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch

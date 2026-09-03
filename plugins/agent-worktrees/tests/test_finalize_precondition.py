@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import finalize
+from agent_worktrees import tracking
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -112,6 +113,27 @@ def _record_and_repo(env: SimpleNamespace):
         pr=SimpleNamespace(enabled=True, branch=env.slug),
     )
     return record, repo
+
+
+def test_worktree_branch_prefers_tracked_host_branch():
+    record = tracking.WorktreeRecord(
+        worktree_id="app-session",
+        branch="host/app-session",
+        worktree_path="/tmp/app-session",
+        repo="owner/repo",
+        machine="host",
+        platform="linux",
+        started_at="2026-09-01T00:00:00",
+        last_resumed_at="2026-09-01T00:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        checkout_managed=False,
+    )
+
+    assert finalize._worktree_branch(record, record.worktree_id) == "host/app-session"
+    assert finalize._worktree_branch(None, "managed") == "worktree/managed"
 
 
 # ---------------------------------------------------------------------------

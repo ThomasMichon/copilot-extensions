@@ -241,7 +241,6 @@ def push_changes(
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
-    branch = f"worktree/{worktree_id}"
     upstream = f"{repo.remote}/{repo.default_branch}"
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
 
@@ -259,6 +258,7 @@ def push_changes(
                 "creator ownership is preserved."
             )
             return False
+    branch = _worktree_branch(record, worktree_id)
 
     # Set title early so it survives even if push fails
     if title and record:
@@ -1361,6 +1361,14 @@ def _rehome_abandoned_obligations(
     return True
 
 
+def _worktree_branch(
+    record: tracking.WorktreeRecord | None, worktree_id: str
+) -> str:
+    if record is not None and record.branch:
+        return record.branch
+    return f"worktree/{worktree_id}"
+
+
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
@@ -1392,7 +1400,6 @@ def validate_and_finalize(
     repo = config.default_repo
     anchor = repo.anchor
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
-    branch = f"worktree/{worktree_id}"
     upstream = f"{repo.remote}/{repo.default_branch}"
     lock_path = Path(repo.worktree_root) / ".finalize.lock"
 
@@ -1408,6 +1415,8 @@ def validate_and_finalize(
                 f"Cannot finalize {worktree_id}: its existing claim ledger is "
                 f"unreadable ({exc}). Creator ownership is preserved.")
             return False
+    branch = _worktree_branch(record, worktree_id)
+    checkout_managed = record is None or record.checkout_managed
 
     try:
         from . import claim_handoffs
@@ -1614,29 +1623,46 @@ def validate_and_finalize(
         # rendering as diverged in the picker (#1106).
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
 
-        if inside_worktree or has_live_session:
+        if not checkout_managed or inside_worktree or has_live_session:
             reason = (
-                "this shell is running inside the worktree" if inside_worktree
-                else "a live Copilot session is still using the worktree"
+                "the checkout is owned by an external session host"
+                if not checkout_managed
+                else (
+                    "this shell is running inside the worktree"
+                    if inside_worktree
+                    else "a live Copilot session is still using the worktree"
+                )
             )
             output.ok(
                 f"Finalized: all content from {branch} is on "
                 f"{repo.remote}/{repo.default_branch}, so this worktree is "
                 f"safe to prune."
             )
-            output.info(
-                f"Leaving the worktree directory and branch in place because "
-                f"{reason}. Finalize never deletes the git branch or the "
-                f"folder of an active worktree -- that's expected, not a "
-                f"failure. They'll be removed by 'agent-worktrees cleanup' "
-                f"once the session ends (this is the normal outcome when you "
-                f"finalize from inside the session)."
-            )
+            if not checkout_managed:
+                output.info(
+                    f"Leaving the worktree directory and branch in place because "
+                    f"{reason}. Later agent-worktrees cleanup may retire this "
+                    f"tracking record, but only the external host may remove the "
+                    f"checkout or branch."
+                )
+            else:
+                output.info(
+                    f"Leaving the worktree directory and branch in place because "
+                    f"{reason}. Finalize never deletes the git branch or the "
+                    f"folder of an active worktree -- that's expected, not a "
+                    f"failure. They'll be removed by 'agent-worktrees cleanup' "
+                    f"once the session ends (this is the normal outcome when you "
+                    f"finalize from inside the session)."
+                )
             activity.log_event(
                 "finalize_skipped_removal",
                 worktree_id=worktree_id,
                 branch=branch,
-                reason="inside_worktree" if inside_worktree else "live_session",
+                reason=(
+                    "external_checkout"
+                    if not checkout_managed
+                    else ("inside_worktree" if inside_worktree else "live_session")
+                ),
             )
         else:
             print("Removing worktree...")
@@ -1688,15 +1714,15 @@ def validate_and_finalize(
 
             git_ops.prune_worktrees(cwd=anchor)
 
-        # Merge permissions
-        merged = permissions.merge_permissions(anchor, worktree_path)
-        if merged:
-            for m in merged:
-                print(f"  Merged new permission: {m}")
-            print("Permissions merged back to anchor and worktree entry removed.")
+        if checkout_managed:
+            merged = permissions.merge_permissions(anchor, worktree_path)
+            if merged:
+                for m in merged:
+                    print(f"  Merged new permission: {m}")
+                print("Permissions merged back to anchor and worktree entry removed.")
 
-        if permissions.remove_trusted_folder(worktree_path):
-            print("Removed worktree path from trustedFolders.")
+            if permissions.remove_trusted_folder(worktree_path):
+                print("Removed worktree path from trustedFolders.")
 
         # Update tracking
         if record:

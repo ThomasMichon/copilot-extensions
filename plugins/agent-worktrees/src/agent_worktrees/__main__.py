@@ -686,6 +686,8 @@ def _worktree_to_dict(
     # Picker/cockpit hides this worktree.
     d["interface"] = rec.resolved_interface
     d["origin"] = rec.resolved_origin
+    if not rec.checkout_managed:
+        d["checkout_managed"] = False
     d["picker_hidden"] = rec.is_picker_hidden
     # worktree-status-core: the agent-asserted disposition overlay so the Picker
     # can render a follow-up glyph + summary and feed the prune verdict. Absent
@@ -4726,6 +4728,83 @@ def _worktree_id_from_git(cwd: Path) -> str | None:
     if p.parent.name == "worktrees" and p.name and p.name != "worktrees":
         return p.name
     return None
+
+
+def _linked_worktree_root(cwd: str | Path) -> Path | None:
+    """Return git's actual linked-worktree root, never a configured projection."""
+    candidate = Path(cwd).resolve()
+    if not _worktree_id_from_git(candidate):
+        return None
+    try:
+        result = git_ops.git(
+            "rev-parse", "--show-toplevel", cwd=str(candidate),
+            check=False, timeout=10,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0 or not (result.stdout or "").strip():
+        return None
+    return Path(result.stdout.strip()).resolve()
+
+
+def _worktree_path_for_id(
+    config: cfg.Config,
+    worktree_id: str | None,
+    *,
+    cwd: str | Path,
+) -> str:
+    """Resolve a worktree ID to its authoritative path."""
+    if not worktree_id:
+        return ""
+    linked_root = _linked_worktree_root(cwd)
+    if linked_root is not None and _worktree_id_from_git(linked_root) == worktree_id:
+        return str(linked_root)
+    record = tracking.load_record_by_id(worktree_id)
+    if record is not None and record.worktree_path:
+        return record.worktree_path
+    return str(Path(config.default_repo.worktree_root) / worktree_id)
+
+
+def _adopt_linked_worktree(cwd: str | Path) -> str | None:
+    """Track a linked worktree created by an external session host."""
+    root = _linked_worktree_root(cwd)
+    worktree_id = _worktree_id_from_git(root) if root is not None else None
+    if root is None or not worktree_id or not cfg.active_project():
+        return None
+    try:
+        config = cfg.load_config()
+        anchor = Path(config.default_repo.anchor).resolve()
+        linked_anchor = git_ops.resolve_to_anchor(root).resolve()
+        if (
+            linked_anchor != anchor
+            or git_ops._normalize_wt_path(str(root))
+            == git_ops._normalize_wt_path(str(anchor))
+        ):
+            return None
+        branch = git_ops.current_branch(root)
+        if not branch:
+            return None
+        record, _created = tracking.create_new_record_if_absent(
+            worktree_id=worktree_id,
+            branch=branch,
+            worktree_path=str(root),
+            repo=config.repo_name,
+            machine=config.machine,
+            platform_name=config.platform,
+            tracking_path=cfg.tracking_dir(),
+            interface="cli",
+            origin="user",
+            checkout_managed=False,
+        )
+    except Exception:
+        return None
+    if (
+        record.repo != config.repo_name
+        or git_ops._normalize_wt_path(record.worktree_path)
+        != git_ops._normalize_wt_path(str(root))
+    ):
+        return None
+    return worktree_id
 
 
 def _infer_worktree_id_from_worktree_root(
@@ -9766,6 +9845,16 @@ def _reap_worktree(
     warnings: list[str] = []
     failures = 0
 
+    if not rec.checkout_managed:
+        (tracking_path / f"{rec.worktree_id}.yaml").unlink(missing_ok=True)
+        disposition_history.remove(rec.worktree_id)
+        activity.log_event(
+            "external_worktree_tracking_retired",
+            worktree_id=rec.worktree_id,
+            path=rec.worktree_path,
+        )
+        return 0, warnings
+
     if rec.worktree_path and Path(rec.worktree_path).exists():
         # Tear down the owning mux session first, then terminate any lingering
         # process whose cwd is still rooted in the worktree (a stray gh, a
@@ -14673,7 +14762,10 @@ def cmd_get(args: argparse.Namespace) -> int:
             except Exception:
                 session_wt_id = None
         wt_id = session_wt_id
-    current_worktree = str(Path(repo.worktree_root) / wt_id) if wt_id else ""
+    identity_cwd = session_cwd if session_cwd is not None else os.getcwd()
+    current_worktree = _worktree_path_for_id(
+        config, wt_id, cwd=identity_cwd,
+    )
     state_scope_id = wt_id
     session_is_anchor = False
     if session_cwd is not None and not wt_id:
@@ -19290,6 +19382,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             wt_id = tracking.find_worktree_id_by_cwd(cwd)
         except Exception:
             wt_id = None
+        if not wt_id:
+            wt_id = _adopt_linked_worktree(cwd)
 
     # Last-resort mux recovery for HOME-cwd/Bare resumes and hooks whose mux
     # environment was stripped. The exact session lock identifies Copilot's
