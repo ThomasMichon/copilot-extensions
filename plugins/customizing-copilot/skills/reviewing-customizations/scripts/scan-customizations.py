@@ -37,6 +37,7 @@ Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
                            [--context-budget]
                            [--from-settings]
+                           [--owned-agent-root RELATIVE_DIR]
                            [--include-plugins DIR ...] [--include-installed]
 
 `REPO_ROOT` defaults to the current directory. `--from-settings` assembles the
@@ -1504,23 +1505,87 @@ def scan_skills(root: Path, report: Report,
 
 
 
+def resolve_owned_agent_roots(
+    root: Path,
+    values: list[str] | None,
+) -> tuple[Path, ...]:
+    """Validate explicit repo-owned agent directories."""
+    repo = root.resolve(strict=True)
+    resolved_roots: set[Path] = set()
+    for raw in values or []:
+        relative = Path(raw)
+        if (
+            not raw.strip()
+            or relative.is_absolute()
+            or ".." in relative.parts
+        ):
+            raise ValueError(
+                f"--owned-agent-root {raw!r} must be a non-empty "
+                "repository-relative directory without '..'"
+            )
+        candidate = repo / relative
+        if candidate.is_symlink():
+            raise ValueError(
+                f"--owned-agent-root {raw!r} must not be a symlink"
+            )
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(repo)
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"--owned-agent-root {raw!r} must resolve inside the repository"
+            ) from exc
+        if resolved == repo or not resolved.is_dir():
+            raise ValueError(
+                f"--owned-agent-root {raw!r} must name a directory below "
+                "the repository root"
+            )
+        for agent_file in resolved.glob("*.agent.md"):
+            if agent_file.is_symlink():
+                raise ValueError(
+                    f"--owned-agent-root {raw!r} contains symlinked agent "
+                    f"{agent_file.name!r}"
+                )
+            try:
+                agent_file.resolve(strict=True).relative_to(resolved)
+            except (OSError, ValueError) as exc:
+                raise ValueError(
+                    f"--owned-agent-root {raw!r} contains an agent outside "
+                    "the declared directory"
+                ) from exc
+        resolved_roots.add(resolved)
+    return tuple(sorted(resolved_roots, key=str))
+
+
+def repo_owned_agent_files(
+    root: Path,
+    owned_agent_roots: tuple[Path, ...] = (),
+) -> set[Path]:
+    """Return standard and explicitly declared repository-owned agents."""
+    files = (
+        set(root.glob(".github/agents/*.agent.md"))
+        | set(root.glob(".claude/agents/*.agent.md"))
+        | set(root.glob("plugins/*/agents/*.agent.md"))
+    )
+    for agent_root in owned_agent_roots:
+        files.update(agent_root.glob("*.agent.md"))
+    return {path.resolve() for path in files if path.is_file()}
+
+
 def scan_agents(
     root: Path,
     report: Report,
     plugin_sources: list[PluginSource] | None = None,
+    owned_agent_roots: tuple[Path, ...] = (),
 ) -> None:
     # Path -> source. None means editable project/suite source. Owned sources
     # take precedence if the same payload is also discovered as installed.
     agent_files: dict[Path, PluginSource | None] = {}
     owned_plugin_agents: set[tuple[str, str]] = set()
     checked_mcp_plugins: set[Path] = set()
-    for af in (
-        set(root.glob(".github/agents/*.agent.md"))
-        | set(root.glob(".claude/agents/*.agent.md"))
-    ):
+    for af in repo_owned_agent_files(root, owned_agent_roots):
         agent_files[af.resolve()] = None
     for af in root.glob("plugins/*/agents/*.agent.md"):
-        agent_files[af.resolve()] = None
         owned_plugin_agents.add((af.parent.parent.name, af.name))
     for source in sorted(
         plugin_sources or [], key=lambda item: not item.controlled
@@ -1753,10 +1818,14 @@ def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
     return out
 
 
-def run(root: Path, plugin_sources: list[PluginSource] | None = None) -> Report:
+def run(
+    root: Path,
+    plugin_sources: list[PluginSource] | None = None,
+    owned_agent_roots: tuple[Path, ...] = (),
+) -> Report:
     report = Report()
     scan_skills(root, report, plugin_sources)
-    scan_agents(root, report, plugin_sources)
+    scan_agents(root, report, plugin_sources, owned_agent_roots)
     scan_text_files(root, report, plugin_sources)
     return report
 
@@ -1926,13 +1995,15 @@ def _personal_instruction_files(home: Path) -> set[Path]:
     return files
 
 
-def _metadata_files(root: Path,
-                    plugin_sources: list[PluginSource]) -> set[Path]:
+def _metadata_files(
+    root: Path,
+    plugin_sources: list[PluginSource],
+    owned_agent_roots: tuple[Path, ...] = (),
+) -> set[Path]:
     files = set(root.glob(".github/skills/*/SKILL.md"))
     files.update(root.glob(".claude/skills/*/SKILL.md"))
     files.update(root.glob(".agents/skills/*/SKILL.md"))
-    files.update(root.glob(".github/agents/*.agent.md"))
-    files.update(root.glob(".claude/agents/*.agent.md"))
+    files.update(repo_owned_agent_files(root, owned_agent_roots))
     for source in plugin_sources:
         files.update(source.skills_root.glob("*/SKILL.md"))
         files.update(source.payload_root.glob("agents/*.agent.md"))
@@ -2059,6 +2130,7 @@ def build_context_budget(
     plugin_sources: list[PluginSource] | None = None,
     *,
     home: Path | None = None,
+    owned_agent_roots: tuple[Path, ...] = (),
 ) -> dict:
     """Build a counts-only context inventory; hook commands are never run."""
     sources = plugin_sources or []
@@ -2080,7 +2152,7 @@ def build_context_budget(
         for source in sources
     )
     metadata_entries = _measure_files(
-        _metadata_files(root, sources),
+        _metadata_files(root, sources, owned_agent_roots),
         root,
         frontmatter_only=True,
         aliases=plugin_aliases,
@@ -2196,11 +2268,26 @@ def main(argv: list[str] | None = None) -> int:
                          "whose payloads join the inventory; repeatable")
     ap.add_argument("--include-installed", action="store_true",
                     help="shortcut for --include-plugins ~/.copilot/installed-plugins")
+    ap.add_argument(
+        "--owned-agent-root",
+        action="append",
+        default=[],
+        metavar="RELATIVE_DIR",
+        help="repository-relative directory whose immediate *.agent.md files "
+             "are fully owned and checked; repeatable",
+    )
     args = ap.parse_args(argv)
 
     root = Path(args.root).resolve()
     if not root.is_dir():
         print(f"error: {root} is not a directory", file=sys.stderr)
+        return 2
+    try:
+        owned_agent_roots = resolve_owned_agent_roots(
+            root, args.owned_agent_root,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
     sources: list[PluginSource] = []
@@ -2222,7 +2309,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"warning: --include-plugins {p} is not a directory (skipped)",
                   file=sys.stderr)
 
-    report = run(root, sources)
+    report = run(root, sources, owned_agent_roots)
     if args.from_settings:
         scan_installed_mcp_bridge_collisions(
             Path.home() / ".copilot" / "installed-plugins",
@@ -2234,7 +2321,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.from_settings
         else None
     )
-    budget = build_context_budget(root, sources) if args.context_budget else None
+    budget = (
+        build_context_budget(
+            root,
+            sources,
+            owned_agent_roots=owned_agent_roots,
+        )
+        if args.context_budget
+        else None
+    )
 
     if args.json:
         payload = {
