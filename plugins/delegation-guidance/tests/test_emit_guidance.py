@@ -103,6 +103,8 @@ def test_powershell_emits_owned_bounded_guidance() -> None:
     context = _context(_run_powershell())
     assert context.startswith(f"[owner: delegation-guidance@{version}]\n")
     assert "Before broad code/file research" in context
+    assert "three or more independent implementation/subsystem tracks" in context
+    assert "reviewer is not an evidence-track substitute" in context
     assert "keep small bounded lookups" in context
     assert "Keep decomposition, synthesis, integration" in context
     assert "domain MCP/service calls" in context
@@ -131,10 +133,12 @@ def test_bash_matches_powershell_guidance() -> None:
 def test_aggregate_guidance_is_owned_compact_and_cross_platform() -> None:
     context = _context(_run_bash("--aggregate"))
     assert context.startswith("[owner: delegation-guidance@")
+    assert "3+ independent tracks" in context
+    assert "reviewer is not a track substitute" in context
     assert "coordinator retains synthesis" in context
     assert "do not spawn children unless explicitly authorized" in context
     assert "Use the `delegating-work` skill" in context
-    assert len(context.encode("utf-8")) <= 480
+    assert len(context.encode("utf-8")) <= 768
 
     if _powershell():
         assert _context(_run_powershell("--aggregate")) == context
@@ -277,6 +281,8 @@ def test_skill_trigger_boundary_and_inventory() -> None:
     assert "use agents to compare or evaluate" in normalized
     assert "split disjoint bulk code" in normalized
     assert "also use proactively before opening broad multi-subsystem research" in normalized
+    assert "three or more independent implementations or subsystems" in normalized
+    assert "reviewers judge a completed artifact" in normalized
     assert "Not for choosing a named domain agent" in normalized
     assert "authoring an agent definition" in normalized
     assert len(skill.splitlines()) < 500
