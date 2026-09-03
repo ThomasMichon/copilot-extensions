@@ -7,7 +7,7 @@
 - **Scope:** leaf (a per-plugin vision; a **consumer** that rides the
   [agent-fabric](../../agent-fabric/README.md) delegation layer, not a layer of it)
 - **Status:** Draft
-- **Last revised:** 2026-07-29
+- **Last revised:** 2026-09-03
 - **Reality docs:** [`plugins/agent-logger/docs/architecture.md`](../../../plugins/agent-logger/docs/architecture.md) ·
   [`plugins/agent-logger/docs/deployment-topologies.md`](../../../plugins/agent-logger/docs/deployment-topologies.md) ·
   [`plugins/agent-logger/docs/manifest-contract.md`](../../../plugins/agent-logger/docs/manifest-contract.md)
@@ -41,6 +41,16 @@ Crucially, the chronicler is **not a bespoke service**. It is the generic,
 facility-neutral realization of a pattern several consumers already want; each
 consumer supplies only *where its sessions are*, *where its logs go*, and *how
 they land* — the machinery in between is shared.
+
+Those consumer choices are **repository-owned declarations**, not one
+machine-global winner-takes-all configuration. A machine compiles every
+applicable declaration into one explainable execution plan before it acts.
+Within a repository, its default, machine-specific policy, and machine-local
+override form an explicit precedence chain. Across repositories there is no
+implicit precedence: source claims must be provably disjoint or resolution
+fails closed. This lets several repositories share one installed chronicler
+without letting a broad default silently capture another repository's sessions
+or destinations.
 
 ## Concepts & Components
 
@@ -84,6 +94,28 @@ A composite of three consumer-supplied strategies:
   pull request, …). The daemon **must not** hardcode a landing mechanism; landing
   is the consumer's to name.
 
+### The aggregate configuration compiler — which seams are authorized here
+Repositories publish portable declarations of the session populations they
+claim, the corpus targets that collect those sessions, and the log sinks that
+render and land their records. On each machine the chronicler discovers the
+applicable declarations through stable repository identities, selects each
+repository's default or matching machine-specific policy, applies any
+machine-local override **only to that repository**, and normalizes the result
+into one reproducible machine plan.
+
+Collection ownership and rendered-log ownership are separate claim dimensions:
+the raw corpus and the durable chronicle may have different owners and landing
+semantics. Within either dimension, however, a source population has one
+unambiguous owner unless an explicit future policy deliberately permits
+fan-out. A wildcard claim and a more specific claim overlap unless the wildcard
+explicitly excludes or cedes that population.
+
+Compilation is a prerequisite for side effects. Ambiguous identities,
+non-deterministic machine matches, overlapping cross-repository claims,
+incompatible targets, unavailable sinks, or invalid landing policies make the
+whole plan unauthorized. The chronicler does not schedule, copy, prune, render,
+or land a valid-looking subset while the aggregate is unresolved.
+
 ### The execution pin — one elected chronicler, catching up
 The daemon runs from **one elected place at a time** across the fleet (so the
 same session is not chronicled by two machines), and does so as **first-class
@@ -107,6 +139,20 @@ The daemon is generic: a **session-source** seam supplies *which sessions and
 when they're ready*, and a **log-sink** seam supplies *where each record goes, in
 what voice, landed how*. A new consumer adopts the chronicler by supplying these
 two seams — never by forking the pipeline.
+
+### repository-owned-aggregate-configuration
+Every participating repository owns its declaration; no repository can
+silently override another's. Each machine compiles all applicable declarations
+into one normalized plan, with same-repository precedence for defaults,
+machine-specific policy, and a repository-scoped machine-local override.
+Cross-repository overlap is a configuration error, not a precedence contest.
+
+### explainable-machine-plan
+The chronicler can expose the exact normalized plan it would execute: machine
+identity, declaration provenance, selected and inactive policies, canonical
+source claims, explicit exclusions, collection targets, rendered-log sinks,
+profiles, landing policies, and any conflict witnesses. Operational diagnosis
+uses this same compiler rather than a second interpretation of configuration.
 
 ### origin-routed-filing
 Each session's record is filed into the **repository the session originated in**,
@@ -182,6 +228,29 @@ carries no resolvable origin does the **machine default** apply. Filing is a
 derivation from recorded truth, with an explicit, bounded fallback — never a
 guess.
 
+### resolve-before-side-effects
+Configuration resolution is deterministic and complete before the chronicler
+touches session material or destinations. Repository identity is canonical, not
+derived from a checkout basename; machine matching produces one selected policy
+per repository; and local overrides cannot escape their owning repository.
+The normalized output is reproducible from the same declarations and machine
+identity.
+
+### reject-cross-repository-collisions
+Repositories do not form a hidden priority order. Two declarations that claim
+the same source population in the same ownership dimension are a hard
+collision, including a wildcard overlapping a specific claim unless an explicit
+exclusion makes them disjoint. Diagnostics name both claimants and the
+overlapping population so an operator can repair ownership rather than guess
+which policy won.
+
+### configuration-is-authorization
+Installation and availability do not authorize collection. An installed,
+enabled chronicler remains passive when no declaration applies and refuses to
+operate when the aggregate plan is invalid. This keeps broad plugin
+availability separate from permission to collect, retain, render, prune, or
+publish session material.
+
 ## Non-Goals / Boundaries
 
 - **Not a per-session live logger.** Writing the *current* session on demand, and
@@ -200,9 +269,16 @@ guess.
   manifest of sessions into Markdown. The chronicler adds **scheduling, routing,
   readiness gating, and landing** around it; it does not re-implement it.
 - **Not a specification.** This fixes the *role, seams, guarantees, and
-  behaviors* of the chronicler — not the storage engine, on-disk shapes, config
-  keys, command grammar, elected-host mechanism, or the settle window's length.
-  Binding detail of that kind belongs to the reality docs.
+  behaviors* of the chronicler — not the storage engine, declaration schema,
+  on-disk shapes, config keys, command grammar, repository-discovery mechanism,
+  elected-host mechanism, or the settle window's length. Binding detail of that
+  kind belongs to the reality docs.
+- **Not cross-repository precedence.** A machine-local override can specialize
+  its owning repository's declaration; it cannot seize another repository's
+  claims. Cross-repository ownership is made disjoint explicitly or rejected.
+- **Not partial execution of an invalid aggregate.** The chronicler does not
+  proceed with unaffected-looking routes when another route is ambiguous or
+  unsafe. Repairing the aggregate plan precedes all collection and publication.
 
 ## See Also
 
@@ -225,6 +301,12 @@ guess.
 
 ## Provenance
 
+- **2026-09-03** — Extended the vision from consumer-supplied source and sink
+  seams to repository-owned declarations compiled across a machine. Established
+  same-repository precedence, repository-scoped machine-local overrides,
+  separate collection and rendering claim dimensions, collision-free
+  cross-repository composition, explainable normalized plans, and fail-closed
+  authorization before side effects.
 - **2026-07-29** — Initial authoring as the shared, upstream home for the
   background-chronicling capability, so all consumers build to **one** source of
   truth rather than duplicating a per-harness vision. Intent mined from an
