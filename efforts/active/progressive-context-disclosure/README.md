@@ -705,3 +705,18 @@ enforcement before migrating the complete contributor stack.
 - Do not eliminate the F3 conflict cell yet. Freeze epoch 3 requires a
   task-local F0 correctness ceiling before a deferred cell can be interpreted.
   Next gate: run three F0 full-inline conflict repetitions.
+
+### 2026-09-03 - F0 conflict has no unanimous ceiling
+
+- Ran three epoch-3 F0 full-inline conflict controls. Repetitions 1 and 3
+  passed literally with zero tool calls, exact required canaries, both owner
+  ids, and the required refusal before destination selection.
+- Repetition 2 also refused correctly with zero tools and preserved PUB-1,
+  CONTRIB-1, both owners, path safety, and prohibited-source constraints, but
+  truncated the `publication-checks` canary in its final witness. The
+  independent judge classified it as a false pass.
+- The F0 and F3 conflict cells both produced 2/3 literal passes. This boundary
+  has no unanimous correctness ceiling on the calibration model and ACP venue,
+  so it cannot support a deferral elimination claim.
+- Hold further conflict variants and continue Phase 2 on the next independently
+  satisfiable task boundary.
