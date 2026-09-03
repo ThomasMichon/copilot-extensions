@@ -473,3 +473,20 @@ enforcement before migrating the complete contributor stack.
   safety-gated emphasis, flat fragments, task, model, ACP venue, and fresh
   boundary fixed. F3 exposes only the task-required guide reference and tests
   whether the surplus F2 references caused the broad exploration.
+
+### 2026-09-03 - F3 safety-gated one-guide cell passes unanimously
+
+- Ran three independently generated fresh ACP repetitions with only the
+  deferral coordinate changed from F2 to F3.
+- All three literal-mode judges passed. Every run loaded only the required
+  `runtime-diagnostics` guide, preserved READY-1 and owner provenance, avoided
+  path invention and prohibited sources, and performed no capability operation
+  or compensating exploration.
+- Tool-call counts were 1, 1, and 2. The third run used one exact locator glob
+  before reading the same required guide; no unrelated path or guide was read.
+- F3 reduced initial context from 4,379 characters / 1,095 estimated tokens to
+  2,862 characters / 716 estimated tokens, a 34.6% reduction, while improving
+  unanimous correctness and eliminating irrelevant reads for this cell.
+- Retain F3 repository-relative safety-gated flat fragments as a surviving
+  one-guide cell, not a selected standard. Next gate: run the no-guide task with
+  every other coordinate fixed and require zero deferred-guide reads.

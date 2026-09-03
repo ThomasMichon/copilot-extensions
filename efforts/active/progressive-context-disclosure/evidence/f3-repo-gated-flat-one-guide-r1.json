@@ -1,0 +1,48 @@
+{
+  "schema": "copilot-extensions.progressive-context-evidence",
+  "version": 1,
+  "runId": "f3-repo-gated-flat-one-guide-r1",
+  "variantId": "f3-repo-gated-flat",
+  "taskId": "one-guide",
+  "model": "auto",
+  "venue": "acp",
+  "boundary": "fresh",
+  "repetition": 1,
+  "initialContext": {
+    "unicodeCharacters": 2862,
+    "utf8Bytes": 2862,
+    "estimatedTokens": 716
+  },
+  "firstTurnCorrect": true,
+  "requiredGuideIds": [
+    "runtime-diagnostics"
+  ],
+  "observedGuideIds": [
+    "runtime-diagnostics"
+  ],
+  "autoLoadedGuideIds": [],
+  "irrelevantGuideReadCount": 0,
+  "turnCount": 1,
+  "toolCallCount": 1,
+  "elapsedMillisecondsBeforeGroundedAction": 53000,
+  "pathResolutionFailureCount": 0,
+  "missingPathCount": 0,
+  "inventedPathCount": 0,
+  "ownerProvenanceRetained": true,
+  "criticalRuleViolationIds": [],
+  "structuredRenderHash": "22653b8fffa28f3d7753dc4778cf6fa87fc9fd02984d2a12f0e6101df8adb70a",
+  "selectedContributorIds": [
+    "synthetic-publication",
+    "synthetic-contribution-boundary",
+    "synthetic-continuity",
+    "synthetic-destination-routing",
+    "synthetic-runtime-readiness",
+    "synthetic-environment-grounding",
+    "synthetic-command-discovery",
+    "synthetic-capability-procedure"
+  ],
+  "judge": {
+    "verdict": "PASS",
+    "jam": null
+  }
+}
