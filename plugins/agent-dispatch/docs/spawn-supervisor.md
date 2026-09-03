@@ -10,9 +10,11 @@ Status: **in progress** — the spawn-reservation primitive, the supervisor loop
 auto-recovery** (local CLI worktree bodies, local headless bodies, and headless
 fleet bodies), **nudge-before-recover**, fixed-interval reconciliation, and **fleet
 dispatch (a health-gated remote embody pool, Model C)** are built. Label-scoped
-**disposable CLI conclusion** is also built: a registration may opt selected
-CLI worker classes into safe terminal session conclusion and managed-worktree
-GC priming without deleting the worktree directly. The
+**disposable local-worker conclusion** is also built (the configuration field
+retains its legacy `disposable_cli_labels` name): a registration may opt
+selected CLI or local headless ACP worker classes into safe terminal session
+conclusion and managed-worktree GC priming without deleting the worktree
+directly. The
 backlog-catch-up policy, authenticated container transport, per-host fleet
 concurrency caps, and load-aware pool selection land in follow-up slices.
 Public trackers: [#44](https://github.com/ThomasMichon/copilot-extensions/issues/44)
@@ -520,13 +522,13 @@ machine alias).
 
 ### Disposable CLI conclusion (built) — opt-in priming, conservative deletion
 
-An attachable CLI worker may be disposable for a declared task class even
-though arbitrary CLI sessions are not. A lane opts in selected labels with
+An isolated local worker worktree may be disposable for a declared task class
+even though arbitrary sessions are not. Both CLI and local headless ACP bodies
+use the same exact recorded worktree/session conclusion path. A lane opts in selected labels with
 `--disposable-cli-label LABEL`, or a registrar declaration uses
 `body.disposable_cli_labels`. Each disposable label must also be watched by the
-lane and routed to a local CLI body; headless and fleet labels cannot opt in
-because the durable reservation records the exact session/worktree but not a
-remote host identity.
+lane and routed to a local body; fleet labels cannot opt in because the durable
+reservation does not provide a local worktree authority.
 
 On terminal task settlement the supervisor uses only the spawn reservation's
 recorded `session_handle` and `worktree`. It never infers an allocation by
@@ -563,7 +565,9 @@ record whenever Git refuses removal.
 A safe preservation decision (`dirty-work`, `local-commits`,
 `session-mismatch`, and related reasons) is a structured held outcome, not an
 error. `live-session` / `live-mux` and operational failures remain durably pending and
-retry with exponential backoff. Each cycle processes a bounded batch; after
+retry with exponential backoff. On the first live-session result, the supervisor
+sends one bounded conclusion prompt to the exact same local ACP session and
+worktree; it never creates a replacement merely to clean the first. Each cycle processes a bounded batch; after
 twelve failed conclusion attempts (a teardown window of roughly 40 minutes at
 the bounded cadence) the reservation becomes visibly held instead of hot-looping
 forever. A primed or held outcome is idempotent and does not run again.

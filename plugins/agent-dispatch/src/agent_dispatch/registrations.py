@@ -90,25 +90,14 @@ def _validate_disposable_cli_labels(spec: dict) -> None:
         raise RegistrationError(
             "disposable CLI conclusion is supported only for local worker bodies"
         )
-    backend = spec.get("embody_backend") or "headless"
-    headless_labels = spec.get("headless_labels") or []
-    cli_overrides = spec.get("cli_labels") or []
     for key, routed in (
-        ("headless_labels", headless_labels),
-        ("cli_labels", cli_overrides),
+        ("headless_labels", spec.get("headless_labels") or []),
+        ("cli_labels", spec.get("cli_labels") or []),
     ):
         if not isinstance(routed, list) or not all(
             isinstance(value, str) and value for value in routed
         ):
             raise RegistrationError(f"'{key}' must be a list of labels")
-    if backend == "cli":
-        cli_labels = watched - set(headless_labels)
-    else:
-        cli_labels = set(cli_overrides)
-    if non_cli := disposable - cli_labels:
-        raise RegistrationError(
-            f"disposable CLI labels {sorted(non_cli)} are not routed to CLI bodies"
-        )
 
 
 def _schedule_entry(spec: dict, *, strict: bool) -> dict:

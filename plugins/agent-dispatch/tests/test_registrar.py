@@ -110,7 +110,7 @@ def test_bad_body_type_rejected():
         load_declaration({"name": "x", "body": {"type": "sidecar"}})
 
 
-def test_disposable_cli_label_must_be_watched_and_cli_routed():
+def test_disposable_cli_label_must_be_watched_and_local():
     with pytest.raises(RegistrarError, match="not in labels"):
         load_declaration(
             {
@@ -122,17 +122,17 @@ def test_disposable_cli_label_must_be_watched_and_cli_routed():
                 },
             }
         )
-    with pytest.raises(RegistrarError, match="not routed"):
-        load_declaration(
-            {
-                "name": "x",
-                "labels": ["review"],
-                "body": {
-                    "type": "headless",
-                    "disposable_cli_labels": ["review"],
-                },
-            }
-        )
+    declaration = load_declaration(
+        {
+            "name": "x",
+            "labels": ["review"],
+            "body": {
+                "type": "headless",
+                "disposable_cli_labels": ["review"],
+            },
+        }
+    )
+    assert declaration.body.disposable_cli_labels == ("review",)
     with pytest.raises(RegistrarError, match="only for local"):
         load_declaration(
             {

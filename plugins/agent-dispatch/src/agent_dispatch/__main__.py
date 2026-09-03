@@ -3398,18 +3398,6 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        cli_routed = (
-            watched - set(headless_labels)
-            if backend == "cli"
-            else set(cli_labels)
-        )
-        if disposable - cli_routed:
-            print(
-                "agent-dispatch supervise: every --disposable-cli-label must "
-                "be routed to a CLI body.",
-                file=sys.stderr,
-            )
-            return 2
         if backend == "cli":
             # CLI-default lane: headless is the per-label opt-in.
             default_spawn, overrides = embody_spawn, {

@@ -5315,6 +5315,42 @@ class TaskQueue:
             now=now,
         )
 
+    def record_spawn_conclusion(
+        self,
+        key: str,
+        *,
+        conclusion_state: str,
+        conclusion_detail: str,
+        now: float | None = None,
+    ) -> SpawnReservation:
+        """Persist conclusion progress without releasing an active reservation."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such reservation: {key}")
+            if row["state"] not in SpawnState.ACTIVE:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"reservation {key} is {row['state']!r}, not active"
+                )
+            conn.execute(
+                "UPDATE spawn_reservations SET updated_at = ?, "
+                "conclusion_state = ?, conclusion_detail = ? WHERE key = ?",
+                (ts, conclusion_state, conclusion_detail, key),
+            )
+            updated = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(updated)
+
     def get_reservation(self, key: str) -> SpawnReservation | None:
         """Return one reservation by key, or ``None``."""
         with self._connect() as conn:
