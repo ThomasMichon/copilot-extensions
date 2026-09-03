@@ -159,6 +159,42 @@ def test_empty_emission_has_no_record_separator(capsys):
     assert capsys.readouterr().out == "{}"
 
 
+def test_main_uses_one_managed_agent_worktrees_start(monkeypatch, capsys):
+    calls = []
+
+    def fake_aw(*args):
+        calls.append(args)
+        return json.dumps({"related": RELATED})
+
+    monkeypatch.setattr(mod, "_aw", fake_aw)
+    monkeypatch.setattr(mod.sys, "argv", ["emit_codespace_map.py", "--aggregate"])
+
+    mod.main()
+
+    assert calls == [
+        ("related", "list", "--json", "--require-managed"),
+    ]
+    assert "example-web(role=product,locus=codespace)" in json.loads(
+        capsys.readouterr().out
+    )["additionalContext"]
+
+
+def test_main_is_empty_when_managed_related_query_is_rejected(monkeypatch, capsys):
+    calls = []
+
+    def fake_aw(*args):
+        calls.append(args)
+        return None
+
+    monkeypatch.setattr(mod, "_aw", fake_aw)
+
+    with pytest.raises(SystemExit):
+        mod.main()
+
+    assert calls == [("related", "list", "--json", "--require-managed")]
+    assert capsys.readouterr().out == "{}"
+
+
 def test_powershell_wrapper_preserves_newline_free_output():
     wrapper = (
         Path(__file__).resolve().parents[1]

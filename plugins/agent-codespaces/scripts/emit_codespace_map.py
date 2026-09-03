@@ -7,11 +7,13 @@ checkout and must be worked in a GitHub CodeSpace (via agent-codespaces /
 agent-bridge) rather than edited in place.
 
 The map is derived, never hardcoded: it reads ``agent-worktrees related list
---json`` and keeps the entries whose ``delegate`` is ``agent-codespaces`` (the
-same registration ``agent-worktrees related resolve <name>`` and the
-``codespace:<name>`` dispatcher consume). Each row surfaces the CodeSpaces
-vessel repo, the in-CodeSpace checkout folder, and the machine, so a session can
-dispatch correctly at a glance.
+--json --require-managed`` and keeps the entries whose ``delegate`` is
+``agent-codespaces`` (the same registration ``agent-worktrees related resolve
+<name>`` and the ``codespace:<name>`` dispatcher consume). The explicit gate
+keeps the hook silent outside an adopted project without requiring a second
+runtime start. Each row surfaces the CodeSpaces vessel repo, the in-CodeSpace
+checkout folder, and the machine, so a session can dispatch correctly at a
+glance.
 
 Output contract (Copilot CLI sessionStart hook): a single JSON object on stdout
 -- ``{"additionalContext": "<markdown>"}`` when there is at least one
@@ -160,12 +162,7 @@ def _serialize_context(context: str) -> str:
 
 
 def main() -> None:
-    # cwd-gate: only emit inside a managed agent-worktrees project.
-    project = (_aw("get", "project") or "").strip()
-    if not project:
-        _emit_empty()
-
-    raw = _aw("related", "list", "--json")
+    raw = _aw("related", "list", "--json", "--require-managed")
     if not raw:
         _emit_empty()
     try:
