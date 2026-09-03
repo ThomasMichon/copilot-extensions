@@ -544,16 +544,18 @@ class GitLeaseStore:
         if self._auth_args and any(a in self._NETWORK_SUBCOMMANDS for a in args):
             call_args = [*self._auth_args, *args]
         try:
-            result = subprocess.run(
-                ["git", *call_args],
-                cwd=tempfile.gettempdir(),
-                input=input_text,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=45,
-                check=False,
-            )
+            with tempfile.TemporaryDirectory(prefix="agent-lease-git-") as cwd:
+                env["GIT_CEILING_DIRECTORIES"] = str(Path(cwd).parent)
+                result = subprocess.run(
+                    ["git", *call_args],
+                    cwd=cwd,
+                    input=input_text,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=45,
+                    check=False,
+                )
         except FileNotFoundError as exc:
             raise GitError("git executable was not found") from exc
         except subprocess.TimeoutExpired as exc:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -325,6 +326,12 @@ def test_caller_checkout_environment_is_not_used(
     poisoned = tmp_path / "poisoned"
     poisoned.mkdir()
     (poisoned / ".git").write_text("gitdir: /missing/repository\n", encoding="utf-8")
+    temp_parent = tmp_path / "temp"
+    temp_parent.mkdir()
+    (temp_parent / ".git").write_text(
+        "gitdir: /missing/temp-repository\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_parent))
     monkeypatch.chdir(poisoned)
     monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
