@@ -8023,6 +8023,7 @@ class _ResidentHookPolicy:
             result = {}
         if not isinstance(result, dict):
             result = {}
+        result.update(self.project_hook())
         return result
 
     def project_hook(self) -> dict:

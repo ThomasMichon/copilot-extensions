@@ -71,6 +71,21 @@ def test_agent_worktrees_lifecycle_hooks_remain_bash_3_compatible():
 
 
 @pytest.mark.guard
+def test_agent_worktrees_session_start_has_one_lifecycle_client():
+    hooks = json.loads(
+        (_PLUGINS / "agent-worktrees" / "hooks.json").read_text(encoding="utf-8")
+    )
+    commands = hooks["hooks"]["sessionStart"]
+    rendered = "\n".join(
+        str(entry.get(shell) or "")
+        for entry in commands
+        for shell in ("powershell", "bash")
+    )
+    assert "register-session" in rendered
+    assert "project-hooks" not in rendered
+
+
+@pytest.mark.guard
 def test_powershell_module_analysis_cache_is_ignored():
     ignore_rules = (_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert any(

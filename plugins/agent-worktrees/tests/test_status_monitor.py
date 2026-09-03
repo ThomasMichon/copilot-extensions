@@ -384,6 +384,11 @@ def test_resident_session_start_preserves_hook_metadata(monkeypatch):
 
     monkeypatch.setattr(m, "cmd_register_session", register)
     policy = m._ResidentHookPolicy(None)
+    monkeypatch.setattr(
+        policy,
+        "project_hook",
+        lambda: {"projectHook": "/hooks/session-start.ps1"},
+    )
     result = policy.session_start({
         "sessionId": "session-1",
         "cwd": "/worktree",
@@ -399,7 +404,10 @@ def test_resident_session_start_preserves_hook_metadata(monkeypatch):
         },
     })
 
-    assert result == {"additionalContext": "bound"}
+    assert result == {
+        "additionalContext": "bound",
+        "projectHook": "/hooks/session-start.ps1",
+    }
     assert captured["worktree_id"] == "wt-bound"
     assert captured["session_id"] == "session-1"
     assert captured["cwd"] == "/worktree"

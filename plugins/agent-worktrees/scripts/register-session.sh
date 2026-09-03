@@ -131,6 +131,7 @@ args=(-m agent_worktrees register-session --stdin --emit-context)
 # this narrow same-plugin merge, agents receive either the binding or the exact
 # argv[0], but not reliably both.
 registration_json=""
+project_hook=""
 use_fallback=1
 client="$HOME/.agent-worktrees/bin/hook_client.py"
 if [[ -f "$client" ]]; then
@@ -141,8 +142,12 @@ if [[ -f "$client" ]]; then
     if [[ "$client_output" == *$'\n'*$'\n'* ]]; then
         client_status="${client_output##*$'\n'}"
         client_context="${client_output%%$'\n'*}"
+        client_remainder="${client_output#*$'\n'}"
+        client_project_hook="${client_remainder%%$'\n'*}"
         if [[ "$client_status" == "0" ]]; then
             registration_json="$client_context"
+            [[ "$client_project_hook" != "-" ]] &&
+                project_hook="$client_project_hook"
             use_fallback=0
         fi
     fi
@@ -153,8 +158,21 @@ if (( use_fallback )); then
     else
         _log WARN "register-session failed (exit $?) wt=${wt_id:-<from-cwd>}"
     fi
+    project="$(PYTHONPATH="" "$PYTHON" -m agent_worktrees get project 2>/dev/null || true)"
+    if [[ -n "$project" ]]; then
+        project_hook="$HOME/.$project/hooks/session-start.sh"
+    fi
 else
     _log OK "registered session through resident monitor (wt=${wt_id:-<from-cwd>})"
+fi
+
+project_json=""
+if [[ -n "$project_hook" && -f "$project_hook" ]]; then
+    if [[ -n "$payload" ]]; then
+        project_json="$(printf '%s' "$payload" | bash "$project_hook" 2>/dev/null || true)"
+    else
+        project_json="$(bash "$project_hook" 2>/dev/null || true)"
+    fi
 fi
 
 catalog_json=""
@@ -181,18 +199,20 @@ def parse_context(raw):
     context = value.get("additionalContext") if isinstance(value, dict) else None
     return context.strip() if isinstance(context, str) else ""
 
-catalog_context = parse_context(sys.argv[1])
-registration_context = parse_context(sys.argv[2])
-if not registration_context:
-    print("{}")
-    raise SystemExit(0)
+project_context = parse_context(sys.argv[1])
+catalog_context = parse_context(sys.argv[2])
+registration_context = parse_context(sys.argv[3])
 
 contexts = []
-for context in (catalog_context, registration_context):
+for context in (
+    project_context,
+    catalog_context if registration_context else "",
+    registration_context,
+):
     if context and context not in contexts:
         contexts.append(context)
 print(json.dumps({"additionalContext": "\n\n".join(contexts)}) if contexts else "{}")
-' "$catalog_json" "$registration_json" 2>/dev/null)"; then
+' "$project_json" "$catalog_json" "$registration_json" 2>/dev/null)"; then
     merged_json="{}"
 fi
 publish "$merged_json"

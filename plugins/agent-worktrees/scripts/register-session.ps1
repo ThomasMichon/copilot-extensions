@@ -150,6 +150,7 @@ $cmdArgs = @('-m', 'agent_worktrees', 'register-session', '--stdin', '--emit-con
 if ($wt_id) { $cmdArgs += @('--worktree-id', $wt_id) }
 
 $registrationJson = ''
+$projectHookPath = ''
 $useFallback = $true
 $client = Join-Path $env:USERPROFILE '.agent-worktrees\bin\hook_client.py'
 if (Test-Path -LiteralPath $client -PathType Leaf) {
@@ -161,6 +162,9 @@ if (Test-Path -LiteralPath $client -PathType Leaf) {
         $lines = @($clientOutput -split "\r?\n")
         if ($lines.Count -ge 3 -and $lines[-1] -eq '0') {
             $registrationJson = [string]$lines[0]
+            if ($lines[1] -ne '-') {
+                $projectHookPath = [string]$lines[1]
+            }
             $useFallback = $false
         }
     } catch { }
@@ -169,6 +173,28 @@ if ($useFallback) {
     try {
         $registrationJson = (
             $payload | & $python @cmdArgs 2>$null | Out-String
+        ).Trim()
+    } catch { }
+    try {
+        $projectName = (
+            & $python -m agent_worktrees get project 2>$null |
+                Select-Object -First 1
+        )
+        if ($projectName) {
+            $projectHookPath = Join-Path $env:USERPROFILE ".$projectName\hooks\session-start.ps1"
+        }
+    } catch { }
+}
+
+$projectHookJson = ''
+if ($projectHookPath -and (Test-Path -LiteralPath $projectHookPath -PathType Leaf)) {
+    try {
+        $projectHookJson = (
+            $(if ($payload) {
+                $payload | & $projectHookPath 2>$null
+            } else {
+                & $projectHookPath 2>$null
+            }) | Out-String
         ).Trim()
     } catch { }
 }
@@ -186,20 +212,8 @@ if ($catalogScript -and (Test-Path -LiteralPath $catalogScript)) {
 # Keep the payload-local command catalog with the worktree-binding context in
 # one sessionStart result. Copilot CLI currently retains only one non-empty
 # result when hooks race (#1234), so separate valid producers are insufficient.
-$registrationContext = ''
-if ($registrationJson) {
-    try {
-        $registrationValue = $registrationJson | ConvertFrom-Json
-        $registrationContext = ([string]$registrationValue.additionalContext).Trim()
-    } catch { }
-}
-if (-not $registrationContext) {
-    Publish-Context '{}'
-    exit 0
-}
-
 $contexts = [System.Collections.Generic.List[string]]::new()
-foreach ($raw in @($catalogJson)) {
+foreach ($raw in @($projectHookJson)) {
     if (-not $raw) { continue }
     try {
         $value = $raw | ConvertFrom-Json
@@ -209,8 +223,27 @@ foreach ($raw in @($catalogJson)) {
         }
     } catch { }
 }
-if (-not $contexts.Contains($registrationContext)) {
-    $contexts.Add($registrationContext)
+$registrationContext = ''
+if ($registrationJson) {
+    try {
+        $registrationValue = $registrationJson | ConvertFrom-Json
+        $registrationContext = ([string]$registrationValue.additionalContext).Trim()
+    } catch { }
+}
+if ($registrationContext) {
+    foreach ($raw in @($catalogJson)) {
+        if (-not $raw) { continue }
+        try {
+            $value = $raw | ConvertFrom-Json
+            $context = ([string]$value.additionalContext).Trim()
+            if ($context -and -not $contexts.Contains($context)) {
+                $contexts.Add($context)
+            }
+        } catch { }
+    }
+    if (-not $contexts.Contains($registrationContext)) {
+        $contexts.Add($registrationContext)
+    }
 }
 if ($contexts.Count -gt 0) {
     Publish-Context ((@{
