@@ -340,3 +340,21 @@ Adopt the authority and schema model in [`design.md`](design.md):
   Opened #1712 for the final rollout/hardening slice: platform containment and
   atomicity, mixed-version behavior, large-history latency, cross-scenario
   convergence, remaining validation closure, and effort archival.
+- The first #1712 hardening increment landed through #1784. Exact session
+  projection access now rejects Windows case-folded and short-name aliases,
+  accepts canonical extended paths, defers transient canonicalization failures,
+  preserves additive same-schema relation and lineage fields, and compares only
+  understood lineage keys during restored-state validation.
+- Projection coverage now exercises older-schema authoritative rebuild,
+  newer-schema writer fencing, deterministic bounded encoding, interrupted
+  replacement cleanup, external staging, POSIX permission repair, and real
+  cross-process lock contention on Windows and POSIX. The rebased Windows
+  baseline completed with 3,534 passes, 38 skips, and the three #1649 tests
+  deliberately deselected; one unrelated timing-sensitive lock assertion
+  passed on isolated retry.
+- Began the next #1712 increment: define a byte-bounded schema migration and
+  mixed-writer contract for truthful relation overflow, and evaluate
+  handle-relative replacement so parent-directory identity cannot change
+  between validation and commit. No projection format change will land until
+  readmission, saturation, deterministic serialization, and old/new writer
+  interleavings are covered together.
