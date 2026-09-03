@@ -200,15 +200,15 @@ def _patch_id(base: str, head: str, *, cwd: str) -> str:
     return out.split()[0] if out else ""
 
 
-def _commit_patch_ids(base: str, head: str, *, cwd: str) -> set[str]:
-    """Patch IDs for non-merge commits in ``base..head``, or an empty set.
+def _commit_patch_ids(base: str, head: str, *, cwd: str) -> dict[str, set[str]]:
+    """Map patch IDs to non-merge commits in ``base..head``.
 
     Stream one ``git log`` process into one ``git patch-id`` process. This
     avoids both per-commit process spawning and buffering a long patch history
     in memory.
     """
     if not base:
-        return set()
+        return {}
     import subprocess
 
     log_process: subprocess.Popen[bytes] | None = None
@@ -226,7 +226,7 @@ def _commit_patch_ids(base: str, head: str, *, cwd: str) -> set[str]:
         if log_process.stdout is None:
             log_process.kill()
             log_process.wait()
-            return set()
+            return {}
         patch_process = subprocess.Popen(
             ["git", "patch-id", "--stable"],
             cwd=cwd,
@@ -247,14 +247,15 @@ def _commit_patch_ids(base: str, head: str, *, cwd: str) -> set[str]:
         if log_process is not None and log_process.poll() is None:
             log_process.kill()
             log_process.wait()
-        return set()
+        return {}
     if patch_process.returncode != 0 or log_returncode != 0:
-        return set()
-    return {
-        line.split()[0]
-        for line in output.splitlines()
-        if line.split()
-    }
+        return {}
+    result: dict[str, set[str]] = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            result.setdefault(parts[0], set()).add(parts[1])
+    return result
 
 
 def _title_from_commits(worktree_path: str, upstream: str) -> str | None:

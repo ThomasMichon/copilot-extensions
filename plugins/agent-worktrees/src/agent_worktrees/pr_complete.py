@@ -41,6 +41,32 @@ from .config import Config
 BACKUP_REF = "refs/pre-complete-backup"
 
 
+def _is_exact_squash_result(
+    effective_base: str, pr_head: str, candidate: str, *, cwd: str
+) -> bool:
+    """Return whether ``candidate`` is the exact squash result for ``pr_head``."""
+    parent = git_ops.git(
+        "rev-parse", f"{candidate}^", cwd=cwd, check=False,
+    )
+    if parent.returncode != 0 or not parent.stdout.strip():
+        return False
+    merged = git_ops.git(
+        "merge-tree", "--write-tree", "--merge-base", effective_base,
+        parent.stdout.strip(), pr_head, cwd=cwd, check=False,
+    )
+    if merged.returncode != 0:
+        return False
+    merged_tree = merged.stdout.splitlines()[0].strip() if merged.stdout else ""
+    candidate_tree = git_ops.git(
+        "rev-parse", f"{candidate}^{{tree}}", cwd=cwd, check=False,
+    )
+    return (
+        bool(merged_tree)
+        and candidate_tree.returncode == 0
+        and merged_tree == candidate_tree.stdout.strip()
+    )
+
+
 def _merged_pr_head(
     worktree_id: str, branch: str, upstream: str, *, cwd: str
 ) -> str | None:
@@ -48,20 +74,20 @@ def _merged_pr_head(
 
     A recorded PR boundary lets reconciliation exclude the PR's original
     commits and replay only later local work. The boundary is trusted only when
-    its aggregate patch-id matches one commit reachable on upstream.
+    its effective aggregate patch-id matches one commit reachable on upstream.
+    The effective base is recomputed from the current upstream: a PR's recorded
+    creation-time base can become stale while the open PR remains mergeable.
     """
     record = tracking.load_record_by_id(worktree_id)
     if record is None:
         return None
 
     candidates: list[tuple[int, str]] = []
-    upstream_patch_ids: dict[str, set[str]] = {}
+    upstream_patch_ids: dict[str, dict[str, set[str]]] = {}
     for pr in record.prs:
         if (
             pr.state != "merged"
-            or not pr.base_sha
             or not pr.head_sha
-            or not pr.patch_id
         ):
             continue
         if git_ops.git(
@@ -70,17 +96,39 @@ def _merged_pr_head(
         ).returncode != 0:
             continue
         if git_ops.git(
-            "merge-base", "--is-ancestor", pr.base_sha, upstream,
+            "merge-base", "--is-ancestor", pr.head_sha, upstream,
             cwd=cwd, check=False,
-        ).returncode != 0:
+        ).returncode == 0:
+            distance = git_ops._rev_count(
+                f"{pr.head_sha}..{branch}", cwd=cwd,
+            )
+            candidates.append((distance, pr.head_sha))
             continue
 
-        if pr.base_sha not in upstream_patch_ids:
-            upstream_patch_ids[pr.base_sha] = pr_ops._commit_patch_ids(
-                pr.base_sha, upstream, cwd=cwd,
+        effective_base_result = git_ops.git(
+            "merge-base", upstream, pr.head_sha, cwd=cwd, check=False,
+        )
+        effective_base = effective_base_result.stdout.strip()
+        if effective_base_result.returncode != 0 or not effective_base:
+            continue
+        effective_patch_id = pr_ops._patch_id(
+            effective_base, pr.head_sha, cwd=cwd,
+        )
+        if not effective_patch_id:
+            continue
+
+        if effective_base not in upstream_patch_ids:
+            upstream_patch_ids[effective_base] = pr_ops._commit_patch_ids(
+                effective_base, upstream, cwd=cwd,
             )
-        patch_ids = upstream_patch_ids[pr.base_sha]
-        if pr.patch_id not in patch_ids:
+        patch_ids = upstream_patch_ids[effective_base]
+        candidates_for_patch = patch_ids.get(effective_patch_id, set())
+        if not any(
+            _is_exact_squash_result(
+                effective_base, pr.head_sha, candidate, cwd=cwd,
+            )
+            for candidate in candidates_for_patch
+        ):
             continue
         distance = git_ops._rev_count(
             f"{pr.head_sha}..{branch}", cwd=cwd,

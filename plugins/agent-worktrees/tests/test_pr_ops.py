@@ -528,8 +528,8 @@ class TestPatchId:
         patch_ids = pr_ops._commit_patch_ids(base, "HEAD", cwd=str(d))
 
         assert patch_ids == {
-            pr_ops._patch_id(base, first, cwd=str(d)),
-            pr_ops._patch_id(first, second, cwd=str(d)),
+            pr_ops._patch_id(base, first, cwd=str(d)): {first},
+            pr_ops._patch_id(first, second, cwd=str(d)): {second},
         }
 
 
