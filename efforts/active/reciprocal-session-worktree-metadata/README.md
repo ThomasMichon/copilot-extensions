@@ -374,8 +374,8 @@ Adopt the authority and schema model in [`design.md`](design.md):
   `1.5.3-dev737`. Readers validate explicit v2 completeness fields and compact
   tombstones, normalize recovery/lineage/controller diagnostics, and block
   every downgrade path while writers continue to emit v1.
-- Deployed and verified the reader floor on Lambda-Core Windows and WSL.
-  Borealis was unavailable and explicitly skipped by the operator;
-  tmichon-book2 remains on its outbound-only launch-time self-heal path. Writer
-  emission remains gated until the remaining supported writer floor is
+- Deployed and verified the reader floor on one Windows writer and its paired
+  Linux environment. One additional writer was unavailable and explicitly
+  skipped; an outbound-only writer remains on its launch-time self-heal path.
+  Writer emission remains gated until the remaining supported writer floor is
   observed or its responsibility is explicitly transferred.
