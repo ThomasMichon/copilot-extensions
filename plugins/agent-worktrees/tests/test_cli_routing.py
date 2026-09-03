@@ -240,6 +240,19 @@ def test_related_dispatch_activates_project_context_from_cwd(monkeypatch):
         m.cfg.set_active_project(None)
 
 
+def test_related_dispatch_can_require_managed_project(monkeypatch, capsys):
+    m.cfg.set_active_project(None)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: (None, None))
+    monkeypatch.setattr(
+        m,
+        "_related_anchor",
+        lambda _rest: pytest.fail("unmanaged lookup must stop before reading"),
+    )
+
+    assert m.cmd_related_dispatch(["list", "--json", "--require-managed"]) == 1
+    assert "not an adopted agent-worktrees project" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     ("argv", "command"),
     [
