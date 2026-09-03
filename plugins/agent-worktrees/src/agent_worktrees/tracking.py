@@ -2134,7 +2134,7 @@ def load_record(path: Path) -> WorktreeRecord:
         owner=str(owner_raw) if owner_raw else None,
         interface=iface_val,
         origin=origin_val,
-        checkout_managed=bool(data.get("checkout_managed", True)),
+        checkout_managed=data.get("checkout_managed", True) is not False,
         parent_session=(str(data["parent_session"])
                         if data.get("parent_session") else None),
         head_session=(str(data["head_session"])

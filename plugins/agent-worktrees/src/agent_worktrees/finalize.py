@@ -1638,14 +1638,22 @@ def validate_and_finalize(
                 f"{repo.remote}/{repo.default_branch}, so this worktree is "
                 f"safe to prune."
             )
-            output.info(
-                f"Leaving the worktree directory and branch in place because "
-                f"{reason}. Finalize never deletes the git branch or the "
-                f"folder of an active worktree -- that's expected, not a "
-                f"failure. They'll be removed by 'agent-worktrees cleanup' "
-                f"once the session ends (this is the normal outcome when you "
-                f"finalize from inside the session)."
-            )
+            if not checkout_managed:
+                output.info(
+                    f"Leaving the worktree directory and branch in place because "
+                    f"{reason}. Later agent-worktrees cleanup may retire this "
+                    f"tracking record, but only the external host may remove the "
+                    f"checkout or branch."
+                )
+            else:
+                output.info(
+                    f"Leaving the worktree directory and branch in place because "
+                    f"{reason}. Finalize never deletes the git branch or the "
+                    f"folder of an active worktree -- that's expected, not a "
+                    f"failure. They'll be removed by 'agent-worktrees cleanup' "
+                    f"once the session ends (this is the normal outcome when you "
+                    f"finalize from inside the session)."
+                )
             activity.log_event(
                 "finalize_skipped_removal",
                 worktree_id=worktree_id,

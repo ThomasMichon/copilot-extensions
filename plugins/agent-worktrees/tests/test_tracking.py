@@ -198,6 +198,31 @@ class TestSaveLoadRoundTrip:
         loaded = load_record(path)
         assert loaded.title == "Fix: handle edge case #42 & more"
 
+    @pytest.mark.parametrize(
+        ("serialized", "expected"),
+        [
+            ("false", False),
+            ("'false'", True),
+            ("null", True),
+            (None, True),
+        ],
+    )
+    def test_checkout_managed_only_accepts_explicit_false(
+        self, tmp_path: Path, serialized: str | None, expected: bool
+    ):
+        path = tmp_path / "wt.yaml"
+        save_record(self._make_record(checkout_managed=False), path)
+        text = path.read_text()
+        if serialized is None:
+            text = text.replace("checkout_managed: false\n", "")
+        else:
+            text = text.replace(
+                "checkout_managed: false", f"checkout_managed: {serialized}"
+            )
+        path.write_text(text)
+
+        assert load_record(path).checkout_managed is expected
+
     def test_load_repairs_control_poison_and_next_save_persists_repair(
         self, tmp_path: Path
     ):
