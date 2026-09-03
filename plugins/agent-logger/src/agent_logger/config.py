@@ -111,6 +111,8 @@ DEFAULTS: dict[str, Any] = {
     # with a -wsl suffix inside WSL).
     "machine": {
         "name": None,
+        # Optional exact role used by aggregate machine selectors.
+        "role": None,
     },
     # Background chronicling -- the scheduled orchestrator daemon. Off by
     # default; only the single elected chronicler host (fleet-wide, one machine)
@@ -674,6 +676,10 @@ class Config:
     @property
     def machine_name(self) -> str | None:
         return self._data.get("machine", {}).get("name")
+
+    @property
+    def machine_role(self) -> str | None:
+        return self._data.get("machine", {}).get("role")
 
     # -- background chronicle -------------------------------------------
 

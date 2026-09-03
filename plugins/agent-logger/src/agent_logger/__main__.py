@@ -9,10 +9,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
+import subprocess
 import sys
 
+import yaml
+
 from agent_logger._build_info import BUILT_AT, COMMIT, __version__
-from agent_logger.config import RepositoryConfigError, load_config
+from agent_logger.aggregate import (
+    ExecutionMode,
+    FileSystemAggregateInputProvider,
+    Finding,
+    MachineIdentity,
+    ResolvedPlan,
+    compile_from_provider,
+)
+from agent_logger.config import RepositoryConfigError, home_dir, load_config
+from agent_logger.segmenter.platform import detect_machine
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
@@ -20,7 +33,70 @@ def _cmd_version(_args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_config(_args: argparse.Namespace) -> int:
+def _load_aggregate_plan() -> ResolvedPlan:
+    home = home_dir()
+    machine = MachineIdentity(
+        name=detect_machine(),
+        platform=_platform_name(),
+    )
+    try:
+        legacy = load_config(home=home, include_repo=False)
+        raw_machine = legacy.get("machine", {})
+        if not isinstance(raw_machine, dict):
+            raise ValueError("machine configuration must be a mapping")
+        machine = MachineIdentity(
+            name=_machine_text(legacy.machine_name, "name") or machine.name,
+            platform=machine.platform,
+            role=_machine_text(legacy.machine_role, "role"),
+        )
+        return compile_from_provider(
+            FileSystemAggregateInputProvider(machine=machine, home=home)
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError, yaml.YAMLError):
+        return ResolvedPlan(
+            machine=machine,
+            mode=ExecutionMode.OBSERVE,
+            findings=[
+                Finding(
+                    code="invalid-machine-configuration",
+                    message="machine aggregate configuration could not be loaded",
+                )
+            ],
+            authorized=False,
+            passive=True,
+        )
+
+
+def _platform_name() -> str:
+    name = platform.system().lower()
+    if name == "darwin":
+        return "macos"
+    if name == "windows":
+        return "windows"
+    return "linux"
+
+
+def _machine_text(value: object, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"machine.{field_name} must be null or a non-empty string")
+    return value.strip()
+
+
+def _print_aggregate_plan(plan: ResolvedPlan, *, canonical: bool) -> None:
+    if canonical:
+        print(plan.canonical_json())
+    else:
+        print(json.dumps(plan.as_dict(), indent=2, sort_keys=True))
+
+
+def _cmd_config(args: argparse.Namespace) -> int:
+    if getattr(args, "resolved", False):
+        plan = _load_aggregate_plan()
+        _print_aggregate_plan(plan, canonical=bool(getattr(args, "json", False)))
+        return 0 if plan.authorized else 2
+
     cfg = load_config()
     summary = {
         "home": str(cfg.home),
@@ -42,6 +118,24 @@ def _cmd_config(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    plan = _load_aggregate_plan()
+    if getattr(args, "json", False):
+        _print_aggregate_plan(plan, canonical=True)
+    else:
+        state = (
+            "passive"
+            if plan.authorized and plan.passive
+            else "authorized"
+            if plan.authorized
+            else "invalid"
+        )
+        print(f"aggregate configuration: {state}")
+        for finding in plan.as_dict()["findings"]:
+            print(f"- {finding['code']}: {finding['message']}")
+    return 0 if plan.authorized else 2
+
+
 def _cmd_organization(_args: argparse.Namespace) -> int:
     cfg = load_config()
     result = {
@@ -55,6 +149,7 @@ def _cmd_organization(_args: argparse.Namespace) -> int:
 
 def _cmd_chronicle_status(_args: argparse.Namespace) -> int:
     cfg = load_config()
+    aggregate_plan = _load_aggregate_plan()
     block = cfg.chronicle
     summary = {
         "enabled": cfg.chronicle_enabled,
@@ -66,6 +161,7 @@ def _cmd_chronicle_status(_args: argparse.Namespace) -> int:
         "routes": block.get("routes", []),
         "skip_repositories": block.get("skip_repositories", []),
         "sinks": sorted((block.get("sinks", {}) or {}).keys()),
+        "aggregate": aggregate_plan.as_dict(),
     }
     print(json.dumps(summary, indent=2))
     return 0
@@ -169,7 +265,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_version.set_defaults(func=_cmd_version)
 
     p_config = sub.add_parser("config", help="show resolved configuration")
+    p_config.add_argument(
+        "--resolved",
+        action="store_true",
+        help="show the resolved aggregate machine plan",
+    )
+    p_config.add_argument(
+        "--json",
+        action="store_true",
+        help="emit canonical compact JSON (with --resolved)",
+    )
     p_config.set_defaults(func=_cmd_config)
+
+    p_doctor = sub.add_parser(
+        "doctor",
+        help="validate aggregate configuration without side effects",
+    )
+    p_doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the resolved aggregate plan as canonical JSON",
+    )
+    p_doctor.set_defaults(func=_cmd_doctor)
 
     p_organization = sub.add_parser(
         "organization",
