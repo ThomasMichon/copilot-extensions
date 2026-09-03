@@ -538,3 +538,28 @@ enforcement before migrating the complete contributor stack.
 - Next gate: return to repository-relative references and change only assembly
   from flat fragments to `flat-with-index`, testing whether one explicit
   generated index can provide ordering without structured-reference verbosity.
+
+### 2026-09-03 - Generated index does not recover multi-guide
+
+- Ran three valid F3 repository-relative safety-gated multi-guide repetitions
+  with only assembly changed from flat fragments to `flat-with-index`. A first
+  repetition-3 attempt timed out and remains transport `INVALID`; an
+  independently generated retry supplied the behavioral repetition.
+- All three literal-mode judges failed the cell. Every run loaded the required
+  guides, but independent judges counted three direct irrelevant guide reads,
+  lost exact owner provenance, used 20 tool calls, and returned an incorrect
+  blocked decision. Repetitions 1 and 2 also invented configuration paths and
+  violated ROUTE-1 and CAP-1.
+- The frozen canary-backed evidence records two irrelevant guides per run
+  because one directly read guide canary was absent or malformed in each final
+  witness. Preserve the independent transcript count rather than changing the
+  evidence contract.
+- Fast-forwarding the evaluation checkout exposed expected suite-inventory
+  drift from a later contributor-order change, so that setup attempt remained
+  `INVALID` before agent launch. The valid scenarios were generated from the
+  frozen pre-change source and driven with the byte-identical current
+  clean-room runner.
+- Reject `flat-with-index`: its 4,150-character / 1,038-token context added
+  overhead without restoring bounded behavior. Next gate: return to flat
+  fragments and change only the reference representation to
+  `backtick-absolute-contained`.
