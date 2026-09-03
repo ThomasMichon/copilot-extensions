@@ -202,9 +202,11 @@ class TestRegisterSessionProjectResolution:
     it is a no-project command (main() sets no active project for it)."""
 
     def test_activates_project_from_payload_cwd(self, monkeypatch):
-        seen: list[str | None] = []
+        seen: list[tuple[str | None, bool]] = []
         monkeypatch.setattr(
-            m, "_activate_project_for_path", lambda c: seen.append(c)
+            m,
+            "_activate_project_for_path",
+            lambda c, *, force=False: seen.append((c, force)),
         )
         # Lookup returns None -> silent no-op; we only assert the activation.
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
@@ -214,13 +216,15 @@ class TestRegisterSessionProjectResolution:
         rc = m.cmd_register_session(_args(stdin=True))
 
         assert rc == 0
-        assert seen == ["/tmp/src/wt-x/sub"]
+        assert seen == [("/tmp/src/wt-x/sub", True)]
 
     def test_lookup_error_is_silent_noop(self, monkeypatch):
         """A cwd outside any adopted project makes find_worktree_id_by_cwd
         raise (cfg.tracking_dir() -> project_name() RuntimeError).  The handler
         must swallow it and stay a silent no-op, never surfacing an error."""
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(
+            m, "_activate_project_for_path", lambda c, *, force=False: None
+        )
 
         def boom(_c):
             raise RuntimeError("no active project")
@@ -303,7 +307,9 @@ class TestMuxRecoveredSessionBinding:
             "stdin",
             io.StringIO('{"sessionId":"sess-mux","cwd":"/home/user"}'),
         )
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda _cwd: None)
+        monkeypatch.setattr(
+            m, "_activate_project_for_path", lambda _cwd, *, force=False: None
+        )
         monkeypatch.setattr(
             m.tracking, "find_worktree_id_by_cwd", lambda _cwd: None
         )
@@ -340,7 +346,9 @@ class TestMuxRecoveredSessionBinding:
             "stdin",
             io.StringIO('{"sessionId":"sess-mux","cwd":"/home/user"}'),
         )
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda _cwd: None)
+        monkeypatch.setattr(
+            m, "_activate_project_for_path", lambda _cwd, *, force=False: None
+        )
         monkeypatch.setattr(
             m.tracking, "find_worktree_id_by_cwd", lambda _cwd: None
         )
@@ -465,7 +473,9 @@ class TestDeregisterSessionStdin:
         path = tmp_tracking_dir / "wt-end.yaml"
         _save_record(tmp_tracking_dir, "wt-end", "/tmp/src/wt-end")
         m.tracking.register_session("wt-end", "session-end")
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda _cwd: None)
+        monkeypatch.setattr(
+            m, "_activate_project_for_path", lambda _cwd, *, force=False: None
+        )
         monkeypatch.setattr(
             m.tracking, "find_worktree_id_by_cwd", lambda _cwd: None
         )
