@@ -13,6 +13,7 @@ that pattern to this repository.
 | [Reciprocal Session-Worktree Metadata](active/reciprocal-session-worktree-metadata/README.md) | Draft | #1635 |
 | [Reliable Context Handoff Cutover](active/reliable-context-handoff-cutover/README.md) | Draft | #1630 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
+| [Persistent SSH Carrier and Push Supervision](active/persistent-ssh-carrier/README.md) | Draft | #1763 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge Contract Baseline](active/agent-bridge-contract-baseline/README.md) | Draft | #1468 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266 |
