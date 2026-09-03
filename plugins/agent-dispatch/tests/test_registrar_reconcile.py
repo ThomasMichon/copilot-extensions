@@ -34,7 +34,7 @@ def test_spec_general_pool_headless():
     assert "embody_backend" not in spec
     assert spec["headless_agent"] == "general-loop-worker"
     assert spec["heartbeat"] is True
-    assert spec["reactive"] is True
+    assert spec["reactive"] is False
 
 
 def test_spec_and_command_carry_disposable_cli_labels():

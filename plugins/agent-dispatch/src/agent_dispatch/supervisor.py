@@ -66,13 +66,6 @@ NudgeFn = Callable[[str, "str | None", dict], bool]
 #: the idempotent autopilot seed instead of spawning a duplicate.
 RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
 
-#: A turn-state resolver: ``(worktree, machine) -> 'running' | 'idle' | None``.
-#: Reads an embodied worker's coarse turn state (the derived turn boundary the
-#: coordination layer computes from its session events); ``None`` when the worker
-#: has no observable live session. Injectable so tests drive turn boundaries
-#: deterministically.
-TurnStateFn = Callable[[str, "str | None"], "str | None"]
-
 #: Prime a terminal CLI worker for ground-layer managed GC:
 #: ``(worktree, session) -> structured outcome``.
 ConclusionFn = Callable[[str, "str | None"], dict]
@@ -219,28 +212,6 @@ def _default_redrive(
     return make_redrive_sender()(
         worktree, machine, task, session, reservation
     )
-
-
-def _default_turn_state(worktree: str, machine: str | None) -> str | None:
-    """Resolve an embodied worker's coarse **turn state** via the agent-bridge
-    registry (shells the CLI, cross-machine over SSH).
-
-    Reads the ``turn_state`` field of the worktree's live session -- the coarse
-    ``running``/``idle`` boundary the coordination layer *derives from its own
-    session events* (``assistant.turn_end``), so sampling it here reads the same
-    turn signal without agent-dispatch subscribing to a raw event stream or
-    importing agent-bridge. Every failure mode (no CLI/ssh, unreachable bridge,
-    no live session, no turn signal yet) collapses to ``None`` -- so ``None`` means
-    "no observable turn boundary", which the reactive wait treats as *no signal*
-    (falling back to the periodic poll), never as a turn-end.
-    """
-    from . import tracking
-
-    session = tracking.resolve_live_session(worktree, machine=machine)
-    if not session:
-        return None
-    state = session.get("turn_state")
-    return state if isinstance(state, str) and state else None
 
 
 def _default_conclusion(worktree: str, session: str | None) -> dict:
@@ -580,7 +551,7 @@ class Supervisor:
         publish_activity: bool = False,
         recover: bool = True,
         nudge: bool = True,
-        reactive: bool = True,
+        reactive: bool = False,
         reactive_interval: float = 2.0,
         stall_seconds: float = 600.0,
         liveness_fn: LivenessFn | None = None,
@@ -595,7 +566,6 @@ class Supervisor:
         fleet_cold_fn: FleetColdFn | None = None,
         nudge_fn: NudgeFn | None = None,
         redrive_fn: RedriveFn | None = None,
-        turn_state_fn: TurnStateFn | None = None,
         disposable_cli_labels: Sequence[str] | None = None,
         conclusion_fn: ConclusionFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
@@ -666,18 +636,13 @@ class Supervisor:
         #: Re-drive sender used when a spawned CLI body is alive but still has
         #: not claimed its queued task after a supervisor/bridge restart.
         self.redrive_fn = redrive_fn or _default_redrive
-        #: When True, the inter-cycle wait in :meth:`serve` is **interruptible by a
-        #: turn boundary**: it returns early when an embodied worker settles a turn
-        #: (goes idle), so a completed goal is reconciled and the next task embodied
-        #: promptly instead of only on the poll cadence (*react-to-turn-end*). The
-        #: periodic poll remains the correctness floor; off restores a plain sleep.
+        #: Reserved for a future push-driven turn-event subscription. The former
+        #: implementation sampled Agent Bridge state every two seconds, including
+        #: one SSH process per remote owner, so it is deliberately contained to a
+        #: full-interval sleep until the event-stream carrier exists.
         self.reactive = reactive
-        #: Sub-sampling cadence for the reactive wait -- how often
-        #: :meth:`wait_for_turn_end` re-checks embodied workers' turn state within a
-        #: single inter-cycle wait. Clamped to a sane floor so it never busy-loops.
+        #: Retained for declaration/CLI compatibility; never drives polling.
         self.reactive_interval = max(0.25, float(reactive_interval))
-        #: Turn-state resolver used by :meth:`wait_for_turn_end`. Injectable for tests.
-        self.turn_state_fn = turn_state_fn or _default_turn_state
         #: Explicit label-scoped terminal conclusion policy. Only a terminal
         #: task carrying one of these labels is handed to the disposable CLI
         #: conclusion path; arbitrary CLI worktrees remain untouched.
@@ -1744,90 +1709,26 @@ class Supervisor:
                 log.exception("nudge failed for task %s", task["id"])
         return nudged
 
-    # -- reactive wait (react-to-turn-end) -----------------------------------
-
-    def _embodied_owners(self) -> list[tuple[str, str | None]]:
-        """``(worktree, machine)`` for each spawned reservation whose task is
-        currently **leased** -- the set of workers with a live turn to react to.
-
-        A headless reservation (no worktree handle) or a task not presently leased
-        (``claimed``/``started``) contributes nothing: there is no live turn
-        boundary to watch. Deduped, order-stable.
-        """
-        owners: list[tuple[str, str | None]] = []
-        seen: set[tuple[str, str | None]] = set()
-        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
-            try:
-                task = self.client.get(res["task_id"])
-            except DispatchError:
-                continue
-            if task.get("status") not in _LEASED:
-                continue
-            owner = task.get("owner")
-            worktree = _worktree_from_reservation(res, owner)
-            if not worktree:
-                continue
-            key = (worktree, _machine_from_owner(owner))
-            if key in seen:
-                continue
-            seen.add(key)
-            owners.append(key)
-        return owners
-
-    def _safe_turn_state(self, owner: tuple[str, str | None]) -> str | None:
-        """Resolve one worker's coarse turn state, swallowing any probe error.
-
-        A resolver failure is treated as *no signal* (``None``), never as a
-        turn-end -- so a flaky bridge only costs promptness, never correctness."""
-        worktree, machine = owner
-        try:
-            return self.turn_state_fn(worktree, machine)
-        except Exception:  # turn-state is best-effort -- never let a probe be fatal
-            return None
+    # -- retired reactive wait compatibility seam -----------------------------
 
     def wait_for_turn_end(
         self,
         timeout: float,
         *,
         sleep: Callable[[float], None] | None = None,
-        clock: Callable[[], float] | None = None,
     ) -> bool:
-        """Block up to ``timeout`` seconds, returning early on a worker **turn-end**.
+        """Sleep for the full reconciliation interval without probing workers.
 
-        The interruptible inter-cycle wait behind *react-to-turn-end*. It baselines
-        each embodied worker's coarse turn state (:meth:`_embodied_owners`), then
-        re-samples every :attr:`reactive_interval` seconds and returns ``True`` as
-        soon as any worker is observed transitioning **running -> idle** (a turn just
-        settled), so the caller runs its next supervision pass immediately.
-
-        Returns ``False`` when ``timeout`` elapses with no turn-end observed -- the
-        periodic poll then fires as the correctness **floor**. Only a *transition* to
-        idle wakes it: a worker already idle at entry is not a fresh turn-end (that
-        would wake instantly every cycle), and a worker with no observable turn state
-        (``None``) contributes no signal -- so with no embodied workers, or no
-        reachable bridge, the wait degrades to exactly a plain sleep. ``sleep`` and
-        ``clock`` are injectable for deterministic tests.
+        This compatibility seam previously sampled Agent Bridge state every two
+        seconds and launched SSH for remote owners. Turn-end wakeups must instead
+        arrive from a persistent push subscription; until that carrier exists,
+        fixed-interval reconciliation is the only safe fallback.
         """
         sleep = sleep or time.sleep
-        clock = clock or time.monotonic
-        if timeout <= 0 or not self.reactive:
-            return False
-        owners = self._embodied_owners()
-        if not owners:
-            sleep(timeout)  # nothing to react to -> one plain sleep of the interval
-            return False
-        seen = {o: self._safe_turn_state(o) for o in owners}
-        deadline = clock() + timeout
-        while True:
-            remaining = deadline - clock()
-            if remaining <= 0:
-                return False
-            sleep(min(self.reactive_interval, remaining))
-            for o in owners:
-                state = self._safe_turn_state(o)
-                if state == "idle" and seen.get(o) == "running":
-                    return True  # a turn just settled -> supervise now
-                seen[o] = state
+        if timeout < 0:
+            raise ValueError("supervisor interval must be non-negative")
+        sleep(timeout)
+        return False
 
     def _effective_max_attempts(self, task: dict) -> int:
         """The dead-letter bound for ``task``: the most-permissive per-label
@@ -2037,12 +1938,10 @@ class Supervisor:
     ) -> None:
         """Run :meth:`poll_once` each cycle, waiting between cycles.
 
-        The inter-cycle wait is **interruptible by a worker turn-end** when
-        :attr:`reactive` is set (*react-to-turn-end*): it returns as soon as an
-        embodied worker settles a turn, so a completed goal is reconciled and the
-        next task embodied promptly instead of only on the ``interval`` cadence.
-        The full ``interval`` remains the floor (and the whole wait when nothing is
-        embodied); ``reactive=False`` restores a plain fixed sleep.
+        The loop currently uses fixed-interval reconciliation only. The historical
+        reactive flag is retained for configuration compatibility but performs one
+        full-interval sleep; turn-end acceleration will return only as a push-driven
+        Agent Bridge event subscription.
         """
         while True:
             try:
@@ -2054,9 +1953,6 @@ class Supervisor:
             except Exception:  # pragma: no cover -- never let the loop die on a blip
                 log.exception("supervision cycle failed")
             try:
-                if self.reactive:
-                    self.wait_for_turn_end(interval)
-                else:
-                    time.sleep(interval)
+                self.wait_for_turn_end(interval)
             except KeyboardInterrupt:
                 return

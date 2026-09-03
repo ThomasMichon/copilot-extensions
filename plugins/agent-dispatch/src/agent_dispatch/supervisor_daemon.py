@@ -84,8 +84,11 @@ def _spec_fingerprint(reg: dict) -> str:
     unit exactly when its definition changed -- not on unrelated ``updated_at``
     churn.
     """
+    spec = dict(reg.get("spec") or {})
+    spec.pop("reactive", None)
+    spec.pop("reactive_interval", None)
     return json.dumps(
-        {"kind": reg.get("kind"), "spec": reg.get("spec")},
+        {"kind": reg.get("kind"), "spec": spec},
         sort_keys=True,
         default=str,
     )
@@ -95,6 +98,8 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
     """Fingerprint effective behavior, filling omitted lane defaults."""
     kind = str(reg.get("kind") or "")
     spec = dict(reg.get("spec") or {})
+    spec.pop("reactive", None)
+    spec.pop("reactive_interval", None)
     if kind in {RegistrationKind.SUPERVISED_LANE, RegistrationKind.EVALUATOR}:
         defaults = {
             "labels": [],
@@ -103,8 +108,6 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "label_max_attempts": {},
             "interval": 30.0,
             "heartbeat": True,
-            "reactive": True,
-            "reactive_interval": 2.0,
             "verify_timeout": 0,
             "embody_backend": "headless",
             "headless_labels": [],
@@ -122,7 +125,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "disposable_cli_labels",
         ):
             spec[key] = sorted(set(spec.get(key) or []))
-        for key in ("interval", "reactive_interval"):
+        for key in ("interval",):
             try:
                 spec[key] = float(spec[key])
             except (TypeError, ValueError):
