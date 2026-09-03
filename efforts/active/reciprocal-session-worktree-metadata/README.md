@@ -181,7 +181,7 @@ Public-safe transcription of the operator request:
 ### Phase 7 - Rollout and convergence
 - [ ] Ship schema-version migration and mixed-version behavior under the
       reviewed [`rollout-schema-v2.md`](rollout-schema-v2.md) contract.
-- [ ] Validate no regression in first-paint/list latency at large session
+- [x] Validate no regression in first-paint/list latency at large session
       counts.
 - [ ] Validate Linux, Windows, remote-control, handoff, and synchronized-session
       scenarios.
@@ -379,3 +379,10 @@ Adopt the authority and schema model in [`design.md`](design.md):
   skipped; an outbound-only writer remains on its launch-time self-heal path.
   Writer emission remains gated until the remaining supported writer floor is
   observed or its responsibility is explicitly transferred.
+- Large-history latency validation passed on the deployed reader floor. A
+  Windows corpus with 1,661 session directories measured a 0.52-second median
+  cache-only first paint and 0.55-second median fresh list. A Linux corpus with
+  6,276 session directories measured 0.77 and 1.07 seconds respectively. Both
+  remain well below the historical approximately seven-second active-paint
+  regression, and the source guard still confines live session-root enumeration
+  to explicit backfill and the bounded resident cursor.
