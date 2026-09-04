@@ -68,6 +68,10 @@ kind:
 7. **Crash-proof SSH tree ownership** — evaluate kill-on-close Windows Job
    Objects for SSH trees whose root exits before a proxy descendant. PID-tree
    cleanup cannot recover that already-orphaned shape reliably.
+8. **Durable coding and review invariants** — #1940. Run the headless-launch
+   guard in required CI, cover canonical shared libraries, reject
+   `CREATE_NEW_CONSOLE` in production background paths, and require live
+   windowless-parent validation for launch-path reviews.
 
 ## Deferred Backlog Intake
 
@@ -161,3 +165,21 @@ against real behavior.
 - A Windows integration regression repeatedly launches real console descendants
   under both capture modes while observing `OpenConsole.exe` and foreground
   state. Standalone ssh-manager tests and the complete agent-dispatch suite pass.
+
+### 2026-09-03 - Durable invariant follow-up
+- A later periodic-SSH regression showed that the existing unit assertion
+  incorrectly credited `CREATE_NEW_CONSOLE + SW_HIDE` as headless. Default
+  Terminal still surfaced the delegated console.
+- #1940 extends the guard from agent-procutil adopters to canonical shared
+  libraries, makes it a required CI gate, and promotes the live Windows
+  validation matrix into the patterns and contribution guidance.
+- The expanded guard immediately caught two direct `CREATE_NO_WINDOW` references
+  in agent-dispatch's compatibility layer; those now reuse
+  `agent_procutil.no_window_flags()`, demonstrating that the guard closes real
+  drift rather than documenting an already-perfect baseline.
+- Review then closed two further enforcement holes: aliased/numeric flag
+  constants and divergent vendored library copies are now scanned directly, and
+  vendored synchronization itself is required in CI and pre-push.
+- A second review extended coverage to shipped plugin scripts and annotated
+  constants, and made the exception syntax fail closed: it must be an actual
+  inline comment with a non-empty reason.

@@ -109,6 +109,12 @@ jobs:
         run: python tools/sync-installation-context.py --check
       - name: Installer readiness contract tests
         run: python -m pytest -q libs/installer-readiness/tests
+      - name: Vendored library synchronization
+        run: python tools/check-vendored-libs-sync.py
+      - name: Windows headless launch invariants
+        run: >-
+          python tools/check-headless-launch.py &&
+          python -m pytest -q tools/test_check_headless_launch.py
       - name: Hook process hygiene
         # PowerShell command hooks already run inside PowerShell. Spawning a
         # second interpreter can surface Default Terminal windows on Windows.

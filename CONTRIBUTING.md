@@ -494,7 +494,8 @@ The repo ships git hooks under `tools/hooks/`:
   over it, the loader silently drops the skill).
 - **`pre-push`** — runs the repo-wide guards: `tools/check-install-contract.py`
   (the [install contract](docs/install-contract.md)),
-  `tools/check-no-internal-identifiers.py`, `tools/check-skills.py`,
+  `tools/check-no-internal-identifiers.py`, `tools/check-vendored-libs-sync.py`,
+  `tools/check-headless-launch.py`, `tools/check-skills.py`,
   `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`, and
   `tools/check-version-consistency.py` (every plugin's version identical across
   `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
@@ -518,6 +519,32 @@ process boundaries that a concurrency or lifecycle test exists to verify.
 
 `TESTING.md` is the canonical source for the portfolio invariants, runner
 mechanics, and the current smoke/exhaustive split.
+
+### Windows Background-Launch Review
+
+Any change that adds or modifies a background subprocess, scheduled launcher,
+health probe, transport, or daemon must classify the launch using
+[`windows-background-process-launch`](docs/patterns/windows-background-process-launch.md)
+and reuse its shared primitive. `CREATE_NEW_CONSOLE` plus `SW_HIDE` is not a
+headless mechanism: Windows Default Terminal may still display and focus it.
+The user's configured default terminal is never a correctness dependency.
+
+Review requires evidence at the real divergence seam, not only a mocked
+`creationflags` assertion:
+
+1. Start the path from a windowless parent such as `pythonw.exe` or the actual
+   service launcher.
+2. Exercise at least one real console-subsystem descendant; for SSH, include the
+   configured `ProxyCommand` path when present.
+3. Observe at least two periodic cycles and assert zero visible top-level
+   windows, zero Default Terminal/`OpenConsole` acquisitions, and zero foreground
+   transitions.
+4. Exercise timeout/cancellation and confirm the complete child tree is reaped.
+5. Verify local targets stay local so a same-machine health check cannot create
+   avoidable SSH/process churn.
+
+Keep this live Windows check focused; the required CI guard remains static and
+fast.
 
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:

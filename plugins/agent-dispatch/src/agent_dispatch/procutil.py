@@ -30,12 +30,18 @@ from pathlib import Path
 # Re-exported so existing callers keep using ``from .procutil import
 # no_window_kwargs`` while the implementation is single-sourced in the shared
 # ``agent_procutil`` lib.
-from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
+from agent_procutil import (
+    detached_kwargs,
+    no_window_flags,
+    no_window_kwargs,
+    windowless_python,
+)
 
 __all__ = [
     "agent_bridge_launch_prefix",
     "agent_worktrees_launch_prefix",
     "detached_kwargs",
+    "no_window_flags",
     "no_window_kwargs",
     "relocate_off_payload",
     "resolve_runtime_python",
@@ -204,7 +210,7 @@ def run_background_capture(
 def ssh_subprocess_kwargs() -> dict[str, object]:
     """Contain SSH and ProxyCommand descendants in a windowless process tree."""
     if sys.platform == "win32":
-        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+        return {"creationflags": no_window_flags()}
     return {"start_new_session": True}
 
 
@@ -239,7 +245,7 @@ def terminate_ssh_process_tree(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=no_window_flags(),
             )
         except OSError:
             _signal_ssh_process(proc, "kill")

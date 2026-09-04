@@ -105,7 +105,7 @@ def test_background_capture_preserves_timeout_failure(monkeypatch):
 
 def test_ssh_subprocess_kwargs_uses_no_window_on_windows(monkeypatch):
     monkeypatch.setattr(procutil.sys, "platform", "win32")
-    monkeypatch.setattr(procutil.subprocess, "CREATE_NO_WINDOW", 8, raising=False)
+    monkeypatch.setattr(procutil, "no_window_flags", lambda: 8)
 
     assert procutil.ssh_subprocess_kwargs() == {"creationflags": 8}
 
