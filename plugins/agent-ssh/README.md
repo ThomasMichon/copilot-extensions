@@ -33,8 +33,12 @@ agent-ssh restore-host --transport dtssh --alias example-host --port 2222 --appl
 The default/dry-run path executes the dtssh host status contract without
 mutation. `--apply` invokes the transport's idempotent installer with
 interactive login disabled; authentication remains an external prerequisite
-and is never captured. Use `--json` for structured command, output, and result
-data.
+and is never captured. When `--apply` is invoked from an SSH session on
+Windows, it brokers the updater through WMI so stopping the serving sshd cannot
+reap the updater with the SSH session. That mode returns
+`verification_required: true` and does not claim `applied` until the caller
+reconnects and runs the dry-run/status contract. Use `--json` for structured
+command, output, and result data.
 
 On Windows, the installer preserves the dtssh server host identity across
 updates before restarting the host. It automatically uses an available

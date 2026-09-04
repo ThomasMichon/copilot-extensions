@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import platform
@@ -155,6 +156,7 @@ def _healthy_status(output: str) -> bool:
         "NOT serving",
         "watchdog not running",
         "startup shortcut missing",
+        "durable host identity: pending",
     )
     if any(marker.casefold() in output.casefold() for marker in unhealthy):
         return False
@@ -163,6 +165,70 @@ def _healthy_status(output: str) -> bool:
         output,
         flags=re.IGNORECASE,
     ) is None
+
+
+def _ssh_session() -> bool:
+    return bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT"))
+
+
+def _ps_quote(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def _spawn_dtssh_update_via_wmi(command: list[str]) -> tuple[bool, str]:
+    powershell = shutil.which("powershell") or shutil.which("powershell.exe")
+    if powershell is None:
+        return False, "Windows PowerShell is required for remote-safe dtssh convergence"
+
+    log_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "agent-ssh-dtssh"
+    log_path = log_dir / "restore-host-detached.log"
+    argv = " ".join(f"'{_ps_quote(arg)}'" for arg in command[1:])
+    child = (
+        "Start-Sleep -Seconds 3; "
+        f"New-Item -ItemType Directory -Force -Path '{_ps_quote(str(log_dir))}' "
+        "| Out-Null; "
+        f"& '{_ps_quote(command[0])}' {argv} "
+        f"*>> '{_ps_quote(str(log_path))}'; "
+        "exit $LASTEXITCODE"
+    )
+    child_encoded = base64.b64encode(child.encode("utf-16-le")).decode("ascii")
+    child_command = (
+        "powershell.exe -NoProfile -NonInteractive "
+        f"-EncodedCommand {child_encoded}"
+    )
+    broker = (
+        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+        f"-Arguments @{{ CommandLine = '{_ps_quote(child_command)}'; "
+        f"CurrentDirectory = '{_ps_quote(str(Path.home()))}' }}; "
+        "exit [int]$r.ReturnValue"
+    )
+    broker_encoded = base64.b64encode(broker.encode("utf-16-le")).decode("ascii")
+    try:
+        proc = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                broker_encoded,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+            **no_window_kwargs(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"cannot launch remote-safe dtssh convergence: {exc}"
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        return False, (
+            "cannot launch remote-safe dtssh convergence"
+            + (f": {detail}" if detail else "")
+        )
+    return True, str(log_path)
 
 
 def restore_host(
@@ -203,6 +269,28 @@ def restore_host(
         }
     try:
         command = _dtssh_command(alias, port, apply=apply)
+        if apply and _ssh_session():
+            launched, detail = _spawn_dtssh_update_via_wmi(command)
+            return {
+                "ok": launched,
+                "transport": transport,
+                "alias": alias,
+                "port": port,
+                "healthy": False,
+                "would_change": True,
+                "applied": False,
+                "detached": launched,
+                "verification_required": launched,
+                "command": command,
+                "returncode": 0 if launched else 1,
+                "stdout": "",
+                "stderr": "",
+                **(
+                    {"detached_log": detail}
+                    if launched
+                    else {"error": detail}
+                ),
+            }
         proc = subprocess.run(
             command,
             capture_output=True,
@@ -297,6 +385,11 @@ def emit_result(result: dict[str, Any], *, json_output: bool) -> int:
         output = f"{result.get('stdout', '')}{result.get('stderr', '')}".rstrip()
         if output:
             print(output)
+        if result.get("verification_required"):
+            print(
+                "[OK] Detached convergence launched; reconnect and run "
+                "`agent-ssh restore-host --dry-run` to verify it."
+            )
         if result.get("error"):
             print(f"[FAIL] {result['error']}")
     return 0 if result.get("ok") else 1
