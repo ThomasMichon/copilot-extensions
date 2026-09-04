@@ -9,16 +9,19 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "run-plugin-tests.py"
+_previous_path = sys.path.copy()
 sys.path.insert(0, str(SCRIPT.parent))
+try:
+    _spec = importlib.util.spec_from_file_location("run_plugin_tests", SCRIPT)
+    assert _spec and _spec.loader
+    runner = importlib.util.module_from_spec(_spec)
+    sys.modules[_spec.name] = runner
+    _spec.loader.exec_module(runner)
 
-_spec = importlib.util.spec_from_file_location("run_plugin_tests", SCRIPT)
-assert _spec and _spec.loader
-runner = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = runner
-_spec.loader.exec_module(runner)
-
-import plugin_test_containment as containment  # noqa: E402
-import pytest_portfolio_guard as portfolio_guard  # noqa: E402
+    import plugin_test_containment as containment
+    import pytest_portfolio_guard as portfolio_guard
+finally:
+    sys.path[:] = _previous_path
 
 
 def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None:
@@ -86,6 +89,20 @@ def test_host_state_opt_in_preserves_credentials_not_session_affinity(
     assert "AGENT_WORKTREES_OWNER_REF" not in env
     for name in containment.ALWAYS_SANDBOX_ENV_NAMES:
         Path(env[name]).resolve().relative_to(tmp_path.resolve())
+
+
+def test_host_state_requires_explicit_tiers_at_environment_boundary(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="allow_host_state requires allow_explicit_tiers",
+    ):
+        containment.isolated_environment(
+            os.environ,
+            tmp_path,
+            allow_host_state=True,
+        )
 
 
 def test_host_state_still_fails_closed_on_escaped_temp(

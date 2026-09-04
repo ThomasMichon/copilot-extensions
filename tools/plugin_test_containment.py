@@ -205,6 +205,8 @@ def isolated_environment(
     allow_host_state: bool = False,
 ) -> dict[str, str]:
     """Return a contained environment, host-detached unless explicitly allowed."""
+    if allow_host_state and not allow_explicit_tiers:
+        raise ValueError("allow_host_state requires allow_explicit_tiers")
     root = sandbox.resolve()
     env = dict(base)
     for name in _ALWAYS_SCRUB_NAMES:
