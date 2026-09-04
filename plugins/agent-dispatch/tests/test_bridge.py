@@ -492,6 +492,15 @@ def test_registered_agent_project_reads_explicit_project(monkeypatch):
     assert bridge.registered_agent_project("missing") is None
 
 
+def test_registered_agent_project_strictly_rejects_indeterminate_registry(
+    monkeypatch,
+):
+    monkeypatch.setattr(bridge, "registered_agents", lambda **_kw: None)
+
+    with pytest.raises(bridge.BridgeUnavailable, match="local agent registry"):
+        bridge.registered_agent_project("reviewer", strict=True)
+
+
 def test_preflight_local_warns_when_agent_absent(monkeypatch):
     monkeypatch.setattr(
         bridge, "registered_agent_names", lambda **_kw: {"general-loop-worker"}

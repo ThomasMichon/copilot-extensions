@@ -554,7 +554,9 @@ def make_headless_spawn(
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
-    spawn.allocation_project = bridge.registered_agent_project(agent) or ""
+    spawn.allocation_project_for = lambda _task: (
+        bridge.registered_agent_project(agent, timeout=30.0, strict=True) or ""
+    )
     return spawn
 
 
@@ -595,7 +597,10 @@ def make_label_routed_spawn(
             if label in overrides:
                 selected = overrides[label]
                 break
-        value = getattr(selected, name, fallback)
+        selector = getattr(selected, f"{name}_for", None)
+        value = selector(task) if callable(selector) else getattr(
+            selected, name, fallback
+        )
         return value if isinstance(value, str) and value else fallback
 
     spawn.requires_reusable_worktree_for = requires_reusable_worktree
