@@ -135,9 +135,18 @@ class LocalBridgeRemoteClient:
             timeout=min(5.0, remaining),
         )
         try:
-            health = json.loads(health_response.read().decode("utf-8"))
+            try:
+                health = json.loads(health_response.read().decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RemoteBridgeOperationError(
+                    "Agent Bridge returned invalid health JSON"
+                ) from exc
         finally:
             health_response.close()
+        if not isinstance(health, dict):
+            raise RemoteBridgeOperationError(
+                "Agent Bridge returned an invalid health response"
+            )
         version = int(health.get("protocol_version") or 0)
         minimum = int(health.get("min_protocol_version") or 1)
         required = required_protocol
@@ -274,10 +283,12 @@ class LocalBridgeRemoteClient:
         timeout: float,
     ) -> None:
         self._request(
-            "DELETE",
+            "POST",
             self._host_path(
                 host,
-                "/sessions/" + urllib.parse.quote(session_id, safe=""),
+                "/sessions/"
+                + urllib.parse.quote(session_id, safe="")
+                + "/end",
             ),
             body={
                 "force": force,

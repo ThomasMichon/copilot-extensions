@@ -1286,9 +1286,8 @@ def test_remote_api_exposes_mutating_command_contract(remote_app) -> None:
             headers=headers,
             json={"reap_host": True},
         )
-        ended = client.request(
-            "DELETE",
-            "/api/v1/remote/example-host/sessions/session-a",
+        ended = client.post(
+            "/api/v1/remote/example-host/sessions/session-a/end",
             headers=headers,
             json={"if_idle": True},
         )

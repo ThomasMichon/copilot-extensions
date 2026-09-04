@@ -224,7 +224,7 @@ async def remote_stop_session(
         _raise(exc)
 
 
-@router.delete("/{host}/sessions/{session_id}", status_code=204)
+@router.post("/{host}/sessions/{session_id}/end", status_code=204)
 async def remote_end_session(
     host: str,
     session_id: str,

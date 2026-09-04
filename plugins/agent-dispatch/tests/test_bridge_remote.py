@@ -6,6 +6,7 @@ import pytest
 
 from agent_dispatch.bridge_remote import (
     LocalBridgeRemoteClient,
+    RemoteBridgeOperationError,
     RemoteBridgeUnavailable,
 )
 
@@ -19,6 +20,11 @@ class _Response:
 
     def close(self):
         pass
+
+
+class _RawResponse(_Response):
+    def read(self):
+        return self._payload
 
 
 def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch):
@@ -45,10 +51,15 @@ def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch)
         caller_id="fleet-task-a",
         timeout=120.0,
     )
+    client.end_session("host-a", "session-a", timeout=20.0)
 
     assert calls[0][2]["required_protocol"] == 11
     assert calls[1][2]["required_protocol"] == 11
     assert "required_protocol" not in calls[2][2]
+    assert calls[3][0:2] == (
+        "POST",
+        "/api/v1/remote/host-a/sessions/session-a/end",
+    )
 
 
 def test_malformed_auth_degrades_as_unavailable(tmp_path, monkeypatch):
@@ -90,3 +101,21 @@ def test_health_probe_shares_operation_timeout_budget(monkeypatch):
         ("http://127.0.0.1:1/health", pytest.approx(0.8)),
         ("http://127.0.0.1:1/operation", pytest.approx(0.6)),
     ]
+
+
+@pytest.mark.parametrize("payload", [b"not-json", b"[]"])
+def test_invalid_health_response_is_an_operation_error(monkeypatch, payload):
+    client = LocalBridgeRemoteClient()
+    monkeypatch.setattr(
+        client,
+        "_connection",
+        lambda: ("http://127.0.0.1:1", "token"),
+    )
+    monkeypatch.setattr(
+        client,
+        "_open",
+        lambda *_args, **_kwargs: _RawResponse(payload),
+    )
+
+    with pytest.raises(RemoteBridgeOperationError, match="health"):
+        client._request("GET", "/operation", timeout=1.0)

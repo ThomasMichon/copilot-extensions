@@ -1488,10 +1488,12 @@ class BridgeClient:
         """End a hosting-Bridge session through the shared carrier."""
         self._require_remote_commands()
         self._request(
-            "DELETE",
+            "POST",
             self._remote_path(
                 host,
-                "/sessions/" + urllib.parse.quote(session_id, safe=""),
+                "/sessions/"
+                + urllib.parse.quote(session_id, safe="")
+                + "/end",
             ),
             {
                 "force": force,
