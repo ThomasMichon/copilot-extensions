@@ -255,7 +255,9 @@ def _run_captured(
     timeout: float,
     input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    kwargs: dict[str, object] = detached_kwargs()
+    kwargs: dict[str, object] = (
+        no_window_kwargs() if os.name == "nt" else detached_kwargs()
+    )
     try:
         process = subprocess.Popen(  # noqa: S603 -- attributed fixed argv
             list(command),

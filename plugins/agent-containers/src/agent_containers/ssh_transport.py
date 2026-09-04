@@ -1,9 +1,9 @@
 """OpenSSH transport for trusted fleet containers.
 
 Docker remains the lifecycle/bootstrap boundary. Agent traffic crosses a real
-OpenSSH connection whose ``ProxyCommand`` starts the container's ``sshd`` in
-inetd mode, avoiding published host ports while matching the CodeSpace SSH
-transport semantics.
+OpenSSH connection to the container's ``sshd`` in inetd mode. POSIX hosts use a
+direct ``ProxyCommand``; Windows uses a plugin-owned loopback byte broker so the
+Docker CLI can be launched explicitly without a visible console.
 """
 
 from __future__ import annotations
@@ -36,6 +36,10 @@ _ENV_EXCLUDE = {"HOME", "LOGNAME", "PWD", "SHELL", "SHLVL", "USER", "_"}
 
 def _creation_flags() -> int:
     return no_window_flags()
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
 
 
 def _validate_target(container: str, user: str) -> None:
@@ -292,21 +296,43 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
         _install_authorized_key(container, user, public_key)
         container_id = _container_id(container)
         alias = f"agent-container-{container}-{container_id[:12]}"
+        proxy_port: int | None = None
+        if _is_windows():
+            from .docker_proxy import ensure_broker
+
+            proxy_port = ensure_broker(
+                container,
+                container_id,
+                _SSH_DIR / f"{container}.proxy.json",
+            )
         config_file = _SSH_DIR / f"{container}.config"
         known_hosts = _SSH_DIR / "known_hosts"
-        content = "\n".join([
+        lines = [
             f"Host {alias}",
-            f"    HostName {alias}",
+            f"    HostName {'127.0.0.1' if proxy_port else alias}",
+        ]
+        if proxy_port:
+            lines.extend([
+                f"    Port {proxy_port}",
+                f"    HostKeyAlias {alias}",
+            ])
+        lines.extend([
             f"    User {user}",
             "    IdentitiesOnly yes",
             "    BatchMode yes",
             "    StrictHostKeyChecking accept-new",
             f'    UserKnownHostsFile "{_config_path(known_hosts)}"',
-            f"    ProxyCommand docker exec -i -u root {container} "
-            "/usr/sbin/sshd -i -e -o GatewayPorts=no",
+        ])
+        if not proxy_port:
+            lines.append(
+                f"    ProxyCommand docker exec -i -u root {container} "
+                "/usr/sbin/sshd -i -e -o GatewayPorts=no"
+            )
+        lines.extend([
             "    LogLevel ERROR",
             "",
         ])
+        content = "\n".join(lines)
         try:
             current = config_file.read_text(encoding="utf-8")
         except OSError:

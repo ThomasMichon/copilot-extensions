@@ -24,6 +24,7 @@ change the symptom, but it is never part of the launch contract.
 |---|---|---|
 | Short-lived child with captured or redirected stdio | A console-subsystem root plus `agent_procutil.no_window_kwargs()` / `no_window_flags()`, or the owning shared library's equivalent | `CREATE_NO_WINDOW`; pipes and exit status preserved; timeout owns the complete tree |
 | Non-interactive OpenSSH transport with redirected stdio | `ssh_manager.ssh_subprocess_kwargs()` | `DETACHED_PROCESS`; no console exists for Default Terminal to surface; pipes, exit status, and root PID remain owned |
+| Console descendant controlled by a third-party OpenSSH `ProxyCommand` | Replace the raw proxy with an owned loopback byte broker; launch the console child from that broker with `no_window_kwargs()` | OpenSSH connects over TCP; protocol bytes remain opaque; child lifecycle and cancellation remain owned |
 | Long-lived Python daemon with no recurring console descendants | `windowless_python()` plus `detached_kwargs()` | No root console; survivability is explicit; occasional captured console children use the short-lived primitive |
 | Long-lived Python daemon with recurring console descendants | Console-subsystem Python plus `windowless_daemon_kwargs()` | One inherited hidden console contains descendants that would otherwise allocate their own Default Terminal hosts |
 | PowerShell startup or scheduled launcher whose output is not captured | `conhost.exe --headless <interpreter> ...` | Headless console inherited by descendants; stable installed target; explicit stop/cutover ownership |
@@ -38,6 +39,12 @@ console descendants from `pythonw.exe`: per-child `CREATE_NO_WINDOW` is
 insufficient for programs such as terminal-multiplexer clients that allocate
 their own console host. Give that daemon a console-subsystem root under
 `windowless_daemon_kwargs()` so every cycle inherits one hidden console tree.
+
+A `ProxyCommand` is a separate launch boundary: detaching `ssh.exe` does not
+control the console flags of a native proxy descendant. Do not put a console or
+pseudoconsole wrapper around an opaque protocol stream. Move that descendant
+behind an owned loopback broker instead, pump bytes without decoding them, and
+apply the normal captured-child launch primitive at the point that creates it.
 
 ## Routing before launching
 
