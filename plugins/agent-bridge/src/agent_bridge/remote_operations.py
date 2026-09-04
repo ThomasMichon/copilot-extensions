@@ -33,6 +33,7 @@ REMOTE_OPERATION_VERSION = 1
 MAX_CALLER_ID_LENGTH = 128
 MAX_HOST_LENGTH = 128
 MAX_SESSION_ID_LENGTH = 256
+MAX_CONTINUITY_ID_LENGTH = 128
 REMOTE_STREAM_RECONNECT_GRACE = 30.0
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]*$")
 _EOF = object()
@@ -146,6 +147,23 @@ def validate_session_id(value: Any) -> str:
     return _validate_id(
         value, field="session_id", maximum=MAX_SESSION_ID_LENGTH
     )
+
+
+def validate_continuity_id(value: Any) -> str | None:
+    """Validate an optional event-log continuity identifier."""
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > MAX_CONTINUITY_ID_LENGTH
+    ):
+        raise RemoteBridgeError(
+            400,
+            "invalid_request",
+            "continuity_id must be a non-empty string when supplied",
+        )
+    return value
 
 
 def _validate_cursor(value: Any, *, field: str = "after") -> int | None:
@@ -297,20 +315,9 @@ class CarrierRequestRouter:
                     raise RemoteBridgeError(
                         400, "invalid_request", "last_id is required"
                     )
-                continuity_id = payload.get("continuity_id")
-                if (
-                    continuity_id is not None
-                    and (
-                        not isinstance(continuity_id, str)
-                        or not continuity_id
-                        or len(continuity_id) > 128
-                    )
-                ):
-                    raise RemoteBridgeError(
-                        400,
-                        "invalid_request",
-                        "continuity_id must be a non-empty string when supplied",
-                    )
+                continuity_id = validate_continuity_id(
+                    payload.get("continuity_id")
+                )
                 info = await asyncio.to_thread(
                     client.get_cursor_info,
                     session_id,
@@ -391,10 +398,7 @@ class CarrierRequestRouter:
         continuity_id: Any,
     ) -> AsyncIterator[Envelope]:
         await _require_remote_operations_protocol(client)
-        if continuity_id is not None and not isinstance(continuity_id, str):
-            raise RemoteBridgeError(
-                400, "invalid_request", "continuity_id must be a string"
-            )
+        continuity_id = validate_continuity_id(continuity_id)
         info = await asyncio.to_thread(
             client.get_cursor_info, session_id, caller_id=caller_id
         )
@@ -801,14 +805,7 @@ class RemoteOperationService:
         last_id: int,
         continuity_id: str | None,
     ) -> int:
-        if continuity_id is not None and (
-            not continuity_id or len(continuity_id) > 128
-        ):
-            raise RemoteBridgeError(
-                400,
-                "invalid_request",
-                "continuity_id must be a non-empty string when supplied",
-            )
+        continuity_id = validate_continuity_id(continuity_id)
         response = await self._request(
             host,
             {
@@ -830,6 +827,7 @@ class RemoteOperationService:
         after: int | None = None,
         continuity_id: str | None = None,
     ) -> RemoteEventSubscription:
+        continuity_id = validate_continuity_id(continuity_id)
         lease = await self._lease(host)
         subscription: CarrierSubscription | None = None
         ownership_transferred = False

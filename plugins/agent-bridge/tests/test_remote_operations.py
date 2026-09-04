@@ -252,6 +252,34 @@ async def test_event_subscription_rejects_legacy_hosting_daemon() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("continuity_id", ["", "x" * 129])
+async def test_event_subscription_rejects_invalid_continuity(
+    continuity_id,
+) -> None:
+    client = _RemoteClient()
+
+    response = await CarrierRequestRouter(lambda: client)(
+        Envelope(
+            EnvelopeType.REQUEST,
+            subscription_id="sub-a",
+            payload={
+                "operation": "session.events",
+                "version": 1,
+                "session_id": "session-a",
+                "caller_id": "consumer-a",
+                "continuity_id": continuity_id,
+            },
+        )
+    )
+
+    assert isinstance(response, Envelope)
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["status"] == 400
+    assert response.payload["code"] == "invalid_request"
+    assert client.streams == []
+
+
+@pytest.mark.asyncio
 async def test_event_ack_requires_continuity_for_non_empty_log() -> None:
     client = _RemoteClient()
 
