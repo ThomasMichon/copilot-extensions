@@ -293,6 +293,44 @@ jobs:
       - name: Collect-only smoke for ${{ env.HEAVY_PLUGIN }}
         run: python tools/run-plugin-tests.py "$HEAVY_PLUGIN" --collect-only
 
+  worktrees-windows-launch:
+    name: agent-worktrees (Windows launch)
+    needs: discover
+    if: needs.discover.outputs.heavy == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Install psmux
+        shell: pwsh
+        run: |
+          $version = "3.3.8"
+          $archive = Join-Path $env:RUNNER_TEMP "psmux.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "psmux"
+          Invoke-WebRequest `
+            "https://github.com/psmux/psmux/releases/download/v$version/psmux-v$version-windows-x64.zip" `
+            -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          $expected = "1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe"
+          if ($actual -ne $expected) {
+            throw "psmux archive checksum mismatch"
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination
+          $psmux = Get-ChildItem -LiteralPath $destination -Filter psmux.exe -Recurse |
+            Select-Object -First 1
+          if (-not $psmux) {
+            throw "psmux.exe not found in release archive"
+          }
+          $psmux.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Test Windows status-loop launch
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          -k status_daemon_console_root_contains_psmux_descendants
+
   full:
     name: full - ${{ matrix.plugin }}
     if: github.event_name == 'workflow_dispatch'

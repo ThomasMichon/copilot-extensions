@@ -960,52 +960,21 @@ def test_windowless_python_noop_off_windows(monkeypatch):
     assert m._windowless_python() == "/usr/bin/python3"
 
 
-def test_spawn_detached_swaps_in_windowless_python(monkeypatch):
+def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
     seen: dict = {}
 
     def _fake_popen(argv, **kwargs):
         seen["argv"] = argv
+        seen["kwargs"] = kwargs
         return object()
 
     monkeypatch.setattr(m.subprocess, "Popen", _fake_popen)
-    monkeypatch.setattr(m, "_windowless_python", lambda: "PYTHONW")
+    monkeypatch.setattr(
+        m, "windowless_daemon_kwargs",
+        lambda **_kw: {"windowless_daemon": True},
+    )
     assert m._spawn_detached(
         [m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
-    assert seen["argv"][0] == "PYTHONW"
+    assert seen["argv"][0] == m.sys.executable
     assert seen["argv"][1:] == ["-m", "agent_worktrees", "status-monitor"]
-
-
-def test_headless_child_guard_ors_no_window(monkeypatch):
-    import subprocess as _sp
-    orig = _sp.Popen.__init__
-    try:
-        monkeypatch.setattr(m, "no_window_flags", lambda: 0x08000000)
-        seen: dict = {}
-        monkeypatch.setattr(
-            _sp.Popen, "__init__",
-            lambda self, *a, **k: seen.__setitem__(
-                "flags", k.get("creationflags", 0)))
-        m._install_headless_child_guard()
-        _sp.Popen(["x"])
-        assert seen["flags"] & 0x08000000  # CREATE_NO_WINDOW OR'd in
-    finally:
-        _sp.Popen.__init__ = orig
-
-
-def test_headless_child_guard_respects_explicit_new_console(monkeypatch):
-    import subprocess as _sp
-    orig = _sp.Popen.__init__
-    try:
-        monkeypatch.setattr(m, "no_window_flags", lambda: 0x08000000)
-        seen: dict = {}
-        monkeypatch.setattr(
-            _sp.Popen, "__init__",
-            lambda self, *a, **k: seen.__setitem__(
-                "flags", k.get("creationflags", 0)))
-        m._install_headless_child_guard()
-        _sp.Popen(["x"], creationflags=m._CREATE_NEW_CONSOLE)
-        # An explicit new-console request is passed through, not silenced.
-        assert not (seen["flags"] & 0x08000000)
-        assert seen["flags"] & m._CREATE_NEW_CONSOLE
-    finally:
-        _sp.Popen.__init__ = orig
+    assert seen["kwargs"]["windowless_daemon"] is True
