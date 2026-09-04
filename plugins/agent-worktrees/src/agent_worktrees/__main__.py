@@ -1135,6 +1135,18 @@ def _prepare_worktree_source(
     return prepared
 
 
+def _creation_parent_session(
+    explicit: str | None,
+    *,
+    inherit_ambient: bool,
+) -> str | None:
+    if explicit:
+        return explicit
+    if inherit_ambient:
+        return os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    return None
+
+
 def _create_worktree_core(
     config: cfg.Config,
     *,
@@ -1287,11 +1299,9 @@ def _create_worktree_core(
             # #1029: link the new worktree back to the session that spawned it, so a
             # later resume (esp. a PR/feedback worktree with no sessions of its own)
             # restores context instead of cold-starting.
-            parent_session=(
-                (parent_session
-                 or os.environ.get("COPILOT_AGENT_SESSION_ID") or None)
-                if inherit_parent_session
-                else None
+            parent_session=_creation_parent_session(
+                parent_session,
+                inherit_ambient=inherit_parent_session,
             ),
             # #2178: for a bridge spawn, record the caller worktree so the Picker can
             # jump back to it.

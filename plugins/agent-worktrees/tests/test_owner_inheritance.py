@@ -168,6 +168,19 @@ def test_cmd_create_normal_worktree_inherits_parent_session(monkeypatch):
     assert captured["inherit_parent_session"] is True
 
 
+def test_creation_parent_session_suppresses_only_ambient_value(monkeypatch):
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "ambient-session")
+    assert m._creation_parent_session(
+        None, inherit_ambient=False
+    ) is None
+    assert m._creation_parent_session(
+        None, inherit_ambient=True
+    ) == "ambient-session"
+    assert m._creation_parent_session(
+        "explicit-session", inherit_ambient=False
+    ) == "explicit-session"
+
+
 def test_cmd_create_emits_structured_coordination_rejection(
     monkeypatch,
     capfd,
