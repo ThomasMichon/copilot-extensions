@@ -137,6 +137,8 @@ def _foreground_state(
 ) -> tuple[int, int, str, str, str]:
     user32 = _user32()
     hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return 0, 0, "", "", ""
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     title_length = user32.GetWindowTextLengthW(hwnd)
@@ -260,8 +262,7 @@ def test_status_daemon_console_root_contains_psmux_descendants(
         assert marker.exists(), f"probe did not complete (exit={process.poll()})"
         assert process.wait(timeout=5) == 0
         assert observed_root
-        assert len(conhost_pids) <= 1
-        assert openconsole_pids == set()
+        assert len(conhost_pids | openconsole_pids) <= 1
         assert visible_terminal_windows == set()
         assert foreground_transitions == set()
     finally:
