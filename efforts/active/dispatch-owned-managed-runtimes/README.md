@@ -4,11 +4,11 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs
 - **Created:** 2026-09-04
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
   [agent-index/`lightweight-client-and-declared-host-service`](../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
 - **Umbrella issue:** #2007
-- **Sub-issues:** Pending per-slice carving
+- **Sub-issues:** #2010
 
 ## Guiding Intent
 
@@ -68,23 +68,24 @@ these runtimes.
 
 - [x] Extend the plugin-service and agent-index visions with the narrow
   `delegated-heavy-companion-runtime` exception.
-- [ ] Land this effort proposal before implementation.
+- [x] Land this effort proposal before implementation.
 
 ### Slice 3A — Declaration contract
 
-- [ ] Carve and claim a contract-only sub-issue.
-- [ ] Add the reusable managed-companion-runtime pattern and narrow the existing
+- [x] Carve and claim a contract-only sub-issue.
+- [x] Add the reusable managed-companion-runtime pattern and narrow the existing
   no-shared-infrastructure/self-provisioning invariants only for this explicit
   capability boundary.
-- [ ] Extend attributed `plugin-companion` declarations with strict
+- [x] Extend attributed `plugin-companion` declarations with strict
   managed-runtime metadata while keeping the daemon non-provisioning.
-- [ ] Allow only logical runtime identity, portable version/profile components,
+- [x] Allow only logical runtime identity, portable version/profile components,
   plugin-relative project inputs, bounded extras and validation imports, and
   named environment bindings.
-- [ ] Reject arbitrary installer commands, package-manager flags, indexes,
-  credentials, absolute runtime roots, traversal, links/reparse escapes, unknown
-  fields, and direct or unattributed registration.
-- [ ] Preserve plugin root, version, marketplace provenance, source declaration,
+- [x] Reject arbitrary installer commands, package-manager flags, indexes,
+  credentials, absolute runtime roots, lexical traversal, unknown fields, and
+  direct or unattributed registration. Filesystem links and reparse points remain
+  a materialization-time check.
+- [x] Preserve plugin root, version, marketplace provenance, source declaration,
   and activation scopes in the desired runtime authority fingerprint.
 
 **Completion gate:** dispatch can validate and retain managed-runtime intent, but
@@ -190,3 +191,15 @@ provisioning and cutover code is not a candidate for wholesale reuse.
   retention, and first-integration slices.
 - Selected a contract-only first slice so reviewed schema and authority
   boundaries land before any dependency download or live lifecycle change.
+
+### 2026-09-04 — Declaration contract implemented
+
+- The reviewed proposal landed as #2009 and Slice 3A was carved as #2010.
+- `plugin-companion` declarations now validate a versioned managed-runtime
+  contract containing only bounded logical runtime data and plugin-relative
+  Python project inputs.
+- The complete managed-runtime declaration joins plugin root and version in the
+  runtime authority revision. No daemon path consumes it for provisioning or
+  launch.
+- Added the reusable managed-companion-runtime pattern and its narrow,
+  explicit exceptions to ordinary standalone self-provisioning invariants.

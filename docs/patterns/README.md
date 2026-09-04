@@ -34,6 +34,7 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 | **Runtime CLI** | Target: installation-cell runtime + payload-local shim, invoked on demand; legacy implementations still use a global binstub during migration | agent-mcp, agent-containers (migration targets) |
 | **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision | agent-bridge, agent-dispatch, agent-vault |
 | **Namespace-provider** | A plugin that registers a namespace with a sibling service via a filesystem **manifest** (its binstub driven over a process boundary), rather than running its own daemon | agent-codespaces / agent-containers (providers to agent-bridge) |
+| **Managed companion capability** | An explicitly configured optional heavyweight capability whose attributed runtime declaration is materialized only by an already-running trusted supervisor | agent-index through agent-dispatch (planned integration) |
 
 ## Design principles
 
@@ -79,10 +80,15 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
-- **No shared-infrastructure dependency.** A plugin service is installable and
-  reachable using only what its *own* installer deployed. It must never *require*
-  an external reverse proxy, tunnel, mesh, load balancer, or service registry.
-  (Serves *Vision plugin-services §Non-Goals/no-shared-infrastructure-dependency*.)
+- **No shared-infrastructure dependency by default.** A plugin service is
+  installable and reachable using only what its *own* installer deployed. It
+  must never *require* an external reverse proxy, tunnel, mesh, load balancer,
+  or service registry. The sole explicit exception is a
+  [`managed-companion-runtime`](managed-companion-runtime.md): an optional
+  heavyweight capability that is inert without its declared trusted supervisor
+  and never masquerades as the plugin's ordinary standalone runtime. (Serves
+  *Vision plugin-services §Non-Goals/no-shared-infrastructure-dependency* and
+  §Features/`delegated-heavy-companion-runtime`.)
 - **Endpoints are collision-free by construction.** Two plugin services — and the
   same service across the Windows/WSL boundary — never contend for one address by
   design, not by a human maintaining a fixed-port table or applying per-platform
@@ -144,6 +150,10 @@ core of the principles above; a reviewer checks a change against these.
   launch" — but that path must not be a *dependency*: the sibling-independent,
   confined-env realization (self-provisioning binstub + `stamp` + skill readiness
   self-check) is [`runtime-self-provisioning.md`](runtime-self-provisioning.md).)
+  An explicitly configured optional
+  [`managed-companion-runtime`](managed-companion-runtime.md) is the narrow
+  exception: enabling the lightweight plugin does not provision that heavyweight
+  capability, and only its already-running trusted supervisor may do so.
 - **Every runtime command is payload-attributable.** Every runtime-bearing
   marketplace `agent-*` plugin declares all agent-facing commands in
   `payload-invocation.json`, commits the generated POSIX/PowerShell/CMD shims,
