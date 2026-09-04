@@ -1183,6 +1183,14 @@ same unit is idempotent (the derived handle identifies it). See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#the-singleton-daemon-built--one-master-per-unit-subprocesses)
 for the registration + daemon model.
 
+An attributed active plugin may also contribute a strict
+`kind: plugin-companion` declaration. Its command, stop command, health probe,
+and optional configuration provider are plugin-relative argv; plugin root,
+version, declaration path, and activation scopes remain attached to the desired
+registration. This kind cannot be registered through the CLI/coordinator API or
+trusted registrar pointers. It is intentionally **contract-only** in this
+version: the daemon reports it unsupported and never launches it.
+
 
 **Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
 spec, each cycle feeds every **newly-terminal** task's lifecycle event

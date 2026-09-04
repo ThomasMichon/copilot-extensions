@@ -80,15 +80,19 @@ def supervisor_lease_scope(machine: str | None, env: str) -> str:
 def _spec_fingerprint(reg: dict) -> str:
     """A stable fingerprint of a registration's runtime-relevant identity.
 
-    Changes only when the ``kind`` or ``spec`` changes, so a reconcile restarts a
-    unit exactly when its definition changed -- not on unrelated ``updated_at``
-    churn.
+    Changes only when the ``kind``, ``spec``, or explicit runtime revision
+    changes, so a reconcile restarts a unit exactly when its definition changed
+    -- not on unrelated ``updated_at`` churn.
     """
     spec = dict(reg.get("spec") or {})
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
     return json.dumps(
-        {"kind": reg.get("kind"), "spec": spec},
+        {
+            "kind": reg.get("kind"),
+            "spec": spec,
+            "runtime_revision": reg.get("runtime_revision"),
+        },
         sort_keys=True,
         default=str,
     )

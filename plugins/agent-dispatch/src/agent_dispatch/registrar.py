@@ -193,6 +193,10 @@ class ProfileDeclaration:
     evaluator: str | None = None
     owner: str | None = None  # provenance: which system declared this
     description: str | None = None
+    plugin_root: str | None = None
+    source_path: str | None = None
+    plugin_version: str | None = None
+    activation_scopes: tuple[str, ...] = ()
 
     def to_supervise_args(self) -> list[str]:
         """Render the equivalent ``agent-dispatch supervise`` args (lossless).
@@ -275,10 +279,27 @@ class ProfileDeclaration:
         lane spec, so it is exposed rather than kept private."""
         return self._effective_headless_labels()
 
-    def with_owner(self, owner: str) -> "ProfileDeclaration":
+    def with_owner(self, owner: str) -> ProfileDeclaration:
         """Return a copy stamped with discovery-time provenance (the pointer's owner),
         used when a declaration is discovered without an explicit ``owner``."""
         return replace(self, owner=self.owner or owner)
+
+    def with_plugin_provenance(
+        self,
+        *,
+        plugin_root: str,
+        source_path: str,
+        plugin_version: str,
+        activation_scopes: tuple[str, ...],
+    ) -> ProfileDeclaration:
+        """Attach authoritative discovery metadata to a plugin-owned declaration."""
+        return replace(
+            self,
+            plugin_root=plugin_root,
+            source_path=source_path,
+            plugin_version=plugin_version,
+            activation_scopes=activation_scopes,
+        )
 
     def effective_filters(self) -> Filters:
         """The pool filter with the ``name``/``labels``/``repos`` shorthand folded in.
@@ -466,7 +487,9 @@ def _load_label_max_attempts(value: object) -> dict[str, int]:
     return out
 
 
-def load_declaration(data: Mapping) -> ProfileDeclaration:
+def load_declaration(
+    data: Mapping, *, allow_plugin_companion: bool = False
+) -> ProfileDeclaration:
     """Validate + normalize a decoded mapping into a :class:`ProfileDeclaration`.
 
     Raises :class:`RegistrarError` with a specific message on any problem. Pure:
@@ -501,7 +524,12 @@ def load_declaration(data: Mapping) -> ProfileDeclaration:
     if not isinstance(kind, str):
         raise RegistrarError(f"kind: expected a string, got {kind!r}")
     if kind != "supervised-lane":
-        from .registrations import RegistrationError, validate_registration
+        from .registrations import RegistrationError, RegistrationKind, validate_registration
+
+        if kind == RegistrationKind.PLUGIN_COMPANION and not allow_plugin_companion:
+            raise RegistrarError(
+                "plugin-companion declarations require attributed plugin discovery"
+            )
 
         allowed = {"name", "kind", "spec", "filters", "owner", "description"}
         extras = sorted(set(data) - allowed)

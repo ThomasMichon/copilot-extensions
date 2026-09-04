@@ -101,7 +101,7 @@ def declaration_to_registration(
         else RegistrationKind.EVALUATOR if decl.evaluator
         else RegistrationKind.SUPERVISED_LANE
     )
-    return {
+    registration = {
         "id": declared_registration_id(decl),
         "logical_id": decl.name,
         "kind": kind,
@@ -112,6 +112,18 @@ def declaration_to_registration(
         "source": DECLARED_ID_PREFIX,
         "owner": decl.owner,
     }
+    if decl.kind == RegistrationKind.PLUGIN_COMPANION:
+        registration["plugin"] = {
+            "root": decl.plugin_root,
+            "source_path": decl.source_path,
+            "version": decl.plugin_version,
+            "activation_scopes": list(decl.activation_scopes),
+        }
+        registration["runtime_revision"] = {
+            "plugin_root": decl.plugin_root,
+            "plugin_version": decl.plugin_version,
+        }
+    return registration
 
 
 def _constrains_machine(decl: ProfileDeclaration) -> bool:

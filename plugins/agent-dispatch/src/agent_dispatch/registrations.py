@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 
 class RegistrationKind:
@@ -36,8 +38,12 @@ class RegistrationKind:
     SCHEDULE = "schedule"
     EMITTER = "emitter"
     EVALUATOR = "evaluator"
+    PLUGIN_COMPANION = "plugin-companion"
 
-    ALL = frozenset({SUPERVISED_LANE, SCHEDULE, EMITTER, EVALUATOR})
+    ALL = frozenset(
+        {SUPERVISED_LANE, SCHEDULE, EMITTER, EVALUATOR, PLUGIN_COMPANION}
+    )
+    DIRECT = frozenset({SUPERVISED_LANE, SCHEDULE, EMITTER, EVALUATOR})
 
 
 class RegistrationStatus:
@@ -57,6 +63,150 @@ class RegistrationStatus:
 
 class RegistrationError(ValueError):
     """Raised when a registration's kind or spec is malformed."""
+
+
+_COMPANION_KEYS = frozenset(
+    {
+        "command",
+        "stop_command",
+        "config_provider",
+        "health_probe",
+        "config_timeout_seconds",
+        "health_timeout_seconds",
+        "startup_timeout_seconds",
+        "stop_timeout_seconds",
+    }
+)
+_COMPANION_REQUIRED_KEYS = frozenset({"command"})
+_COMPANION_TIMEOUT_KEYS = frozenset(
+    {
+        "config_timeout_seconds",
+        "health_timeout_seconds",
+        "startup_timeout_seconds",
+        "stop_timeout_seconds",
+    }
+)
+COMPANION_CONFIG_RESULT_VERSION = 1
+COMPANION_HEALTH_RESULT_VERSION = 1
+
+
+def _validate_plugin_relative_argv(value: object, *, field: str) -> None:
+    if not isinstance(value, list) or not value or not all(
+        isinstance(part, str) and part for part in value
+    ):
+        raise RegistrationError(
+            f"plugin-companion '{field}' must be a non-empty argv list"
+        )
+    executable = value[0].replace("\\", "/")
+    path = PurePosixPath(executable)
+    if path.is_absolute() or re.match(r"^[A-Za-z]:", executable):
+        raise RegistrationError(
+            f"plugin-companion '{field}' executable must be plugin-relative"
+        )
+    if any(part in ("", ".", "..") for part in path.parts):
+        raise RegistrationError(
+            f"plugin-companion '{field}' executable must be a contained relative path"
+        )
+
+
+def _validate_plugin_companion(spec: dict) -> None:
+    unknown = sorted(set(spec) - _COMPANION_KEYS)
+    if unknown:
+        raise RegistrationError(
+            f"plugin-companion spec has unknown fields: {', '.join(unknown)}"
+        )
+    missing = sorted(_COMPANION_REQUIRED_KEYS - set(spec))
+    if missing:
+        raise RegistrationError(
+            f"plugin-companion spec is missing required fields: {', '.join(missing)}"
+        )
+    for field in ("command", "stop_command", "health_probe", "config_provider"):
+        if field in spec:
+            _validate_plugin_relative_argv(spec[field], field=field)
+    for field in _COMPANION_TIMEOUT_KEYS:
+        value = spec.get(field)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+            or value > 3600
+        ):
+            raise RegistrationError(
+                f"plugin-companion '{field}' must be > 0 and <= 3600"
+            )
+
+
+def validate_companion_config_result(result: dict) -> None:
+    """Validate the versioned JSON contract emitted by a companion config provider."""
+    if not isinstance(result, dict):
+        raise RegistrationError("companion config result must be a JSON object")
+    allowed = {"schema_version", "active", "arguments", "environment"}
+    if unknown := sorted(set(result) - allowed):
+        raise RegistrationError(
+            f"companion config result has unknown fields: {', '.join(unknown)}"
+        )
+    schema_version = result.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != COMPANION_CONFIG_RESULT_VERSION
+    ):
+        raise RegistrationError(
+            "companion config result needs schema_version "
+            f"{COMPANION_CONFIG_RESULT_VERSION}"
+        )
+    if not isinstance(result.get("active"), bool):
+        raise RegistrationError("companion config result 'active' must be true/false")
+    arguments = result.get("arguments")
+    if arguments is not None and (
+        not isinstance(arguments, list)
+        or not all(isinstance(value, str) and value for value in arguments)
+    ):
+        raise RegistrationError(
+            "companion config result 'arguments' must be a list of non-empty strings"
+        )
+    environment = result.get("environment")
+    if environment is not None and (
+        not isinstance(environment, dict)
+        or not all(
+            isinstance(key, str)
+            and key
+            and isinstance(value, str)
+            for key, value in environment.items()
+        )
+    ):
+        raise RegistrationError(
+            "companion config result 'environment' must map strings to strings"
+        )
+
+
+def validate_companion_health_result(result: dict) -> None:
+    """Validate the versioned JSON contract emitted by a companion health probe."""
+    if not isinstance(result, dict):
+        raise RegistrationError("companion health result must be a JSON object")
+    allowed = {"schema_version", "healthy", "detail"}
+    if unknown := sorted(set(result) - allowed):
+        raise RegistrationError(
+            f"companion health result has unknown fields: {', '.join(unknown)}"
+        )
+    schema_version = result.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != COMPANION_HEALTH_RESULT_VERSION
+    ):
+        raise RegistrationError(
+            "companion health result needs schema_version "
+            f"{COMPANION_HEALTH_RESULT_VERSION}"
+        )
+    if not isinstance(result.get("healthy"), bool):
+        raise RegistrationError("companion health result 'healthy' must be true/false")
+    detail = result.get("detail")
+    if detail is not None and (not isinstance(detail, str) or not detail):
+        raise RegistrationError(
+            "companion health result 'detail' must be a non-empty string"
+        )
 
 
 def _validate_disposable_cli_labels(spec: dict) -> None:
@@ -212,6 +362,8 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "evaluator 'evaluator_ref' must be a non-empty string"
             )
         _validate_disposable_cli_labels(spec)
+    elif kind == RegistrationKind.PLUGIN_COMPANION:
+        _validate_plugin_companion(spec)
 
 
 def _scope_key(kind: str, spec: dict) -> str:

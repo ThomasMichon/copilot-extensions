@@ -281,6 +281,8 @@ def _resolve_declaration_paths(
 
 def read_declaration_file_set(
     path: str | Path,
+    *,
+    allow_plugin_companion: bool = False,
 ) -> tuple[ProfileDeclaration, ...]:
     """Read one document and expand it into one or more runtime declarations."""
     p = Path(path).expanduser()
@@ -307,16 +309,24 @@ def read_declaration_file_set(
 
         declarations = expand_repository_issue_loop(data)
     else:
-        declarations = (load_declaration(data),)
+        declarations = (
+            load_declaration(
+                data, allow_plugin_companion=allow_plugin_companion
+            ),
+        )
     return tuple(
         _resolve_declaration_paths(declaration, p.parent)
         for declaration in declarations
     )
 
 
-def read_declaration_file(path: str | Path) -> ProfileDeclaration:
+def read_declaration_file(
+    path: str | Path, *, allow_plugin_companion: bool = False
+) -> ProfileDeclaration:
     """Read a document that represents exactly one runtime declaration."""
-    declarations = read_declaration_file_set(path)
+    declarations = read_declaration_file_set(
+        path, allow_plugin_companion=allow_plugin_companion
+    )
     if len(declarations) != 1:
         raise RegistrarError(
             f"{path}: expands to {len(declarations)} declarations; "
