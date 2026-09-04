@@ -17,8 +17,11 @@ server is started.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
+from agent_dispatch.companion import CompanionIndeterminate
 from agent_dispatch.registrar import load_declaration
 from agent_dispatch.registrar_reconcile import declaration_to_registration
 from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
@@ -62,6 +65,66 @@ class FakeLauncher:
         proc = FakeProc()
         self.launched.append((reg["id"], proc))
         return proc
+
+    def proc_for(self, rid: str) -> FakeProc:
+        return [p for (r, p) in self.launched if r == rid][-1]
+
+
+class FakeCompanionController:
+    def __init__(self):
+        self.resolve_outcomes: list[object] = []
+        self.health_outcomes: list[object] = []
+        self.launched: list[tuple[str, FakeProc]] = []
+        self.stopped: list[str] = []
+        self.stopped_versions: list[str] = []
+        self.retired: list[str] = []
+        self.adopted_receipts: list[set[str]] = []
+        self.recover_next = False
+
+    def resolve(self, registration, *, machine, env):
+        outcome = object()
+        if self.resolve_outcomes:
+            outcome = self.resolve_outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            if outcome is None:
+                return None
+        resolved = dict(registration)
+        resolved["companion_runtime"] = (
+            outcome
+            if isinstance(outcome, dict)
+            else {"arguments": [], "environment": {}, "environment_digest": "same"}
+        )
+        return SimpleNamespace(registration=resolved)
+
+    def launch(self, resolution, *, fingerprint):
+        proc = FakeProc()
+        rid = resolution.registration["id"]
+        self.launched.append((rid, proc))
+        recovered, self.recover_next = self.recover_next, False
+        return SimpleNamespace(process=proc, recovered=recovered)
+
+    def stop(self, resolution, process):
+        self.stopped.append(resolution.registration["id"])
+        self.stopped_versions.append(
+            resolution.registration["plugin"]["version"]
+        )
+        process.terminate()
+
+    def health(self, resolution):
+        if not self.health_outcomes:
+            return None
+        outcome = self.health_outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def retire_crashed(self, resolution, process):
+        self.retired.append(resolution.registration["id"])
+        process.terminate()
+
+    def reconcile_receipts(self, adopted_registration_ids):
+        self.adopted_receipts.append(set(adopted_registration_ids))
 
     def proc_for(self, rid: str) -> FakeProc:
         return [p for (r, p) in self.launched if r == rid][-1]
@@ -139,6 +202,21 @@ def _reg(rid, **over) -> dict:
     }
     r.update(over)
     return r
+
+
+def _companion_reg(rid="companion", *, root="C:\\plugins\\index", version="1"):
+    return _reg(
+        rid,
+        kind="plugin-companion",
+        spec={"command": ["bin/service.py"], "config_provider": ["bin/config.py"]},
+        plugin={
+            "root": root,
+            "source_path": root + "\\.github\\plugin\\plugin.json",
+            "version": version,
+            "activation_scopes": ["repo"],
+        },
+        runtime_revision={"plugin_root": root, "plugin_version": version},
+    )
 
 
 def _daemon(client, launcher, **kw):
@@ -380,6 +458,136 @@ def test_reconcile_starts_a_unit_per_registration():
     summary2 = d.reconcile_once()
     assert summary2.started == []
     assert summary2.running == ["a", "b"]
+
+
+def test_companion_provider_active_starts_and_inactive_winds_down():
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    launcher = FakeLauncher()
+    daemon = _daemon(
+        client, launcher, companion_controller=controller
+    )
+
+    started = daemon.reconcile_once()
+    assert started.started == ["companion"]
+    assert launcher.launched == []
+
+    controller.resolve_outcomes.append(None)
+    stopped = daemon.reconcile_once()
+    assert stopped.stopped == ["companion"]
+    assert controller.stopped == ["companion"]
+    assert controller.adopted_receipts[-1] == {"companion"}
+
+
+def test_companion_provider_indeterminate_retains_same_authority():
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller
+    )
+    daemon.reconcile_once()
+    first = controller.proc_for("companion")
+    controller.resolve_outcomes.append(
+        CompanionIndeterminate("provider unavailable")
+    )
+
+    summary = daemon.reconcile_once()
+
+    assert summary.stopped == []
+    assert controller.proc_for("companion") is first
+
+
+def test_companion_indeterminate_new_authority_winds_down_old_process():
+    client = FakeClient([_companion_reg(version="1")])
+    controller = FakeCompanionController()
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller
+    )
+    daemon.reconcile_once()
+    controller.resolve_outcomes.append(
+        CompanionIndeterminate("new provider unavailable")
+    )
+    client.set_regs([_companion_reg(version="2")])
+
+    summary = daemon.reconcile_once()
+
+    assert summary.stopped == ["companion"]
+    assert summary.running == []
+    assert controller.stopped == ["companion"]
+    assert controller.stopped_versions == ["1"]
+
+
+def test_companion_provider_runtime_change_restarts_unit():
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    controller.resolve_outcomes.append(
+        {"arguments": ["--first"], "environment": {}, "environment_digest": "a"}
+    )
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller
+    )
+    daemon.reconcile_once()
+    first = controller.proc_for("companion")
+    controller.resolve_outcomes.append(
+        {"arguments": ["--second"], "environment": {}, "environment_digest": "b"}
+    )
+
+    summary = daemon.reconcile_once()
+
+    assert summary.restarted == ["companion"]
+    assert controller.proc_for("companion") is not first
+
+
+def test_companion_confirmed_unhealthy_restarts_but_indeterminate_health_keeps():
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller
+    )
+    daemon.reconcile_once()
+    first = controller.proc_for("companion")
+    controller.health_outcomes.append(
+        CompanionIndeterminate("probe unavailable")
+    )
+    retained = daemon.reconcile_once()
+    assert retained.restarted == []
+    assert controller.proc_for("companion") is first
+
+    controller.health_outcomes.append(False)
+    restarted = daemon.reconcile_once()
+    assert restarted.unhealthy == ["companion"]
+    assert restarted.restarted == ["companion"]
+    assert controller.proc_for("companion") is not first
+
+
+def test_companion_recovery_is_reported_without_duplicate_start():
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    controller.recover_next = True
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller
+    )
+
+    summary = daemon.reconcile_once()
+
+    assert summary.recovered == ["companion"]
+    assert summary.started == []
+    assert len(controller.launched) == 1
+
+
+def test_companion_crash_tree_is_retired_before_restart():
+    client = FakeClient([_companion_reg()])
+    controller = FakeCompanionController()
+    daemon = _daemon(
+        client, FakeLauncher(), companion_controller=controller
+    )
+    daemon.reconcile_once()
+    controller.proc_for("companion").crash()
+
+    summary = daemon.reconcile_once()
+
+    assert controller.retired == ["companion"]
+    assert summary.revived == ["companion"]
 
 
 def test_reconcile_stops_removed_registration():
