@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agent_dispatch.registrar import (
@@ -12,7 +14,7 @@ from agent_dispatch.registrar import (
     declaration_from_env,
     load_declaration,
 )
-
+from agent_dispatch.registrar_discovery import read_declaration_file
 
 # -- Loading + validation ----------------------------------------------------
 
@@ -480,6 +482,41 @@ def test_filters_dont_affect_supervise_args():
         {"name": "general", "labels": ["general"], "filters": {"permit": {"role": ["worker"]}}}
     )
     assert "--role" not in d.to_supervise_args()
+
+
+def test_plugin_companion_requires_attributed_discovery():
+    data = {
+        "name": "index-service",
+        "kind": "plugin-companion",
+        "spec": {
+            "command": ["bin/serve"],
+            "stop_command": ["bin/stop"],
+            "health_probe": ["bin/health"],
+        },
+    }
+    with pytest.raises(RegistrarError, match="attributed plugin discovery"):
+        load_declaration(data)
+    assert load_declaration(data, allow_plugin_companion=True).kind == "plugin-companion"
+
+
+def test_trusted_declaration_file_rejects_plugin_companion(tmp_path):
+    path = tmp_path / "companion.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "index-service",
+                "kind": "plugin-companion",
+                "spec": {
+                    "command": ["bin/serve"],
+                    "stop_command": ["bin/stop"],
+                    "health_probe": ["bin/health"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RegistrarError, match="attributed plugin discovery"):
+        read_declaration_file(path)
 
 
 # -- helpers -----------------------------------------------------------------

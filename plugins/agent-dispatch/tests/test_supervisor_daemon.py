@@ -25,6 +25,7 @@ from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
 from agent_dispatch.supervisor_daemon import (
     SupervisorDaemon,
     UnsupportedKind,
+    _spec_fingerprint,
     build_command,
     supervisor_lease_scope,
 )
@@ -328,6 +329,35 @@ def test_build_command_needs_materializer_for_inline_spec():
 def test_build_command_rejects_unsupported_kind():
     with pytest.raises(UnsupportedKind):
         build_command(_reg("a", kind="totally-unknown", spec={"x": 1}))
+
+
+def test_build_command_does_not_launch_plugin_companion_contract():
+    with pytest.raises(UnsupportedKind, match="plugin-companion"):
+        build_command(
+            _reg(
+                "companion",
+                kind="plugin-companion",
+                spec={
+                    "command": ["bin/serve"],
+                    "stop_command": ["bin/stop"],
+                    "health_probe": ["bin/health"],
+                },
+            )
+        )
+
+
+def test_plugin_companion_runtime_revision_changes_fingerprint():
+    first = _reg("companion", kind="plugin-companion", spec={"command": ["bin/serve"]})
+    first["runtime_revision"] = {
+        "plugin_root": "/plugins/index",
+        "plugin_version": "1.0.0",
+    }
+    second = dict(first)
+    second["runtime_revision"] = {
+        "plugin_root": "/plugins/index",
+        "plugin_version": "1.0.1",
+    }
+    assert _spec_fingerprint(first) != _spec_fingerprint(second)
 
 
 def test_lease_scope_format():

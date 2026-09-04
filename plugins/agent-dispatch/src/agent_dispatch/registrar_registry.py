@@ -24,7 +24,7 @@ from dropin_registry import (
     ScanSnapshot,
     scan_directory,
 )
-from plugin_activation import ActivationReport, resolve_active_plugins
+from plugin_activation import ActivationReport, ActivePlugin, resolve_active_plugins
 
 from .registrar import ProfileDeclaration, RegistrarError
 from .registrar_discovery import RegistrarIndeterminateError, read_declaration_file
@@ -321,9 +321,13 @@ def _classify_declaration(
     path: Path,
     *,
     manifest: RegistrarManifest,
+    plugin_root: Path,
+    active_plugin: ActivePlugin | None,
 ) -> EntryDecision[PluginDeclaration]:
     try:
-        declaration = read_declaration_file(path)
+        declaration = read_declaration_file(
+            path, allow_plugin_companion=True
+        )
     except RegistrarIndeterminateError as exc:
         return EntryDecision.indeterminate(
             _finding(
@@ -355,6 +359,77 @@ def _classify_declaration(
         )
     if not declaration.owner:
         declaration = declaration.with_owner(manifest.plugin)
+    if declaration.kind == "plugin-companion":
+        if active_plugin is None:
+            return EntryDecision.indeterminate(
+                _finding(
+                    path,
+                    "entry-indeterminate",
+                    status="indeterminate",
+                    owner=manifest.plugin,
+                    detail="plugin activation could not be confirmed",
+                )
+            )
+        try:
+            plugin_data = json.loads(
+                (plugin_root / "plugin.json").read_text(encoding="utf-8-sig")
+            )
+            if not isinstance(plugin_data, dict):
+                raise ValueError("plugin.json must contain an object")
+            plugin_version = plugin_data.get("version")
+        except OSError as exc:
+            return EntryDecision.indeterminate(
+                _finding(
+                    path,
+                    "entry-indeterminate",
+                    status="indeterminate",
+                    owner=manifest.plugin,
+                    detail=f"plugin companion version could not be read: {exc}",
+                )
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            return EntryDecision.inactive(
+                _finding(
+                    path,
+                    "invalid-entry",
+                    owner=manifest.plugin,
+                    detail=f"plugin companion version could not be read: {exc}",
+                )
+            )
+        if not isinstance(plugin_version, str) or not plugin_version:
+            return EntryDecision.inactive(
+                _finding(
+                    path,
+                    "invalid-entry",
+                    owner=manifest.plugin,
+                    detail="plugin companion requires plugin.json version",
+                )
+            )
+        scopes = tuple(
+            sorted(
+                {
+                    scope
+                    for live_root in active_plugin.live_roots
+                    if live_root.root.resolve() == plugin_root
+                    for scope in live_root.scopes
+                }
+            )
+        )
+        if not scopes:
+            return EntryDecision.inactive(
+                _finding(
+                    path,
+                    "identity-mismatch",
+                    owner=manifest.plugin,
+                    detail="plugin companion root has no authoritative activation scopes",
+                )
+            )
+        declaration = declaration.with_plugin_provenance(
+            plugin_root=str(plugin_root),
+            source_path=str(path.resolve()),
+            plugin_version=plugin_version,
+            activation_scopes=scopes,
+        )
     return EntryDecision.active(
         PluginDeclaration(
             declaration=declaration,
@@ -536,11 +611,15 @@ def _classify_manifest(
             )
         return target_error
     assert registrar_target is not None
+    active_plugin = activation_decision.value if activation_decision is not None else None
 
     declaration_snapshot = scan_directory(
         registrar_target,
         lambda declaration_path: _classify_declaration(
-            declaration_path, manifest=manifest
+            declaration_path,
+            manifest=manifest,
+            plugin_root=plugin_root,
+            active_plugin=active_plugin,
         ),
         registry=REGISTRY_NAME,
         suffixes=_DECL_SUFFIXES,

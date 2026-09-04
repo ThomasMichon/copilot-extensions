@@ -49,6 +49,7 @@ from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import PayloadStore, is_blob_ref
 from .registrations import (
     RegistrationError,
+    RegistrationKind,
     RegistrationRecord,
     RegistrationStatus,
     derive_registration_id,
@@ -5779,6 +5780,10 @@ class TaskQueue:
         **upserts** (idempotent by handle) rather than duplicating it, preserving
         ``created_at`` and the ``status`` flag across the upsert.
         """
+        if kind not in RegistrationKind.DIRECT:
+            raise TaskError(
+                f"registration kind {kind!r} is not available through direct registration"
+            )
         try:
             validate_registration(kind, spec)
         except RegistrationError as exc:
