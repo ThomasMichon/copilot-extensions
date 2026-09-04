@@ -48,10 +48,18 @@ def _repo(path: Path, machine: str | None) -> Path:
     return path
 
 
+def _platform_key() -> str:
+    if os.name == "nt":
+        return "windows"
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return "wsl"
+    return "linux"
+
+
 def _registry(home: Path, project: str, repo: Path) -> None:
     registry = home / ".agent-worktrees" / "repos.yaml"
     registry.parent.mkdir(parents=True)
-    platform_key = "windows" if os.name == "nt" else "linux"
+    platform_key = _platform_key()
     registry.write_text(
         f"repos:\n  {project}:\n    {platform_key}: {json.dumps(str(repo))}\n",
         encoding="utf-8",
@@ -91,7 +99,7 @@ def test_provider_is_inactive_for_client_or_missing_config(tmp_path: Path, monke
     empty = _repo(tmp_path / "empty", None)
     _registry(home, "harness", repo)
     registry = home / ".agent-worktrees" / "repos.yaml"
-    platform_key = "windows" if os.name == "nt" else "linux"
+    platform_key = _platform_key()
     registry.write_text(
         registry.read_text(encoding="utf-8")
         + "  empty:\n"
@@ -285,6 +293,17 @@ def test_session_hook_publishes_attributed_registrar_candidate(
         "registrar": "references/agent-dispatch/registrar",
     }
     assert module.main() == 0
+
+
+def test_python_registrar_empty_override_uses_default_home(tmp_path: Path, monkeypatch) -> None:
+    module = _module(REGISTER, "register_dispatch_companion_default")
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DROPINS_DIR", "")
+    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+
+    assert module.main() == 0
+    assert (
+        tmp_path / ".agent-dispatch" / "registrar.d" / "agent-index-copilot-extensions.json"
+    ).is_file()
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])

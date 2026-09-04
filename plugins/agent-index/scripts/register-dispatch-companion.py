@@ -16,10 +16,8 @@ def main() -> int:
         if not registrar.is_dir():
             return 0
         target_dir = Path(
-            os.environ.get(
-                "AGENT_DISPATCH_REGISTRAR_DROPINS_DIR",
-                str(Path.home() / ".agent-dispatch" / "registrar.d"),
-            )
+            os.environ.get("AGENT_DISPATCH_REGISTRAR_DROPINS_DIR")
+            or Path.home() / ".agent-dispatch" / "registrar.d"
         ).expanduser()
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "agent-index-copilot-extensions.json"
