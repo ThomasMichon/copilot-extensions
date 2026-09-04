@@ -206,6 +206,14 @@ class TestSessionBackendConfig:
                 },
                 "protocol_versions",
             ),
+            (
+                {
+                    "kind": "ahp",
+                    "endpoint_url": "ws://127.0.0.1:8765",
+                    "connect_timeout_seconds": True,
+                },
+                "connect_timeout_seconds",
+            ),
         ],
     )
     def test_rejects_invalid_backend(self, raw, message):

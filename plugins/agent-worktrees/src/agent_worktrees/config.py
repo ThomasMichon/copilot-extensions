@@ -1128,6 +1128,10 @@ def _parse_session_backend(raw: Any) -> SessionBackendConfig:
             "session_backend.protocol_versions must contain a version"
         )
     timeout_raw = raw.get("connect_timeout_seconds", 15)
+    if isinstance(timeout_raw, bool):
+        raise ValueError(
+            "session_backend.connect_timeout_seconds must be a number"
+        )
     try:
         timeout = float(timeout_raw)
     except (TypeError, ValueError) as exc:

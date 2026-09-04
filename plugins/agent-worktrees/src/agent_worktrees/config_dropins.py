@@ -466,8 +466,15 @@ def _validate_config(raw: object) -> str | None:
                 return error
         if (
             "connect_timeout_seconds" in session_backend
-            and not isinstance(
-                session_backend["connect_timeout_seconds"], int | float
+            and (
+                isinstance(
+                    session_backend["connect_timeout_seconds"],
+                    bool,
+                )
+                or not isinstance(
+                    session_backend["connect_timeout_seconds"],
+                    int | float,
+                )
             )
         ):
             return (
