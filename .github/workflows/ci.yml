@@ -340,7 +340,11 @@ jobs:
       - name: Stop psmux test session
         if: always()
         shell: pwsh
-        run: psmux kill-session -t aw-ci
+        run: |
+          if (Get-Command psmux -ErrorAction SilentlyContinue) {
+            psmux kill-session -t aw-ci 2>$null
+          }
+          exit 0
 
   full:
     name: full - ${{ matrix.plugin }}

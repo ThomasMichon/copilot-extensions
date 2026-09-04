@@ -7606,16 +7606,19 @@ def _remove_monitor_entry(reg_dir: Path, sess: str) -> None:
 
 
 def _windowless_python() -> str:
-    """The interpreter to spawn a detached, consoleless background daemon with.
+    """The interpreter for a detached daemon with no recurring console children.
 
     On Windows a venv ``python.exe`` is a *console* launcher: even started with
     ``DETACHED_PROCESS`` it re-launches the base interpreter as a child that
     allocates its OWN console, which Windows Terminal (DefTerm) then surfaces as
-    a visible window/tab -- the "headed status-monitor / status-updater" bug.
+    a visible window/tab.
     ``pythonw.exe`` (the GUI-subsystem sibling) never allocates a console, so a
     fully-background daemon (DEVNULL stdio, no console I/O) stays truly
     windowless through the trampoline. Falls back to ``sys.executable`` when no
-    sibling ``pythonw`` exists (non-standard layout) or off Windows.
+    sibling ``pythonw`` exists (non-standard layout) or off Windows. Daemons
+    with recurring console descendants intentionally retain console Python
+    under ``windowless_daemon_kwargs()`` instead, so those descendants inherit
+    one hidden console tree.
     """
     return windowless_python(sys.executable)
 
