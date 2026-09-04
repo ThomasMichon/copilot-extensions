@@ -155,6 +155,31 @@ class TestDeliveryCursor:
             == state["continuity_id"]
         )
 
+    def test_snapshot_common_path_does_not_take_write_lock(
+        self, tmp_db: Database
+    ) -> None:
+        class _UnexpectedWriteLock:
+            def __enter__(self):
+                raise AssertionError("read-only cursor snapshot took write lock")
+
+            def __exit__(self, *_args):
+                return False
+
+        _seed_session(tmp_db)
+        tmp_db.append_event(
+            "s1", 1, "agent_message", {"text": "one"}, 100.0
+        )
+        tmp_db.flush()
+        write_lock = tmp_db._write_lock
+        tmp_db._write_lock = _UnexpectedWriteLock()
+        try:
+            state = tmp_db.get_controlled_cursor_state("caller-a", "s1")
+        finally:
+            tmp_db._write_lock = write_lock
+
+        assert state["head_id"] == 1
+        assert state["continuity_id"] is not None
+
     def test_controlled_ack_rejects_cursor_beyond_head(
         self, tmp_db: Database
     ) -> None:

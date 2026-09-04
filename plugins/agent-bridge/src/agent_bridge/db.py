@@ -1958,9 +1958,9 @@ class Database:
     ) -> dict[str, Any]:
         """Read cursor, invalidation, head, and continuity from one DB snapshot."""
         self.flush()
-        with self._write_lock:
-            conn = self._get_conn()
-            conn.execute("BEGIN IMMEDIATE")
+        conn = self._get_conn()
+        while True:
+            conn.execute("BEGIN")
             try:
                 row = conn.execute(
                     "SELECT last_acked_id, updated_at FROM delivery_cursors "
@@ -1987,24 +1987,46 @@ class Database:
                     and invalidation["current_continuity_id"] is None
                     and continuity_id is not None
                 ):
-                    conn.execute(
-                        "UPDATE delivery_cursor_invalidations SET "
-                        "current_continuity_id=? "
-                        "WHERE caller_id=? AND session_id=? "
-                        "AND current_continuity_id IS NULL",
-                        (continuity_id, caller_id, session_id),
-                    )
-                    invalidation = conn.execute(
-                        "SELECT prior_last_acked_id, prior_head_id, "
-                        "prior_continuity_id, current_continuity_id, "
-                        "invalidated_at FROM delivery_cursor_invalidations "
-                        "WHERE caller_id=? AND session_id=?",
-                        (caller_id, session_id),
-                    ).fetchone()
+                    conn.rollback()
+                    with self._write_lock:
+                        conn.execute("BEGIN IMMEDIATE")
+                        try:
+                            repair_head = conn.execute(
+                                "SELECT MIN(CASE WHEN event_id=1 "
+                                "THEN timestamp END) AS origin "
+                                "FROM events WHERE session_id=?",
+                                (session_id,),
+                            ).fetchone()
+                            repair_continuity = self._event_continuity(
+                                session_id,
+                                (
+                                    repair_head["origin"]
+                                    if repair_head
+                                    else None
+                                ),
+                            )
+                            if repair_continuity is not None:
+                                conn.execute(
+                                    "UPDATE delivery_cursor_invalidations SET "
+                                    "current_continuity_id=? "
+                                    "WHERE caller_id=? AND session_id=? "
+                                    "AND current_continuity_id IS NULL",
+                                    (
+                                        repair_continuity,
+                                        caller_id,
+                                        session_id,
+                                    ),
+                                )
+                            conn.commit()
+                        except BaseException:
+                            conn.rollback()
+                            raise
+                    continue
                 conn.commit()
             except BaseException:
                 conn.rollback()
                 raise
+            break
         return {
             "registered": row is not None,
             "last_acked_id": row["last_acked_id"] if row else 0,
