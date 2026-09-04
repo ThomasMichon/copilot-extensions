@@ -188,6 +188,8 @@ def test_path_repair_does_not_mutate_live_sessions():
         ensure.index("elseif ($sessionState.Sessions.Count -gt 0)"):
         ensure.index("} else {", ensure.index("elseif ($sessionState.Sessions.Count -gt 0)"))
     ]
+    assert "compatibility cannot be validated because the helper is missing" in ensure
+    assert "compatibility cannot be validated because the helper is unavailable" in ensure
     assert "& winget install" not in unknown_branch
     assert "not replacing it" in unknown_branch
     assert "& winget install" not in live_branch

@@ -2150,14 +2150,16 @@ function Ensure-Psmux {
     $muxBin = Resolve-AwPsmuxBin (Get-Command psmux -ErrorAction SilentlyContinue)
     $psmuxVer = (& $muxBin --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
     $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
-    if (Test-Path -LiteralPath $helper) {
-        . $helper
+    if (-not (Test-Path -LiteralPath $helper)) {
+        Write-ServiceWarn "psmux $psmuxVer compatibility cannot be validated because the helper is missing -- not replacing it"
+        return
     }
-    $compatible = if (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue) {
-        Test-AwPsmuxVersionCompatible -Version $psmuxVer
-    } else {
-        $false
+    . $helper
+    if (-not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue)) {
+        Write-ServiceWarn "psmux $psmuxVer compatibility cannot be validated because the helper is unavailable -- not replacing it"
+        return
     }
+    $compatible = Test-AwPsmuxVersionCompatible -Version $psmuxVer
     if (-not $compatible) {
         if (Test-Path -LiteralPath $helper) {
             $sessionState = Get-AwPsmuxSessionState -Path $muxBin
