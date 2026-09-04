@@ -2840,10 +2840,10 @@ def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
 
     Reads ``record.pair_ref`` (a :class:`ClaimRef` to the sibling) and loads that
     worktree's record from the referenced project's tracking directory.
-    Cross-machine refs resolve only when a local record exists. A legacy record
-    misplaced in the current project's directory is deliberately not accepted:
+    Only same-machine qualified refs resolve. A legacy record misplaced in the
+    current project's directory is deliberately not accepted:
     ``state-root --pair`` must surface that broken pair until ``doctor --fix``
-    moves the record to its owning project.
+    copies the record to its owning project registry.
     """
     ref = record.pair_claim_ref
     if ref is None:

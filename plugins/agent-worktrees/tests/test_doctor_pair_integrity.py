@@ -119,7 +119,13 @@ def test_doctor_json_repairs_pair_from_untracked_knowledge_cwd(
     projects_path = cfg.install_dir() / "projects.yaml"
     projects_path.parent.mkdir(parents=True, exist_ok=True)
     projects_path.write_text(
-        yaml.safe_dump({"projects": {"harness": {}, "knowledge": {}}}),
+        yaml.safe_dump({
+            "projects": {
+                "harness": {},
+                "knowledge": {},
+                "../invalid": {},
+            }
+        }),
         encoding="utf-8",
     )
     harness_dir = cfg.project_dir("harness") / "worktrees"

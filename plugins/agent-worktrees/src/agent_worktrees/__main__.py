@@ -21108,6 +21108,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         for name in (
             (inst.read_projects_registry().get("projects") or {}).keys()
         )
+        if isinstance(name, str) and cfg._PROJECT_NAME_RE.fullmatch(name)
     )
     if not proj_name:
         discovered = health.find_record_by_cwd_across_projects(
@@ -21385,7 +21386,7 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
     if pairs["found"]:
         print(
             f"  {chk if applied and pairs['repaired'] == pairs['found'] else '!'} "
-            f"Pair integrity: {pairs['found']} finding(s), "
+            f"Pair registry placement: {pairs['found']} finding(s), "
             f"{pairs['repaired'] if applied else pairs['repairable']} "
             f"{'repaired' if applied else 'repairable'}"
         )
@@ -21397,7 +21398,7 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
                 f"      - {item['worktree_id']} [{mark}] {item['detail']}"
             )
     else:
-        print(f"  {chk} Paired worktree records are reciprocal")
+        print(f"  {chk} Pair records are stored in their owning project registries")
 
     hc = report.get("head_cache", {"found": 0, "fixed": 0, "ids": []})
     if hc["found"]:

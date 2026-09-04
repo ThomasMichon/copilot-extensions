@@ -110,7 +110,8 @@ def audit_pair_integrity(
     The paired carve historically wrote the knowledge sibling into the active
     harness tracking directory. A repair is safe only when exactly one misplaced
     record has the identity named by a qualified same-machine pair reference and
-    its checkout still exists.
+    its checkout still exists. The legacy copy is retained during rollout so
+    older runtimes can continue resolving active pairs.
     """
     records_by_project = {
         project: tracking.list_records(_tracking_dir(project))
@@ -154,18 +155,26 @@ def audit_pair_integrity(
                 and candidates[0][0] != ref.project
                 and Path(candidates[0][1].worktree_path).is_dir()
             )
-            found_in = candidates[0][0] if len(candidates) == 1 else ""
+            found_in = (
+                candidates[0][0]
+                if len(candidates) == 1
+                else ", ".join(sorted(project for project, _ in candidates))
+            )
+            if len(candidates) > 1:
+                location = (
+                    "has multiple candidate records across project registries: "
+                    f"{found_in}"
+                )
+            elif found_in:
+                location = f"is stored under {found_in!r}"
+            else:
+                location = "is missing from every project registry"
             finding = PairIntegrityFinding(
                 worktree_id=ref.worktree_id,
                 project=ref.project,
                 found_in_project=found_in,
                 detail=(
-                    f"record belongs in project {ref.project!r} but is "
-                    + (
-                        f"stored under {found_in!r}"
-                        if found_in
-                        else "missing from every project registry"
-                    )
+                    f"record belongs in project {ref.project!r} but {location}"
                 ),
                 repairable=repairable,
             )
