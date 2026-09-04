@@ -31,17 +31,19 @@ re-spawn) and surfaced for a human, which is the safe default.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import logging
+import stat
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
+from .bridge_events import BridgeSubscription, SupervisorEventWake
 from .client import DispatchClient, DispatchError
 from .queue import SpawnState, Status
-from .bridge_events import BridgeSubscription, SupervisorEventWake
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
@@ -292,6 +294,7 @@ FleetEndFn = Callable[[str, str], bool]
 LocalBodyVerdictFn = Callable[[str], str]
 LocalBodyActivityFn = Callable[[str], str | None]
 LocalAcpSessionFn = Callable[[str], str | None]
+LocalBodyTargetDirFn = Callable[[str], str | None]
 LocalEndFn = Callable[[str], bool]
 LocalResumeFn = Callable[[str, str], bool]
 
@@ -381,6 +384,35 @@ def _default_local_acp_session(bridge_session_id: str) -> str | None:
         acp_session_id = session.get("acp_session_id")
         return str(acp_session_id) if acp_session_id else None
     return None
+
+
+def _default_local_body_target_dir(bridge_session_id: str) -> str | None:
+    """Return an absolute target directory from a local body snapshot."""
+    from . import tracking
+
+    for session in tracking.list_local_body_sessions():
+        if str(session.get("session_id") or "") != bridge_session_id:
+            continue
+        target_dir = session.get("target_dir")
+        if not isinstance(target_dir, str) or not target_dir:
+            return None
+        path = Path(target_dir)
+        return str(path) if path.is_absolute() else None
+    return None
+
+
+def _target_directory_missing(target_dir: str) -> bool | None:
+    """Classify an absolute target directory without treating stat errors as loss."""
+    path = Path(target_dir)
+    if not path.is_absolute():
+        return None
+    try:
+        target_stat = path.stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return None
+    return not stat.S_ISDIR(target_stat.st_mode)
 
 
 def _default_local_cold(bridge_session_id: str) -> bool:
@@ -659,6 +691,7 @@ class Supervisor:
         local_body_verdict_fn: LocalBodyVerdictFn | None = None,
         local_body_activity_fn: LocalBodyActivityFn | None = None,
         local_acp_session_fn: LocalAcpSessionFn | None = None,
+        local_body_target_dir_fn: LocalBodyTargetDirFn | None = None,
         local_cold_fn: LocalColdFn | None = None,
         local_end_fn: LocalEndFn | None = None,
         local_resume_fn: LocalResumeFn | None = None,
@@ -745,6 +778,9 @@ class Supervisor:
         )
         self.local_acp_session_fn = (
             local_acp_session_fn or _default_local_acp_session
+        )
+        self.local_body_target_dir_fn = (
+            local_body_target_dir_fn or _default_local_body_target_dir
         )
         self.local_cold_fn = local_cold_fn or _default_local_cold
         self.local_end_fn = local_end_fn or _default_local_end
@@ -1169,9 +1205,9 @@ class Supervisor:
         return bound
 
     def release_resumed_cold_tasks(self, *, now: float | None = None) -> int:
-        """Resume each cold task in its existing ACP session."""
+        """Resume viable cold bodies or release ones whose worktree vanished."""
         now = time.time() if now is None else now
-        resumed = 0
+        handled = 0
         for res in self._pool_reservations(
             state=SpawnState.COLD, resume_requested=True
         ):
@@ -1187,6 +1223,50 @@ class Supervisor:
                 continue
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is None:
+                continue
+            try:
+                target_dir = self.local_body_target_dir_fn(local_sid)
+            except Exception:
+                log.exception(
+                    "failed to resolve target directory for cold session %s",
+                    local_sid,
+                )
+                target_dir = None
+            target_missing = (
+                _target_directory_missing(target_dir)
+                if target_dir is not None
+                else None
+            )
+            if target_missing is True:
+                try:
+                    self.client.release(
+                        task["id"],
+                        owner,
+                        reason=(
+                            "recorded worktree is missing; released for fresh "
+                            "re-embodiment"
+                        ),
+                    )
+                except DispatchError:
+                    self._resume_retry_after[key] = (
+                        now + _COLD_RESUME_RETRY_SECONDS
+                    )
+                    log.exception(
+                        "failed to release missing-worktree cold task %s",
+                        task["id"],
+                    )
+                    continue
+                self._cooled_reservations.discard(key)
+                self._cold_retry_after.pop(key, None)
+                self._resume_retry_after.pop(key, None)
+                handled += 1
+                log.warning(
+                    "released suspended task %s after its recorded worktree "
+                    "disappeared (%s); durable task state retained for fresh "
+                    "re-embodiment",
+                    task["id"],
+                    target_dir,
+                )
                 continue
             prompt = (
                 f"Task {task['id']} has new durable steering. Resume this same "
@@ -1228,7 +1308,7 @@ class Supervisor:
                     expected_generation=task.get("generation"),
                 )
                 self._resume_retry_after.pop(key, None)
-                resumed += 1
+                handled += 1
                 log.info(
                     "resumed cold task %s in existing ACP session %s",
                     task.get("id"),
@@ -1239,10 +1319,10 @@ class Supervisor:
                     now + _COLD_RESUME_RETRY_SECONDS
                 )
                 log.exception(
-                    "failed to release resumed cold task %s",
+                    "failed to finalize cold-task resume for %s",
                     task.get("id"),
                 )
-        return resumed
+        return handled
 
     def reconcile_reserving(self) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
