@@ -7,7 +7,7 @@
 - **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
   the [plugin-services](../../plugin-services/README.md) service model)
 - **Status:** Draft
-- **Last revised:** 2026-07-29
+- **Last revised:** 2026-09-04
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's future `plugins/agent-index/docs/`
 

@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-09-03
+- **Last revised:** 2026-09-04
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
