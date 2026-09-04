@@ -6,8 +6,9 @@ agents on the same machine. Leases are *advisory*: the ``container:`` resolver
 does not hard-block dispatch, but ``borrow`` will not hand out a container that
 is already leased to a live holder.
 
-A lease is reclaimed when its holder process is gone (same-host pid check) or
-its heartbeat is older than the TTL.
+A lease can be reclaimed during acquisition when its exact same-host holder PID
+is definitively gone and no provider lifecycle or session admission protects
+the container. Remote and indeterminate holders remain leased until the TTL.
 """
 
 from __future__ import annotations
@@ -56,6 +57,10 @@ class Lease:
     host: str
     acquired_at: float
     heartbeat_at: float
+    reclaim_reason: str | None = None
+    reclaimed_from_effort: str | None = None
+    reclaimed_from_pid: int | None = None
+    reclaimed_at: float | None = None
 
     def age(self) -> float:
         return time.time() - self.heartbeat_at
@@ -340,6 +345,29 @@ def _prune(leases: dict[str, Lease], ttl: float) -> dict[str, Lease]:
     return live
 
 
+def _lease_holder_liveness(lease: Lease) -> bool | None:
+    """Return local holder liveness, or None when it cannot be established."""
+    if lease.host != _this_host():
+        return None
+    try:
+        alive = _pid_alive(lease.pid)
+    except (OSError, RuntimeError) as exc:
+        log.warning(
+            "Could not determine lease holder liveness for %s "
+            "(host=%s, pid=%s): %s",
+            lease.container,
+            lease.host,
+            lease.pid,
+            exc,
+        )
+        return None
+    if alive is True:
+        return True
+    if alive is False:
+        return False
+    return None
+
+
 def list_leases(ttl: float = DEFAULT_TTL, prune: bool = True) -> list[Lease]:
     """Return current (optionally pruned) leases."""
     with _lease_lock():
@@ -406,6 +434,7 @@ def borrow(
             )
 
         by_name = {c.name: c for c in members}
+        reclaimed: Lease | None = None
 
         if container:
             if container not in by_name:
@@ -419,15 +448,20 @@ def borrow(
                     f"{hold.operation} is in progress"
                 )
             held = leases.get(container)
-            if container in admitted and held is None:
+            if container in admitted and (
+                held is None or held.effort != effort
+            ):
                 raise ProviderAdmissionError(
                     f"Container '{container}' has an active provider session"
                 )
             if held and held.effort != effort:
-                raise RuntimeError(
-                    f"Container '{container}' is leased by effort "
-                    f"'{held.effort}' (host={held.host}, pid={held.pid})"
-                )
+                if _lease_holder_liveness(held) is False:
+                    reclaimed = held
+                else:
+                    raise RuntimeError(
+                        f"Container '{container}' is leased by effort "
+                        f"'{held.effort}' (host={held.host}, pid={held.pid})"
+                    )
             chosen = container
         else:
             # Effort-level idempotency: a normal fleet-scoped re-borrow should
@@ -446,34 +480,75 @@ def borrow(
                         f"{hold.operation} is in progress"
                     )
             else:
-                # Prefer running, then startable; skip those already leased.
-                free = [
-                    c for c in members
-                    if (
-                        c.name not in leases
-                        and c.name not in holds
-                        and c.name not in admitted
-                    )
-                ]
-                if not free:
+                # Treat a definitively dead same-host holder as available, but
+                # only when no lifecycle or connection admission protects it.
+                available = []
+                for member in members:
+                    if member.name in holds or member.name in admitted:
+                        continue
+                    held = leases.get(member.name)
+                    if held is None:
+                        available.append((member, None))
+                    elif _lease_holder_liveness(held) is False:
+                        available.append((member, held))
+                if not available:
                     raise RuntimeError(
                         "All fleet containers are currently leased or under "
                         "provider lifecycle hold. Release one or grow the fleet."
                     )
-                free.sort(key=lambda c: (not c.is_running, c.name))
-                chosen = free[0].name
+                available.sort(
+                    key=lambda candidate: (
+                        not candidate[0].is_running,
+                        candidate[0].name,
+                    )
+                )
+                chosen, reclaimed = (
+                    available[0][0].name,
+                    available[0][1],
+                )
 
         now = time.time()
+        previous = leases.get(chosen)
+        same_effort = previous is not None and previous.effort == effort
         lease = Lease(
             container=chosen,
             effort=effort,
             pid=os.getpid(),
             host=_this_host(),
-            acquired_at=leases[chosen].acquired_at if chosen in leases else now,
+            acquired_at=previous.acquired_at if same_effort else now,
             heartbeat_at=now,
+            reclaim_reason=(
+                previous.reclaim_reason
+                if same_effort
+                else "dead-local-holder-pid" if reclaimed else None
+            ),
+            reclaimed_from_effort=(
+                previous.reclaimed_from_effort
+                if same_effort
+                else reclaimed.effort if reclaimed else None
+            ),
+            reclaimed_from_pid=(
+                previous.reclaimed_from_pid
+                if same_effort
+                else reclaimed.pid if reclaimed else None
+            ),
+            reclaimed_at=(
+                previous.reclaimed_at
+                if same_effort
+                else now if reclaimed else None
+            ),
         )
         leases[chosen] = lease
         _write_leases(leases)
+        if reclaimed is not None:
+            log.info(
+                "Reclaimed lease on '%s' from effort '%s': "
+                "dead-local-holder-pid (host=%s, pid=%s)",
+                chosen,
+                reclaimed.effort,
+                reclaimed.host,
+                reclaimed.pid,
+            )
         log.info("Leased container '%s' to effort '%s'", chosen, effort)
         return lease
 

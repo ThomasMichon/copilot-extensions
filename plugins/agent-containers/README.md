@@ -36,11 +36,16 @@ this plugin and work standalone; without agent-bridge only bridge addressing
   devcontainer spec. Kept warm (stopped, not destroyed) between uses.
 - **Lease / borrow** — an *effort* (a logical unit of work) borrows a
   container for the duration of its work, then releases it. Leases persist
-  across CLI invocations and agent dispatches; they expire only on explicit
-  `release` or after a TTL (default 24h). Enforcement is **advisory** — the
-  resolver logs but does not block cross-effort dispatch. Restricted destructive
-  lifecycle adds a separate provider-owned hold: while a member is being checked
-  for recreate/remove, new borrows and provider launches are refused.
+  across CLI invocations and agent dispatches; they expire on explicit
+  `release` or after a TTL (default 24h). Acquisition may reclaim a lease sooner
+  only when its exact same-host holder PID is definitively gone. Remote or
+  indeterminate holder liveness keeps the TTL behavior, and active lifecycle or
+  provider-session admissions block reclamation. The replacement lease records
+  the reclaim reason and prior holder for audit. Enforcement is **advisory** —
+  the resolver logs but does not block cross-effort dispatch. Restricted
+  destructive lifecycle adds a separate provider-owned hold: while a member is
+  being checked for recreate/remove, new borrows and provider launches are
+  refused.
 - **`container:` resolver** — `agent-bridge send container:<name> "..."`
   is served through agent-bridge's declarative provider registry. The
   `agent-containers` binstub implements `namespace-list`,

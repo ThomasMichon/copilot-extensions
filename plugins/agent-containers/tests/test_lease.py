@@ -42,6 +42,29 @@ def fleet(monkeypatch, tmp_path):
     return ContainersConfig()
 
 
+def _seed_lease(
+    *,
+    container="myrepo-1",
+    effort="previous-effort",
+    pid=123,
+    host=None,
+    heartbeat_at=None,
+):
+    now = time.time()
+    lease_mod._write_leases(
+        {
+            container: lease_mod.Lease(
+                container=container,
+                effort=effort,
+                pid=pid,
+                host=host or lease_mod._this_host(),
+                acquired_at=now - 60,
+                heartbeat_at=heartbeat_at or now,
+            )
+        }
+    )
+
+
 def test_borrow_picks_running_first(fleet):
     lease = lease_mod.borrow(fleet, "effort-a")
     assert lease.container == "myrepo-1"
@@ -201,6 +224,165 @@ def test_lease_survives_within_ttl(fleet):
     leases = lease_mod.list_leases()
     assert len(leases) == 1
     assert leases[0].effort == "effort-a"
+
+
+def test_borrow_reclaims_definitively_dead_local_holder(fleet, monkeypatch):
+    _seed_lease(pid=123)
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda pid: False if pid == 123 else True,
+    )
+
+    lease = lease_mod.borrow(fleet, "next-effort")
+
+    assert lease.effort == "next-effort"
+    assert lease.reclaim_reason == "dead-local-holder-pid"
+    assert lease.reclaimed_from_effort == "previous-effort"
+    assert lease.reclaimed_from_pid == 123
+    assert lease.reclaimed_at is not None
+    stored = json.loads(lease_mod.LEASE_FILE.read_text(encoding="utf-8"))
+    assert stored["myrepo-1"]["reclaim_reason"] == "dead-local-holder-pid"
+
+
+def test_borrow_preserves_live_local_holder(fleet, monkeypatch):
+    _seed_lease(pid=123)
+    monkeypatch.setattr(lease_mod, "pid_alive", lambda _pid: True)
+
+    with pytest.raises(RuntimeError, match="previous-effort"):
+        lease_mod.borrow(fleet, "next-effort", container="myrepo-1")
+
+    assert lease_mod.get_lease("myrepo-1").effort == "previous-effort"
+
+
+def test_borrow_never_probes_or_reclaims_remote_holder(fleet, monkeypatch):
+    _seed_lease(pid=123, host="remote-host")
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda _pid: (_ for _ in ()).throw(
+            AssertionError("must not inspect a remote PID")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="remote-host"):
+        lease_mod.borrow(fleet, "next-effort", container="myrepo-1")
+
+    assert lease_mod.get_lease("myrepo-1").effort == "previous-effort"
+
+
+def test_borrow_keeps_unknown_local_liveness_until_ttl(fleet, monkeypatch):
+    _seed_lease(pid=123)
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda _pid: (_ for _ in ()).throw(OSError("probe unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="previous-effort"):
+        lease_mod.borrow(fleet, "next-effort", container="myrepo-1")
+
+    lease = lease_mod.borrow(
+        fleet,
+        "next-effort",
+        container="myrepo-1",
+        ttl=-1,
+    )
+    assert lease.reclaim_reason is None
+
+
+def test_dead_local_holder_is_preserved_by_provider_deploy_hold(
+    fleet,
+    monkeypatch,
+):
+    _seed_lease(pid=123)
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda pid: False if pid == 123 else True,
+    )
+
+    with lease_mod.deploy_hold("myrepo-1", "recreate"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="provider recreate is in progress",
+        ):
+            lease_mod.borrow(
+                fleet,
+                "next-effort",
+                container="myrepo-1",
+            )
+
+    assert lease_mod.get_lease("myrepo-1").effort == "previous-effort"
+
+
+def test_dead_local_holder_is_preserved_by_active_session(
+    fleet,
+    monkeypatch,
+):
+    _seed_lease(pid=123)
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda pid: False if pid == 123 else True,
+    )
+
+    with lease_mod.session_admission("myrepo-1"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="active provider session",
+        ):
+            lease_mod.borrow(
+                fleet,
+                "next-effort",
+                container="myrepo-1",
+            )
+
+    assert lease_mod.get_lease("myrepo-1").effort == "previous-effort"
+
+
+def test_concurrent_borrowers_have_one_dead_holder_reclaim_winner(
+    fleet,
+    monkeypatch,
+):
+    _seed_lease(pid=123)
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda pid: False if pid == 123 else True,
+    )
+    barrier = threading.Barrier(3)
+    successes = []
+    conflicts = []
+
+    def acquire(effort):
+        barrier.wait()
+        try:
+            successes.append(
+                lease_mod.borrow(
+                    fleet,
+                    effort,
+                    container="myrepo-1",
+                )
+            )
+        except RuntimeError as exc:
+            conflicts.append(str(exc))
+
+    workers = [
+        threading.Thread(target=acquire, args=(effort,))
+        for effort in ("effort-a", "effort-b")
+    ]
+    for worker in workers:
+        worker.start()
+    barrier.wait()
+    for worker in workers:
+        worker.join(timeout=2)
+
+    assert all(not worker.is_alive() for worker in workers)
+    assert len(successes) == 1
+    assert len(conflicts) == 1
+    assert successes[0].reclaim_reason == "dead-local-holder-pid"
+    assert lease_mod.get_lease("myrepo-1").effort == successes[0].effort
 
 
 def test_concurrent_borrow_is_blocked_by_provider_deploy_hold(fleet):
