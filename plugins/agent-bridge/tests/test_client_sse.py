@@ -35,9 +35,17 @@ class _FakeSseResp:
 
 
 class _FailingCloseSseResp(_FakeSseResp):
+    def __init__(
+        self,
+        lines: list[str],
+        failure_type: type[BaseException] = OSError,
+    ) -> None:
+        super().__init__(lines)
+        self.failure_type = failure_type
+
     def close(self) -> None:
         self.closed = True
-        raise OSError("close failed")
+        raise self.failure_type("close failed")
 
 
 def _drain(lines: list[str]) -> list[dict]:
@@ -102,11 +110,15 @@ class TestSseCommentParsing:
 
         assert response.closed is True
 
+    @pytest.mark.parametrize("failure_type", [OSError, KeyboardInterrupt])
     def test_abandoned_stream_suppresses_close_failure(
-        self, monkeypatch
+        self, monkeypatch, failure_type
     ) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok")
-        response = _FailingCloseSseResp([": heartbeat", ""])
+        response = _FailingCloseSseResp(
+            [": heartbeat", ""],
+            failure_type,
+        )
         unraisable = []
         monkeypatch.setattr(sys, "unraisablehook", unraisable.append)
         with patch(

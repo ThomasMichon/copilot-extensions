@@ -76,7 +76,7 @@ class SseStream(Iterator[dict[str, Any]]):
     def _close_safely(self) -> None:
         try:
             self.close()
-        except Exception:
+        except BaseException:
             pass
 
     def __next__(self) -> dict[str, Any]:
