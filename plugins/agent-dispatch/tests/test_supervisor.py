@@ -2910,6 +2910,49 @@ def test_failed_attempt_cleanup_retries_across_supervisor_restart(q, client):
     assert q.latest_reservation(task.id).attempt == 2
 
 
+def test_held_attempt_cleanup_remains_fenced_without_retries(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="launch failed",
+        disposition="failed",
+    )
+    conclusions = []
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "gone",
+        attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
+            "action": "preserved",
+            "reason": "dirty-worktree",
+        },
+        nudge=False,
+    )
+
+    assert sup.poll_once() == []
+    held = q.get_reservation(reservation.key)
+    assert held.state == SpawnState.RELEASING
+    assert held.conclusion_state == "held"
+    assert len(conclusions) == 1
+    assert spawn.calls == []
+
+    assert sup.poll_once() == []
+    assert len(conclusions) == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+    assert spawn.calls == []
+
+
 def test_terminal_created_worktree_uses_attempt_cleanup_without_label(
     q, client
 ):

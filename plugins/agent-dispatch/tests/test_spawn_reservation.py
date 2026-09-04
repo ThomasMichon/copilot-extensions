@@ -821,3 +821,42 @@ def test_create_spawn_failure_stays_fenced_when_cleanup_is_pending(
 
     m._spawn_worker_for(args, {"id": t.id})
     assert len(calls) == 1
+
+
+def test_create_spawn_failure_stays_fenced_when_cleanup_is_held(
+    monkeypatch, q
+):
+    t = q.create("work")
+    calls: list[int] = []
+
+    monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: {
+            "action": "preserved",
+            "reason": "dirty-worktree",
+        },
+    )
+
+    def failing_do_spawn(_args, task, *, route=""):
+        calls.append(1)
+        return (
+            types.SimpleNamespace(returncode=1),
+            "fake",
+            {"session": None, "worktree": task["spawn_worktree"]},
+        )
+
+    monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
+    args = types.SimpleNamespace(url=None, token=None)
+
+    m._spawn_worker_for(args, {"id": t.id})
+    first = q.latest_reservation(t.id)
+    assert first.state == SpawnState.RELEASING
+    assert first.conclusion_state == "held"
+
+    m._spawn_worker_for(args, {"id": t.id})
+    assert len(calls) == 1

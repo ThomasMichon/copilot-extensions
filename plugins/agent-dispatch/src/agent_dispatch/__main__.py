@@ -1112,13 +1112,14 @@ def _release_failed_created_spawn(
         conclusion_state=state,
         conclusion_detail=conclusion_detail,
     )
-    if state != "pending":
-        action = str(outcome.get("action") or "unknown")
-        reason = str(outcome.get("reason") or "")
-        suffix = f"attempt conclusion {action}"
-        if reason:
-            suffix += f" ({reason})"
-        client.fail_spawn(key, detail=f"{detail}; {suffix}")
+    if state in {"pending", "held"}:
+        return
+    action = str(outcome.get("action") or "unknown")
+    reason = str(outcome.get("reason") or "")
+    suffix = f"attempt conclusion {action}"
+    if reason:
+        suffix += f" ({reason})"
+    client.fail_spawn(key, detail=f"{detail}; {suffix}")
 
 
 def _embody_handle(result) -> dict[str, str | None]:

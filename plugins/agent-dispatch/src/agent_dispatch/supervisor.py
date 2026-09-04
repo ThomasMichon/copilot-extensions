@@ -1414,6 +1414,11 @@ class Supervisor:
             )
         )
         for res in reservations:
+            if (
+                res.get("state") == SpawnState.RELEASING
+                and res.get("conclusion_state") == _CONCLUSION_HELD
+            ):
+                continue
             if not res.get("release_requested"):
                 continue
             try:
@@ -1510,7 +1515,7 @@ class Supervisor:
                 sort_keys=True,
                 separators=(",", ":"),
             )
-            if conclusion_state == _CONCLUSION_PENDING:
+            if conclusion_state in {_CONCLUSION_PENDING, _CONCLUSION_HELD}:
                 try:
                     self.client.record_spawn_conclusion(
                         res["key"],
