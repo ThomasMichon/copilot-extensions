@@ -39,11 +39,147 @@ from pathlib import Path
 
 import yaml
 
+from . import config as cfg
+from . import tracking
+
 # Mirrors the serializer's quoting predicate in ``tracking.save_record`` so a
 # repaired scalar is quoted on exactly the same chars the writer would have.
 _NEEDS_QUOTE = set(":{}[]#&*!|>'\",")
 # Free-text scalar fields the (older) serializer could emit unquoted.
 _QUOTABLE_FIELDS = ("title", "summary")
+
+
+@dataclass
+class PairIntegrityFinding:
+    """A paired worktree record is absent from its owning project registry."""
+
+    worktree_id: str
+    project: str
+    found_in_project: str
+    detail: str
+    repairable: bool
+    repaired: bool = False
+
+    def as_dict(self) -> dict:
+        return {
+            "worktree_id": self.worktree_id,
+            "project": self.project,
+            "found_in_project": self.found_in_project,
+            "detail": self.detail,
+            "repairable": self.repairable,
+            "repaired": self.repaired,
+        }
+
+
+def _tracking_dir(project: str) -> Path:
+    return cfg.project_dir(project) / "worktrees"
+
+
+def _same_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    candidate = Path(left).resolve(strict=False)
+    root = Path(right).resolve(strict=False)
+    return candidate == root or root in candidate.parents
+
+
+def find_record_by_cwd_across_projects(
+    cwd: str,
+    project_names: list[str],
+):
+    """Find one unambiguous record containing ``cwd`` across all projects."""
+    matches = []
+    for project in project_names:
+        for record in tracking.list_records(_tracking_dir(project)):
+            if _same_path(cwd, record.worktree_path):
+                matches.append(record)
+    identities = {
+        (record.machine, record.repo, record.worktree_id): record
+        for record in matches
+    }
+    return next(iter(identities.values())) if len(identities) == 1 else None
+
+
+def audit_pair_integrity(
+    project_names: list[str],
+    *,
+    apply: bool,
+) -> list[PairIntegrityFinding]:
+    """Detect and repair records stored outside their owning project registry.
+
+    The paired carve historically wrote the knowledge sibling into the active
+    harness tracking directory. A repair is safe only when exactly one misplaced
+    record has the identity named by a qualified same-machine pair reference and
+    its checkout still exists.
+    """
+    records_by_project = {
+        project: tracking.list_records(_tracking_dir(project))
+        for project in project_names
+    }
+    findings: list[PairIntegrityFinding] = []
+    seen: set[tuple[str, str]] = set()
+
+    for source_project, records in records_by_project.items():
+        for record in records:
+            if record.pair_kind != "worktree":
+                continue
+            ref = tracking.parse_claim_ref(record.pair_ref or "")
+            if not (
+                ref
+                and ref.is_qualified
+                and ref.machine == record.machine
+                and ref.project
+                and ref.project in records_by_project
+            ):
+                continue
+            target_key = (ref.project, ref.worktree_id)
+            if target_key in seen:
+                continue
+            target_path = _tracking_dir(ref.project) / f"{ref.worktree_id}.yaml"
+            if target_path.exists():
+                continue
+
+            candidates = [
+                (project, candidate)
+                for project, project_records in records_by_project.items()
+                for candidate in project_records
+                if (
+                    candidate.worktree_id == ref.worktree_id
+                    and candidate.machine == ref.machine
+                    and candidate.repo == ref.project
+                )
+            ]
+            repairable = (
+                len(candidates) == 1
+                and candidates[0][0] != ref.project
+                and Path(candidates[0][1].worktree_path).is_dir()
+            )
+            found_in = candidates[0][0] if len(candidates) == 1 else ""
+            finding = PairIntegrityFinding(
+                worktree_id=ref.worktree_id,
+                project=ref.project,
+                found_in_project=found_in,
+                detail=(
+                    f"record belongs in project {ref.project!r} but is "
+                    + (
+                        f"stored under {found_in!r}"
+                        if found_in
+                        else "missing from every project registry"
+                    )
+                ),
+                repairable=repairable,
+            )
+            if apply and repairable:
+                source, candidate = candidates[0]
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                tracking.save_record(candidate, target_path)
+                source_path = _tracking_dir(source) / f"{candidate.worktree_id}.yaml"
+                if source_path != target_path:
+                    source_path.unlink(missing_ok=True)
+                finding.repaired = True
+            findings.append(finding)
+            seen.add(target_key)
+    return findings
 
 
 # --------------------------------------------------------------------------- #

@@ -994,7 +994,7 @@ def _carve_paired_knowledge(
         repo=knowledge_name,
         machine=config.machine,
         platform_name=plat,
-        tracking_path=cfg.tracking_dir(),
+        tracking_path=cfg.project_dir(knowledge_name) / "worktrees",
         pair_id=pair_id,
         pair_role="knowledge",
         pair_ref=harness_ref,
@@ -21103,6 +21103,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         proj_name = cfg.project_name()
     except Exception:
         proj_name = ""
+    project_names = sorted(
+        str(name)
+        for name in (
+            (inst.read_projects_registry().get("projects") or {}).keys()
+        )
+    )
+    if not proj_name:
+        discovered = health.find_record_by_cwd_across_projects(
+            os.getcwd(), project_names
+        )
+        if discovered is not None:
+            proj_name = discovered.repo
+            cfg.set_active_project(proj_name)
 
     yaml_findings = []
     backfill = {
@@ -21140,6 +21153,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "items": [],
         },
     }
+    pair_integrity = health.audit_pair_integrity(
+        project_names,
+        apply=apply,
+    )
 
     if proj_name:
         tracking_dir = cfg.tracking_dir()
@@ -21268,6 +21285,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         },
         "backfill": backfill,
         "reciprocal_metadata": reciprocal,
+        "pair_integrity": {
+            "found": len(pair_integrity),
+            "repairable": sum(1 for finding in pair_integrity if finding.repairable),
+            "repaired": sum(1 for finding in pair_integrity if finding.repaired),
+            "items": [finding.as_dict() for finding in pair_integrity],
+        },
         "head_cache": {
             "found": len(stale_heads),
             "fixed": stale_heads_fixed,
@@ -21354,6 +21377,27 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
             f"      {projection_remaining} projection relation(s) remain "
             "outside this run's budget"
         )
+
+    pairs = report.get(
+        "pair_integrity",
+        {"found": 0, "repairable": 0, "repaired": 0, "items": []},
+    )
+    if pairs["found"]:
+        print(
+            f"  {chk if applied and pairs['repaired'] == pairs['found'] else '!'} "
+            f"Pair integrity: {pairs['found']} finding(s), "
+            f"{pairs['repaired'] if applied else pairs['repairable']} "
+            f"{'repaired' if applied else 'repairable'}"
+        )
+        for item in pairs["items"][:8]:
+            mark = "fixed" if item["repaired"] else (
+                "needs --fix" if item["repairable"] else "manual"
+            )
+            print(
+                f"      - {item['worktree_id']} [{mark}] {item['detail']}"
+            )
+    else:
+        print(f"  {chk} Paired worktree records are reciprocal")
 
     hc = report.get("head_cache", {"found": 0, "fixed": 0, "ids": []})
     if hc["found"]:
