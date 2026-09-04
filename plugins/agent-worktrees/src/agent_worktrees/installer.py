@@ -690,12 +690,19 @@ def _is_legacy_project_binstub_for(text: str, project: str) -> bool:
     if not _is_project_binstub(text):
         return False
     escaped = re.escape(project)
-    return bool(
+    normalized = text.replace("\\", "/")
+    has_project = bool(
         re.search(
             rf"WORKTREE_PROJECT\s*=\s*[\"']?{escaped}(?=[\"'\s]|$)",
             text,
         )
     )
+    has_launcher = ".agent-worktrees/bin/launch-session." in normalized
+    has_payload_route = (
+        "bin/payload/agent-worktrees" in normalized
+        or "python -m agent_worktrees" in normalized
+    )
+    return has_project and has_launcher and has_payload_route
 
 
 def _can_migrate_legacy_project_binstub(project: str) -> bool:
@@ -709,7 +716,7 @@ def _can_migrate_legacy_project_binstub(project: str) -> bool:
         return False
     for path in existing:
         try:
-            text = path.read_text(errors="replace")
+            text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return False
         if not _is_legacy_project_binstub_for(text, project):

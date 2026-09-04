@@ -309,16 +309,21 @@ def test_reconcile_migrates_matching_legacy_unreceipted_stub(
             legacy = (
                 '@echo off\r\nset "WORKTREE_PROJECT=demo"\r\n'
                 'call "%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd"\r\n'
+                '"C:\\payload\\bin\\payload\\agent-worktrees.cmd" '
+                '--project demo %*\r\n'
                 if target.suffix.lower() == ".cmd"
                 else "$env:WORKTREE_PROJECT = 'demo'\n"
                 "& \"$HOME\\.agent-worktrees\\bin\\launch-session.ps1\"\n"
+                "& 'C:\\payload\\bin\\payload\\agent-worktrees.ps1' "
+                "--project demo @args\n"
             )
             target.write_text(legacy, encoding="utf-8")
     else:
         target = specs[0][0]
         target.write_text(
             '#!/usr/bin/env bash\nWORKTREE_PROJECT=demo\n'
-            'exec "$HOME/.agent-worktrees/bin/launch-session.sh"\n',
+            '"$HOME/.agent-worktrees/bin/launch-session.sh"\n'
+            'exec /payload/bin/payload/agent-worktrees --project demo "$@"\n',
             encoding="utf-8",
         )
 
@@ -368,6 +373,30 @@ def test_reconcile_preserves_unreceipted_explicit_project_wrapper(
     _reg(monkeypatch, ["demo"])
     target = inst._project_binstub_specs("demo")[0][0]
     wrapper = "python -m agent_worktrees --project demo status\n"
+    target.write_text(wrapper, encoding="utf-8")
+
+    result = inst.reconcile_binstubs()
+
+    assert result["migrated"] == []
+    assert result["preserved"] == ["demo"]
+    assert target.read_text(encoding="utf-8") == wrapper
+    assert inst._read_receipt("demo") is None
+
+
+def test_reconcile_preserves_custom_ambient_project_wrapper(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    lb.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    target = inst._project_binstub_specs("demo")[0][0]
+    wrapper = (
+        "WORKTREE_PROJECT=demo\n"
+        'exec "$HOME/.agent-worktrees/bin/launch-session.sh"\n'
+    )
     target.write_text(wrapper, encoding="utf-8")
 
     result = inst.reconcile_binstubs()
