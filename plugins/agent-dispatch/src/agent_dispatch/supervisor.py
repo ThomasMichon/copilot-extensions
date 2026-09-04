@@ -32,6 +32,7 @@ re-spawn) and surfaced for a human, which is the safe default.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import time
 import uuid
@@ -40,6 +41,7 @@ from typing import Any
 
 from .client import DispatchClient, DispatchError
 from .queue import SpawnState, Status
+from .bridge_events import BridgeSubscription, SupervisorEventWake
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
@@ -672,6 +674,7 @@ class Supervisor:
         evaluator: Any | None = None,
         evaluator_ref: str | None = None,
         evaluate_limit: int = 100,
+        event_wake: SupervisorEventWake | None = None,
     ):
         self.client = client
         self.spawn_fn = spawn_fn
@@ -687,7 +690,22 @@ class Supervisor:
         self.label_max_attempts = {
             str(k): max(0, int(v)) for k, v in (label_max_attempts or {}).items()
         }
-        self.supervisor_id = supervisor_id or f"supervisor-{uuid.uuid4().hex[:8]}"
+        if machine is None:
+            from . import remote_dispatch
+
+            machine = remote_dispatch.local_machine()
+        lane_identity = json.dumps(
+            {
+                "machine": machine,
+                "repo": repo,
+                "labels": sorted(labels or ()),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self.supervisor_id = supervisor_id or (
+            "supervisor-" + hashlib.sha256(lane_identity.encode()).hexdigest()[:16]
+        )
         self.heartbeat = heartbeat
         #: Publish exact execution state into coordinator-owned task rows. This
         #: keeps read surfaces pure API queries instead of shelling to bridge.
@@ -741,10 +759,9 @@ class Supervisor:
         #: Re-drive sender used when a spawned CLI body is alive but still has
         #: not claimed its queued task after a supervisor/bridge restart.
         self.redrive_fn = redrive_fn or _default_redrive
-        #: Reserved for a future push-driven turn-event subscription. The former
-        #: implementation sampled Agent Bridge state every two seconds, including
-        #: one SSH process per remote owner, so it is deliberately contained to a
-        #: full-interval sleep until the event-stream carrier exists.
+        #: Push acceleration is optional. The former implementation sampled
+        #: Agent Bridge state every two seconds; this path owns one aggregate
+        #: local stream and never changes periodic reconciliation correctness.
         self.reactive = reactive
         #: Retained for declaration/CLI compatibility; never drives polling.
         self.reactive_interval = max(0.25, float(reactive_interval))
@@ -756,11 +773,14 @@ class Supervisor:
         self.attempt_conclusion_fn = (
             attempt_conclusion_fn or _default_attempt_conclusion
         )
-        if machine is None:
-            from . import remote_dispatch
-
-            machine = remote_dispatch.local_machine()
         self.machine = machine
+        self._event_caller_id = (
+            "agent-dispatch:"
+            + hashlib.sha256(self.supervisor_id.encode()).hexdigest()[:24]
+        )
+        self.event_wake = event_wake or (
+            SupervisorEventWake() if self.reactive else None
+        )
         #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
         #: live worker is nudged at most once per stall window, not every cycle).
         self._last_nudge: dict[str, float] = {}
@@ -2854,18 +2874,32 @@ class Supervisor:
         *,
         sleep: Callable[[float], None] | None = None,
     ) -> bool:
-        """Sleep for the full reconciliation interval without probing workers.
-
-        This compatibility seam previously sampled Agent Bridge state every two
-        seconds and launched SSH for remote owners. Turn-end wakeups must instead
-        arrive from a persistent push subscription; until that carrier exists,
-        fixed-interval reconciliation is the only safe fallback.
-        """
+        """Wait for one coalesced push wake or the ordinary interval."""
         sleep = sleep or time.sleep
         if timeout < 0:
             raise ValueError("supervisor interval must be non-negative")
+        if self.event_wake is not None:
+            return self.event_wake.wait(timeout)
         sleep(timeout)
         return False
+
+    def _sync_event_subscriptions(self) -> None:
+        if self.event_wake is None:
+            return
+        subscriptions: list[BridgeSubscription] = []
+        for reservation in self._pool_reservations(state=SpawnState.SPAWNED):
+            fleet = _parse_fleet_body_handle(reservation.get("session_handle"))
+            if fleet is None:
+                continue
+            host, session_id = fleet
+            subscriptions.append(
+                BridgeSubscription(
+                    host=host,
+                    session_id=session_id,
+                    caller_id=self._event_caller_id,
+                )
+            )
+        self.event_wake.update(subscriptions)
 
     def _effective_max_attempts(self, task: dict) -> int:
         """The dead-letter bound for ``task``: the most-permissive per-label
@@ -3107,6 +3141,9 @@ class Supervisor:
                     )
             except DispatchError:
                 log.exception("bookkeeping failed for reservation %s", key)
+        if self.event_wake is not None:
+            self.event_wake.acknowledge()
+        self._sync_event_subscriptions()
         return spawned
 
     def serve(
@@ -3117,21 +3154,23 @@ class Supervisor:
     ) -> None:
         """Run :meth:`poll_once` each cycle, waiting between cycles.
 
-        The loop currently uses fixed-interval reconciliation only. The historical
-        reactive flag is retained for configuration compatibility but performs one
-        full-interval sleep; turn-end acceleration will return only as a push-driven
-        Agent Bridge event subscription.
+        Push delivery changes latency only; the timeout always preserves ordinary
+        fixed-interval reconciliation as the correctness floor.
         """
-        while True:
-            try:
-                spawned = self.poll_once()
-                if on_cycle is not None:
-                    on_cycle(spawned)
-            except KeyboardInterrupt:
-                return
-            except Exception:  # pragma: no cover -- never let the loop die on a blip
-                log.exception("supervision cycle failed")
-            try:
-                self.wait_for_turn_end(interval)
-            except KeyboardInterrupt:
-                return
+        try:
+            while True:
+                try:
+                    spawned = self.poll_once()
+                    if on_cycle is not None:
+                        on_cycle(spawned)
+                except KeyboardInterrupt:
+                    return
+                except Exception:  # pragma: no cover -- never let the loop die on a blip
+                    log.exception("supervision cycle failed")
+                try:
+                    self.wait_for_turn_end(interval)
+                except KeyboardInterrupt:
+                    return
+        finally:
+            if self.event_wake is not None:
+                self.event_wake.close()

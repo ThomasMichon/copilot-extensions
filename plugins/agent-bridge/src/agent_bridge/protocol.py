@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 12
+HTTP_PROTOCOL_VERSION = 13
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -68,6 +68,10 @@ REMOTE_OPERATIONS_PROTOCOL_VERSION = 11
 
 # First version that atomically ends a session only while it remains idle.
 CONDITIONAL_IDLE_END_PROTOCOL_VERSION = 12
+
+# First version that exposes one aggregate SSE connection for a caller's set of
+# remote carrier subscriptions.
+REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION = 13
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

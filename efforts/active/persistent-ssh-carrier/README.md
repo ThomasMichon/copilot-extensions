@@ -153,25 +153,25 @@ The repository's ownership and independence patterns require:
 
 ### Phase 4 — Wake Agent Dispatch from pushed lifecycle events (#1779)
 
-- [ ] Add one long-lived local Agent Bridge subscription client per supervisor
+- [x] Add one long-lived local Agent Bridge subscription client per supervisor
       process, multiplexing every reservation for that lane. Never spawn one CLI
       child or HTTP stream per reservation.
-- [ ] Key subscriptions by the reservation's exact Bridge host/session identity
+- [x] Key subscriptions by the reservation's exact Bridge host/session identity
       and stable lane-specific caller identity.
-- [ ] Subscribe to existing durable lifecycle boundaries including
+- [x] Subscribe to existing durable lifecycle boundaries including
       `session_state_changed`, `assistant.turn_end`, shutdown, handoff, and
       terminal events; reconnect from the acknowledged cursor without losing an
       idle or completion boundary.
-- [ ] Coalesce bursts into a supervisor wake signal and run the ordinary
+- [x] Coalesce bursts into a supervisor wake signal and run the ordinary
       reconciliation pass; event delivery changes latency, never correctness or
       lifecycle authority.
-- [ ] Treat heartbeat expiry, cursor invalidation, and a local subscription
+- [x] Treat heartbeat expiry, cursor invalidation, and a local subscription
       client exit as degraded event acceleration: wake one immediate full pass,
       report degraded health, reconnect with backoff, and continue the ordinary
       interval without tight retry polling.
-- [ ] Add and remove subscriptions as reservations are spawned, rebound,
+- [x] Add and remove subscriptions as reservations are spawned, rebound,
       suspended, completed, abandoned, or proven gone.
-- [ ] Degrade to exactly the configured periodic interval when Agent Bridge,
+- [x] Degrade to exactly the configured periodic interval when Agent Bridge,
       the host carrier, the remote session, or the selected protocol is
       unavailable.
 
@@ -224,11 +224,11 @@ The repository's ownership and independence patterns require:
       boundaries survive disconnect/reconnect and replay exactly from the
       consumer's distinct durable cursor. Log rebuild and cursor invalidation
       produce an explicit gap signal and immediate reconciliation.
-- [ ] Dispatch tests prove event bursts coalesce to prompt reconciliation,
+- [x] Dispatch tests prove event bursts coalesce to prompt reconciliation,
       subscription removal follows reservation lifecycle, and missing or stale
       Bridge capability falls back to one ordinary interval without tight
       polling.
-- [ ] Dispatch process tests prove local subscription clients are O(supervisor
+- [x] Dispatch process tests prove local subscription clients are O(supervisor
       lanes), not O(active reservations), and recover across a local Agent
       Bridge daemon cutover without stalling supervision.
 - [ ] Migration tests prove each replaced raw SSH operation retains its prior
@@ -298,8 +298,52 @@ transport foundation #1763 requires.
 
 ## Journal
 
+### 2026-09-04 — Agent Dispatch event wake
+
+- Added Agent Bridge HTTP protocol generation 13 and authenticated
+  `POST /api/v1/remote/events`, which multiplexes a bounded set of exact
+  host/session/caller subscriptions over one local SSE response while preserving
+  the hosting Bridge's durable cursors and existing persistent carrier leases.
+- Added one independent event-wake worker per long-lived Dispatch supervisor.
+  Fleet reservation identities become one replaceable aggregate subscription
+  set; registered supervisors derive stable lane caller IDs, pushed lifecycle
+  boundaries coalesce into the ordinary reconciliation pass, and one-shot
+  supervision starts no background worker.
+- Kept periodic reconciliation as the sole correctness floor. Missing or stale
+  Bridge capability, carrier loss, stream exit, and control envelopes wake one
+  immediate full pass per outage generation and reconnect with bounded backoff;
+  heartbeat or event progress is required before a later failure begins a new
+  outage generation.
+- Cursor acknowledgement occurs only after reconciliation. Identified
+  invalidation and replay-gap controls carry the authoritative head and
+  continuity so the completed pass can reset that generation; a crash before
+  acknowledgement replays the boundary. Generation checks also prevent a stream
+  opened concurrently with close or subscription replacement from being
+  published late.
+- Published version allocations Agent Bridge `0.4.0-dev432` and Agent Dispatch
+  `0.1.2-dev7`. The complete Dispatch portfolio passed 1,797 tests with 3
+  skips before final-review fixes; the affected final Dispatch set passes 172
+  tests. The full Bridge run reached 2,278 passes with 14 skips and one
+  independently reproduced unchanged `origin/main` mock-signature failure; the
+  affected remote, cursor, contract, and database sets pass 79 and 65 tests
+  after the fixes. Install-contract, version, payload, and Ruff guards pass.
+- Three independent review findings drove cursor-generation recovery,
+  connection-establishment cancellation, and persistent-fault outage
+  coalescing regressions. The final high-confidence re-review reported no
+  remaining significant issues.
+- Provider review found that aggregate streams discarded carrier
+  `tool_progress` envelopes, which could falsely trip the local read timeout
+  during active remote work. Aggregate streams now forward tool progress as
+  non-waking SSE comments, matching the single-subscription keepalive contract.
+  The same review cycle exposed and corrected incomplete generation-13 contract
+  registry evidence while preserving generation 12 as the previous fixture.
+
 ### 2026-09-03 — Remote Bridge operations
 
+- Landed the Phase 3 implementation through #1944, then landed #2000 to make
+  abandoned Agent Bridge SSE iterators close safely and publish Agent Bridge
+  `0.4.0-dev431`. Both changes were deployed through the unified updater before
+  Phase 4 publication work resumed.
 - Added the carrier operation router for exact owned-session status, exact
   represented live-session resolution, cursor acknowledgement, and replayable
   event subscriptions. The far-side carrier authenticates to its host-local

@@ -8,8 +8,9 @@ the exact `argv[0]` from the agent-dispatch session command catalog.
 Status: **in progress** — the spawn-reservation primitive, the supervisor loop
 (spawn-at-most-once), the liveness-gated lease heartbeat, **confirmed-gone
 auto-recovery** (local CLI worktree bodies, local headless bodies, and headless
-fleet bodies), **nudge-before-recover**, fixed-interval reconciliation, and **fleet
-dispatch (a health-gated remote embody pool, Model C)** are built. Label-scoped
+fleet bodies), **nudge-before-recover**, push-accelerated fixed-interval
+reconciliation, and **fleet dispatch (a health-gated remote embody pool, Model
+C)** are built. Label-scoped
 **disposable local-worker conclusion** is also built (the configuration field
 retains its legacy `disposable_cli_labels` name): a registration may opt
 selected CLI or local headless ACP worker classes into safe terminal session
@@ -203,9 +204,25 @@ agent-dispatch reservations rearm <task> --permit --reason "transport repaired" 
     [--min-failures 3]
 ```
 
-`--no-reactive` and `--reactive-interval` remain accepted for configuration
-compatibility but do not enable a sub-interval watcher. Supervisors reconcile on
-`--interval` until turn-end acceleration is backed by a persistent push stream.
+By default each long-lived lane supervisor owns one authenticated local Agent
+Bridge event client. It sends the complete set of active fleet reservation
+host/session identities over one aggregate SSE connection; Agent Bridge then
+multiplexes their logical subscriptions over its per-host persistent carriers.
+Durable turn, session-state, and handoff boundaries coalesce into one ordinary
+reconciliation wake. Cursors are acknowledged only after that pass completes.
+Reservation settlement or rebinding replaces the aggregate subscription set.
+
+Stream exit, heartbeat/progress failure, cursor invalidation, and local Bridge
+cutover mark acceleration degraded and wake one immediate full pass. Reconnect
+uses bounded backoff and rediscovers the active local Bridge endpoint. The
+outage guard resets only after heartbeat or event progress, so an immediately
+failing reconnect cannot turn backoff into short reconciliation polling. After
+a cursor invalidation or replay gap, the completed full pass acknowledges the
+identified authoritative head and continuity before reconnecting.
+The ordinary `--interval` remains the sole correctness floor and continues unchanged
+when Bridge or a remote carrier is missing or version-skewed. `--no-reactive`
+disables push acceleration. `--reactive-interval` remains accepted only for
+configuration compatibility and never enables polling.
 
 The rearm is one coordinator write transaction. It succeeds only while the
 task is still queued and unowned, no `reserving`/`spawned` reservation exists,

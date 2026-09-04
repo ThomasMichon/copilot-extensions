@@ -134,6 +134,14 @@ per-caller invalidation marker, while continuity changes and non-contiguous
 event IDs terminate the stream with an explicit `bridge_control` /
 `full_reconcile` signal rather than an empty result. Unsupported operation
 versions are rejected before a remote HTTP request or subscription is opened.
+An aggregate `POST /api/v1/remote/events` surface accepts a bounded set of exact
+host/session/caller identities and returns one SSE connection. Each logical
+subscription retains its own hosting cursor and carrier lease, while events and
+control signals carry their subscription identity in the envelope. Replacing
+the set means replacing this one local stream; it never creates one local HTTP
+connection per observed session. Carrier heartbeats and tool-progress envelopes
+become SSE comments so ongoing remote activity keeps the aggregate connection
+and its local consumer healthy without creating reconciliation wakes.
 
 ## HTTP API
 
@@ -158,6 +166,7 @@ DELETE /api/v1/sessions/{id}             # End (full cleanup)
 GET    /api/v1/remote/{host}/sessions/{id}/status
 GET    /api/v1/remote/{host}/live-sessions/{id}
 GET    /api/v1/remote/{host}/sessions/{id}/events
+POST   /api/v1/remote/events             # Multiplex several remote subscriptions
 POST   /api/v1/remote/{host}/sessions/{id}/cursor
 ```
 
@@ -176,6 +185,14 @@ event caller must provide a distinct stable `caller_id`; response headers expose
 the accepted cursor and event-log continuity, and cursor acknowledgements carry
 that continuity back. `bridge_control` SSE events have no durable event ID and
 request full reconciliation after cursor invalidation or a replay gap.
+The aggregate endpoint emits `bridge_event` envelopes containing the exact
+`host`, `session_id`, `caller_id`, durable `event_id`, event name, continuity,
+timestamp, and payload. Any subscription-level gap or carrier failure emits one
+identified `bridge_control` envelope so the consumer can run a full
+reconciliation pass, acknowledge the identified subscription's authoritative
+head and continuity when supplied, and reconnect the whole set from durable
+cursors. Initialization-time subscription failures use the same identified SSE
+control envelope instead of changing the aggregate response shape.
 
 ### Health
 
