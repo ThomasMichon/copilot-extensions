@@ -105,25 +105,28 @@ suites first.
 
 ### Phase 1 — Containment before measurement
 
+- [x] Serialize potentially heavy local runner invocations behind one
+  host-wide, liveness-reconciled admission lease while leaving guards and
+  collection smoke available as cheap concurrent feedback.
 - [ ] Make the test runner own the complete descendant process tree on Windows
   and POSIX, including cleanup after interruption and timeout.
-- [ ] Enforce individual-test, sequential sub-suite, and plugin-aggregate
+- [x] Enforce individual-test, sequential sub-suite, and plugin-aggregate
   wall-clock limits so one hung case or oversized file group cannot monopolize
   a run.
-- [ ] Add a test-mode spawn policy to the shared process helper so production
+- [x] Add a test-mode spawn policy to the shared process helper so production
   breakaway behavior is disabled under containment without changing production
   semantics; prove that attempted breakaway descendants remain runner-owned.
-- [ ] Redirect `HOME`, `USERPROFILE`, XDG roots, Copilot roots, and plugin state
+- [x] Redirect `HOME`, `USERPROFILE`, XDG roots, Copilot roots, and plugin state
   roots into runner-owned temporary state for every default-tier suite; fail
   closed when a test resolves a real host state root.
-- [ ] Add configurable wall-clock, process-count, memory, and temporary-storage
+- [x] Add configurable wall-clock, process-count, memory, and temporary-storage
   budgets with conservative defaults.
-- [ ] Add explicit effect markers for process, network, service, host-state, and
+- [x] Add explicit effect markers for process, network, service, host-state, and
   external-system interactions; fail collection when a declared tier violates
   its allowed effects.
-- [ ] Add regression coverage for recursive fixture executables and other
+- [x] Add regression coverage for recursive fixture executables and other
   process-escape cases without reproducing an unbounded process storm.
-- [ ] Prove containment in an isolated venue before allowing full-suite
+- [x] Prove containment in an isolated venue before allowing full-suite
   measurement.
 
 ### Phase 2 — Machine-readable portfolio census
@@ -257,8 +260,17 @@ the inventory and evidence gates are available.
 - Began the repository-owned containment supervisor: isolated mutable state,
   runner-owned process trees, configurable wall/process/memory/temp budgets, and
   collection-time tier/effect validation.
-- Broad suite execution remains prohibited until adversarial containment tests
-  pass and production breakaway requests are suppressed in test mode.
+- Added the local admission boundary: non-guard/non-collection runs share one
+  host-wide kernel lease, fail fast on contention, and may request a bounded
+  wait.
+- Credential-dependent explicit-tier checks may opt into host credentials and
+  config roots without inheriting live Copilot session or worktree ownership.
+- Added focused Linux and Windows CI coverage for the admission contract.
+- Merged #1321 for process-tree containment, tier/effect policy, and resource
+  budgets, then #1329 for shared contained-spawn semantics and adversarial
+  detachment proof on Linux and Windows.
+- The remaining Phase 1 containment gate is explicit success, failure, and
+  interruption cleanup proof for the complete descendant tree.
 
 ### 2026-08-28 — Time and assurance density direction
 

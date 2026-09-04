@@ -8,9 +8,23 @@ from pathlib import Path
 import pytest
 
 try:
-    from plugin_test_containment import CONTAINED_ENV, SANDBOX_ENV
+    from plugin_test_containment import (
+        ALLOW_HOST_STATE_ENV,
+        ALWAYS_SANDBOX_ENV_NAMES,
+        CONTAINED_ENV,
+        OPTIONAL_FILE_ENV_NAMES,
+        ROOT_ENV_NAMES,
+        SANDBOX_ENV,
+    )
 except ModuleNotFoundError:
-    from tools.plugin_test_containment import CONTAINED_ENV, SANDBOX_ENV
+    from tools.plugin_test_containment import (
+        ALLOW_HOST_STATE_ENV,
+        ALWAYS_SANDBOX_ENV_NAMES,
+        CONTAINED_ENV,
+        OPTIONAL_FILE_ENV_NAMES,
+        ROOT_ENV_NAMES,
+        SANDBOX_ENV,
+    )
 
 _TIERS = {"T0", "T1", "T2", "T3", "T4"}
 _EFFECTS = {
@@ -28,22 +42,6 @@ _ALLOWED_EFFECTS = {
     "T3": _EFFECTS,
     "T4": _EFFECTS,
 }
-_ROOT_ENV = (
-    "HOME",
-    "USERPROFILE",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "XDG_CONFIG_HOME",
-    "XDG_CACHE_HOME",
-    "XDG_DATA_HOME",
-    "XDG_STATE_HOME",
-    "XDG_RUNTIME_DIR",
-    "COPILOT_HOME",
-    "AGENT_HOME",
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-)
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -63,12 +61,24 @@ def validate_contained_environment() -> None:
     raw_sandbox = os.environ.get(SANDBOX_ENV)
     if not raw_sandbox:
         raise pytest.UsageError(f"{SANDBOX_ENV} is required for contained tests")
+    allow_host_state = os.environ.get(ALLOW_HOST_STATE_ENV) == "1"
+    if allow_host_state:
+        if os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1":
+            raise pytest.UsageError(
+                f"{ALLOW_HOST_STATE_ENV} requires explicit test tiers"
+            )
     sandbox = Path(raw_sandbox)
     escaped = []
-    for name in _ROOT_ENV:
+    root_names = ALWAYS_SANDBOX_ENV_NAMES if allow_host_state else ROOT_ENV_NAMES
+    for name in root_names:
         value = os.environ.get(name)
         if not value or not _is_within(Path(value), sandbox):
             escaped.append(f"{name}={value!r}")
+    if not allow_host_state:
+        for name in OPTIONAL_FILE_ENV_NAMES:
+            value = os.environ.get(name)
+            if value and not _is_within(Path(value), sandbox):
+                escaped.append(f"{name}={value!r}")
     if escaped:
         raise pytest.UsageError(
             "test state roots escape the runner sandbox: " + ", ".join(escaped)
