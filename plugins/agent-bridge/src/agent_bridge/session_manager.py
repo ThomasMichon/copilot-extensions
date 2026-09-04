@@ -5800,9 +5800,7 @@ class SessionManager:
             ):
                 raise ValueError(f"Session {session_id} is not idle")
             if self._db.count_pending_prompts(session_id) > 0:
-                raise ValueError(
-                    f"Session {session_id} has queued prompts and is not idle"
-                )
+                raise ValueError(f"Session {session_id} has queued prompts")
             await self.end_session(session_id, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
