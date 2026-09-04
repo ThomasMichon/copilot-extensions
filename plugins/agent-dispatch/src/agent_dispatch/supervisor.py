@@ -1783,6 +1783,8 @@ class Supervisor:
             return {}
         if not isinstance(payload, dict):
             return {}
+        if not payload.get("acp_session_id") and payload.get("session"):
+            payload["acp_session_id"] = payload["session"]
         return payload
 
     @classmethod

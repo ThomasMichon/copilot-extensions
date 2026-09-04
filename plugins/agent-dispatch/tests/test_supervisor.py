@@ -1361,6 +1361,7 @@ def test_end_failure_counts_after_legacy_pending_attempts(q, client):
             {
                 "action": "failed",
                 "reason": "session-identity-unavailable",
+                "session": "acp-session-exact",
                 "attempts": 3,
                 "next_attempt_at": 0,
             }
@@ -1379,7 +1380,9 @@ def test_end_failure_counts_after_legacy_pending_attempts(q, client):
         ),
         local_body_verdict_fn=lambda _sid: tracking.LIVE,
         local_body_activity_fn=lambda _sid: "IDLE",
-        local_acp_session_fn=lambda _sid: "acp-session-exact",
+        local_acp_session_fn=lambda _sid: pytest.fail(
+            "legacy checkpoint must avoid a fresh identity lookup"
+        ),
         local_end_fn=lambda _sid: False,
     )
 

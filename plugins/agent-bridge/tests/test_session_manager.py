@@ -2142,6 +2142,24 @@ class TestEndSession:
         assert session_manager._db.count_pending_prompts(session.session_id) == 0
 
     @pytest.mark.asyncio
+    async def test_end_if_idle_revalidates_after_waiting_for_lock(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        await session._turn_start_lock.acquire()
+        end_task = asyncio.create_task(
+            session_manager.end_session_if_idle(session.session_id)
+        )
+        await asyncio.sleep(0)
+        assert not end_task.done()
+
+        await session_manager.end_session(session.session_id)
+        session._turn_start_lock.release()
+
+        with pytest.raises(KeyError, match="not found"):
+            await end_task
+
+    @pytest.mark.asyncio
     async def test_end_succeeds_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:

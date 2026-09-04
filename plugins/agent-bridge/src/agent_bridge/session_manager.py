@@ -5792,6 +5792,8 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
         async with session._turn_start_lock:
+            if self._sessions.get(session_id) is not session:
+                raise KeyError(f"Session {session_id} not found")
             if (
                 session.status != SessionStatus.STOPPED
                 and not session.is_at_rest()
