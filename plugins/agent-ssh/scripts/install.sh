@@ -9,6 +9,20 @@ _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
 
+_install_agent_ssh_package() {
+    if [[ "$HAVE_UV" -eq 1 ]]; then
+        if uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+            return 0
+        fi
+        _step 'uv package install failed -- falling back to python -m pip'
+    fi
+
+    "$VENV_PYTHON" -m pip install --quiet \
+        "$PLUGIN_DIR/libs/agent-procutil" \
+        "$PLUGIN_DIR/libs/dropin-registry" \
+        "$PLUGIN_DIR" 2>/dev/null
+}
+
 ACTION="${AGENT_SSH_ACTION:-install}"
 FORCE=0
 INSTALL_DIR=""
@@ -510,16 +524,9 @@ else
     _skip 'Venv already exists'
 fi
 
-if [[ "$HAVE_UV" -eq 1 ]]; then
-    if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
-        _fail 'Failed to install agent-ssh package into venv'
-        exit 1
-    fi
-else
-    if ! "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null; then
-        _fail 'Failed to install agent-ssh package into venv'
-        exit 1
-    fi
+if ! _install_agent_ssh_package; then
+    _fail 'Failed to install agent-ssh package into venv'
+    exit 1
 fi
 _ok 'Package installed: agent-ssh'
 

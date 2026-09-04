@@ -209,7 +209,8 @@ function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -Foregro
 function Install-AgentSshPackage {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
-        [Parameter(Mandatory = $true)][string]$Source
+        [Parameter(Mandatory = $true)][string]$Source,
+        [string[]]$Dependencies = @()
     )
 
     $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
@@ -227,7 +228,8 @@ function Install-AgentSshPackage {
         }
     }
 
-    & $Python -m pip install --quiet $Source 2>&1 | Out-Null
+    $pipSources = @($Dependencies) + @($Source)
+    & $Python -m pip install --quiet @pipSources 2>&1 | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
@@ -681,7 +683,14 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
-$pkgInstalled = Install-AgentSshPackage -Python $VenvPython -Source $PluginDir
+$vendoredDependencies = @(
+    (Join-Path $PluginDir 'libs\agent-procutil'),
+    (Join-Path $PluginDir 'libs\dropin-registry')
+)
+$pkgInstalled = Install-AgentSshPackage `
+    -Python $VenvPython `
+    -Source $PluginDir `
+    -Dependencies $vendoredDependencies
 $ErrorActionPreference = $prevEAP
 if (-not $pkgInstalled) {
     Write-Fail 'Failed to install agent-ssh package into venv'
