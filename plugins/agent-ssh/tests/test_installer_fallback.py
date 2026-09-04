@@ -74,7 +74,7 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
     )
     env = {
         **os.environ,
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
     }
 
     proc = subprocess.run(
