@@ -5756,7 +5756,10 @@ class SessionManager:
         if not session:
             raise KeyError(f"Session {session_id} not found")
         async with session._turn_start_lock:
-            if not session.is_at_rest():
+            if (
+                session.status != SessionStatus.STOPPED
+                and not session.is_at_rest()
+            ):
                 raise ValueError(f"Session {session_id} is not idle")
             pending = self._db.list_pending_prompts(session_id)
             if pending:

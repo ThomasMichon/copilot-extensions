@@ -1150,6 +1150,9 @@ class BridgeClient:
 
         ``force`` maps to the route's ``?force=true`` — tear down even with
         active background sub-agent tasks (they are killed). See #191.
+        ``if_idle`` maps to ``?if_idle=true`` and atomically refuses teardown
+        unless the session is idle or stopped with no queued prompts. It
+        requires a daemon that advertises the conditional-idle-end protocol.
         """
         if if_idle:
             from .protocol import CONDITIONAL_IDLE_END_PROTOCOL_VERSION

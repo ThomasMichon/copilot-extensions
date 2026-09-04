@@ -226,7 +226,7 @@ def stop_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
 
 
 def end_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
-    """Terminally end one local headless body after its task concludes."""
+    """End one local headless body only while it remains idle or stopped."""
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
