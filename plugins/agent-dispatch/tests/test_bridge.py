@@ -365,6 +365,13 @@ def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
         "which",
         lambda command: "/usr/bin/ssh" if command == "ssh" else None,
     )
+    monkeypatch.setattr(
+        bridge.bridge_remote.LocalBridgeRemoteClient,
+        "send_live_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            bridge.bridge_remote.RemoteBridgeUnavailable("not installed")
+        ),
+    )
 
     def fake_run(cmd, **kwargs):
         calls["cmd"] = cmd
@@ -395,6 +402,70 @@ def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
         ),
     ]
     assert calls["kwargs"]["input"] == "resume now"
+
+
+def test_resume_steered_owner_uses_carrier_without_ssh(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge.remote_dispatch, "local_machine", lambda: "coordinator"
+    )
+
+    def send(_self, host, target, **kwargs):
+        calls.update(host=host, target=target, **kwargs)
+        return {"message_id": "message-1"}
+
+    monkeypatch.setattr(
+        bridge.bridge_remote.LocalBridgeRemoteClient,
+        "send_live_message",
+        send,
+    )
+    monkeypatch.setattr(
+        bridge.shutil,
+        "which",
+        lambda _name: pytest.fail("carrier-backed send must not resolve ssh"),
+    )
+
+    assert bridge.resume_steered_owner(
+        "Worker-Host/worktree-1",
+        "task-42",
+        "resume now",
+        owner_session_id="session-42",
+        idempotency_key="wake:task-42:1:2",
+    )
+    assert calls == {
+        "host": "Worker-Host",
+        "target": "worktree-1",
+        "sender": "agent-dispatch-steer",
+        "message": "resume now",
+        "kind": "prompt",
+        "expected_session_id": "session-42",
+        "idempotency_key": "wake:task-42:1:2",
+        "timeout": 20.0,
+    }
+
+
+def test_resume_steered_owner_does_not_fallback_after_carrier_error(monkeypatch):
+    monkeypatch.setattr(
+        bridge.remote_dispatch, "local_machine", lambda: "coordinator"
+    )
+    monkeypatch.setattr(
+        bridge.bridge_remote.LocalBridgeRemoteClient,
+        "send_live_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            bridge.bridge_remote.RemoteBridgeOperationError("remote rejected")
+        ),
+    )
+    monkeypatch.setattr(
+        bridge.shutil,
+        "which",
+        lambda _name: pytest.fail("carrier operation errors must not fall back"),
+    )
+
+    assert not bridge.resume_steered_owner(
+        "Worker-Host/worktree-1",
+        "task-42",
+        owner_session_id="session-42",
+    )
 
 
 # -- registered-agent preflight ----------------------------------------------

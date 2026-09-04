@@ -1384,6 +1384,18 @@ class BridgeClient:
                 f"v{version}. Update the agent-bridge plugin + runtime.",
             )
 
+    def _require_remote_commands(self) -> None:
+        from .protocol import REMOTE_COMMANDS_PROTOCOL_VERSION
+
+        if not self.daemon_supports(REMOTE_COMMANDS_PROTOCOL_VERSION):
+            version, _minimum = self.daemon_protocol()
+            raise BridgeClientError(
+                426,
+                "remote Bridge commands require agent-bridge HTTP protocol "
+                f"v{REMOTE_COMMANDS_PROTOCOL_VERSION}; the daemon advertises "
+                f"v{version}. Update the agent-bridge plugin + runtime.",
+            )
+
     def get_remote_session_status(
         self, host: str, session_id: str, *, caller_id: str
     ) -> dict[str, Any]:
@@ -1401,17 +1413,125 @@ class BridgeClient:
         ) or {}
 
     def resolve_remote_live_session(
-        self, host: str, session_id: str
+        self, host: str, target: str
     ) -> dict[str, Any]:
-        """Resolve one exact represented session on a hosting Bridge."""
+        """Resolve an exact session or worktree handle on a hosting Bridge."""
         self._require_remote_operations()
         return self._request(
             "GET",
             self._remote_path(
                 host,
                 "/live-sessions/"
-                + urllib.parse.quote(session_id, safe=""),
+                + urllib.parse.quote(target, safe=""),
             ),
+        ) or {}
+
+    def create_remote_session(
+        self,
+        host: str,
+        *,
+        agent: str,
+        prompt: str,
+        caller_id: str,
+        timeout: float = 120.0,
+    ) -> dict[str, Any]:
+        """Create and seed a new hosting-Bridge session through the carrier."""
+        self._require_remote_commands()
+        return self._request(
+            "POST",
+            self._remote_path(host, "/sessions"),
+            {
+                "agent": agent,
+                "prompt": prompt,
+                "caller_id": caller_id,
+                "timeout": timeout,
+            },
+            request_timeout=timeout + 15.0,
+        ) or {}
+
+    def stop_remote_session(
+        self,
+        host: str,
+        session_id: str,
+        *,
+        force: bool = False,
+        reap_host: bool = False,
+        timeout: float = 20.0,
+    ) -> None:
+        """Stop a hosting-Bridge session through the shared carrier."""
+        self._require_remote_commands()
+        self._request(
+            "POST",
+            self._remote_path(
+                host,
+                "/sessions/"
+                + urllib.parse.quote(session_id, safe="")
+                + "/stop",
+            ),
+            {
+                "force": force,
+                "reap_host": reap_host,
+                "timeout": timeout,
+            },
+            request_timeout=timeout + 15.0,
+        )
+
+    def end_remote_session(
+        self,
+        host: str,
+        session_id: str,
+        *,
+        force: bool = False,
+        if_idle: bool = False,
+        timeout: float = 20.0,
+    ) -> None:
+        """End a hosting-Bridge session through the shared carrier."""
+        self._require_remote_commands()
+        self._request(
+            "DELETE",
+            self._remote_path(
+                host,
+                "/sessions/" + urllib.parse.quote(session_id, safe=""),
+            ),
+            {
+                "force": force,
+                "if_idle": if_idle,
+                "timeout": timeout,
+            },
+            request_timeout=timeout + 15.0,
+        )
+
+    def send_remote_live_message(
+        self,
+        host: str,
+        target: str,
+        *,
+        sender: str,
+        message: str,
+        kind: str = "prompt",
+        expected_session_id: str | None = None,
+        idempotency_key: str | None = None,
+        timeout: float = 20.0,
+    ) -> dict[str, Any]:
+        """Deliver to a represented remote session through the carrier."""
+        self._require_remote_commands()
+        return self._request(
+            "POST",
+            self._remote_path(
+                host,
+                "/live-sessions/"
+                + urllib.parse.quote(target, safe="")
+                + "/messages",
+            ),
+            {
+                "sender": sender,
+                "message": message,
+                "kind": kind,
+                "expected_session_id": expected_session_id,
+                "idempotency_key": idempotency_key,
+                "timeout": timeout,
+            },
+            request_timeout=timeout + 15.0,
         ) or {}
 
     def stream_remote_events(

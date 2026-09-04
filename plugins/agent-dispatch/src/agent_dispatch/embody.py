@@ -22,6 +22,7 @@ import shlex
 import shutil
 import subprocess
 
+from . import bridge_remote
 from .procutil import (
     agent_worktrees_launch_prefix,
     no_window_kwargs,
@@ -824,9 +825,6 @@ def spawn_fleet_headless_worker(
     lacking ``agent-bridge`` surfaces as a non-zero exit (the caller fails the
     reservation).
     """
-    exe = shutil.which("ssh")
-    if exe is None:
-        raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
     seed = fleet_autopilot_worker_prompt(
         task_id,
         origin=origin,
@@ -835,6 +833,33 @@ def spawn_fleet_headless_worker(
         repo=repo,
         all_repos=all_repos,
     )
+    try:
+        created = bridge_remote.LocalBridgeRemoteClient().create_session(
+            host,
+            agent=agent,
+            prompt=seed,
+            caller_id=owner,
+            timeout=timeout if timeout is not None else 120.0,
+        )
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(created),
+            stderr="",
+        )
+    except bridge_remote.RemoteBridgeUnavailable:
+        pass
+    except bridge_remote.RemoteBridgeOperationError as exc:
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr=str(exc),
+        )
+
+    exe = shutil.which("ssh")
+    if exe is None:
+        raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
     # `--json` (a global flag, before the subcommand) makes `create --no-wait`
     # emit the created session_id as JSON, so the caller can record a recovery
     # handle (the pool host's agent-bridge session id) for liveness-gated
@@ -977,8 +1002,33 @@ def fleet_body_verdict(
     """
     from . import tracking
 
+    if not host or not session_id:
+        return tracking.UNKNOWN
+    effective_timeout = timeout if timeout is not None else 8.0
+    try:
+        status = bridge_remote.LocalBridgeRemoteClient().session_status(
+            host,
+            session_id,
+            caller_id="agent-dispatch-fleet",
+            timeout=effective_timeout,
+        )
+        return _classify_body_status(
+            subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=json.dumps(status),
+                stderr="",
+            )
+        )
+    except bridge_remote.RemoteBridgeUnavailable:
+        pass
+    except bridge_remote.RemoteBridgeOperationError as exc:
+        if exc.code == "session_not_found" or exc.status == 404:
+            return tracking.GONE
+        return tracking.UNKNOWN
+
     ssh = shutil.which("ssh")
-    if ssh is None or not host or not session_id:
+    if ssh is None:
         return tracking.UNKNOWN
     remote = f"agent-bridge --json status {shlex.quote(session_id)}"
     cmd = [
@@ -987,7 +1037,7 @@ def fleet_body_verdict(
     ]
     try:
         proc = run_ssh_command(
-            cmd, timeout=timeout if timeout is not None else 8.0
+            cmd, timeout=effective_timeout
         )
     except (subprocess.TimeoutExpired, OSError):
         return tracking.UNKNOWN
@@ -998,22 +1048,37 @@ def stop_fleet_body(
     host: str, session_id: str, *, timeout: float | None = 20.0
 ) -> bool:
     """End one remote fleet body so its process is fully reclaimed."""
+    effective_timeout = timeout if timeout is not None else 20.0
+    try:
+        bridge_remote.LocalBridgeRemoteClient().end_session(
+            host,
+            session_id,
+            timeout=effective_timeout,
+        )
+        return True
+    except bridge_remote.RemoteBridgeUnavailable:
+        pass
+    except bridge_remote.RemoteBridgeOperationError:
+        return False
     ssh = shutil.which("ssh")
     if ssh is None:
         return False
     remote = f"agent-bridge end {shlex.quote(session_id)}"
-    completed = run_ssh_command(
-        [
-            ssh,
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=3",
-            host.strip().lower(),
-            remote,
-        ],
-        timeout=timeout,
-    )
+    try:
+        completed = run_ssh_command(
+            [
+                ssh,
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=3",
+                host.strip().lower(),
+                remote,
+            ],
+            timeout=effective_timeout,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
     return completed.returncode == 0
 
 
@@ -1023,8 +1088,23 @@ def fleet_body_activity(
     """Exact ACTIVE/STALLED state for a remote headless fleet body."""
     from . import tracking
 
+    if not host or not session_id:
+        return None
+    effective_timeout = timeout if timeout is not None else 8.0
+    try:
+        session = bridge_remote.LocalBridgeRemoteClient().session_status(
+            host,
+            session_id,
+            caller_id="agent-dispatch-fleet",
+            timeout=effective_timeout,
+        )
+        return tracking.session_activity(session)
+    except bridge_remote.RemoteBridgeUnavailable:
+        pass
+    except bridge_remote.RemoteBridgeOperationError:
+        return None
     ssh = shutil.which("ssh")
-    if ssh is None or not host or not session_id:
+    if ssh is None:
         return None
     remote = f"agent-bridge --json status {shlex.quote(session_id)}"
     cmd = [
@@ -1034,7 +1114,7 @@ def fleet_body_activity(
     try:
         proc = run_ssh_command(
             cmd,
-            timeout=timeout if timeout is not None else 8.0,
+            timeout=effective_timeout,
         )
     except (subprocess.TimeoutExpired, OSError):
         return None

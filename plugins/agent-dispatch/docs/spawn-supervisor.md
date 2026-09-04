@@ -251,6 +251,15 @@ when Bridge or a remote carrier is missing or version-skewed. `--no-reactive`
 disables push acceleration. `--reactive-interval` remains accepted only for
 configuration compatibility and never enables polling.
 
+Remote fleet Bridge commands use the same local Bridge owner and per-host
+carrier as event subscriptions. Create, exact status/activity, end,
+session-or-worktree resolution, and queued steering/redrive delivery therefore
+do not create additional SSH processes while the command capability is present.
+Dispatch retains its former bounded raw SSH commands only when the optional
+local Bridge daemon or required command protocol is absent. Once that local
+capability is accepted, a timeout, remote rejection, or carrier failure degrades
+the operation without falling through to direct SSH beside the event stream.
+
 The rearm is one coordinator write transaction. It succeeds only while the
 task is still queued and unowned, no `reserving`/`spawned` reservation exists,
 and at least three (or the explicitly higher threshold) failed attempts remain.
@@ -699,8 +708,9 @@ The supervisor now has the positive-death signal the earlier design deferred to:
   SSH for a remote owner). A different/absent session is `gone`.
 - **local headless body** — parse the local `agent-bridge` session id from the
   reservation handle and probe that session on this host.
-- **headless fleet body** — parse `fleet-body:<host>:<session-id>` and probe the
-  pool host over SSH (`agent-bridge --json status <session-id>`).
+- **headless fleet body** — parse `fleet-body:<host>:<session-id>` and ask the
+  local Bridge for exact remote status over its shared carrier. A direct SSH
+  status probe is compatibility-only.
 
 For a confirmed-gone body, the supervisor yields the task on the dead owner's
 behalf when it is still leased (preserving `goal` and `progress_log`), marks the
@@ -794,8 +804,9 @@ completes identically; only the *body* differs. A headless-fleet body is **not a
 worktree**, so the *worktree-keyed* liveness probe doesn't apply — instead its
 recovery handle is the **pool host's agent-bridge session id** (captured from
 `create --no-wait --json` and stamped on the reservation as
-`fleet-body:<host>:<session-id>`). The supervisor probes *that* over SSH
-(`ssh <host> agent-bridge --json status <session-id>`, `embody.fleet_body_verdict`)
+`fleet-body:<host>:<session-id>`). The supervisor probes *that* through the
+local Bridge carrier (`embody.fleet_body_verdict`, with bounded direct SSH only
+when the command capability is absent)
 for the same tri-state verdict: a **confirmed-live** body is heartbeated
 (`hold_live_leases`) so a quiet-but-alive sweep isn't wrongly recovered, and a
 **confirmed-gone** body (its ACP session terminal or absent) has its reservation

@@ -7,6 +7,8 @@ integration (an asleep pool defers a task without burning a spawn attempt).
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from agent_dispatch import embody, fleet
@@ -282,6 +284,11 @@ def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch):
 
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(embody, "run_ssh_command", fake_run)
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "create_session",
+        _remote_unavailable,
+    )
 
     embody.spawn_fleet_embodied_worker(
         "Host-B", "t7", origin="brain", owner="fleet-t7-xyz", worker_id="fleet-t7-xyz"
@@ -362,6 +369,11 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
 
 def test_spawn_fleet_headless_worker_requires_ssh(monkeypatch):
     monkeypatch.setattr(embody.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "create_session",
+        _remote_unavailable,
+    )
     with pytest.raises(embody.EmbodyUnavailable):
         embody.spawn_fleet_headless_worker(
             "a", "t1", origin="brain", owner="o", worker_id="o"
@@ -402,6 +414,10 @@ def _fake_status_run(rc, stdout, stderr=""):
     return run
 
 
+def _remote_unavailable(*_args, **_kwargs):
+    raise embody.bridge_remote.RemoteBridgeUnavailable("not installed")
+
+
 @pytest.mark.parametrize(
     "rc,stdout,stderr,expected",
     [
@@ -419,11 +435,21 @@ def _fake_status_run(rc, stdout, stderr=""):
 def test_fleet_body_verdict_classifies(monkeypatch, rc, stdout, stderr, expected):
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(embody, "run_ssh_command", _fake_status_run(rc, stdout, stderr))
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "session_status",
+        _remote_unavailable,
+    )
     assert embody.fleet_body_verdict("Host-B", "sid-1") == expected
 
 
 def test_fleet_body_verdict_unknown_without_ssh(monkeypatch):
     monkeypatch.setattr(embody.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "session_status",
+        _remote_unavailable,
+    )
     assert embody.fleet_body_verdict("h", "sid") == "unknown"
 
 
@@ -438,7 +464,101 @@ def test_fleet_body_verdict_unknown_without_ssh(monkeypatch):
 def test_fleet_body_activity_classifies(monkeypatch, payload, expected):
     monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(embody, "run_ssh_command", _fake_status_run(0, payload))
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "session_status",
+        _remote_unavailable,
+    )
     assert embody.fleet_body_activity("Host-B", "sid-1") == expected
+
+
+def test_headless_create_uses_carrier_without_ssh(monkeypatch):
+    calls = {}
+
+    def create(_self, host, **kwargs):
+        calls.update(host=host, **kwargs)
+        return {"session_id": "bridge-1"}
+
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient, "create_session", create
+    )
+    monkeypatch.setattr(
+        embody.shutil,
+        "which",
+        lambda _name: pytest.fail("carrier-backed create must not resolve ssh"),
+    )
+
+    result = embody.spawn_fleet_headless_worker(
+        "Host-B",
+        "t7",
+        origin="brain",
+        owner="fleet-t7-xyz",
+        worker_id="fleet-t7-xyz",
+        agent="review-worker",
+    )
+
+    assert result.returncode == 0
+    assert embody.parse_fleet_body_session(result) == "bridge-1"
+    assert calls["host"] == "Host-B"
+    assert calls["agent"] == "review-worker"
+    assert calls["caller_id"] == "fleet-t7-xyz"
+
+
+def test_carrier_status_preserves_tri_state_without_ssh(monkeypatch):
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "session_status",
+        lambda *_args, **_kwargs: {"status": "idle"},
+    )
+    monkeypatch.setattr(
+        embody.shutil,
+        "which",
+        lambda _name: pytest.fail("carrier-backed status must not resolve ssh"),
+    )
+    assert embody.fleet_body_verdict("Host-B", "sid-1") == "live"
+
+
+def test_carrier_not_found_is_gone_without_ssh_fallback(monkeypatch):
+    def missing(*_args, **_kwargs):
+        raise embody.bridge_remote.RemoteBridgeOperationError(
+            "missing", status=404, code="session_not_found"
+        )
+
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "session_status",
+        missing,
+    )
+    monkeypatch.setattr(
+        embody.shutil,
+        "which",
+        lambda _name: pytest.fail("carrier operation errors must not fall back"),
+    )
+    assert embody.fleet_body_verdict("Host-B", "sid-1") == "gone"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        subprocess.TimeoutExpired(["ssh"], 20),
+        subprocess.SubprocessError("ssh failed"),
+        OSError("ssh unavailable"),
+    ],
+)
+def test_stop_fleet_body_normalizes_ssh_fallback_errors(monkeypatch, error):
+    monkeypatch.setattr(embody.shutil, "which", lambda _name: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        embody.bridge_remote.LocalBridgeRemoteClient,
+        "end_session",
+        _remote_unavailable,
+    )
+
+    def fail(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(embody, "run_ssh_command", fail)
+
+    assert embody.stop_fleet_body("Host-B", "sid-1") is False
 
 
 def test_headless_call_encodes_fleet_body_recovery_handle():

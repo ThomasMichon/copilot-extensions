@@ -35,7 +35,7 @@ import subprocess
 import time
 from typing import Any
 
-from . import remote_dispatch
+from . import bridge_remote, remote_dispatch
 from .procutil import (
     agent_bridge_launch_prefix,
     run_agent_worktrees_capture,
@@ -161,6 +161,18 @@ def resolve_live_session(
     """
     if not worktree:
         return None
+    if machine is not None:
+        effective_timeout = timeout if timeout is not None else 6.0
+        try:
+            return bridge_remote.LocalBridgeRemoteClient().resolve_live_session(
+                machine,
+                worktree,
+                timeout=effective_timeout,
+            )
+        except bridge_remote.RemoteBridgeUnavailable:
+            pass
+        except bridge_remote.RemoteBridgeOperationError:
+            return None
     argv = _bridge_resolve_argv(worktree, machine=machine)
     if argv is None:
         return None
@@ -388,10 +400,9 @@ def enrich_task(
 
     The overlay resolves against the *owner's* machine (Phase 8 Slice 8b): a
     local owner uses the local ``agent-bridge`` (gated on
-    :func:`bridge_available`); a remote owner resolves over the SSH mesh (gated
-    on :func:`~remote_dispatch.ssh_available`). A batch caller (``list``) hoists
-    the one-time ``bridge_available`` / ``ssh_available`` / ``local_machine``
-    probes so a lane of tasks makes at most one of each.
+    :func:`bridge_available`); a remote owner first uses the local Bridge carrier
+    and consults SSH availability only if that optional capability is absent.
+    A batch caller (``list``) hoists the one-time availability probes.
     """
     if not isinstance(task, dict) or task.get("status") not in _LEASED:
         return task
@@ -409,10 +420,6 @@ def enrich_task(
             and machine.strip().casefold() != str(local).strip().casefold()
         )
     if is_remote:
-        if ssh_ok is None:
-            ssh_ok = remote_dispatch.ssh_available()
-        if not ssh_ok:
-            return task
         session = resolve_live_session(worktree, machine=machine)
     else:
         if bridge_ok is None:

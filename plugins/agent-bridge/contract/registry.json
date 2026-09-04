@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 13,
+        "current": 14,
         "minimum": 1,
-        "previous_generation": 12,
+        "previous_generation": 13,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -19,14 +19,16 @@
           10,
           11,
           12,
-          13
+          13,
+          14
         ],
         "runtimes": [
           "0.4.0-dev423",
           "0.4.0-dev424",
           "0.4.0-dev429",
           "0.4.0-dev430",
-          "0.4.0-dev432"
+          "0.4.0-dev432",
+          "0.4.0-dev433"
         ]
       },
       "capability_versions": {
@@ -41,13 +43,14 @@
         "attention_wait": 10,
         "remote_operations": 11,
         "conditional_idle_end": 12,
-        "remote_event_multiplex": 13
+        "remote_event_multiplex": 13,
+        "remote_commands": 14
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "b553d35f6a1a3671b4606294dafb82925cebc5bef5776f4e3b529f11d84e6fcf",
+          "sha256": "3c2a43766ce10d69b42aaf9a9f8ce5331faff9cb7d9af8b87c36ab397e2c2cd5",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -70,6 +73,12 @@
           "non_semantic_reason": null
         },
         {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "sha256": "024b306e8cb82a486560feae9e770fad4dbbda9cc152a901bf266ac8ba7a1fc5",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
           "path": "plugins/agent-bridge/tests/test_wire_compat.py",
           "sha256": "83728e07defb2ce501055554ec7c26e9707038a04c477e75e18b23525a0620a4",
           "semantic": false,
@@ -79,8 +88,14 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "f2555cd50558d61874e80ffbdfb65c9861285a419533fa1a4540a1bfe5ca2376",
+          "sha256": "aaa8075b61c697cb6e5b92da2ab3c427adc6bce0f0dc8a0968f4a6da8ce35e44",
           "role": "current health response",
+          "generation": 14
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-13/health.json",
+          "sha256": "f2555cd50558d61874e80ffbdfb65c9861285a419533fa1a4540a1bfe5ca2376",
+          "role": "previous HTTP generation health evidence",
           "generation": 13
         },
         {
@@ -91,21 +106,21 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
-          "sha256": "ecfb7eb50f1e4c2b5ae599552d15c24aeca077f9f2d265ea0984ab900caa5f77",
+          "sha256": "d41a0717cfecc9154f458917305d9088691e4720f8f23326a83ecaa6f361c04b",
           "role": "current session-create request with unknown-field tolerance",
-          "generation": 13
+          "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "fd9d5e015092644f5f14491d3e1466ae640517dfe66bb42675532d2dc04f9303",
+          "sha256": "b32e6eec81821e346a9ed3d8c1cff9fdf574159f3cedce01890ffc4250a40748",
           "role": "current session-create response",
-          "generation": 13
+          "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "a6fe5f98448b1023394d3c4c469374138354ca91323a59c515f4b0a295f04308",
+          "sha256": "3bff5e6d44127f5bd5ec99de922cb003168b010634d9ddcb6baaeb105914ae6c",
           "role": "current representative FastAPI error",
-          "generation": 13
+          "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-11/health.json",
@@ -127,12 +142,58 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "ac56e5653cad0f5540ace72b2ad47a3a47066107e3342bddba1bd65101d78df6",
+          "sha256": "11f98293e2a8f41dcff23ed75eeaf27b1853a59509950f2768bba4f87ce3dae9",
           "role": "current HTTP range and capability constants",
-          "generation": 13
+          "generation": 14
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
+          "sha256": "99cb66706a316aa014c0556d6f7adfea626e64e720ca1a2078f91a180b464af2",
+          "role": "current carrier-backed remote command request and response",
+          "generation": 14
         }
       ],
       "provenance": [
+        {
+          "commit": "d33775a5b784dd5b2464fa86098d469470523f36",
+          "plugin_version": "0.4.0-dev433",
+          "generation": 14,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "64a1a80dee8e0568a57f4d7eea528fcdca3eb17f",
+          "capture_method": "Read production constants and serialize representative models from this exact source revision."
+        },
+        {
+          "commit": "d33775a5b784dd5b2464fa86098d469470523f36",
+          "plugin_version": "0.4.0-dev433",
+          "generation": 14,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "598dd52ff55a442540d934f79712857fe6a61e8b",
+          "capture_method": "Serialize the reviewed carrier-backed remote command request and response surface."
+        },
+        {
+          "commit": "d33775a5b784dd5b2464fa86098d469470523f36",
+          "plugin_version": "0.4.0-dev433",
+          "generation": 14,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
+          "capture_method": "Invoke the health route with a controlled empty runtime state and zeroed carrier diagnostics."
+        },
+        {
+          "commit": "d33775a5b784dd5b2464fa86098d469470523f36",
+          "plugin_version": "0.4.0-dev433",
+          "generation": 14,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "391f9ceaf3b7638b7cc1e508c1a2e9ada5e944bc",
+          "capture_method": "Validate and serialize representative session-create request and response models."
+        },
+        {
+          "commit": "d33775a5b784dd5b2464fa86098d469470523f36",
+          "plugin_version": "0.4.0-dev433",
+          "generation": 14,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "8f0a0f10ce17e7bdd5e4a567cd856ed3f2891278",
+          "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response."
+        },
         {
           "commit": "f41404f6e8fb1918f60bb047893bb435e0f8bad8",
           "plugin_version": "0.4.0-dev432",

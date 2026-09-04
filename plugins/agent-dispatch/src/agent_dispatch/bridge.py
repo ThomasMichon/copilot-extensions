@@ -15,7 +15,7 @@ import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 
-from . import remote_dispatch
+from . import bridge_remote, remote_dispatch
 from .procutil import (
     agent_bridge_launch_prefix,
     no_window_kwargs,
@@ -349,6 +349,22 @@ def redrive_embodied_worker(
         and machine.casefold() != local_machine.casefold()
     )
     if is_remote:
+        try:
+            bridge_remote.LocalBridgeRemoteClient().send_live_message(
+                machine,
+                worktree,
+                sender=sender,
+                message=prompt,
+                kind="prompt",
+                expected_session_id=expected_session_id,
+                idempotency_key=idempotency_key,
+                timeout=timeout if timeout is not None else 20.0,
+            )
+            return True
+        except bridge_remote.RemoteBridgeUnavailable:
+            pass
+        except bridge_remote.RemoteBridgeOperationError:
+            return False
         ssh = shutil.which("ssh")
         if ssh is None:
             return False
@@ -442,6 +458,22 @@ def resume_steered_owner(
         and machine.casefold() != local_machine.casefold()
     )
     if is_remote:
+        try:
+            bridge_remote.LocalBridgeRemoteClient().send_live_message(
+                machine,
+                worktree,
+                sender="agent-dispatch-steer",
+                message=prompt,
+                kind="prompt",
+                expected_session_id=owner_session_id,
+                idempotency_key=idempotency_key,
+                timeout=timeout if timeout is not None else 20.0,
+            )
+            return True
+        except bridge_remote.RemoteBridgeUnavailable:
+            pass
+        except bridge_remote.RemoteBridgeOperationError:
+            return False
         ssh = shutil.which("ssh")
         if ssh is None:
             return False

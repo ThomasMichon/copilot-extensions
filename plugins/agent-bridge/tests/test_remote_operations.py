@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -49,6 +50,10 @@ class _RemoteClient:
     def __init__(self) -> None:
         self.status_calls = []
         self.resolve_calls = []
+        self.create_calls = []
+        self.stop_calls = []
+        self.end_calls = []
+        self.message_calls = []
         self.ack_calls = []
         self.streams = []
         self.cursor_info = {
@@ -69,9 +74,27 @@ class _RemoteClient:
     def daemon_protocol(self):
         return (10, 1)
 
-    def get_live_session(self, session_id):
-        self.resolve_calls.append(session_id)
-        return {"session_id": session_id, "status": "live"}
+    def resolve_live_session(self, target):
+        self.resolve_calls.append(target)
+        return {"session_id": "live-a", "worktree_id": target, "status": "live"}
+
+    def start_session(self, **kwargs):
+        self.create_calls.append(kwargs)
+        return {"session_id": "created-a"}
+
+    def submit_prompt(self, session_id, prompt, **kwargs):
+        self.create_calls.append((session_id, prompt, kwargs))
+        return {"accepted": True}
+
+    def stop_session(self, session_id, **kwargs):
+        self.stop_calls.append((session_id, kwargs))
+
+    def end_session(self, session_id, **kwargs):
+        self.end_calls.append((session_id, kwargs))
+
+    def send_live_message(self, session_id, **kwargs):
+        self.message_calls.append((session_id, kwargs))
+        return {"message_id": "message-a"}
 
     def get_cursor_info(self, session_id, *, caller_id):
         return dict(self.cursor_info)
@@ -188,10 +211,256 @@ async def test_status_and_live_resolution_proxy_exact_authority() -> None:
     assert status.payload["result"]["session_id"] == "session-a"
     assert live.payload["result"] == {
         "session_id": "live-a",
+        "worktree_id": "live-a",
         "status": "live",
     }
     assert client.status_calls == [("session-a", "consumer-a")]
     assert client.resolve_calls == ["live-a"]
+
+
+@pytest.mark.asyncio
+async def test_mutating_operations_proxy_structured_bridge_calls() -> None:
+    client = _RemoteClient()
+    router = CarrierRequestRouter(lambda: client)
+
+    create = await router(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="create",
+            payload={
+                "operation": "session.create",
+                "version": 2,
+                "agent": "task-worker",
+                "prompt": "do the work",
+                "caller_id": "fleet-task-a",
+            },
+        )
+    )
+    stop = await router(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="stop",
+            payload={
+                "operation": "session.stop",
+                "version": 2,
+                "session_id": "created-a",
+                "reap_host": True,
+            },
+        )
+    )
+    end = await router(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="end",
+            payload={
+                "operation": "session.end",
+                "version": 2,
+                "session_id": "created-a",
+                "if_idle": True,
+            },
+        )
+    )
+    sent = await router(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="send",
+            payload={
+                "operation": "live_session.send",
+                "version": 2,
+                "target": "worktree-a",
+                "sender": "agent-dispatch-steer",
+                "message": "resume",
+                "kind": "prompt",
+                "expected_session_id": "live-a",
+                "idempotency_key": "wake-task-a",
+            },
+        )
+    )
+
+    assert create.payload["result"] == {"session_id": "created-a"}
+    assert stop.payload["result"] == {"stopped": True}
+    assert end.payload["result"] == {"ended": True}
+    assert sent.payload["result"] == {"message_id": "message-a"}
+    assert client.create_calls == [
+        {
+            "agent": "task-worker",
+            "caller_id": "fleet-task-a",
+            "force_new": True,
+        },
+        ("created-a", "do the work", {"caller_id": "fleet-task-a"}),
+    ]
+    assert client.stop_calls == [
+        ("created-a", {"force": False, "reap_host": True})
+    ]
+    assert client.end_calls == [
+        ("created-a", {"force": False, "if_idle": True})
+    ]
+    assert client.resolve_calls[-1] == "worktree-a"
+    assert client.message_calls == [
+        (
+            "live-a",
+            {
+                "sender": "agent-dispatch-steer",
+                "body": "resume",
+                "kind": "prompt",
+                "wait": False,
+                "idempotency_key": "wake-task-a",
+                "expected_session_id": "live-a",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mutating_operations_require_protocol_version_two() -> None:
+    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="create",
+            payload={
+                "operation": "session.create",
+                "version": 1,
+                "agent": "task-worker",
+                "prompt": "do the work",
+                "caller_id": "fleet-task-a",
+            },
+        )
+    )
+
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "unsupported_version"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "field", "value"),
+    [
+        ("session.stop", "force", "false"),
+        ("session.stop", "reap_host", 1),
+        ("session.end", "if_idle", None),
+        ("live_session.send", "expected_session_id", {"session": "live-a"}),
+        ("live_session.send", "idempotency_key", "not safe"),
+    ],
+)
+async def test_mutating_operations_reject_malformed_options(
+    operation: str, field: str, value: object
+) -> None:
+    payload = {
+        "operation": operation,
+        "version": 2,
+        "session_id": "created-a",
+        field: value,
+    }
+    if operation == "live_session.send":
+        payload.update(
+            {
+                "target": "worktree-a",
+                "sender": "agent-dispatch-steer",
+                "message": "resume",
+                "kind": "prompt",
+            }
+        )
+
+    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id=f"{operation}-{field}",
+            payload=payload,
+        )
+    )
+
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "invalid_request"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_create_reclaims_late_session() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class _SlowCreateClient(_RemoteClient):
+        def start_session(self, **kwargs):
+            started.set()
+            release.wait(timeout=5)
+            return {"session_id": "late-session"}
+
+    client = _SlowCreateClient()
+    task = asyncio.create_task(
+        CarrierRequestRouter(lambda: client)(
+            Envelope(
+                EnvelopeType.REQUEST,
+                request_id="create",
+                payload={
+                    "operation": "session.create",
+                    "version": 2,
+                    "agent": "task-worker",
+                    "prompt": "do the work",
+                    "caller_id": "fleet-task-a",
+                },
+            )
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 5)
+    task.cancel()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.end_calls == [
+        ("late-session", {"force": True})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_create_preserves_cancellation_when_cleanup_fails() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class _CleanupFailureClient(_RemoteClient):
+        def start_session(self, **kwargs):
+            started.set()
+            release.wait(timeout=5)
+            return {"session_id": "late-session"}
+
+        def end_session(self, session_id, **kwargs):
+            raise TimeoutError("cleanup timed out")
+
+    task = asyncio.create_task(
+        CarrierRequestRouter(lambda: _CleanupFailureClient())(
+            Envelope(
+                EnvelopeType.REQUEST,
+                request_id="create",
+                payload={
+                    "operation": "session.create",
+                    "version": 2,
+                    "agent": "task-worker",
+                    "prompt": "do the work",
+                    "caller_id": "fleet-task-a",
+                },
+            )
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 5)
+    task.cancel()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_remote_client_validates_live_message_guards() -> None:
+    client = RemoteOperationService(SimpleNamespace())
+
+    with pytest.raises(RemoteBridgeError, match="expected_session_id"):
+        await client.send_live_message(
+            "host-a",
+            "worktree-a",
+            sender="agent-dispatch-steer",
+            message="resume",
+            kind="prompt",
+            expected_session_id="not safe",
+        )
 
 
 @pytest.mark.asyncio
@@ -586,6 +855,61 @@ async def test_local_subscription_uses_initial_position_only(
 
 
 @pytest.mark.asyncio
+async def test_service_preserves_v1_for_reads_and_uses_v2_for_mutations(
+    monkeypatch,
+) -> None:
+    class _Carrier:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def request(self, payload, **_kwargs):
+            self.calls.append(payload)
+            operation = payload["operation"]
+            if operation == "session.status":
+                result = {"status": "idle"}
+            else:
+                result = {"ended": True}
+            return Envelope(
+                EnvelopeType.RESPONSE,
+                payload={"result": result},
+            )
+
+    class _Lease:
+        def __init__(self) -> None:
+            self.carrier = _Carrier()
+
+        async def release(self):
+            pass
+
+    class _Resolver:
+        def resolve_ssh_environment(self, _host):
+            return object(), SimpleNamespace(
+                alias="example-host",
+                user=None,
+                port=22,
+                shell="bash",
+                name="linux",
+            )
+
+    lease = _Lease()
+
+    async def acquire(*_args, **_kwargs):
+        return lease
+
+    monkeypatch.setattr(
+        "agent_bridge.carrier.acquire_remote_carrier", acquire
+    )
+    service = RemoteOperationService(_Resolver())
+
+    await service.session_status(
+        "example-host", "session-a", "consumer-a"
+    )
+    await service.end_session("example-host", "session-a")
+
+    assert [call["version"] for call in lease.carrier.calls] == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_cancelled_subscription_setup_releases_lease(monkeypatch) -> None:
     started = asyncio.Event()
 
@@ -860,6 +1184,7 @@ class _ApiService:
     def __init__(self) -> None:
         self.subscription = _ApiSubscription()
         self.acks = []
+        self.commands = []
 
     async def session_status(self, host, session_id, caller_id):
         return {
@@ -870,6 +1195,20 @@ class _ApiService:
 
     async def resolve_live_session(self, host, session_id):
         return {"session_id": session_id, "status": "live"}
+
+    async def create_session(self, host, **kwargs):
+        self.commands.append(("create", host, kwargs))
+        return {"session_id": "created-a"}
+
+    async def stop_session(self, host, session_id, **kwargs):
+        self.commands.append(("stop", host, session_id, kwargs))
+
+    async def end_session(self, host, session_id, **kwargs):
+        self.commands.append(("end", host, session_id, kwargs))
+
+    async def send_live_message(self, host, target, **kwargs):
+        self.commands.append(("send", host, target, kwargs))
+        return {"message_id": "message-a"}
 
     async def subscribe_events(self, *args, **kwargs):
         return self.subscription
@@ -928,6 +1267,52 @@ def test_remote_api_is_authenticated_and_streams_control(
         assert "event: bridge_control" in text
         assert '"code":"cursor_invalidated"' in text
         assert remote_app.state.remote_operations.subscription.closed is True
+
+
+def test_remote_api_exposes_mutating_command_contract(remote_app) -> None:
+    headers = {"Authorization": "Bearer " + "test-" + "token"}
+    with TestClient(remote_app) as client:
+        created = client.post(
+            "/api/v1/remote/example-host/sessions",
+            headers=headers,
+            json={
+                "agent": "task-worker",
+                "prompt": "do the work",
+                "caller_id": "fleet-task-a",
+            },
+        )
+        stopped = client.post(
+            "/api/v1/remote/example-host/sessions/session-a/stop",
+            headers=headers,
+            json={"reap_host": True},
+        )
+        ended = client.request(
+            "DELETE",
+            "/api/v1/remote/example-host/sessions/session-a",
+            headers=headers,
+            json={"if_idle": True},
+        )
+        sent = client.post(
+            "/api/v1/remote/example-host/live-sessions/worktree-a/messages",
+            headers=headers,
+            json={
+                "sender": "agent-dispatch-steer",
+                "message": "resume",
+                "kind": "prompt",
+                "expected_session_id": "session-a",
+            },
+        )
+
+    assert created.json() == {"session_id": "created-a"}
+    assert stopped.status_code == 204
+    assert ended.status_code == 204
+    assert sent.json() == {"message_id": "message-a"}
+    assert [command[0] for command in remote_app.state.remote_operations.commands] == [
+        "create",
+        "stop",
+        "end",
+        "send",
+    ]
 
 
 def test_remote_api_multiplexes_subscriptions_over_one_stream(
