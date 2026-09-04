@@ -304,6 +304,8 @@ def test_docker_broker_clean_early_exit_fails_without_waiting(
 def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
     endpoint_file = tmp_path / "proxy.json"
     seen = {}
+    launch_marker = object()
+    launch_options = {}
     process = SimpleNamespace(pid=123, poll=lambda: None)
 
     def fake_popen(args, **kwargs):
@@ -315,6 +317,10 @@ def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
         )
         return process
 
+    def fake_daemon_kwargs(*, breakaway):
+        launch_options["breakaway"] = breakaway
+        return {"startupinfo": launch_marker}
+
     health_results = iter((False, True))
     monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(
@@ -325,7 +331,7 @@ def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
     monkeypatch.setattr(
         docker_proxy,
         "windowless_daemon_kwargs",
-        lambda **kwargs: {"creationflags": 0x09000000, "breakaway": kwargs["breakaway"]},
+        fake_daemon_kwargs,
     )
 
     assert (
@@ -337,8 +343,8 @@ def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
         == 54320
     )
     assert seen["args"][0] == docker_proxy.sys.executable
-    assert seen["kwargs"]["creationflags"] == 0x09000000
-    assert seen["kwargs"]["breakaway"] is True
+    assert seen["kwargs"]["startupinfo"] is launch_marker
+    assert launch_options["breakaway"] is True
 
 
 @pytest.mark.parametrize("container,user", [
