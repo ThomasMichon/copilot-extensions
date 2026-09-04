@@ -142,7 +142,7 @@ def test_provider_active_supplies_runtime_arguments_and_environment(tmp_path):
     ]
 
 
-def test_captured_provider_uses_owned_no_window_launch(monkeypatch):
+def test_captured_provider_uses_owned_no_window_launch_on_windows(monkeypatch):
     seen = {}
 
     class Process:
@@ -157,6 +157,7 @@ def test_captured_provider_uses_owned_no_window_launch(monkeypatch):
         seen["kwargs"] = kwargs
         return Process()
 
+    monkeypatch.setattr(companion.os, "name", "nt")
     monkeypatch.setattr(companion.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(
         companion,
@@ -176,6 +177,40 @@ def test_captured_provider_uses_owned_no_window_launch(monkeypatch):
     assert seen["command"] == ["python", "provider.py"]
     assert seen["kwargs"]["creationflags"] == 0x08000000
     assert "start_new_session" not in seen["kwargs"]
+
+
+def test_captured_provider_preserves_process_group_on_posix(monkeypatch):
+    seen = {}
+
+    class Process:
+        returncode = 0
+        pid = 123
+
+        def communicate(self, input_text, timeout):
+            return "{}", ""
+
+    def fake_popen(command, **kwargs):
+        seen["kwargs"] = kwargs
+        return Process()
+
+    monkeypatch.setattr(companion.os, "name", "posix")
+    monkeypatch.setattr(companion.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        companion,
+        "detached_kwargs",
+        lambda: {"start_new_session": True},
+    )
+
+    completed = companion._run_captured(
+        ("python", "provider.py"),
+        cwd=".",
+        environment={},
+        timeout=2,
+    )
+
+    assert completed.returncode == 0
+    assert seen["kwargs"]["start_new_session"] is True
+    assert "creationflags" not in seen["kwargs"]
 
 
 def test_provider_inactive_withdraws_companion(tmp_path):
