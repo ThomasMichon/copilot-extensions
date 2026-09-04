@@ -132,13 +132,13 @@ Public formulation from issue #2014:
 
 ### Phase 3 - Outcome provenance and trial admission
 
-- [ ] Decide and document the minimal provenance owner before implementation:
+- [x] Decide and document the minimal provenance owner before implementation:
   agent-dispatch task/session state, an assignment record derived from
   agent-worktrees prior art, or a deliberately shared contract with one writer.
-- [ ] Record purpose, selected model, eligibility state, execution surface,
+- [x] Record purpose, selected model, eligibility state, execution surface,
   assignment reason, parent/worker identity, and terminal disposition without
   storing raw prompts or source bodies.
-- [ ] Emit attribution that external accounting systems can join to unique
+- [x] Emit attribution that external accounting systems can join to unique
   provider billing events; do not build a billing or promotion-analytics ledger
   inside this plugin suite.
 - [ ] Add an enforceable admission check at the dispatch/restricted-container
@@ -254,3 +254,19 @@ See [design.md](design.md).
   in the considered set with machine-readable exclusion reasons.
 - The direct/delegate decision remains outside and ahead of model selection;
   this helper cannot create a delegation merely because a cheap model exists.
+
+### 2026-09-04 - Dispatch provenance code complete
+
+- Chose agent-dispatch as the one writer for routing assignment and terminal
+  outcome provenance. Agent-worktrees and agent-containers remain referenced
+  authorities for worktree/session and containment facts.
+- Added a versioned assignment record keyed to the existing
+  `dispatch-task:<task_id>:<attempt>` reservation identity plus append-only
+  lifecycle and provider-event-reference rows.
+- Assignment creation is immutable and idempotent; terminal updates use
+  compare-and-set. Repair/retry work receives a separate linked assignment.
+- Added bounded read/export HTTP and client surfaces. Records contain literal
+  configured model IDs but no prompts, source bodies, credentials, paths, or
+  monetary values.
+- Candidate admission remains deliberately unwired until the next reviewed
+  slice. Existing tasks and reservations require no routing record.

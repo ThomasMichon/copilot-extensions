@@ -112,6 +112,33 @@ GET  /spawn-reservations/{key}
 `spawn.spawned`, `spawn.failed`, `spawn.settled`, `spawn.rearmed`) are published
 on the SSE bus.
 
+### Routing assignment provenance
+
+A caller may attach one immutable routing assignment to the reservation key
+after reserving and before launch:
+
+```text
+POST /spawn-reservations/{key}/routing-assignment
+POST /routing-assignments/{id}/transition
+POST /routing-assignments/{id}/billing-ref
+GET  /routing-assignments/{id}
+GET  /routing-assignments/{id}/events
+GET  /routing-assignments?task_id=<id>&limit=<n>
+```
+
+The assignment ID is the reservation key
+`dispatch-task:<task_id>:<attempt>`. Repeating an identical assignment is
+idempotent; changing its immutable routing facts is rejected. Lifecycle events
+are append-only and terminal transition is compare-and-set. Retry or repair
+work receives a new assignment linked through `parent_assignment_id` rather
+than rewriting the original attempt.
+
+The optional provider billing-event reference is opaque and unique per provider.
+Agent-dispatch stores no monetary value and no raw prompt/source content.
+Existing reservations with no routing assignment remain valid and readable;
+candidate admission and container enforcement are a separate follow-up
+boundary.
+
 ### How `create --spawn` uses it (the bug fix)
 
 `create --spawn` now **reserves before spawning**:

@@ -100,10 +100,17 @@ External consumers join each unique event to one outcome and actor role; this
 repository does not assign a second monetary value to context transfer or
 duplicate parent/child totals.
 
-Before implementation, the effort must choose one writer and storage owner.
-Possible reuse includes agent-dispatch tracking or the terminal assignment
-pattern used by agent-worktrees. A second parallel state store is not an
-acceptable convenience.
+Agent-dispatch is the single writer and storage owner. The assignment identity
+is the existing spawn reservation key
+`dispatch-task:<task_id>:<attempt>`. Agent-worktrees remains authoritative for
+worktree/session/profile facts and agent-containers remains authoritative for
+effective containment; the dispatch record references those facts without
+copying their stores.
+
+The record uses literal configured model identifiers. Provider billing-event
+references are optional, opaque, and unique; no monetary amount is stored.
+Repair work is a separate linked assignment rather than a rewritten terminal
+outcome.
 
 ## Trial admission
 
@@ -120,6 +127,11 @@ A writable candidate trial is allowed only when a runtime launcher can verify:
 Guidance may explain these conditions, but enforcement belongs at the launch
 surface. Restricted containers and credential relay boundaries should be reused
 rather than recreated in a payload-only plugin.
+
+A trusted demonstrated coordinator may arm a candidate worker trial when the
+reviewed trial policy permits that purpose and authority. It cannot arm itself
+as a candidate coordinator or promote either participant; admission and
+promotion remain separate decisions.
 
 ## Independent promotion
 
@@ -196,4 +208,3 @@ changes can return an entry to candidate or held state.
 - No self-promotion or automatic candidate promotion.
 - No weaker product, review, security, publication, or deployment gate.
 - No broad exhaustive test matrix on ordinary pull requests.
-

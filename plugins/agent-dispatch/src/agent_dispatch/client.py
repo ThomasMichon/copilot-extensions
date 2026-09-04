@@ -7,8 +7,8 @@ snapshots) so callers stay decoupled from the server-side dataclasses.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Sequence
-from typing import Any, Callable
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
 import httpx
 
@@ -578,6 +578,80 @@ class DispatchClient:
                 f"/spawn-reservations/{key}/spawned",
                 json={"session_handle": session_handle, "worktree": worktree},
             )
+        )
+
+    def record_routing_assignment(self, key: str, assignment: dict[str, Any]) -> dict:
+        """Attach one immutable routing decision to a spawn reservation."""
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/routing-assignment",
+                json=assignment,
+            )
+        )
+
+    def transition_routing_assignment(
+        self,
+        assignment_id: str,
+        *,
+        event_type: str,
+        actor_role: str,
+        terminal_disposition: str | None = None,
+        reason_code: str | None = None,
+        worker_session_ref: str | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/routing-assignments/{assignment_id}/transition",
+                json={
+                    "event_type": event_type,
+                    "actor_role": actor_role,
+                    "terminal_disposition": terminal_disposition,
+                    "reason_code": reason_code,
+                    "worker_session_ref": worker_session_ref,
+                },
+            )
+        )
+
+    def record_routing_billing_ref(
+        self,
+        assignment_id: str,
+        *,
+        event_id: str,
+        provider: str,
+        provider_billing_event_ref: str,
+        actor_role: str,
+        occurred_at: float | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/routing-assignments/{assignment_id}/billing-ref",
+                json={
+                    "event_id": event_id,
+                    "provider": provider,
+                    "provider_billing_event_ref": provider_billing_event_ref,
+                    "actor_role": actor_role,
+                    "occurred_at": occurred_at,
+                },
+            )
+        )
+
+    def routing_assignment(self, assignment_id: str) -> dict:
+        return self._unwrap(self._http.get(f"/routing-assignments/{assignment_id}"))
+
+    def routing_assignments(
+        self,
+        *,
+        task_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        params = {"limit": limit}
+        if task_id is not None:
+            params["task_id"] = task_id
+        return self._unwrap(self._http.get("/routing-assignments", params=params))
+
+    def routing_assignment_events(self, assignment_id: str) -> list[dict]:
+        return self._unwrap(
+            self._http.get(f"/routing-assignments/{assignment_id}/events")
         )
 
     def record_spawn_worktree(
