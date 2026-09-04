@@ -270,7 +270,7 @@ def ensure_broker(
             current = None
         if _healthy_endpoint(current, container, container_id):
             return int(current["port"])
-        if process.poll() not in (None, 0):
+        if process.poll() is not None:
             break
         time.sleep(0.05)
     if process.poll() is None:

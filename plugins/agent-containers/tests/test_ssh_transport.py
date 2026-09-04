@@ -234,6 +234,37 @@ def test_docker_broker_failed_start_retires_process_and_endpoint(
     assert not endpoint_file.exists()
 
 
+def test_docker_broker_clean_early_exit_fails_without_waiting(
+    monkeypatch,
+    tmp_path,
+):
+    process = SimpleNamespace(
+        pid=123,
+        poll=lambda: 0,
+    )
+    monkeypatch.setattr(
+        docker_proxy.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: process,
+    )
+    monkeypatch.setattr(docker_proxy, "_healthy_endpoint", lambda *_args: False)
+    monkeypatch.setattr(docker_proxy, "windowless_python", lambda value: value)
+    monkeypatch.setattr(docker_proxy, "detached_kwargs", lambda **_kwargs: {})
+    monkeypatch.setattr(
+        docker_proxy.time,
+        "sleep",
+        lambda _seconds: pytest.fail("early broker exit should not sleep"),
+    )
+
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        docker_proxy.ensure_broker(
+            "repo-1",
+            "a" * 64,
+            tmp_path / "proxy.json",
+            timeout=10,
+        )
+
+
 @pytest.mark.parametrize("container,user", [
     ("repo-1;whoami", "vscode"),
     ("repo-1", "vscode;whoami"),
