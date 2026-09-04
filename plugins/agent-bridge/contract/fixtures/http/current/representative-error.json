@@ -1,0 +1,16 @@
+{
+  "captured_from": {
+    "commit": "4b8a3777221ad0e71f2931dd577cf3c7592ebb90",
+    "plugin_version": "0.4.0-dev430",
+    "protocol_generation": 12,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+    "source_git_blob": "8f0a0f10ce17e7bdd5e4a567cd856ed3f2891278",
+    "source_sha256": "49d51795792a12b55ed8cd93893abd26f24e1a5a84dde049f97e24525153f583"
+  },
+  "response": {
+    "status_code": 503,
+    "json": {
+      "detail": "agent-bridge is initializing; retry shortly"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "captured_from": {
+    "commit": "94b0ee093471c8744ab9abaf1f75abfc2e73e8da",
+    "commit_abbreviation": "94b0ee093",
+    "plugin_version": "0.4.0-dev429",
+    "protocol_generation": 11,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+    "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
+    "source_sha256": "729566b0f8865493b91ffcc9ef61a7d4f375c279695f14f05564146f0a00be29"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/health"
+  },
+  "response": {
+    "status_code": 200,
+    "json": {
+      "status": "ok",
+      "service": "agent-bridge",
+      "version": "0.4.0-dev429",
+      "ready": false,
+      "topology_ready": false,
+      "credential_relay_ready": false,
+      "draining": false,
+      "protocol_version": 11,
+      "min_protocol_version": 1,
+      "ssh_carriers": {
+        "total": 0,
+        "healthy": 0,
+        "degraded": 0,
+        "logical_clients": 0,
+        "active_requests": 0,
+        "active_subscriptions": 0,
+        "queued_frames": 0,
+        "buffered_bytes": 0
+      }
+    }
+  }
+}
