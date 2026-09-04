@@ -2360,6 +2360,30 @@ class TestAddResourceClaim:
         assert rec.resources[0].state == "released"
         assert rec.resources[0].note == "second"
 
+    def test_complete_session_worktree_can_add_claim(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.status = "complete"
+
+        add_resource_claim(
+            rec,
+            ResourceClaim(kind="worktree", ref="host/repo/wt-B"),
+            save=False,
+        )
+
+        assert [claim.ref for claim in rec.resources] == ["host/repo/wt-B"]
+
+    def test_complete_managed_worktree_rejects_claim(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        rec.kind = "bridge"
+        rec.status = "complete"
+
+        with pytest.raises(ValueError, match="creator ownership is frozen"):
+            add_resource_claim(
+                rec,
+                ResourceClaim(kind="worktree", ref="host/repo/wt-B"),
+                save=False,
+            )
+
     def test_stamp_owner_ref_via_create(self, tmp_path: Path):
         # create_new_record stamps the backward owner link on the resource.
         create_new_record(

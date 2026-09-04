@@ -3915,13 +3915,13 @@ def add_resource_claim(
     (kind/state/note/created_at) rather than duplicated, so re-running the
     owning ``run`` wrapper is idempotent. Returns the stored claim.
     """
-    if record.status in {
-        "complete",
-        "completed",
-        "finalizing",
-        "finalized",
-        "orphaned",
-    }:
+    if (
+        record.status in {"finalizing", "finalized", "orphaned"}
+        or (
+            record.kind in MANAGED_KINDS
+            and record.status in {"complete", "completed"}
+        )
+    ):
         raise ValueError(
             f"owner worktree {record.worktree_id} is {record.status}; "
             "creator ownership is frozen")
