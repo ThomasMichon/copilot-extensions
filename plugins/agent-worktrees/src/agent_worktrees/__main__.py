@@ -7756,11 +7756,16 @@ def _monitor_sweep(
                 incarnations[sess] = incarnation
         served = [(s, p) for s, p in registry.items() if s in live_wt and p]
     if session_projects is not None:
-        registered_paths = {
-            os.path.normcase(os.path.realpath(path))
-            for path in registry.values()
-            if path
-        }
+        registered_paths: set[str] = set()
+        for path in registry.values():
+            if not path:
+                continue
+            try:
+                registered_paths.add(
+                    os.path.normcase(os.path.realpath(path))
+                )
+            except (OSError, ValueError):
+                continue
         for key in list(session_projects):
             if key not in registered_paths:
                 session_projects.pop(key, None)

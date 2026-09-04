@@ -376,6 +376,25 @@ def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
     assert projects == {m.os.path.normcase(m.os.path.realpath("/w/a")): "repo-a"}
 
 
+def test_sweep_skips_invalid_paths_when_pruning_project_cache(
+    tmp_path, monkeypatch
+):
+    reg = tmp_path / "reg"
+    reg.mkdir()
+    (reg / "wt-a").write_text("bad\0path", encoding="utf-8")
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_monitor_mux_set", lambda *a, **k: True)
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    projects = {"stale": "repo-a"}
+
+    assert m._monitor_sweep(
+        "tmux", "T", "P", set(), segment_cache=object(),
+        session_projects=projects) == 1
+    assert projects == {}
+
+
 def test_sweep_retries_failed_mux_publish(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
