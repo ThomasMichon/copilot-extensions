@@ -288,6 +288,89 @@ class TestEventLogFromDB:
         assert [item.id for item in events] == [1]
         assert event is not None and event.id == 1
 
+    def test_first_event_after_empty_rebuild_updates_invalidation_epoch(
+        self, tmp_db: Database
+    ) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        log = EventLog(db=tmp_db, session_id="s1")
+        log.append("agent_message", {"text": "before"})
+        tmp_db.set_cursor("caller-a", "s1", 1, now)
+
+        log.rebuild([])
+        assert tmp_db.get_cursor_state(
+            "caller-a", "s1"
+        )["invalidation"]["current_continuity_id"] is None
+
+        log.append("session_state_changed", {"status": "idle"})
+
+        invalidation = tmp_db.get_cursor_state(
+            "caller-a", "s1"
+        )["invalidation"]
+        assert invalidation["current_continuity_id"] == log.continuity_id
+
+    def test_rebuild_invalidates_cursor_before_replacing_events(
+        self, tmp_db: Database, monkeypatch
+    ) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        log = EventLog(db=tmp_db, session_id="s1")
+        log.append("agent_message", {"text": "before"})
+        tmp_db.set_cursor("caller-a", "s1", 1, now)
+
+        def fail_append(*_args, **_kwargs):
+            raise RuntimeError("simulated crash before event replacement")
+
+        monkeypatch.setattr(tmp_db, "append_event", fail_append)
+
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            log.rebuild([("agent_message", {"text": "after"})])
+
+        invalidation = tmp_db.get_cursor_state(
+            "caller-a", "s1"
+        )["invalidation"]
+        assert invalidation is not None
+        assert invalidation["prior_last_acked_id"] == 1
+        assert tmp_db.get_max_event_id("s1") == 0
+
+    def test_failed_rebuild_boundary_preserves_in_memory_generation(
+        self, tmp_db: Database, monkeypatch
+    ) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)
+        log = EventLog(db=tmp_db, session_id="s1")
+        log.append("agent_message", {"text": "before"})
+        prior_continuity = log.continuity_id
+
+        def fail_boundary(*_args, **_kwargs):
+            raise RuntimeError("simulated rebuild transaction failure")
+
+        monkeypatch.setattr(tmp_db, "begin_event_rebuild", fail_boundary)
+
+        with pytest.raises(RuntimeError, match="transaction failure"):
+            log.rebuild([("agent_message", {"text": "after"})])
+
+        assert log.continuity_id == prior_continuity
+        assert log.latest_id == 1
+
+    @pytest.mark.asyncio
+    async def test_wait_snapshot_discards_detached_prior_generation(
+        self, monkeypatch
+    ) -> None:
+        log = EventLog()
+        stale = log.append("agent_message", {"text": "stale"})
+
+        async def rebuild_during_wait(_after, timeout=30.0):
+            log.rebuild([("agent_message", {"text": "replacement"})])
+            return [stale]
+
+        monkeypatch.setattr(log, "wait_for_events", rebuild_during_wait)
+
+        continuity, events = await log.wait_for_events_snapshot(0)
+
+        assert continuity == log.continuity_id
+        assert [event.data["text"] for event in events] == ["replacement"]
+
     def test_from_db_flushes_queued_burst(self, tmp_db: Database) -> None:
         now = time.time()
         tmp_db.create_session("s1", "test", None, ".", "local", "idle", now)

@@ -112,11 +112,28 @@ application-level multiplexing contract without depending on ControlMaster.
 
 The versioned protocol uses bounded, length-prefixed frames for hello, request,
 response, event, heartbeat, cancellation, and error envelopes. It supports
-concurrent request IDs and replay-shaped subscriptions, detects heartbeat and
+concurrent request IDs and replayable subscriptions, detects heartbeat and
 subscription staleness, reconnects with bounded backoff, bounds output queues,
 retires after an idle interval with no logical clients, and closes stdin before
-reaping the SSH process tree. The endpoint currently exposes only this protocol
-foundation; remote session operations are added separately.
+reaping the SSH process tree.
+
+The first operation contract proxies only exact session status, exact
+live-session resolution, and cursor-based session events. The remote carrier
+endpoint authenticates to its host-local Bridge through the existing discovered
+HTTP endpoint and bearer-token flow, then calls the same status, live-session,
+event, and cursor authorities used by direct clients. It does not import Agent
+Dispatch, copy session state, or maintain a second event log.
+
+The caller supplies a required stable `caller_id`; no anonymous/default cursor
+is used for remote subscriptions. Actual event IDs, names, payloads, and
+timestamps are forwarded unchanged. The local proxy acknowledges the hosting
+Bridge only after its own authenticated API/CLI consumer accepts delivery, so a
+carrier reconnect reopens from the durable hosting cursor. A replacement local
+daemon can do the same after zero-downtime cutover. Event-log rebuilds persist a
+per-caller invalidation marker, while continuity changes and non-contiguous
+event IDs terminate the stream with an explicit `bridge_control` /
+`full_reconcile` signal rather than an empty result. Unsupported operation
+versions are rejected before a remote HTTP request or subscription is opened.
 
 ## HTTP API
 
@@ -137,6 +154,11 @@ POST   /api/v1/sessions/{id}/cursor      # Ack delivery (advance cursor)
 POST   /api/v1/sessions/{id}/stop        # Stop (preserve state)
 POST   /api/v1/sessions/{id}/resume      # Resume stopped session
 DELETE /api/v1/sessions/{id}             # End (full cleanup)
+
+GET    /api/v1/remote/{host}/sessions/{id}/status
+GET    /api/v1/remote/{host}/live-sessions/{id}
+GET    /api/v1/remote/{host}/sessions/{id}/events
+POST   /api/v1/remote/{host}/sessions/{id}/cursor
 ```
 
 The SSE stream (`/events`) resumes from the caller's last-acked **delivery
@@ -147,6 +169,13 @@ ungraceful client death never skips output. `/events/range` is the only way to
 re-read already-consumed content and never moves the cursor. See
 [Streaming & the delivery cursor](../README.md#streaming--the-delivery-cursor)
 in the README for the consumer model.
+
+The `/remote` endpoints are authenticated local proxy surfaces. Clients name a
+topology host and exact hosting-Bridge session, never SSH arguments. Each remote
+event caller must provide a distinct stable `caller_id`; response headers expose
+the accepted cursor and event-log continuity, and cursor acknowledgements carry
+that continuity back. `bridge_control` SSE events have no durable event ID and
+request full reconciliation after cursor invalidation or a replay gap.
 
 ### Health
 

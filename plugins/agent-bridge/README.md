@@ -106,6 +106,39 @@ one contiguous, gap-free, duplicate-free stream:
 The caller identity keying the cursor comes from `--caller`, else the current
 worktree (`agent-worktrees get worktree-dir`), else a shared per-session default.
 
+### Remote Bridge carrier operations
+
+Remote consumers use the local Agent Bridge daemon rather than constructing SSH
+commands or learning carrier details. The initial surface is intentionally
+narrow and read-oriented:
+
+```bash
+agent-bridge remote status example-host 11111111-1111-1111-1111-111111111111 \
+  --caller-id supervisor.lane-a --json
+agent-bridge remote live-session example-host 22222222-2222-2222-2222-222222222222 \
+  --json
+agent-bridge remote events example-host 11111111-1111-1111-1111-111111111111 \
+  --caller-id supervisor.lane-a --json
+```
+
+`host` is a topology machine key for a single-environment machine, or an exact
+SSH alias. Multi-environment machines require the alias so Windows, WSL, and
+Linux Bridge daemons cannot be confused. Session arguments are exact
+hosting-Bridge IDs. Status, live-session resolution, event IDs, event names,
+payloads, and timestamps come unchanged from the hosting Bridge. The local
+daemon owns one shared reconnecting carrier per normalized SSH identity and
+does not create another session or event ledger.
+
+Every event consumer supplies its own stable `caller_id`. Remote delivery uses
+that identity's hosting-Bridge cursor and acknowledges only after local output
+has been flushed. Carrier reconnect starts from the hosting Bridge's durable
+acknowledged cursor; a local daemon cutover is likewise recoverable because a
+replacement daemon reuses the same remote cursor authority. Event-log rebuild,
+cursor invalidation, and non-contiguous replay produce a cursor-neutral
+`bridge_control` envelope with `action=full_reconcile`; they are never reported
+as a quiet empty stream. The HTTP equivalents live below
+`/api/v1/remote/{host}/...` and require the ordinary local bearer token.
+
 ### Bounded result snapshots
 
 `result` is the cursor-neutral answer to "what did this delegate produce?":

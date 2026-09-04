@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from ssh_manager.carrier import (
     CarrierBackpressure,
     CarrierProtocolError,
+    CarrierRemoteError,
     CarrierStale,
     CarrierUnavailable,
     Envelope,
     EnvelopeType,
     PersistentCarrier,
+    StdioCarrierServer,
     decode_envelope,
     encode_envelope,
     hello_envelope,
@@ -242,6 +246,68 @@ async def test_concurrent_requests_are_correlated():
 
 
 @pytest.mark.asyncio
+async def test_remote_error_preserves_code_and_payload():
+    async def handler(_number, reader, writer):
+        request = await read_envelope(reader)
+        await _write(
+            writer,
+            Envelope(
+                EnvelopeType.ERROR,
+                request_id=request.request_id,
+                payload={
+                    "code": "unsupported_version",
+                    "message": "update required",
+                    "status": 426,
+                },
+            ),
+        )
+        await asyncio.sleep(1)
+
+    server, opener, closer, _count = await _start_peer(handler)
+    carrier = PersistentCarrier("identity", "carrier", opener, closer)
+    lease = await carrier.acquire()
+    try:
+        with pytest.raises(CarrierRemoteError) as exc_info:
+            await carrier.request({"operation": "synthetic"})
+        assert exc_info.value.code == "unsupported_version"
+        assert exc_info.value.payload["status"] == 426
+    finally:
+        await lease.release()
+        await carrier.close()
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_stdio_server_streams_async_handler_results():
+    async def handler(_request):
+        async def results():
+            yield Envelope(EnvelopeType.RESPONSE, payload={"accepted": True})
+            yield Envelope(EnvelopeType.EVENT, payload={"id": 1})
+
+        return results()
+
+    server = StdioCarrierServer(io.BytesIO(), io.BytesIO(), handler=handler)
+    server._queue_envelope = AsyncMock()
+    request = Envelope(
+        EnvelopeType.REQUEST,
+        subscription_id="sub-1",
+        payload={"operation": "events"},
+    )
+
+    await server._serve_request(request)
+
+    queued = [
+        call.args[0] for call in server._queue_envelope.await_args_list
+    ]
+    assert [item.type for item in queued] == [
+        EnvelopeType.RESPONSE,
+        EnvelopeType.EVENT,
+    ]
+    assert all(item.subscription_id == "sub-1" for item in queued)
+
+
+@pytest.mark.asyncio
 async def test_replayable_subscription_resumes_from_latest_position():
     seen_positions: list[int | str | None] = []
     second_connected = asyncio.Event()
@@ -349,6 +415,59 @@ async def test_reconnect_resumes_after_buffered_event_position():
         second = await asyncio.wait_for(subscription.get(), timeout=1)
         assert restore_positions[:2] == [3, 7]
         assert [first.position, second.position] == [7, 8]
+    finally:
+        await subscription.close()
+        await lease.release()
+        await carrier.close()
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_can_discard_buffer_before_authoritative_replay():
+    reconnected = asyncio.Event()
+    restore_positions = []
+
+    async def handler(number, reader, writer):
+        request = await read_envelope(reader)
+        restore_positions.append(request.position)
+        await _write(
+            writer,
+            Envelope(
+                EnvelopeType.EVENT,
+                subscription_id=request.subscription_id,
+                payload={
+                    "source": "buffered" if number == 0 else "replayed"
+                },
+                position=7,
+            ),
+        )
+        if number == 0:
+            return
+        reconnected.set()
+        await asyncio.sleep(1)
+
+    server, opener, closer, _count = await _start_peer(handler)
+    carrier = PersistentCarrier(
+        "identity",
+        "carrier",
+        opener,
+        closer,
+        reconnect_initial=0.01,
+        reconnect_max=0.02,
+    )
+    lease = await carrier.acquire()
+    subscription = await carrier.subscribe(
+        {"operation": "events"},
+        position=3,
+        retain_buffered_on_reconnect=False,
+    )
+    try:
+        await asyncio.wait_for(reconnected.wait(), timeout=1)
+        event = await asyncio.wait_for(subscription.get(), timeout=1)
+        assert event.payload["source"] == "replayed"
+        assert restore_positions[:2] == [3, 3]
+        assert subscription.position == 7
     finally:
         await subscription.close()
         await lease.release()

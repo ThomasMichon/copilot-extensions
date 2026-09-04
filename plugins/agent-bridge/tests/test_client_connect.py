@@ -589,12 +589,16 @@ class TestRefreshEndpoint:
             "http://127.0.0.1:9280", "tok",
             reresolve=lambda: "http://127.0.0.1:9280",
         )
+        client._daemon_proto = (10, 1)
         assert client.refresh_endpoint() is False
         assert client._base == "http://127.0.0.1:9280"
+        assert client._daemon_proto is None
 
     def test_refresh_noop_without_resolver(self):
         client = BridgeClient("http://127.0.0.1:9280", "tok")
+        client._daemon_proto = (10, 1)
         assert client.refresh_endpoint() is False
+        assert client._daemon_proto is None
 
     def test_refresh_noop_when_resolver_returns_none(self):
         client = BridgeClient(

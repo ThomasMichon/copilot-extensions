@@ -2093,6 +2093,18 @@ class AgentResolver:
             f"Machine '{host}' not found by key or SSH alias in topology"
         )
 
+    def resolve_ssh_environment(
+        self, host: str, ssh_environment: str | None = None
+    ) -> tuple[MachineConfig, SshEnvironment]:
+        """Resolve a topology machine key or SSH alias to one exact environment."""
+        machine, forced_env = self._resolve_machine(host, ssh_environment)
+        environment = forced_env or machine.get_ssh_env(ssh_environment)
+        if environment is None:
+            raise ValueError(
+                f"Machine '{machine.key}' has no SSH environment"
+            )
+        return machine, environment
+
     def resolve(self, agent_name: str) -> SpawnTarget:
         """Resolve an agent name to a SpawnTarget (sync path).
 

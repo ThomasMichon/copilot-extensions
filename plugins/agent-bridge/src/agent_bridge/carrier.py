@@ -54,7 +54,12 @@ async def acquire_remote_carrier(
     """Acquire Agent Bridge's shared carrier for one normalized SSH identity."""
     owner = manager or get_default_manager()
     source = config_source or SSHProfileSource(host_alias=host)
-    await owner.ensure_connected(host, source, port_forwards=port_forwards)
+    await owner.ensure_connected(
+        host,
+        source,
+        port_forwards=port_forwards,
+        preserve_existing_forwards=port_forwards is None,
+    )
     return await owner.acquire_carrier(
         host,
         build_remote_carrier_command(remote_platform),
@@ -73,8 +78,14 @@ def _binary_stdio() -> tuple[object, object]:
 
 async def run_stdio_carrier() -> None:
     """Run the bounded carrier protocol until the SSH parent closes stdin."""
+    from .remote_operations import CarrierRequestRouter
+
     reader, writer = _binary_stdio()
-    await StdioCarrierServer(reader, writer).run()
+    await StdioCarrierServer(
+        reader,
+        writer,
+        handler=CarrierRequestRouter(),
+    ).run()
 
 
 def cmd_carrier_stdio() -> None:

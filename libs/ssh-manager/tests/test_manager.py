@@ -194,6 +194,52 @@ class TestConnectionManagerIdentity:
         assert info2.port_forwards == ["-R 9999:localhost:9999"]
 
     @pytest.mark.asyncio
+    async def test_preserves_existing_forwards_for_shared_carrier(
+        self, win_platform, source
+    ):
+        manager = ConnectionManager(platform=win_platform)
+        info1 = await manager.ensure_connected(
+            "test-host", source, ["-R 9847:localhost:9847"]
+        )
+
+        info2 = await manager.ensure_connected(
+            "test-host",
+            source,
+            preserve_existing_forwards=True,
+        )
+
+        assert info2 is info1
+        assert info2.port_forwards == ["-R 9847:localhost:9847"]
+
+    @pytest.mark.asyncio
+    async def test_separate_carrier_namespace_survives_forwarded_connection(
+        self, unix_platform, source
+    ):
+        manager = ConnectionManager(platform=unix_platform)
+        master = AsyncMock()
+        master.returncode = None
+        with patch.object(
+            manager,
+            "_start_control_master",
+            new=AsyncMock(return_value=master),
+        ):
+            carrier = await manager.ensure_connected(
+                "carrier:test-host", source
+            )
+            forwarded = await manager.ensure_connected(
+                "test-host", source, ["-R 9847:localhost:9847"]
+            )
+
+        connections = {
+            connection.host: connection for connection in manager.list_connections()
+        }
+        assert connections["carrier:test-host"] is carrier
+        assert connections["test-host"] is forwarded
+        assert carrier.port_forwards == []
+        assert forwarded.port_forwards == ["-R 9847:localhost:9847"]
+        assert carrier.socket_path != forwarded.socket_path
+
+    @pytest.mark.asyncio
     async def test_direct_mode_splits_port_forward_into_tokens(
         self, win_platform, source
     ):

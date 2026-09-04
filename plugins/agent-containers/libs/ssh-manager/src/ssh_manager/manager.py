@@ -199,6 +199,8 @@ class ConnectionManager:
         host: str,
         config_source: ConfigSource,
         port_forwards: list[str] | None = None,
+        *,
+        preserve_existing_forwards: bool = False,
     ) -> ConnectionInfo:
         """Ensure a master connection exists for the given host.
 
@@ -208,7 +210,12 @@ class ConnectionManager:
         """
         lock = await self._get_lock(host)
         async with lock:
-            forwards = port_forwards or []
+            existing = self._connections.get(host)
+            forwards = (
+                list(existing.port_forwards)
+                if preserve_existing_forwards and existing is not None
+                else port_forwards or []
+            )
 
             # Check existing connection
             if host in self._connections:
@@ -263,6 +270,7 @@ class ConnectionManager:
             config.hostname or config.host_alias,
             config.user,
             config.port,
+            namespace=host,
         )
 
         if self._platform.supports_control_master:

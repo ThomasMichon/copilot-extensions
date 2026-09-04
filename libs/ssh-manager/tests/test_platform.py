@@ -84,6 +84,20 @@ class TestSocketPath:
         path2 = socket_path_for_host(platform, "server", user="alice", port=22)
         assert path1 == path2
 
+    def test_different_namespaces_get_different_paths(self):
+        platform = PlatformInfo(
+            mode=MultiplexMode.CONTROL_MASTER,
+            socket_dir=Path("/tmp/sockets"),
+            max_socket_path=108,
+        )
+        carrier = socket_path_for_host(
+            platform, "server", namespace="carrier:server"
+        )
+        forwarded = socket_path_for_host(
+            platform, "server", namespace="server"
+        )
+        assert carrier != forwarded
+
     def test_long_hostname_truncated(self):
         platform = PlatformInfo(
             mode=MultiplexMode.CONTROL_MASTER,

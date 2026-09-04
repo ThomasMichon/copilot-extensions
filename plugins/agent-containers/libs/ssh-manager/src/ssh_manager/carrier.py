@@ -8,7 +8,7 @@ import json
 import struct
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, BinaryIO, Protocol
@@ -56,6 +56,18 @@ class CarrierUnavailable(CarrierError):
 
 class CarrierStale(CarrierUnavailable):
     """The peer stopped making heartbeat or subscription progress."""
+
+
+class CarrierRemoteError(CarrierError):
+    """A structured error returned by the remote carrier endpoint."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = dict(payload)
+        self.code = str(payload.get("code") or "remote_error")
+        super().__init__(
+            str(payload.get("message") or "remote carrier error"),
+            reconnectable=bool(payload.get("reconnectable", False)),
+        )
 
 
 @dataclass(frozen=True)
@@ -322,6 +334,7 @@ class CarrierSubscription:
         queue_size: int,
         progress_timeout: float | None,
         position: str | int | None,
+        retain_buffered_on_reconnect: bool,
     ) -> None:
         self._carrier = carrier
         self.subscription_id = subscription_id
@@ -333,6 +346,7 @@ class CarrierSubscription:
         self.progress_timeout = progress_timeout
         self.last_progress = time.monotonic()
         self.position = position
+        self.retain_buffered_on_reconnect = retain_buffered_on_reconnect
         self.closed = False
         self.initializing = True
         self._terminal_error: CarrierError | None = None
@@ -355,6 +369,8 @@ class CarrierSubscription:
         self._carrier._buffer_budget.release(size)
         if isinstance(item, CarrierError):
             raise item
+        if item.position is not None:
+            self.position = item.position
         self.last_progress = time.monotonic()
         return item
 
@@ -365,20 +381,27 @@ class CarrierSubscription:
             return False
         self._queue.put_nowait((item, size))
         self.last_progress = time.monotonic()
-        if isinstance(item, Envelope) and item.position is not None:
+        if (
+            self.retain_buffered_on_reconnect
+            and isinstance(item, Envelope)
+            and item.position is not None
+        ):
             self.position = item.position
         return True
 
     def _terminate(self, error: CarrierError) -> None:
         self._terminal_error = error
+        self._clear_buffer()
+        self._queue.put_nowait((error, 0))
+        self.closed = True
+
+    def _clear_buffer(self) -> None:
         while True:
             try:
                 _item, size = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
             self._carrier._buffer_budget.release(size)
-        self._queue.put_nowait((error, 0))
-        self.closed = True
 
     async def close(self) -> None:
         await self._carrier.close_subscription(self.subscription_id)
@@ -672,6 +695,7 @@ class PersistentCarrier:
         queue_size: int = 32,
         progress_timeout: float | None = None,
         position: str | int | None = None,
+        retain_buffered_on_reconnect: bool = True,
     ) -> CarrierSubscription:
         """Register a bounded subscription-shaped request.
 
@@ -691,6 +715,7 @@ class PersistentCarrier:
             queue_size=queue_size,
             progress_timeout=progress_timeout,
             position=position,
+            retain_buffered_on_reconnect=retain_buffered_on_reconnect,
         )
         self._subscriptions[subscription_id] = subscription
         subscription.initializing = False
@@ -828,12 +853,7 @@ class PersistentCarrier:
                 item: Envelope | CarrierError = envelope
                 size = 0
                 if envelope.type is EnvelopeType.ERROR:
-                    item = CarrierError(
-                        str(
-                            envelope.payload.get("message")
-                            or "remote carrier subscription error"
-                        )
-                    )
+                    item = CarrierRemoteError(envelope.payload)
                     self._subscriptions.pop(envelope.subscription_id, None)
                     subscription._terminate(item)
                     self._schedule_idle_retirement()
@@ -866,11 +886,7 @@ class PersistentCarrier:
             future = self._pending.get(envelope.request_id)
             if future is not None and not future.done():
                 if envelope.type is EnvelopeType.ERROR:
-                    future.set_exception(
-                        CarrierError(
-                            str(envelope.payload.get("message") or "remote carrier error")
-                        )
-                    )
+                    future.set_exception(CarrierRemoteError(envelope.payload))
                 elif envelope.type is EnvelopeType.RESPONSE:
                     future.set_result(envelope)
                 else:
@@ -968,6 +984,8 @@ class PersistentCarrier:
                 self._subscriptions.items()
             ):
                 if subscription.replayable:
+                    if not subscription.retain_buffered_on_reconnect:
+                        subscription._clear_buffer()
                     continue
                 self._subscriptions.pop(subscription_id, None)
                 subscription._terminate(
@@ -1077,7 +1095,10 @@ class PersistentCarrier:
 
 
 RequestHandler = Callable[
-    [Envelope], Awaitable[Envelope | list[Envelope] | None]
+    [
+        Envelope,
+    ],
+    Awaitable[Envelope | list[Envelope] | AsyncIterable[Envelope] | None],
 ]
 
 
@@ -1170,8 +1191,16 @@ class StdioCarrierServer:
             result = await self._handler(envelope)
             if result is None:
                 return
-            for response in result if isinstance(result, list) else [result]:
-                await self._queue_envelope(self._correlate(response, envelope))
+            if isinstance(result, AsyncIterable):
+                async for response in result:
+                    await self._queue_envelope(
+                        self._correlate(response, envelope)
+                    )
+            else:
+                for response in result if isinstance(result, list) else [result]:
+                    await self._queue_envelope(
+                        self._correlate(response, envelope)
+                    )
         except asyncio.CancelledError:
             await self._queue_envelope(
                 Envelope(
