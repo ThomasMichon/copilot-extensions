@@ -906,6 +906,20 @@ def test_remote_api_stream_closes_on_daemon_shutdown(remote_app) -> None:
     assert remote_app.state.remote_operations.subscription.closed is True
 
 
+def test_remote_api_stream_rejects_empty_continuity(remote_app) -> None:
+    with TestClient(remote_app) as client:
+        response = client.get(
+            "/api/v1/remote/example-host/sessions/session-a/events",
+            params={
+                "caller_id": "consumer-a",
+                "continuity_id": "",
+            },
+            headers={"Authorization": "Bearer " + "test-token"},
+        )
+
+    assert response.status_code == 422
+
+
 def test_remote_api_returns_retryable_status_while_initializing(
     remote_app,
 ) -> None:

@@ -110,7 +110,9 @@ async def remote_session_events(
     request: Request,
     caller_id: str = Query(min_length=1, max_length=128),
     after: int | None = Query(default=None, ge=0),
-    continuity_id: str | None = Query(default=None, max_length=128),
+    continuity_id: str | None = Query(
+        default=None, min_length=1, max_length=128
+    ),
 ) -> StreamingResponse:
     try:
         subscription = await _service(request).subscribe_events(
