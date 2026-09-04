@@ -27,7 +27,7 @@ DEFAULT_SESSION_SETTLE_GRACE = 5.0
 class BridgeClientError(Exception):
     """Raised when the API returns an error."""
 
-    def __init__(self, status: int, detail: str) -> None:
+    def __init__(self, status: int, detail: Any) -> None:
         self.status = status
         self.detail = detail
         super().__init__(f"HTTP {status}: {detail}")
@@ -40,6 +40,88 @@ class BridgeConnectionError(Exception):
     catches this and retries -- so a service restart mid-workflow is
     survivable: the client reconnects and resumes from its acked cursor.
     """
+
+
+class SseStream(Iterator[dict[str, Any]]):
+    """Closable incremental SSE parser used by long-lived subscriptions."""
+
+    def __init__(self, response: Any) -> None:
+        self._response = response
+        self._lines = iter(response)
+        self._event_type = ""
+        self._event_id = ""
+        self._data_lines: list[str] = []
+        self.headers = getattr(response, "headers", {})
+
+    def __iter__(self) -> SseStream:
+        return self
+
+    def __enter__(self) -> SseStream:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __next__(self) -> dict[str, Any]:
+        while True:
+            try:
+                raw_line = next(self._lines)
+            except StopIteration:
+                self.close()
+                raise
+            line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+
+            if line.startswith(":"):
+                body = line[1:].strip()
+                if body.startswith("tool_progress"):
+                    raw = body[len("tool_progress"):].strip()
+                    try:
+                        data = json.loads(raw) if raw else {}
+                    except json.JSONDecodeError:
+                        data = {}
+                    return {
+                        "id": "",
+                        "event": "tool_progress",
+                        "data": data,
+                    }
+                return {"id": "", "event": "_heartbeat", "data": {}}
+            if line.startswith("id: "):
+                self._event_id = line[4:]
+            elif line.startswith("event: "):
+                self._event_type = line[7:]
+            elif line.startswith("data: "):
+                self._data_lines.append(line[6:])
+            elif line == "":
+                if not self._data_lines:
+                    self._event_type = ""
+                    self._event_id = ""
+                    continue
+                raw_data = "\n".join(self._data_lines)
+                try:
+                    parsed = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    parsed = {"raw": raw_data}
+                event = {
+                    "id": self._event_id,
+                    "event": self._event_type or parsed.get("event", ""),
+                    "data": parsed.get("data", parsed),
+                }
+                if "timestamp" in parsed:
+                    event["timestamp"] = parsed["timestamp"]
+                if "continuity_id" in parsed:
+                    event["continuity_id"] = parsed["continuity_id"]
+                self._event_type = ""
+                self._event_id = ""
+                self._data_lines = []
+                return event
+
+    def close(self) -> None:
+        response, self._response = self._response, None
+        if response is not None:
+            response.close()
 
 
 class BridgeClient:
@@ -250,6 +332,7 @@ class BridgeClient:
             nonlocal req
             if self._reresolve is None:
                 return False
+            self._daemon_proto = None
             new_base = self._reresolve()
             if not new_base or new_base.rstrip("/") == self._base:
                 return False
@@ -371,6 +454,7 @@ class BridgeClient:
         True when the base actually changed. Safe/no-op when the client was built
         without a re-resolver.
         """
+        self._daemon_proto = None
         if self._reresolve is None:
             return False
         new_base = self._reresolve()
@@ -381,7 +465,7 @@ class BridgeClient:
 
     def _stream_sse(
         self, path: str, *, params: dict[str, str] | None = None
-    ) -> Iterator[dict[str, Any]]:
+    ) -> SseStream:
         """Stream SSE events from an endpoint. Yields parsed event dicts.
 
         Raises ``BridgeConnectionError`` if the service is unreachable so the
@@ -414,56 +498,7 @@ class BridgeClient:
             ) from exc
 
         self._mark_connected()
-        try:
-            event_type = ""
-            event_id = ""
-            data_lines: list[str] = []
-
-            for raw_line in resp:
-                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-
-                if line.startswith(":"):
-                    # SSE comment. ``: tool_progress <json>`` carries quiet-
-                    # period liveness (the in-flight tool call the remote is
-                    # blocked on); any other comment is a bare heartbeat. Both
-                    # are cursor-neutral (no id) -- they let the streaming
-                    # engine show progress and check for turn completion during
-                    # silence, without touching the durable event stream.
-                    body = line[1:].strip()
-                    if body.startswith("tool_progress"):
-                        raw = body[len("tool_progress"):].strip()
-                        try:
-                            data = json.loads(raw) if raw else {}
-                        except json.JSONDecodeError:
-                            data = {}
-                        yield {"id": "", "event": "tool_progress", "data": data}
-                    else:
-                        yield {"id": "", "event": "_heartbeat", "data": {}}
-                    continue
-                elif line.startswith("id: "):
-                    event_id = line[4:]
-                elif line.startswith("event: "):
-                    event_type = line[7:]
-                elif line.startswith("data: "):
-                    data_lines.append(line[6:])
-                elif line == "":
-                    # End of event block
-                    if data_lines:
-                        raw_data = "\n".join(data_lines)
-                        try:
-                            parsed = json.loads(raw_data)
-                        except json.JSONDecodeError:
-                            parsed = {"raw": raw_data}
-                        yield {
-                            "id": event_id,
-                            "event": event_type or parsed.get("event", ""),
-                            "data": parsed.get("data", parsed),
-                        }
-                    event_type = ""
-                    event_id = ""
-                    data_lines = []
-        finally:
-            resp.close()
+        return SseStream(resp)
 
     # -- API methods ---------------------------------------------------------
 
@@ -1203,7 +1238,10 @@ class BridgeClient:
         *,
         after: int | None = None,
         caller_id: str | None = None,
-    ) -> Iterator[dict[str, Any]]:
+        controlled: bool = False,
+        continuity_id: str | None = None,
+        transient: bool = False,
+    ) -> SseStream:
         """GET /api/v1/sessions/{id}/events (SSE stream).
 
         ``after=None`` + ``caller_id`` resumes from the caller's last-acked
@@ -1215,6 +1253,12 @@ class BridgeClient:
             params["after"] = str(after)
         if caller_id:
             params["caller_id"] = caller_id
+        if controlled:
+            params["controlled"] = "true"
+        if continuity_id is not None:
+            params["continuity_id"] = continuity_id
+        if transient:
+            params["transient"] = "true"
         return self._stream_sse(
             f"/api/v1/sessions/{session_id}/events",
             params=params or None,
@@ -1246,7 +1290,12 @@ class BridgeClient:
         return resp or {"last_acked_id": 0, "head_id": 0}
 
     def ack_cursor(
-        self, session_id: str, last_id: int, *, caller_id: str | None = None
+        self,
+        session_id: str,
+        last_id: int,
+        *,
+        caller_id: str | None = None,
+        continuity_id: str | None = None,
     ) -> int:
         """POST /api/v1/sessions/{id}/cursor -- confirm delivery up to last_id.
 
@@ -1255,10 +1304,115 @@ class BridgeClient:
         body: dict[str, Any] = {"last_id": last_id}
         if caller_id:
             body["caller_id"] = caller_id
+        if continuity_id is not None:
+            body["continuity_id"] = continuity_id
         resp = self._request(
             "POST", f"/api/v1/sessions/{session_id}/cursor", body
         )
         return resp.get("last_acked_id", last_id) if resp else last_id
+
+    @staticmethod
+    def _remote_path(host: str, suffix: str) -> str:
+        return (
+            "/api/v1/remote/"
+            + urllib.parse.quote(host, safe="")
+            + suffix
+        )
+
+    def _require_remote_operations(self) -> None:
+        from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
+
+        if not self.daemon_supports(REMOTE_OPERATIONS_PROTOCOL_VERSION):
+            version, _minimum = self.daemon_protocol()
+            raise BridgeClientError(
+                426,
+                "remote Bridge operations require agent-bridge HTTP protocol "
+                f"v{REMOTE_OPERATIONS_PROTOCOL_VERSION}; the daemon advertises "
+                f"v{version}. Update the agent-bridge plugin + runtime.",
+            )
+
+    def get_remote_session_status(
+        self, host: str, session_id: str, *, caller_id: str
+    ) -> dict[str, Any]:
+        """Read exact session status through the local carrier owner."""
+        self._require_remote_operations()
+        return self._request(
+            "GET",
+            self._remote_path(
+                host,
+                "/sessions/"
+                + urllib.parse.quote(session_id, safe="")
+                + "/status",
+            ),
+            params={"caller_id": caller_id},
+        ) or {}
+
+    def resolve_remote_live_session(
+        self, host: str, session_id: str
+    ) -> dict[str, Any]:
+        """Resolve one exact represented session on a hosting Bridge."""
+        self._require_remote_operations()
+        return self._request(
+            "GET",
+            self._remote_path(
+                host,
+                "/live-sessions/"
+                + urllib.parse.quote(session_id, safe=""),
+            ),
+        ) or {}
+
+    def stream_remote_events(
+        self,
+        host: str,
+        session_id: str,
+        *,
+        caller_id: str,
+        after: int | None = None,
+        continuity_id: str | None = None,
+    ) -> SseStream:
+        """Stream exact hosting-Bridge events through the shared carrier."""
+        self._require_remote_operations()
+        params = {"caller_id": caller_id}
+        if after is not None:
+            params["after"] = str(after)
+        if continuity_id is not None:
+            params["continuity_id"] = continuity_id
+        return self._stream_sse(
+            self._remote_path(
+                host,
+                "/sessions/"
+                + urllib.parse.quote(session_id, safe="")
+                + "/events",
+            ),
+            params=params,
+        )
+
+    def ack_remote_cursor(
+        self,
+        host: str,
+        session_id: str,
+        last_id: int,
+        *,
+        caller_id: str,
+        continuity_id: str | None,
+    ) -> int:
+        """Acknowledge a remote event only after local delivery is accepted."""
+        self._require_remote_operations()
+        response = self._request(
+            "POST",
+            self._remote_path(
+                host,
+                "/sessions/"
+                + urllib.parse.quote(session_id, safe="")
+                + "/cursor",
+            ),
+            body={
+                "caller_id": caller_id,
+                "last_id": last_id,
+                "continuity_id": continuity_id,
+            },
+        )
+        return response.get("last_acked_id", last_id) if response else last_id
 
     def read_range(
         self, session_id: str, *, start: int = 0, end: int | None = None

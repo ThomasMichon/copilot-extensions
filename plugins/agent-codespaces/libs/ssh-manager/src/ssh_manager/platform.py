@@ -76,14 +76,16 @@ def socket_path_for_host(
     host: str,
     user: str | None = None,
     port: int | None = None,
+    *,
+    namespace: str | None = None,
 ) -> Path:
     """Generate a short, unique socket path for a host.
 
     Uses a hash to keep paths under the 108-char Unix socket limit.
-    The identity includes user, host, and port so different SSH targets
-    to the same hostname get distinct sockets.
+    The identity includes namespace, user, host, and port so different
+    SSH targets or carrier roles get distinct sockets.
     """
-    identity = f"{user or ''}@{host}:{port or 22}"
+    identity = f"{namespace or ''}|{user or ''}@{host}:{port or 22}"
     short_hash = hashlib.sha256(identity.encode()).hexdigest()[:12]
     socket_name = f"{host[:20]}-{short_hash}"
     return platform.socket_dir / socket_name

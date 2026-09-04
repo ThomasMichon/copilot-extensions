@@ -42,6 +42,179 @@ class TestDeliveryCursor:
         eff = tmp_db.set_cursor("caller-a", "s1", 9, time.time())
         assert eff == 9
 
+    def test_rebuild_preserves_explicit_cursor_invalidation(
+        self, tmp_db: Database
+    ) -> None:
+        _seed_session(tmp_db)
+        tmp_db.set_cursor("caller-a", "s1", 7, time.time())
+
+        tmp_db.reset_delivery_cursors(
+            "s1",
+            prior_head_id=9,
+            prior_continuity_id="old",
+            current_continuity_id="new",
+            timestamp=123.0,
+        )
+
+        state = tmp_db.get_cursor_state("caller-a", "s1")
+        assert state["last_acked_id"] == 0
+        assert state["invalidation"] == {
+            "prior_last_acked_id": 7,
+            "prior_head_id": 9,
+            "prior_continuity_id": "old",
+            "current_continuity_id": "new",
+            "invalidated_at": 123.0,
+        }
+
+    def test_repeated_rebuild_refreshes_invalidated_continuity(
+        self, tmp_db: Database
+    ) -> None:
+        _seed_session(tmp_db)
+        tmp_db.set_cursor("caller-a", "s1", 7, time.time())
+        tmp_db.reset_delivery_cursors(
+            "s1",
+            prior_head_id=9,
+            prior_continuity_id="old",
+            current_continuity_id="new-1",
+            timestamp=123.0,
+        )
+
+        tmp_db.reset_delivery_cursors(
+            "s1",
+            prior_head_id=4,
+            prior_continuity_id="new-1",
+            current_continuity_id="new-2",
+            timestamp=124.0,
+        )
+
+        invalidation = tmp_db.get_cursor_state(
+            "caller-a", "s1"
+        )["invalidation"]
+        assert invalidation["current_continuity_id"] == "new-2"
+        assert invalidation["invalidated_at"] == 124.0
+
+    def test_new_ack_clears_cursor_invalidation(self, tmp_db: Database) -> None:
+        _seed_session(tmp_db)
+        tmp_db.set_cursor("caller-a", "s1", 3, time.time())
+        tmp_db.reset_delivery_cursors("s1", prior_head_id=3)
+
+        tmp_db.set_cursor("caller-a", "s1", 1, time.time())
+
+        assert tmp_db.get_cursor_state("caller-a", "s1")["invalidation"] is None
+
+    def test_stale_generation_ack_preserves_cursor_invalidation(
+        self, tmp_db: Database
+    ) -> None:
+        _seed_session(tmp_db)
+        tmp_db.append_event(
+            "s1", 1, "agent_message", {"text": "before"}, 100.0
+        )
+        tmp_db.flush()
+        tmp_db.set_cursor("caller-a", "s1", 1, time.time())
+        tmp_db.reset_delivery_cursors(
+            "s1",
+            prior_head_id=1,
+            prior_continuity_id="old",
+            current_continuity_id="new",
+        )
+
+        result = tmp_db.acknowledge_controlled_cursor(
+            "caller-a",
+            "s1",
+            1,
+            time.time(),
+            continuity_id="old",
+        )
+
+        assert result["accepted"] is False
+        assert result["code"] == "cursor_invalidated"
+        assert tmp_db.get_cursor_state(
+            "caller-a", "s1"
+        )["invalidation"] is not None
+
+    def test_snapshot_repairs_missing_replacement_continuity(
+        self, tmp_db: Database
+    ) -> None:
+        _seed_session(tmp_db)
+        tmp_db.set_cursor("caller-a", "s1", 1, time.time())
+        tmp_db.reset_delivery_cursors(
+            "s1",
+            prior_head_id=1,
+            prior_continuity_id="old",
+            current_continuity_id=None,
+        )
+        tmp_db.append_event(
+            "s1", 1, "agent_message", {"text": "replacement"}, 100.0
+        )
+
+        state = tmp_db.get_controlled_cursor_state("caller-a", "s1")
+
+        assert state["continuity_id"] is not None
+        assert (
+            state["invalidation"]["current_continuity_id"]
+            == state["continuity_id"]
+        )
+
+    def test_snapshot_common_path_does_not_take_write_lock(
+        self, tmp_db: Database
+    ) -> None:
+        class _UnexpectedWriteLock:
+            def __enter__(self):
+                raise AssertionError("read-only cursor snapshot took write lock")
+
+            def __exit__(self, *_args):
+                return False
+
+        _seed_session(tmp_db)
+        tmp_db.append_event(
+            "s1", 1, "agent_message", {"text": "one"}, 100.0
+        )
+        tmp_db.flush()
+        write_lock = tmp_db._write_lock
+        tmp_db._write_lock = _UnexpectedWriteLock()
+        try:
+            state = tmp_db.get_controlled_cursor_state("caller-a", "s1")
+        finally:
+            tmp_db._write_lock = write_lock
+
+        assert state["head_id"] == 1
+        assert state["continuity_id"] is not None
+
+    def test_controlled_ack_rejects_cursor_beyond_head(
+        self, tmp_db: Database
+    ) -> None:
+        _seed_session(tmp_db)
+        tmp_db.append_event(
+            "s1", 1, "agent_message", {"text": "one"}, 100.0
+        )
+        state = tmp_db.get_controlled_cursor_state("caller-a", "s1")
+
+        result = tmp_db.acknowledge_controlled_cursor(
+            "caller-a",
+            "s1",
+            999,
+            time.time(),
+            continuity_id=state["continuity_id"],
+        )
+
+        assert result["accepted"] is False
+        assert result["code"] == "replay_gap"
+        assert tmp_db.get_cursor("caller-a", "s1") == 0
+
+    def test_ensure_cursor_registers_zero_without_clearing_invalidation(
+        self, tmp_db: Database
+    ) -> None:
+        _seed_session(tmp_db)
+        tmp_db.set_cursor("caller-a", "s1", 1, time.time())
+        tmp_db.reset_delivery_cursors("s1", prior_head_id=1)
+
+        tmp_db.ensure_cursor("caller-a", "s1", time.time())
+
+        state = tmp_db.get_cursor_state("caller-a", "s1")
+        assert state["registered"] is True
+        assert state["last_acked_id"] == 0
+        assert state["invalidation"] is not None
+
 
 class TestEventsRange:
     def test_range_inclusive(self, tmp_db: Database) -> None:
@@ -117,3 +290,24 @@ class TestSchemaMigration:
         _seed_session(db)
         db.set_cursor("c", "s1", 3, time.time())
         assert db.get_cursor("c", "s1") == 3
+
+    def test_migration_from_v16_adds_cursor_invalidations(self, tmp_path) -> None:
+        import sqlite3
+
+        db_path = tmp_path / "old-v16.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (16);
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        db = Database(db_path)
+        rows = db.execute_read(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='delivery_cursor_invalidations'"
+        )
+        assert len(rows) == 1

@@ -11,6 +11,7 @@ SSE event log for agent-bridge sessions.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass, field
 from threading import Lock
@@ -142,6 +143,13 @@ class EventLog:
             self._db.append_event(
                 self._session_id, event_id, event_type, data, ts,
             )
+            if event_id == 1 and self._telemetry.log_epoch:
+                self._db.flush()
+                self._db.update_delivery_cursor_invalidation_continuity(
+                    self._session_id,
+                    self._telemetry.log_epoch,
+                    timestamp=ts,
+                )
         # Generic telemetry seam: emit only the reducer's content-free
         # structural transitions (no-op unless a consumer registered a sink).
         for record in telemetry_records:
@@ -200,19 +208,28 @@ class EventLog:
         disconnect. Returns the number of events written.
         """
         with self._lock:
+            prior_head_id = self._events[-1].id if self._events else 0
+            prior_origin_timestamp = (
+                self._events[0].timestamp if self._events else None
+            )
+            prior_epoch = self._telemetry.log_epoch
+            ts = time.time()
+            if prior_origin_timestamp is not None:
+                ts = max(
+                    ts,
+                    math.nextafter(prior_origin_timestamp, math.inf),
+                )
             if self._db is not None and self._session_id is not None:
-                self._db.flush()
-                self._db.delete_events(self._session_id)
-                # The rebuilt log renumbers event ids from 1; monotonic delivery
-                # cursors would then point past the log and orphan consumers
-                # (NF's "odd states"). Reset them so consumers re-read the
-                # authoritative rebuilt log instead of silently stalling.
-                self._db.reset_delivery_cursors(self._session_id)
+                self._db.begin_event_rebuild(
+                    self._session_id,
+                    prior_head_id=prior_head_id,
+                    prior_continuity_id=prior_epoch or None,
+                    timestamp=ts,
+                )
+            self._telemetry.begin_rebuild()
             self._events = []
             self._open_tool_calls = {}
             self._next_id = 1
-            prior_epoch = self._telemetry.begin_rebuild()
-            ts = time.time()
             for event_type, data in events:
                 event_id = self._next_id
                 self._next_id += 1
@@ -231,11 +248,17 @@ class EventLog:
                 # emit historical telemetry again.
                 self._telemetry.observe(event_type, data, event_id=event_id)
             count = len(self._events)
-            if self._db is not None and self._session_id is not None:
-                self._db.flush()
             rebuild_marker = self._telemetry.complete_rebuild(
                 prior_epoch, count
             )
+            if self._db is not None and self._session_id is not None:
+                self._db.flush()
+                if self._telemetry.log_epoch:
+                    self._db.update_delivery_cursor_invalidation_continuity(
+                        self._session_id,
+                        self._telemetry.log_epoch,
+                        timestamp=ts,
+                    )
         for loop, waiter in self._waiters:
             if not loop.is_closed():
                 loop.call_soon_threadsafe(waiter.set)
@@ -394,3 +417,14 @@ class EventLog:
             with self._lock:
                 if registration in self._waiters:
                     self._waiters.remove(registration)
+
+    async def wait_for_events_snapshot(
+        self, after: int, timeout: float = 30.0
+    ) -> tuple[str | None, list[SseEvent]]:
+        """Wait, then snapshot one internally consistent event generation."""
+        await self.wait_for_events(after, timeout=timeout)
+        continuity, _head, events = self.snapshot_window(
+            after=after,
+            limit=2**31 - 1,
+        )
+        return continuity, events

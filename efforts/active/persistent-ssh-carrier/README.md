@@ -128,27 +128,27 @@ The repository's ownership and independence patterns require:
 
 ### Phase 3 — Expose narrow remote Bridge operations (#1778)
 
-- [ ] Implement only the operations required by existing remote Bridge
+- [x] Implement only the operations required by existing remote Bridge
       consumers first: exact session status, live-session resolution, and
       cursor-based session event subscription.
-- [ ] Preserve the hosting Bridge's session IDs, event IDs, event names, and
+- [x] Preserve the hosting Bridge's session IDs, event IDs, event names, and
       replay semantics exactly; the local daemon is a transport proxy, not a
       second authority.
-- [ ] Add an authenticated local Agent Bridge API/CLI surface for remote
+- [x] Add an authenticated local Agent Bridge API/CLI surface for remote
       operations so clients identify a host and exact session without learning
       carrier state or SSH arguments.
-- [ ] Give every supervisor lane a distinct, stable `caller_id` propagated to
+- [x] Give every supervisor lane a distinct, stable `caller_id` propagated to
       the hosting Bridge. A supervision cursor must never reuse or advance an
       operator, attention-wait, or other consumer's delivery cursor.
-- [ ] Report event-log rebuild, cursor invalidation, or any detected replay gap
+- [x] Report event-log rebuild, cursor invalidation, or any detected replay gap
       as an explicit control envelope that immediately wakes full
       reconciliation; never translate a stale cursor into a quiet empty stream.
-- [ ] Make unsupported protocol versions and operations fail before opening a
+- [x] Make unsupported protocol versions and operations fail before opening a
       subscription or issuing a remote command.
-- [ ] Re-establish remote operations and subscriptions from the last
+- [x] Re-establish remote operations and subscriptions from the last
       acknowledged cursor after either a remote carrier reconnect or a local
       Agent Bridge daemon restart/zero-downtime cutover.
-- [ ] Retain existing direct transport as a bounded compatibility fallback only
+- [x] Retain existing direct transport as a bounded compatibility fallback only
       for operations not yet migrated; never run a parallel direct event poll.
 
 ### Phase 4 — Wake Agent Dispatch from pushed lifecycle events (#1779)
@@ -297,6 +297,41 @@ end-to-end slice small enough to validate while establishing the ownership and
 transport foundation #1763 requires.
 
 ## Journal
+
+### 2026-09-03 — Remote Bridge operations
+
+- Added the carrier operation router for exact owned-session status, exact
+  represented live-session resolution, cursor acknowledgement, and replayable
+  event subscriptions. The far-side carrier authenticates to its host-local
+  Bridge and reuses the existing HTTP status, live-session, SSE, and cursor
+  authorities; no Dispatch import or second session/event ledger was added.
+- Added authenticated local `/api/v1/remote/{host}/...` and `agent-bridge
+  remote` surfaces. Callers provide only a topology host, exact hosting-Bridge
+  session ID, and a required stable consumer-specific `caller_id`; topology
+  resolution selects the SSH alias, user, port, and remote shell internally.
+- Kept actual hosting event IDs, names, payloads, and timestamps unchanged.
+  Delivery acknowledgement remains remote and caller-scoped. Carrier reconnect
+  deliberately drops the initial cursor precondition and resubscribes from the
+  hosting Bridge's durable acknowledged cursor, which also lets a replacement
+  local daemon recover after cutover.
+- Made event-log rebuilds persist per-caller cursor invalidations. Controlled
+  streams detect continuity changes and non-contiguous IDs and emit a
+  cursor-neutral `bridge_control` / `full_reconcile` signal instead of an empty
+  stream. Continuity-qualified acknowledgements reject stale-log acks.
+- Extended the shared carrier server to stream async handler results and
+  preserve structured remote error codes, synchronized all three vendored
+  `ssh-manager` copies, and bumped the shared library plus Agent Bridge,
+  Agent Codespaces, and Agent Containers runtime/marketplace versions.
+- Focused Phase 3 coverage passes 159 tests and the complete shared
+  `ssh-manager` platform/manager/carrier suite passes 65 tests. The official
+  Agent Bridge guard portfolio passes; the five-shard run passed shards 1-3 and
+  5, while shard 4's changed surfaces passed after isolating one unchanged
+  `origin/main` mock-signature failure and rerunning an environment-sensitive
+  session-selection surface through the official contained runner. Vendoring,
+  documentation, install-contract, payload-invocation, diff, and fast Ruff
+  guards pass. Repository-wide version consistency is currently blocked by an
+  unrelated `origin/main` agent-index fallback mismatch; every version surface
+  changed by this phase agrees.
 
 ### 2026-09-02 — Persistent carrier foundation
 

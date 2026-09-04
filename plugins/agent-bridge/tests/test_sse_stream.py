@@ -20,8 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_bridge.events import EventLog
-from agent_bridge.routes.sessions import get_events
+from agent_bridge.events import EventLog, SseEvent
+from agent_bridge.routes.sessions import _sse_event_stream, get_events
 
 
 def _short_timeout_log() -> EventLog:
@@ -139,3 +139,108 @@ async def test_sse_tool_progress_when_busy():
         assert payload["tool_call_id"] == "t9"
     finally:
         await it.aclose()
+
+
+@pytest.mark.asyncio
+async def test_controlled_stream_reports_midstream_rebuild() -> None:
+    log = EventLog()
+    log.append("agent_message", {"text": "before"})
+    log.append("agent_message", {"text": "buffered-2"})
+    log.append("agent_message", {"text": "buffered-3"})
+    session = SimpleNamespace(session_id="sess-1", event_log=log)
+    stream = _sse_event_stream(
+        session,
+        0,
+        server=None,
+        is_disconnected=None,
+        signal_gaps=True,
+        heartbeat_interval=0.05,
+    )
+    first = _decode(await stream.__anext__())
+    assert "id: 1" in first
+
+    log.rebuild([("agent_message", {"text": "after"})])
+
+    control = _decode(await stream.__anext__())
+    assert "event: bridge_control" in control
+    assert '"code":"cursor_invalidated"' in control
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_controlled_stream_reports_noncontiguous_replay() -> None:
+    class _GapLog:
+        continuity_id = "epoch-a"
+
+        async def wait_for_events(self, after: int, timeout: float):
+            return [
+                SseEvent(
+                    id=after + 2,
+                    event="assistant.turn_end",
+                    data={},
+                )
+            ]
+
+        def active_tool_call(self):
+            return None
+
+    session = SimpleNamespace(session_id="sess-1", event_log=_GapLog())
+    stream = _sse_event_stream(
+        session,
+        4,
+        server=None,
+        is_disconnected=None,
+        signal_gaps=True,
+        expected_continuity_id="epoch-a",
+        heartbeat_interval=0.05,
+    )
+
+    control = _decode(await stream.__anext__())
+
+    assert "event: bridge_control" in control
+    assert '"code":"replay_gap"' in control
+    assert '"next_event_id":6' in control
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_controlled_stream_reports_midbatch_replay_gap() -> None:
+    class _GapLog:
+        continuity_id = "epoch-a"
+
+        async def wait_for_events(self, after: int, timeout: float):
+            return [
+                SseEvent(
+                    id=after + 1,
+                    event="agent_message",
+                    data={"text": "present"},
+                ),
+                SseEvent(
+                    id=after + 3,
+                    event="assistant.turn_end",
+                    data={},
+                ),
+            ]
+
+        def active_tool_call(self):
+            return None
+
+    session = SimpleNamespace(session_id="sess-1", event_log=_GapLog())
+    stream = _sse_event_stream(
+        session,
+        4,
+        server=None,
+        is_disconnected=None,
+        signal_gaps=True,
+        expected_continuity_id="epoch-a",
+        heartbeat_interval=0.05,
+    )
+
+    first = _decode(await stream.__anext__())
+    control = _decode(await stream.__anext__())
+
+    assert "id: 5" in first
+    assert "event: bridge_control" in control
+    assert '"code":"replay_gap"' in control
+    assert '"next_event_id":7' in control
+    await stream.aclose()
