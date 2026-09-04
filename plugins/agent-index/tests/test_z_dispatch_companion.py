@@ -204,6 +204,28 @@ def test_service_adapter_forces_no_self_provision(tmp_path: Path, monkeypatch) -
     assert marker.read_text(encoding="utf-8") == "start:1"
 
 
+def test_service_adapter_scrubs_inherited_runtime_authority(monkeypatch) -> None:
+    module = _module(SERVICE, "companion_service_environment")
+    monkeypatch.setenv("AGENT_INDEX_HOME", "wrong-home")
+    monkeypatch.setenv("AGENT_INDEX_STATE_DIR", "wrong-state")
+    monkeypatch.setenv("AGENT_INDEX_CONFIG_DATA_B64", "forwarded")
+    monkeypatch.setenv("AGENT_INDEX_EFFECTIVE_CONFIG", "approved-config")
+    monkeypatch.setenv("AGENT_INDEX_REPO", "approved-repo")
+    monkeypatch.setenv("AGENT_INDEX_MACHINE", "approved-machine")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "wrong-context")
+
+    environment = module._runtime_environment()
+
+    assert "AGENT_INDEX_HOME" not in environment
+    assert "AGENT_INDEX_STATE_DIR" not in environment
+    assert "AGENT_INDEX_CONFIG_DATA_B64" not in environment
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
+    assert environment["AGENT_INDEX_EFFECTIVE_CONFIG"] == "approved-config"
+    assert environment["AGENT_INDEX_REPO"] == "approved-repo"
+    assert environment["AGENT_INDEX_MACHINE"] == "approved-machine"
+    assert environment["AGENT_INDEX_NO_SELFPROVISION"] == "1"
+
+
 def test_service_adapter_does_not_stop_unsupported_installation(
     monkeypatch,
 ) -> None:

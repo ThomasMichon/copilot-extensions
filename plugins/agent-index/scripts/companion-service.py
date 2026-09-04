@@ -10,6 +10,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+_PROVIDER_ENVIRONMENT = {
+    "AGENT_INDEX_EFFECTIVE_CONFIG",
+    "AGENT_INDEX_MACHINE",
+    "AGENT_INDEX_NO_SELFPROVISION",
+    "AGENT_INDEX_REPO",
+}
+_SESSION_CONTEXT_ENVIRONMENT = {
+    "CLAUDE_PLUGIN_ROOT",
+    "COPILOT_EXTENSIONS_CONTEXT",
+    "COPILOT_PLUGIN_ROOT",
+    "PLUGIN_ROOT",
+}
+
 
 def _runtime_gate(action: str) -> list[str]:
     scripts = Path(__file__).resolve().parent
@@ -32,12 +45,24 @@ def _runtime_gate(action: str) -> list[str]:
     return [shell, str(scripts / "runtime-gate.sh"), action]
 
 
-def _run(action: str, *, capture: bool = False) -> subprocess.CompletedProcess[str]:
-    environment = dict(os.environ)
+def _runtime_environment() -> dict[str, str]:
+    approved = {
+        key: value for key in _PROVIDER_ENVIRONMENT if (value := os.environ.get(key)) is not None
+    }
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("AGENT_INDEX_") and key not in _SESSION_CONTEXT_ENVIRONMENT
+    }
+    environment.update(approved)
     environment["AGENT_INDEX_NO_SELFPROVISION"] = "1"
+    return environment
+
+
+def _run(action: str, *, capture: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         _runtime_gate(action),
-        env=environment,
+        env=_runtime_environment(),
         stdin=subprocess.DEVNULL,
         capture_output=capture,
         text=True,
