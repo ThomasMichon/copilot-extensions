@@ -190,14 +190,28 @@ jobs:
         working-directory: worktree-manager
         run: uv run --extra dev pytest -q
 
-  test-runner:
-    name: test runner (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  test-runner-linux:
+    name: test runner (ubuntu-latest)
+    runs-on: ubuntu-latest
     timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test runner admission and isolation
+        env:
+          PYTHONPATH: libs/single-instance-lease/src
+        run: >-
+          uv run --with pytest python -m pytest -q
+          libs/single-instance-lease/tests/test_lease.py
+          tools/test_run_plugin_tests.py
+
+  test-runner-windows:
+    name: test runner (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
