@@ -122,6 +122,18 @@ def test_controlled_stream_allows_continuity_guarded_transient_resume(
     assert captured["start"] == 1
 
 
+def test_controlled_stream_rejects_reserved_caller(client, app) -> None:
+    _seed_session(app)
+
+    response = client.get(
+        "/api/v1/sessions/sess-1/events",
+        params={"caller_id": "__default__", "controlled": True},
+    )
+
+    assert response.status_code == 422
+    assert "reserved" in response.json()["detail"]
+
+
 class TestCursorEndpoints:
     def test_get_cursor_defaults_zero(self, client, app) -> None:
         _seed_session(app)
@@ -237,6 +249,25 @@ class TestCursorEndpoints:
                 "last_id": 1,
                 "continuity_id": "",
             },
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.parametrize("caller_id", [None, "__default__"])
+    def test_controlled_ack_requires_distinct_caller(
+        self, client, app, caller_id
+    ) -> None:
+        _seed_session(app)
+        payload = {
+            "last_id": 1,
+            "continuity_id": "epoch-a",
+        }
+        if caller_id is not None:
+            payload["caller_id"] = caller_id
+
+        response = client.post(
+            "/api/v1/sessions/sess-1/cursor",
+            json=payload,
         )
 
         assert response.status_code == 422

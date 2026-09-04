@@ -72,6 +72,21 @@ def _cursor_key(caller_id: str | None) -> str:
     return caller_id if caller_id else _CURSOR_DEFAULT_KEY
 
 
+def _controlled_cursor_key(caller_id: str | None) -> str:
+    """Require a distinct caller identity for continuity-qualified delivery."""
+    if not caller_id:
+        raise HTTPException(
+            status_code=422,
+            detail="controlled cursor operations require caller_id",
+        )
+    if caller_id == _CURSOR_DEFAULT_KEY:
+        raise HTTPException(
+            status_code=422,
+            detail="caller_id is reserved for legacy anonymous delivery",
+        )
+    return caller_id
+
+
 def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
     """Resolve an owned session or authoritative worktree handle."""
     session = mgr.get_session(ref)
@@ -1172,17 +1187,15 @@ async def get_events(
     session = mgr.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    controlled_caller_id = (
+        _controlled_cursor_key(caller_id) if controlled else None
+    )
     if not session.event_log:
         raise HTTPException(status_code=500, detail="No event log for session")
 
     cursor_state = None
     current_continuity_id = None
     if controlled:
-        if not caller_id:
-            raise HTTPException(
-                status_code=422,
-                detail="controlled event delivery requires caller_id",
-            )
         if transient and (after is None or continuity_id is None):
             raise HTTPException(
                 status_code=422,
@@ -1191,7 +1204,7 @@ async def get_events(
                 ),
             )
         cursor_state = mgr.db.get_controlled_cursor_state(
-            _cursor_key(caller_id), session_id
+            controlled_caller_id, session_id
         )
         invalidation = cursor_state.get("invalidation")
         if invalidation:
@@ -1368,7 +1381,7 @@ async def ack_cursor(
         )
 
     result = mgr.db.acknowledge_controlled_cursor(
-        _cursor_key(req.caller_id),
+        _controlled_cursor_key(req.caller_id),
         session_id,
         req.last_id,
         time.time(),
