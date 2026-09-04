@@ -46,8 +46,9 @@ def _write_loop(path):
 
 
 class FakeClient:
-    def __init__(self, tasks=()):
+    def __init__(self, tasks=(), reservations=()):
         self.tasks = list(tasks)
+        self.reservations = list(reservations)
 
     def __enter__(self):
         return self
@@ -57,6 +58,14 @@ class FakeClient:
 
     def list(self, **_kwargs):
         return list(self.tasks)
+
+    def list_reservations(self, *, task_id=None, state=None, **_kwargs):
+        return [
+            reservation
+            for reservation in self.reservations
+            if (task_id is None or reservation.get("task_id") == task_id)
+            and (state is None or reservation.get("state") == state)
+        ]
 
 
 def test_inspect_disable_and_enable_cover_both_units(
@@ -200,3 +209,153 @@ def test_doctor_exposes_forge_failure_and_emitter_failure(
     assert "emitter-failure" in output["diagnoses"]
     assert output["forge_error"] == "credential unavailable"
     assert output["kill_switch"]["disabled"] is False
+
+
+def test_doctor_exposes_exhausted_spawn_attempts(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import repository_issue_loops as loops
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    declaration = (
+        tmp_path / "repo" / ".agent-dispatch" / "registrar" / "issues.json"
+    )
+    registrar_dir = tmp_path / "registrar-state"
+    _write_loop(declaration)
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(registrar_dir))
+    assert main(["repository-issue-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+    task = {
+        "id": "task-dead-lettered",
+        "status": "queued",
+        "origin_ref": "backlog/occurrence/1",
+        "awaiting_steer": False,
+    }
+    reservations = [
+        {
+            "task_id": task["id"],
+            "state": "failed",
+            "attempt": attempt,
+        }
+        for attempt in range(1, 4)
+    ]
+    monkeypatch.setattr(
+        cli,
+        "_client",
+        lambda _args, **_kwargs: FakeClient([task], reservations),
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _p: True)
+    monkeypatch.setattr(
+        loops.GitHubProvider,
+        "list_open_issues",
+        lambda _self, _repo: [],
+    )
+    registrations = cli._repository_issue_loop_registrations(
+        cli.build_parser().parse_args(
+            ["repository-issue-loop", "status", str(declaration)]
+        )
+    )
+    runtime = cli._supervisor_runtime_status_path(
+        supervisor_lease_scope("host-a", "default")
+    )
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    runtime.write_text(
+        json.dumps(
+            {
+                "updated_at": time.time(),
+                "running": [item["id"] for item in registrations],
+                "backing_off": [],
+                "dead": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["repository-issue-loop", "doctor", str(declaration)]) == 1
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["healthy"] is False
+    assert "spawn-dead-lettered" in output["diagnoses"]
+    assert output["active_occurrence"]["spawn_failures"] == 3
+    assert output["active_occurrence"]["spawn_attempt_limit"] == 3
+    assert output["active_occurrence"]["spawn_dead_lettered"] is True
+    assert output["active_occurrence"]["spawn_recovery"] is None
+    assert output["actions"] == [
+        "agent-dispatch reservations rearm task-dead-lettered "
+        "--permit --reason <reason>"
+    ]
+
+
+def test_doctor_does_not_recommend_unsupported_rearm(
+    tmp_path, monkeypatch, capsys
+):
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import repository_issue_loops as loops
+    from agent_dispatch.supervisor_daemon import supervisor_lease_scope
+
+    declaration = (
+        tmp_path / "repo" / ".agent-dispatch" / "registrar" / "issues.json"
+    )
+    registrar_dir = tmp_path / "registrar-state"
+    _write_loop(declaration)
+    config = json.loads(declaration.read_text(encoding="utf-8"))
+    config["pool"]["max_attempts"] = 2
+    declaration.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(registrar_dir))
+    assert main(["repository-issue-loop", "setup", str(declaration)]) == 0
+    capsys.readouterr()
+    task = {
+        "id": "task-two-attempts",
+        "status": "queued",
+        "origin_ref": "backlog/occurrence/2",
+        "awaiting_steer": False,
+    }
+    reservations = [
+        {"task_id": task["id"], "state": "failed", "attempt": attempt}
+        for attempt in range(1, 3)
+    ]
+    monkeypatch.setattr(
+        cli,
+        "_client",
+        lambda _args, **_kwargs: FakeClient([task], reservations),
+    )
+    monkeypatch.setattr(
+        "agent_dispatch.remote_dispatch.local_machine", lambda: "host-a"
+    )
+    monkeypatch.setattr("agent_dispatch.single_instance.is_locked", lambda _p: True)
+    monkeypatch.setattr(
+        loops.GitHubProvider,
+        "list_open_issues",
+        lambda _self, _repo: [],
+    )
+    registrations = cli._repository_issue_loop_registrations(
+        cli.build_parser().parse_args(
+            ["repository-issue-loop", "status", str(declaration)]
+        )
+    )
+    runtime = cli._supervisor_runtime_status_path(
+        supervisor_lease_scope("host-a", "default")
+    )
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    runtime.write_text(
+        json.dumps(
+            {
+                "updated_at": time.time(),
+                "running": [item["id"] for item in registrations],
+                "backing_off": [],
+                "dead": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["repository-issue-loop", "doctor", str(declaration)]) == 1
+
+    output = json.loads(capsys.readouterr().out)
+    assert "spawn-dead-lettered" in output["diagnoses"]
+    assert output["actions"] == []
+    assert "requires at least 3" in output["active_occurrence"]["spawn_recovery"]

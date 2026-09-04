@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import types
@@ -497,6 +498,75 @@ def test_resolve_worktree_bypasses_display_cache(monkeypatch):
         "--json",
         "--fresh",
     ]
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["finalizing", "finalized", "complete", "completed", "orphaned"],
+)
+def test_resolve_worktree_rejects_terminal_checkout(monkeypatch, status):
+    monkeypatch.setattr(
+        embody,
+        "_agent_worktrees_launch_prefix",
+        lambda: ["/usr/bin/agent-worktrees"],
+    )
+    monkeypatch.setattr(
+        embody.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "worktrees": [
+                        {
+                            "id": "wt-finalized",
+                            "path": "/tmp/wt-finalized",
+                            "status": status,
+                        }
+                    ]
+                }
+            ),
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(embody.WorktreeNotFound, match="terminal"):
+        embody.resolve_worktree("wt-finalized", project="widgets")
+
+
+def test_prepare_reusable_worktree_replaces_finalized_checkout(monkeypatch):
+    monkeypatch.setattr(
+        embody,
+        "resolve_worktree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            embody.WorktreeNotFound("worktree is terminal")
+        ),
+    )
+    monkeypatch.setattr(
+        embody,
+        "create_worktree",
+        lambda **_kwargs: {
+            "worktree": "wt-fresh",
+            "path": "/tmp/wt-fresh",
+        },
+    )
+
+    prepared = embody.prepare_reusable_worktree(
+        {"id": "task-1", "repo": "example.com/acme/widgets"},
+        {
+            "key": "dispatch-task:task-1:2",
+            "attempt": 2,
+            "worktree": "wt-finalized",
+            "session_handle": "local-body:session-unknown",
+        },
+        interface="acp",
+        driver="agent-dispatch",
+        supervisor="supervisor-1",
+    )
+
+    assert prepared["worktree"] == "wt-fresh"
+    assert prepared["replaced"] is True
+    assert prepared["ownership"] == "created"
 
 
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
