@@ -958,6 +958,33 @@ def test_remote_cursor_ack_stays_caller_scoped(remote_app) -> None:
     ]
 
 
+def test_remote_cli_status_defaults_to_text_output(monkeypatch, capsys) -> None:
+    class _CliClient:
+        def get_remote_session_status(self, *_args, **_kwargs):
+            return {
+                "session_id": "session-a",
+                "status": "idle",
+                "last_acked_id": 4,
+                "head_id": 5,
+            }
+
+    monkeypatch.setattr(
+        main_module, "_get_client", lambda **kwargs: _CliClient()
+    )
+    args = argparse.Namespace(
+        remote_action="status",
+        host="example-host",
+        session_id="session-a",
+        caller_id="consumer-a",
+    )
+
+    main_module._cmd_remote(args)
+
+    assert capsys.readouterr().out.strip() == (
+        "session-a [idle] cursor=4/5"
+    )
+
+
 def test_remote_cli_events_ack_after_output(monkeypatch, capsys) -> None:
     class _CliStream(_FakeStream):
         headers = {"X-Agent-Bridge-Continuity": "epoch-a"}

@@ -571,7 +571,7 @@ def _cmd_session_status(args: argparse.Namespace) -> None:
             print(f"[FAIL] {exc.detail}", file=sys.stderr)
         sys.exit(1)
 
-    if args.json:
+    if getattr(args, "json", False):
         _json_out(st)
         return
 
@@ -709,7 +709,7 @@ def _cmd_remote(args: argparse.Namespace) -> None:
                 args.session_id,
                 caller_id=args.caller_id,
             )
-            if args.json:
+            if getattr(args, "json", False):
                 _json_out(result)
             else:
                 print(
@@ -723,7 +723,7 @@ def _cmd_remote(args: argparse.Namespace) -> None:
             result = client.resolve_remote_live_session(
                 args.host, args.session_id
             )
-            if args.json:
+            if getattr(args, "json", False):
                 _json_out(result)
             else:
                 print(
