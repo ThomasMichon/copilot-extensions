@@ -378,7 +378,7 @@ class TestPairedBothGate:
 
 
 class TestDefaultPairedSiblingFinal:
-    """The default probe resolves the sibling from the tracking dir."""
+    """The default probe resolves the sibling from its project registry."""
 
     def _save(self, tracking_dir, rec):
         tracking.save_record(rec, tracking_dir / f"{rec.worktree_id}.yaml")
@@ -391,25 +391,29 @@ class TestDefaultPairedSiblingFinal:
         assert prune.default_paired_sibling_final(rec) is True
 
     def test_sibling_finalized_true(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(tracking.cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(tracking.cfg, "project_dir", lambda _project: tmp_path)
+        sibling_dir = tmp_path / "worktrees"
+        sibling_dir.mkdir()
         sib = _rec()
         sib.worktree_id = "wt-k"
         sib.status = "finalized"
-        self._save(tmp_path, sib)
+        self._save(sibling_dir, sib)
         rec = _rec_paired(pair_ref="m/k/wt-k")
         assert prune.default_paired_sibling_final(rec) is True
 
     def test_sibling_not_finalized_false(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(tracking.cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(tracking.cfg, "project_dir", lambda _project: tmp_path)
+        sibling_dir = tmp_path / "worktrees"
+        sibling_dir.mkdir()
         sib = _rec()
         sib.worktree_id = "wt-k"
         sib.status = "active"
-        self._save(tmp_path, sib)
+        self._save(sibling_dir, sib)
         rec = _rec_paired(pair_ref="m/k/wt-k")
         assert prune.default_paired_sibling_final(rec) is False
 
     def test_sibling_missing_none(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(tracking.cfg, "tracking_dir", lambda: tmp_path)
+        monkeypatch.setattr(tracking.cfg, "project_dir", lambda _project: tmp_path)
         rec = _rec_paired(pair_ref="m/k/wt-gone")
         assert prune.default_paired_sibling_final(rec) is None
 
