@@ -281,7 +281,7 @@ set against the registry on every tick.
   supervisor per machine-and-environment* guarantee. A double launch (e.g. two
   `--ensure` registers racing) is self-correcting: the loser stands down.
 - **Reconcile each tick.** Start a newly-registered unit; **restart** one whose
-  spec changed (fingerprint of `kind`+`spec`); **wind down** one that was removed
+  spec or attributed runtime revision changed; **wind down** one that was removed
   or paused (`terminate` its subprocess); **revive** one whose subprocess crashed,
   gated by a restart backoff and bounded by `max_restarts` (a crash-looping unit
   is left stopped and surfaced, never retried forever).
@@ -307,11 +307,22 @@ set against the registry on every tick.
   **materialized** to a per-registration file under the run dir so its subprocess
   can read it. A kind the daemon can't build a command for is logged and skipped,
   never fatal.
+- **Attributed plugin companions.** Active plugin discovery may contribute the
+  non-direct `plugin-companion` kind. Its optional provider decides whether the
+  unit is active and may add arguments/environment; provider uncertainty retains
+  a previous answer only under the exact same declaration authority. The daemon
+  validates plugin-root containment, strips inherited dispatch authority,
+  launches through a pre-execution containment gate, and records PID plus process
+  creation identity before plugin code runs. Windows uses a kill-on-close Job;
+  POSIX uses a process group and can recover a matching receipt after supervisor
+  restart. Confirmed unhealthy probes restart the unit; indeterminate probes do
+  not.
 
 > **Increment status.** The **registration store + verbs**, the **singleton
 > daemon** (reconcile, per-unit subprocesses, crash-safe OS-lock single-instance,
-> crash-revive, wind-down), and **all four kinds** (supervised-lane, evaluator,
-> schedule, emitter) are built — the daemon runs each as its own subprocess,
+> crash-revive, wind-down), the **four direct kinds** (supervised-lane, evaluator,
+> schedule, emitter), and attributed-plugin-only **plugin companions** are built.
+> The daemon runs each active unit as its own contained subprocess,
 > subsuming the foreground `supervise --evaluator` flag into an evaluator
 > registration. The bare `supervise` foreground loop remains available.
 

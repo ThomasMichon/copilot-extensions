@@ -40,6 +40,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from .companion import (
+    CompanionError,
+    CompanionIndeterminate,
+    DefaultCompanionController,
+    companion_authority_fingerprint,
+)
 from .procutil import no_window_kwargs
 from .registrations import RegistrationKind
 
@@ -92,6 +98,7 @@ def _spec_fingerprint(reg: dict) -> str:
             "kind": reg.get("kind"),
             "spec": spec,
             "runtime_revision": reg.get("runtime_revision"),
+            "companion_runtime": reg.get("companion_runtime"),
         },
         sort_keys=True,
         default=str,
@@ -407,6 +414,8 @@ class ManagedUnit:
     registration_id: str
     kind: str
     fingerprint: str
+    registration: dict = field(default_factory=dict)
+    companion_resolution: Any | None = None
     proc: ProcHandle | None = None
     started_at: float = 0.0
     restarts: int = 0
@@ -425,6 +434,8 @@ class ReconcileSummary:
     stopped: list[str] = field(default_factory=list)
     restarted: list[str] = field(default_factory=list)
     revived: list[str] = field(default_factory=list)
+    recovered: list[str] = field(default_factory=list)
+    unhealthy: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     #: Direct registrations suppressed by equivalent declarations this cycle.
     deduplicated: list[str] = field(default_factory=list)
@@ -464,6 +475,7 @@ class SupervisorDaemon:
         declared_source: Callable[[], Iterable[Any]] | None = None,
         overrides_source: Callable[[], Mapping[str, dict]] | None = None,
         client_factory: Callable[[], Any] | None = None,
+        companion_controller: Any | None = None,
     ):
         self.client = client
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
@@ -507,6 +519,9 @@ class SupervisorDaemon:
         #: unit does). Empty until the first successful read.
         self._last_declared: list[dict] = []
         self._last_merge_diagnostics: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+        self._companion_controller = companion_controller
+        self._last_companion_desired: dict[str, tuple[str, Any | None]] = {}
+        self._companion_resolutions: dict[str, Any] = {}
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
@@ -598,9 +613,78 @@ class SupervisorDaemon:
         for rid, registration in list(desired.items()):
             if registration_override_ids(registration) & overridden:
                 desired.pop(rid, None)
+        self._resolve_companion_desired(desired)
         self._deduplicated = merged.deduplicated
         self._conflicts = merged.conflicts
         return desired
+
+    def _companion(self) -> Any:
+        if self._companion_controller is None:
+            self._companion_controller = DefaultCompanionController(
+                self._spec_dir() / "companions"
+            )
+        return self._companion_controller
+
+    def _resolve_companion_desired(self, desired: dict[str, dict]) -> None:
+        current: dict[str, Any] = {}
+        present = {
+            rid
+            for rid, registration in desired.items()
+            if registration.get("kind") == RegistrationKind.PLUGIN_COMPANION
+        }
+        for rid in set(self._last_companion_desired) - present:
+            self._last_companion_desired.pop(rid, None)
+        for rid in present:
+            registration = desired[rid]
+            authority = companion_authority_fingerprint(registration)
+            try:
+                resolution = self._companion().resolve(
+                    registration, machine=self.machine, env=self.env
+                )
+            except CompanionIndeterminate as exc:
+                previous = self._last_companion_desired.get(rid)
+                if previous is not None and previous[0] == authority:
+                    resolution = previous[1]
+                    log.warning(
+                        "companion %s configuration is indeterminate; "
+                        "retaining its last confirmed desired state: %s",
+                        rid,
+                        exc,
+                    )
+                else:
+                    desired.pop(rid, None)
+                    log.warning(
+                        "companion %s configuration is indeterminate without "
+                        "matching confirmed authority; withholding it: %s",
+                        rid,
+                        exc,
+                    )
+                    continue
+            except CompanionError as exc:
+                desired.pop(rid, None)
+                self._last_companion_desired.pop(rid, None)
+                log.error("invalid companion %s: %s", rid, exc)
+                continue
+            else:
+                self._last_companion_desired[rid] = (authority, resolution)
+
+            if resolution is None:
+                desired.pop(rid, None)
+            else:
+                desired[rid] = resolution.registration
+                current[rid] = resolution
+        managed_companions = {
+            rid
+            for rid, unit in self._units.items()
+            if unit.kind == RegistrationKind.PLUGIN_COMPANION
+        }
+        try:
+            self._companion().reconcile_receipts(
+                set(current) | managed_companions
+            )
+        except (CompanionError, CompanionIndeterminate, OSError) as exc:
+            log.warning("companion receipt reconciliation is incomplete: %s", exc)
+        self._companion_resolutions = current
 
     # -- unit lifecycle ------------------------------------------------------
 
@@ -632,36 +716,70 @@ class SupervisorDaemon:
 
     def _start(self, reg: dict, summary: ReconcileSummary, *, bucket: str) -> None:
         rid = reg["id"]
-        try:
-            cmd = build_command(reg, materialize=self._materializer(reg))
-        except UnsupportedKind as exc:
-            log.warning("skipping registration %s: %s", rid, exc)
-            summary.skipped.append(rid)
-            return
-        try:
-            proc = self.launcher.launch(reg, cmd)
-        except OSError as exc:  # pragma: no cover -- launch failure is environmental
-            log.error("failed to launch registration %s: %s", rid, exc)
-            summary.skipped.append(rid)
-            return
+        resolution = self._companion_resolutions.get(rid)
+        if reg.get("kind") == RegistrationKind.PLUGIN_COMPANION:
+            if resolution is None:
+                summary.skipped.append(rid)
+                return
+            try:
+                launched = self._companion().launch(
+                    resolution, fingerprint=_spec_fingerprint(reg)
+                )
+            except (CompanionError, CompanionIndeterminate, OSError) as exc:
+                log.error("failed to launch companion %s: %s", rid, exc)
+                summary.skipped.append(rid)
+                return
+            proc = launched.process
+        else:
+            try:
+                cmd = build_command(reg, materialize=self._materializer(reg))
+            except UnsupportedKind as exc:
+                log.warning("skipping registration %s: %s", rid, exc)
+                summary.skipped.append(rid)
+                return
+            try:
+                proc = self.launcher.launch(reg, cmd)
+            except OSError as exc:  # pragma: no cover -- launch failure is environmental
+                log.error("failed to launch registration %s: %s", rid, exc)
+                summary.skipped.append(rid)
+                return
         existing = self._units.get(rid)
         restarts = existing.restarts if existing else 0
         self._units[rid] = ManagedUnit(
             registration_id=rid,
             kind=reg.get("kind", ""),
             fingerprint=_spec_fingerprint(reg),
+            registration=reg,
+            companion_resolution=resolution,
             proc=proc,
             started_at=self.clock(),
             restarts=restarts,
         )
-        getattr(summary, bucket).append(rid)
+        if reg.get("kind") == RegistrationKind.PLUGIN_COMPANION and launched.recovered:
+            summary.recovered.append(rid)
+        else:
+            getattr(summary, bucket).append(rid)
 
     def _stop(self, rid: str) -> bool:
         unit = self._units.pop(rid, None)
         if unit is None:
             return False
         proc = unit.proc
-        if proc is not None and proc.poll() is None:
+        if proc is not None and unit.kind == RegistrationKind.PLUGIN_COMPANION:
+            try:
+                self._companion().stop(unit.companion_resolution, proc)
+            except (CompanionError, CompanionIndeterminate, OSError, subprocess.SubprocessError):
+                log.exception("error stopping companion %s; forcing retirement", rid)
+                with contextlib.suppress(
+                    CompanionError,
+                    CompanionIndeterminate,
+                    OSError,
+                    subprocess.SubprocessError,
+                ):
+                    self._companion().retire_crashed(
+                        unit.companion_resolution, proc
+                    )
+        elif proc is not None and proc.poll() is None:
             try:
                 proc.terminate()
                 proc.wait(timeout=10)
@@ -702,9 +820,52 @@ class SupervisorDaemon:
             unit = self._units.get(rid)
             if unit is None or unit.proc is None:
                 continue
+            if (
+                unit.kind == RegistrationKind.PLUGIN_COMPANION
+                and unit.proc.poll() is None
+            ):
+                try:
+                    healthy = self._companion().health(
+                        unit.companion_resolution
+                    )
+                except (
+                    CompanionError,
+                    CompanionIndeterminate,
+                    OSError,
+                    subprocess.SubprocessError,
+                ) as exc:
+                    log.warning(
+                        "companion %s health is indeterminate; keeping it: %s",
+                        rid,
+                        exc,
+                    )
+                else:
+                    if healthy is False:
+                        summary.unhealthy.append(rid)
+                        self._stop(rid)
+                        self._start(reg, summary, bucket="restarted")
+                        continue
             if unit.proc.poll() is None:
                 continue  # still running
             # crashed
+            if unit.kind == RegistrationKind.PLUGIN_COMPANION:
+                try:
+                    self._companion().retire_crashed(
+                        unit.companion_resolution, unit.proc
+                    )
+                except (
+                    CompanionError,
+                    CompanionIndeterminate,
+                    OSError,
+                    subprocess.SubprocessError,
+                ) as exc:
+                    log.error(
+                        "could not retire crashed companion %s tree: %s",
+                        rid,
+                        exc,
+                    )
+                    summary.skipped.append(rid)
+                    continue
             if self.max_restarts is not None and unit.restarts >= self.max_restarts:
                 log.error(
                     "registration %s exceeded max restarts (%d); leaving stopped",

@@ -1188,8 +1188,17 @@ An attributed active plugin may also contribute a strict
 and optional configuration provider are plugin-relative argv; plugin root,
 version, declaration path, and activation scopes remain attached to the desired
 registration. This kind cannot be registered through the CLI/coordinator API or
-trusted registrar pointers. It is intentionally **contract-only** in this
-version: the daemon reports it unsupported and never launches it.
+trusted registrar pointers. The singleton daemon resolves the provider on every
+reconcile, retains the last confirmed result only while declaration authority is
+unchanged, and launches an active companion inside an OS-owned process tree.
+Commands cannot escape the attributed plugin root or traverse symlink/reparse
+components, and inherited `AGENT_DISPATCH_*` authority is stripped. A process
+receipt fences recovery by PID plus process-start identity; confirmed unhealthy
+probes restart the unit, while an unavailable or invalid probe is
+indeterminate and leaves a live unit alone. On Windows, kill-on-close Jobs
+retire companion trees with the daemon. On POSIX, process groups and receipts
+allow a restarted daemon to recover a matching live companion without
+duplicating it.
 
 
 **Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
