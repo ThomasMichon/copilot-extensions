@@ -34,6 +34,18 @@ def test_installers_fall_back_and_preserve_bounded_diagnostics() -> None:
     assert "falling back to the base package" in posix
 
 
+def test_windows_management_binstub_resolves_powershell_without_path() -> None:
+    powershell = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
+
+    assert r'%SystemRoot%\System32\where.exe" pwsh' in powershell
+    assert (
+        r"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+        in powershell
+    )
+    assert '"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass' in powershell
+    assert "else (powershell " not in powershell
+
+
 @pytest.mark.skipif(os.name == "nt", reason="requires native POSIX bash semantics")
 def test_posix_bounded_command_survives_errexit() -> None:
     source = (PLUGIN / "scripts" / "init.sh").read_text(encoding="utf-8")
