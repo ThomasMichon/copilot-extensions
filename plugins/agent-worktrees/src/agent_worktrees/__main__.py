@@ -11414,7 +11414,11 @@ def sweep_managed_worktrees(
                 else ""
             )
             if current.worktree_path and Path(current.worktree_path).exists():
-                if git_ops.current_branch(current.worktree_path) != current.branch:
+                if (
+                    current.branch
+                    and git_ops.current_branch(current.worktree_path)
+                    != current.branch
+                ):
                     result["skipped"].append(
                         {
                             "id": current.worktree_id,
