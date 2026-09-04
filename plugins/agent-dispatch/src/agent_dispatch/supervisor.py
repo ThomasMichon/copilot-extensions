@@ -103,7 +103,8 @@ def _default_liveness(worktree: str, machine: str | None) -> dict | None:
     """
     from . import tracking
 
-    return tracking.resolve_live_session(worktree, machine=machine)
+    peer = machine if tracking.remote_dispatch.is_peer_machine(machine) else None
+    return tracking.resolve_live_session(worktree, machine=peer)
 
 
 def _reservation_made_progress(reservation: dict, task: dict) -> bool:
