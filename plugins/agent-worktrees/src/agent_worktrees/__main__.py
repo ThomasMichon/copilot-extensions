@@ -6713,7 +6713,9 @@ def _render_status_segment(
     # (a `master` project binstub must still classify a `main` repo).
     remote, config_default = "origin", None
     try:
-        repo = cfg.load_config().default_repo
+        repo = cfg.load_config(
+            include_control_plane_related_pr=False
+        ).default_repo
         remote, config_default = repo.remote, repo.default_branch
     except Exception:
         pass
