@@ -126,7 +126,7 @@
     {
       "name": "delegation-guidance",
       "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
-      "version": "0.1.0-dev10",
+      "version": "0.1.0-dev11",
       "source": "plugins/delegation-guidance"
     },
     {
