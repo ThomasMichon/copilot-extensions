@@ -220,12 +220,14 @@ def test_status_daemon_console_root_contains_psmux_descendants(
     openconsole_pids: set[int] = set()
     visible_terminal_windows: set[tuple[int, int, str, str, str]] = set()
     foreground_transitions: set[tuple[int, int, str, str, str]] = set()
+    observed_descendants: set[int] = set()
     observed_root = False
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline and not marker.exists():
         processes = _process_snapshot()
         observed_root = observed_root or process.pid in processes
         descendants = _descendants(process.pid, processes)
+        observed_descendants.update(descendants)
         for pid in descendants:
             name = processes.get(pid, ("", 0))[0].lower()
             if name == "conhost.exe":
@@ -235,11 +237,19 @@ def test_status_daemon_console_root_contains_psmux_descendants(
 
         for hwnd, window in _window_snapshot(processes).items():
             state = (hwnd, *window)
-            if hwnd not in baseline_windows and _is_terminal_window(state):
+            if (
+                hwnd not in baseline_windows
+                and window[0] in observed_descendants
+                and _is_terminal_window(state)
+            ):
                 visible_terminal_windows.add(state)
 
         foreground = _foreground_state(processes)
-        if foreground != baseline_foreground and _is_terminal_window(foreground):
+        if (
+            foreground != baseline_foreground
+            and foreground[1] in observed_descendants
+            and _is_terminal_window(foreground)
+        ):
             foreground_transitions.add(foreground)
         time.sleep(0.02)
 
