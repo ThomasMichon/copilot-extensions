@@ -195,7 +195,7 @@ locally supervised host runtime the search capability is honestly unavailable.
 
 The hosted service uses the suite's
 [plugin-services](../../plugin-services/README.md)
-`delegated-heavy-companion-runtime` boundary. Agent-index contributes attributed
+`delegated-heavy-companion-runtime` boundary. agent-index contributes attributed
 declarative runtime inputs and lifecycle adapters, while the already-running
 dispatch supervisor alone installs, updates, rolls back, and retires the
 versioned service dependencies. Agent-facing commands and ordinary direct CLI

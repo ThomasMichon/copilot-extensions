@@ -22,7 +22,7 @@ runtime cells.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Planning worktree | Own reviewed intent and carve independent slices | `worktree/cpc-tmich-oixui-win-20260904-074914-1f58` |
+| Planning worktree | Own reviewed intent and carve independent slices | This proposal PR |
 | Per-slice worktree | Implement one accepted slice | Fresh worktree and PR linked from #2007 |
 
 ## Coordination
