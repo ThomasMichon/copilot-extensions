@@ -4619,11 +4619,10 @@ def _cmd_end(args: argparse.Namespace) -> None:
 
     client = _get_client()
     try:
-        client.end_session(
-            args.session_id,
-            force=getattr(args, "force", False),
-            if_idle=getattr(args, "if_idle", False),
-        )
+        end_kwargs = {"force": getattr(args, "force", False)}
+        if getattr(args, "if_idle", False):
+            end_kwargs["if_idle"] = True
+        client.end_session(args.session_id, **end_kwargs)
     except BridgeClientError as exc:
         if exc.status == 404:
             print(f"[OK] Session {args.session_id} already ended")

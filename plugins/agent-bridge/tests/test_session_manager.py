@@ -2080,6 +2080,22 @@ class TestEndSession:
         assert session_manager.get_session(session.session_id) is session
 
     @pytest.mark.asyncio
+    async def test_end_if_idle_preserves_queued_prompts(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session_manager._db.enqueue_prompt(
+            session.session_id,
+            "continue later",
+            session.updated_at,
+        )
+
+        with pytest.raises(ValueError, match="has queued prompts"):
+            await session_manager.end_session_if_idle(session.session_id)
+
+        assert session_manager.get_session(session.session_id) is session
+
+    @pytest.mark.asyncio
     async def test_end_succeeds_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:

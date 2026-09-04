@@ -1151,12 +1151,25 @@ class BridgeClient:
         ``force`` maps to the route's ``?force=true`` — tear down even with
         active background sub-agent tasks (they are killed). See #191.
         """
+        if if_idle:
+            from .protocol import CONDITIONAL_IDLE_END_PROTOCOL_VERSION
+
+            if not self.daemon_supports(CONDITIONAL_IDLE_END_PROTOCOL_VERSION):
+                raise BridgeClientError(
+                    426,
+                    "Conditional idle end requires agent-bridge HTTP protocol "
+                    f"{CONDITIONAL_IDLE_END_PROTOCOL_VERSION} or newer.",
+                )
         params: dict[str, str] = {}
         if force:
             params["force"] = "true"
         if if_idle:
             params["if_idle"] = "true"
-        self._request("DELETE", f"/api/v1/sessions/{session_id}", params=params)
+        self._request(
+            "DELETE",
+            f"/api/v1/sessions/{session_id}",
+            params=params or None,
+        )
 
     def handoff_session(
         self, session_id: str, *, reason: str | None = None, seed: bool = True

@@ -5027,6 +5027,8 @@ class SessionManager:
 
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
         """Atomically start a turn against conditional idle teardown."""
+        if self._draining:
+            raise DaemonDrainingError("turn")
         resolved = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(resolved)
         if not session:
