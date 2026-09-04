@@ -56,6 +56,15 @@ class SseStream(Iterator[dict[str, Any]]):
     def __iter__(self) -> SseStream:
         return self
 
+    def __enter__(self) -> SseStream:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
     def __next__(self) -> dict[str, Any]:
         while True:
             try:

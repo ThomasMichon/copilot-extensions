@@ -8,6 +8,7 @@ Locks in the contract that liveness rides the comment channel:
 
 from __future__ import annotations
 
+import gc
 import json
 from unittest.mock import patch
 
@@ -20,12 +21,13 @@ class _FakeSseResp:
     def __init__(self, lines: list[str]) -> None:
         # Each SSE line is delivered as its own bytes chunk, newline-terminated.
         self._lines = [(ln + "\n").encode() for ln in lines]
+        self.closed = False
 
     def __iter__(self):
         return iter(self._lines)
 
     def close(self) -> None:
-        pass
+        self.closed = True
 
 
 def _drain(lines: list[str]) -> list[dict]:
@@ -38,6 +40,32 @@ def _drain(lines: list[str]) -> list[dict]:
 
 
 class TestSseCommentParsing:
+    def test_abandoned_stream_closes_response(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FakeSseResp([": heartbeat", ""])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            stream = client.stream_events("sess-1")
+            assert next(stream)["event"] == "_heartbeat"
+            del stream
+            gc.collect()
+
+        assert response.closed is True
+
+    def test_stream_context_manager_closes_response(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FakeSseResp([": heartbeat", ""])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            with client.stream_events("sess-1") as stream:
+                assert next(stream)["event"] == "_heartbeat"
+
+        assert response.closed is True
+
     def test_successful_stream_resets_outage_budget(self) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok")
         client._outage_deadline = 1.0

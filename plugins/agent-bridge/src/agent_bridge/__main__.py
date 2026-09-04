@@ -4050,6 +4050,7 @@ def _stream_feed(
             pass
 
     for _attempt in range(max_attempts):
+        stream = None
         try:
             attention_result = _probe_attention()
             if attention_result and attention_result.get("settled"):
@@ -4061,9 +4062,10 @@ def _stream_feed(
                 and attention_result.get("identity", {}).get("successor_id")
             ):
                 return attention_result
-            for evt in client.stream_events(
+            stream = client.stream_events(
                 session_id, after=cursor, caller_id=caller_id
-            ):
+            )
+            for evt in stream:
                 now = time.monotonic()
                 etype = evt.get("event", "")
 
@@ -4182,6 +4184,10 @@ def _stream_feed(
                     )
                     return "error"
             # non-404 transient -- retry
+        finally:
+            close_stream = getattr(stream, "close", None)
+            if close_stream is not None:
+                close_stream()
 
         now = time.monotonic()
         if deadline and now > deadline:
