@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice worktrees and pull requests
 - **Created:** 2026-09-04
-- **Status:** Draft
+- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
 - **Vision:** [`visions/harness-guidance`](../../../visions/harness-guidance/README.md)
   - `evidence-calibrated-model-routing`
   - `purpose-to-model-grounding`
@@ -225,4 +225,3 @@ See [design.md](design.md).
   dispatch/container boundaries.
 - This PR carries only the reviewed implementation plan. Plugin changes begin
   after it merges.
-
