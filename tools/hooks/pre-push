@@ -40,6 +40,9 @@ fi
 # Keep each plugin's version identical across plugin.json / pyproject.toml /
 # marketplace.json (a one-file bump wedges the Picker's update indicator).
 "${PY[@]}" "$ROOT/tools/check-version-consistency.py"
+# Freeze registered agent-bridge contracts and require a registry update when a
+# contract-sensitive source changes.
+"${PY[@]}" "$ROOT/tools/check-agent-bridge-contracts.py" --base origin/main
 # Require a version bump whenever a plugin's content -- or a vendored lib it
 # ships -- changes, so new code never serves under a stale version (the silent
 # stale-deploy gap, dotfiles #1025). Diffs the push against origin/main.

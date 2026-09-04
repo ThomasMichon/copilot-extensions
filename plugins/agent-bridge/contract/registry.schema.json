@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ThomasMichon/copilot-extensions/agent-bridge-contract-registry.schema.json",
+  "title": "agent-bridge contract registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contracts",
+    "deferred_contracts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "contracts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/contract"
+      }
+    },
+    "deferred_contracts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/deferredContract"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "gitBlob": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sourcePath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "semantic",
+        "non_semantic_reason"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "semantic": {
+          "type": "boolean"
+        },
+        "non_semantic_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "role",
+        "generation"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "runtimeProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "plugin_version",
+        "generation",
+        "source_path",
+        "source_git_blob",
+        "capture_method"
+      ],
+      "properties": {
+        "commit": {
+          "$ref": "#/$defs/gitCommit"
+        },
+        "plugin_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_git_blob": {
+          "$ref": "#/$defs/gitBlob"
+        },
+        "capture_method": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "generationRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current",
+        "minimum",
+        "previous_generation",
+        "previous_absent_reason"
+      ],
+      "properties": {
+        "current": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimum": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "previous_generation": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "previous_absent_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "authority",
+        "owner",
+        "kind",
+        "normative",
+        "declared_range",
+        "evidence_window",
+        "capability_versions",
+        "durable_records",
+        "source_paths",
+        "fixtures",
+        "provenance",
+        "support_window",
+        "bridge_contract_rollback_window",
+        "mixed_version_scenarios",
+        "removal_gate"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]+$"
+        },
+        "authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "wire-protocol",
+            "semantic-contract",
+            "external-reference",
+            "representation-reference"
+          ]
+        },
+        "normative": {
+          "type": "boolean"
+        },
+        "declared_range": {
+          "$ref": "#/$defs/generationRange"
+        },
+        "evidence_window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "generations",
+            "runtimes"
+          ],
+          "properties": {
+            "generations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "runtimes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "capability_versions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "durable_records": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sourcePath"
+          }
+        },
+        "fixtures": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/fixture"
+          }
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/runtimeProvenance"
+          }
+        },
+        "support_window": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bridge_contract_rollback_window": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mixed_version_scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "removal_gate": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "deferredContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner",
+        "classification",
+        "tracked_issue",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]+$"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "enum": [
+            "bridge-owned",
+            "externally-owned",
+            "deferred"
+          ]
+        },
+        "tracked_issue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reference_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

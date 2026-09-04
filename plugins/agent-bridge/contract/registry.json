@@ -1,0 +1,353 @@
+{
+  "schema_version": 1,
+  "contracts": [
+    {
+      "id": "agent-bridge.http-wire",
+      "authority": "agent-bridge/http-wire",
+      "owner": "agent-bridge",
+      "kind": "wire-protocol",
+      "normative": true,
+      "declared_range": {
+        "current": 12,
+        "minimum": 1,
+        "previous_generation": 11,
+        "previous_absent_reason": null
+      },
+      "evidence_window": {
+        "generations": [
+          9,
+          10,
+          11,
+          12
+        ],
+        "runtimes": [
+          "0.4.0-dev423",
+          "0.4.0-dev424",
+          "0.4.0-dev429",
+          "0.4.0-dev430"
+        ]
+      },
+      "capability_versions": {
+        "relay_interrupt": 2,
+        "failed_acp_handshake": 3,
+        "container_recreate": 4,
+        "machine_metadata": 5,
+        "result_snapshot": 6,
+        "represented_result_snapshot": 7,
+        "provider_target_refresh": 8,
+        "at_rest_projection": 9,
+        "attention_wait": 10,
+        "remote_operations": 11,
+        "conditional_idle_end": 12
+      },
+      "durable_records": [],
+      "source_paths": [
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "sha256": "e561212d4cbcc607808c050014e0ee996b699b133b0b9c70bb6c9f18c853774f",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "sha256": "81f524ad0d58f4bedefb3ec5062c71ed0ddde367bcba4458f9696538ce2202fd",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "sha256": "729566b0f8865493b91ffcc9ef61a7d4f375c279695f14f05564146f0a00be29",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "sha256": "49d51795792a12b55ed8cd93893abd26f24e1a5a84dde049f97e24525153f583",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/tests/test_wire_compat.py",
+          "sha256": "83728e07defb2ce501055554ec7c26e9707038a04c477e75e18b23525a0620a4",
+          "semantic": false,
+          "non_semantic_reason": "This guard asserts tolerant reading but does not produce the registered wire shape."
+        }
+      ],
+      "fixtures": [
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
+          "sha256": "bbe2c7dc4f8ea00c7f5710948af7e81ec10d0396ecbaf1ce4e3835e340fd38b8",
+          "role": "current health response",
+          "generation": 12
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
+          "sha256": "447037b2a7e4126ad165c57d0d91c520f4078abc721c756481b7ddad5ed0e27c",
+          "role": "current session-create request with unknown-field tolerance",
+          "generation": 12
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
+          "sha256": "0e96fd45485435b392a8969a18c71f9f45bae2cf20a5246c1d09d0ad1e307f67",
+          "role": "current session-create response",
+          "generation": 12
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
+          "sha256": "4a5832e98f6c4d4ae04977644d87cbb271d89b1c45365ee139e0de1dbe7426ca",
+          "role": "current representative FastAPI error",
+          "generation": 12
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-11/health.json",
+          "sha256": "71741f49f9f6a4b5d5afbd3f6d75e2a1ad4d963d219d0c985f058255cbf0d40d",
+          "role": "previous HTTP generation health evidence",
+          "generation": 11
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-9/health.json",
+          "sha256": "f9a5d3a19a5bab679afb2851d9dbab44eea9367b707747ef1489650d5e27be92",
+          "role": "previous HTTP generation health evidence",
+          "generation": 9
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/prior-runtime-dev424/health.json",
+          "sha256": "61c71de24ee21fd7a99197146a160d84351bd31fa9e84ebe25fe0ef6210a7abd",
+          "role": "previous runtime speaking current HTTP generation",
+          "generation": 10
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
+          "sha256": "05dee546c705995a3e18a36ee305f436b110b93017ded3ad321d5623b219830f",
+          "role": "current HTTP range and capability constants",
+          "generation": 12
+        }
+      ],
+      "provenance": [
+        {
+          "commit": "4b8a3777221ad0e71f2931dd577cf3c7592ebb90",
+          "plugin_version": "0.4.0-dev430",
+          "generation": 12,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "e35defb3a9efbca79e1010386e5aef6ae043c399",
+          "capture_method": "Read production constants and serialize representative models from this exact source revision."
+        },
+        {
+          "commit": "4b8a3777221ad0e71f2931dd577cf3c7592ebb90",
+          "plugin_version": "0.4.0-dev430",
+          "generation": 12,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
+          "capture_method": "Invoke the health route with a controlled empty runtime state and zeroed carrier diagnostics."
+        },
+        {
+          "commit": "4b8a3777221ad0e71f2931dd577cf3c7592ebb90",
+          "plugin_version": "0.4.0-dev430",
+          "generation": 12,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "391f9ceaf3b7638b7cc1e508c1a2e9ada5e944bc",
+          "capture_method": "Validate and serialize representative session-create request and response models."
+        },
+        {
+          "commit": "4b8a3777221ad0e71f2931dd577cf3c7592ebb90",
+          "plugin_version": "0.4.0-dev430",
+          "generation": 12,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "8f0a0f10ce17e7bdd5e4a567cd856ed3f2891278",
+          "capture_method": "Invoke the pre-resolution initialization refusal and preserve its FastAPI error response."
+        },
+        {
+          "commit": "94b0ee093471c8744ab9abaf1f75abfc2e73e8da",
+          "plugin_version": "0.4.0-dev429",
+          "generation": 11,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "b62167549bacc47adce0ba61f65524deff20d61e",
+          "capture_method": "Read the immutable Git blob from the immediately previous HTTP generation."
+        },
+        {
+          "commit": "94b0ee093471c8744ab9abaf1f75abfc2e73e8da",
+          "plugin_version": "0.4.0-dev429",
+          "generation": 11,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
+          "capture_method": "Read the immutable health-route blob from the immediately previous HTTP generation."
+        },
+        {
+          "commit": "2977f41b922ce863641e285e02efb4a023f30880",
+          "plugin_version": "0.4.0-dev424",
+          "generation": 10,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "9e9795a77a27980c6781e0a37ccec7d40d2493cf",
+          "capture_method": "Read the immutable Git blob from the immediately previous published runtime."
+        },
+        {
+          "commit": "2977f41b922ce863641e285e02efb4a023f30880",
+          "plugin_version": "0.4.0-dev424",
+          "generation": 10,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
+          "capture_method": "Read the immutable health-route blob from the immediately previous published runtime."
+        },
+        {
+          "commit": "cda89a5b49fe1acb3779a5783125617e96da8fb4",
+          "plugin_version": "0.4.0-dev423",
+          "generation": 9,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "909569cbf584091cd48aab033afee598795de229",
+          "capture_method": "Read the immutable Git blob from the last published HTTP generation before attention waits."
+        },
+        {
+          "commit": "cda89a5b49fe1acb3779a5783125617e96da8fb4",
+          "plugin_version": "0.4.0-dev423",
+          "generation": 9,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
+          "capture_method": "Read the immutable health-route blob from the last published HTTP generation before attention waits."
+        }
+      ],
+      "support_window": "The daemon declares HTTP generations 1 through 12 supported; evidence currently exercises generations 9 through 12.",
+      "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
+      "mixed_version_scenarios": [
+        "new-client_old-daemon",
+        "old-client_new-daemon",
+        "unversioned-peer"
+      ],
+      "removal_gate": "Stop old writers, prove zero live or recoverable references, expire the rollback window, and pass the current/previous mixed-version matrix."
+    },
+    {
+      "id": "agent-bridge.session-host-wire",
+      "authority": "agent-bridge/session-host-wire",
+      "owner": "agent-bridge",
+      "kind": "wire-protocol",
+      "normative": true,
+      "declared_range": {
+        "current": 1,
+        "minimum": 1,
+        "previous_generation": null,
+        "previous_absent_reason": "The Session Host envelope has never published a generation before 1."
+      },
+      "evidence_window": {
+        "generations": [
+          1
+        ],
+        "runtimes": [
+          "0.4.0-dev150",
+          "0.4.0-dev425"
+        ]
+      },
+      "capability_versions": {
+        "length_prefixed_envelope": 1,
+        "unknown_message_skip": 1
+      },
+      "durable_records": [],
+      "source_paths": [
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "sha256": "65ff14618e7a530a3d5177f3591e71edbc31760c3ebefd9e98e46f76abc45567",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_host/version_mux.py",
+          "sha256": "2549cfb4c456aeb5b09a79360f67fa1b85f2de9fee74452ecd44a45b046792c4",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/tests/test_session_host.py",
+          "sha256": "e9e73b9a35cd58b7119411399bcae9ecccfaa1f0b0e2b63d99be0b4779409aae",
+          "semantic": false,
+          "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape."
+        }
+      ],
+      "fixtures": [
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/current/messages.json",
+          "sha256": "2472605f0ddb8a543ca1a10a603cfd7dbfb940ee6e441055a956a16981d3377d",
+          "role": "current framing and every control/data message shape",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/prior-runtime-dev150/messages.json",
+          "sha256": "dbf68e730b2db4457951a7b0ecac7c7ebd597a4474ab0a440f4c0aac1aafadbe",
+          "role": "prior-runtime framing and unknown-message tolerance",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/current/version-mux.json",
+          "sha256": "11f70c03f74d344f79ed87d28615aa05929ee738aa6c2cd35ae7b4c536f7745f",
+          "role": "current frontend supported Session Host generations",
+          "generation": 1
+        }
+      ],
+      "provenance": [
+        {
+          "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
+          "plugin_version": "0.4.0-dev425",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "source_git_blob": "09f8fd20efb3a35915989883a3835c7dffcb9a1c",
+          "capture_method": "Serialize every current message type with fixed synthetic values and preserve ACP payloads as opaque bytes."
+        },
+        {
+          "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
+          "plugin_version": "0.4.0-dev425",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/version_mux.py",
+          "source_git_blob": "cbed209a2c58658c9434a21ec1a3bafdc21fb360",
+          "capture_method": "Read the exact frontend supported-generation set from the published version-mux source."
+        },
+        {
+          "commit": "4ed08dcdd0e72377b95a67d6bd22aec819bf7fec",
+          "plugin_version": "0.4.0-dev150",
+          "generation": 1,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+          "source_git_blob": "dde0d3566ce5d0cd92a49d8f6438dd907d533993",
+          "capture_method": "Read the immutable Git blob from the published runtime that introduced unknown-message skipping."
+        }
+      ],
+      "support_window": "Session Host generation 1 is the only published envelope and remains supported by the current frontend mux.",
+      "bridge_contract_rollback_window": "Retain the dev150 prior-runtime fixture until no supported frontend or recoverable host can run that envelope implementation.",
+      "mixed_version_scenarios": [
+        "new-frontend_H1-host",
+        "H1-frontend_new-host",
+        "unknown-additive-message"
+      ],
+      "removal_gate": "Publish and negotiate a successor envelope, retain a generation-1 adapter through the rollback window, and prove zero live or recoverable generation-1 hosts."
+    }
+  ],
+  "deferred_contracts": [
+    {
+      "id": "agent-bridge.ahp-0.8",
+      "owner": "#1308",
+      "classification": "externally-owned",
+      "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1308",
+      "reason": "AHP owns its released corpus and compatibility policy; this registry records only a source reference until that owner promotes an integration contract.",
+      "reference_path": "plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/source-manifest.json",
+      "reference_sha256": "4111e47901e0b2fe176df2dcf2fc237568ab15fc404f71a0447b0d42b83c560a"
+    },
+    {
+      "id": "agent-bridge.delegation-control",
+      "owner": "#1448",
+      "classification": "externally-owned",
+      "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1448",
+      "reason": "The delegation effort owns lifecycle vocabulary and product semantics; the compatibility registry must not redefine them.",
+      "reference_path": "plugins/agent-bridge/docs/delegation-contract.md",
+      "reference_sha256": "8d8adc3c49f122b7475498119cc22fcecdc6ecf5168db6e3996a0b82d5ebdda4"
+    },
+    {
+      "id": "agent-bridge.event-history-identity",
+      "owner": "#1138",
+      "classification": "deferred",
+      "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1138",
+      "reason": "Event, cursor, projection-reference, and rebuild-generation semantics remain non-normative until immutable event identity lands."
+    },
+    {
+      "id": "agent-bridge.durable-integration-boundaries",
+      "owner": "#1915",
+      "classification": "deferred",
+      "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1915",
+      "reason": "HostIndex, SpawnTarget, route authority, relay, claim-adapter, and provider-manifest families are the next independently reviewable baseline; that inventory will select the first tolerant-reader and old-writer-fencing target."
+    }
+  ]
+}
