@@ -478,14 +478,13 @@ def resume_steered_owner(
     return proc.returncode == 0
 
 
-def parse_agent_names(out: str | None) -> set[str] | None:
-    """Extract agent ``name`` values from ``agent-bridge --json agents`` stdout.
+def parse_agents(out: str | None) -> list[dict] | None:
+    """Extract agent records from ``agent-bridge --json agents`` stdout.
 
     ``agent-bridge`` may print a human preamble line before the JSON array, so we
-    locate the first ``[`` and ``raw_decode`` from there. Returns the set of names,
-    or ``None`` -- meaning *indeterminate*, not *empty* -- when the payload is
-    missing or unparseable, so a caller can distinguish "provably absent" (a real
-    set that omits a name) from "couldn't tell".
+    locate the first ``[`` and ``raw_decode`` from there. Returns ``None`` --
+    meaning *indeterminate*, not *empty* -- when the payload is missing or
+    unparseable.
     """
     text = (out or "").strip()
     if not text:
@@ -505,23 +504,27 @@ def parse_agent_names(out: str | None) -> set[str] | None:
             return None
     if not isinstance(data, list):
         return None
-    names: set[str] = set()
-    for entry in data:
-        if isinstance(entry, dict):
-            name = entry.get("name")
-            if isinstance(name, str) and name:
-                names.add(name)
-    return names
+    return [entry for entry in data if isinstance(entry, dict)]
 
 
-def registered_agent_names(*, timeout: float = 8.0) -> set[str] | None:
-    """Best-effort set of agent names registered with the **local** agent-bridge.
+def parse_agent_names(out: str | None) -> set[str] | None:
+    """Extract agent ``name`` values from ``agent-bridge --json agents`` stdout."""
+    rows = parse_agents(out)
+    if rows is None:
+        return None
+    return {
+        name
+        for row in rows
+        if isinstance((name := row.get("name")), str) and name
+    }
 
-    Runs ``agent-bridge --json agents`` and collects each entry's ``name``.
+
+def registered_agents(*, timeout: float = 8.0) -> list[dict] | None:
+    """Best-effort agent records from the **local** agent-bridge.
+
     Returns ``None`` (indeterminate) whenever the registry can't be read -- the
     bridge CLI is absent, the command exits non-zero, times out, or emits
-    unparseable output -- so a caller never mistakes "couldn't check" for "no such
-    agent". Never raises.
+    unparseable output. Never raises.
     """
     exe = _agent_bridge_launch_prefix()
     if exe is None:
@@ -536,7 +539,32 @@ def registered_agent_names(*, timeout: float = 8.0) -> set[str] | None:
         return None
     if proc.returncode != 0:
         return None
-    return parse_agent_names(proc.stdout)
+    return parse_agents(proc.stdout)
+
+
+def registered_agent_names(*, timeout: float = 8.0) -> set[str] | None:
+    """Best-effort set of names registered with the local agent-bridge."""
+    rows = registered_agents(timeout=timeout)
+    if rows is None:
+        return None
+    return {
+        name
+        for row in rows
+        if isinstance((name := row.get("name")), str) and name
+    }
+
+
+def registered_agent_project(agent: str, *, timeout: float = 8.0) -> str | None:
+    """Return a registered local agent's explicit project, when available."""
+    rows = registered_agents(timeout=timeout)
+    if rows is None:
+        return None
+    for row in rows:
+        if row.get("name") != agent:
+            continue
+        project = row.get("project")
+        return project if isinstance(project, str) and project else None
+    return None
 
 
 def preflight_headless_agent(
