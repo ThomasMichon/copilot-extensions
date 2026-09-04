@@ -170,12 +170,9 @@ def audit_pair_integrity(
                 repairable=repairable,
             )
             if apply and repairable:
-                source, candidate = candidates[0]
+                _source, candidate = candidates[0]
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 tracking.save_record(candidate, target_path)
-                source_path = _tracking_dir(source) / f"{candidate.worktree_id}.yaml"
-                if source_path != target_path:
-                    source_path.unlink(missing_ok=True)
                 finding.repaired = True
             findings.append(finding)
             seen.add(target_key)

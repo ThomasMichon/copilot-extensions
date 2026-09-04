@@ -84,7 +84,7 @@ def test_doctor_repairs_misplaced_knowledge_record(tmp_path, monkeypatch):
     ) is not None
     assert tracking.load_record_by_id(
         "wt-k", tracking_path=harness_dir
-    ) is None
+    ) is not None
 
 
 def test_doctor_discovers_misplaced_record_from_knowledge_cwd(
