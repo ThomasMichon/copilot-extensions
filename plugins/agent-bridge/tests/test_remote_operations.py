@@ -26,6 +26,7 @@ from agent_bridge.remote_operations import (
     RemoteBridgeError,
     RemoteOperationService,
     validate_caller_id,
+    validate_continuity_id,
 )
 
 
@@ -117,6 +118,14 @@ def test_caller_id_is_required_distinct_from_legacy_default() -> None:
         validate_caller_id("__default__")
     with pytest.raises(RemoteBridgeError, match="safe ASCII"):
         validate_caller_id("consumer with spaces")
+
+
+def test_continuity_id_is_normalized_and_safe() -> None:
+    assert validate_continuity_id(" epoch-a ") == "epoch-a"
+    with pytest.raises(RemoteBridgeError, match="safe ASCII"):
+        validate_continuity_id(" ")
+    with pytest.raises(RemoteBridgeError, match="safe ASCII"):
+        validate_continuity_id("epoch a")
 
 
 @pytest.mark.asyncio
@@ -252,7 +261,7 @@ async def test_event_subscription_rejects_legacy_hosting_daemon() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("continuity_id", ["", "x" * 129])
+@pytest.mark.parametrize("continuity_id", ["", " ", "epoch a", "x" * 129])
 async def test_event_subscription_rejects_invalid_continuity(
     continuity_id,
 ) -> None:

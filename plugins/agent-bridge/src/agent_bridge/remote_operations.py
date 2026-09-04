@@ -154,17 +154,11 @@ def validate_continuity_id(value: Any) -> str | None:
     """Validate an optional event-log continuity identifier."""
     if value is None:
         return None
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value) > MAX_CONTINUITY_ID_LENGTH
-    ):
-        raise RemoteBridgeError(
-            400,
-            "invalid_request",
-            "continuity_id must be a non-empty string when supplied",
-        )
-    return value
+    return _validate_id(
+        value,
+        field="continuity_id",
+        maximum=MAX_CONTINUITY_ID_LENGTH,
+    )
 
 
 def _validate_cursor(value: Any, *, field: str = "after") -> int | None:
