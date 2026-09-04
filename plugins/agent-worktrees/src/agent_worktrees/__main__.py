@@ -8220,7 +8220,7 @@ def _run_session_lifecycle(
         registration_args = argparse.Namespace(
             worktree_id=None,
             session_id=payload.get("sessionId"),
-            cwd=payload.get("cwd"),
+            cwd=cwd,
             stdin=False,
             pid=None,
             pane=(

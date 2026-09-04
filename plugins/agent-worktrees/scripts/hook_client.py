@@ -292,6 +292,8 @@ def _bootstrap_first_install(payload: dict) -> dict:
         else:
             if isinstance(value, dict):
                 result.update(value)
+            else:
+                result["additionalContext"] = stdout
     if completed.stderr:
         result["_stderr"] = completed.stderr
     return result
