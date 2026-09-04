@@ -133,11 +133,17 @@ def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> No
             for hook in session_start
             if isinstance(hook, dict) and hook.get("type") == "command"
         ]
+        required_hook_names = ["emit-command-catalog"]
+        if data["sessionStartBootstrap"]:
+            required_hook_names.insert(0, "bootstrap-check")
         for shell_field, required_hooks in (
-            ("bash", ("bootstrap-check.sh", "emit-command-catalog.sh")),
+            (
+                "bash",
+                tuple(f"{name}.sh" for name in required_hook_names),
+            ),
             (
                 "powershell",
-                ("bootstrap-check.ps1", "emit-command-catalog.ps1"),
+                tuple(f"{name}.ps1" for name in required_hook_names),
             ),
         ):
             for required_hook in required_hooks:

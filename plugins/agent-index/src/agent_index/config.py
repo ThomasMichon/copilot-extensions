@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +20,8 @@ ENDPOINT_ENV = "AGENT_INDEX_ENDPOINT"
 HOME_ENV = "AGENT_INDEX_HOME"
 ROLE_ENV = "AGENT_INDEX_ROLE"
 CONFIG_ENV = "AGENT_INDEX_CONFIG"
+EFFECTIVE_CONFIG_ENV = "AGENT_INDEX_EFFECTIVE_CONFIG"
+CONFIG_DATA_ENV = "AGENT_INDEX_CONFIG_DATA_B64"
 MACHINE_ENV = "AGENT_INDEX_MACHINE"
 REPO_ENV = "AGENT_INDEX_REPO"
 VALID_ROLES = ("host", "client")
@@ -78,6 +82,30 @@ def _load_yaml(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _load_inline_config() -> dict | None:
+    encoded = os.environ.get(CONFIG_DATA_ENV)
+    if not encoded:
+        return None
+    try:
+        value = json.loads(
+            base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8")
+        )
+    except (ValueError, UnicodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _load_effective_repo_config(root: Path | None) -> dict:
+    if CONFIG_DATA_ENV in os.environ:
+        return _load_inline_config() or {}
+    effective = os.environ.get(EFFECTIVE_CONFIG_ENV)
+    if effective:
+        return _load_yaml(Path(effective).expanduser())
+    if root is None:
+        return {}
+    return _load_yaml(repo_config_path(root))
 
 
 def _read_config_role(path: Path) -> str | None:
@@ -153,14 +181,16 @@ def read_indexer(root: Path | None) -> dict | None:
     or, for a plural ``indexers:`` deployment, the **primary** (first) indexer.
     Callers that need the full ordered set use :func:`read_indexers`.
     """
-    if root is None:
+    if root is None and not (
+        os.environ.get(EFFECTIVE_CONFIG_ENV) or os.environ.get(CONFIG_DATA_ENV)
+    ):
         return None
-    data = _load_yaml(repo_config_path(root))
-    ind = data.get("indexer")
-    if isinstance(ind, dict) and ind.get("machine"):
-        return ind
+    data = _load_effective_repo_config(root)
     plural = read_indexers(root)
-    return plural[0] if plural else None
+    if plural:
+        return plural[0]
+    ind = data.get("indexer")
+    return ind if isinstance(ind, dict) and ind.get("machine") else None
 
 
 def read_indexers(root: Path | None) -> list[dict]:
@@ -178,9 +208,11 @@ def read_indexers(root: Path | None) -> list[dict]:
     Malformed entries (no ``machine``) are dropped defensively. Returns ``[]`` when
     neither key is set.
     """
-    if root is None:
+    if root is None and not (
+        os.environ.get(EFFECTIVE_CONFIG_ENV) or os.environ.get(CONFIG_DATA_ENV)
+    ):
         return []
-    data = _load_yaml(repo_config_path(root))
+    data = _load_effective_repo_config(root)
     items = data.get("indexers")
     if isinstance(items, list):
         out = [it for it in items if isinstance(it, dict) and it.get("machine")]
@@ -218,8 +250,8 @@ def read_corpus_sources() -> list[dict]:
     (its project name). Malformed entries are dropped defensively. Returns ``[]``
     when nothing is declared anywhere.
     """
-    def _sources_of(path: Path) -> list[dict]:
-        corpus = _load_yaml(path).get("corpus")
+    def _sources_of_data(data: dict) -> list[dict]:
+        corpus = data.get("corpus")
         if not isinstance(corpus, dict):
             return []
         srcs = corpus.get("sources")
@@ -227,7 +259,18 @@ def read_corpus_sources() -> list[dict]:
             return []
         return [s for s in srcs if isinstance(s, dict) and s.get("name")]
 
+    def _sources_of(path: Path) -> list[dict]:
+        return _sources_of_data(_load_yaml(path))
+
     graft: dict[str, dict] = {}
+
+    effective_root = repo_root()
+    for spec in _sources_of_data(_load_effective_repo_config(effective_root)):
+        spec = dict(spec)
+        if effective_root is not None:
+            spec.setdefault("_repo_path", str(effective_root))
+        spec.setdefault("_contributed_by", "effective-config")
+        graft.setdefault(str(spec["name"]), spec)
 
     # (1)+(2) adopted projects, each self-declaring its index targets
     for name, root in _local_project_roots().items():
@@ -531,7 +574,7 @@ def client_url() -> str | None:
     ``status``/``stop`` probe a dead static port and report the running service as
     down (#1349)."""
     root = repo_root()
-    indexers = read_indexers(root) if root is not None else []
+    indexers = read_indexers(root)
     if indexers:
         me = machine_id().strip().lower()
         role = (

@@ -10,7 +10,7 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($contextRoot, $selfRoot)) {
     Write-Output '{}'
     exit 0
 }
-
+@@CATALOG_GATE_POWERSHELL@@
 $installerPath = Join-Path $selfRoot 'scripts\@@INSTALLER@@.ps1'
 $specs = '@@CATALOG_SPECS_JSON_PS@@' | ConvertFrom-Json
 $commands = @(

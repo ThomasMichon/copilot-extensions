@@ -60,40 +60,41 @@ The installer follows the repo's durable-vs-versioned runtime pattern: service
 code is versioned and swappable; index data and queued work are durable and
 shared. See `../../../docs/patterns/durable-vs-versioned-runtime.md`.
 
-## Lifecycle and supervision
+## Activation, lifecycle, and supervision
 
-The default lifecycle is user-mode and session-start-assisted:
+Activation is repository-scoped and fail-closed:
 
-1. `bootstrap-check` stamps the installed payload if no runtime exists, putting a
-setup-gated `agent-index` binstub on PATH. Before activation it never builds a
-runtime or starts a service.
-2. `agent-index status` is read-only before setup and reports a structured
-`setup_required` lifecycle state. Other operational commands are refused until
-the operator explicitly runs `agent-index setup --single` or
-`agent-index setup --indexer <machine> --ssh <alias>`.
-3. Setup provisions from the stamped snapshot, writes the selected role, then
+1. One resolver selects a valid current-repository
+`.agent-index/config.yaml`. If none exists, and only if the repository requires
+an external state root, it may select the valid config from the bound knowledge
+repo. A present invalid local config, an unsafe path, a conflicting
+singular/plural indexer declaration, a missing required binding, or an
+unavailable resolver leaves the plugin inactive.
+2. Session-start hooks are pure contributors. They emit the command catalog and
+scope context only while that resolver reports active; they never stamp or
+provision a runtime and never start a service.
+3. Every payload CLI entry runs the same resolver before installation-context
+selection, runtime provisioning, or transport routing. `status` reports
+structured `inactive` outside an opted-in repository; other commands are
+refused.
+4. In an active repository, explicit setup or first operational use may
+provision the runtime. Setup writes the selected role, then
 reconciles the role-specific runtime and service. Noninteractive setup requires
 an explicit role flag. `host` and `client` use distinct immutable slots even
 when the plugin payload version is unchanged; `.agent-index-runtime-profile.json`
 strictly binds the slot to its role and installed extras.
-4. `ensure-service` runs on session start only when the current repository has
-an explicit `indexer`/`indexers` designation. On a designated `host` it starts
-or recovers the user-mode service (and engine when provisioned); on a
-designated `client` or an unconfigured repository it exits without starting
-a daemon. Namespaced mode performs only a bounded coalescing check in the hook:
-one detached cell-runtime worker owns the real ensure, while a live worker or
-busy installation lock returns immediately within the hook budget. On Windows,
-the ordinary cold-start interpreter is suspended, assigned to an owned Job, and
-then resumed, so readiness failure before an instance receipt still terminates
-the exact interpreter child tree.
-5. `install update` performs an active/passive zdd service cutover when a live
+5. The installer-readiness probe is deliberately configuration-empty at session
+start, including for opted-in repositories, so generic launch reconciliation
+does not download packages or start services. Existing explicit installer and
+runtime commands remain available.
+6. `install update` performs an active/passive zdd service cutover when a live
 service is healthy. A passive generation publishes an instance-specific receipt
 only; it neither starts the shared task runner nor publishes `endpoint.json` or
 `running-version.json` before an ownership-checked promotion. After passive
 health succeeds, governance is rechecked, promotion makes the target read-ready,
 and only then is the zdd route published; maintenance or deactivation retires
 the passive target without draining, rerouting, or stopping the old service.
-6. Namespaced marker CAS, deploy-manifest publication, and service
+7. Namespaced marker CAS, deploy-manifest publication, and service
 reconciliation are one durable installation transaction. Retry/bootstrap
 finishes a validated target or restores the prior marker and manifest.
 `cell-recover` resumes interrupted selection/cutover work and reaps only exact,
@@ -182,14 +183,16 @@ operator-configured work-item queries and pull-request queries. No query means
 that side indexes nothing, by design.
 
 Corpus config is intentionally outside the runtime. A repository activates
-agent-index by explicitly designating its indexer with `agent-index setup`; mere
-plugin enablement leaves the runtime configuration-empty and does not start or
-probe a service. For multi-repo harness use,
+agent-index by carrying a valid `.agent-index/config.yaml`; mere plugin
+enablement leaves the capability inactive and does not start or probe a
+service. For a repository that requires an external state root, the bound
+knowledge repo's config is eligible only when no local config is present. For
+multi-repo harness use,
 `.agent-index/config.yaml` `corpus.sources` is swept from locally adopted
 projects via the sibling agent-worktrees registry; machine-local
 `~/.agent-index/config.yaml` can add supplemental sources. The session-start
-scope-binding hook separately reads the current repo's `.agent-index/config.yaml`
-so agents see configured scopes even before making a query.
+scope-binding hook reads only the effective config selected by the activation
+resolver.
 
 ## Embedding engine and query behavior
 

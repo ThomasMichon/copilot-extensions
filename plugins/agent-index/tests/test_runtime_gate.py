@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shlex
@@ -68,6 +69,12 @@ def test_runtime_gates_serialize_provisioning() -> None:
     assert "[IO.FileShare]::None" in powershell
 
 
+def test_posix_runtime_gate_supports_stock_macos_bash() -> None:
+    posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
+    assert "mapfile" not in posix
+    assert "while IFS= read -r field; do" in posix
+
+
 def test_namespaced_session_ensure_is_background_coalesced() -> None:
     posix_gate = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(
         encoding="utf-8"
@@ -116,6 +123,18 @@ def test_activation_import_checks_use_target_slot_python() -> None:
 
 
 def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
+    subprocess.run(
+        ["git", "init", "--quiet", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    config = tmp_path / ".agent-index" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "corpus:\n  sources:\n    - name: git:test\n",
+        encoding="utf-8",
+    )
     payload = tmp_path / f"payload-{shell}"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
@@ -144,6 +163,17 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
     )
     env.pop("AGENT_INDEX_ROLE", None)
     env.pop("AGENT_INDEX_CONFIG", None)
+    env.pop("AGENT_INDEX_EFFECTIVE_CONFIG", None)
+    env.pop("AGENT_INDEX_CONFIG_DATA_B64", None)
+    env.pop("AGENT_INDEX_REPO", None)
+    shutil.copy2(
+        PLUGIN / "scripts" / "resolve_effective_config.py",
+        scripts / "resolve_effective_config.py",
+    )
+    shutil.copy2(
+        PLUGIN / "scripts" / "resolve-activation-role.py",
+        scripts / "resolve-activation-role.py",
+    )
     if shell == "bash":
         shutil.copy2(PLUGIN / "scripts" / "runtime-gate.sh", scripts / "runtime-gate.sh")
         context_dir = scripts / "installation-context"
@@ -707,6 +737,90 @@ def test_windows_powershell5_dispatches_from_non_ascii_path(
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_inactive_repository_blocks_before_runtime_mutation(
+    tmp_path: Path, shell: str
+) -> None:
+    if shell == "bash" and shutil.which("bash") is None:
+        pytest.skip("bash is not installed")
+    script, env = _fixture(tmp_path, shell)
+    (tmp_path / ".agent-index" / "config.yaml").unlink()
+    env["TEST_PYTHON"] = ""
+    home = Path(env["AGENT_INDEX_HOME"])
+
+    status = _run(shell, script, env, "status")
+    search = _run(shell, script, env, "search", "anything", "--json")
+
+    assert status.returncode == 0, status.stderr
+    assert json.loads(status.stdout)["state"] == "inactive"
+    assert search.returncode == 2
+    assert json.loads(search.stdout)["state"] == "inactive"
+    assert not home.exists()
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_forwarded_config_allows_remote_host_dispatch(
+    tmp_path: Path, shell: str
+) -> None:
+    if shell == "bash" and shutil.which("bash") is None:
+        pytest.skip("bash is not installed")
+    script, env = _fixture(tmp_path, shell)
+    (tmp_path / ".agent-index" / "config.yaml").unlink()
+    env["AGENT_INDEX_CONFIG_DATA_B64"] = base64.urlsafe_b64encode(
+        json.dumps({"indexers": [{"machine": "remote-host"}]}).encode("utf-8")
+    ).decode("ascii")
+    env["AGENT_INDEX_MACHINE"] = "remote-host"
+    env["TEST_PYTHON"] = ""
+
+    result = _run(shell, script, env, "role", "--json")
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["role"] == "host"
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_forwarded_read_never_provisions_missing_host_runtime(
+    tmp_path: Path, shell: str
+) -> None:
+    if shell == "bash" and shutil.which("bash") is None:
+        pytest.skip("bash is not installed")
+    script, env = _fixture(tmp_path, shell)
+    (tmp_path / ".agent-index" / "config.yaml").unlink()
+    env["AGENT_INDEX_CONFIG_DATA_B64"] = base64.urlsafe_b64encode(
+        json.dumps({"indexers": [{"machine": "remote-host"}]}).encode("utf-8")
+    ).decode("ascii")
+    env["AGENT_INDEX_MACHINE"] = "remote-host"
+    env["TEST_PYTHON"] = ""
+    home = Path(env["AGENT_INDEX_HOME"])
+
+    result = _run(shell, script, env, "search", "anything", "--json")
+
+    assert result.returncode == 1, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "runtime_unavailable"
+    assert payload["role"] == "host"
+    assert not home.exists()
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_installer_readiness_never_provisions_at_session_start(
+    tmp_path: Path, shell: str
+) -> None:
+    if shell == "bash" and shutil.which("bash") is None:
+        pytest.skip("bash is not installed")
+    script, env = _fixture(tmp_path, shell)
+    env["TEST_PYTHON"] = ""
+    home = Path(env["AGENT_INDEX_HOME"])
+
+    result = _run(shell, script, env, "installer-readiness")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "configuration-empty"
+    assert "does not provision" in payload["detail"]
+    assert not home.exists()
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
 def test_status_without_runtime_is_non_mutating_setup_required(
     tmp_path: Path, shell: str
 ) -> None:
@@ -894,6 +1008,14 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         encoding="utf-8",
     )
     shutil.copy2(PLUGIN / "scripts" / "runtime-gate.ps1", scripts / "runtime-gate.ps1")
+    shutil.copy2(
+        PLUGIN / "scripts" / "resolve_effective_config.py",
+        scripts / "resolve_effective_config.py",
+    )
+    shutil.copy2(
+        PLUGIN / "scripts" / "resolve-activation-role.py",
+        scripts / "resolve-activation-role.py",
+    )
     shutil.copytree(
         PLUGIN / "scripts" / "installation-context",
         scripts / "installation-context",
@@ -918,6 +1040,18 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
             encoding="utf-8",
         )
     legacy = tmp_path / "legacy"
+    subprocess.run(
+        ["git", "init", "--quiet", str(tmp_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    active = tmp_path / ".agent-index" / "config.yaml"
+    active.parent.mkdir()
+    active.write_text(
+        "corpus:\n  sources:\n    - name: git:test\n",
+        encoding="utf-8",
+    )
     env = {
         **os.environ,
         "USERPROFILE": str(profile),
@@ -1130,6 +1264,12 @@ def test_active_cell_preserves_original_repository_before_safe_cwd(
         check=True,
         capture_output=True,
         text=True,
+    )
+    repo_config = repository / ".agent-index" / "config.yaml"
+    repo_config.parent.mkdir()
+    repo_config.write_text(
+        "corpus:\n  sources:\n    - name: git:test\n",
+        encoding="utf-8",
     )
     captured = tmp_path / f"repo-context-{shell}-{command}.json"
     runtime_source = (

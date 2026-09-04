@@ -163,6 +163,11 @@ def load_manifest(path: Path) -> dict[str, object]:
     provision_mode = data.get("provisionMode", "snapshot")
     if provision_mode not in _PROVISION_MODES:
         raise ValueError(f"{path}: invalid provisionMode: {provision_mode!r}")
+    session_start_bootstrap = data.get("sessionStartBootstrap", True)
+    if not isinstance(session_start_bootstrap, bool):
+        raise ValueError(
+            f"{path}: invalid sessionStartBootstrap: {session_start_bootstrap!r}"
+        )
     payload_root_env = data.get("payloadRootEnv", "")
     if not isinstance(payload_root_env, str) or (
         payload_root_env and not _ENV.fullmatch(payload_root_env)
@@ -194,6 +199,16 @@ def load_manifest(path: Path) -> dict[str, object]:
         raise ValueError(
             f"{path}: payloadDispatcher must declare both posix and windows"
         )
+    catalog_gate = data.get("catalogGate", "")
+    if not isinstance(catalog_gate, str) or (
+        catalog_gate
+        and (
+            not _DISPATCHER.fullmatch(catalog_gate)
+            or ".." in Path(catalog_gate).parts
+            or not (path.parent / catalog_gate).is_file()
+        )
+    ):
+        raise ValueError(f"{path}: invalid catalogGate: {catalog_gate!r}")
     if installation_context == "required":
         if plugin not in _eligible_core_runtime_plugins():
             raise ValueError(
@@ -215,8 +230,10 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["installer"] = installer
     data["windowsCatalogShim"] = windows_catalog_shim
     data["provisionMode"] = provision_mode
+    data["sessionStartBootstrap"] = session_start_bootstrap
     data["payloadRootEnv"] = payload_root_env
     data["payloadDispatcher"] = normalized_dispatcher
+    data["catalogGate"] = catalog_gate
     data["plugin"] = plugin
     data["commands"] = commands
     data["multiCommandManifest"] = raw_commands is not None
@@ -337,6 +354,27 @@ def render(
         "WINDOWS_CMD_HOST_BLOCK": windows_cmd_host_block,
         "PROVISION_POSIX": provision_posix,
         "PROVISION_POWERSHELL": provision_powershell,
+        "CATALOG_GATE_POSIX": (
+            f'catalog_gate="$self_root/{data["catalogGate"]}"\n'
+            'if ! "$py" -E -X utf8 "$catalog_gate" --check --cwd "$PWD"; then\n'
+            "    printf '%s\\n' '{}'\n"
+            "    exit 0\n"
+            "fi\n"
+            if data["catalogGate"]
+            else ""
+        ),
+        "CATALOG_GATE_POWERSHELL": (
+            "$catalogGate = Join-Path $selfRoot "
+            f"'{str(data['catalogGate']).replace('/', chr(92))}'\n"
+            "$python = Get-Command python -ErrorAction SilentlyContinue\n"
+            "if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }\n"
+            "if (-not $python) { Write-Output '{}'; exit 0 }\n"
+            "& $python.Source -E -X utf8 $catalogGate --check "
+            "--cwd (Get-Location).Path *> $null\n"
+            "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
+            if data["catalogGate"]
+            else ""
+        ),
         "PAYLOAD_DISPATCH_POSIX": (
             (
                 f'export {data["payloadRootEnv"]}="$_payload_root"\n'

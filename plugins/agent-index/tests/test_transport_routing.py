@@ -7,6 +7,7 @@ command a client builds to run the same read subcommand on the indexer host.
 from __future__ import annotations
 
 import base64
+import json
 
 import pytest
 
@@ -233,6 +234,31 @@ def test_maybe_delegate_client_delegates_over_ssh(monkeypatch):
     assert "'--json'" in inner
 
 
+def test_external_effective_config_enables_ordered_ssh_routing(
+    tmp_path, monkeypatch
+):
+    repository = tmp_path / "harness"
+    repository.mkdir()
+    config_path = tmp_path / "knowledge" / ".agent-index" / "config.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "indexers:\n"
+        "  - machine: primary\n"
+        "    ssh: primary\n"
+        "  - machine: secondary\n"
+        "    ssh: secondary\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_INDEX_REPO", str(repository))
+    monkeypatch.setenv("AGENT_INDEX_EFFECTIVE_CONFIG", str(config_path))
+    monkeypatch.setenv("AGENT_INDEX_MACHINE", "client")
+    run, calls = _runner([transport.SSH_TRANSPORT_RC, 0])
+    monkeypatch.setattr(transport.subprocess, "run", run)
+
+    assert transport.maybe_delegate("status", ["status"]) == 0
+    assert calls == ["primary", "secondary"]
+
+
 def test_maybe_delegate_client_ssh_failure_reports_error(monkeypatch, capsys):
     _patch(monkeypatch, root="/repo", indexer={"machine": "indexer-host", "ssh": "indexer-host"}, machine="client-host")
 
@@ -393,7 +419,9 @@ def test_failover_skips_whitespace_only_ssh_alias(monkeypatch):
 
 def test_build_inner_pwsh_quotes_special_chars():
     inner = transport._build_inner("pwsh", ["search", "it's a test", "--limit", "5"])
-    assert inner.startswith('& "$env:USERPROFILE\\.local\\bin\\agent-index.ps1" ')
+    assert inner.startswith("$env:AGENT_INDEX_CONFIG_DATA_B64=")
+    assert '$env:AGENT_INDEX_MACHINE=\'indexer\';' in inner
+    assert '& "$env:USERPROFILE\\.local\\bin\\agent-index.ps1" ' in inner
     # single quote doubled for pwsh literal quoting
     assert "'it''s a test'" in inner
     assert "'--limit' '5'" in inner
@@ -401,12 +429,28 @@ def test_build_inner_pwsh_quotes_special_chars():
 
 def test_build_inner_bash_uses_home_binstub_and_shlex():
     inner = transport._build_inner("bash", ["search", "a b", "--json"])
-    assert inner.startswith('"$HOME/.local/bin/agent-index" ')
+    assert inner.startswith("AGENT_INDEX_CONFIG_DATA_B64=")
+    assert "AGENT_INDEX_MACHINE=indexer" in inner
+    assert '"$HOME/.local/bin/agent-index" ' in inner
     assert "'a b'" in inner
 
 
+def test_build_inner_forwards_only_the_selected_indexer():
+    inner = transport._build_inner(
+        "bash",
+        ["status"],
+        {"machine": "secondary", "ssh": "secondary", "endpoint": "ignored"},
+    )
+    encoded = inner.split("AGENT_INDEX_CONFIG_DATA_B64=", 1)[1].split(" ", 1)[0]
+    payload = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+    assert payload == {"indexers": [{"machine": "secondary"}]}
+
+
 def test_build_ssh_argv_bash_wraps_in_login_shell():
-    argv = transport.build_ssh_argv({"ssh": "linbox", "shell": "bash"}, ["status"])
+    argv = transport.build_ssh_argv(
+        {"machine": "linbox", "ssh": "linbox", "shell": "bash"},
+        ["status"],
+    )
     assert argv[0] == "ssh"
     assert "linbox" in argv
     assert argv[-1].startswith("bash -lc '")
@@ -414,20 +458,26 @@ def test_build_ssh_argv_bash_wraps_in_login_shell():
 
 
 def test_build_ssh_argv_defaults_to_pwsh():
-    argv = transport.build_ssh_argv({"ssh": "winbox"}, ["status"])
+    argv = transport.build_ssh_argv(
+        {"machine": "winbox", "ssh": "winbox"}, ["status"]
+    )
     assert "EncodedCommand" in argv[-1]
 
 
 def test_build_ssh_argv_carries_connect_options(monkeypatch):
     monkeypatch.delenv("AGENT_INDEX_SSH_CONNECT_TIMEOUT_S", raising=False)
-    argv = transport.build_ssh_argv({"ssh": "winbox"}, ["status"])
+    argv = transport.build_ssh_argv(
+        {"machine": "winbox", "ssh": "winbox"}, ["status"]
+    )
     assert "BatchMode=yes" in argv
     assert f"ConnectTimeout={transport.DEFAULT_SSH_CONNECT_TIMEOUT_S}" in argv
 
 
 def test_build_ssh_argv_connect_timeout_env_override(monkeypatch):
     monkeypatch.setenv("AGENT_INDEX_SSH_CONNECT_TIMEOUT_S", "3")
-    argv = transport.build_ssh_argv({"ssh": "winbox"}, ["status"])
+    argv = transport.build_ssh_argv(
+        {"machine": "winbox", "ssh": "winbox"}, ["status"]
+    )
     assert "ConnectTimeout=3" in argv
 
 
