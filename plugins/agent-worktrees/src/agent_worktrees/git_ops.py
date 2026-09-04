@@ -454,20 +454,37 @@ def _classify_git_state(
     dirty_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
     dirty_count = len(dirty_lines)
 
-    # Merge base -- use effective_branch (actual HEAD when drifted)
-    mb = _g("merge-base", upstream, effective_branch)
-    if mb.returncode != 0:
+    # Ahead / behind in one spawn.  A symmetric-difference count also lets us
+    # defer merge-base: unrelated histories necessarily have commits on both
+    # sides, while an all-ahead or all-behind pair already shares an ancestor.
+    counts_r = _g(
+        "rev-list", "--left-right", "--count",
+        f"{effective_branch}...{upstream}",
+    )
+    counts_ok = counts_r.returncode == 0
+    try:
+        ahead_s, behind_s = counts_r.stdout.split()
+        ahead = int(ahead_s) if counts_ok else 0
+        behind = int(behind_s) if counts_ok else 0
+    except (AttributeError, TypeError, ValueError):
+        ahead = behind = 0
+
+    merge_base: str | None = None
+
+    def _merge_base() -> str | None:
+        nonlocal merge_base
+        if merge_base is None:
+            mb = _g("merge-base", upstream, effective_branch)
+            if mb.returncode != 0:
+                return None
+            merge_base = mb.stdout.strip()
+        return merge_base
+
+    if (not counts_ok or (ahead > 0 and behind > 0)) and _merge_base() is None:
         return WorktreeStateInfo(
             state=WorktreeState.ORPHAN, dirty=dirty_count,
             current_branch=actual_branch, branch_drift=drift,
         )
-    merge_base = mb.stdout.strip()
-
-    # Ahead / behind
-    ahead_r = _g("rev-list", "--count", f"{merge_base}..{effective_branch}")
-    behind_r = _g("rev-list", "--count", f"{effective_branch}..{upstream}")
-    ahead = int(ahead_r.stdout.strip()) if ahead_r.returncode == 0 else 0
-    behind = int(behind_r.stdout.strip()) if behind_r.returncode == 0 else 0
 
     # Last commit subject as fallback title
     title = ""
@@ -523,6 +540,12 @@ def _classify_git_state(
 
     # Fallback: direct blob comparison for cases git-cherry can't match
     # (e.g. content arrived on upstream via a different patch shape).
+    merge_base = _merge_base()
+    if merge_base is None:
+        return WorktreeStateInfo(
+            state=WorktreeState.ORPHAN, dirty=dirty_count,
+            current_branch=actual_branch, branch_drift=drift,
+        )
     diff_r = _g("diff", "--name-only", merge_base, effective_branch)
     changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]
 
