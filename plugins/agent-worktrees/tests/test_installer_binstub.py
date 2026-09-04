@@ -294,6 +294,119 @@ def test_reconcile_adds_registered_and_removes_stale(monkeypatch, tmp_path: Path
     assert any("staleproj" in r for r in result["removed"])
 
 
+def test_reconcile_migrates_matching_legacy_unreceipted_stub(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    lb.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    specs = inst._project_binstub_specs("demo")
+    if platform.system() == "Windows":
+        for target, _content in specs:
+            legacy = (
+                '@echo off\r\nset "WORKTREE_PROJECT=demo"\r\n'
+                'call "%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd"\r\n'
+                '"C:\\payload\\bin\\payload\\agent-worktrees.cmd" '
+                '--project demo %*\r\n'
+                if target.suffix.lower() == ".cmd"
+                else "$env:WORKTREE_PROJECT = 'demo'\n"
+                "& \"$HOME\\.agent-worktrees\\bin\\launch-session.ps1\"\n"
+                "& 'C:\\payload\\bin\\payload\\agent-worktrees.ps1' "
+                "--project demo @args\n"
+            )
+            target.write_text(legacy, encoding="utf-8", newline="")
+    else:
+        target = specs[0][0]
+        target.write_text(
+            '#!/usr/bin/env bash\nWORKTREE_PROJECT=demo\n'
+            '"$HOME/.agent-worktrees/bin/launch-session.sh"\n'
+            'exec /payload/bin/payload/agent-worktrees --project demo "$@"\n',
+            encoding="utf-8",
+        )
+
+    result = inst.reconcile_binstubs()
+
+    assert result["migrated"] == ["demo"]
+    assert inst._read_receipt("demo") is not None
+    for target, _content in specs:
+        deployed = target.read_text(encoding="utf-8")
+        assert "agent-worktrees project binstub" in deployed
+        assert "WORKTREE_PROJECT" not in deployed
+
+
+def test_reconcile_preserves_legacy_stub_for_different_project(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    lb.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    target = inst._project_binstub_specs("demo")[0][0]
+    target.write_text(
+        'WORKTREE_PROJECT=another-project\n.agent-worktrees\n',
+        encoding="utf-8",
+    )
+
+    result = inst.reconcile_binstubs()
+
+    assert result["migrated"] == []
+    assert result["preserved"] == ["demo"]
+    assert target.read_text(encoding="utf-8").startswith(
+        "WORKTREE_PROJECT=another-project"
+    )
+    assert inst._read_receipt("demo") is None
+
+
+def test_reconcile_preserves_unreceipted_explicit_project_wrapper(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    lb.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    target = inst._project_binstub_specs("demo")[0][0]
+    wrapper = "python -m agent_worktrees --project demo status\n"
+    target.write_text(wrapper, encoding="utf-8")
+
+    result = inst.reconcile_binstubs()
+
+    assert result["migrated"] == []
+    assert result["preserved"] == ["demo"]
+    assert target.read_text(encoding="utf-8") == wrapper
+    assert inst._read_receipt("demo") is None
+
+
+def test_reconcile_preserves_custom_ambient_project_wrapper(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    lb.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    target = inst._project_binstub_specs("demo")[0][0]
+    wrapper = (
+        "WORKTREE_PROJECT=demo\n"
+        'exec "$HOME/.agent-worktrees/bin/launch-session.sh"\n'
+    )
+    target.write_text(wrapper, encoding="utf-8")
+
+    result = inst.reconcile_binstubs()
+
+    assert result["migrated"] == []
+    assert result["preserved"] == ["demo"]
+    assert target.read_text(encoding="utf-8") == wrapper
+    assert inst._read_receipt("demo") is None
+
+
 def test_reconcile_never_touches_reserved_global_name(monkeypatch, tmp_path: Path):
     """A project accidentally registered as ``agent-worktrees`` (e.g. install run
     from the plugin checkout) must never be deployed as a project stub -- that

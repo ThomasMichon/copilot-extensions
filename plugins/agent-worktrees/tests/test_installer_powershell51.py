@@ -160,12 +160,15 @@ $source = Get-Content -LiteralPath $env:INSTALLER -Raw
 $ast = [System.Management.Automation.Language.Parser]::ParseInput(
     $source, [ref]$tokens, [ref]$errors
 )
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq 'Get-ApplicationPath'
-}, $true)
-Invoke-Expression $functionAst.Extent.Text
+foreach ($name in @('Resolve-WinGetPackageExecutable', 'Get-ApplicationPath')) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if (-not $functionAst) { throw "Missing installer function: $name" }
+    Invoke-Expression $functionAst.Extent.Text
+}
 function Get-Command {
     @(
         [pscustomobject]@{ Source = $env:STORE_ALIAS },
@@ -192,6 +195,152 @@ Get-ApplicationPath -Name @('python')
 
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == str(first)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="WinGet paths are Windows-only")
+def test_application_path_resolves_winget_link_to_package_binary(
+    tmp_path: Path,
+):
+    pwsh = shutil.which("powershell.exe") or shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    local_appdata = tmp_path / "localappdata"
+    link = (
+        local_appdata / "Microsoft" / "WinGet" / "Links" / "uv[preview].exe"
+    )
+    package = (
+        local_appdata
+        / "Microsoft"
+        / "WinGet"
+        / "Packages"
+        / "example.uv_source"
+        / "uv[preview].exe"
+    )
+    link.parent.mkdir(parents=True)
+    package.parent.mkdir(parents=True)
+    link.touch()
+    package.write_bytes(b"ordinary executable")
+
+    script = r"""
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+foreach ($name in @('Resolve-WinGetPackageExecutable', 'Get-ApplicationPath')) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if (-not $functionAst) { throw "Missing installer function: $name" }
+    Invoke-Expression $functionAst.Extent.Text
+}
+function Get-Command {
+    [pscustomobject]@{ Source = $env:WINGET_LINK }
+}
+function Get-Item {
+    [pscustomobject]@{
+        Attributes = [IO.FileAttributes]::ReparsePoint
+    }
+}
+Get-ApplicationPath -Name @('uv')
+"""
+    proc = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "INSTALLER": str(INSTALLER),
+            "LOCALAPPDATA": str(local_appdata),
+            "WINGET_LINK": str(link),
+        },
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str(package)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="WinGet paths are Windows-only")
+def test_application_path_preserves_ambiguous_winget_link(tmp_path: Path):
+    pwsh = shutil.which("powershell.exe") or shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    local_appdata = tmp_path / "localappdata"
+    link = local_appdata / "Microsoft" / "WinGet" / "Links" / "tool.exe"
+    link.parent.mkdir(parents=True)
+    link.write_bytes(b"link shim")
+    for package_name in ("example.one", "example.two"):
+        package = (
+            local_appdata
+            / "Microsoft"
+            / "WinGet"
+            / "Packages"
+            / package_name
+            / "tool.exe"
+        )
+        package.parent.mkdir(parents=True)
+        package.write_bytes(package_name.encode("ascii"))
+
+    script = r"""
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+foreach ($name in @('Resolve-WinGetPackageExecutable', 'Get-ApplicationPath')) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if (-not $functionAst) { throw "Missing installer function: $name" }
+    Invoke-Expression $functionAst.Extent.Text
+}
+function Get-Command {
+    [pscustomobject]@{ Source = $env:WINGET_LINK }
+}
+function Get-Item {
+    [pscustomobject]@{
+        Attributes = [IO.FileAttributes]::ReparsePoint
+    }
+}
+Get-ApplicationPath -Name @('tool')
+"""
+    proc = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "INSTALLER": str(INSTALLER),
+            "LOCALAPPDATA": str(local_appdata),
+            "WINGET_LINK": str(link),
+        },
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str(link)
+
+
+def test_venv_install_invokes_resolved_uv_path():
+    installer = INSTALLER.read_text(encoding="utf-8")
+    body = installer.split("function Invoke-VenvPackageInstall", 1)[1].split(
+        "function Deploy-Venv", 1
+    )[0]
+
+    assert "$uvPath = Get-ApplicationPath -Name @('uv')" in body
+    assert "& $uvPath pip install" in body
+    assert "& uv pip install" not in body
 
 
 def test_early_installer_utilities_are_powershell_51_safe_ascii():
