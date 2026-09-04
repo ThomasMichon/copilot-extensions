@@ -76,6 +76,32 @@ class TestSseCommentParsing:
 
         assert response.closed is True
 
+    def test_context_manager_preserves_body_exception(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            with pytest.raises(ValueError, match="body failed"):
+                with client.stream_events("sess-1"):
+                    raise ValueError("body failed")
+
+        assert response.closed is True
+
+    def test_context_manager_surfaces_close_failure(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            with pytest.raises(OSError, match="close failed"):
+                with client.stream_events("sess-1"):
+                    pass
+
+        assert response.closed is True
+
     def test_abandoned_stream_suppresses_close_failure(
         self, monkeypatch
     ) -> None:

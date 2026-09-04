@@ -59,8 +59,16 @@ class SseStream(Iterator[dict[str, Any]]):
     def __enter__(self) -> SseStream:
         return self
 
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
+    def __exit__(
+        self,
+        exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
+        if exc_type is None:
+            self.close()
+        else:
+            self._close_safely()
 
     def __del__(self) -> None:
         self._close_safely()
