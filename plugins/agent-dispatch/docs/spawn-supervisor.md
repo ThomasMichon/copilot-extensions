@@ -60,22 +60,24 @@ that represent successive episodes for one logical resource.
   or — later — the supervisor loop), **before** launching embody.
 - **Keyed** `dispatch-task:<task_id>:<attempt>`.
 - **Lifecycle:** `reserving → spawned → settled`, with `cold` for a suspended
-  reusable headless body, `failed` for a bounded retry that mints a fresh
-  attempt, and `rearmed` when an operator atomically retires failed history
-  after repairing the transport.
+  reusable headless body, `releasing` while a failed/yielded/terminal attempt
+  concludes its exact created allocation, `failed` for a bounded retry that
+  mints a fresh attempt, and `rearmed` when an operator atomically retires
+  failed history after repairing the transport.
 
   | state       | meaning                                                        |
   |-------------|----------------------------------------------------------------|
   | `reserving` | this spawner owns the (task, attempt) spawn; embody not yet confirmed launched. A restart reconciles a pre-recorded worktree to `spawned`, `failed`, or held-unknown. |
   | `spawned`   | embody launched; the session/worktree handle is recorded.      |
   | `cold`      | the headless process is stopped while its resumable session, worktree, and task ownership remain bound. |
+  | `releasing` | the body is gone and its reservation-created worktree is being conservatively concluded; replacement remains fenced while cleanup is pending. |
   | `settled`   | the reserved attempt reached a terminal outcome; no more spawning. Optional `conclusion_state` / structured `conclusion_detail` keep post-settlement disposable-worktree priming retryable and visible. |
   | `failed`    | spawn failed or was lost; a fresh attempt may now be reserved.  |
   | `rearmed`   | a failed attempt was retired by an audited operator rearm; preserved for history but excluded from the dead-letter count. |
 
 - **Exactly-one invariant.** `reserve_spawn(task_id)` is a single
   `BEGIN IMMEDIATE` transaction: if any reservation for the task is **active**
-  (`reserving`/`spawned`/`cold`), it returns
+  (`reserving`/`spawned`/`cold`/`releasing`), it returns
   `(existing, reserved=False)` — the caller must **not** spawn. For an
   `exclusive_key`, the active lookup and a partial unique index use that key
   across all task ids, so two episodes cannot reserve the same resource. A new
@@ -95,8 +97,9 @@ atomic-under-concurrency guarantee with no new locking. HTTP surface:
 
 ```
 POST /spawn-reservations               {task_id, reserved_by} -> {reserved, reservation}
-POST /spawn-reservations/{key}/worktree {worktree}
+POST /spawn-reservations/{key}/worktree {worktree, ownership, creating_host, driver}
 POST /spawn-reservations/{key}/spawned  {session_handle, worktree}
+POST /spawn-reservations/{key}/release  {detail, disposition}
 POST /spawn-reservations/{key}/fail     {detail}
 POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/tasks/{task_id}/rearm {permitted, reason, min_failures}
@@ -114,15 +117,20 @@ on the SSE bus.
 
 1. `reserve_spawn(task_id)`. If `reserved=False`, print a skip note and return
    (an active spawn already exists — the double-spawn is prevented).
-2. For an exclusive task, resolve its carried worktree or create one, then
-   record that id while the reservation is still `reserving`. A positively
-   missing carried id may be replaced; an indeterminate lookup fails closed.
+2. Resolve a targeted/carried worktree or create one, then record that id plus
+   `created|targeted|reused` ownership while the reservation is still
+   `reserving`. A newly created worktree is stamped before launch with its
+   task, reservation, attempt, driver, supervisor, and creating-machine
+   provenance. A positively missing carried id may be replaced; an
+   indeterminate lookup fails closed.
 3. Run the spawn (`embody` or `bridge` backend) in that recorded checkout. The
    bridge backend first resumes a valid carried ACP session and creates a
    replacement only after the prior session is confirmed gone.
-4. On success, `record_spawn(key, session_handle, worktree)`; on non-zero exit
-   or no mechanism, `fail_spawn(key, detail=…)` so a later run can retry a fresh
-   attempt.
+4. On success, `record_spawn(key, session_handle, worktree)`. A non-zero exit
+   or missing mechanism moves a reservation-created allocation to `releasing`;
+   `create --spawn` immediately attempts the same exact-ID managed teardown as
+   the supervisor. A later run cannot retry until the ground layer safely
+   removes the worktree or explicitly holds it for attention.
 
 Fail-safe: if the reservation call itself errors, `create --spawn` **does not
 spawn** (better to leave the task queued than risk a second autonomous worker).
@@ -136,7 +144,7 @@ invariant:
 > **A task is spawned only when a *fresh* spawn reservation is acquired for it.**
 
 Because `reserve_spawn` returns `reserved=False` whenever an *active*
-(`reserving`/`spawned`) reservation already exists, a task that is already being
+(`reserving`/`spawned`/`cold`/`releasing`) reservation already exists, a task that is already being
 spawned — or is still held by a slow-but-alive embody — is skipped. **Elapsed
 time is not treated as death**, so a slow-but-alive embody is never
 double-spawned. Each cycle:
@@ -147,25 +155,27 @@ double-spawned. Each cycle:
    a confirmed-gone body or an explicit end/conclusion permits release. A
    completed idle **local** headless session may remain carried for the next task
    episode; a fleet body is ended because no remote carry/resume path exists.
-   For
-   labels explicitly opted into `--disposable-cli-label`, settlement releases
-   the reservation first and durably marks conclusion pending, then asks
-   agent-worktrees to conclude the exact recorded session/worktree and prime a
-   safe checkout for managed GC. A live worker or operational failure remains
-   pending for a later reconcile; a preservation decision is held visibly.
-   Neither outcome blocks settlement.
+   A provenance-bearing reservation-created worktree moves to `releasing`
+   before settlement and remains fenced while exact-ID managed teardown is
+   transiently pending. Legacy CLI worktrees explicitly opted in with
+   `--disposable-cli-label` retain their existing post-settlement conclusion
+   path.
 2. **recover interrupted reservations** — a `reserving` row with a pre-recorded
-   worktree is promoted when that worker is confirmed live, failed when the
-   worktree is confirmed to have no live worker, and held when liveness is
-   unknown. An unbound reservation is never guessed away.
+   worktree is promoted when that worker is confirmed live. A confirmed-gone
+   reservation-created worktree enters `releasing`; targeted/reused legacy
+   rows may fail directly. Unknown liveness remains reserved. An unbound
+   reservation is never guessed away.
 3. **fulfill yield/release requests** — yielding marks the active reservation
    for release but does not settle it transactionally. The supervisor ends a
-   confirmed-live headless body (or observes it gone) before settlement;
-   unknown bodies and live CLI worktrees remain reserved.
+   confirmed-live headless body (or observes it gone), concludes only a
+   provenance-verified reservation-created worktree, and persists pending or
+   held cleanup across restarts. Targeted, reused, foreign-host, origin-unknown,
+   dirty, committed, live, and obligated worktrees are preserved.
 4. **poll** — for each eligible queued task (in the lane, due, matching the
    optional **label opt-in**), up to `--max-concurrent` in-flight: `reserve_spawn`
-   → if reserved, spawn embody → `record_spawn` (or `fail_spawn` on error, which
-   releases a fresh attempt). A task that accumulates `--max-attempts` **failed**
+   → if reserved, pre-create and record its worktree → spawn embody →
+   `record_spawn` (or fenced release on error). A task that accumulates
+   `--max-attempts` **failed**
    spawn attempts is treated as **spawn-dead-lettered** by the supervisor — held
    out of auto-retry, with its failed history queryable via `reservations list
    --state failed` for a human — so a persistently-unspawnable task can't drive a
@@ -520,15 +530,18 @@ possibly-dynamic endpoint into the body); route by the default local
 coordinator, `--shared`, or fleet mode (`--pool`/`--origin`, which routes by
 machine alias).
 
-### Disposable local-worker conclusion (built) — opt-in priming, conservative deletion
+### Disposable local-worker conclusion (built) — provenance-first priming
 
-An isolated local worker worktree may be disposable for a declared task class
-even though arbitrary sessions are not. Both CLI and local headless ACP bodies
-use the same exact recorded worktree/session conclusion path. A lane opts in selected labels with
-`--disposable-cli-label LABEL`, or a registrar declaration uses
-`body.disposable_cli_labels`. Each disposable label must also be watched by the
-lane and routed to a local body; fleet labels cannot opt in because the durable
-reservation does not provide a local worktree authority.
+Every locally created dispatch worktree carries immutable task, reservation,
+attempt, driver, supervisor, and creating-machine provenance. That proof
+authorizes automatic conclusion for both CLI and local headless ACP bodies; no
+label opt-in or branch-name inference is needed. Pre-existing targeted/reused
+worktrees and legacy records without exact ownership are never treated as
+dispatch-owned.
+
+The older `--disposable-cli-label LABEL` path remains for explicitly declared
+CLI worker classes whose worktrees predate allocation provenance. A registrar
+may supply the equivalent `body.disposable_cli_labels`.
 
 On terminal task settlement the supervisor uses only the spawn reservation's
 recorded `session_handle` and `worktree`. It never infers an allocation by
@@ -536,8 +549,22 @@ branch name or age. When the initial session handle is the known
 `wt-<worktree>` mux placeholder, the supervisor upgrades it from the task's
 durably captured `owner_session_id` (or a matching live-session observation)
 before settlement; an already-exact handle is never replaced by a successor.
-The reservation is settled first so its process slot is released even if
-conclusion fails. The supervisor then invokes:
+For a provenance-bearing allocation, the reservation stays active in
+`releasing` while cleanup is transiently pending, preventing a retry from
+allocating another worktree. The supervisor invokes:
+
+```bash
+agent-worktrees conclude-disposable \
+    --worktree <exact-id> \
+    --session <exact-session-id> \
+    --policy dispatch-attempt \
+    --reservation <exact-reservation-key> \
+    --owner agent-dispatch \
+    --remove \
+    --json
+```
+
+The legacy label-scoped CLI path instead invokes:
 
 ```bash
 agent-worktrees conclude-disposable \
@@ -555,9 +582,10 @@ commit. It also preserves a different or unresolved asserted lifecycle head
 rather than making a clean checkout GC-eligible around a resumable session.
 Dirty generated overlays are preserved under the same rule as other dirty work;
 a clean branch with zero commits ahead of the configured upstream may remain
-behind without being rewritten. A safe result concludes the exact recorded session, marks the checkout as a
-managed final CLI worker, and immediately asks the managed sweep to remove only
-that exact id with zero idle grace. The sweep remains the deletion authority:
+behind without being rewritten. A safe result concludes the exact recorded
+session, marks the checkout as a managed final worker, and immediately asks the
+managed sweep to remove only that exact id with zero idle grace. The sweep
+remains the deletion authority:
 it freshly re-checks liveness, lifecycle state, Git state, and record invariants
 under the same lifecycle fence used by CLI embodiment. Final Git removal is
 non-forced, runs after the short record recheck lock is released, and retains
@@ -571,7 +599,7 @@ sends one bounded conclusion prompt to the exact same local ACP session and
 worktree; it never creates a replacement merely to clean the first. Each cycle processes a bounded batch; after
 twelve failed conclusion attempts (a teardown window of roughly 40 minutes at
 the bounded cadence) the reservation becomes visibly held instead of hot-looping
-forever. A primed or held outcome is idempotent and does not run again.
+forever. A removed or held outcome is idempotent and does not run again.
 
 ### Lease heartbeat (built) — the live-worker safety net
 

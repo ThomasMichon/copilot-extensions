@@ -99,6 +99,43 @@ def test_conclude_disposable_worker_requests_exact_managed_removal(monkeypatch):
     assert result["action"] == "removed"
 
 
+def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(
+        embody.subprocess,
+        "run",
+        lambda cmd, **_kwargs: calls.append(cmd)
+        or _completed('{"action":"removed","managed_gc_eligible":false}'),
+    )
+
+    result = embody.conclude_dispatch_attempt(
+        "wt-review",
+        "session-review",
+        "dispatch-task:task-1:1",
+    )
+
+    assert calls[0] == [
+        "/usr/bin/agent-worktrees",
+        "conclude-disposable",
+        "--worktree",
+        "wt-review",
+        "--policy",
+        "dispatch-attempt",
+        "--reservation",
+        "dispatch-task:task-1:1",
+        "--owner",
+        "agent-dispatch",
+        "--remove",
+        "--json",
+        "--session",
+        "session-review",
+    ]
+    assert result["action"] == "removed"
+
+
 def test_conclude_disposable_worker_preservation_skip_is_returned(monkeypatch):
     monkeypatch.setattr(
         embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
@@ -322,7 +359,15 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
     )
     monkeypatch.setattr(embody.subprocess, "run", fake_run)
 
-    result = embody.create_worktree(project="widgets")
+    result = embody.create_worktree(
+        project="widgets",
+        interface="acp",
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="agent-dispatch",
+        supervisor="supervisor-1",
+    )
 
     assert result == {"session": None, "worktree": "wt-new", "path": "/tmp/wt-new"}
     assert captured["cmd"] == [
@@ -332,9 +377,20 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
         "create",
         "--origin",
         "delegate",
+        "--interface",
+        "acp",
+        "--dispatch-task-id",
+        "task-1",
+        "--dispatch-reservation-key",
+        "dispatch-task:task-1:1",
+        "--dispatch-attempt",
+        "1",
+        "--dispatch-driver",
+        "agent-dispatch",
+        "--dispatch-supervisor",
+        "supervisor-1",
         "--json",
     ]
-    assert "--interface" not in captured["cmd"]
 
 
 def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
@@ -355,8 +411,15 @@ def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
     )
 
     prepared = embody.prepare_reusable_worktree(
-        {"repo": "example.com/acme/widgets"},
-        {"worktree": "wt-missing"},
+        {"id": "task-1", "repo": "example.com/acme/widgets"},
+        {
+            "key": "dispatch-task:task-1:1",
+            "attempt": 1,
+            "worktree": "wt-missing",
+        },
+        interface="acp",
+        driver="agent-dispatch",
+        supervisor="supervisor-1",
     )
 
     assert prepared == {
@@ -364,6 +427,7 @@ def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
         "path": "/tmp/wt-fresh",
         "created": True,
         "replaced": True,
+        "ownership": "created",
     }
 
 
@@ -386,8 +450,15 @@ def test_prepare_reusable_worktree_holds_on_indeterminate_resolution(
 
     with pytest.raises(embody.EmbodyUnavailable, match="registry unavailable"):
         embody.prepare_reusable_worktree(
-            {"repo": "example.com/acme/widgets"},
-            {"worktree": "wt-unknown"},
+            {"id": "task-1", "repo": "example.com/acme/widgets"},
+            {
+                "key": "dispatch-task:task-1:1",
+                "attempt": 1,
+                "worktree": "wt-unknown",
+            },
+            interface="cli",
+            driver="agent-dispatch",
+            supervisor="supervisor-1",
         )
 
     assert created == []
