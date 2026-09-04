@@ -5460,20 +5460,33 @@ class TaskQueue:
                     f"reservation {key} is {row['state']!r}, not active "
                     "(cannot request release)"
                 )
-            conn.execute(
-                "UPDATE spawn_reservations SET state = ?, "
-                "release_requested = 1, release_disposition = ?, "
-                "detail = COALESCE(?, detail), conclusion_state = ?, "
-                "updated_at = ? WHERE key = ?",
-                (
-                    SpawnState.RELEASING,
-                    disposition,
-                    detail,
-                    "pending",
-                    ts,
-                    key,
-                ),
-            )
+            if row["state"] == SpawnState.RELEASING:
+                release_disposition = (
+                    "failed"
+                    if "failed" in {row["release_disposition"], disposition}
+                    else row["release_disposition"] or disposition
+                )
+                conn.execute(
+                    "UPDATE spawn_reservations SET release_requested = 1, "
+                    "release_disposition = ?, detail = COALESCE(?, detail), "
+                    "updated_at = ? WHERE key = ?",
+                    (release_disposition, detail, ts, key),
+                )
+            else:
+                conn.execute(
+                    "UPDATE spawn_reservations SET state = ?, "
+                    "release_requested = 1, release_disposition = ?, "
+                    "detail = COALESCE(?, detail), conclusion_state = ?, "
+                    "updated_at = ? WHERE key = ?",
+                    (
+                        SpawnState.RELEASING,
+                        disposition,
+                        detail,
+                        "pending",
+                        ts,
+                        key,
+                    ),
+                )
             row = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
             ).fetchone()

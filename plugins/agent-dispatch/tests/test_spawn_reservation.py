@@ -357,6 +357,42 @@ def test_exclusive_index_replacement_is_transactional(q, monkeypatch):
     assert begin < drop < create < commit
 
 
+def test_repeated_release_preserves_held_conclusion_and_upgrades_failure(q):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.request_spawn_release(
+        reservation.key,
+        detail="yielded",
+        disposition="settled",
+    )
+    q.record_spawn_conclusion(
+        reservation.key,
+        conclusion_state="held",
+        conclusion_detail='{"action":"preserved","reason":"dirty-worktree"}',
+    )
+
+    repeated = q.request_spawn_release(
+        reservation.key,
+        detail="still held",
+        disposition="settled",
+    )
+    assert repeated.state == SpawnState.RELEASING
+    assert repeated.release_disposition == "settled"
+    assert repeated.conclusion_state == "held"
+    assert repeated.conclusion_detail == (
+        '{"action":"preserved","reason":"dirty-worktree"}'
+    )
+
+    upgraded = q.request_spawn_release(
+        reservation.key,
+        detail="worker failed",
+        disposition="failed",
+    )
+    assert upgraded.release_disposition == "failed"
+    assert upgraded.conclusion_state == "held"
+    assert upgraded.conclusion_detail == repeated.conclusion_detail
+
+
 def test_supersede_exclusive_key_abandons_only_queued_or_proposed(q):
     queued = q.create("old queued", exclusive_key="review:repo:42")
     held = q.create("old held", exclusive_key="review:repo:42")

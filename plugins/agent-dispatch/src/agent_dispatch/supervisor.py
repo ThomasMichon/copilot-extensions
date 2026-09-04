@@ -73,7 +73,7 @@ RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
 #: Prime a terminal CLI worker for ground-layer managed GC:
 #: ``(worktree, session) -> structured outcome``.
 ConclusionFn = Callable[[str, "str | None"], dict]
-AttemptConclusionFn = Callable[[str, "str | None", str, str], dict]
+AttemptConclusionFn = Callable[[str, str | None, str, str], dict]
 
 #: Stop a local headless bridge session while preserving it for later resume.
 LocalColdFn = Callable[[str], bool]
