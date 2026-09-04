@@ -133,7 +133,11 @@ def _enrich_session_payload(payload: dict) -> dict:
     enriched = dict(payload)
     enriched["_agentWorktrees"] = {
         "pluginVersion": _plugin_version(),
-        "environment": dict(os.environ),
+        "environment": {
+            key: value
+            for key, value in os.environ.items()
+            if key != "WORKTREE_ID"
+        },
     }
     return enriched
 
@@ -268,7 +272,7 @@ def _bootstrap_first_install(payload: dict) -> dict:
     if not argv or not script.is_file():
         return {}
     try:
-        subprocess.run(
+        completed = subprocess.run(
             argv,
             input=json.dumps(payload, separators=(",", ":")),
             text=True,
@@ -277,8 +281,20 @@ def _bootstrap_first_install(payload: dict) -> dict:
             capture_output=True,
         )
     except (OSError, subprocess.SubprocessError):
-        pass
-    return {}
+        return {}
+    result: dict = {}
+    stdout = (completed.stdout or "").strip()
+    if stdout:
+        try:
+            value = json.loads(stdout)
+        except (TypeError, ValueError):
+            result["additionalContext"] = stdout
+        else:
+            if isinstance(value, dict):
+                result.update(value)
+    if completed.stderr:
+        result["_stderr"] = completed.stderr
+    return result
 
 
 def _fallback_legacy_session_start(payload: dict) -> dict:

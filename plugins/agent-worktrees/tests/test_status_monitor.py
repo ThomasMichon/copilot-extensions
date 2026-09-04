@@ -30,6 +30,32 @@ def test_status_monitor_registered():
     assert "status-monitor" in m._LAUNCHER_REAP_VETOES
 
 
+def test_resident_lifecycle_requests_wait_for_their_deadline():
+    assert m._resident_hook_lock_timeout("sessionStart", 4.75) == 1.75
+    assert m._resident_hook_lock_timeout("sessionStart", 1.75) == 0.0
+    assert m._resident_hook_lock_timeout("preToolUse", 1.75) == 0.05
+    assert m._resident_hook_lock_timeout("postToolUse", 0.02) == 0.02
+
+
+def test_ordinary_hooks_yield_to_waiting_lifecycle_request():
+    priority = types.SimpleNamespace(is_set=lambda: True)
+
+    assert m._resident_hook_should_yield("preToolUse", priority) is True
+    assert m._resident_hook_should_yield("postToolUse", priority) is True
+    assert m._resident_hook_should_yield("sessionStart", priority) is False
+
+
+def test_monitor_yields_to_waiting_lifecycle_request(monkeypatch):
+    states = iter((True, True, False))
+    priority = types.SimpleNamespace(is_set=lambda: next(states))
+    sleeps = []
+    monkeypatch.setattr(m.time, "sleep", sleeps.append)
+
+    m._wait_for_lifecycle_priority(priority)
+
+    assert sleeps == [0.01, 0.01]
+
+
 def test_reconcile_sessions_registered():
     assert m.COMMAND_MAP["reconcile-sessions"] is m.cmd_reconcile_sessions
     assert m._WORKTREE_VERBS["reconcile-sessions"] == "reconcile-sessions"

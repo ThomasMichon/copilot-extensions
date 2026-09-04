@@ -320,7 +320,7 @@ def test_session_start_enriches_payload_with_session_environment(
     })
     metadata = enriched["_agentWorktrees"]
     assert metadata["pluginVersion"] == "1.2.3-dev4"
-    assert metadata["environment"]["WORKTREE_ID"] == "worktree-1"
+    assert "WORKTREE_ID" not in metadata["environment"]
     assert metadata["environment"]["TMUX_PANE"] == "%7"
     assert (
         metadata["environment"]["AGENT_WORKTREES_HANDOFF_TOKEN"]
@@ -329,6 +329,29 @@ def test_session_start_enriches_payload_with_session_environment(
     assert metadata["environment"]["WORKTREE_NO_RECONCILE"] == "1"
     assert metadata["environment"]["WORKTREE_NO_PROVISION"] == "1"
     assert metadata["environment"]["CUSTOM_SESSION_VALUE"] == "current-session"
+
+
+def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        hook_client.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="[agent-worktrees] Runtime not installed.",
+            stderr="bootstrap warning\n",
+        ),
+    )
+    monkeypatch.setattr(
+        hook_client.shutil,
+        "which",
+        lambda name: str(tmp_path / name),
+    )
+
+    result = hook_client._bootstrap_first_install({"sessionId": "session-1"})
+
+    assert result == {
+        "additionalContext": "[agent-worktrees] Runtime not installed.",
+        "_stderr": "bootstrap warning\n",
+    }
 
 
 def test_project_hook_uses_exact_current_session_environment(
@@ -513,7 +536,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
         ("register-session", '{"additionalContext":"binding"}'),
     ]
     assert restored == ["before"]
-    assert registration["worktree_id"] == "worktree-1"
+    assert registration["worktree_id"] is None
     assert registration["pane"] == "%7"
     assert registration["launch_id"] == "launch-1"
     assert registration["assignment_token"] == "assignment-1"

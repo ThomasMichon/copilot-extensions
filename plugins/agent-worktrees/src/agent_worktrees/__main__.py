@@ -50,6 +50,7 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import enum
 import json
@@ -7642,6 +7643,8 @@ def _monitor_sweep(
     segment_cache=None,
     published: dict[tuple[str, str], str] | None = None,
     incarnations: dict[str, str] | None = None,
+    project_lock=None,
+    lifecycle_priority=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -7693,11 +7696,33 @@ def _monitor_sweep(
     for sess, path in served:
         if pane_observer is not None:
             pane_observer(sess, path)
-        try:
-            _activate_project_for_path(path, force=True)
-            warm_projects.setdefault(cfg.project_name(), path)
-        except Exception:
-            pass
+        context_value = None
+        segment_value = ""
+        _wait_for_lifecycle_priority(lifecycle_priority)
+        with (
+            project_lock
+            if project_lock is not None
+            else contextlib.nullcontext()
+        ):
+            try:
+                _activate_project_for_path(path, force=True)
+                warm_projects.setdefault(cfg.project_name(), path)
+            except Exception:
+                pass
+            if sess not in ctx_done:
+                try:
+                    context_value = _render_status_context(path, plain=False)
+                except Exception:
+                    pass
+            try:
+                if segment_cache is not None:
+                    segment_value = segment_cache.get(path)
+                else:
+                    segment_value = _render_status_segment(
+                        path, fetch=False, plain=False, no_title=False,
+                        persist_title=True)
+            except Exception:
+                pass
         # Win the single-instance election so any per-session updater retires,
         # publishing our current-runtime prefix so it defers to us (not to a
         # superseded owner) -- see cmd_status_updater's debounce.
@@ -7712,31 +7737,24 @@ def _monitor_sweep(
 
         _publish("@aw_updater", token)
         _publish("@aw_updater_prefix", prefix)
-        if sess not in ctx_done:
+        if context_value is not None and _publish("@aw_ctx", context_value):
+            ctx_done.add(sess)
+        _publish("@aw_seg", segment_value)
+    for project, path in warm_projects.items():
+        _wait_for_lifecycle_priority(lifecycle_priority)
+        with (
+            project_lock
+            if project_lock is not None
+            else contextlib.nullcontext()
+        ):
             try:
-                if _publish("@aw_ctx", _render_status_context(path, plain=False)):
-                    ctx_done.add(sess)
+                if path:
+                    _activate_project_for_path(path, force=True)
+                else:
+                    cfg.set_active_project(project)
+                _warm_list_cache_for_active_project(interval=interval)
             except Exception:
                 pass
-        try:
-            if segment_cache is not None:
-                seg = segment_cache.get(path)
-            else:
-                seg = _render_status_segment(
-                    path, fetch=False, plain=False, no_title=False,
-                    persist_title=True)
-        except Exception:
-            seg = ""
-        _publish("@aw_seg", seg)
-    for project, path in warm_projects.items():
-        try:
-            if path:
-                _activate_project_for_path(path, force=True)
-            else:
-                cfg.set_active_project(project)
-            _warm_list_cache_for_active_project(interval=interval)
-        except Exception:
-            pass
     return len(served)
 
 
@@ -8200,7 +8218,7 @@ def _run_session_lifecycle(
         _reconcile_marketplace_snapshot(payload, cwd)
 
         registration_args = argparse.Namespace(
-            worktree_id=session_environment.get("WORKTREE_ID"),
+            worktree_id=None,
             session_id=payload.get("sessionId"),
             cwd=payload.get("cwd"),
             stdin=False,
@@ -8471,6 +8489,24 @@ def _resident_hook_decision(
         cfg.set_active_project(previous_project)
 
 
+_RESIDENT_LIFECYCLE_RUNWAY_S = 3.0
+
+
+def _resident_hook_lock_timeout(kind: str, remaining: float) -> float:
+    if kind == "sessionStart":
+        return max(0.0, remaining - _RESIDENT_LIFECYCLE_RUNWAY_S)
+    return min(0.05, remaining)
+
+
+def _resident_hook_should_yield(kind: str, priority_event) -> bool:
+    return kind != "sessionStart" and priority_event.is_set()
+
+
+def _wait_for_lifecycle_priority(priority_event) -> None:
+    while priority_event is not None and priority_event.is_set():
+        time.sleep(0.01)
+
+
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 
@@ -8531,19 +8567,45 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
     state_lock = threading.RLock()
+    lifecycle_priority = threading.Event()
+    lifecycle_count_lock = threading.Lock()
+    lifecycle_count = 0
     hook_client = _load_hook_client_module()
     hook_policy = _ResidentHookPolicy(hook_client)
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
+        nonlocal lifecycle_count
+        is_lifecycle = kind == "sessionStart"
+        if is_lifecycle:
+            with lifecycle_count_lock:
+                lifecycle_count += 1
+                lifecycle_priority.set()
         remaining = deadline - time.time()
-        if remaining <= 0 or not state_lock.acquire(timeout=min(0.05, remaining)):
-            raise HookUnavailable
+        lock_timeout = _resident_hook_lock_timeout(kind, remaining)
         try:
-            return _resident_hook_decision(
-                kind, payload, segment_cache=segment_cache,
-                policy=hook_policy, deadline=deadline)
+            if (
+                remaining <= 0
+                or _resident_hook_should_yield(kind, lifecycle_priority)
+                or not state_lock.acquire(timeout=lock_timeout)
+            ):
+                raise HookUnavailable
+            try:
+                if (
+                    is_lifecycle
+                    and deadline - time.time() < _RESIDENT_LIFECYCLE_RUNWAY_S
+                ):
+                    raise HookUnavailable
+                return _resident_hook_decision(
+                    kind, payload, segment_cache=segment_cache,
+                    policy=hook_policy, deadline=deadline)
+            finally:
+                state_lock.release()
         finally:
-            state_lock.release()
+            if is_lifecycle:
+                with lifecycle_count_lock:
+                    lifecycle_count -= 1
+                    if lifecycle_count == 0:
+                        lifecycle_priority.clear()
 
     hook_server = None
     if hook_policy.ready():
@@ -8573,14 +8635,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             picker_projects = monitor_roots.live_picker_projects()
             demand_projects = list_cache.recent_demand_projects()
             external_projects = picker_projects | demand_projects
+            served = _monitor_sweep(
+                mux_bin, token, my_prefix, ctx_done,
+                interval=interval, picker_projects=external_projects,
+                catalog_observer=reconciler.observe_mux,
+                pane_observer=pane_reconciler.observe,
+                segment_cache=segment_cache, published=published,
+                incarnations=incarnations, project_lock=state_lock,
+                lifecycle_priority=lifecycle_priority)
+            _wait_for_lifecycle_priority(lifecycle_priority)
             with state_lock:
-                served = _monitor_sweep(
-                    mux_bin, token, my_prefix, ctx_done,
-                    interval=interval, picker_projects=external_projects,
-                    catalog_observer=reconciler.observe_mux,
-                    pane_observer=pane_reconciler.observe,
-                    segment_cache=segment_cache, published=published,
-                    incarnations=incarnations)
                 try:
                     reconciler.step()
                 except Exception:
