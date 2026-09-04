@@ -8489,7 +8489,7 @@ def _resident_hook_decision(
         cfg.set_active_project(previous_project)
 
 
-_RESIDENT_LIFECYCLE_RUNWAY_S = 3.0
+_RESIDENT_LIFECYCLE_RUNWAY_S = 1.0
 
 
 def _resident_hook_lock_timeout(kind: str, remaining: float) -> float:
