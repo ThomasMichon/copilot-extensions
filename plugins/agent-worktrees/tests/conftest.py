@@ -245,7 +245,10 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
 
     _cfg.set_active_project("test-project")
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tmp_tracking_dir)
-    monkeypatch.setattr("agent_worktrees.config.project_dir", lambda: tmp_path / ".test-project")
+    monkeypatch.setattr(
+        "agent_worktrees.config.project_dir",
+        lambda name=None: tmp_path / f".{name or 'test-project'}",
+    )
     monkeypatch.setattr(
         "agent_worktrees.config.install_dir", lambda: tmp_path / ".agent-worktrees"
     )

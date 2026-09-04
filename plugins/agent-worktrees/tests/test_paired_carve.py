@@ -29,6 +29,12 @@ def _common_patches(monkeypatch, tmp_path):
     """Patch tracking dir + best-effort permissions/activity to no-ops."""
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        m.cfg, "project_dir", lambda name=None: tmp_path / f".{name}"
+    )
+    monkeypatch.setattr(
+        tk.cfg, "project_dir", lambda name=None: tmp_path / f".{name}"
+    )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda a, b: False)
     monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda p: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
@@ -122,13 +128,18 @@ class TestCarvePairedKnowledge:
         assert carved["branch"] == "worktree/test-win-20260806-ab-k"
         assert carved["start_point"] == "origin/main"
         # Knowledge tracking record written, cross-stamped back to harness.
-        krec = tk.load_record_by_id("test-win-20260806-ab-k")
+        knowledge_tracking = tmp_path / ".citadel-knowledge" / "worktrees"
+        krec = tk.load_record_by_id(
+            "test-win-20260806-ab-k",
+            tracking_path=knowledge_tracking,
+        )
         assert krec is not None
         assert krec.repo == "citadel-knowledge"
         assert krec.pair_role == "knowledge"
         assert krec.pair_kind == "worktree"
         assert krec.pair_id == "20260806-ab"
         assert krec.pair_ref == "test/citadel-harness/test-win-20260806-ab"
+        assert not (tmp_path / "test-win-20260806-ab-k.yaml").exists()
 
     def test_non_worktree_class_pairs_anchor(self, monkeypatch, tmp_path):
         _common_patches(monkeypatch, tmp_path)

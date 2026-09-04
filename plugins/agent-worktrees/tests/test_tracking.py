@@ -1488,8 +1488,12 @@ class TestPairedRecordResolution:
             pair_ref="test/citadel-harness/wt-harness",
             pair_kind="worktree",
         )
-        self._save(tmp_tracking_dir, harness)
-        self._save(tmp_tracking_dir, knowledge)
+        harness_dir = tmp_tracking_dir.parent / ".citadel-harness" / "worktrees"
+        knowledge_dir = (
+            tmp_tracking_dir.parent / ".citadel-knowledge" / "worktrees"
+        )
+        self._save(harness_dir, harness)
+        self._save(knowledge_dir, knowledge)
         sib = find_paired_record(harness)
         assert sib is not None and sib.worktree_id == "wt-knowledge"
         assert sib.pair_role == "knowledge"
@@ -1508,7 +1512,6 @@ class TestPairedRecordResolution:
             "wt-x", pair_id="p", pair_role="harness",
             pair_ref="test/proj/wt-gone", pair_kind="worktree",
         )
-        self._save(tmp_tracking_dir, rec)
         assert find_paired_record(rec) is None
 
 
