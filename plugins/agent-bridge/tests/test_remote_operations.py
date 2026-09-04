@@ -934,28 +934,6 @@ def test_remote_api_multiplexes_subscriptions_over_one_stream(
         remote_app,
 ) -> None:
         first = _ApiSubscription()
-        first._items = iter(
-            [
-                Envelope(
-                    EnvelopeType.EVENT,
-                    payload={
-                        "kind": "tool_progress",
-                        "data": {"tool": "example"},
-                    },
-                ),
-                Envelope(
-                    EnvelopeType.EVENT,
-                    payload={
-                        "kind": "event",
-                        "id": 5,
-                        "event": "assistant.turn_end",
-                        "data": {"stop_reason": "end_turn"},
-                        "timestamp": 123.0,
-                        "continuity_id": "epoch-a",
-                    },
-                ),
-            ]
-        )
         second = _ApiSubscription()
         second._items = iter(
             [
@@ -998,9 +976,8 @@ def test_remote_api_multiplexes_subscriptions_over_one_stream(
                 headers={"Authorization": "Bearer " + "test-token"},
             ) as response:
                 text = "".join(response.iter_text())
-
         assert response.status_code == 200
-        assert ': tool_progress {"tool":"example"}' in text
+        assert response.status_code == 200
         assert text.count("event: bridge_event") == 2
         assert '"session_id":"session-a"' in text
         assert '"session_id":"session-b"' in text
@@ -1008,6 +985,59 @@ def test_remote_api_multiplexes_subscriptions_over_one_stream(
         assert '"event":"session_state_changed"' in text
         assert first.closed is True
         assert second.closed is True
+
+
+def test_remote_api_multiplex_forwards_tool_progress_as_keepalive(
+    remote_app,
+) -> None:
+    subscription = _ApiSubscription()
+    subscription._items = iter(
+        [
+            Envelope(
+                EnvelopeType.EVENT,
+                payload={
+                    "kind": "tool_progress",
+                    "data": {"tool": "example"},
+                },
+            ),
+            Envelope(
+                EnvelopeType.EVENT,
+                payload={
+                    "kind": "event",
+                    "id": 5,
+                    "event": "assistant.turn_end",
+                    "data": {"stop_reason": "end_turn"},
+                    "timestamp": 123.0,
+                    "continuity_id": "epoch-a",
+                },
+            ),
+        ]
+    )
+    remote_app.state.remote_operations.subscribe_events = AsyncMock(
+        return_value=subscription
+    )
+
+    with TestClient(remote_app) as client:
+        with client.stream(
+            "POST",
+            "/api/v1/remote/events",
+            json={
+                "subscriptions": [
+                    {
+                        "host": "host-a",
+                        "session_id": "session-a",
+                        "caller_id": "lane-a",
+                    }
+                ]
+            },
+            headers={"Authorization": "Bearer " + "test-token"},
+        ) as response:
+            text = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert ': tool_progress {"tool":"example"}' in text
+    assert text.count("event: bridge_event") == 1
+    assert subscription.closed is True
 
 
 def test_remote_api_multiplex_rejects_duplicate_identity(remote_app) -> None:
