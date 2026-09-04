@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -180,6 +181,49 @@ def test_dtssh_apply_over_ssh_reports_detached_launch_failure(
     assert result["verification_required"] is False
     assert result["applied"] is False
     assert result["error"] == "broker failed"
+
+
+def test_wmi_broker_uses_resolved_powershell_path(monkeypatch):
+    resolved = r"C:\Custom PowerShell\powershell.exe"
+    captured = {}
+
+    monkeypatch.setattr(
+        host_restore.shutil,
+        "which",
+        lambda name: resolved if name == "powershell" else None,
+    )
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(host_restore.subprocess, "run", run)
+
+    launched, _detail = host_restore._spawn_dtssh_update_via_wmi(
+        [r"C:\Program Files\PowerShell\7\pwsh.exe", "-NoProfile"]
+    )
+
+    assert launched is True
+    assert captured["command"][0] == resolved
+    broker = base64.b64decode(captured["command"][-1]).decode("utf-16-le")
+    assert f'"{resolved}" -NoProfile -NonInteractive' in broker
+
+
+def test_detached_guidance_includes_complete_verification_command(capsys):
+    result = {
+        "ok": True,
+        "transport": "dtssh",
+        "alias": "example-host",
+        "port": 2222,
+        "verification_required": True,
+    }
+
+    assert host_restore.emit_result(result, json_output=False) == 0
+    output = capsys.readouterr().out
+    assert (
+        "agent-ssh restore-host --transport dtssh "
+        "--alias example-host --port 2222 --dry-run"
+    ) in output
 
 
 def test_dtssh_restore_launches_helpers_without_console_windows(

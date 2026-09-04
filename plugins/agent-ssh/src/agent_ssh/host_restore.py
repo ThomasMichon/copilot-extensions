@@ -193,7 +193,7 @@ def _spawn_dtssh_update_via_wmi(command: list[str]) -> tuple[bool, str]:
     )
     child_encoded = base64.b64encode(child.encode("utf-16-le")).decode("ascii")
     child_command = (
-        "powershell.exe -NoProfile -NonInteractive "
+        f'"{powershell}" -NoProfile -NonInteractive '
         f"-EncodedCommand {child_encoded}"
     )
     broker = (
@@ -388,7 +388,10 @@ def emit_result(result: dict[str, Any], *, json_output: bool) -> int:
         if result.get("verification_required"):
             print(
                 "[OK] Detached convergence launched; reconnect and run "
-                "`agent-ssh restore-host --dry-run` to verify it."
+                "`agent-ssh restore-host "
+                f"--transport {result['transport']} "
+                f"--alias {result['alias']} "
+                f"--port {result['port']} --dry-run` to verify it."
             )
         if result.get("error"):
             print(f"[FAIL] {result['error']}")
