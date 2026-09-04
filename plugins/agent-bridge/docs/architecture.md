@@ -89,6 +89,13 @@ For SSH-spawned agents, the transport layer reads per-machine
 forwards plus environment variable exports. This makes the local relay
 available inside remote agent sessions without separate relay setup.
 
+Stopped trusted-container sessions have a stricter resume boundary. The bridge
+re-resolves the provider target, replaces any surviving reverse-forward against
+the current live relay port, and verifies the container-side loopback listener
+before ACP readiness or prompt delivery. A relay-enabled resume fails explicitly
+when that readiness cannot be proven; fleets with relay disabled skip the gate.
+This resume contract is separate from broader relay port-stability policy.
+
 The relay speaks the git credential protocol over TCP and supports the standard
 `get`/`fill`, `store`/`approve`, and `erase`/`reject` shapes plus token actions
 such as `get-github-token`, `get-azure-token`, and `get-access-token`; provider

@@ -27,6 +27,40 @@ from ssh_manager import (
 )
 
 
+class CredentialRelayReadinessError(RuntimeError):
+    """A required remote credential-relay listener could not be proven ready."""
+
+
+async def wait_for_relay_serving(
+    probe: Callable[[], Awaitable[bool]],
+    *,
+    timeout: float = 5.0,
+    interval: float = 0.25,
+) -> None:
+    """Wait briefly for a required far-side relay listener to accept."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    last_error: Exception | None = None
+    while True:
+        try:
+            if await probe():
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            last_error = exc
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(interval, remaining))
+    error = CredentialRelayReadinessError(
+        "credential relay reverse-forward did not become ready before timeout"
+    )
+    if last_error is not None:
+        raise error from last_error
+    raise error
+
+
 def endpoint_from_ssh_config(
     config: SSHConfig,
     remote_port: int,
@@ -154,6 +188,8 @@ def relay_forwards_from_endpoint(
 
 def endpoint_serving_probe_factory(
     endpoint: dict[str, Any],
+    *,
+    fail_open: bool = True,
 ) -> Callable[[int], Callable[[], Awaitable[bool]]]:
     """Build a ``serving_probe_for_port`` factory for a persisted endpoint.
 
@@ -165,7 +201,9 @@ def endpoint_serving_probe_factory(
     pre-restart ``-R`` had not been released yet -- so the relay supervisor
     re-establishes until the rebind takes (dotfiles #855). Transport failures
     return ``True`` (a health hint, never a reason to churn a possibly-fine
-    relay on a transient SSH failure). Mirrors
+    relay on a transient SSH failure). Set ``fail_open=False`` for a launch or
+    resume readiness gate where an inconclusive probe must block ACP delivery.
+    Mirrors
     ``spawner._serving_probe_for_port`` for the restart path.
     """
     config = ssh_config_from_endpoint(endpoint)
@@ -187,7 +225,9 @@ def endpoint_serving_probe_factory(
                 )
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
             except Exception:
-                return True
+                if fail_open:
+                    return True
+                raise
             return proc.returncode == 0 and b"OK" in (out or b"")
 
         return _probe

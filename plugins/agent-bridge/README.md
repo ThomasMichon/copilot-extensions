@@ -236,6 +236,13 @@ pruning, with an explicit process-group reap if the owned child survived.
 Startup inspection never wakes a stopped CodeSpace; explicit resume may wake
 and revalidate it.
 
+For a stopped trusted-container session, resume first re-resolves the provider's
+current serving generation. If credential relay is enabled, it replaces the
+session's reverse-forward against the daemon's current live relay and proves the
+container-side loopback listener accepts before ACP is marked ready or a queued
+prompt is delivered. Relay setup or verification failure aborts the resume
+explicitly; relay-disabled fleets keep the auth-light path.
+
 ### Session retention & garbage collection
 
 `sessions.db` is a *relay log* of cross-agent turns/events -- not the canonical
