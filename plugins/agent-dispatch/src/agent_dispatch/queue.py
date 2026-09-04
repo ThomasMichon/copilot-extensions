@@ -1175,15 +1175,22 @@ class TaskQueue:
                 "CREATE INDEX IF NOT EXISTS idx_spawn_res_state "
                 "ON spawn_reservations(state)"
             )
-            conn.execute(
-                "DROP INDEX IF EXISTS idx_spawn_res_exclusive_active"
-            )
-            conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_spawn_res_exclusive_active "
-                "ON spawn_reservations(exclusive_key) "
-                "WHERE exclusive_key IS NOT NULL "
-                "AND state IN ('reserving','spawned','cold','releasing')"
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "DROP INDEX IF EXISTS idx_spawn_res_exclusive_active"
+                )
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_spawn_res_exclusive_active "
+                    "ON spawn_reservations(exclusive_key) "
+                    "WHERE exclusive_key IS NOT NULL "
+                    "AND state IN ('reserving','spawned','cold','releasing')"
+                )
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
             # Recurring-schedule registry -- the persisted form of the timer
             # producer's spec entries, so recurring jobs are managed first-class
             # (register/list/inspect/remove/pause) instead of a hand-edited JSON

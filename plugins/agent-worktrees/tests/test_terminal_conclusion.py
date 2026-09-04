@@ -318,6 +318,42 @@ def test_newer_dispatch_provenance_is_preserved_but_not_trusted(
     assert result["reason"] == "dispatch-provenance-missing"
 
 
+def test_blank_dispatch_provenance_is_preserved_but_not_trusted(
+    tmp_path, monkeypatch
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    raw["dispatch_attempt"] = {
+        "task_id": "task-1",
+        "reservation_key": "dispatch-task:task-1:1",
+        "attempt": 1,
+        "driver": "   ",
+        "supervisor": "host-a",
+        "creator_machine": "host-a",
+        "ownership": "created",
+    }
+    record_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    loaded = tracking.load_record(record_path)
+    assert loaded.dispatch_attempt is None
+    assert loaded.dispatch_attempt_opaque is True
+
+    tracking.save_record(loaded, record_path)
+    saved = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    assert saved["dispatch_attempt"] == raw["dispatch_attempt"]
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:1",
+    )
+    assert result["action"] == "skipped"
+    assert result["reason"] == "dispatch-provenance-missing"
+
+
 def test_lifecycle_change_during_git_inspection_blocks_priming(
     tmp_path,
     monkeypatch,

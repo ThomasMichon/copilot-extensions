@@ -9,6 +9,7 @@ supervisor loop) can never double-spawn an autonomous worker.
 from __future__ import annotations
 
 import concurrent.futures
+import sqlite3
 import threading
 import types
 
@@ -328,6 +329,32 @@ def test_releasing_reservation_fences_same_exclusive_key(q):
     assert acquired is False
     assert blocked.key == reservation.key
     assert blocked.state == SpawnState.RELEASING
+
+
+def test_exclusive_index_replacement_is_transactional(q, monkeypatch):
+    conn = sqlite3.connect(q.db_path, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    statements: list[str] = []
+    conn.set_trace_callback(statements.append)
+    monkeypatch.setattr(q, "_connect", lambda: conn)
+
+    try:
+        q._migrate()
+    finally:
+        conn.close()
+
+    normalized = [" ".join(statement.upper().split()) for statement in statements]
+    begin = normalized.index("BEGIN IMMEDIATE")
+    drop = normalized.index("DROP INDEX IF EXISTS IDX_SPAWN_RES_EXCLUSIVE_ACTIVE")
+    create = next(
+        index
+        for index, statement in enumerate(normalized)
+        if statement.startswith(
+            "CREATE UNIQUE INDEX IF NOT EXISTS IDX_SPAWN_RES_EXCLUSIVE_ACTIVE"
+        )
+    )
+    commit = normalized.index("COMMIT", create)
+    assert begin < drop < create < commit
 
 
 def test_supersede_exclusive_key_abandons_only_queued_or_proposed(q):

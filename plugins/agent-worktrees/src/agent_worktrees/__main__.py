@@ -10240,7 +10240,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 "supervisor",
             )
             if not isinstance(dispatch_fields[key], str)
-            or not dispatch_fields[key]
+            or not dispatch_fields[key].strip()
             or len(dispatch_fields[key]) > tracking.DISPATCH_PROVENANCE_TEXT_MAX
         ]
         if invalid:

@@ -158,7 +158,11 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
     strings: dict[str, str] = {}
     for key in required - {"attempt", "ownership"}:
         raw = value.get(key)
-        if not isinstance(raw, str) or not raw or len(raw) > DISPATCH_PROVENANCE_TEXT_MAX:
+        if (
+            not isinstance(raw, str)
+            or not raw.strip()
+            or len(raw) > DISPATCH_PROVENANCE_TEXT_MAX
+        ):
             return None
         strings[key] = raw
     try:
