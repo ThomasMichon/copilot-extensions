@@ -2163,6 +2163,7 @@ def mux_binding_for_session(
     session_id: str,
     *,
     mux: str | None = None,
+    expected_session_name: str | None = None,
 ) -> dict | None:
     """Recover a session's mux/worktree identity from its live lock process.
 
@@ -2185,7 +2186,9 @@ def mux_binding_for_session(
     if not entry.is_dir():
         return None
 
-    live_pids: list[int] = []
+    from . import locks, reclaim
+
+    live_pid_start_times: dict[int, str] = {}
     try:
         for lock_file in entry.glob("inuse.*.lock"):
             parts = lock_file.stem.split(".")
@@ -2195,14 +2198,17 @@ def mux_binding_for_session(
                 pid = int(parts[1])
             except ValueError:
                 continue
-            if _is_copilot_process(pid):
-                live_pids.append(pid)
+            start_time = locks.process_start_time(pid)
+            if (
+                start_time
+                and _is_copilot_process(pid)
+                and locks.process_start_time(pid) == start_time
+            ):
+                live_pid_start_times[pid] = start_time
     except OSError:
         return None
-    if not live_pids:
+    if not live_pid_start_times:
         return None
-
-    from . import locks, reclaim
 
     table = reclaim.build_process_table()
     if not table:
@@ -2219,6 +2225,7 @@ def mux_binding_for_session(
         seen.add(cur)
         own_ancestry.add(cur)
         cur = table[cur]["ppid"]
+    live_pids = list(live_pid_start_times)
     owned_pids = [pid for pid in live_pids if pid in own_ancestry]
     if owned_pids:
         live_pids = owned_pids
@@ -2268,7 +2275,12 @@ def mux_binding_for_session(
         if len(fields) != 3:
             continue
         session_name, pane_id, pane_pid_raw = fields
-        if not session_name.startswith("wt-") or not pane_id:
+        session_is_allowed = (
+            session_name == expected_session_name
+            if expected_session_name
+            else session_name.startswith("wt-")
+        )
+        if not session_is_allowed or not pane_id:
             continue
         try:
             pane_pid = int(pane_pid_raw)
@@ -2276,6 +2288,9 @@ def mux_binding_for_session(
             continue
         for copilot_pid, ancestry in ancestry_by_pid.items():
             if pane_pid not in ancestry:
+                continue
+            copilot_start_time = live_pid_start_times[copilot_pid]
+            if locks.process_start_time(copilot_pid) != copilot_start_time:
                 continue
             key = (session_name, pane_id, pane_pid, copilot_pid)
             matches[key] = {
@@ -2285,7 +2300,7 @@ def mux_binding_for_session(
                 "pane_pid": pane_pid,
                 "pane_start_time": locks.process_start_time(pane_pid),
                 "copilot_pid": copilot_pid,
-                "copilot_start_time": locks.process_start_time(copilot_pid),
+                "copilot_start_time": copilot_start_time,
             }
 
     return next(iter(matches.values())) if len(matches) == 1 else None
