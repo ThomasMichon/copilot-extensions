@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [agent-index](plugins/agent-index/) | Index/search service | Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem. Phase 1 ships the service shell; indexing and retrieval arrive in later slices. |
 | [agent-machines](plugins/agent-machines/) | Machine-state reconciler | Portable restore-machinestate — converge a machine to desired state declared in in-repo requirement packages (Copilot settings first). Machine-scoped union restore, a seven-disposition model, and a detect-not-arbitrate conflict validator. The engine is generic; sensitive OS-mutating modules stay repo-local. |
 | [agent-vault](plugins/agent-vault/) | CLI + service | Local KeePassXC-backed secret store — a machine-local service caches the master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and credentials on demand without hardcoding, committing, or env-exporting them. Ships a SUDO_ASKPASS helper for `sudo -A`. |
-| [customizing-copilot](plugins/customizing-copilot/) | Customizing the CLI | Teach an agent how to customize and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, and authoring `<repo>-harness` plugins. Seven focused skills. Payload-only — no runtime to install. |
+| [customizing-copilot](plugins/customizing-copilot/) | Customizing and diagnosing the CLI | Teach an agent how to customize, diagnose, and extend the Copilot CLI — authoring skills, defining sub-agents, registering MCP servers, installing plugins, building a control-harness, reviewing customizations, diagnosing startup hangs, and authoring `<repo>-harness` plugins. Eight focused skills. Payload-only — no runtime to install. |
 | [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Operator harness | Portable owner-authored skills, the `clean-room-judge` evaluator agent, and an ambient pointer to the general-purpose, organization-neutral contribution boundary. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `<repo>-harness` standard. Payload-only. |
 | [wsl-setup](plugins/wsl-setup/) | Environment setup | Set up and troubleshoot WSL2 as a reachable, persistent service host — pick the networking mode (NAT + localhostForwarding vs mirrored), diagnose corp-network egress + host↔WSL loopback failures, and keep a distro alive for a hosted listener (e.g. sshd behind a Dev Tunnel). Ships a windowless keepalive helper. |
 | [harness-knowledge](plugins/harness-knowledge/) | Binding skill | Bind a stateless control harness to its private **knowledge** repo, harness-first — ask for (or create) the knowledge repo, write the machine-local `knowledge_repo` pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths. Keeps the shareable harness tree generic + name-free. Payload-only. |
@@ -475,7 +475,7 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | Description |
 |----------|-------------|
-| [README](plugins/customizing-copilot/README.md) | Plugin overview, the seven skills, no-install delivery |
+| [README](plugins/customizing-copilot/README.md) | Plugin overview, the eight skills, no-install delivery |
 | [authoring-skills](plugins/customizing-copilot/skills/authoring-skills/SKILL.md) | SKILL.md format, folder convention, validation, hooks, custom instructions |
 | [defining-subagents](plugins/customizing-copilot/skills/defining-subagents/SKILL.md) | Custom agents: `.agent.md`, bounded execution, MCP ownership, Task-capable anti-recursion |
 | [registering-mcp-servers](plugins/customizing-copilot/skills/registering-mcp-servers/SKILL.md) | MCP registration hierarchy, config formats, writing a server |
@@ -483,6 +483,7 @@ Your source repos and their `.worktrees` content are never touched.
 | [building-harnesses](plugins/customizing-copilot/skills/building-harnesses/SKILL.md) | In-session entry to the Control-Harness Runbook (greenfield / brownfield / audit) |
 | [reviewing-customizations](plugins/customizing-copilot/skills/reviewing-customizations/SKILL.md) | Review a harness's skills, owned and enabled-plugin sub-agents, `AGENTS.md`, hooks, MCP configs |
 | [authoring-harness-plugins](plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md) | The `<repo>-harness` standard: ship operator skills for a repo |
+| [diagnosing-copilot-cli-startup](plugins/customizing-copilot/skills/diagnosing-copilot-cli-startup/SKILL.md) | Diagnose interactive CLI `Loading` / `Resuming` hangs from mux, process, session-state, and plugin evidence |
 
 ### Agent Dispatch
 

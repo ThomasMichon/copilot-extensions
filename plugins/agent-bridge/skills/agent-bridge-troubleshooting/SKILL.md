@@ -36,6 +36,13 @@ failure modes -- jump to the matching section:
   then **cannot fetch/push/PR**: git fails with `unable to get password` /
   `relay unreachable`. -> *Is this the credential-relay flap?* below.
 
+If a **headed or interactive** Copilot CLI is stuck on `Loading...` or
+`Resuming...`, invoke
+`customizing-copilot:diagnosing-copilot-cli-startup` first. That skill owns mux
+capture, interactive process/session logs, and startup-boundary classification;
+return here when the differential reaches bridge-owned ACP recovery or
+live-session registration.
+
 Identify the mode and capture the trace. The resume-hang root cause is the
 Copilot CLI startup race
 github/copilot-agent-runtime **#13492** (fix **#13494**), originally scoped to
