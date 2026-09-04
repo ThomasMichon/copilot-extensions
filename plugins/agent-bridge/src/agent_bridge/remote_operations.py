@@ -87,6 +87,7 @@ class RemoteBridgeError(RuntimeError):
             "code": self.code,
             "message": str(self),
             **self.details,
+            "reconnectable": self.reconnectable,
         }
 
 

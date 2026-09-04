@@ -963,6 +963,27 @@ def test_remote_api_returns_retryable_status_while_initializing(
     assert "initializing" in response.json()["detail"]
 
 
+def test_remote_api_preserves_retryability_in_http_errors(remote_app) -> None:
+    remote_app.state.remote_operations.session_status = AsyncMock(
+        side_effect=RemoteBridgeError(
+            503,
+            "carrier_unavailable",
+            "transport lost",
+            reconnectable=True,
+        )
+    )
+
+    with TestClient(remote_app) as client:
+        response = client.get(
+            "/api/v1/remote/example-host/sessions/session-a/status",
+            params={"caller_id": "consumer-a"},
+            headers={"Authorization": "Bearer " + "test-token"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["reconnectable"] is True
+
+
 def test_remote_api_maps_backpressure_to_control(remote_app) -> None:
     class _BackpressureSubscription(_ApiSubscription):
         async def get(self):
@@ -983,6 +1004,32 @@ def test_remote_api_maps_backpressure_to_control(remote_app) -> None:
 
     assert "event: bridge_control" in text
     assert '"code":"consumer_backpressure"' in text
+    assert remote_app.state.remote_operations.subscription.closed is True
+
+
+def test_remote_api_preserves_retryability_in_stream_control(
+    remote_app,
+) -> None:
+    class _UnavailableSubscription(_ApiSubscription):
+        async def get(self):
+            raise CarrierUnavailable("transport lost", reconnectable=True)
+
+    remote_app.state.remote_operations.subscription = (
+        _UnavailableSubscription()
+    )
+
+    with TestClient(remote_app) as client:
+        with client.stream(
+            "GET",
+            "/api/v1/remote/example-host/sessions/session-a/events",
+            params={"caller_id": "consumer-a", "after": 4},
+            headers={"Authorization": "Bearer " + "test-token"},
+        ) as response:
+            text = "".join(response.iter_text())
+
+    assert "event: bridge_control" in text
+    assert '"code":"carrier_unavailable"' in text
+    assert '"reconnectable":true' in text
     assert remote_app.state.remote_operations.subscription.closed is True
 
 

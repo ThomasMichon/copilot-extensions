@@ -52,10 +52,8 @@ def _raise(error: RemoteBridgeError) -> None:
 
 def _control(error: RemoteBridgeError) -> str:
     payload = {
-        "code": error.code,
-        "message": str(error),
         "action": "full_reconcile",
-        **error.details,
+        **error.public_detail(),
     }
     return (
         "event: bridge_control\n"
