@@ -562,6 +562,119 @@ def test_cold_steer_resumes_existing_acp_session(q, client):
     assert reservation.key not in sup._cooled_reservations
 
 
+def test_cold_resume_missing_worktree_releases_same_task_for_fresh_embodiment(
+    q, client, tmp_path
+):
+    missing_worktree = tmp_path / "removed-review-worktree"
+    blocked = q.create(
+        "needs operator",
+        labels=["review"],
+        goal="finish the current review",
+        done_criteria="post a verdict for the current head",
+    )
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "removed-review-worktree",
+        ownership="created",
+        creating_host="test-machine",
+        driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:blocked-session",
+        worktree="removed-review-worktree",
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.record_progress(
+        blocked.id,
+        "headless-owner",
+        phase="reviewing",
+        summary="reviewed the prior head",
+    )
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(
+        blocked.id,
+        fields={"head": "corrected-head"},
+        sender="producer",
+    )
+    before = q.get(blocked.id)
+    before_progress = q.progress_log(blocked.id)
+    before_steers = q.steer_log(blocked.id)
+    resumed: list[str] = []
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_target_dir_fn=lambda _sid: str(missing_worktree),
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True,
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "already-removed",
+            "reason": "worktree-missing",
+        },
+        machine="test-machine",
+    )
+    sup._cooled_reservations.add(reservation.key)
+
+    assert sup.release_resumed_cold_tasks(now=1000) == 1
+    released = q.get(blocked.id)
+    assert released.id == before.id
+    assert released.goal == before.goal
+    assert released.done_criteria == before.done_criteria
+    assert released.latest_progress == before.latest_progress
+    assert q.progress_log(blocked.id) == before_progress
+    assert q.steer_log(blocked.id) == before_steers
+    assert released.status == Status.QUEUED
+    assert released.owner is None
+    assert resumed == []
+    held = q.get_reservation(reservation.key)
+    assert held.state == SpawnState.COLD
+    assert held.release_requested is True
+
+    assert sup.poll_once(now=1001) == [blocked.id]
+    assert spawn.calls == [blocked.id]
+    reservations = q.list_reservations(task_id=blocked.id)
+    assert len(reservations) == 2
+    assert sum(r.state == SpawnState.SPAWNED for r in reservations) == 1
+
+
+@pytest.mark.parametrize("target_known", [False, True])
+def test_cold_resume_preserves_unknown_or_present_worktree(
+    q, client, tmp_path, target_known
+):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+    resumed: list[str] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_target_dir_fn=(
+            (lambda _sid: str(tmp_path)) if target_known else (lambda _sid: None)
+        ),
+        local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True,
+    )
+
+    assert sup.release_resumed_cold_tasks() == 1
+    assert resumed == ["blocked-session"]
+    assert q.get(blocked.id).status == Status.STARTED
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+
+
 def test_cold_resume_does_not_start_process_before_reservation_transition(
     q, client, monkeypatch
 ):
