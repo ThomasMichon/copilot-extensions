@@ -175,6 +175,7 @@ def _run_psmux_probe(marker: Path, psmux: str) -> int:
         subprocess.run(
             [psmux, "list-sessions"],
             capture_output=True,
+            check=True,
             timeout=5,
         )
         time.sleep(0.05)

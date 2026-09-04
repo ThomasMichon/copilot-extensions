@@ -328,10 +328,19 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_PATH `
             -Value $psmux.DirectoryName `
             -Encoding utf8
+      - name: Start psmux test session
+        shell: pwsh
+        run: >-
+          psmux new-session -d -s aw-ci --
+          powershell.exe -NoProfile -Command "Start-Sleep -Seconds 300"
       - name: Test Windows status-loop launch
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           -k status_daemon_console_root_contains_psmux_descendants
+      - name: Stop psmux test session
+        if: always()
+        shell: pwsh
+        run: psmux kill-session -t aw-ci
 
   full:
     name: full - ${{ matrix.plugin }}
