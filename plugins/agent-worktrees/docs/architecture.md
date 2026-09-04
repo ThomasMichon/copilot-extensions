@@ -560,7 +560,7 @@ caller that already holds both ids.
 
 **Safe terminal worker interface — `conclude-disposable`.** A higher layer that
 explicitly owns a disposable CLI worker class can conclude the exact recorded
-allocation without gaining a direct deletion primitive:
+allocation and optionally request exact-id managed teardown:
 
 ```bash
 agent-worktrees conclude-disposable \
@@ -568,6 +568,7 @@ agent-worktrees conclude-disposable \
     --session <exact-session-id> \
     --policy disposable-cli \
     --owner <allocator> \
+    --remove \
     --json
 ```
 
@@ -582,25 +583,30 @@ from the stale-lock age, so contention skips rather than breaking a healthy
 longer-running lifecycle operation. Pending handoffs, follow-ups, resource
 obligations, pairs, open pull requests, branch drift, arbitrary dirty paths,
 and local commits all produce structured skip reasons and remain untouched,
-including generated overlays. A clean commit-free branch may advance with
-`git reset --keep` to the locally available canonical default branch.
+including generated overlays. A clean branch with zero commits ahead of the
+configured upstream may remain behind without being rewritten.
 Repository resolution uses the record and the legacy/default fallback; a truly
 unknown repository is held. If the checkout directory is
 already absent, any surviving local branch is still compared with its configured
 upstream and preserved when it contains unique commits.
 
-A successful conclusion converts the record to a managed, final CLI worker and
-returns. It does not call `remove-system`, remove the worktree, or bypass
-liveness/grace checks. The existing managed-worktree sweep is the later
-deletion authority: it independently re-checks final/unused state, live
+A successful conclusion converts the record to a managed, final CLI worker.
+Without `--remove`, it returns for a later managed-GC pass. With `--remove`, it
+invokes that same managed-worktree sweep for only the exact id with zero idle
+grace. The sweep independently re-checks final/unused state, live
 session/mux/attachment, follow-up, activity knowledge, and idle grace. CLI
 embodiment and final managed removal share the repository lifecycle fence. The
-final decision holds the record lock only for its metadata recheck, then uses
+managed terminal record rejects late session registration, disposition changes,
+and new resource claims before removal; Picker reconciliation also leaves that
+terminal tombstone intact.
+The final decision holds the record lock only for its metadata recheck, then uses
 non-forced Git removal so a concurrently dirtied checkout is preserved. Lock
 wait diagnostics use stderr and therefore never corrupt JSON command output.
-Managed removal resolves each record's own repository and retains the tracking
-record if Git worktree or branch removal fails, so cleanup remains retryable
-rather than converting a failed removal into an invisible orphan.
+Managed removal resolves each record's own repository, verifies the observed
+branch and HEAD before reconciliation, and deletes the final branch ref only
+with its expected old object id. It retains the tracking record if Git worktree
+or branch removal fails, so cleanup remains retryable rather than converting a
+failed removal into an invisible orphan.
 
 **Cross-layer read interface — `agent-worktrees head-session`.** Because a
 higher layer (agent-bridge, context-handoff) runs in its *own* venv and cannot

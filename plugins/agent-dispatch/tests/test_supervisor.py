@@ -1068,6 +1068,11 @@ def test_terminal_conclusion_reconcile_is_idempotent(q, client):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("action", ["removed", "already-removed"])
+def test_removed_conclusion_actions_are_complete(action):
+    assert Supervisor._conclusion_state({"action": action}) == "complete"
+
+
 def test_live_terminal_conclusion_retries_after_settlement(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
