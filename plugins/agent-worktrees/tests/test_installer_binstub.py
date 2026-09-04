@@ -357,6 +357,27 @@ def test_reconcile_preserves_legacy_stub_for_different_project(
     assert inst._read_receipt("demo") is None
 
 
+def test_reconcile_preserves_unreceipted_explicit_project_wrapper(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    lb.mkdir()
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    target = inst._project_binstub_specs("demo")[0][0]
+    wrapper = "python -m agent_worktrees --project demo status\n"
+    target.write_text(wrapper, encoding="utf-8")
+
+    result = inst.reconcile_binstubs()
+
+    assert result["migrated"] == []
+    assert result["preserved"] == ["demo"]
+    assert target.read_text(encoding="utf-8") == wrapper
+    assert inst._read_receipt("demo") is None
+
+
 def test_reconcile_never_touches_reserved_global_name(monkeypatch, tmp_path: Path):
     """A project accidentally registered as ``agent-worktrees`` (e.g. install run
     from the plugin checkout) must never be deployed as a project stub -- that

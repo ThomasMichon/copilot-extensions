@@ -165,6 +165,7 @@ foreach ($name in @(
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
             $node.Name -eq $name
     }, $true)
+    if (-not $functionAst) { throw "Missing installer function: $name" }
     Invoke-Expression $functionAst.Extent.Text
 }
 

@@ -690,11 +690,10 @@ def _is_legacy_project_binstub_for(text: str, project: str) -> bool:
     if not _is_project_binstub(text):
         return False
     escaped = re.escape(project)
-    return any(
-        re.search(pattern, text)
-        for pattern in (
-            rf"--project(?:\s+|=)[\"']?{escaped}(?=[\"'\s]|$)",
+    return bool(
+        re.search(
             rf"WORKTREE_PROJECT\s*=\s*[\"']?{escaped}(?=[\"'\s]|$)",
+            text,
         )
     )
 
