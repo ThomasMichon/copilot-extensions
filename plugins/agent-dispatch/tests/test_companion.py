@@ -142,6 +142,42 @@ def test_provider_active_supplies_runtime_arguments_and_environment(tmp_path):
     ]
 
 
+def test_captured_provider_uses_owned_no_window_launch(monkeypatch):
+    seen = {}
+
+    class Process:
+        returncode = 0
+        pid = 123
+
+        def communicate(self, input_text, timeout):
+            return "{}", ""
+
+    def fake_popen(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+        return Process()
+
+    monkeypatch.setattr(companion.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        companion,
+        "no_window_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
+
+    completed = companion._run_captured(
+        ("python", "provider.py"),
+        cwd=".",
+        environment={},
+        timeout=2,
+        input_text="request",
+    )
+
+    assert completed.returncode == 0
+    assert seen["command"] == ["python", "provider.py"]
+    assert seen["kwargs"]["creationflags"] == 0x08000000
+    assert "start_new_session" not in seen["kwargs"]
+
+
 def test_provider_inactive_withdraws_companion(tmp_path):
     root = tmp_path / "plugin"
     _write_script(root / "bin" / "service.py")

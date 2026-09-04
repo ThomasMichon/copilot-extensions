@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent_containers import docker_proxy
 from agent_containers import ssh_transport as transport
 
 
@@ -42,7 +43,7 @@ def test_staged_input_is_binary_to_preserve_lf(monkeypatch):
     assert "text" not in seen
 
 
-def test_prepare_ssh_config_uses_docker_only_as_proxy(monkeypatch, tmp_path):
+def test_prepare_ssh_config_uses_docker_directly_off_windows(monkeypatch, tmp_path):
     monkeypatch.setattr(transport, "_SSH_DIR", tmp_path)
     monkeypatch.setattr(
         transport,
@@ -51,6 +52,7 @@ def test_prepare_ssh_config_uses_docker_only_as_proxy(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(transport, "_install_authorized_key", lambda *args: None)
     monkeypatch.setattr(transport, "_container_id", lambda name: "a" * 64)
+    monkeypatch.setattr(transport, "_is_windows", lambda: False)
 
     config = transport.prepare_ssh_config("repo-1", "vscode")
 
@@ -62,6 +64,80 @@ def test_prepare_ssh_config_uses_docker_only_as_proxy(monkeypatch, tmp_path):
     assert "StrictHostKeyChecking accept-new" in text
     assert config.host_alias.endswith("-" + ("a" * 12))
     assert config.user == "vscode"
+
+
+def test_prepare_ssh_config_uses_windowless_broker_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(transport, "_SSH_DIR", tmp_path)
+    monkeypatch.setattr(
+        transport,
+        "_ensure_host_key",
+        lambda: (tmp_path / "id_ed25519", "ssh-ed25519 AAAA"),
+    )
+    monkeypatch.setattr(transport, "_install_authorized_key", lambda *args: None)
+    monkeypatch.setattr(transport, "_container_id", lambda name: "a" * 64)
+    monkeypatch.setattr(transport, "_is_windows", lambda: True)
+    monkeypatch.setattr(docker_proxy, "ensure_broker", lambda *args: 54321)
+
+    config = transport.prepare_ssh_config("repo-1", "vscode")
+
+    text = Path(config.config_file).read_text(encoding="utf-8")
+    assert "HostName 127.0.0.1" in text
+    assert "Port 54321" in text
+    assert "HostKeyAlias agent-container-repo-1-aaaaaaaaaaaa" in text
+    assert "ProxyCommand docker exec" not in text
+
+
+def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):
+    seen = {}
+    process = SimpleNamespace(
+        stdin=SimpleNamespace(),
+        stdout=SimpleNamespace(),
+        wait=lambda: 17,
+        poll=lambda: 17,
+    )
+
+    def fake_popen(args, **kwargs):
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        return process
+
+    monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        docker_proxy,
+        "no_window_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
+    monkeypatch.setattr(
+        docker_proxy.threading,
+        "Thread",
+        lambda **kwargs: SimpleNamespace(
+            start=lambda: None,
+            join=lambda timeout=None: None,
+        ),
+    )
+    connection = SimpleNamespace(close=lambda: None)
+
+    docker_proxy._serve_connection("repo-1", connection)
+
+    assert seen["args"] == [
+        "docker",
+        "exec",
+        "-i",
+        "-u",
+        "root",
+        "repo-1",
+        "/usr/sbin/sshd",
+        "-i",
+        "-e",
+        "-o",
+        "GatewayPorts=no",
+    ]
+    assert seen["kwargs"] == {
+        "stdin": subprocess.PIPE,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.DEVNULL,
+        "creationflags": 0x08000000,
+    }
 
 
 @pytest.mark.parametrize("container,user", [

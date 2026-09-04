@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
-from agent_procutil import contained_test_mode, detached_kwargs, no_window_kwargs
+from agent_procutil import contained_test_mode, no_window_kwargs
 from plugin_activation import read_json_object, write_json_object_atomic
 
 from .registrations import (
@@ -255,7 +255,7 @@ def _run_captured(
     timeout: float,
     input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    kwargs: dict[str, object] = detached_kwargs()
+    kwargs: dict[str, object] = no_window_kwargs()
     try:
         process = subprocess.Popen(  # noqa: S603 -- attributed fixed argv
             list(command),
