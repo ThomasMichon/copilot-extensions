@@ -44,6 +44,7 @@ from .queue import (
     ProducerScopeValidationError,
     ResultTooLargeError,
     ResultValidationError,
+    RoutingAssignment,
     SpawnReservation,
     StructuredResult,
     Task,
@@ -446,6 +447,41 @@ class AbandonBody(BaseModel):
 class ReserveSpawnBody(BaseModel):
     task_id: str
     reserved_by: str | None = None
+
+
+class RoutingAssignmentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    purpose: str
+    selected_model: str
+    eligibility_state: str
+    selection_reason: str
+    execution_surface: str
+    decision_ref: str
+    parent_assignment_id: str | None = None
+    containment_profile_ref: str | None = None
+    trial_ref: str | None = None
+    coordinator_session_ref: str | None = None
+
+
+class RoutingTransitionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str
+    actor_role: str
+    terminal_disposition: str | None = None
+    reason_code: str | None = None
+    worker_session_ref: str | None = None
+
+
+class RoutingBillingRefBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    provider: str
+    provider_billing_event_ref: str
+    actor_role: str
+    occurred_at: FiniteFloat | None = None
 
 
 class RecordSpawnBody(BaseModel):
@@ -1565,6 +1601,97 @@ def create_app(
             msg = str(exc)
             status = 404 if msg.startswith("no such reservation") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
+
+    def _routing_guard(op) -> tuple[RoutingAssignment, bool]:
+        try:
+            return op()
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+
+    @app.post("/spawn-reservations/{key}/routing-assignment")
+    def record_routing_assignment(key: str, body: RoutingAssignmentBody) -> dict:
+        assignment, created = _routing_guard(
+            lambda: queue.record_routing_assignment(key, body.model_dump())
+        )
+        result = asdict(assignment)
+        if created:
+            bus.publish({"type": "routing.assigned", "assignment": result})
+        return {"created": created, "assignment": result}
+
+    @app.post("/routing-assignments/{assignment_id}/transition")
+    def transition_routing_assignment(
+        assignment_id: str,
+        body: RoutingTransitionBody,
+    ) -> dict:
+        assignment, changed = _routing_guard(
+            lambda: queue.transition_routing_assignment(
+                assignment_id,
+                body.event_type,
+                body.actor_role,
+                terminal_disposition=body.terminal_disposition,
+                reason_code=body.reason_code,
+                worker_session_ref=body.worker_session_ref,
+            )
+        )
+        result = asdict(assignment)
+        if changed:
+            bus.publish({"type": "routing.transitioned", "assignment": result})
+        return {"changed": changed, "assignment": result}
+
+    @app.post("/routing-assignments/{assignment_id}/billing-ref")
+    def record_routing_billing_ref(
+        assignment_id: str,
+        body: RoutingBillingRefBody,
+    ) -> dict:
+        try:
+            created = queue.record_routing_billing_ref(
+                assignment_id,
+                body.event_id,
+                body.provider,
+                body.provider_billing_event_ref,
+                body.actor_role,
+                occurred_at=body.occurred_at,
+            )
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+        if created:
+            bus.publish({
+                "type": "routing.billing_linked",
+                "assignment_id": assignment_id,
+                "event_id": body.event_id,
+            })
+        return {"created": created, "assignment_id": assignment_id}
+
+    @app.get("/routing-assignments")
+    def list_routing_assignments(
+        task_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        return [
+            asdict(assignment)
+            for assignment in queue.list_routing_assignments(
+                task_id=task_id,
+                limit=limit,
+            )
+        ]
+
+    @app.get("/routing-assignments/{assignment_id}/events")
+    def get_routing_assignment_events(assignment_id: str) -> list[dict]:
+        try:
+            return queue.routing_assignment_events(assignment_id)
+        except TaskError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/routing-assignments/{assignment_id}")
+    def get_routing_assignment(assignment_id: str) -> dict:
+        assignment = queue.get_routing_assignment(assignment_id)
+        if assignment is None:
+            raise HTTPException(status_code=404, detail="no such routing assignment")
+        return asdict(assignment)
 
     @app.post("/spawn-reservations/{key}/spawned")
     def record_spawn(key: str, body: RecordSpawnBody) -> dict:
