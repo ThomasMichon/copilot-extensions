@@ -47,6 +47,29 @@ function Get-AwPsmuxBinaryVersion {
     return $null
 }
 
+function Test-AwPsmuxVersionCompatible {
+    param(
+        [Parameter(Mandatory)][string]$Version,
+        [string]$MinimumVersion = '3.3.5',
+        [string[]]$BlockedVersions = @('3.3.6')
+    )
+    try {
+        $parsed = [version]$Version
+        $minimum = [version]$MinimumVersion
+    } catch {
+        return $false
+    }
+    if ($parsed -lt $minimum) { return $false }
+    foreach ($blocked in $BlockedVersions) {
+        try {
+            if ($parsed -eq [version]$blocked) { return $false }
+        } catch {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Get-AwPsmuxSessionState {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -74,11 +97,11 @@ function Get-AwPsmuxSessionState {
 function Find-AwCompatiblePsmuxPackageBinary {
     param(
         [Parameter(Mandatory)][string]$PackageRoot,
-        [Parameter(Mandatory)][string]$MinimumVersion,
+        [string]$MinimumVersion = '3.3.5',
+        [string[]]$BlockedVersions = @('3.3.6'),
         [scriptblock]$VersionProbe
     )
     if (-not (Test-Path -LiteralPath $PackageRoot)) { return $null }
-    try { $minimum = [version]$MinimumVersion } catch { return $null }
     $compatible = @(
         Get-ChildItem -LiteralPath $PackageRoot -Directory -Filter 'marlocarlo.psmux_*' `
             -ErrorAction SilentlyContinue |
@@ -90,7 +113,9 @@ function Find-AwCompatiblePsmuxPackageBinary {
                 $version = Get-AwPsmuxBinaryVersion `
                     -Path $_.FullName -VersionProbe $VersionProbe
                 try { $parsed = [version]$version } catch { $parsed = $null }
-                if ($parsed -and $parsed -ge $minimum) {
+                if ($parsed -and (Test-AwPsmuxVersionCompatible `
+                    -Version $version -MinimumVersion $MinimumVersion `
+                    -BlockedVersions $BlockedVersions)) {
                     [pscustomobject]@{
                         Path = $_.FullName
                         Directory = $_.DirectoryName

@@ -43,7 +43,7 @@ $probe = {
     return '3.3.8'
 }
 $selected = Find-AwCompatiblePsmuxPackageBinary -PackageRoot $Root `
-    -MinimumVersion '3.3.8' -VersionProbe $probe
+    -VersionProbe $probe
 $repair = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
     -UserPath "$Old;$Keep;$Desired;$Newer" `
     -ProcessPath "$Keep;$Old;$Desired;$Newer" -PackageRoot $Root
@@ -129,9 +129,43 @@ def test_installer_and_launcher_use_compatible_version_helper():
         "Select-Object -First 1"
     ) in installer
     assert "Find-AwCompatiblePsmuxPackageBinary" in launcher
-    assert "-MinimumVersion '3.3.8'" in launcher
-    assert "$minimumVersion = '3.3.8'" in installer
+    assert "Test-AwPsmuxVersionCompatible" in helper
+    assert "[string]$MinimumVersion = '3.3.5'" in helper
+    assert "[string[]]$BlockedVersions = @('3.3.6')" in helper
+    assert "$installVersion = '3.3.8'" in installer
     assert "winget pin add" not in installer
+
+
+@pytest.mark.skipif(_PWSH is None, reason="PowerShell is not available")
+def test_compatibility_accepts_335_and_337_but_blocks_336(tmp_path):
+    script = tmp_path / "probe.ps1"
+    script.write_text(
+        """
+param($Helper)
+. $Helper
+@('3.3.4', '3.3.5', '3.3.6', '3.3.7', '3.3.8') | ForEach-Object {
+    [pscustomobject]@{
+        version = $_
+        compatible = Test-AwPsmuxVersionCompatible -Version $_
+    }
+} | ConvertTo-Json -Compress
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [_PWSH, "-NoLogo", "-NoProfile", "-File", str(script), str(_HELPER)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = {item["version"]: item["compatible"] for item in json.loads(proc.stdout)}
+    assert result == {
+        "3.3.4": False,
+        "3.3.5": True,
+        "3.3.6": False,
+        "3.3.7": True,
+        "3.3.8": True,
+    }
 
 
 def test_path_repair_does_not_mutate_live_sessions():

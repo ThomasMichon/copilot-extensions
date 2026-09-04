@@ -754,8 +754,7 @@ function Test-AwJoiningLiveSession {
     if (Test-Path -LiteralPath $pathHelper) {
         . $pathHelper
         $desired = Find-AwCompatiblePsmuxPackageBinary `
-            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
-            -MinimumVersion '3.3.8'
+            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
         if ($desired) { $cmd = Get-Command $desired.Path }
     }
     # Resolve the WinGet reparse-stub to the real exe (pwsh 7.4 can't launch the
@@ -1205,8 +1204,7 @@ function Resolve-AwPsmuxBin {
     if (Test-Path -LiteralPath $pathHelper) {
         . $pathHelper
         $desired = Find-AwCompatiblePsmuxPackageBinary `
-            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
-            -MinimumVersion '3.3.8'
+            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
         if ($desired) { return $desired.Path }
     }
     $src = $Cmd.Source
