@@ -72,6 +72,10 @@ kind:
    guard in required CI, cover canonical shared libraries, reject
    `CREATE_NEW_CONSOLE` in production background paths, and require live
    windowless-parent validation for launch-path reviews.
+9. **agent-worktrees status-loop containment** — #1974. Launch the resident
+   status monitor and per-session status updater from one console-subsystem
+   Python root under `CREATE_NO_WINDOW`, so repeated `psmux` probes inherit one
+   hidden console instead of allocating a new `conhost` per refresh.
 
 ## Deferred Backlog Intake
 
@@ -183,3 +187,17 @@ against real behavior.
 - A second review extended coverage to shipped plugin scripts and annotated
   constants, and made the exception syntax fail closed: it must be an actual
   inline comment with a non-empty reason.
+
+### 2026-09-04 - agent-worktrees status-loop residual
+- A one-hour Windows process trace attributed repeated short-lived console
+  allocations to the resident `agent-worktrees status-monitor`: each `psmux`
+  probe launched beneath the consoleless `pythonw` daemon allocated its own
+  `conhost`.
+- A controlled comparison over 20 real `psmux list-sessions` cycles reproduced
+  20 descendant `conhost` processes with `pythonw` plus per-child
+  `CREATE_NO_WINDOW`, versus one inherited hidden `conhost` when console
+  `python.exe` was the root under `CREATE_NO_WINDOW`.
+- Accepted #1974 as the status-loop containment slice. The implementation will
+  use the console-root primitive for both the resident monitor and its
+  per-session fallback, then validate multiple real periodic cycles with no
+  Default Terminal process or foreground transition.
