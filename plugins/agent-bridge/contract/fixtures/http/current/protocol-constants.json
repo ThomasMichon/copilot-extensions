@@ -9,7 +9,7 @@
   },
   "declared_range": {
     "minimum": 1,
-    "current": 12
+    "current": 13
   },
   "capability_versions": {
     "relay_interrupt": 2,
@@ -22,6 +22,7 @@
     "at_rest_projection": 9,
     "attention_wait": 10,
     "remote_operations": 11,
-    "conditional_idle_end": 12
+    "conditional_idle_end": 12,
+    "remote_event_multiplex": 13
   }
 }

@@ -13,7 +13,7 @@
       "session_id": "session-123",
       "name": "example-session",
       "status": "idle",
-      "protocol_version": 12,
+      "protocol_version": 13,
       "min_protocol_version": 1,
       "parity_fault_result": null
     }

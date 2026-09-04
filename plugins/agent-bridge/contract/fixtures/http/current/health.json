@@ -21,7 +21,7 @@
       "topology_ready": false,
       "credential_relay_ready": false,
       "draining": false,
-      "protocol_version": 12,
+      "protocol_version": 13,
       "min_protocol_version": 1,
       "ssh_carriers": {
         "total": 0,

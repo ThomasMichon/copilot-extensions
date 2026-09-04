@@ -34,6 +34,22 @@ class RemoteCursorAckRequest(BaseModel):
     )
 
 
+class RemoteEventMultiplexSubscription(BaseModel):
+    host: str = Field(min_length=1, max_length=128)
+    session_id: str = Field(min_length=1, max_length=256)
+    caller_id: str = Field(min_length=1, max_length=128)
+    after: int | None = Field(default=None, ge=0)
+    continuity_id: str | None = Field(
+        default=None, min_length=1, max_length=128
+    )
+
+
+class RemoteEventMultiplexRequest(BaseModel):
+    subscriptions: list[RemoteEventMultiplexSubscription] = Field(
+        min_length=1, max_length=256
+    )
+
+
 def _service(request: Request) -> RemoteOperationService:
     if not getattr(request.app.state, "ready", True):
         raise HTTPException(
@@ -61,9 +77,49 @@ def _control(error: RemoteBridgeError) -> str:
     )
 
 
+def _multiplex_control(
+    error: RemoteBridgeError,
+    subscription: RemoteEventMultiplexSubscription | None = None,
+) -> str:
+    payload = {
+        "action": "full_reconcile",
+        **error.public_detail(),
+    }
+    if subscription is not None:
+        payload.update(
+            {
+                "host": subscription.host,
+                "session_id": subscription.session_id,
+                "caller_id": subscription.caller_id,
+            }
+        )
+    return (
+        "event: bridge_control\n"
+        f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+    )
+
+
 def _control_response(error: RemoteBridgeError) -> StreamingResponse:
     async def stream():
         yield _control(error)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _multiplex_control_response(
+    error: RemoteBridgeError,
+    subscription: RemoteEventMultiplexSubscription,
+) -> StreamingResponse:
+    async def stream():
+        yield _multiplex_control(error, subscription)
 
     return StreamingResponse(
         stream(),
@@ -236,6 +292,160 @@ async def remote_session_events(
         stream(),
         media_type="text/event-stream",
         headers=headers,
+    )
+
+
+@router.post("/events")
+async def multiplex_remote_session_events(
+    body: RemoteEventMultiplexRequest,
+    request: Request,
+) -> StreamingResponse:
+    """Multiplex exact remote session subscriptions over one local SSE stream."""
+    service = _service(request)
+    requested = body.subscriptions
+    identities = {
+        (item.host, item.session_id, item.caller_id) for item in requested
+    }
+    if len(identities) != len(requested):
+        raise HTTPException(
+            status_code=422,
+            detail="remote event subscriptions must be unique",
+        )
+    subscriptions: list[tuple[RemoteEventMultiplexSubscription, Any]] = []
+    try:
+        for item in requested:
+            subscription = await service.subscribe_events(
+                item.host,
+                item.session_id,
+                caller_id=validate_caller_id(item.caller_id),
+                after=item.after,
+                continuity_id=item.continuity_id,
+            )
+            subscriptions.append((item, subscription))
+    except CarrierBackpressure as exc:
+        for _item, subscription in subscriptions:
+            await subscription.close()
+        return _multiplex_control_response(
+            RemoteBridgeError(
+                429,
+                "consumer_backpressure",
+                str(exc),
+                details={"reason": "local event queue overflow"},
+            ),
+            item,
+        )
+    except RemoteBridgeError as exc:
+        for _item, subscription in subscriptions:
+            await subscription.close()
+        return _multiplex_control_response(exc, item)
+
+    server = getattr(request.app.state, "uvicorn_server", None)
+
+    async def closing() -> bool:
+        if server is not None and getattr(server, "should_exit", False):
+            return True
+        is_disconnected = getattr(request, "is_disconnected", None)
+        if is_disconnected is None:
+            return False
+        try:
+            return bool(await is_disconnected())
+        except Exception:
+            return False
+
+    async def stream():
+        tasks: dict[asyncio.Task, tuple[RemoteEventMultiplexSubscription, Any]] = {}
+        try:
+            for item, subscription in subscriptions:
+                tasks[asyncio.create_task(subscription.get())] = (
+                    item,
+                    subscription,
+                )
+            while tasks:
+                if await closing():
+                    return
+                done, _pending = await asyncio.wait(
+                    set(tasks), timeout=0.5, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    item, subscription = tasks.pop(task)
+                    try:
+                        envelope = task.result()
+                    except CarrierRemoteError as exc:
+                        yield _multiplex_control(
+                            RemoteBridgeError.from_carrier(exc), item
+                        )
+                        return
+                    except CarrierBackpressure as exc:
+                        yield _multiplex_control(
+                            RemoteBridgeError(
+                                429,
+                                "consumer_backpressure",
+                                str(exc),
+                                details={"reason": "local event queue overflow"},
+                            ),
+                            item,
+                        )
+                        return
+                    except CarrierUnavailable as exc:
+                        yield _multiplex_control(
+                            RemoteBridgeError(
+                                503,
+                                "carrier_unavailable",
+                                str(exc),
+                                reconnectable=exc.reconnectable,
+                            ),
+                            item,
+                        )
+                        return
+                    if envelope.type is not EnvelopeType.EVENT:
+                        tasks[asyncio.create_task(subscription.get())] = (
+                            item,
+                            subscription,
+                        )
+                        continue
+                    payload = envelope.payload
+                    kind = payload.get("kind")
+                    if kind == "heartbeat":
+                        yield ": heartbeat\n\n"
+                    elif kind == "event":
+                        continuity_id = payload.get("continuity_id")
+                        if isinstance(continuity_id, str):
+                            subscription.continuity_id = continuity_id
+                        event_payload = {
+                            "host": item.host,
+                            "session_id": item.session_id,
+                            "caller_id": item.caller_id,
+                            "event_id": int(payload["id"]),
+                            "event": str(payload["event"]),
+                            "data": payload.get("data") or {},
+                            "timestamp": payload.get("timestamp"),
+                            "continuity_id": subscription.continuity_id,
+                        }
+                        yield (
+                            "event: bridge_event\n"
+                            f"data: {json.dumps(event_payload, separators=(',', ':'))}\n\n"
+                        )
+                    tasks[asyncio.create_task(subscription.get())] = (
+                        item,
+                        subscription,
+                    )
+        finally:
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(BaseException):
+                    await task
+            for _item, subscription in subscriptions:
+                await subscription.close()
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

@@ -506,6 +506,9 @@ async def test_cursor_invalidation_is_explicit_before_stream_open() -> None:
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "cursor_invalidated"
     assert response.payload["details"]["action"] == "full_reconcile"
+    assert response.payload["details"]["head_id"] == 5
+    assert response.payload["details"]["continuity_id"] == "epoch-a"
+    assert response.payload["details"]["current_continuity_id"] == "new"
     assert client.streams == []
 
 
@@ -925,6 +928,118 @@ def test_remote_api_is_authenticated_and_streams_control(
         assert "event: bridge_control" in text
         assert '"code":"cursor_invalidated"' in text
         assert remote_app.state.remote_operations.subscription.closed is True
+
+
+def test_remote_api_multiplexes_subscriptions_over_one_stream(
+        remote_app,
+) -> None:
+        first = _ApiSubscription()
+        second = _ApiSubscription()
+        second._items = iter(
+            [
+                Envelope(
+                    EnvelopeType.EVENT,
+                    payload={
+                        "kind": "event",
+                        "id": 8,
+                        "event": "session_state_changed",
+                        "data": {"status": "idle"},
+                        "timestamp": 124.0,
+                        "continuity_id": "epoch-b",
+                    },
+                )
+            ]
+        )
+        subscriptions = iter([first, second])
+        remote_app.state.remote_operations.subscribe_events = AsyncMock(
+            side_effect=lambda *args, **kwargs: next(subscriptions)
+        )
+
+        with TestClient(remote_app) as client:
+            with client.stream(
+                "POST",
+                "/api/v1/remote/events",
+                json={
+                    "subscriptions": [
+                        {
+                            "host": "host-a",
+                            "session_id": "session-a",
+                            "caller_id": "lane-a",
+                        },
+                        {
+                            "host": "host-a",
+                            "session_id": "session-b",
+                            "caller_id": "lane-a",
+                        },
+                    ]
+                },
+                headers={"Authorization": "Bearer " + "test-token"},
+            ) as response:
+                text = "".join(response.iter_text())
+
+        assert response.status_code == 200
+        assert text.count("event: bridge_event") == 2
+        assert '"session_id":"session-a"' in text
+        assert '"session_id":"session-b"' in text
+        assert '"event":"assistant.turn_end"' in text
+        assert '"event":"session_state_changed"' in text
+        assert first.closed is True
+        assert second.closed is True
+
+
+def test_remote_api_multiplex_rejects_duplicate_identity(remote_app) -> None:
+        subscription = {
+            "host": "host-a",
+            "session_id": "session-a",
+            "caller_id": "lane-a",
+        }
+        with TestClient(remote_app) as client:
+            response = client.post(
+                "/api/v1/remote/events",
+                json={"subscriptions": [subscription, subscription]},
+                headers={"Authorization": "Bearer " + "test-token"},
+            )
+
+        assert response.status_code == 422
+
+
+def test_remote_api_multiplex_returns_identified_initial_control(
+    remote_app,
+) -> None:
+    remote_app.state.remote_operations.subscribe_events = AsyncMock(
+        side_effect=RemoteBridgeError(
+            409,
+            "cursor_invalidated",
+            "cursor replaced",
+            details={
+                "head_id": 3,
+                "current_continuity_id": "epoch-b",
+            },
+        )
+    )
+    with TestClient(remote_app) as client:
+        with client.stream(
+            "POST",
+            "/api/v1/remote/events",
+            json={
+                "subscriptions": [
+                    {
+                        "host": "host-a",
+                        "session_id": "session-a",
+                        "caller_id": "lane-a",
+                    }
+                ]
+            },
+            headers={"Authorization": "Bearer " + "test-token"},
+        ) as response:
+            text = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: bridge_control" in text
+    assert '"code":"cursor_invalidated"' in text
+    assert '"host":"host-a"' in text
+    assert '"session_id":"session-a"' in text
+    assert '"caller_id":"lane-a"' in text
 
 
 def test_remote_api_stream_closes_on_daemon_shutdown(remote_app) -> None:

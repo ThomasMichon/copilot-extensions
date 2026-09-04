@@ -405,6 +405,8 @@ class CarrierRequestRouter:
                 "the caller cursor was invalidated by an event-log rebuild",
                 details={
                     "action": "full_reconcile",
+                    "head_id": int(info.get("head_id") or 0),
+                    "continuity_id": info.get("continuity_id"),
                     **invalidation,
                 },
             )
@@ -430,6 +432,7 @@ class CarrierRequestRouter:
                     "action": "full_reconcile",
                     "prior_continuity_id": continuity_id,
                     "continuity_id": current_continuity,
+                    "head_id": int(info.get("head_id") or 0),
                 },
             )
         if durable_cursor > int(info.get("head_id") or 0):
@@ -441,6 +444,7 @@ class CarrierRequestRouter:
                     "action": "full_reconcile",
                     "last_acked_id": durable_cursor,
                     "head_id": int(info.get("head_id") or 0),
+                    "continuity_id": current_continuity,
                 },
             )
         if not info.get("cursor_registered"):
