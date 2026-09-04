@@ -5822,7 +5822,10 @@ def build_parser() -> argparse.ArgumentParser:
     end_p.add_argument(
         "--if-idle",
         action="store_true",
-        help="End only if the session is still idle and has no queued prompts",
+        help=(
+            "End only if the session is still idle or stopped and has no "
+            "queued prompts"
+        ),
     )
     end_p.set_defaults(func=_cmd_end)
 
