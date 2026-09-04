@@ -208,6 +208,38 @@ class TestCmdEmbody:
             "pane": "%5", "seed": "do the thing", "ready_timeout": 180.0,
         }
 
+    def test_terminal_managed_worktree_refuses_embodiment(
+        self,
+        monkeypatch,
+        capfd,
+        tmp_path,
+    ):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wt-terminal")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wt-terminal.yaml").write_text("x")
+        record = type(
+            "Rec",
+            (),
+            {
+                "worktree_path": "/w/wt-terminal",
+                "kind": "bridge",
+                "status": "complete",
+            },
+        )()
+        monkeypatch.setattr(m.tracking, "load_record", lambda _path: record)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda _wt: False)
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_session",
+            lambda *_args, **_kwargs: pytest.fail("must not spawn"),
+        )
+
+        rc = m.cmd_embody(_ns(worktree_id="wt-terminal"))
+
+        assert rc == 3
+        assert "terminal and managed" in capfd.readouterr().out
+
     def test_seed_ready_timeout_is_forwarded(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtT")

@@ -97,6 +97,25 @@ def _preservation_reason(record: tracking.WorktreeRecord) -> str | None:
     return None
 
 
+def _identity_reason(
+    record: tracking.WorktreeRecord,
+    record_path: Path,
+) -> str | None:
+    if Path(record.worktree_path).name != record.worktree_id:
+        return "worktree-path-mismatch"
+    if record.branch != f"worktree/{record.worktree_id}":
+        return "worktree-branch-mismatch"
+    path_key = _normalized(record.worktree_path)
+    for peer in tracking.list_records(record_path.parent):
+        if peer.worktree_id == record.worktree_id:
+            continue
+        if _normalized(peer.worktree_path) == path_key:
+            return "worktree-path-conflict"
+        if peer.branch and peer.branch == record.branch:
+            return "worktree-branch-conflict"
+    return None
+
+
 def conclude_disposable_worktree(
     record_path: Path,
     repo: Any,
@@ -116,6 +135,10 @@ def conclude_disposable_worktree(
 
     record_path = Path(record_path)
     record = tracking.load_record(record_path)
+    if record.worktree_id != record_path.stem:
+        raise RuntimeError(
+            "tracking record identity does not match its filename"
+        )
     result: dict[str, Any] = {
         "worktree_id": record.worktree_id,
         "policy": policy,
@@ -140,6 +163,13 @@ def conclude_disposable_worktree(
             require_sidecar=True,
         ):
             record = tracking.load_record(record_path)
+            if record.worktree_id != record_path.stem:
+                raise RuntimeError(
+                    "tracking record identity changed during conclusion"
+                )
+            if reason := _identity_reason(record, record_path):
+                result.update(action="skipped", reason=reason)
+                return result
             live_reason = _session_is_live(record)
             if live_reason:
                 result.update(action="skipped", reason=live_reason)
@@ -187,7 +217,6 @@ def conclude_disposable_worktree(
             expected_branch = record.branch
 
         worktree_path = Path(expected_path)
-        reconciled = False
         if worktree_path.exists():
             if not (worktree_path / ".git").exists():
                 result.update(action="skipped", reason="invalid-worktree")
@@ -240,37 +269,6 @@ def conclude_disposable_worktree(
                 )
                 return result
 
-            head = git_ops.git(
-                "rev-parse", "HEAD", cwd=worktree_path, check=False
-            )
-            target = verified.stdout.strip()
-            if head.returncode != 0:
-                raise RuntimeError(
-                    head.stderr.strip() or "could not inspect checkout HEAD"
-                )
-            if head.stdout.strip() != target:
-                current_record = tracking.load_record(record_path)
-                if live_reason := _session_is_live(current_record):
-                    result.update(action="skipped", reason=live_reason)
-                    return result
-                reset = git_ops.git(
-                    "reset",
-                    "--keep",
-                    upstream,
-                    cwd=worktree_path,
-                    check=False,
-                    no_hooks=True,
-                )
-                if reset.returncode != 0:
-                    raise RuntimeError(
-                        reset.stderr.strip()
-                        or "could not reconcile disposable checkout"
-                    )
-                if _dirty_entries(worktree_path):
-                    raise RuntimeError(
-                        "disposable checkout remained dirty after reconciliation"
-                    )
-                reconciled = True
         elif expected_branch:
             branch = git_ops.git(
                 "rev-parse",
@@ -326,6 +324,13 @@ def conclude_disposable_worktree(
             require_sidecar=True,
         ):
             record = tracking.load_record(record_path)
+            if record.worktree_id != record_path.stem:
+                raise RuntimeError(
+                    "tracking record identity changed during conclusion"
+                )
+            if reason := _identity_reason(record, record_path):
+                result.update(action="skipped", reason=reason)
+                return result
             if live_reason := _session_is_live(record):
                 result.update(action="skipped", reason=live_reason)
                 return result
@@ -363,9 +368,9 @@ def conclude_disposable_worktree(
             tracking.save_record(record, record_path)
 
             result.update(
-                action="already-primed" if already_primed and not reconciled else "primed",
+                action="already-primed" if already_primed else "primed",
                 reason="managed-gc-candidate",
-                reconciled=reconciled,
+                reconciled=False,
                 managed_gc_eligible=True,
             )
             return result

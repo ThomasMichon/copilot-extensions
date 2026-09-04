@@ -154,7 +154,11 @@ def test_managed_gc_uses_non_force_removal_for_registered_worktree(
     record.branch = ""
     repo = _config(tmp_path).default_repo
 
-    with patch("agent_worktrees.sessions.kill_tmux_session"), \
+    with patch("agent_worktrees.sessions.has_mux_session", return_value=False), \
+         patch(
+             "agent_worktrees.sessions.scan_sessions_fast",
+             return_value=types.SimpleNamespace(active_sessions={}),
+         ), \
          patch(
              "agent_worktrees.git_ops.list_worktree_paths",
              return_value=[record.worktree_path],

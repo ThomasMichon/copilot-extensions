@@ -3915,7 +3915,13 @@ def add_resource_claim(
     (kind/state/note/created_at) rather than duplicated, so re-running the
     owning ``run`` wrapper is idempotent. Returns the stored claim.
     """
-    if record.status in {"finalizing", "finalized", "orphaned"}:
+    if (
+        record.status in {"finalizing", "finalized", "orphaned"}
+        or (
+            record.kind in MANAGED_KINDS
+            and record.status in {"complete", "completed"}
+        )
+    ):
         raise ValueError(
             f"owner worktree {record.worktree_id} is {record.status}; "
             "creator ownership is frozen")
@@ -4624,6 +4630,14 @@ def register_session(
 
     with _RecordLock(yaml_path):
         record = load_record(yaml_path)
+        if (
+            record.kind in MANAGED_KINDS
+            and record.status in {"complete", "completed", "finalized"}
+        ):
+            raise SessionLifecycleError(
+                f"worktree {worktree_id} is terminal and managed; "
+                "refusing new session activation"
+            )
         if record.sessions is None:
             record.sessions = []
         event_at = started_at or _now_iso()

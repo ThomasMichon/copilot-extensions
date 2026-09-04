@@ -5,6 +5,8 @@ import os
 import types
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import git_ops, sessions, tracking
 from agent_worktrees import terminal_conclusion as tc
 from agent_worktrees import __main__ as cli
@@ -182,6 +184,38 @@ def test_non_cli_worktree_preserves_session(tmp_path, monkeypatch):
     assert record.session_entry("session-exact").state == "active"
 
 
+def test_mismatched_worktree_path_is_preserved(tmp_path, monkeypatch):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    record.worktree_path = str(Path(record.worktree_path).with_name("other-worker"))
+    tracking.save_record(record, record_path)
+
+    result = _conclude(record_path, repo)
+
+    assert result["action"] == "skipped"
+    assert result["reason"] == "worktree-path-mismatch"
+
+
+def test_duplicate_worktree_path_is_preserved(tmp_path, monkeypatch):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    peer = tracking.create_new_record(
+        "peer-worker",
+        "worktree/peer-worker",
+        record.worktree_path,
+        "demo",
+        "host",
+        "linux",
+        record_path.parent,
+    )
+    tracking.save_record(peer, record_path.parent / "peer-worker.yaml")
+
+    result = _conclude(record_path, repo)
+
+    assert result["action"] == "skipped"
+    assert result["reason"] == "worktree-path-conflict"
+
+
 def test_lifecycle_change_during_git_inspection_blocks_priming(
     tmp_path,
     monkeypatch,
@@ -219,6 +253,26 @@ def test_lifecycle_change_during_git_inspection_blocks_priming(
     assert record.kind == "session"
     assert record.resolved_head_session == "successor-session"
     assert worktree.exists()
+
+
+def test_behind_branch_is_primed_without_rewriting_head(
+    tmp_path,
+    monkeypatch,
+):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    anchor = Path(repo.anchor)
+    (anchor / "upstream.txt").write_text("new\n", encoding="utf-8")
+    _git(anchor, "add", "upstream.txt")
+    _git(anchor, "commit", "-m", "advance upstream")
+    _git(anchor, "push", "origin", "main")
+    before = _git(worktree, "rev-parse", "HEAD")
+
+    result = _conclude(record_path, repo)
+
+    assert result["action"] == "primed"
+    assert result["reconciled"] is False
+    assert _git(worktree, "rev-parse", "HEAD") == before
+    assert record_path.exists()
 
 
 def test_dirty_author_work_is_preserved(tmp_path, monkeypatch):
@@ -327,6 +381,28 @@ def test_repeated_conclusion_is_idempotent(tmp_path, monkeypatch):
     assert second["session"]["action"] == "already-concluded"
 
 
+def test_terminal_managed_record_rejects_new_session_activation(
+    tmp_path,
+    monkeypatch,
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    _conclude(record_path, repo)
+    monkeypatch.setattr(
+        tracking.cfg,
+        "tracking_dir",
+        lambda: record_path.parent,
+    )
+
+    with pytest.raises(
+        tracking.SessionLifecycleError,
+        match="terminal and managed",
+    ):
+        tracking.register_session(
+            "worker-20260901-abcd",
+            "late-session",
+        )
+
+
 def test_managed_gc_can_later_remove_primed_tree(tmp_path, monkeypatch):
     repo, record_path, worktree = _worker(tmp_path, monkeypatch)
     _conclude(record_path, repo)
@@ -353,6 +429,392 @@ def test_managed_gc_can_later_remove_primed_tree(tmp_path, monkeypatch):
     ]
     assert not worktree.exists()
     assert not record_path.exists()
+
+
+def test_managed_gc_preserves_detached_head_commit(tmp_path, monkeypatch):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    _conclude(record_path, repo)
+    detached = _git(worktree, "rev-parse", "HEAD")
+    _git(worktree, "checkout", "--detach", detached)
+    (worktree / "detached.txt").write_text("valuable\n", encoding="utf-8")
+    _git(worktree, "add", "detached.txt")
+    _git(worktree, "commit", "-m", "detached valuable work")
+    detached_commit = _git(worktree, "rev-parse", "HEAD")
+    config = types.SimpleNamespace(default_repo=repo, repo_name="demo")
+    monkeypatch.setattr(cli.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: record_path.parent)
+    monkeypatch.setattr(cli.sessions, "_list_mux_sessions", lambda: {})
+    monkeypatch.setattr(cli.sessions, "_mux_session_activity", lambda: {})
+    monkeypatch.setattr(
+        cli.sessions,
+        "scan_sessions_fast",
+        lambda _records: types.SimpleNamespace(active_sessions={}),
+    )
+    monkeypatch.setattr(cli, "_build_active_paths", lambda *_args, **_kw: set())
+
+    report = cli.sweep_managed_worktrees(min_idle_secs=0)
+
+    assert report["removed"] == []
+    assert report["skipped"] == [
+        {
+            "id": "worker-20260901-abcd",
+            "reason": "recheck-branch-drift",
+        }
+    ]
+    assert worktree.exists()
+    assert _git(worktree, "rev-parse", "HEAD") == detached_commit
+    assert record_path.exists()
+
+
+def test_cli_remove_is_idempotent_when_record_is_already_gone(
+    monkeypatch,
+    capfd,
+):
+    monkeypatch.setattr(cli, "_find_tracking_file_exact", lambda _raw: None)
+    args = types.SimpleNamespace(
+        worktree_id="worker-gone",
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 0
+
+    payload = json.loads(capfd.readouterr().out)
+    assert payload == {
+        "version": 1,
+        "worktree_id": "worker-gone",
+        "action": "already-removed",
+        "managed_gc_eligible": False,
+    }
+
+
+def test_cli_remove_rejects_malformed_exact_id(capfd):
+    args = types.SimpleNamespace(
+        worktree_id="../worker",
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 1
+
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["error"] == "Invalid exact worktree id: '../worker'"
+
+
+def test_exact_tracking_lookup_rejects_cross_project_collision(
+    tmp_path,
+    monkeypatch,
+):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    for directory in (first, second):
+        (directory / "worker-collision.yaml").write_text(
+            "worktree_id: worker-collision\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(cli, "_all_tracking_dirs", lambda: [first, second])
+
+    with pytest.raises(RuntimeError, match="ambiguous across projects"):
+        cli._find_tracking_file_exact("worker-collision")
+
+
+def test_terminal_conclusion_rejects_embedded_identity_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    mismatched = record_path.with_name("different-worker.yaml")
+    record_path.rename(mismatched)
+
+    with pytest.raises(RuntimeError, match="does not match its filename"):
+        _conclude(mismatched, repo)
+
+
+def test_cli_remove_rejects_embedded_identity_mismatch(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    record_path = tmp_path / "requested-worker.yaml"
+    record_path.write_text("worktree_id: other-worker\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "_find_tracking_file_exact",
+        lambda _raw: record_path,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_project_for_tracking_file",
+        lambda _path: "demo",
+    )
+    monkeypatch.setattr(
+        cli.cfg,
+        "load_project_config",
+        lambda _project: types.SimpleNamespace(repo_name="demo"),
+    )
+    monkeypatch.setattr(
+        cli.tracking,
+        "load_record",
+        lambda _path: types.SimpleNamespace(worktree_id="other-worker"),
+    )
+    args = types.SimpleNamespace(
+        worktree_id="requested-worker",
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 1
+
+    payload = json.loads(capfd.readouterr().out)
+    assert "identity mismatch" in payload["error"]
+
+
+def test_cli_remove_is_idempotent_when_record_disappears_after_lookup(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    record_path = tmp_path / "worker-gone.yaml"
+    record_path.write_text("worktree_id: worker-gone\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli,
+        "_find_tracking_file_exact",
+        lambda _raw: record_path,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_project_for_tracking_file",
+        lambda _path: "demo",
+    )
+    monkeypatch.setattr(
+        cli.cfg,
+        "load_project_config",
+        lambda _project: types.SimpleNamespace(repo_name="demo"),
+    )
+    monkeypatch.setattr(
+        cli.tracking,
+        "load_record",
+        lambda _path: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+    args = types.SimpleNamespace(
+        worktree_id="worker-gone",
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 0
+
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["action"] == "already-removed"
+
+
+def test_cli_remove_is_idempotent_when_record_disappears_during_conclusion(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    config = types.SimpleNamespace(repo_name="demo")
+    monkeypatch.setattr(
+        cli,
+        "_find_tracking_file_exact",
+        lambda _raw: record_path,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_project_for_tracking_file",
+        lambda _path: "demo",
+    )
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
+
+    def disappear(*_args, **_kwargs):
+        record_path.unlink()
+        raise FileNotFoundError
+
+    monkeypatch.setattr(
+        cli.terminal_conclusion,
+        "conclude_disposable_worktree",
+        disappear,
+    )
+    args = types.SimpleNamespace(
+        worktree_id="worker-20260901-abcd",
+        session_id="session-exact",
+        owner="dispatcher",
+        policy=tc.DISPOSABLE_CLI_POLICY,
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 0
+
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["action"] == "already-removed"
+
+
+def test_cli_remove_runs_exact_managed_sweep_after_eligibility(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    config = types.SimpleNamespace(repo_name="demo")
+    captured = {}
+    monkeypatch.setattr(
+        cli,
+        "_find_tracking_file_exact",
+        lambda _raw: record_path,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_project_for_tracking_file",
+        lambda _path: "demo",
+    )
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
+    monkeypatch.setattr(
+        cli.terminal_conclusion,
+        "conclude_disposable_worktree",
+        lambda *_args, **_kwargs: {
+            "worktree_id": "worker-20260901-abcd",
+            "action": "primed",
+            "managed_gc_eligible": True,
+        },
+    )
+
+    def sweep(**kwargs):
+        captured.update(kwargs)
+        return {
+            "removed": [
+                {
+                    "id": "worker-20260901-abcd",
+                    "reason": "completed",
+                }
+            ],
+            "skipped": [],
+        }
+
+    monkeypatch.setattr(cli, "sweep_managed_worktrees", sweep)
+    args = types.SimpleNamespace(
+        worktree_id="worker-20260901-abcd",
+        session_id="session-exact",
+        owner="dispatcher",
+        policy=tc.DISPOSABLE_CLI_POLICY,
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 0
+
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["action"] == "removed"
+    assert payload["managed_gc_eligible"] is False
+    assert captured["worktree_ids"] == {"worker-20260901-abcd"}
+    assert captured["min_idle_secs"] == 0
+    assert captured["config"] is config
+    assert captured["tracking_path"] == record_path.parent
+
+
+def test_cli_remove_surfaces_fresh_managed_sweep_skip(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    config = types.SimpleNamespace(repo_name="demo")
+    monkeypatch.setattr(
+        cli,
+        "_find_tracking_file_exact",
+        lambda _raw: record_path,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_project_for_tracking_file",
+        lambda _path: "demo",
+    )
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
+    monkeypatch.setattr(
+        cli.terminal_conclusion,
+        "conclude_disposable_worktree",
+        lambda *_args, **_kwargs: {
+            "worktree_id": "worker-20260901-abcd",
+            "action": "primed",
+            "managed_gc_eligible": True,
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "sweep_managed_worktrees",
+        lambda **_kwargs: {
+            "removed": [],
+            "skipped": [
+                {
+                    "id": "worker-20260901-abcd",
+                    "reason": "recheck-live-session",
+                }
+            ],
+        },
+    )
+    args = types.SimpleNamespace(
+        worktree_id="worker-20260901-abcd",
+        session_id="session-exact",
+        owner="dispatcher",
+        policy=tc.DISPOSABLE_CLI_POLICY,
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 1
+
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["error"] == (
+        "managed teardown skipped: recheck-live-session"
+    )
+
+
+def test_cli_remove_accepts_concurrent_exact_removal(
+    tmp_path,
+    monkeypatch,
+    capfd,
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    config = types.SimpleNamespace(repo_name="demo")
+    monkeypatch.setattr(
+        cli,
+        "_find_tracking_file_exact",
+        lambda _raw: record_path,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_project_for_tracking_file",
+        lambda _path: "demo",
+    )
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
+    monkeypatch.setattr(
+        cli.terminal_conclusion,
+        "conclude_disposable_worktree",
+        lambda *_args, **_kwargs: {
+            "worktree_id": "worker-20260901-abcd",
+            "action": "primed",
+            "managed_gc_eligible": True,
+        },
+    )
+
+    def sweep(**_kwargs):
+        record_path.unlink()
+        return {"removed": [], "skipped": []}
+
+    monkeypatch.setattr(cli, "sweep_managed_worktrees", sweep)
+    args = types.SimpleNamespace(
+        worktree_id="worker-20260901-abcd",
+        session_id="session-exact",
+        owner="dispatcher",
+        policy=tc.DISPOSABLE_CLI_POLICY,
+        remove=True,
+    )
+
+    assert cli.cmd_conclude_disposable(args) == 0
+
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["action"] == "already-removed"
+    assert payload["managed_gc_eligible"] is False
 
 
 def test_short_wait_does_not_break_a_fresh_lifecycle_lock(

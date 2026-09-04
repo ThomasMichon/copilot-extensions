@@ -272,12 +272,11 @@ def conclude_disposable_worker(
     owner: str = DEFAULT_DRIVER,
     timeout: float = 30.0,
 ) -> dict:
-    """Safely prime one exact terminal CLI worker through agent-worktrees.
+    """Safely conclude and remove one exact terminal CLI worker.
 
     The local/remote ground layer receives the reservation's recorded worktree
-    and session identities verbatim. It decides whether the dead checkout is
-    disposable and returns a structured prime/skip result; removal remains the
-    managed garbage collector's job.
+    and session identities verbatim. It owns both the disposable verdict and
+    exact-ID managed teardown; preservation skips never remove anything.
     """
     args = [
         "conclude-disposable",
@@ -287,6 +286,7 @@ def conclude_disposable_worker(
         "disposable-cli",
         "--owner",
         owner,
+        "--remove",
         "--json",
     ]
     if session:

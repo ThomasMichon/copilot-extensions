@@ -545,6 +545,7 @@ agent-worktrees conclude-disposable \
     --session <exact-session-id> \
     --policy disposable-cli \
     --owner agent-dispatch \
+    --remove \
     --json
 ```
 
@@ -553,14 +554,14 @@ obligation, open pull request, branch drift, arbitrary dirty path, or local
 commit. It also preserves a different or unresolved asserted lifecycle head
 rather than making a clean checkout GC-eligible around a resumable session.
 Dirty generated overlays are preserved under the same rule as other dirty work;
-a clean, commit-free branch may advance with `git reset --keep` to the locally
-available canonical default branch. A safe result concludes the exact recorded session,
-marks the checkout as a managed final CLI worker, and returns; it does **not**
-remove the worktree. The existing managed sweep remains the only deletion
-authority and re-checks liveness plus its idle grace on a later pass under the
-same lifecycle fence used by CLI embodiment. Final Git removal is non-forced,
-runs after the short record recheck lock is released, and retains the tracking
-record whenever Git refuses removal.
+a clean branch with zero commits ahead of the configured upstream may remain
+behind without being rewritten. A safe result concludes the exact recorded session, marks the checkout as a
+managed final CLI worker, and immediately asks the managed sweep to remove only
+that exact id with zero idle grace. The sweep remains the deletion authority:
+it freshly re-checks liveness, lifecycle state, Git state, and record invariants
+under the same lifecycle fence used by CLI embodiment. Final Git removal is
+non-forced, runs after the short record recheck lock is released, and retains
+the tracking record whenever Git refuses removal.
 
 A safe preservation decision (`dirty-work`, `local-commits`,
 `session-mismatch`, and related reasons) is a structured held outcome, not an

@@ -11,6 +11,14 @@ import pytest
 from agent_dispatch import embody, procutil
 
 
+def _completed(stdout: str, *, returncode: int = 0, stderr: str = ""):
+    return types.SimpleNamespace(
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
 def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9")
     assert "abc123" in prompt
@@ -58,6 +66,74 @@ def test_headless_autopilot_prompt_uses_explicit_worker_identity():
     assert "agent-dispatch complete abc123 headless-1234" in prompt
     assert "agent-dispatch yield abc123 headless-1234 --note <why>" in prompt
     assert "--exclude-self worktree" not in prompt
+
+
+def test_conclude_disposable_worker_requests_exact_managed_removal(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(
+        embody.subprocess,
+        "run",
+        lambda cmd, **_kwargs: calls.append(cmd)
+        or _completed('{"action":"removed","managed_gc_eligible":false}'),
+    )
+
+    result = embody.conclude_disposable_worker("wt-review", "session-review")
+
+    assert calls[0] == [
+        "/usr/bin/agent-worktrees",
+        "conclude-disposable",
+        "--worktree",
+        "wt-review",
+        "--policy",
+        "disposable-cli",
+        "--owner",
+        "agent-dispatch",
+        "--remove",
+        "--json",
+        "--session",
+        "session-review",
+    ]
+    assert result["action"] == "removed"
+
+
+def test_conclude_disposable_worker_preservation_skip_is_returned(monkeypatch):
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(
+        embody.subprocess,
+        "run",
+        lambda _cmd, **_kwargs: _completed(
+            '{"action":"skipped","managed_gc_eligible":false}'
+        ),
+    )
+
+    result = embody.conclude_disposable_worker("wt-live", "session-live")
+
+    assert result["action"] == "skipped"
+
+
+def test_conclude_disposable_worker_surfaces_managed_removal_failure(monkeypatch):
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(
+        embody.subprocess,
+        "run",
+        lambda _cmd, **_kwargs: _completed(
+            '{"error":"worktree became live"}',
+            returncode=1,
+        ),
+    )
+
+    with pytest.raises(
+        embody.DisposableConclusionError,
+        match="worktree became live",
+    ):
+        embody.conclude_disposable_worker("wt-raced", "session-raced")
 
 
 def test_autopilot_prompt_threads_shared_moniker_route():
