@@ -1584,6 +1584,7 @@ def _build_launch_cmd(
     profile: cfg.CopilotProfile | None = None,
     *,
     preflight: LaunchPreflight | None = None,
+    fallback_copilot_path: str | None = None,
 ) -> list[str]:
     """Build the launch command from config or fallback convention.
 
@@ -1593,7 +1594,10 @@ def _build_launch_cmd(
     selects the
     **normalized** launch (the default-setup launcher runs the repo hook, then
     execs Copilot); else a legacy ``tools/setup/setup.{ps1,sh}`` is run as the
-    session command; else the plugin's ``default-setup.{ps1,sh}``.
+    session command; else the plugin's ``default-setup.{ps1,sh}``. A verified
+    predecessor executable may be supplied as a final Copilot-path fallback for
+    normalized/default launch only; explicit launch templates, configured
+    ``copilot_path``, and legacy setup scripts remain authoritative.
     """
     recovery = getattr(args, "recovery", False)
     repo = config.default_repo
@@ -1650,8 +1654,11 @@ def _build_launch_cmd(
             if not os.path.isabs(resolved_env_script):
                 resolved_env_script = str(Path(anchor) / resolved_env_script)
         copilot_path = repo.copilot_path.get(plat_key)
-        resolved_copilot_path = (
+        configured_copilot_path = (
             copilot_path.format(**variables) if copilot_path else ""
+        )
+        resolved_copilot_path = (
+            configured_copilot_path or fallback_copilot_path or ""
         )
         is_windows = platform.system() == "Windows"
 
@@ -1705,7 +1712,7 @@ def _build_launch_cmd(
             legacy = (
                 Path(setup_path).is_file()
                 and not resolved_env_script
-                and not resolved_copilot_path
+                and not configured_copilot_path
             )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
@@ -1720,7 +1727,7 @@ def _build_launch_cmd(
                 cmd += ["-SessionPath", session_path_arg]
             if resolved_env_script:
                 cmd += ["-EnvScript", resolved_env_script]
-            if resolved_copilot_path:
+            if resolved_copilot_path and not legacy:
                 cmd += ["-CopilotPath", resolved_copilot_path]
             if recovery:
                 cmd.append("-Recovery")
@@ -1729,7 +1736,7 @@ def _build_launch_cmd(
             legacy = (
                 Path(setup_path).is_file()
                 and not resolved_env_script
-                and not resolved_copilot_path
+                and not configured_copilot_path
             )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
@@ -1738,7 +1745,7 @@ def _build_launch_cmd(
                 cmd += ["--session-path", session_path_arg]
             if resolved_env_script:
                 cmd += ["--env-script", resolved_env_script]
-            if resolved_copilot_path:
+            if resolved_copilot_path and not legacy:
                 cmd += ["--copilot-path", resolved_copilot_path]
             if recovery:
                 cmd.append("--recovery")
@@ -2065,12 +2072,45 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         return _json_error(str(exc), exit_code=3)
     if record is not None:
         _reflect_assignment(record, selection)
+    predecessor_binding = None
+    if session_id:
+        predecessor_binding = (
+            sessions.mux_binding_for_session(
+                session_id,
+                expected_session_name=mux_session,
+            )
+            if anchor_mode and mux_session
+            else sessions.mux_binding_for_session(session_id)
+        )
+    expected_mux_session = (
+        mux_session if anchor_mode else sessions.mux_session_name(wt_id)
+    )
+    if (
+        predecessor_binding
+        and predecessor_binding.get("session_name") != expected_mux_session
+    ):
+        predecessor_binding = None
+    predecessor_copilot_path = None
+    if predecessor_binding:
+        predecessor_pid = predecessor_binding.get("copilot_pid")
+        predecessor_start = predecessor_binding.get("copilot_start_time")
+        if predecessor_pid and predecessor_start:
+            predecessor_copilot_path = procs.process_executable_path(
+                predecessor_pid
+            )
+            if (
+                not predecessor_copilot_path
+                or locks.process_start_time(predecessor_pid)
+                != str(predecessor_start)
+            ):
+                predecessor_copilot_path = None
     launch_cmd = _build_launch_cmd(
         config,
         args,
         work_dir,
         profile=selection.profile,
         preflight=launch_preflight,
+        fallback_copilot_path=predecessor_copilot_path,
     )
     env = _apply_assignment_env(
         _build_env(
@@ -2097,9 +2137,13 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     old_pane = (
         getattr(args, "old_pane", None)
         or (
-            sessions.mux_active_pane_named(mux_session)
-            if anchor_mode and mux_session
-            else sessions.mux_copilot_pane(wt_id, session_id)
+            predecessor_binding.get("pane_id")
+            if predecessor_binding
+            else (
+                sessions.mux_active_pane_named(mux_session)
+                if anchor_mode and mux_session
+                else sessions.mux_copilot_pane(wt_id, session_id)
+            )
         )
         or (None if anchor_mode else sessions.mux_active_pane(wt_id))
     )
@@ -2127,10 +2171,12 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         session_name=mux_session,
     )
     if not result.get("ok"):
-        return _json_error(
-            f"failed to open successor window: {result.get('error')}",
-            exit_code=4,
+        failure = dict(result)
+        failure["error"] = (
+            f"failed to open successor window: {result.get('error')}"
         )
+        _json_output(failure)
+        return 4
 
     new_pane = result.get("new_pane")
     activity.log_event(

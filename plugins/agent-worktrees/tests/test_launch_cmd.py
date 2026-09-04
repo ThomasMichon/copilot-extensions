@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import shutil
 import subprocess
@@ -234,6 +235,62 @@ def test_explicit_launch_remains_authoritative_over_copilot_path(monkeypatch):
     assert "--copilot-path" not in cmd
 
 
+def test_predecessor_copilot_path_falls_back_for_default_launch(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cmd = m._build_launch_cmd(
+        _hook_config(),
+        _args([]),
+        "/w/wt",
+        fallback_copilot_path="/opt/copilot/current/copilot",
+    )
+    assert cmd[cmd.index("--copilot-path") + 1] == (
+        "/opt/copilot/current/copilot"
+    )
+
+
+def test_configured_copilot_path_wins_over_predecessor_fallback(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cmd = m._build_launch_cmd(
+        _hook_config(copilot_path={"linux": "/opt/copilot/configured"}),
+        _args([]),
+        "/w/wt",
+        fallback_copilot_path="/opt/copilot/predecessor",
+    )
+    assert cmd[cmd.index("--copilot-path") + 1] == "/opt/copilot/configured"
+
+
+def test_explicit_launch_ignores_predecessor_copilot_path(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cmd = m._build_launch_cmd(
+        _hook_config(legacy_launch=True),
+        _args([]),
+        "/w/wt",
+        fallback_copilot_path="/opt/copilot/predecessor",
+    )
+    assert cmd[0] == "copilot"
+    assert "--copilot-path" not in cmd
+
+
+def test_legacy_setup_ignores_predecessor_copilot_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    setup = tmp_path / "tools" / "setup" / "setup.sh"
+    setup.parent.mkdir(parents=True)
+    setup.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    cfg_ = _hook_config()
+    repo = dataclasses.replace(cfg_.default_repo, anchor=str(tmp_path))
+    cfg_ = dataclasses.replace(cfg_, repos={"ext": repo})
+
+    cmd = m._build_launch_cmd(
+        cfg_,
+        _args([]),
+        str(tmp_path),
+        fallback_copilot_path="/opt/copilot/predecessor",
+    )
+
+    assert cmd[:2] == ["bash", str(setup)]
+    assert "--copilot-path" not in cmd
+
+
 def test_session_env_config_parsing():
     data = {"session_env": {"COPILOT_FEATURE_FLAGS": "extensions", "X": 1}}
     repo = cfg._build_repo_config(data, "/a", "/w")
@@ -413,7 +470,7 @@ def test_default_setup_sh_supports_hook_and_session_path():
     assert 'exec "$COPILOT_PATH_OVERRIDE"' in text
     # --stdio (ACP) mode keeps human output off the JSON-RPC channel
     assert "STDIO=true" in text
-    assert 'bash "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
+    assert '"$_SETUP_SHELL" "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
 
 
 def test_default_setup_ps1_supports_hook_and_session_path():
@@ -434,11 +491,177 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "SetEnvironmentVariable" in text
     assert "-not $Recovery" in text  # hook skipped in recovery
     assert "$env:PATH" in text
+    assert "[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName" in text
+    assert "& $setupShell -NoProfile -NoLogo -File $SetupHook" in text
     assert "& $overrideCmd.Source @CopilotArgs" in text
     assert "copilot @CopilotArgs" in text
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text
+
+
+def test_default_setup_launches_absolute_copilot_with_empty_path(
+    tmp_path,
+):
+    marker = tmp_path / "launched"
+    env = os.environ.copy()
+    env["PATH"] = ""
+    env["HOSTNAME"] = "test-host"
+    env["HOME"] = str(tmp_path / "home")
+    env["USERPROFILE"] = str(tmp_path / "home")
+    env["COPILOT_LAUNCH_MARKER"] = str(marker)
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+
+    if os.name == "nt":
+        shell = shutil.which("pwsh")
+        if not shell:
+            pytest.skip("pwsh is unavailable")
+        copilot = tmp_path / "copilot-test.cmd"
+        copilot.write_text(
+            "@echo off\r\n"
+            "> \"%COPILOT_LAUNCH_MARKER%\" echo launched\r\n",
+            encoding="utf-8",
+        )
+        command = [
+            shell,
+            "-NoProfile",
+            "-NoLogo",
+            "-File",
+            str(scripts / "default-setup.ps1"),
+            "-Machine",
+            "test",
+            "-CopilotPath",
+            str(copilot),
+        ]
+    else:
+        shell = shutil.which("bash")
+        if not shell:
+            pytest.skip("bash is unavailable")
+        copilot = tmp_path / "copilot-test"
+        copilot.write_text(
+            "#!/bin/sh\nprintf launched > \"$COPILOT_LAUNCH_MARKER\"\n",
+            encoding="utf-8",
+        )
+        copilot.chmod(0o755)
+        command = [
+            shell,
+            str(scripts / "default-setup.sh"),
+            "--machine",
+            "test",
+            "--copilot-path",
+            str(copilot),
+        ]
+
+    proc = subprocess.run(
+        command,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert marker.read_text(encoding="utf-8").strip() == "launched"
+
+
+def test_default_setup_runs_hook_with_empty_path(
+    tmp_path,
+):
+    hook_marker = tmp_path / "hook-ran"
+    launch_marker = tmp_path / "launched"
+    config_root = tmp_path / "config-root"
+    config_root.mkdir()
+    env = os.environ.copy()
+    env["PATH"] = ""
+    env["HOSTNAME"] = "test-host"
+    env["HOME"] = str(tmp_path / "home")
+    env["USERPROFILE"] = str(tmp_path / "home")
+    env["SETUP_HOOK_MARKER"] = str(hook_marker)
+    env["COPILOT_LAUNCH_MARKER"] = str(launch_marker)
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+
+    if os.name == "nt":
+        shell = shutil.which("pwsh")
+        if not shell:
+            pytest.skip("pwsh is unavailable")
+        runtime = tmp_path / "runtime.cmd"
+        runtime.write_text(
+            f"@echo off\r\necho {config_root}\r\n",
+            encoding="utf-8",
+        )
+        hook = tmp_path / "setup-hook.ps1"
+        hook.write_text(
+            "param([string]$Machine)\n"
+            "Set-Content -LiteralPath $env:SETUP_HOOK_MARKER -Value ran\n",
+            encoding="utf-8",
+        )
+        copilot = tmp_path / "copilot-test.cmd"
+        copilot.write_text(
+            "@echo off\r\n"
+            "> \"%COPILOT_LAUNCH_MARKER%\" echo launched\r\n",
+            encoding="utf-8",
+        )
+        command = [
+            shell,
+            "-NoProfile",
+            "-NoLogo",
+            "-File",
+            str(scripts / "default-setup.ps1"),
+            "-Machine",
+            "test",
+            "-SetupHook",
+            str(hook),
+            "-RuntimePython",
+            str(runtime),
+            "-CopilotPath",
+            str(copilot),
+        ]
+    else:
+        shell = shutil.which("bash")
+        if not shell:
+            pytest.skip("bash is unavailable")
+        runtime = tmp_path / "runtime"
+        runtime.write_text(
+            f"#!/bin/sh\nprintf '%s\\n' '{config_root}'\n",
+            encoding="utf-8",
+        )
+        runtime.chmod(0o755)
+        hook = tmp_path / "setup-hook.sh"
+        hook.write_text(
+            "#!/bin/sh\nprintf ran > \"$SETUP_HOOK_MARKER\"\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        copilot = tmp_path / "copilot-test"
+        copilot.write_text(
+            "#!/bin/sh\nprintf launched > \"$COPILOT_LAUNCH_MARKER\"\n",
+            encoding="utf-8",
+        )
+        copilot.chmod(0o755)
+        command = [
+            shell,
+            str(scripts / "default-setup.sh"),
+            "--machine",
+            "test",
+            "--setup-hook",
+            str(hook),
+            "--runtime-python",
+            str(runtime),
+            "--copilot-path",
+            str(copilot),
+        ]
+
+    proc = subprocess.run(
+        command,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert hook_marker.read_text(encoding="utf-8").strip() == "ran"
+    assert launch_marker.read_text(encoding="utf-8").strip() == "launched"
 
 
 def test_supported_setup_surface_rejects_stateless_destination_before_hook(

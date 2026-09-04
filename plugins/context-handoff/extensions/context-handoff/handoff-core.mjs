@@ -320,28 +320,28 @@ export function worktreeInfo(cwd, sid, get = agentWorktreesGet) {
   return { wtDir, worktree, stateDir };
 }
 
-export function collectCliHandoffFacts(cwd, sid) {
-  const git = (args) => {
-    try {
-      return execFileSync("git", args, {
-        cwd,
-        timeout: 5000,
-        encoding: "utf-8",
-      }).trim() || null;
-    } catch {
-      return null;
-    }
+export function collectAdvisoryGitFacts() {
+  // This payload has no attributable Git command surface. Advisory handoff
+  // facts stay null rather than consulting an ambient PATH entry.
+  return {
+    branch: null,
+    repo: null,
+    status: null,
   };
+}
+
+export function collectCliHandoffFacts(cwd, sid) {
   const info = worktreeInfo(cwd, sid);
+  const git = collectAdvisoryGitFacts();
   return {
     sessionId: sid || null,
     cwd,
     worktree: info.worktree,
     worktreeDir: info.wtDir,
     stateDir: info.stateDir,
-    branch: git(["rev-parse", "--abbrev-ref", "HEAD"]),
-    repo: git(["remote", "get-url", "origin"]),
-    gitStatus: git(["status", "--short"]),
+    branch: git.branch,
+    repo: git.repo,
+    gitStatus: git.status,
     sessionBinding: sessionBindingForSession(sid, cwd),
     generatedAt: new Date().toISOString(),
   };
@@ -1398,17 +1398,30 @@ export function runHandoffCutover(
     const result = JSON.parse(execute(
       "agent-worktrees", argv, { cwd, timeout: 20000 },
     ));
-    return result?.ok ? result : { ok: false, reason: "error", error: null };
+    return result?.ok
+      ? result
+      : {
+          ...result,
+          ok: false,
+          reason: "error",
+          error: result?.error || null,
+        };
   } catch (e) {
     const status = typeof e?.status === "number" ? e.status : null;
     let error = null;
+    let parsed = null;
     try {
       const stdout = (e?.stdout || "").toString();
-      const parsed = stdout ? JSON.parse(stdout) : null;
+      parsed = stdout ? JSON.parse(stdout) : null;
       error = parsed?.error || null;
     } catch { /* stdout was not JSON */ }
     const reason = status === 2 ? "no-worktree" : status === 3 ? "no-mux" : "error";
-    return { ok: false, reason, error };
+    return {
+      ...(parsed || {}),
+      ok: false,
+      reason,
+      error,
+    };
   }
 }
 
