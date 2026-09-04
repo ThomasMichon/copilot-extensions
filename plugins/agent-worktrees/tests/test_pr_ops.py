@@ -30,6 +30,90 @@ class TestSlugify:
         assert pr_ops.slugify("!!!") == "change"
 
 
+class TestRequiredBodySections:
+    def test_requires_visible_content_under_each_heading(self):
+        body = (
+            "## Intent\nShip the change.\n\n"
+            "## Changes\n<!-- placeholder -->\n\n"
+            "## Validation\nTests pass.\n"
+        )
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Intent", "Changes", "Validation"),
+        ) == ["Changes"]
+
+    def test_accepts_case_insensitive_markdown_headings(self):
+        body = (
+            "# intent\nShip the change.\n"
+            "### CHANGES\nUpdated behavior.\n"
+            "## Validation ##\nTests pass.\n"
+        )
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Intent", "Changes", "Validation"),
+        ) == []
+
+    def test_multiline_comments_are_not_visible_content(self):
+        body = "## Changes\n<!--\nTODO\n-->\n"
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Changes",),
+        ) == ["Changes"]
+
+    def test_unterminated_comment_is_hidden_through_eof(self):
+        body = "## Changes\n<!-- TODO"
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Changes",),
+        ) == ["Changes"]
+
+    def test_nested_headings_remain_inside_required_section(self):
+        body = (
+            "## Changes\n"
+            "### Added\n"
+            "Implemented the feature.\n"
+            "## Validation\n"
+            "Tests pass.\n"
+        )
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Changes", "Validation"),
+        ) == []
+
+    def test_fenced_markdown_does_not_supply_required_heading(self):
+        body = "```markdown\n## Changes\nFake content.\n```\n"
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Changes",),
+        ) == ["Changes"]
+
+    def test_fence_with_trailing_text_does_not_close_block(self):
+        body = (
+            "```markdown\n"
+            "```not-a-close\n"
+            "## Changes\n"
+            "Fake content.\n"
+            "```\n"
+        )
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Changes",),
+        ) == ["Changes"]
+
+    def test_html_comment_literal_inside_fence_does_not_hide_following_sections(self):
+        body = (
+            "```html\n"
+            "<!-- literal example\n"
+            "```\n"
+            "## Changes\n"
+            "Implemented the feature.\n"
+        )
+        assert pr_ops.missing_required_body_sections(
+            body,
+            ("Changes",),
+        ) == []
+
+
 class TestFeatureBranchName:
     def test_uses_suffix_and_slug(self):
         name = pr_ops.feature_branch_name(
@@ -95,6 +179,89 @@ class TestCreatePR:
         res = pr_ops.create_pr(wid, config2)
         assert res["success"] is False
         assert "not enabled" in res["error"]
+
+    def test_required_body_sections_fail_before_branch_publication(self, pr_repo):
+        import dataclasses
+
+        config, wid, wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+        pr = dataclasses.replace(
+            repo.pr,
+            required_body_sections=("Intent", "Changes", "Validation"),
+        )
+        config = dataclasses.replace(
+            config,
+            repos={"ext": dataclasses.replace(repo, pr=pr)},
+        )
+
+        result = pr_ops.create_pr(
+            wid,
+            config,
+            title="Add feature",
+            body="## Intent\nShip it.\n",
+        )
+
+        assert result["success"] is False
+        assert "Changes, Validation" in result["error"]
+        assert not git_ops.local_branch_exists(
+            "feature/add-feature-aaaa",
+            cwd=str(wt_path),
+        )
+
+    def test_required_body_is_not_repeated_for_existing_pr_rerun(self, pr_repo):
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+        config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    repo,
+                    pr=dataclasses.replace(
+                        repo.pr,
+                        required_body_sections=("Intent",),
+                    ),
+                )
+            },
+        )
+        body = "## Intent\nShip it.\n"
+        assert pr_ops.create_pr(
+            wid, config, title="Add feature", body=body
+        )["success"]
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.pr.number = 42
+        tracking.save_record(record)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is True
+        assert rerun["rerun"] is True
+
+    def test_provider_mismatch_fails_before_credential_resolution(
+        self, pr_repo, monkeypatch
+    ):
+        config, wid, _wt_path, _ = pr_repo
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.pr = tracking.PRRecord(
+            state="open",
+            branch="feature/existing",
+            number=42,
+            provider="github",
+            repo="example/project",
+        )
+        tracking.save_record(record)
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("credentials must not be resolved")
+            ),
+        )
+
+        result = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert result["success"] is False
+        assert "mismatched credentials" in result["error"]
 
     def test_creates_and_pushes_feature_branch(self, pr_repo):
         config, wid, wt_path, _remote_dir = pr_repo
@@ -692,6 +859,84 @@ class TestPRFinalizeAndPush:
         local_head = _git("rev-parse", "HEAD", cwd=wt_path)
         assert rec.pr.head_sha == local_head
         assert rec.pr.state == "open"
+
+    def test_push_changes_refreshes_marker_and_preserves_body(
+        self, pr_repo, monkeypatch
+    ):
+        import dataclasses
+
+        from agent_worktrees import finalize as fin
+        from agent_worktrees.providers import attribution
+
+        config, wid, wt_path, _ = pr_repo
+        repo = config.repos["ext"]
+        config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    repo,
+                    pr=dataclasses.replace(repo.pr, source_attribution=True),
+                )
+            },
+        )
+        pr_ops.create_pr(wid, config, title="Add feature")
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.pr.number = 42
+        record.pr.repo = "example/project"
+        record.pr.provider = "gitea"
+        tracking.save_record(record)
+        captured: dict[str, str] = {}
+        publishes = {"count": 0}
+
+        class FakeProvider:
+            def publish_source_marker(
+                self, repo, number, marker, *, api_base="", token=None
+            ):
+                captured["marker"] = marker
+                publishes["count"] += 1
+                return ""
+
+        provider = FakeProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider",
+            lambda name: captured.setdefault("provider", name) and provider,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda slug, prcfg: None,
+        )
+        wt_path.joinpath("c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        assert fin.push_changes(wid, config) is True
+
+        fields = attribution.parse_marker(captured["marker"])
+        assert fields is not None
+        assert captured["provider"] == "gitea"
+        assert fields["head"] == _git("rev-parse", "HEAD", cwd=wt_path)
+        assert "old-head" not in captured["marker"]
+        refreshed = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert refreshed.pr.attribution_head == fields["head"]
+        assert pr_ops.refresh_source_attribution(
+            wid,
+            config,
+            refreshed,
+            refreshed.pr,
+            fields["head"],
+        ) == ""
+        assert publishes["count"] == 1
+        refreshed.pr.provider = "github"
+        refreshed.pr.attribution_head = ""
+        mismatch = pr_ops.refresh_source_attribution(
+            wid,
+            config,
+            refreshed,
+            refreshed.pr,
+            fields["head"],
+        )
+        assert "credentials cannot be resolved safely" in mismatch
+        assert publishes["count"] == 1
 
     def test_push_changes_from_worktree_branch_snapshot(self, pr_repo):
         # New primary flow: create-pr leaves HEAD on worktree/<id> at the

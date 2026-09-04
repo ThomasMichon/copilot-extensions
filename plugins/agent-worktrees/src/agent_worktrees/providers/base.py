@@ -83,8 +83,6 @@ class PullResult:
     being silently swallowed, so a dropped ``auto-merge`` / ``source:<machine>``
     label is visible rather than mysterious.
     """
-
-
 @runtime_checkable
 class PRProvider(Protocol):
     """Protocol every PR provider implements."""
@@ -99,6 +97,18 @@ class PRProvider(Protocol):
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:
         """Look up an existing PR by number (best-effort; may be unsupported)."""
+        ...
+
+    def publish_source_marker(
+        self,
+        repo: str,
+        number: int,
+        marker: str,
+        *,
+        api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Publish a managed source-attribution PR comment; "" on success."""
         ...
 
     def remove_label(

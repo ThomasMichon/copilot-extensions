@@ -66,6 +66,89 @@ def slugify(text: str, *, max_len: int = 40) -> str:
     return s or "change"
 
 
+def missing_required_body_sections(
+    body: str | None,
+    required_sections: tuple[str, ...],
+) -> list[str]:
+    """Return required Markdown sections that are absent or visibly empty."""
+    lines: list[str] = []
+    in_comment = False
+    fence_char = ""
+    fence_len = 0
+    for raw_line in (body or "").splitlines():
+        if fence_char:
+            closing = re.fullmatch(
+                rf"\s{{0,3}}{re.escape(fence_char)}{{{fence_len},}}\s*",
+                raw_line,
+            )
+            if closing is not None:
+                fence_char = ""
+                fence_len = 0
+            continue
+        line = raw_line
+        visible_parts: list[str] = []
+        while line:
+            if in_comment:
+                end = line.find("-->")
+                if end < 0:
+                    line = ""
+                    continue
+                line = line[end + 3:]
+                in_comment = False
+                continue
+            start = line.find("<!--")
+            if start < 0:
+                visible_parts.append(line)
+                line = ""
+                continue
+            visible_parts.append(line[:start])
+            line = line[start + 4:]
+            in_comment = True
+        visible_line = "".join(visible_parts)
+        if in_comment and not visible_line:
+            continue
+        line = visible_line
+        fence = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if fence is not None:
+            fence_char = fence.group(1)[0]
+            fence_len = len(fence.group(1))
+            continue
+        lines.append(line)
+    headings: list[tuple[str, int, int]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        if match:
+            headings.append(
+                (match.group(2).strip().casefold(), index, len(match.group(1)))
+            )
+    missing: list[str] = []
+    for required in required_sections:
+        wanted = required.strip().casefold()
+        match_index = next(
+            (index for index, heading in enumerate(headings) if heading[0] == wanted),
+            None,
+        )
+        if match_index is None:
+            missing.append(required)
+            continue
+        _, heading_line, heading_level = headings[match_index]
+        end = len(lines)
+        for _, next_line, next_level in headings[match_index + 1:]:
+            if next_level <= heading_level:
+                end = next_line
+                break
+        section = "\n".join(lines[heading_line + 1:end])
+        section = re.sub(
+            r"^\s{0,3}#{1,6}\s+.*$",
+            "",
+            section,
+            flags=re.MULTILINE,
+        )
+        if not section.strip():
+            missing.append(required)
+    return missing
+
+
 def feature_branch_name(prefix: str, title: str, worktree_id: str) -> str:
     """Build ``{prefix}/{slug}-{worktree_id_suffix}``.
 
@@ -394,6 +477,21 @@ def create_pr(
     # *externally* (e.g. Gitea API + auto-merge label) leaves the local record
     # stale at 'open', which would otherwise reuse + force-push a merged branch
     # and open no new PR (#1163).
+    recorded_active = record.active_pr() if record else None
+    if (
+        recorded_active is not None
+        and not tracking._pr_is_terminal(recorded_active)
+        and recorded_active.provider
+        and recorded_active.provider != prcfg.provider
+    ):
+        return {
+            **base,
+            "error": (
+                f"Tracked PR provider {recorded_active.provider!r} differs from "
+                f"configured provider {prcfg.provider!r}; refusing provider "
+                "access with mismatched credentials."
+            ),
+        }
     _reconcile_active_pr(record, config)
     active = record.active_pr() if record else None
     active_is_live = active is not None and not tracking._pr_is_terminal(active)
@@ -425,6 +523,22 @@ def create_pr(
                 tracking.save_record(record)
             active = record.active_pr() if record else None
             active_is_live = active is not None and not tracking._pr_is_terminal(active)
+
+    needs_body = new or not active_is_live or active.number is None
+    if needs_body:
+        missing_body = missing_required_body_sections(
+            body,
+            prcfg.required_body_sections,
+        )
+        if missing_body:
+            return {
+                **base,
+                "error": (
+                    "PR body is missing required non-empty section(s): "
+                    + ", ".join(missing_body)
+                    + ". Pass --body or --body-file before opening the PR."
+                ),
+            }
 
     # Resolve the feature branch name: explicit > live active PR > derived.
     if branch:
@@ -766,6 +880,8 @@ def _open_via_provider(
         # produced this PR -- but never clobber an explicit one.
         if not record.parent_session and session:
             record.parent_session = session
+        if attribution:
+            target_pr.attribution_head = head_sha
         tracking.save_record(record)
     result["pr_opened"] = True
     result["url"] = pull.url
@@ -781,6 +897,58 @@ def _open_via_provider(
     # and source attribution depend on these labels.
     if getattr(pull, "label_error", ""):
         result["pr_label_error"] = pull.label_error
+
+
+def refresh_source_attribution(
+    worktree_id: str,
+    config: Config,
+    record: tracking.WorktreeRecord,
+    target_pr: PRRecord | None,
+    head_sha: str,
+) -> str:
+    """Publish the pushed head as a dedicated managed attribution comment."""
+    if not config.default_repo.pr.source_attribution:
+        return ""
+    if target_pr is None or target_pr.number is None or not target_pr.repo:
+        return "active PR has no provider repo/number"
+    if target_pr.attribution_head == head_sha:
+        return ""
+    from . import providers
+    from .providers import attribution
+
+    prcfg = config.default_repo.pr
+    provider_name = target_pr.provider or prcfg.provider
+    if provider_name != prcfg.provider:
+        return (
+            f"tracked PR provider {provider_name!r} differs from configured "
+            f"provider {prcfg.provider!r}; credentials cannot be resolved safely"
+        )
+    session = ""
+    if record.sessions:
+        live = [item for item in record.sessions if not item.ended_at]
+        session = (live[-1] if live else record.sessions[-1]).session_id
+    try:
+        provider = providers.get_provider(provider_name)
+        token = providers.account_token_for_slug(target_pr.repo, prcfg)
+        marker = attribution.build_marker(
+            worktree_id,
+            machine=record.machine,
+            session=session,
+            head=head_sha,
+        )
+        error = provider.publish_source_marker(
+            target_pr.repo,
+            int(target_pr.number),
+            marker,
+            api_base=prcfg.api_base,
+            token=token,
+        )
+        if not error:
+            target_pr.attribution_head = head_sha
+            tracking.save_record(record)
+        return error
+    except (providers.ProviderError, OSError, ValueError) as exc:
+        return str(exc)
 
 
 def _finish_auto_open(
@@ -832,6 +1000,19 @@ def _finish_auto_open(
     # re-run's ``--draft`` request masquerade as "opened as a DRAFT". Un-drafting
     # an already-open PR is pr-ready's job, not create-pr's.
     result["draft"] = False
+    want_attribution = (
+        prcfg.source_attribution if attribution is None else attribution
+    )
+    if want_attribution and record is not None:
+        error = refresh_source_attribution(
+            worktree_id,
+            config,
+            record,
+            target_pr,
+            head_sha,
+        )
+        if error:
+            result["pr_attribution_error"] = error
 
 
 def _reconcile_active_pr(
@@ -1086,12 +1267,18 @@ def _set_pr_locked(
             pr = PRRecord()
             record.prs.append(pr)
 
+    identity_changed = (
+        (number is not None and number != pr.number)
+        or (provider is not None and provider != pr.provider)
+    )
     if url is not None:
         pr.url = url
     if number is not None:
         pr.number = number
     if provider is not None:
         pr.provider = provider
+    if identity_changed:
+        pr.attribution_head = ""
     if branch is not None:
         pr.branch = branch
     if state is not None:

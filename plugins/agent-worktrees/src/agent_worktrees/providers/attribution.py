@@ -1,11 +1,12 @@
-"""Optional source-worktree attribution markers embedded in PR bodies.
+"""Optional source-worktree attribution markers for PR bodies/comments.
 
 When a closed-circuit repo opts in with ``pr.source_attribution: true``, a PR
-opened by agent-worktrees carries a durable, hidden HTML-comment marker naming
-the **source worktree** (+ machine / session / head SHA). This makes the PR
-traceable back to its origin without session-store archaeology. The marker is
-off by default because hidden PR metadata is still public and raw machine,
-worktree, and session identifiers are inappropriate for public repositories.
+opened by agent-worktrees carries an initial hidden HTML-comment marker naming
+the **source worktree** (+ machine / session / head SHA). Later pushed heads are
+published as dedicated marker comments so mutable metadata never replaces the
+authored PR description. Consumers use the newest marker across both surfaces.
+The feature is off by default because hidden PR metadata is still public and raw
+machine, worktree, and session identifiers are inappropriate for public repos.
 
 The marker is a single HTML comment, invisible in rendered Markdown:
 
@@ -47,6 +48,11 @@ def append_marker(body: str, marker: str) -> str:
     if stripped:
         return f"{stripped}\n\n{marker}\n"
     return f"{marker}\n"
+
+
+def strip_marker(body: str) -> str:
+    """Return authored PR content with managed source markers removed."""
+    return _MARKER_RE.sub("", body or "").rstrip()
 
 
 def parse_marker(body: str) -> dict[str, str] | None:

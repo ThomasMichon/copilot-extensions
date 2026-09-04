@@ -303,6 +303,24 @@ def _label_endpoint(args, label_post, applied, id_name):
 
 
 class TestGiteaProvider:
+    def test_publish_source_marker_creates_issue_comment(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        captured = {}
+        provider = gitea.GiteaProvider()
+
+        def fake_curl(method, url, token, *, payload=None):
+            captured.update(method=method, url=url, token=token, payload=payload)
+            return 200, "{}"
+
+        monkeypatch.setattr(provider, "_curl", fake_curl)
+
+        assert provider.publish_source_marker(
+            "o/r", 42, "updated", api_base="https://h/gitea", token="tok"
+        ) == ""
+        assert captured["method"] == "POST"
+        assert captured["payload"] == {"body": "updated"}
+
     def test_combined_status_state_maps_gitea_states(self, monkeypatch):
         # #225: the combined commit status is normalized onto the pr_contract
         # vocabulary (failure/error -> failure; pending/warning -> pending; etc).
@@ -721,6 +739,22 @@ class TestGiteaProvider:
 # ---------------------------------------------------------------------------
 
 class TestGitHubProvider:
+    def test_publish_source_marker_creates_pr_comment(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        captured = {}
+
+        def fake_run(args, **kwargs):
+            captured.update(args=args, kwargs=kwargs)
+            return _proc()
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().publish_source_marker(
+            "o/r", 42, "updated"
+        ) == ""
+        assert captured["args"][-2:] == ["--body", "updated"]
+
     def test_create_pull_parses_number_from_url(self, monkeypatch):
         from agent_worktrees.providers import github
         monkeypatch.setattr(
@@ -1039,6 +1073,40 @@ class TestGitHubProvider:
 
 
 class TestAzureDevOpsProvider:
+    def test_publish_source_marker_creates_thread(self, monkeypatch):
+        from agent_worktrees.providers import azure_devops
+
+        captured = {}
+
+        provider = azure_devops.AzureDevOpsProvider()
+        monkeypatch.setattr(
+            provider,
+            "_auth_header",
+            lambda token: ("Authorization: Bearer synthetic", ""),
+        )
+        monkeypatch.setattr(
+            provider,
+            "_rest_call",
+            lambda method, url, auth, payload=None: (
+                captured.update(
+                    method=method,
+                    url=url,
+                    auth=auth,
+                    payload=payload,
+                )
+                or (201, "{}")
+            ),
+        )
+
+        assert provider.publish_source_marker(
+            "project/repo",
+            42,
+            "updated",
+            api_base="https://dev.azure.com/example",
+        ) == ""
+        assert captured["method"] == "POST"
+        assert json.loads(captured["payload"])["comments"][0]["content"] == "updated"
+
     def test_get_pull_completed_is_merged(self, monkeypatch):
         # Azure status "completed" == merged; canonicalize state to "merged".
         from agent_worktrees.providers import azure_devops as azure
