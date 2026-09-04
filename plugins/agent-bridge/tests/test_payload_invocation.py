@@ -114,6 +114,7 @@ async def test_session_host_strips_parent_payload_context(monkeypatch) -> None:
     async def fake_spawn(*args, **kwargs):
         captured["args"] = args
         captured["env"] = kwargs["env"]
+        captured["kwargs"] = kwargs
         return object()
 
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/parent/payload")
@@ -130,6 +131,11 @@ async def test_session_host_strips_parent_payload_context(monkeypatch) -> None:
     assert isinstance(child_env, dict)
     assert "COPILOT_PLUGIN_ROOT" not in child_env
     assert child_env["KEEP"] == "yes"
+    spawn_kwargs = captured["kwargs"]
+    assert isinstance(spawn_kwargs, dict)
+    assert spawn_kwargs["creationflags"] == launcher.no_window_flags()
+    assert spawn_kwargs["stdin"] is launcher.asyncio.subprocess.PIPE
+    assert spawn_kwargs["stdout"] is launcher.asyncio.subprocess.PIPE
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")
