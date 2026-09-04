@@ -273,6 +273,53 @@ class TestMuxNewWindow:
         assert out["prompt_status"] == "failed:2"
         assert cleaned == {"pane": "%9", "tree": {100, 101}}
 
+    def test_child_exit_during_startup_grace_preserves_receipt_failure(
+        self, monkeypatch, tmp_path,
+    ):
+        receipt = tmp_path / "receipt"
+
+        class R:
+            returncode = 0
+            stdout = "%9\n"
+            stderr = ""
+
+        def _spawn(*args, **kwargs):
+            receipt.write_text("launching", encoding="utf-8")
+            return R()
+
+        monkeypatch.setattr(subprocess, "run", _spawn)
+        monkeypatch.setattr(
+            sessions, "_initial_prompt_receipt_path", lambda token: receipt,
+        )
+        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a, **k: False)
+        monkeypatch.setattr(
+            sessions, "_mux_pane_process_tree", lambda *a, **k: {100},
+        )
+        monkeypatch.setattr(
+            sessions,
+            "_retire_failed_successor",
+            lambda *a, **k: {"ok": True},
+        )
+        monkeypatch.setattr(
+            sessions,
+            "build_mux_new_window_argv",
+            lambda *a, **k: ["psmux", "new-window"],
+        )
+
+        out = sessions.mux_new_window(
+            "id",
+            "/w",
+            ["copilot"],
+            None,
+            mux="psmux",
+            initial_prompt="continue",
+        )
+
+        assert out["ok"] is False
+        assert out["prompt_received"] is False
+        assert out["prompt_status"] == "failed:pane-exited"
+        assert out["error"].endswith("(status: failed:pane-exited)")
+
     def test_parent_transports_exact_watched_receipt_path(
         self, monkeypatch, tmp_path,
     ):
@@ -874,10 +921,34 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(m.cfg, "load_config", lambda: config)
         monkeypatch.setattr(
             m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        launch = {}
+
+        def _build_launch(config, args, work_dir, **kwargs):
+            launch.update(kwargs)
+            return ["copilot"]
+
         monkeypatch.setattr(
-            m, "_build_launch_cmd", lambda c, a, wd, **k: ["copilot"])
+            m, "_build_launch_cmd", _build_launch)
         monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
         monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid, expected_session_name=None: {
+                "session_name": expected_session_name,
+                "pane_id": "%4",
+                "copilot_pid": 4242,
+                "copilot_start_time": "created-1",
+            },
+        )
+        monkeypatch.setattr(
+            procs,
+            "process_executable_path",
+            lambda pid: r"C:\Programs\Copilot\copilot.exe",
+        )
+        monkeypatch.setattr(
+            locks, "process_start_time", lambda pid: "created-1",
+        )
         captured = {}
 
         def _new_window(wt, wd, cmd, env, **kwargs):
@@ -898,7 +969,11 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
 
         rc = m.cmd_handoff_cutover(
-            _ns(seed="continue", old_pane="%4")
+            _ns(
+                seed="continue",
+                old_pane="%4",
+                session_id="anchor-session",
+            )
         )
 
         assert rc == 0
@@ -913,6 +988,9 @@ class TestCmdHandoffCutover:
             "session_name": "caller-session",
             "initial_prompt": "continue",
         }
+        assert launch["fallback_copilot_path"] == (
+            r"C:\Programs\Copilot\copilot.exe"
+        )
 
     def test_spawn_dry_run_reports_plan_and_old_pane(
         self, monkeypatch, capfd, tmp_path,
@@ -1049,3 +1127,174 @@ class TestCmdHandoffCutover:
         )
         assert captured["env"]["AGENT_WORKTREES_HANDOFF_TOKEN"] == "task-123"
         assert out["seed_method"] == "interactive-argv"
+
+    def test_spawn_threads_verified_predecessor_executable(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight(),
+        )
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid: {
+                "session_name": "wt-wtZ",
+                "pane_id": "%2",
+                "copilot_pid": 4242,
+                "copilot_start_time": "created-1",
+            },
+        )
+        monkeypatch.setattr(
+            procs,
+            "process_executable_path",
+            lambda pid: r"C:\Programs\Copilot\copilot.exe",
+        )
+        monkeypatch.setattr(
+            locks, "process_start_time", lambda pid: "created-1",
+        )
+        captured = {}
+
+        def _build(config, args, work_dir, **kwargs):
+            captured.update(kwargs)
+            return ["copilot"]
+
+        monkeypatch.setattr(m, "_build_launch_cmd", _build)
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(
+            _ns(seed="continue", session_id="session-1")
+        )
+
+        assert rc == 0
+        assert captured["fallback_copilot_path"] == (
+            r"C:\Programs\Copilot\copilot.exe"
+        )
+        assert json.loads(capfd.readouterr().out)["old_pane"] == "%2"
+
+    def test_spawn_drops_executable_when_process_identity_changes(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight(),
+        )
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid: {
+                "session_name": "wt-wtZ",
+                "pane_id": "%2",
+                "copilot_pid": 4242,
+                "copilot_start_time": "created-1",
+            },
+        )
+        monkeypatch.setattr(
+            procs,
+            "process_executable_path",
+            lambda pid: "/opt/copilot",
+        )
+        monkeypatch.setattr(
+            locks, "process_start_time", lambda pid: "created-2",
+        )
+        captured = {}
+
+        def _build(config, args, work_dir, **kwargs):
+            captured.update(kwargs)
+            return ["copilot"]
+
+        monkeypatch.setattr(m, "_build_launch_cmd", _build)
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(
+            _ns(seed="continue", session_id="session-1")
+        )
+
+        assert rc == 0
+        assert captured["fallback_copilot_path"] is None
+        capfd.readouterr()
+
+    def test_spawn_failure_preserves_prompt_receipt_details(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight(),
+        )
+        monkeypatch.setattr(
+            m, "_build_launch_cmd", lambda *a, **k: ["copilot"],
+        )
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": False,
+                "new_pane": "%5",
+                "prompt_received": False,
+                "prompt_status": "failed:pane-exited",
+                "error": "successor exited during startup",
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(seed="continue"))
+
+        assert rc == 4
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is False
+        assert out["prompt_received"] is False
+        assert out["prompt_status"] == "failed:pane-exited"
+        assert out["error"] == (
+            "failed to open successor window: "
+            "successor exited during startup"
+        )

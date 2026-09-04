@@ -190,6 +190,62 @@ class TestMuxBindingForSession:
             "copilot_start_time": "copilot-created",
         }
 
+    def test_resolves_expected_non_worktree_mux_session(
+        self, tmp_path: Path, monkeypatch
+    ):
+        self._session_lock(tmp_path, "sess-a", 300)
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._is_copilot_process",
+            lambda pid: pid == 300,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.reclaim.build_process_table",
+            lambda: {
+                100: {"ppid": 1, "name": "psmux.exe"},
+                200: {"ppid": 100, "name": "pwsh.exe"},
+                300: {"ppid": 200, "name": "copilot.exe"},
+            },
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._windows_process_start_time",
+            lambda pid: {100: 1, 200: 2, 300: 3}.get(pid),
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.platform.system", lambda: "Windows"
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.locks.process_start_time",
+            lambda pid: {
+                200: "pane-created",
+                300: "copilot-created",
+            }.get(pid),
+        )
+
+        class _Result:
+            returncode = 0
+            stdout = "caller-owned|%7|200\nwt-wt-other|%8|100\n"
+
+        monkeypatch.setattr(
+            "subprocess.run", lambda *args, **kwargs: _Result()
+        )
+
+        assert mux_binding_for_session(
+            "sess-a",
+            mux="psmux",
+            expected_session_name="caller-owned",
+        ) == {
+            "worktree_id": "",
+            "session_name": "caller-owned",
+            "pane_id": "%7",
+            "pane_pid": 200,
+            "pane_start_time": "pane-created",
+            "copilot_pid": 300,
+            "copilot_start_time": "copilot-created",
+        }
+
     def test_ambiguous_pane_ancestry_fails_closed(
         self, tmp_path: Path, monkeypatch
     ):
@@ -280,6 +336,28 @@ class TestMuxBindingForSession:
         )
         monkeypatch.setattr(
             "agent_worktrees.sessions._is_copilot_process", lambda _pid: False
+        )
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda *args, **kwargs: pytest.fail("mux should not be queried"),
+        )
+
+        assert mux_binding_for_session("sess-a", mux="psmux") is None
+
+    def test_reused_lock_pid_during_validation_does_not_query_mux(
+        self, tmp_path: Path, monkeypatch
+    ):
+        self._session_lock(tmp_path, "sess-a", 300)
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._session_state_dir", lambda: tmp_path
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions._is_copilot_process", lambda _pid: True
+        )
+        start_times = iter(("copilot-created", "replacement-created"))
+        monkeypatch.setattr(
+            "agent_worktrees.locks.process_start_time",
+            lambda _pid: next(start_times),
         )
         monkeypatch.setattr(
             "subprocess.run",

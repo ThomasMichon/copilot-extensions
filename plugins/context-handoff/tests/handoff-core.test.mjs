@@ -18,7 +18,8 @@ import {
   safePathSegment, agentWorktreesGet, handoffDirFor,
   runCli,
   agentWorktreesGetResult, consumeFileHandoffOnce, writeJsonAtomic,
-  currentMuxSession, resolveSystemCli, sessionBindingForSession, manualFallbackInstructions,
+  collectAdvisoryGitFacts, currentMuxSession, resolveSystemCli,
+  sessionBindingForSession, manualFallbackInstructions,
   prepareTaskCutoverCheckpoint, completeHandoffLifecycle,
   consumeDispatchHandoffTask,
   makeHandoffMetadata,
@@ -156,6 +157,14 @@ test("runtime invocation isolates imports and forces UTF-8", () => {
       PYTHONUTF8: "1",
     },
   );
+});
+
+test("advisory Git facts do not require an ambient git command", () => {
+  assert.deepEqual(collectAdvisoryGitFacts(), {
+    branch: null,
+    repo: null,
+    status: null,
+  });
 });
 
 test("handoff titles are normalized to one line at entry", () => {
@@ -309,6 +318,73 @@ test("cutover passes startup association after predecessor discovery", () => {
     "--handoff-token", "task-1",
     "--worktree-id", "wt-example",
   ]);
+});
+
+test("cutover preserves prompt receipt failure details", () => {
+  const result = runHandoffCutover(
+    "/repo",
+    "continue",
+    "session-1",
+    (_bin, args) => {
+      if (args[0] === "session-binding") {
+        return JSON.stringify({ found: false, session_id: "session-1" });
+      }
+      return JSON.stringify({
+        ok: false,
+        prompt_received: false,
+        prompt_status: "failed:pane-exited",
+        error: "successor did not confirm prompt launch",
+      });
+    },
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    prompt_received: false,
+    prompt_status: "failed:pane-exited",
+    error: "successor did not confirm prompt launch",
+    reason: "error",
+  });
+});
+
+test("cutover handles a null JSON result without masking the failure", () => {
+  const result = runHandoffCutover(
+    "/repo",
+    "continue",
+    "session-1",
+    (_bin, args) => args[0] === "session-binding"
+      ? JSON.stringify({ found: false, session_id: "session-1" })
+      : "null",
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "error",
+    error: null,
+  });
+});
+
+test("cutover catch ignores non-object JSON stdout", () => {
+  const result = runHandoffCutover(
+    "/repo",
+    "continue",
+    "session-1",
+    (_bin, args) => {
+      if (args[0] === "session-binding") {
+        return JSON.stringify({ found: false, session_id: "session-1" });
+      }
+      const error = new Error("cutover failed");
+      error.status = 3;
+      error.stdout = JSON.stringify("not structured output");
+      throw error;
+    },
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "no-mux",
+    error: null,
+  });
 });
 
 test("manual fallback clearly delimits the exact copyable seed", () => {

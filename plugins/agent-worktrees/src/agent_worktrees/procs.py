@@ -20,6 +20,7 @@ import platform
 from pathlib import Path
 
 __all__ = [
+    "process_executable_path",
     "processes_with_cwd_under",
     "terminate_processes_under",
     "terminate_pid",
@@ -217,6 +218,49 @@ def _win_read_cwd(k32, pid: int) -> tuple[str, str]:
         return cwd_raw.decode("utf-16-le", "ignore").rstrip("\\/"), exe_name
     finally:
         k32.CloseHandle(handle)
+
+
+def process_executable_path(pid: int) -> str | None:
+    """Return the absolute executable path for a live process when supported.
+
+    Windows queries the process image through a limited-information handle.
+    POSIX uses Linux-style ``/proc/<pid>/exe`` when that attributable process
+    link is available. Unsupported or unreadable processes return ``None``.
+    """
+    if pid <= 0:
+        return None
+    if platform.system() == "Windows":
+        import ctypes
+        from ctypes import wintypes
+
+        try:
+            k32 = _win_kernel32()
+        except OSError:
+            return None
+        handle = k32.OpenProcess(
+            _PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(32768)
+            size = wintypes.DWORD(len(buf))
+            if not k32.QueryFullProcessImageNameW(
+                handle, 0, buf, ctypes.byref(size)
+            ):
+                return None
+            path = buf.value
+        finally:
+            k32.CloseHandle(handle)
+    else:
+        proc_link = Path("/proc") / str(pid) / "exe"
+        try:
+            path = os.readlink(proc_link)
+        except OSError:
+            return None
+        if path.endswith(" (deleted)"):
+            path = str(proc_link) if os.access(proc_link, os.X_OK) else ""
+    return path if path and os.path.isabs(path) else None
 
 
 def _terminate_windows(k32, pid: int) -> bool:

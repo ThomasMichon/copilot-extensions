@@ -48,6 +48,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$setupShell = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+if (-not $setupShell -or -not (Test-Path -LiteralPath $setupShell -PathType Leaf)) {
+    throw 'Unable to resolve the current PowerShell executable.'
+}
 
 # ── --stdio (ACP) mode: keep human output off the JSON-RPC channel ────────
 # In --stdio mode stdout is the ACP JSON-RPC stream (SSH merges Information into
@@ -154,7 +158,12 @@ if ($EnvScript) {
 # ── Environment ──────────────────────────────────────────────────────────
 # Resolve the project from CWD (git-like); fall back to the directory name if
 # the CLI is unavailable (e.g. recovery mode).
-$project = (agent-worktrees get project 2>$null | Select-Object -First 1)
+$project = $null
+$agentWorktreesCmd = Get-Command agent-worktrees -ErrorAction SilentlyContinue
+if ($agentWorktreesCmd) {
+    $project = (& $agentWorktreesCmd.Source get project 2>$null |
+        Select-Object -First 1)
+}
 if (-not $project) { $project = Split-Path -Leaf $PWD }
 $env:WORKTREE_MACHINE = $Machine
 
@@ -168,10 +177,10 @@ if ($SetupHook -and -not $Recovery) {
         Write-Host "  Setup:    $SetupHook" -ForegroundColor DarkGray
         if ($script:StdioMode) {
             # Keep the hook's stdout off the ACP channel.
-            & pwsh.exe -NoProfile -NoLogo -File $SetupHook -Machine $Machine 2>&1 |
+            & $setupShell -NoProfile -NoLogo -File $SetupHook -Machine $Machine 2>&1 |
                 ForEach-Object { [Console]::Error.WriteLine($_) }
         } else {
-            & pwsh.exe -NoProfile -NoLogo -File $SetupHook -Machine $Machine
+            & $setupShell -NoProfile -NoLogo -File $SetupHook -Machine $Machine
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Setup hook exited with code $LASTEXITCODE; continuing to launch."
@@ -182,9 +191,14 @@ if ($SetupHook -and -not $Recovery) {
 }
 
 # ── Welcome banner ───────────────────────────────────────────────────────
-$branch = git branch --show-current 2>$null
-if (-not $branch) { $branch = '(detached)' }
-$dirty = git status --porcelain 2>$null
+$branch = '(detached)'
+$dirty = $null
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCmd) {
+    $resolvedBranch = & $gitCmd.Source branch --show-current 2>$null
+    if ($resolvedBranch) { $branch = $resolvedBranch }
+    $dirty = & $gitCmd.Source status --porcelain 2>$null
+}
 $status = if ($dirty) { 'dirty' } else { 'clean' }
 
 Write-Host ''

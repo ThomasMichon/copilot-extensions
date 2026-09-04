@@ -16,7 +16,31 @@
 
 set -euo pipefail
 
-MACHINE="${HOSTNAME:-$(hostname)}"
+_SETUP_SHELL="${BASH:-}"
+if [[ "$_SETUP_SHELL" != /* || ! -x "$_SETUP_SHELL" ]]; then
+    if [[ -x /bin/bash ]]; then
+        _SETUP_SHELL=/bin/bash
+    elif [[ -x /usr/bin/bash ]]; then
+        _SETUP_SHELL=/usr/bin/bash
+    else
+        _SETUP_SHELL="$(command -v bash 2>/dev/null || true)"
+    fi
+fi
+if [[ -z "$_SETUP_SHELL" || ! -x "$_SETUP_SHELL" ]]; then
+    echo "ERROR: Unable to resolve the current Bash executable." >&2
+    exit 1
+fi
+
+MACHINE="${HOSTNAME:-}"
+if [[ -z "$MACHINE" ]]; then
+    if [[ -x /bin/hostname ]]; then
+        MACHINE=$(/bin/hostname)
+    elif [[ -x /usr/bin/hostname ]]; then
+        MACHINE=$(/usr/bin/hostname)
+    else
+        MACHINE="unknown"
+    fi
+fi
 RECOVERY=false
 SETUP_HOOK=""
 SESSION_PATH=""
@@ -112,7 +136,7 @@ PROJECT=""
 if [[ -x "$_AW_PY" ]]; then
     PROJECT="$(PYTHONPATH="" "$_AW_PY" -m agent_worktrees get project 2>/dev/null || true)"
 fi
-[[ -z "$PROJECT" ]] && PROJECT="$(basename "$PWD")"
+[[ -z "$PROJECT" ]] && PROJECT="${PWD##*/}"
 export WORKTREE_MACHINE="$MACHINE"
 
 # -- Repo setup hook (vault / MCP; repo-specific) -------------------------
@@ -125,10 +149,10 @@ if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
         say "  Setup:    $SETUP_HOOK"
         if $STDIO; then
             # Keep the hook's stdout off the ACP channel.
-            if ! bash "$SETUP_HOOK" --machine "$MACHINE" >&2; then
+            if ! "$_SETUP_SHELL" "$SETUP_HOOK" --machine "$MACHINE" >&2; then
                 echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
             fi
-        elif ! bash "$SETUP_HOOK" --machine "$MACHINE"; then
+        elif ! "$_SETUP_SHELL" "$SETUP_HOOK" --machine "$MACHINE"; then
             echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
         fi
     else
@@ -137,10 +161,14 @@ if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
 fi
 
 # -- Welcome banner -------------------------------------------------------
-BRANCH=$(git branch --show-current 2>/dev/null || echo "(detached)")
-# Guard against set -e: outside a git repo (e.g. Bare resume launches Copilot in
-# ~/), `git status` exits 128 and would abort this launcher before `exec copilot`.
-DIRTY=$(git status --porcelain 2>/dev/null || true)
+BRANCH="(detached)"
+DIRTY=""
+if command -v git &>/dev/null; then
+    BRANCH=$(git branch --show-current 2>/dev/null || echo "(detached)")
+    # Guard against set -e: outside a git repo (e.g. Bare resume launches
+    # Copilot in ~/), `git status` exits 128 and would otherwise abort launch.
+    DIRTY=$(git status --porcelain 2>/dev/null || true)
+fi
 STATUS="clean"
 [[ -n "$DIRTY" ]] && STATUS="dirty"
 

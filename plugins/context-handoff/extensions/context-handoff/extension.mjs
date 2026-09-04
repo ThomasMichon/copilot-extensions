@@ -30,7 +30,6 @@ import {
   existsSync,
   writeFileSync,
 } from "node:fs";
-import { execSync } from "node:child_process";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
@@ -40,6 +39,7 @@ import {
   agentWorktreesGet,
   buildResumePrompt,
   buildSeedForStored,
+  collectAdvisoryGitFacts,
   completeHandoffLifecycle,
   consumeDispatchHandoffTask,
   consumeFileHandoff,
@@ -94,34 +94,13 @@ function ensureState(invocation) {
   }
 }
 
-function getGitInfo(cwd) {
-  const run = (cmd) => {
-    try {
-      return execSync(cmd, { cwd, timeout: 5000, encoding: "utf-8" }).trim();
-    } catch { return null; }
-  };
-  // Cap status to first 30 lines to avoid huge diffs
-  let status = run("git status --short");
-  if (status) {
-    const lines = status.split("\n");
-    if (lines.length > 30) {
-      status = lines.slice(0, 30).join("\n") + `\n... ${lines.length - 30} more files omitted`;
-    }
-  }
-  return {
-    branch: run("git rev-parse --abbrev-ref HEAD"),
-    repo: run("git remote get-url origin"),
-    status,
-  };
-}
-
 // --- Shared Logic ---
 
 // Collect structured handoff data from current session state.
 // Used by both the generate_handoff_prompt tool and the /handoff command.
 function collectHandoffData(sid, overrides = {}) {
   const cwd = state.cwd || process.cwd();
-  const git = getGitInfo(cwd);
+  const git = collectAdvisoryGitFacts();
   const utilPct = state.tokenLimit > 0
     ? Math.round(state.lastUtilization * 100)
     : null;
@@ -205,7 +184,11 @@ function formatHandoffMarkdown(handoffData, scope) {
     "",
     `**Session:** ${handoffData.sessionId}`,
     `**CWD:** ${handoffData.cwd}`,
-    `**Branch:** ${handoffData.branch || "(detached)"}`,
+    `**Branch:** ${
+      handoffData.branch === null
+        ? "(unavailable)"
+        : handoffData.branch || "(detached)"
+    }`,
     `**Turn count:** ${handoffData.turnCount}`,
     `**Context utilization:** ${handoffData.contextUtilization}`,
     `**Generated:** ${handoffData.generatedAt}`,
@@ -292,7 +275,11 @@ const session = await joinSession({
             "",
             `**Session:** ${handoffData.sessionId}`,
             `**CWD:** ${handoffData.cwd}`,
-            `**Branch:** ${handoffData.branch || "(detached)"}`,
+            `**Branch:** ${
+              handoffData.branch === null
+                ? "(unavailable)"
+                : handoffData.branch || "(detached)"
+            }`,
             `**Turn count:** ${handoffData.turnCount}`,
             `**Context utilization:** ${handoffData.contextUtilization}`,
             "",
@@ -306,7 +293,9 @@ const session = await joinSession({
             "",
             "### Git Status",
             "```",
-            handoffData.gitStatus || "(clean)",
+            handoffData.gitStatus === null
+              ? "(unavailable)"
+              : handoffData.gitStatus || "(clean)",
             "```",
             "",
             args.summary ? `### Agent Summary\n${args.summary}\n` : "",
