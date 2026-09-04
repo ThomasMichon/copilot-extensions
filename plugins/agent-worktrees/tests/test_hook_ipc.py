@@ -5,6 +5,7 @@ import io
 import json
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -456,9 +457,21 @@ def test_started_resident_lifecycle_suppresses_duplicate_fallback(
 
 def test_resident_dispatches_session_start_to_combined_lifecycle(monkeypatch):
     seen = {}
+    provisioning_start_event = threading.Event()
 
-    def lifecycle(payload, *, deadline=None):
-        seen.update(payload=payload, deadline=deadline)
+    def lifecycle(
+        payload,
+        *,
+        deadline=None,
+        provisioning_start_event=None,
+        plugin_related_anchors=None,
+    ):
+        seen.update(
+            payload=payload,
+            deadline=deadline,
+            provisioning_start_event=provisioning_start_event,
+            plugin_related_anchors=plugin_related_anchors,
+        )
         return {"additionalContext": "project hook"}
 
     monkeypatch.setattr(main, "_run_session_lifecycle", lifecycle)
@@ -466,12 +479,33 @@ def test_resident_dispatches_session_start_to_combined_lifecycle(monkeypatch):
         "sessionStart",
         {"cwd": str(Path.cwd()), "sessionId": "session-1"},
         segment_cache=SimpleNamespace(),
-        policy=SimpleNamespace(),
+        policy=SimpleNamespace(
+            plugin_related_anchors=lambda: ["plugin-anchor"]
+        ),
         deadline=123.0,
+        provisioning_start_event=provisioning_start_event,
     )
     assert result == {"additionalContext": "project hook"}
     assert seen["payload"]["sessionId"] == "session-1"
     assert seen["deadline"] == 123.0
+    assert seen["provisioning_start_event"] is provisioning_start_event
+    assert seen["plugin_related_anchors"] == ["plugin-anchor"]
+
+
+def test_resident_policy_caches_plugin_related_anchors(monkeypatch):
+    from agent_worktrees import related
+
+    calls = []
+    monkeypatch.setattr(
+        related,
+        "installed_plugin_related_anchors",
+        lambda: calls.append("discover") or ["plugin-anchor"],
+    )
+    policy = main._ResidentHookPolicy(None)
+
+    assert policy.plugin_related_anchors() == ["plugin-anchor"]
+    assert policy.plugin_related_anchors() == ["plugin-anchor"]
+    assert calls == ["discover"]
 
 
 def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_path):
@@ -604,6 +638,87 @@ def test_session_provisioning_ignores_stale_resident_opt_out(
     monkeypatch.setattr(reconcile, "build_plan", build_plan)
     assert main._start_provisioning_if_needed(str(tmp_path), {}) == ""
     assert seen == {"repo": tmp_path, "save": False}
+
+
+def test_session_lifecycle_schedules_provisioning_without_waiting(
+    monkeypatch, tmp_path
+):
+    started = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    lifecycle_released = threading.Event()
+    monkeypatch.setattr(
+        main,
+        "_provisioning_status_diagnostic",
+        lambda cwd: "",
+    )
+
+    def provision(
+        cwd,
+        environment,
+        *,
+        include_status_diagnostic,
+        process_holder,
+    ):
+        started.set()
+        release.wait(5)
+        completed.set()
+        return ""
+
+    monkeypatch.setattr(main, "_start_provisioning_if_needed", provision)
+
+    before = time.perf_counter()
+    assert main._schedule_provisioning_if_needed(
+        str(tmp_path), {}, start_event=lifecycle_released
+    ) == ""
+    elapsed = time.perf_counter() - before
+
+    assert not started.wait(0.05)
+    assert elapsed < 0.5
+    lifecycle_released.set()
+    assert started.wait(1)
+    release.set()
+    assert completed.wait(1)
+
+
+def test_session_lifecycle_deduplicates_provisioning_preview(
+    monkeypatch, tmp_path
+):
+    started = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    calls = []
+    monkeypatch.setattr(
+        main,
+        "_provisioning_status_diagnostic",
+        lambda cwd: "",
+    )
+
+    class Process:
+        def wait(self):
+            release.wait(5)
+            completed.set()
+
+    def provision(
+        cwd,
+        environment,
+        *,
+        include_status_diagnostic,
+        process_holder,
+    ):
+        calls.append(cwd)
+        process_holder.append(Process())
+        started.set()
+        return ""
+
+    monkeypatch.setattr(main, "_start_provisioning_if_needed", provision)
+
+    assert main._schedule_provisioning_if_needed(str(tmp_path), {}) == ""
+    assert started.wait(1)
+    assert main._schedule_provisioning_if_needed(str(tmp_path), {}) == ""
+    assert calls == [str(tmp_path)]
+    release.set()
+    assert completed.wait(1)
 
 
 def test_late_completed_request_does_not_request_duplicate_fallback(tmp_path):

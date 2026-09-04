@@ -21,6 +21,43 @@ def _record(path: Path, role: str = "harness") -> SimpleNamespace:
     )
 
 
+def test_related_summary_uses_supplied_plugin_related_anchors(
+    monkeypatch,
+) -> None:
+    seen = {}
+    monkeypatch.setattr(
+        session_context.state_root,
+        "config_source_anchors",
+        lambda *_a, **_k: [],
+    )
+
+    def unexpected_discovery():
+        raise AssertionError("resident snapshot must be reused")
+
+    monkeypatch.setattr(
+        session_context.related,
+        "installed_plugin_related_anchors",
+        unexpected_discovery,
+    )
+    def read_related(anchors):
+        seen["anchors"] = anchors
+        return related.RelatedConfig(primary=None, related={})
+
+    monkeypatch.setattr(
+        session_context.related,
+        "read_related_grafted",
+        read_related,
+    )
+
+    session_context._related_summary(
+        SimpleNamespace(),
+        ".",
+        plugin_related_anchors=["plugin-anchor"],
+    )
+
+    assert seen["anchors"] == ["plugin-anchor"]
+
+
 def test_context_includes_pair_and_bounded_related_topology(
     tmp_path: Path,
     monkeypatch,
