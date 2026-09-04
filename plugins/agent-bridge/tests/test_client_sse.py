@@ -147,6 +147,19 @@ class TestSseCommentParsing:
 
         assert response.closed is True
 
+    def test_exhausted_stream_preserves_cancellation(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([], KeyboardInterrupt)
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            stream = client.stream_events("sess-1")
+            with pytest.raises(KeyboardInterrupt):
+                next(stream)
+
+        assert response.closed is True
+
     def test_successful_stream_resets_outage_budget(self) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok")
         client._outage_deadline = 1.0

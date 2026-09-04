@@ -79,12 +79,18 @@ class SseStream(Iterator[dict[str, Any]]):
         except BaseException:
             pass
 
+    def _close_on_exhaustion(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def __next__(self) -> dict[str, Any]:
         while True:
             try:
                 raw_line = next(self._lines)
             except StopIteration:
-                self._close_safely()
+                self._close_on_exhaustion()
                 raise
             line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
 
