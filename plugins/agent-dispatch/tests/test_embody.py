@@ -375,6 +375,7 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
         "--project",
         "widgets",
         "create",
+        "--no-owner",
         "--origin",
         "delegate",
         "--interface",
