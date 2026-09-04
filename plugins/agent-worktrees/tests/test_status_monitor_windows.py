@@ -225,44 +225,49 @@ def test_status_daemon_console_root_contains_psmux_descendants(
     foreground_transitions: set[tuple[int, int, str, str, str]] = set()
     observed_descendants: set[int] = set()
     observed_root = False
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline and not marker.exists():
-        processes = _process_snapshot()
-        observed_root = observed_root or process.pid in processes
-        descendants = _descendants(process.pid, processes)
-        observed_descendants.update(descendants)
-        for pid in descendants:
-            name = processes.get(pid, ("", 0))[0].lower()
-            if name == "conhost.exe":
-                conhost_pids.add(pid)
-            elif name == "openconsole.exe":
-                openconsole_pids.add(pid)
+    try:
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not marker.exists():
+            processes = _process_snapshot()
+            observed_root = observed_root or process.pid in processes
+            descendants = _descendants(process.pid, processes)
+            observed_descendants.update(descendants)
+            for pid in descendants:
+                name = processes.get(pid, ("", 0))[0].lower()
+                if name == "conhost.exe":
+                    conhost_pids.add(pid)
+                elif name == "openconsole.exe":
+                    openconsole_pids.add(pid)
 
-        for hwnd, window in _window_snapshot(processes).items():
-            state = (hwnd, *window)
+            for hwnd, window in _window_snapshot(processes).items():
+                state = (hwnd, *window)
+                if (
+                    hwnd not in baseline_windows
+                    and window[0] in observed_descendants
+                    and _is_terminal_window(state)
+                ):
+                    visible_terminal_windows.add(state)
+
+            foreground = _foreground_state(processes)
             if (
-                hwnd not in baseline_windows
-                and window[0] in observed_descendants
-                and _is_terminal_window(state)
+                foreground != baseline_foreground
+                and foreground[1] in observed_descendants
+                and _is_terminal_window(foreground)
             ):
-                visible_terminal_windows.add(state)
+                foreground_transitions.add(foreground)
+            time.sleep(0.02)
 
-        foreground = _foreground_state(processes)
-        if (
-            foreground != baseline_foreground
-            and foreground[1] in observed_descendants
-            and _is_terminal_window(foreground)
-        ):
-            foreground_transitions.add(foreground)
-        time.sleep(0.02)
-
-    assert marker.exists()
-    assert process.wait(timeout=5) == 0
-    assert observed_root
-    assert len(conhost_pids) <= 1
-    assert openconsole_pids == set()
-    assert visible_terminal_windows == set()
-    assert foreground_transitions == set()
+        assert marker.exists(), f"probe did not complete (exit={process.poll()})"
+        assert process.wait(timeout=5) == 0
+        assert observed_root
+        assert len(conhost_pids) <= 1
+        assert openconsole_pids == set()
+        assert visible_terminal_windows == set()
+        assert foreground_transitions == set()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
 
 
 if __name__ == "__main__" and len(sys.argv) == 4 and sys.argv[1] == "--probe":
