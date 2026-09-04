@@ -7828,6 +7828,7 @@ class _StatusSegmentCache:
     def __init__(self, ttl: float = 60.0):
         self.ttl = max(15.0, float(ttl))
         self._entries: dict[str, tuple[float, str]] = {}
+        self._aliases: dict[str, str] = {}
         self._lock = threading.RLock()
 
     @staticmethod
@@ -7835,18 +7836,27 @@ class _StatusSegmentCache:
         return os.path.normcase(os.path.realpath(path))
 
     def get(self, path: str) -> str:
+        input_key = self._key(path)
+        now = time.monotonic()
+        with self._lock:
+            key = self._aliases.get(input_key, input_key)
+            cached = self._entries.get(key)
+            if cached and now - cached[0] < self.ttl:
+                return cached[1]
+
         record = _find_record_for_path(path)
         target = record.worktree_path if record and record.worktree_path else path
         key = self._key(target)
-        now = time.monotonic()
         with self._lock:
             cached = self._entries.get(key)
             if cached and now - cached[0] < self.ttl:
+                self._aliases[input_key] = key
                 return cached[1]
         _activate_project_for_path(target, force=True)
         value = _render_status_segment(
             target, fetch=False, plain=False, no_title=False, persist_title=True)
         with self._lock:
+            self._aliases[input_key] = key
             self._entries[key] = (now, value)
         return value
 
@@ -7855,6 +7865,7 @@ class _StatusSegmentCache:
             return
         target = self._key(cwd)
         with self._lock:
+            removed: set[str] = set()
             for key in list(self._entries):
                 try:
                     common = os.path.commonpath((target, key))
@@ -7862,10 +7873,19 @@ class _StatusSegmentCache:
                     continue
                 if common == key or common == target:
                     self._entries.pop(key, None)
+                    removed.add(key)
+            for alias, key in list(self._aliases.items()):
+                try:
+                    common = os.path.commonpath((target, alias))
+                except (OSError, ValueError):
+                    common = ""
+                if key in removed or common == alias or common == target:
+                    self._aliases.pop(alias, None)
 
     def invalidate_all(self) -> None:
         with self._lock:
             self._entries.clear()
+            self._aliases.clear()
 
 
 _HOOK_WRITE_TOOLS = frozenset({
