@@ -1110,6 +1110,18 @@ taken from the coordinator before anything is launched: a dedup collision
 worker **exactly once**; the rest skip. See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md) for the reservation model.
 
+An optional **routing assignment** may be attached to a reservation before
+launch. Agent-dispatch is the single writer for this append-only provenance:
+purpose, literal selected model, demonstrated/candidate state, selection reason,
+execution surface, trial/decision references, session linkage, lifecycle
+events, terminal disposition, and optional unique opaque provider-event
+references. The record contains no prompt, source body, credential, or monetary
+value; external accounting systems may join provider events without
+double-counting them.
+
+Routing provenance is not candidate admission by itself. Existing spawn callers
+remain unchanged, and no routing record is required for legacy tasks.
+
 ### Supervising a lane (`agent-dispatch supervise`)
 
 The supervisor turns **queued** tasks into host embody autopilots — **exactly
