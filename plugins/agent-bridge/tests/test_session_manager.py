@@ -2107,6 +2107,41 @@ class TestEndSession:
         assert session_manager.get_session(session.session_id) is session
 
     @pytest.mark.asyncio
+    async def test_end_if_idle_excludes_concurrent_prompt_admission(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        ending = asyncio.Event()
+        release_end = asyncio.Event()
+        original_end = session_manager.end_session
+
+        async def delayed_end(session_id: str, *, force: bool = False) -> None:
+            ending.set()
+            await release_end.wait()
+            await original_end(session_id, force=force)
+
+        session_manager.end_session = delayed_end
+        end_task = asyncio.create_task(
+            session_manager.end_session_if_idle(session.session_id)
+        )
+        await ending.wait()
+
+        submit_task = asyncio.create_task(
+            session_manager.submit_or_queue_prompt(
+                session.session_id,
+                "do not discard",
+            )
+        )
+        await asyncio.sleep(0)
+        assert not submit_task.done()
+
+        release_end.set()
+        await end_task
+        with pytest.raises(KeyError, match="not found"):
+            await submit_task
+        assert session_manager._db.count_pending_prompts(session.session_id) == 0
+
+    @pytest.mark.asyncio
     async def test_end_succeeds_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:
