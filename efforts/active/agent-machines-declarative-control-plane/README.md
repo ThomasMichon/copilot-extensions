@@ -66,7 +66,7 @@ fleet, topology, or operating environment.
   embedding installed payload paths or ambiguous PATH commands (#1627).
 - [ ] Distinguish portable declarations from discovered facts and generated
   projections.
-- [ ] Add explicit authority metadata so a more-specific requirement package
+- [x] Add explicit authority metadata so a more-specific requirement package
   can supersede a lower-authority declaration deterministically while
   equal-authority contradictions remain errors (#1721).
 - [x] Resolve supplemental package repositories from generic project
@@ -85,7 +85,7 @@ fleet, topology, or operating environment.
   package directories (#1529).
 - [ ] Make every projection reproducible and attributable to its source
   declaration and resource module.
-- [ ] Preserve both selected and superseded declaration provenance in plans,
+- [x] Preserve both selected and superseded declaration provenance in plans,
   validation, restore results, and drift identity (#1721).
 - [ ] Eliminate independently authored shadow inventories after parity is
   proven.
@@ -119,7 +119,7 @@ fleet, topology, or operating environment.
   declarative orchestrator rather than learning dtssh internals (#1627).
 - [ ] Order actions from declared dependencies and preserve idempotence across
   interrupted or repeated runs.
-- [ ] Define whether imperative modules participate in authority selection or
+- [x] Define whether imperative modules participate in authority selection or
   remain explicitly opaque; never let module discovery order become hidden
   last-writer behavior (#1721).
 - [ ] Fail loudly on unsupported platforms, unavailable prerequisites, and
@@ -137,10 +137,10 @@ fleet, topology, or operating environment.
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown
   resource types fail before mutation.
-- [ ] Portable-default, operator-policy, and project-policy fixtures prove
+- [x] Portable-default, operator-policy, and project-policy fixtures prove
   deterministic authority selection independent of package discovery order;
   equal-authority contradictions still fail (#1721).
-- [ ] Plans and restore results identify the selected declaration and retain
+- [x] Plans and restore results identify the selected declaration and retain
   source-qualified evidence for declarations it superseded (#1721).
 - [x] Raw host, topology key, hostname, alias, and display-name inputs resolve
   to one canonical machine and one deterministic accepted-alias set; ambiguous
@@ -149,7 +149,7 @@ fleet, topology, or operating environment.
   resolved identity while canonical plan/drift output remains stable (#1529).
 - [x] Harness-only, harness-plus-supplemental, duplicate-adoption, unresolved
   relationship, and cross-repository conflict fixtures prove #1418.
-- [ ] Repeated projection from the same declarations produces byte-stable
+- [x] Repeated projection from the same declarations produces byte-stable
   derived views.
 - [ ] Plan and apply touch only resources named by the selected scope and report
   every skipped or blocked dependency.
@@ -287,3 +287,19 @@ behavioral parity is demonstrated.
 - Scoped the design across managed settings, declarative resources, and
   imperative modules, with opaque module behavior requiring an explicit
   contract rather than accidental last-writer semantics.
+
+### 2026-09-02 - Explicit package authority implemented
+
+- Added schema-v4 bounded package and declaration authority with fail-closed
+  v1-v3 compatibility, manage-overlay fallback, and explicit exclusion of
+  plugin activation, tombstone, marketplace, and removal surfaces.
+- Added deterministic same-shape settings and safe field-level resource
+  selection with equal-highest conflicts, conservative union fields,
+  source-qualified supersession findings, and stable plan/restore authority
+  decisions. Incompatible settings shapes and managed-block marker changes
+  remain explicit hard conflicts.
+- Kept modules additive and opaque while reporting effective authority, split
+  effective drift identity from full provenance identity, and covered shuffled
+  input order, legacy schemas, safety boundaries, every supported resource
+  authority field, direct-library restore validation, and loser-only drift
+  stability in the agent-machines suite.

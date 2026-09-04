@@ -1,9 +1,8 @@
 """The conflict validator.
 
 Multiple harness repos on one machine may declare overlapping desired state.
-Per the operator's model, conflict handling is **detect-and-report, not
-auto-arbitrate**: the user owns conflict-avoidance; the validator surfaces
-clashes so they can fix their packages.
+Schema-v4 authority resolves a disagreement only when the highest authority is
+unique in value and shape. Equal-highest contradictions remain fail-loud.
 
 Two rules, plus one advisory, all computable from manifests alone (no live
 ``~/.copilot/`` read required):
@@ -26,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import resources as _resources
+from .authority import contributor, effective_authority, sort_decisions
 from .discover import current_platform
 from .manifest import (
     BOOTSTRAP_CRITICAL_MARKETPLACES,
@@ -48,6 +48,26 @@ class Finding:
     level: str
     code: str
     message: str
+
+
+@dataclass(frozen=True)
+class _SettingCandidate:
+    package: RequirementPackage
+    manage_key: str
+    spec: dict[str, Any]
+    value: Any
+
+    @property
+    def authority(self) -> int:
+        return effective_authority(self.package, self.spec)
+
+    @property
+    def label(self) -> str:
+        return self.package.name
+
+    @property
+    def provenance(self) -> dict[str, Any]:
+        return contributor(self.package, self.spec)
 
 
 def _managed_values_under(pkg: RequirementPackage, prefix: str):
@@ -122,7 +142,49 @@ def _shape(value: Any) -> str:
     return type(value).__name__
 
 
-def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
+def _candidate_key(candidate: _SettingCandidate) -> tuple[str, str, str]:
+    return (
+        candidate.package.source_repo,
+        candidate.package.name,
+        candidate.manage_key,
+    )
+
+
+def _authority_resolution(
+    path: tuple[str, ...],
+    candidates: list[_SettingCandidate],
+    semantic_value,
+) -> tuple[list[_SettingCandidate], list[_SettingCandidate], bool]:
+    highest = max(candidate.authority for candidate in candidates)
+    selected = sorted(
+        [candidate for candidate in candidates if candidate.authority == highest],
+        key=_candidate_key,
+    )
+    values = {
+        (type(semantic_value(candidate)).__name__, repr(semantic_value(candidate)))
+        for candidate in selected
+    }
+    if len(values) > 1:
+        return selected, [], True
+    selected_value = next(iter(values))
+    superseded = sorted(
+        [
+            candidate
+            for candidate in candidates
+            if candidate.authority < highest
+            and (
+                type(semantic_value(candidate)).__name__,
+                repr(semantic_value(candidate)),
+            ) != selected_value
+        ],
+        key=_candidate_key,
+    )
+    return selected, superseded, False
+
+
+def _settings_authority_analysis(
+    packages: list[RequirementPackage],
+) -> tuple[list[Finding], list[dict[str, Any]]]:
     """Detect cross-package ``enforce`` disagreements (value-shape rule).
 
     The disposition is declared per *surface* (``copilot.settings``), but the
@@ -133,9 +195,10 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
     shape advisory (it belongs under ``ensure-present`` union).
     """
     findings: list[Finding] = []
-    enforced_scalar: dict[tuple[str, ...], list[tuple[str, Any]]] = {}
-    collection_leaf_owners: dict[tuple[str, ...], set[str]] = {}
-    enforced_shapes: dict[tuple[str, ...], list[tuple[str, str]]] = {}
+    enforced_scalar: dict[tuple[str, ...], list[_SettingCandidate]] = {}
+    collection_leaves: dict[tuple[str, ...], list[_SettingCandidate]] = {}
+    enforced_shapes: dict[tuple[str, ...], list[_SettingCandidate]] = {}
+    decisions: list[dict[str, Any]] = []
 
     for pkg in packages:
         for key, spec in pkg.manage.items():
@@ -159,13 +222,10 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                             "enabledPlugins",
                             str(plugin),
                         )
-                        enforced_shapes.setdefault(leaf_key, []).append(
-                            (pkg.name, _shape(enabled))
-                        )
+                        candidate = _SettingCandidate(pkg, key, spec, enabled)
+                        enforced_shapes.setdefault(leaf_key, []).append(candidate)
                         if isinstance(enabled, _SCALAR):
-                            enforced_scalar.setdefault(leaf_key, []).append(
-                                (pkg.name, enabled)
-                            )
+                            enforced_scalar.setdefault(leaf_key, []).append(candidate)
                 continue
             # copilot.settings.* suffixes group contributions but do not change
             # their physical settings.json root.
@@ -175,9 +235,10 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                 else key
             )
             for leaf_key, val in _enforced_nodes((root,), values):
-                enforced_shapes.setdefault(leaf_key, []).append((pkg.name, _shape(val)))
+                candidate = _SettingCandidate(pkg, key, spec, val)
+                enforced_shapes.setdefault(leaf_key, []).append(candidate)
                 if isinstance(val, _SCALAR):
-                    enforced_scalar.setdefault(leaf_key, []).append((pkg.name, val))
+                    enforced_scalar.setdefault(leaf_key, []).append(candidate)
                 elif (
                     val is not None
                     and (
@@ -185,12 +246,16 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                         or leaf_key in _OPAQUE_SETTING_MAPS
                     )
                 ):
-                    collection_leaf_owners.setdefault(leaf_key, set()).add(pkg.name)
+                    collection_leaves.setdefault(leaf_key, []).append(candidate)
 
-    for leaf_key, entries in sorted(enforced_shapes.items()):
-        shapes = {shape for _, shape in entries}
+    decision_paths: set[tuple[str, ...]] = set()
+    for leaf_key, candidates in sorted(enforced_shapes.items()):
+        shapes = {_shape(candidate.value) for candidate in candidates}
         if len(shapes) > 1:
-            detail = "; ".join(f"{name}={shape}" for name, shape in entries)
+            detail = "; ".join(
+                f"{candidate.label}={_shape(candidate.value)}"
+                for candidate in sorted(candidates, key=_candidate_key)
+            )
             findings.append(
                 Finding(
                     "error",
@@ -199,7 +264,16 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                     f"across packages: {detail}",
                 )
             )
-    for leaf_key, owners in sorted(collection_leaf_owners.items()):
+    for leaf_key, candidates in sorted(collection_leaves.items()):
+        selected, superseded, conflict = _authority_resolution(
+            leaf_key, candidates, lambda candidate: candidate.value
+        )
+        highest = max(candidate.authority for candidate in candidates)
+        owners = {
+            candidate.label
+            for candidate in candidates
+            if candidate.authority == highest
+        }
         findings.append(
             Finding(
                 "advisory",
@@ -209,9 +283,30 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                 f"'ensure-present' (union), not 'enforce'.",
             )
         )
-    for leaf_key, entries in sorted(enforced_scalar.items()):
-        if len({(type(value), value) for _, value in entries}) > 1:
-            detail = "; ".join(f"{name}={value!r}" for name, value in entries)
+        if superseded and not conflict:
+            decisions.append({
+                "domain": "settings",
+                "identity": _format_path(leaf_key),
+                "selected": [candidate.provenance for candidate in selected],
+                "superseded": [candidate.provenance for candidate in superseded],
+            })
+            findings.append(Finding(
+                "info",
+                "authority-supersession",
+                f"'{_format_path(leaf_key)}' uses authority "
+                f"{selected[0].authority} from "
+                f"{', '.join(candidate.label for candidate in selected)} over "
+                f"{', '.join(candidate.label for candidate in superseded)}",
+            ))
+    for leaf_key, candidates in sorted(enforced_scalar.items()):
+        selected, superseded, conflict = _authority_resolution(
+            leaf_key, candidates, lambda candidate: candidate.value
+        )
+        if conflict:
+            detail = "; ".join(
+                f"{candidate.label}={candidate.value!r}"
+                for candidate in selected
+            )
             findings.append(
                 Finding(
                     "error",
@@ -220,7 +315,52 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                     f"across packages: {detail}",
                 )
             )
-    return findings
+        elif superseded:
+            decision = {
+                "domain": "settings",
+                "identity": _format_path(leaf_key),
+                "selected": [candidate.provenance for candidate in selected],
+                "superseded": [candidate.provenance for candidate in superseded],
+            }
+            if leaf_key in decision_paths:
+                decisions = [
+                    existing
+                    for existing in decisions
+                    if not (
+                        existing["domain"] == "settings"
+                        and existing["identity"] == decision["identity"]
+                    )
+                ]
+                findings = [
+                    finding
+                    for finding in findings
+                    if not (
+                        finding.code == "authority-supersession"
+                        and f"'{decision['identity']}'" in finding.message
+                    )
+                ]
+            decisions.append(decision)
+            findings.append(Finding(
+                "info",
+                "authority-supersession",
+                f"'{_format_path(leaf_key)}' uses authority "
+                f"{selected[0].authority} from "
+                f"{', '.join(candidate.label for candidate in selected)} over "
+                f"{', '.join(candidate.label for candidate in superseded)}",
+            ))
+    return findings, sort_decisions(decisions)
+
+
+def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
+    """Detect authority-aware cross-package ``enforce`` disagreements."""
+    return _settings_authority_analysis(packages)[0]
+
+
+def settings_authority_decisions(
+    packages: list[RequirementPackage],
+) -> list[dict[str, Any]]:
+    """Return stable settings selections that supersede lower authority."""
+    return _settings_authority_analysis(packages)[1]
 
 
 def check_plugin_tombstone_group(

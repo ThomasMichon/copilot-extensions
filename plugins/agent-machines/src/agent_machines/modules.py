@@ -40,6 +40,7 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
+from .authority import AUTHORITY_MODE_OPAQUE_ADDITIVE, effective_authority
 from .manifest import RequirementPackage
 
 #: Per-platform block fallbacks: a wsl module may reuse the linux block.
@@ -60,6 +61,9 @@ class ModuleResult:
     skipped_reason: str | None = None
     stdout_tail: str = ""
     stderr_tail: str = ""
+    package: str = ""
+    authority: int = 0
+    authority_mode: str = AUTHORITY_MODE_OPAQUE_ADDITIVE
 
     @property
     def ok(self) -> bool:
@@ -107,7 +111,14 @@ def resolve_modules(
                 platform_block(module, plat) or invocation_block(module, plat)
             ):
                 out.append((pkg, module))
-    return out
+    return sorted(
+        out,
+        key=lambda item: (
+            item[0].source_repo,
+            item[0].name,
+            str(item[1].get("name")),
+        ),
+    )
 
 
 def _tail(text: str, limit: int = 4000) -> str:
@@ -215,15 +226,23 @@ def run_module(
 ) -> ModuleResult:
     """Execute one repo-local module (or skip it) and capture the outcome."""
     name = str(module.get("name"))
+    authority = effective_authority(pkg, module)
+    metadata = {
+        "package": pkg.name,
+        "authority": authority,
+        "authority_mode": AUTHORITY_MODE_OPAQUE_ADDITIVE,
+    }
     repo_root = pkg.repo_root()
     block = platform_block(module, plat)
     invocation = invocation_block(module, plat)
     if block is None and invocation is None:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run,
-                            skipped_reason=f"no command for platform '{plat}'")
+                            skipped_reason=f"no command for platform '{plat}'",
+                            **metadata)
     if repo_root is None:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run,
-                            skipped_reason="could not derive repo root from package path")
+                            skipped_reason="could not derive repo root from package path",
+                            **metadata)
 
     env = None
     if invocation is not None:
@@ -237,6 +256,7 @@ def run_module(
                 dry_run=dry_run,
                 returncode=127,
                 stderr_tail=str(exc),
+                **metadata,
             )
         command.extend(str(arg) for arg in invocation.get("arguments", []))
         mode_args = (
@@ -255,6 +275,7 @@ def run_module(
                     "payload invocation declares no dry_run_arguments "
                     "(skipped in dry-run)"
                 ),
+                **metadata,
             )
         command.extend(str(arg) for arg in (mode_args or []))
     else:
@@ -267,6 +288,7 @@ def run_module(
             return ModuleResult(
                 name, pkg.source_repo, ran=False, dry_run=True, command=command,
                 skipped_reason="module declares no dry_run_args (skipped in dry-run)",
+                **metadata,
             )
         if dry_args:
             command = command + [str(a) for a in dry_args]
@@ -280,13 +302,15 @@ def run_module(
         )
     except FileNotFoundError as exc:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run, command=command,
-                            skipped_reason=f"interpreter not found: {exc}")
+                            skipped_reason=f"interpreter not found: {exc}", **metadata)
     except subprocess.TimeoutExpired:
         return ModuleResult(name, pkg.source_repo, ran=True, dry_run=dry_run, command=command,
-                            returncode=124, stderr_tail=f"timed out after {timeout}s")
+                            returncode=124, stderr_tail=f"timed out after {timeout}s",
+                            **metadata)
     return ModuleResult(
         name, pkg.source_repo, ran=True, dry_run=dry_run, returncode=proc.returncode,
         command=command, stdout_tail=_tail(proc.stdout), stderr_tail=_tail(proc.stderr),
+        **metadata,
     )
 
 
