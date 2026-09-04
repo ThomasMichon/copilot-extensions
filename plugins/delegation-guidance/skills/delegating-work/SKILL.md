@@ -67,6 +67,26 @@ The optional inert resolver is
 python <plugin-root>/scripts/resolve-model-routing.py --repo <repository-root>
 ```
 
+For a deterministic selection, provide the classified purpose, execution
+surface, actual available models, and any required context, reasoning, or
+constraint facts:
+
+```text
+python <plugin-root>/scripts/resolve-model-routing.py \
+  --repo <repository-root> \
+  --purpose evidence \
+  --surface task \
+  --available-model <model-id> \
+  --context-tier long_context \
+  --reasoning-effort high \
+  --constraint <satisfied-constraint>
+```
+
+The JSON `decision` reports every considered model and reason, the selected
+ordinary model and demonstrated fallbacks, or `no-eligible-model`. A candidate
+requires both `--trial-model <model-id>` and `--trial-id <trial-id>`; merely
+listing it as available cannot select it.
+
 It reads:
 
 - trusted repository configuration:

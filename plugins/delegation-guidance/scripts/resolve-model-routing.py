@@ -50,6 +50,48 @@ def _parser() -> argparse.ArgumentParser:
         default=Path.cwd(),
         help="Repository path; defaults to the current directory.",
     )
+    parser.add_argument(
+        "--purpose",
+        help="Select a model for this configured purpose.",
+    )
+    parser.add_argument(
+        "--surface",
+        help="Required execution surface for model selection.",
+    )
+    parser.add_argument(
+        "--available-model",
+        action="append",
+        default=[],
+        help="Available model identifier; repeat for each available model.",
+    )
+    parser.add_argument(
+        "--context-tier",
+        choices=sorted(CONTEXT_TIERS),
+        help="Required context tier.",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=sorted(REASONING_EFFORTS),
+        help="Required reasoning effort.",
+    )
+    parser.add_argument(
+        "--constraint",
+        action="append",
+        default=[],
+        help="Satisfied configured constraint; repeat as needed.",
+    )
+    parser.add_argument(
+        "--trial-model",
+        help="Explicit candidate model requested for a trial.",
+    )
+    parser.add_argument(
+        "--trial-id",
+        help="Non-empty trial identity required with --trial-model.",
+    )
+    parser.add_argument(
+        "--as-of",
+        help="ISO date used for evidence-expiry checks; defaults to today.",
+    )
     return parser
 
 
@@ -318,6 +360,152 @@ def _layer(
         return "invalid", {}
 
 
+def _selection_date(raw: str | None) -> date:
+    if raw is None:
+        return date.today()
+    if DATE_PATTERN.fullmatch(raw) is None:
+        raise ConfigError("--as-of must be an ISO date")
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as exc:
+        raise ConfigError("--as-of must be an ISO date") from exc
+
+
+def _entry_reasons(
+    entry: dict[str, object],
+    *,
+    available: set[str],
+    surface: str,
+    context_tier: str | None,
+    reasoning_effort: str | None,
+    constraints: set[str],
+    as_of: date,
+) -> list[str]:
+    reasons: list[str] = []
+    model = str(entry["model"])
+    state = str(entry["state"])
+    if model not in available:
+        reasons.append("unavailable")
+    if surface not in entry["surfaces"]:
+        reasons.append("surface-mismatch")
+    tiers = entry.get("contextTiers", [])
+    if tiers and context_tier not in tiers:
+        reasons.append("context-tier-mismatch")
+    efforts = entry.get("reasoningEfforts", [])
+    if efforts and reasoning_effort not in efforts:
+        reasons.append("reasoning-effort-mismatch")
+    missing_constraints = sorted(set(entry.get("constraints", [])) - constraints)
+    if missing_constraints:
+        reasons.append("unsatisfied-constraints:" + ",".join(missing_constraints))
+    recheck_after = entry.get("recheckAfter")
+    if isinstance(recheck_after, str) and date.fromisoformat(recheck_after) < as_of:
+        reasons.append("evidence-expired")
+    if state in {"held", "failed"}:
+        reasons.append(f"state-{state}")
+    return reasons
+
+
+def _cost_key(entry: dict[str, object]) -> tuple[int, str]:
+    return (
+        int(entry.get("costRank", sys.maxsize)),
+        str(entry["model"]),
+    )
+
+
+def _fallbacks(
+    selected: dict[str, object],
+    demonstrated: list[dict[str, object]],
+) -> list[str]:
+    by_model = {str(entry["model"]): entry for entry in demonstrated}
+    result: list[str] = []
+    for model in selected.get("fallbackOrder", []):
+        if model in by_model and model != selected["model"] and model not in result:
+            result.append(str(model))
+    for entry in sorted(demonstrated, key=_cost_key):
+        model = str(entry["model"])
+        if model != selected["model"] and model not in result:
+            result.append(model)
+    return result
+
+
+def _decision(
+    purposes: dict[str, list[dict[str, object]]],
+    *,
+    purpose: str,
+    surface: str,
+    available_models: list[str],
+    context_tier: str | None,
+    reasoning_effort: str | None,
+    constraints: list[str],
+    trial_model: str | None,
+    trial_id: str | None,
+    as_of: date,
+) -> dict[str, object]:
+    available = set(available_models)
+    satisfied = set(constraints)
+    considered: list[dict[str, object]] = []
+    eligible_demonstrated: list[dict[str, object]] = []
+    eligible_candidates: dict[str, dict[str, object]] = {}
+    for entry in purposes.get(purpose, []):
+        reasons = _entry_reasons(
+            entry,
+            available=available,
+            surface=surface,
+            context_tier=context_tier,
+            reasoning_effort=reasoning_effort,
+            constraints=satisfied,
+            as_of=as_of,
+        )
+        state = str(entry["state"])
+        considered.append({
+            "model": entry["model"],
+            "state": state,
+            "eligible": not reasons,
+            "reasons": reasons,
+        })
+        if reasons:
+            continue
+        if state == "demonstrated":
+            eligible_demonstrated.append(entry)
+        elif state == "candidate":
+            eligible_candidates[str(entry["model"])] = entry
+
+    selected: dict[str, object] | None = None
+    mode = "none"
+    reason = "no eligible demonstrated model"
+    if trial_model is not None:
+        if not trial_id:
+            reason = "explicit candidate trial requires --trial-id"
+        elif trial_model not in eligible_candidates:
+            reason = "requested candidate is not eligible for this assignment"
+        else:
+            selected = eligible_candidates[trial_model]
+            mode = "trial"
+            reason = "explicit eligible candidate trial"
+    elif eligible_demonstrated:
+        selected = min(eligible_demonstrated, key=_cost_key)
+        mode = "ordinary"
+        reason = "lowest-cost demonstrated eligible model"
+
+    result: dict[str, object] = {
+        "status": "selected" if selected is not None else "no-eligible-model",
+        "mode": mode,
+        "purpose": purpose,
+        "surface": surface,
+        "asOf": as_of.isoformat(),
+        "reason": reason,
+        "considered": considered,
+        "fallbacks": [],
+    }
+    if selected is not None:
+        result["model"] = selected["model"]
+        result["state"] = selected["state"]
+        result["fallbacks"] = _fallbacks(selected, eligible_demonstrated)
+        if mode == "trial":
+            result["trialId"] = trial_id
+    return result
+
+
 def main() -> int:
     args = _parser().parse_args()
     repo = _repo_root(args.repo)
@@ -350,6 +538,46 @@ def main() -> int:
         "purposes": _merge(repository, operator),
         "diagnostics": diagnostics,
     }
+    selection_requested = any(
+        value is not None
+        for value in (
+            args.purpose,
+            args.surface,
+            args.context_tier,
+            args.reasoning_effort,
+            args.trial_model,
+            args.trial_id,
+            args.as_of,
+        )
+    ) or bool(args.available_model or args.constraint)
+    if selection_requested:
+        if not args.purpose or not PURPOSE_PATTERN.fullmatch(args.purpose):
+            raise SystemExit("--purpose must be lowercase kebab-case for selection")
+        if not args.surface or not PURPOSE_PATTERN.fullmatch(args.surface):
+            raise SystemExit("--surface must be lowercase kebab-case for selection")
+        if not args.available_model:
+            raise SystemExit("at least one --available-model is required for selection")
+        if args.trial_id and not args.trial_model:
+            raise SystemExit("--trial-id requires --trial-model")
+        if args.trial_model and not (args.trial_id and args.trial_id.strip()):
+            raise SystemExit("--trial-model requires a non-empty --trial-id")
+        trial_id = args.trial_id.strip() if args.trial_id else None
+        try:
+            as_of = _selection_date(args.as_of)
+        except ConfigError as exc:
+            raise SystemExit(str(exc)) from exc
+        result["decision"] = _decision(
+            result["purposes"],
+            purpose=args.purpose,
+            surface=args.surface,
+            available_models=args.available_model,
+            context_tier=args.context_tier,
+            reasoning_effort=args.reasoning_effort,
+            constraints=args.constraint,
+            trial_model=args.trial_model,
+            trial_id=trial_id,
+            as_of=as_of,
+        )
     print(json.dumps(result, indent=2, sort_keys=True))
     for diagnostic in diagnostics:
         print(f"[delegation-guidance] {diagnostic}", file=sys.stderr)

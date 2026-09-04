@@ -119,15 +119,15 @@ Public formulation from issue #2014:
 
 ### Phase 2 - Deterministic selection helper
 
-- [ ] Add a pure resolver from purpose, required capabilities, execution
+- [x] Add a pure resolver from purpose, required capabilities, execution
   surface, model availability, and layered registry to an ordered routing
   decision.
-- [ ] Prefer the least-expensive demonstrated eligible choice; fall through to
+- [x] Prefer the least-expensive demonstrated eligible choice; fall through to
   another demonstrated choice when the preferred one is unavailable.
-- [ ] Require an explicit armed-trial mark before returning a candidate.
-- [ ] Return a structured reason for ordinary choice, substitution, trial,
+- [x] Require an explicit armed-trial mark before returning a candidate.
+- [x] Return a structured reason for ordinary choice, substitution, trial,
   escalation, hold, or no-eligible-model.
-- [ ] Keep the direct-versus-delegate decision ahead of model selection so cheap
+- [x] Keep the direct-versus-delegate decision ahead of model selection so cheap
   workers do not cause unnecessary task fragmentation.
 
 ### Phase 3 - Outcome provenance and trial admission
@@ -241,3 +241,16 @@ See [design.md](design.md).
 - Focused delegation-guidance coverage passes with 21 tests and 2
   platform-specific skips. Bash syntax and aggregate output were checked
   separately under WSL; the compact context remains inside its declared budget.
+
+### 2026-09-04 - Deterministic selection code complete
+
+- Extended the inert resolver with explicit purpose, surface, availability,
+  context, reasoning, constraint, and evidence-expiry inputs.
+- Ordinary selection returns only the lowest-cost demonstrated eligible model.
+  Unavailable choices are retained with reasons and fall through to demonstrated
+  alternatives.
+- Candidate selection requires an exact requested model plus a non-empty trial
+  identity. Held, failed, expired, mismatched, or unconstrained entries remain
+  in the considered set with machine-readable exclusion reasons.
+- The direct/delegate decision remains outside and ahead of model selection;
+  this helper cannot create a delegation merely because a cheap model exists.

@@ -316,6 +316,8 @@ def test_skill_trigger_boundary_and_inventory() -> None:
     assert "Dependencies & assumptions" in readme
     assert "Troubleshooting, contributing & issues" in readme
     assert "Model-routing configuration" in readme
+    assert "--trial-model" in readme
+    assert "--trial-id" in readme
     assert "schemas/model-routing.schema.json" in readme
     assert "examples/model-routing.json" in readme
     assert MODEL_ROUTING_RESOLVER.is_file()

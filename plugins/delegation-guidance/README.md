@@ -70,6 +70,11 @@ listed in Copilot's `trustedFolders`. If an operator config exists but is
 invalid, lower-precedence repository choices are suppressed so an intended
 operator hold cannot disappear because of a typo.
 
+Pass `--purpose`, `--surface`, repeated `--available-model` values, and optional
+context/reasoning/constraint facts to receive a deterministic `decision`. An
+ordinary selection can return only a demonstrated eligible model. Selecting a
+candidate requires both its exact `--trial-model` and a non-empty `--trial-id`.
+
 Start from [`examples/model-routing.json`](examples/model-routing.json) and
 validate against
 [`schemas/model-routing.schema.json`](schemas/model-routing.schema.json). The
@@ -86,6 +91,7 @@ example model IDs are intentionally synthetic.
 - limits on recursive delegation, duplicate investigation, and repeated review.
 - a versioned purpose-to-model configuration contract and inert resolver;
 - demonstrated/candidate/held/failed model eligibility guidance.
+- deterministic ordinary, fallback, explicit-trial, and no-route decisions.
 
 **Does NOT provide**
 
