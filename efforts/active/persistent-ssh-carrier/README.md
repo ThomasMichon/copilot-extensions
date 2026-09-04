@@ -331,6 +331,12 @@ transport foundation #1763 requires.
   connection-establishment cancellation, and persistent-fault outage
   coalescing regressions. The final high-confidence re-review reported no
   remaining significant issues.
+- Provider review found that aggregate streams discarded carrier
+  `tool_progress` envelopes, which could falsely trip the local read timeout
+  during active remote work. Aggregate streams now forward tool progress as
+  non-waking SSE comments, matching the single-subscription keepalive contract.
+  The same review cycle exposed and corrected incomplete generation-13 contract
+  registry evidence while preserving generation 12 as the previous fixture.
 
 ### 2026-09-03 — Remote Bridge operations
 

@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "4b8a3777221ad0e71f2931dd577cf3c7592ebb90",
-    "plugin_version": "0.4.0-dev430",
-    "protocol_generation": 12,
+    "commit": "f41404f6e8fb1918f60bb047893bb435e0f8bad8",
+    "plugin_version": "0.4.0-dev432",
+    "protocol_generation": 13,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-    "source_git_blob": "e35defb3a9efbca79e1010386e5aef6ae043c399",
-    "source_sha256": "e561212d4cbcc607808c050014e0ee996b699b133b0b9c70bb6c9f18c853774f"
+    "source_git_blob": "d1157e1872b83e2c545a4e3924c49cd227aae1bf",
+    "source_sha256": "b553d35f6a1a3671b4606294dafb82925cebc5bef5776f4e3b529f11d84e6fcf"
   },
   "declared_range": {
     "minimum": 1,

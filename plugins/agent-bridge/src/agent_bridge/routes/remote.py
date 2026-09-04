@@ -407,6 +407,12 @@ async def multiplex_remote_session_events(
                     kind = payload.get("kind")
                     if kind == "heartbeat":
                         yield ": heartbeat\n\n"
+                    elif kind == "tool_progress":
+                        data = json.dumps(
+                            payload.get("data") or {},
+                            separators=(",", ":"),
+                        )
+                        yield f": tool_progress {data}\n\n"
                     elif kind == "event":
                         continuity_id = payload.get("continuity_id")
                         if isinstance(continuity_id, str):

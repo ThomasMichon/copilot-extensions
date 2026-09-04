@@ -934,6 +934,28 @@ def test_remote_api_multiplexes_subscriptions_over_one_stream(
         remote_app,
 ) -> None:
         first = _ApiSubscription()
+        first._items = iter(
+            [
+                Envelope(
+                    EnvelopeType.EVENT,
+                    payload={
+                        "kind": "tool_progress",
+                        "data": {"tool": "example"},
+                    },
+                ),
+                Envelope(
+                    EnvelopeType.EVENT,
+                    payload={
+                        "kind": "event",
+                        "id": 5,
+                        "event": "assistant.turn_end",
+                        "data": {"stop_reason": "end_turn"},
+                        "timestamp": 123.0,
+                        "continuity_id": "epoch-a",
+                    },
+                ),
+            ]
+        )
         second = _ApiSubscription()
         second._items = iter(
             [
@@ -978,6 +1000,7 @@ def test_remote_api_multiplexes_subscriptions_over_one_stream(
                 text = "".join(response.iter_text())
 
         assert response.status_code == 200
+        assert ': tool_progress {"tool":"example"}' in text
         assert text.count("event: bridge_event") == 2
         assert '"session_id":"session-a"' in text
         assert '"session_id":"session-b"' in text

@@ -139,7 +139,9 @@ host/session/caller identities and returns one SSE connection. Each logical
 subscription retains its own hosting cursor and carrier lease, while events and
 control signals carry their subscription identity in the envelope. Replacing
 the set means replacing this one local stream; it never creates one local HTTP
-connection per observed session.
+connection per observed session. Carrier heartbeats and tool-progress envelopes
+become SSE comments so ongoing remote activity keeps the aggregate connection
+and its local consumer healthy without creating reconciliation wakes.
 
 ## HTTP API
 
