@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ssh-manager"
-version = "0.1.0-dev8"
+version = "0.1.0-dev9"
 description = "Shared SSH ControlMaster connection multiplexer for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

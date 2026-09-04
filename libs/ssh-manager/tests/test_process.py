@@ -7,9 +7,9 @@ import asyncio
 from ssh_manager import process
 
 
-def test_ssh_subprocess_kwargs_windows_uses_no_window(monkeypatch):
+def test_ssh_subprocess_kwargs_windows_uses_detached_process(monkeypatch):
     monkeypatch.setattr(process.sys, "platform", "win32")
-    monkeypatch.setattr(process.subprocess, "CREATE_NO_WINDOW", 8, raising=False)
+    monkeypatch.setattr(process.subprocess, "DETACHED_PROCESS", 8, raising=False)
 
     kwargs = process.ssh_subprocess_kwargs(limit=123)
 
