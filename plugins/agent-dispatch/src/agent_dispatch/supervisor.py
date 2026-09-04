@@ -1485,7 +1485,12 @@ class Supervisor:
     def _conclusion_state(outcome: dict) -> str:
         action = str(outcome.get("action") or "")
         reason = str(outcome.get("reason") or "")
-        if action in {"primed", "already-primed"}:
+        if action in {
+            "primed",
+            "already-primed",
+            "removed",
+            "already-removed",
+        }:
             return _CONCLUSION_COMPLETE
         if action == "failed" or reason in _TRANSIENT_CONCLUSION_REASONS:
             return _CONCLUSION_PENDING
