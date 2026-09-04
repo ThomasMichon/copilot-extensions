@@ -1,7 +1,7 @@
 {
   "captured_from": {
     "commit": "21f651837a0c7000fcb0a789cf56a3339d08dcc2",
-    "plugin_version": "0.4.0-dev433",
+    "plugin_version": "0.4.0-dev434",
     "protocol_generation": 14,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
     "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
@@ -16,7 +16,7 @@
     "json": {
       "status": "ok",
       "service": "agent-bridge",
-      "version": "0.4.0-dev433",
+      "version": "0.4.0-dev434",
       "ready": false,
       "topology_ready": false,
       "credential_relay_ready": false,

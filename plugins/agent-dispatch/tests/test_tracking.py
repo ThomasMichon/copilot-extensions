@@ -288,6 +288,24 @@ def test_resolve_live_session_uses_carrier_without_ssh(monkeypatch):
     }
 
 
+@pytest.mark.parametrize("payload", [{}, []])
+def test_resolve_live_session_rejects_invalid_carrier_payload(monkeypatch, payload):
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        lambda *_args, **_kwargs: payload,
+    )
+    monkeypatch.setattr(
+        tracking.shutil,
+        "which",
+        lambda _name: pytest.fail("invalid carrier response must not use ssh"),
+    )
+
+    assert (
+        tracking.resolve_live_session("wt-x", machine="emancipation-cube") is None
+    )
+
+
 def test_enrich_task_resolves_remote_owner_over_mesh(monkeypatch):
     # Owner is on emancipation-cube; the local machine is anomalous-potato -> remote path.
     monkeypatch.setattr(tracking.remote_dispatch, "local_machine", lambda: "anomalous-potato")

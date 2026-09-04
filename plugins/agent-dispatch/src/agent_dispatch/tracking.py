@@ -161,11 +161,14 @@ def resolve_live_session(
     if machine is not None:
         effective_timeout = timeout if timeout is not None else 6.0
         try:
-            return bridge_remote.LocalBridgeRemoteClient().resolve_live_session(
+            data = bridge_remote.LocalBridgeRemoteClient().resolve_live_session(
                 machine,
                 worktree,
                 timeout=effective_timeout,
             )
+            if not isinstance(data, dict) or not data:
+                return None
+            return data
         except bridge_remote.RemoteBridgeUnavailable:
             pass
         except bridge_remote.RemoteBridgeOperationError:

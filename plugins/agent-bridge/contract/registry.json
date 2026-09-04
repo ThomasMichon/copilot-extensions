@@ -28,7 +28,7 @@
           "0.4.0-dev429",
           "0.4.0-dev430",
           "0.4.0-dev432",
-          "0.4.0-dev433"
+          "0.4.0-dev434"
         ]
       },
       "capability_versions": {
@@ -88,7 +88,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "ef3281659bed7bd42b6b73fa0cae32375ad5b9a04d35d7a91af119e203a7b54e",
+          "sha256": "47bd69eee955d10531cd0f489a8e8020640ad4f4b1c52842a56bc84a4ca91a0f",
           "role": "current health response",
           "generation": 14
         },
@@ -106,19 +106,19 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
-          "sha256": "e94a36028e43e272f9248dccdfcdb30de41b325c2f0cbaf3705ea9d39ff99b4f",
+          "sha256": "10b69b1b7478c55b69aaa1c1ece6684de3e9edac948ec3538b7cbb9cea2fdcdb",
           "role": "current session-create request with unknown-field tolerance",
           "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "979d75b0badcbe9544180132ca521c3ddd7122edffecf20382d9bde05bef959c",
+          "sha256": "ea270bc4157b9bd9ac5c1465336aced2790b5430b1fdcd41795ab31b40731f0c",
           "role": "current session-create response",
           "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "9544624677e107f881dee06bd1ec3824b0c358fe706698c4fefca977bb155a5e",
+          "sha256": "9988784b4aa74f8a8e1b63021548c8e3cd9da3749128c890e93a072cc496e039",
           "role": "current representative FastAPI error",
           "generation": 14
         },
@@ -142,13 +142,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "ef9993f73486cfdc7073f6f954cc285fcaf70c34e4d6656f17a03ae0bcf974a1",
+          "sha256": "0f9e46a6207ec0930014978fdb621e3f27e561d1cd1b188a9f346be83c7137ab",
           "role": "current HTTP range and capability constants",
           "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
-          "sha256": "f99c2575e601fd7ed8d8b4fd3dd2532bc27a10b0cc604b1a6cac4dab81285994",
+          "sha256": "c7018c7de4616eaff04f4a4f1ea97f93e365c425ebaa7b4b31b74f4ee4dabb80",
           "role": "current carrier-backed remote command request and response",
           "generation": 14
         }
@@ -156,7 +156,7 @@
       "provenance": [
         {
           "commit": "21f651837a0c7000fcb0a789cf56a3339d08dcc2",
-          "plugin_version": "0.4.0-dev433",
+          "plugin_version": "0.4.0-dev434",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
           "source_git_blob": "64a1a80dee8e0568a57f4d7eea528fcdca3eb17f",
@@ -164,7 +164,7 @@
         },
         {
           "commit": "0e1911b882a84bab8caf9b0bdcb674df8b669d4c",
-          "plugin_version": "0.4.0-dev433",
+          "plugin_version": "0.4.0-dev434",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
           "source_git_blob": "8d3442fb7c93d5de0a8234ac2d6c66fef53174d8",
@@ -172,7 +172,7 @@
         },
         {
           "commit": "21f651837a0c7000fcb0a789cf56a3339d08dcc2",
-          "plugin_version": "0.4.0-dev433",
+          "plugin_version": "0.4.0-dev434",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "3db42b622f914802f529fc1df83358020d382969",
@@ -180,7 +180,7 @@
         },
         {
           "commit": "21f651837a0c7000fcb0a789cf56a3339d08dcc2",
-          "plugin_version": "0.4.0-dev433",
+          "plugin_version": "0.4.0-dev434",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
           "source_git_blob": "391f9ceaf3b7638b7cc1e508c1a2e9ada5e944bc",
@@ -188,7 +188,7 @@
         },
         {
           "commit": "21f651837a0c7000fcb0a789cf56a3339d08dcc2",
-          "plugin_version": "0.4.0-dev433",
+          "plugin_version": "0.4.0-dev434",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
           "source_git_blob": "8f0a0f10ce17e7bdd5e4a567cd856ed3f2891278",
