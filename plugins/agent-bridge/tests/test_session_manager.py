@@ -3349,6 +3349,41 @@ class TestDurablePromptQueue:
         assert session_manager._db.count_pending_prompts(sid) == 0
 
     @pytest.mark.asyncio
+    async def test_queue_drain_excludes_conditional_teardown(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        session_manager._db.enqueue_prompt(sid, "next", session.updated_at)
+        submitting = asyncio.Event()
+        release_submit = asyncio.Event()
+
+        async def delayed_submit(session_id: str, prompt: str) -> int:
+            submitting.set()
+            await release_submit.wait()
+            session.status = SessionStatus.RUNNING
+            return 0
+
+        session_manager._submit_prompt_locked = delayed_submit
+        drain_task = asyncio.create_task(
+            session_manager._drain_pending_prompts(session)
+        )
+        await submitting.wait()
+
+        end_task = asyncio.create_task(
+            session_manager.end_session_if_idle(sid)
+        )
+        await asyncio.sleep(0)
+        assert not end_task.done()
+
+        release_submit.set()
+        await drain_task
+        with pytest.raises(ValueError, match="is not idle"):
+            await end_task
+        assert session_manager.get_session(sid) is session
+        assert session.status == SessionStatus.RUNNING
+
+    @pytest.mark.asyncio
     async def test_interrupt_clears_queue(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp
     ) -> None:

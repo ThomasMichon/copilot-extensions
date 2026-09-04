@@ -5304,6 +5304,13 @@ class SessionManager:
         drains instead, so a queued message is never lost to a dead process, and
         pop-then-submit stays exactly-once (no loss, no dup).
         """
+        async with session._turn_start_lock:
+            if self._sessions.get(session.session_id) is not session:
+                return
+            await self._drain_pending_prompts_locked(session)
+
+    async def _drain_pending_prompts_locked(self, session: Session) -> None:
+        """Pop and submit one queued prompt while teardown is excluded."""
         if session.status != SessionStatus.IDLE:
             return
         if not (session.client and session.client.is_running):
@@ -5318,7 +5325,7 @@ class SessionManager:
                 "caller_id": row.get("caller_id"),
             })
         try:
-            await self.submit_prompt(session.session_id, prompt)
+            await self._submit_prompt_locked(session.session_id, prompt)
         except Exception as exc:
             # Defensive: an unexpected submit failure must not drop the message.
             # Re-enqueue (at the tail -- a rare reorder is better than a loss);
