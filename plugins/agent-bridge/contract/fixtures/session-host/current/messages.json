@@ -1,0 +1,63 @@
+{
+  "captured_from": {
+    "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
+    "plugin_version": "0.4.0-dev425",
+    "protocol_generation": 1,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/protocol.py",
+    "source_git_blob": "09f8fd20efb3a35915989883a3835c7dffcb9a1c",
+    "source_sha256": "65ff14618e7a530a3d5177f3591e71edbc31760c3ebefd9e98e46f76abc45567"
+  },
+  "framing": "u32be body length, one-byte type, opaque payload",
+  "messages": {
+    "attach": {
+      "type_base64": "QQ==",
+      "payload_base64": "AAAAAAAAAAdub25jZQ==",
+      "frame_base64": "AAAADkEAAAAAAAAAB25vbmNl"
+    },
+    "ack": {
+      "type_base64": "Sw==",
+      "payload_base64": "AAAAAAAAAAc=",
+      "frame_base64": "AAAACUsAAAAAAAAABw=="
+    },
+    "write": {
+      "type_base64": "Vw==",
+      "payload_base64": "eyJqc29ucnBjIjoiMi4wIn0K",
+      "frame_base64": "AAAAE1d7Impzb25ycGMiOiIyLjAifQo="
+    },
+    "terminate": {
+      "type_base64": "VA==",
+      "payload_base64": "",
+      "frame_base64": "AAAAAVQ="
+    },
+    "status": {
+      "type_base64": "Uw==",
+      "payload_base64": "AQ==",
+      "frame_base64": "AAAAAlMB"
+    },
+    "detach": {
+      "type_base64": "RA==",
+      "payload_base64": "AA==",
+      "frame_base64": "AAAAAkQA"
+    },
+    "hello": {
+      "type_base64": "SA==",
+      "payload_base64": "AAAAAAAAAAsAAAAAAAAQkg==",
+      "frame_base64": "AAAAEUgAAAAAAAAACwAAAAAAABCS"
+    },
+    "frame": {
+      "type_base64": "Rg==",
+      "payload_base64": "AAAAAAAAAAx7InR5cGUiOiJyZXN1bHQifQo=",
+      "frame_base64": "AAAAG0YAAAAAAAAADHsidHlwZSI6InJlc3VsdCJ9Cg=="
+    },
+    "liveness": {
+      "type_base64": "TA==",
+      "payload_base64": "AAAAAAc=",
+      "frame_base64": "AAAABkwAAAAABw=="
+    },
+    "unknown": {
+      "type_base64": "Wg==",
+      "payload_base64": "ZnV0dXJl",
+      "frame_base64": "AAAAB1pmdXR1cmU="
+    }
+  }
+}

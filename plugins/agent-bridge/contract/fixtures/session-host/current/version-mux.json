@@ -1,0 +1,13 @@
+{
+  "captured_from": {
+    "commit": "340288212311ad6ce21e2539b9a5b67656bf8c7e",
+    "plugin_version": "0.4.0-dev425",
+    "protocol_generation": 1,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/version_mux.py",
+    "source_git_blob": "cbed209a2c58658c9434a21ec1a3bafdc21fb360",
+    "source_sha256": "2549cfb4c456aeb5b09a79360f67fa1b85f2de9fee74452ecd44a45b046792c4"
+  },
+  "supported_protocol_versions": [
+    1
+  ]
+}

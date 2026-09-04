@@ -73,6 +73,13 @@ jobs:
         run: python tools/check-marketplace-isolation.py
       - name: Marketplace isolation guard tests
         run: python -m pytest -q tools/test_check_marketplace_isolation.py
+      - name: Agent Bridge contract registry
+        run: python tools/check-agent-bridge-contracts.py
+      - name: Agent Bridge contract source coverage (PR diff only)
+        if: github.event_name == 'pull_request'
+        run: python tools/check-agent-bridge-contracts.py --base ${{ github.event.pull_request.base.sha }}
+      - name: Agent Bridge contract registry guard tests
+        run: python -m pytest -q tools/test_check_agent_bridge_contracts.py
       - name: Git hook interpreter tests
         run: python -m pytest -q tools/test_hook_interpreter.py
       - name: Payload invocation generated files
@@ -271,6 +278,9 @@ jobs:
         plugin: ${{ fromJson(needs.discover.outputs.smoke) }}
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch Agent Bridge contract provenance
+        if: matrix.plugin == 'agent-bridge'
+        run: git fetch --no-tags --prune --unshallow
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

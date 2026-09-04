@@ -5,7 +5,7 @@
 - **Branch(es):** plan PR followed by serial implementation PRs; registry schema
   and checker first, fixture families second
 - **Created:** 2026-08-31
-- **Status:** Draft
+- **Status:** Done
 - **Vision:** advances the first implementation delta under
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   §Features/`version-skew-safe-contract-evolution` and
@@ -109,134 +109,137 @@ contract data beside the agent-bridge plugin that owns or consumes it.
 
 ### Phase 0 — Confirm scope and ownership
 
-- [ ] Inventory every contract artifact covered by #1460 Phase 0 and classify it
+- [x] Inventory every contract artifact covered by #1460 Phase 0 and classify it
       as bridge-owned, externally owned but bridge-consumed, or deferred.
-- [ ] Record the exact source commit and declared plugin/runtime version for the
-      current HTTP 5/1 and Session Host 1 baselines using the commit plus
+- [x] Record the exact source commit and declared plugin/runtime version for the
+      current HTTP 12/1 and Session Host 1 baselines using the commit plus
       declared plugin/project versions and capture method.
-- [ ] Separate `previous_generation` from `previous_runtime`. Permit a null
+- [x] Separate `previous_generation` from `previous_runtime`. Permit a null
       previous generation only with a required `previous_absent_reason`; still
       identify an earlier runtime speaking the same generation where available.
-- [ ] Identify prior baselines from source history; do not synthesize a
+- [x] Identify prior baselines from source history; do not synthesize a
       "previous" shape from the current model.
-- [ ] Treat event/cursor shapes as deferrable non-normative representation
+- [x] Treat event/cursor shapes as deferrable non-normative representation
       references until #1138 supplies immutable identity semantics.
-- [ ] Keep #1308 authoritative for the AHP 0.8 corpus; this effort registers a
+- [x] Keep #1308 authoritative for the AHP 0.8 corpus; this effort registers a
       `kind: external-reference` owner/source/hash reference rather than copying
       it or defining AHP policy fields. If #1308 lands first, adopt its
       provenance field names rather than forking the format.
 
 ### Phase 1 — Land the registry schema and checker
 
-- [ ] Add `plugins/agent-bridge/contract/registry.schema.json` and
+- [x] Add `plugins/agent-bridge/contract/registry.schema.json` and
       `plugins/agent-bridge/contract/registry.json`, following the existing
       singular `contract/` convention.
-- [ ] Define required fields for id, owner, kind, protocol generation/range,
+- [x] Define required fields for id, owner, kind, protocol generation/range,
       capability versions, durable records, support window, bridge-contract
       rollback window, fixture references, source/version provenance,
       mixed-version scenarios, and removal gate.
-- [ ] Split `declared_range` (mirrored verbatim from production constants) from
+- [x] Split `declared_range` (mirrored verbatim from production constants) from
       `evidence_window` (the prior runtime/generation actually covered by
       fixtures and tests). A checker may expose missing evidence but never narrow
       the source-declared support policy.
-- [ ] For generation families, support nullable `previous_generation` plus a
+- [x] For generation families, support nullable `previous_generation` plus a
       required `previous_absent_reason`, independently of `previous_runtime`.
-- [ ] Add per-entry `source_paths` and source-content fingerprints so
+- [x] Add per-entry `source_paths` and source-content fingerprints so
       diff-scoped coverage checks have a stable review marker that survives
       squash merging.
-- [ ] Add `tools/check-agent-bridge-contracts.py` using only repository-standard
+- [x] Add `tools/check-agent-bridge-contracts.py` using only repository-standard
       Python dependencies.
-- [ ] Add focused checker tests covering malformed records, duplicate ids or
+- [x] Add focused checker tests covering malformed records, duplicate ids or
       owners, missing fixtures, path escape, invalid hashes, missing provenance,
       unsupported schema versions, and deterministic diagnostics.
-- [ ] Make the checker treat externally owned contracts as references with an
+- [x] Make the checker treat externally owned contracts as references with an
       explicit owner and source, never as bridge-defined semantics.
 
 ### Phase 2 — Freeze HTTP and Session Host baselines
 
-- [ ] Capture legacy and current HTTP health, session-create request/response,
+- [x] Capture legacy and current HTTP health, session-create request/response,
       representative error, and unknown-field tolerance fixtures.
-- [ ] Record HTTP 5/1 as the exact `declared_range` and select an exact prior
-      runtime for the initial `evidence_window`; do not rewrite 1–5 support as a
+- [x] Record HTTP 12/1 as the exact `declared_range` and select exact previous
+      generation and prior-runtime evidence for the initial `evidence_window`;
+      do not rewrite 1–10 support as a
       narrower tested range.
-- [ ] Capture Session Host generation 1 framing and each control/data message
+- [x] Capture Session Host generation 1 framing and each control/data message
       shape as base64 inside JSON without interpreting opaque ACP payload bytes.
-- [ ] Convert or supplement inline compatibility tests so they consume immutable
+- [x] Convert or supplement inline compatibility tests so they consume immutable
       fixture files rather than reconstructing both producer and expected shape
       in one test. Broad conversions may be transferred to a named follow-on
       issue when the current-fixture assertion is already independent.
-- [ ] Name initial `new-client_old-daemon`, `old-client_new-daemon`,
+- [x] Name initial `new-client_old-daemon`, `old-client_new-daemon`,
       `new-frontend_H1-host`, and `unversioned-peer` scenarios without changing
       their runtime execution yet.
 
 ### Phase 3 — Freeze durable and integration boundaries
 
-- [ ] Treat each family in this phase as independently deferrable to a named
-      follow-on issue; it does not block the minimum viable exit below.
-- [ ] Capture HostIndex version 1, `SpawnTarget`, route/remote-authority, relay
+- [x] Deferred to `#1915`: Treat each family in this phase as independently
+      deferrable to a named follow-on issue; it does not block the minimum
+      viable exit below.
+- [x] Deferred to `#1915`: Capture HostIndex version 1, `SpawnTarget`, route/remote-authority, relay
       profile/rendezvous, and bridge-side claim adapter fixtures.
-- [ ] Capture provider manifest schemas 0/1 as externally owned fixture
+- [x] Deferred to `#1915`: Capture provider manifest schemas 0/1 as externally owned fixture
       references, preserving the provider plugin as semantic owner.
-- [ ] Record which fixtures contain process identity, ownership, authorization,
+- [x] Deferred to `#1915`: Record which fixtures contain process identity, ownership, authorization,
       fencing, or recovery fields that Phase 1 of #1460 must never permit an old
       writer to erase.
-- [ ] Separate representation fixtures from semantic assertions owned by
+- [x] Deferred to `#1915`: Separate representation fixtures from semantic assertions owned by
       agent-worktrees, venue providers, credential relay, or #1138.
 
 ### Phase 4 — Gate repository changes
 
-- [ ] Add the checker to `.github/workflows/ci.yml` near the existing repository
+- [x] Add the checker to `.github/workflows/ci.yml` near the existing repository
       guards.
-- [ ] Add the same diff-scoped checker to `tools/hooks/pre-push`, following the
+- [x] Add the same diff-scoped checker to `tools/hooks/pre-push`, following the
       existing local-first guard convention.
-- [ ] Mark focused registry tests with the existing `guard` pytest marker.
-- [ ] Make it fail when a registered fixture is missing or changed without its
+- [x] Mark focused registry tests with the existing `guard` pytest marker.
+- [x] Make it fail when a registered fixture is missing or changed without its
       hash/provenance entry changing.
-- [ ] Accept `--base` and fail only when a changed `source_paths` entry lacks a
+- [x] Accept `--base` and fail only when a changed `source_paths` entry lacks a
       corresponding registry/fingerprint or explicit non-semantic fixture
       decision, following the repository's existing PR-diff guard pattern.
-- [ ] Document the contributor workflow: update source, registry, fixtures,
+- [x] Document the contributor workflow: update source, registry, fixtures,
       provenance, and owner approval together.
-- [ ] Bump agent-bridge's plugin/runtime/marketplace version in every
+- [x] Bump agent-bridge's plugin/runtime/marketplace version in every
       implementation PR that changes files under `plugins/agent-bridge/`.
 
 ### Phase 5 — Hand off to tolerant-reader work
 
-- [ ] Publish the frozen contract inventory and named scenario list in #1460.
-- [ ] Select the first bridge-owned durable record for the tolerant-reader and
-      old-writer-fencing stretch using the registry's risk classification.
-- [ ] Transfer every deferred external semantic question to its named issue and
+- [x] Publish the frozen contract inventory and named scenario list in #1460.
+- [x] Deferred to `#1915`: Select the first bridge-owned durable record for the
+      tolerant-reader and old-writer-fencing stretch using the registry's risk
+      classification.
+- [x] Transfer every deferred external semantic question to its named issue and
       leave only an explicit non-normative fixture reference here.
-- [ ] Mark this effort Done when the schema, checker, checker tests, CI and
-      pre-push wiring, current HTTP 5/1 fixtures, current Session Host 1 fixtures,
+- [x] Mark this effort Done when the schema, checker, checker tests, CI and
+      pre-push wiring, current HTTP 12/1 fixtures, current Session Host 1 fixtures,
       and at least one exact prior-runtime fixture are merged. Every remaining
       family must be completed or transferred to a named follow-on issue.
 
 ## Validation Plan
 
-- [ ] The registry and every fixture validate from a clean checkout without a
+- [x] The registry and every fixture validate from a clean checkout without a
       running bridge, network access, or an installed plugin runtime.
-- [ ] Registry output and errors are deterministic on Windows and POSIX.
-- [ ] Every fixture path remains inside the declared `contract/` directory and its
+- [x] Registry output and errors are deterministic on Windows and POSIX.
+- [x] Every fixture path remains inside the declared `contract/` directory and its
       content hash matches the registry.
-- [ ] Every normative fixture has an owner, source commit, release/runtime
+- [x] Every normative fixture has an owner, source commit, release/runtime
       provenance, capture method, and support/removal policy.
-- [ ] The registry's `declared_range` exactly matches production constants and
+- [x] The registry's `declared_range` exactly matches production constants and
       never narrows source-declared support to the smaller `evidence_window`.
-- [ ] A contract with no previous generation records a non-empty
+- [x] A contract with no previous generation records a non-empty
       `previous_absent_reason`; prior-runtime evidence remains independently
       representable.
-- [ ] The current source constants and serialized shapes match their registered
+- [x] The current source constants and serialized shapes match their registered
       fixtures without modifying production behavior.
-- [ ] A deliberately malformed entry, missing fixture, duplicate owner, stale
+- [x] A deliberately malformed entry, missing fixture, duplicate owner, stale
       hash, or uncovered contract-source change fails the repository checker.
-- [ ] Existing agent-bridge suites remain behaviorally unchanged; fixture-backed
+- [x] Existing agent-bridge suites remain behaviorally unchanged; fixture-backed
       tests replace or supplement inline expectations rather than weakening them.
-- [ ] AHP fixtures remain owned by #1308, event identity remains owned by #1138,
+- [x] AHP fixtures remain owned by #1308, event identity remains owned by #1138,
       and provider/worktree semantics remain owned by their plugins.
-- [ ] Externally owned non-normative references can land without owner response
+- [x] Externally owned non-normative references can land without owner response
       and cannot be consumed as normative semantics by #1460 Phase 1.
-- [ ] The next tolerant-reader effort can identify its exact old/new fixtures
+- [x] Deferred to `#1915`: The next tolerant-reader effort can identify its exact old/new fixtures
       and previous-runtime writer from the registry alone.
 
 ## Proposal
@@ -274,7 +277,7 @@ may read it unless a later reviewed change relocates runtime-consumed data under
 `src/` and defines its packaging and compatibility contract.
 
 The first implementation PR should land the schema, checker, checker tests, and
-the HTTP 5/1 plus Session Host 1 current fixtures. Prior-runtime and remaining
+the HTTP 12/1 plus Session Host 1 current fixtures. Prior-runtime and remaining
 durable/integration families may follow as separate PRs if provenance research
 would make the initial review too broad.
 
@@ -290,3 +293,50 @@ would make the initial review too broad.
   and event/cursor representation.
 - Kept AHP corpus, delegation semantics, event identity, worktree claims, and
   provider semantics with their existing owners.
+
+### 2026-09-03 — Implementation resumed
+
+- Activated the reviewed effort after its plan landed through #1471.
+- Claimed #1468 and selected the minimum viable exit in the reviewed order:
+  registry/schema/checker, current HTTP and Session Host fixtures, one exact
+  prior-runtime fixture, then CI and pre-push gates.
+- Kept runtime behavior, tolerant readers, writer fencing, negotiation, and
+  externally owned semantics outside this baseline stretch.
+
+### 2026-09-03 — Minimum baseline implemented
+
+- Added a dependency-free schema and checker with canonical contract IDs,
+  exact owner/source/runtime provenance, path confinement, source and fixture
+  fingerprints, production-constant checks, diff coverage, and deterministic
+  diagnostics.
+- Froze HTTP generations 9 and 10, agent-bridge runtimes dev423-dev425,
+  Session Host generation 1, and the dev150 Session Host implementation.
+  Current fixture assertions execute production encoders; historical Session
+  Host assertions execute the exact recorded Git revision.
+- Added repository CI and pre-push gates and initially bumped agent-bridge to
+  `0.4.0-dev426`.
+- Combined unchanged-run validation covered every agent-bridge test: aggregate
+  groups passed, and the sole budget-expired Windows installer test passed on
+  its targeted retry without an intervening source change. The new checker
+  suite passed directly and the new fixture guards passed through the canonical
+  plugin runner.
+- Opened #1915 for HostIndex, SpawnTarget, route authority, relay, claim-adapter,
+  and provider-manifest evidence; that inventory owns selection of the first
+  tolerant-reader and old-writer-fencing target.
+
+### 2026-09-04 — Current-main reconciliation and completion
+
+- Rebased the baseline through the HTTP generation 11 and 12 changes on current
+  `main`, preserved exact generation 11 evidence, and advanced agent-bridge to
+  `0.4.0-dev431` after intervening runtime changes consumed dev427-dev430.
+- Made every checker Git subprocess ignore ambient `GIT_*` repository and
+  configuration state, disable lazy fetching and replacement objects, avoid
+  optional locks, and refuse terminal prompting.
+- Added a regression test that runs the checker under contaminated Git
+  environment variables and still resolves only the intended repository.
+- Re-ran the dependency-free checker, focused checker regressions, agent-bridge
+  fixture guards, version consistency, lint, and the repository install
+  contract on Windows; the rebased Linux CI lane provides the POSIX half of the
+  deterministic-output gate.
+- Published the frozen inventory and named scenario list to #1460. All remaining
+  durable and integration fixture families remain transferred to #1915.
