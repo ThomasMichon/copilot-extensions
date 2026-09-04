@@ -48,6 +48,7 @@ def _seed_lease(
     effort="previous-effort",
     pid=123,
     host=None,
+    environment=None,
     heartbeat_at=None,
 ):
     now = time.time()
@@ -60,6 +61,7 @@ def _seed_lease(
                 host=host or lease_mod._this_host(),
                 acquired_at=now - 60,
                 heartbeat_at=heartbeat_at or now,
+                environment=environment or lease_mod._this_environment(),
             )
         }
     )
@@ -240,6 +242,7 @@ def test_borrow_reclaims_definitively_dead_local_holder(fleet, monkeypatch):
     assert lease.reclaim_reason == "dead-local-holder-pid"
     assert lease.reclaimed_from_effort == "previous-effort"
     assert lease.reclaimed_from_pid == 123
+    assert lease.reclaimed_from_environment == lease_mod._this_environment()
     assert lease.reclaimed_at is not None
     stored = json.loads(lease_mod.LEASE_FILE.read_text(encoding="utf-8"))
     assert stored["myrepo-1"]["reclaim_reason"] == "dead-local-holder-pid"
@@ -269,6 +272,68 @@ def test_borrow_never_probes_or_reclaims_remote_holder(fleet, monkeypatch):
         lease_mod.borrow(fleet, "next-effort", container="myrepo-1")
 
     assert lease_mod.get_lease("myrepo-1").effort == "previous-effort"
+
+
+def test_borrow_never_probes_or_reclaims_cross_environment_holder(
+    fleet,
+    monkeypatch,
+):
+    other_environment = (
+        "wsl" if lease_mod._this_environment() != "wsl" else "windows"
+    )
+    _seed_lease(pid=123, environment=other_environment)
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda _pid: (_ for _ in ()).throw(
+            AssertionError("must not inspect another environment's PID")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="previous-effort"):
+        lease_mod.borrow(fleet, "next-effort", container="myrepo-1")
+
+    assert lease_mod.get_lease("myrepo-1").environment == other_environment
+
+
+def test_borrow_keeps_legacy_lease_without_environment_until_ttl(
+    fleet,
+    monkeypatch,
+):
+    now = time.time()
+    lease_mod.LEASE_FILE.write_text(
+        json.dumps(
+            {
+                "myrepo-1": {
+                    "container": "myrepo-1",
+                    "effort": "previous-effort",
+                    "pid": 123,
+                    "host": lease_mod._this_host(),
+                    "acquired_at": now - 60,
+                    "heartbeat_at": now,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda _pid: (_ for _ in ()).throw(
+            AssertionError("must not inspect a legacy lease PID")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="previous-effort"):
+        lease_mod.borrow(fleet, "next-effort", container="myrepo-1")
+
+    lease = lease_mod.borrow(
+        fleet,
+        "next-effort",
+        container="myrepo-1",
+        ttl=-1,
+    )
+    assert lease.reclaim_reason is None
 
 
 def test_borrow_keeps_unknown_local_liveness_until_ttl(fleet, monkeypatch):
