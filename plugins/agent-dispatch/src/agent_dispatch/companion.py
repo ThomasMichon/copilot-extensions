@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import stat
@@ -142,7 +143,16 @@ def _resolve_command(root: Path, value: object, *, field: str) -> tuple[str, ...
         or not all(isinstance(part, str) and part for part in value)
     ):
         raise CompanionError(f"plugin companion '{field}' must be a non-empty argv")
-    relative = PurePosixPath(value[0].replace("\\", "/"))
+    executable = value[0].replace("\\", "/")
+    relative = PurePosixPath(executable)
+    if (
+        relative.is_absolute()
+        or re.match(r"^[A-Za-z]:", executable)
+        or any(part in ("", ".", "..") for part in relative.parts)
+    ):
+        raise CompanionError(
+            f"plugin companion '{field}' executable must be a contained relative path"
+        )
     current = root
     try:
         for part in relative.parts:
@@ -775,7 +785,7 @@ class DefaultCompanionController:
             self._receipt_path(registration_id).unlink()
 
     def reconcile_receipts(self, adopted_registration_ids: set[str]) -> None:
-        """Retire identity-confirmed POSIX companions no longer in desired state."""
+        """Retire identity-confirmed companions no longer in desired state."""
         if not self.receipt_dir.exists():
             return
         failures: list[str] = []

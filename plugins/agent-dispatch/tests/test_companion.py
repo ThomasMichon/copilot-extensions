@@ -67,7 +67,7 @@ def test_resolve_command_accepts_contained_regular_file(tmp_path):
 def test_resolve_command_rejects_non_relative_paths(tmp_path, value):
     root = tmp_path / "plugin"
     root.mkdir()
-    with pytest.raises((CompanionError, CompanionIndeterminate)):
+    with pytest.raises(CompanionError, match="contained relative path"):
         _resolve_command(root, value, field="command")
 
 
