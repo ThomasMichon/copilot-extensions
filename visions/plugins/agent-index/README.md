@@ -186,17 +186,23 @@ index reflects what has actually landed on the mainline, fetched fresh before it
 reindexes. (A purely local repo with no remote still indexes cleanly from its
 local history — the remote is the *default* source of truth, not a requirement.)
 
-### self-contained-service
-agent-index is a complete, standalone plugin: a user installs it and it works on
-its own, with no sibling plugin, shared broker, or hand-wired infrastructure
-assumed. It honors the suite's [plugin-services](../../plugin-services/README.md)
-model — self-contained runtime, discoverable local endpoint, platform-native
-lifecycle, à-la-carte install. The plugin provisions **both** of its runtimes
-itself — the light, versioned service and the durable engine — as **platform-native
-lifecycles**, so nothing is hand-wired per host. **Which role a machine takes** —
-hosting the engine versus only consuming search — is resolved from
-**configuration** (machine-local, or a source repo's own `.agent-index` config),
-never a machine list baked into the plugin.
+### lightweight-client-and-declared-host-service
+agent-index stays lightweight on every machine unless repository-scoped
+configuration explicitly opts into search and designates a host role. Client
+routing and configuration resolution carry no host store or model dependencies.
+Without effective configuration the plugin is inert; without a reachable or
+locally supervised host runtime the search capability is honestly unavailable.
+
+The hosted service uses the suite's
+[plugin-services](../../plugin-services/README.md)
+`delegated-heavy-companion-runtime` boundary. Agent-index contributes attributed
+declarative runtime inputs and lifecycle adapters, while the already-running
+dispatch supervisor alone installs, updates, rolls back, and retires the
+versioned service dependencies. Agent-facing commands and ordinary direct CLI
+calls never provision the host runtime. **Which role a machine takes** — hosting
+the engine versus only consuming search — is resolved from **configuration**
+(machine-local, or a source repo's own `.agent-index` config), never a machine
+list baked into the plugin.
 
 ### reusable-engine-extension-seam
 The connector interface and query API are a **stable extension surface**: a
@@ -440,3 +446,13 @@ generic is what lets many different products reuse it.
   `indexer:` block and a lone `endpoint:` still work). Realized in config
   (`indexers:` list, `read_indexers`, ordered-failover `client_url`), adoption
   (`setup` resolves role/routing from an authored list), and tests.
+
+- **2026-09-04** — Replaced **self-contained-service** with
+  **lightweight-client-and-declared-host-service**. Repository-scoped
+  configuration remains the opt-in and role authority, but heavyweight host
+  service dependencies move behind the shared
+  `delegated-heavy-companion-runtime` boundary: agent-index declares inputs and
+  lifecycle adapters, while the running dispatch supervisor alone provisions
+  and selects immutable service runtimes. Direct plugin commands cannot install
+  the host stack, and missing configuration or supervision remains inert rather
+  than triggering a fallback installer.

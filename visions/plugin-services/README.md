@@ -180,6 +180,24 @@ and true-up alignment**, but a plugin **provisions and reconciles itself — and
 supervises its own daemon (see *platform-native-lifecycle*) — with that app
 entirely absent**.
 
+### delegated-heavy-companion-runtime
+The self-provisioning contract has one narrow exception: an explicitly
+configured **optional companion capability** whose dependency footprint is too
+heavy or invasive for ordinary plugin first-use and session-start paths may
+delegate runtime materialization to an already-running trusted supervisor. The
+plugin contributes an attributed declarative contract; it does not contribute
+an arbitrary installer command, package-manager flags, credentials, or physical
+runtime placement. The supervisor alone builds, validates, atomically publishes,
+selects, rolls back, and retires immutable companion runtime generations.
+
+This exception never becomes an ambient dependency of the plugin. Without
+explicit capability configuration and the owning supervisor, the contribution
+is inert and the capability is honestly unavailable; an agent-facing command
+cannot install it as a fallback. The plugin's remaining lightweight surfaces
+continue to work independently where meaningful. A normal runtime plugin or
+service still follows `self-provisioning-runtime`; delegation is an explicit
+capability boundary, not a way to centralize routine plugin installation.
+
 ### graceful-composition
 When multiple services are present they discover and use one another's optional
 capabilities without a mandatory central broker and without user-authored wiring.
@@ -594,3 +612,13 @@ credentials.** Guarded by the *single-instance-lease*, cut over by
   primitive beside `zdd`/rendezvous, and the coalescing tier stays strictly
   optional with an always-correct inline fallback. Realized by the
   *plugin-process-hygiene* effort.
+
+- **2026-09-04** — Added **delegated-heavy-companion-runtime** as a narrow
+  exception to ordinary plugin self-provisioning. An explicitly configured
+  optional capability may keep heavyweight dependencies out of plugin and
+  session paths by contributing a declarative runtime contract to an
+  already-running trusted supervisor. The supervisor owns package installation,
+  immutable publication, rollback, and retention; the plugin has no fallback
+  installer authority and remains inert when the capability or supervisor is
+  absent. This preserves the default independent-plugin contract while giving
+  genuinely heavyweight companions one explicit ownership boundary.
