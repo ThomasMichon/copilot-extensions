@@ -1139,13 +1139,23 @@ class BridgeClient:
             or {}
         )
 
-    def end_session(self, session_id: str, *, force: bool = False) -> None:
+    def end_session(
+        self,
+        session_id: str,
+        *,
+        force: bool = False,
+        if_idle: bool = False,
+    ) -> None:
         """DELETE /api/v1/sessions/{id}
 
         ``force`` maps to the route's ``?force=true`` — tear down even with
         active background sub-agent tasks (they are killed). See #191.
         """
-        params = {"force": "true"} if force else None
+        params: dict[str, str] = {}
+        if force:
+            params["force"] = "true"
+        if if_idle:
+            params["if_idle"] = "true"
         self._request("DELETE", f"/api/v1/sessions/{session_id}", params=params)
 
     def handoff_session(

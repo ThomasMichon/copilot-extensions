@@ -161,7 +161,11 @@ double-spawned. Each cycle:
    before settlement and remains fenced while exact-ID managed teardown is
    transiently pending. Legacy CLI worktrees explicitly opted in with
    `--disposable-cli-label` retain their existing post-settlement conclusion
-   path.
+   path: the dispatcher ends an idle local body first, releases the
+   reservation, durably marks conclusion pending, then asks agent-worktrees to
+   conclude and remove the exact recorded session/worktree. A running worker
+   or operational failure remains pending for a later reconcile; a
+   preservation decision is held visibly.
 2. **recover interrupted reservations** — a `reserving` row with a pre-recorded
    worktree is promoted when that worker is confirmed live. A confirmed-gone
    reservation-created worktree enters `releasing`; targeted/reused legacy

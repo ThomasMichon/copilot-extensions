@@ -4619,7 +4619,11 @@ def _cmd_end(args: argparse.Namespace) -> None:
 
     client = _get_client()
     try:
-        client.end_session(args.session_id, force=getattr(args, "force", False))
+        client.end_session(
+            args.session_id,
+            force=getattr(args, "force", False),
+            if_idle=getattr(args, "if_idle", False),
+        )
     except BridgeClientError as exc:
         if exc.status == 404:
             print(f"[OK] Session {args.session_id} already ended")
@@ -5815,6 +5819,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help="Tear down even with active background sub-agent tasks (kills "
              "them). Prefer waiting for them to finish.",
+    )
+    end_p.add_argument(
+        "--if-idle",
+        action="store_true",
+        help="End only if the session is still idle and has no queued prompts",
     )
     end_p.set_defaults(func=_cmd_end)
 

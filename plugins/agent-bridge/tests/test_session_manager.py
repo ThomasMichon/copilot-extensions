@@ -2058,6 +2058,28 @@ class TestEndSession:
         assert session_manager.get_session(sid) is None
 
     @pytest.mark.asyncio
+    async def test_end_if_idle_removes_idle_session(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+
+        await session_manager.end_session_if_idle(session.session_id)
+
+        assert session_manager.get_session(session.session_id) is None
+
+    @pytest.mark.asyncio
+    async def test_end_if_idle_preserves_running_session(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+
+        with pytest.raises(ValueError, match="is not idle"):
+            await session_manager.end_session_if_idle(session.session_id)
+
+        assert session_manager.get_session(session.session_id) is session
+
+    @pytest.mark.asyncio
     async def test_end_succeeds_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:

@@ -690,6 +690,7 @@ class Session:
         self.progress: dict[str, str] = {}
         self._prompt_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._turn_start_lock = asyncio.Lock()
         # Set when a context-pressure handoff is owed but the session is not yet
         # idle (usage crosses critical mid-turn). The turn-settle path fires the
         # deferred handoff once the session is idle. In-memory only.
@@ -5025,6 +5026,15 @@ class SessionManager:
         return count
 
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
+        """Atomically start a turn against conditional idle teardown."""
+        resolved = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(resolved)
+        if not session:
+            raise KeyError(f"Session {resolved} not found")
+        async with session._turn_start_lock:
+            return await self._submit_prompt_locked(resolved, prompt)
+
+    async def _submit_prompt_locked(self, session_id: str, prompt: str) -> int:
         """Submit a prompt to a session, returning the turn index.
 
         The prompt is sent to the ACP subprocess. Streaming events
@@ -5731,6 +5741,27 @@ class SessionManager:
             })
         session.touch()
         log.info("Session %s (%s) stopped", session_id, session.name)
+
+    async def end_session_if_idle(
+        self,
+        session_id: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        """End only if no turn can start between the idle check and teardown."""
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+        async with session._turn_start_lock:
+            if not session.is_at_rest():
+                raise ValueError(f"Session {session_id} is not idle")
+            pending = self._db.list_pending_prompts(session_id)
+            if pending:
+                raise ValueError(
+                    f"Session {session_id} has queued prompts and is not idle"
+                )
+            await self.end_session(session_id, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.

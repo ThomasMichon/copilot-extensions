@@ -1597,19 +1597,29 @@ class Supervisor:
             "result-ref and no progress -- held for review"
         )
 
-    def _conclude_terminal_worker(self, reservation: dict, task: dict) -> dict | None:
+    def _conclude_terminal_worker(
+        self,
+        reservation: dict,
+        task: dict,
+        *,
+        session_override: str | None = None,
+    ) -> dict | None:
         """Run the opt-in exact-identity terminal conclusion policy."""
         if not self.disposable_cli_labels.intersection(task.get("labels") or []):
             return None
         worktree = reservation.get("worktree")
         if not isinstance(worktree, str) or not worktree:
             return {"action": "skipped", "reason": "reservation-has-no-worktree"}
-        session = reservation.get("session_handle")
-        bridge_session: str | None = None
+        recorded_handle = reservation.get("session_handle")
+        bridge_session = (
+            _parse_local_body_handle(recorded_handle)
+            if isinstance(recorded_handle, str)
+            else None
+        )
+        session = session_override or recorded_handle
         if not isinstance(session, str) or not session:
             session = None
-        elif decoded_bridge_session := _parse_local_body_handle(session):
-            bridge_session = decoded_bridge_session
+        elif bridge_session and session_override is None:
             retry_payload = self._conclusion_retry_payload(reservation)
             recorded_acp = retry_payload.get("acp_session_id")
             session = (
@@ -1633,7 +1643,10 @@ class Supervisor:
                 task.get("id"),
                 reservation.get("key"),
             )
-            return {"action": "failed", "reason": str(exc)[:300]}
+            failure = {"action": "failed", "reason": str(exc)[:300]}
+            if bridge_session and session:
+                failure["acp_session_id"] = session
+            return failure
 
     def _nudge_terminal_conclusion(self, reservation: dict, task: dict) -> bool:
         """Reawaken the exact local body once to finish its worktree lifecycle."""
@@ -1783,7 +1796,13 @@ class Supervisor:
         policy_applies: bool,
     ) -> tuple[bool, dict | None]:
         """Require body conclusion before releasing an exclusive reservation."""
-        if not reservation.get("exclusive_key"):
+        local_sid = _parse_local_body_handle(
+            reservation.get("session_handle")
+        )
+        if (
+            not reservation.get("exclusive_key")
+            and not (policy_applies and local_sid is not None)
+        ):
             return True, None
 
         fleet = _parse_fleet_body_handle(reservation.get("session_handle"))
@@ -1806,9 +1825,6 @@ class Supervisor:
                 )
                 return False, None
 
-        local_sid = _parse_local_body_handle(
-            reservation.get("session_handle")
-        )
         if local_sid is not None:
             try:
                 verdict = self.local_body_verdict_fn(local_sid)
@@ -1816,15 +1832,122 @@ class Supervisor:
                 verdict = _tracking().UNKNOWN
             if verdict == _tracking().UNKNOWN:
                 return False, None
-            if verdict == _tracking().GONE:
+            if verdict == _tracking().GONE and not policy_applies:
                 return True, None
             if policy_applies:
+                if verdict != _tracking().GONE:
+                    try:
+                        if self.local_body_activity_fn(local_sid) != "IDLE":
+                            return False, None
+                    except Exception:
+                        return False, None
+                attempts, next_attempt_at = self._conclusion_retry_meta(
+                    reservation
+                )
+                now = time.time()
+                if attempts >= _CONCLUSION_MAX_ATTEMPTS or next_attempt_at > now:
+                    return False, None
+                prior_payload = self._conclusion_retry_payload(reservation)
+                acp_session = prior_payload.get("acp_session_id")
+                if not acp_session:
+                    try:
+                        acp_session = self.local_acp_session_fn(local_sid)
+                    except Exception:
+                        acp_session = None
+                if not acp_session:
+                    attempts += 1
+                    failure = {
+                        "action": "failed",
+                        "reason": "session-identity-unavailable",
+                        "attempts": attempts,
+                        "next_attempt_at": now + min(
+                            300,
+                            _CONCLUSION_RETRY_BASE_SECONDS
+                            * (2 ** max(0, attempts - 1)),
+                        ),
+                    }
+                    try:
+                        self.client.record_spawn_conclusion(
+                            reservation["key"],
+                            conclusion_state=(
+                                _CONCLUSION_HELD
+                                if attempts >= _CONCLUSION_MAX_ATTEMPTS
+                                else _CONCLUSION_PENDING
+                            ),
+                            conclusion_detail=json.dumps(
+                                failure,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        )
+                    except DispatchError:
+                        pass
+                    return False, None
+                checkpoint = {
+                    "action": "pending",
+                    "reason": "ending-terminal-body",
+                    "acp_session_id": str(acp_session),
+                    "attempts": attempts,
+                    "next_attempt_at": 0,
+                }
                 try:
-                    if self.local_body_activity_fn(local_sid) == "IDLE":
-                        return True, None
+                    self.client.record_spawn_conclusion(
+                        reservation["key"],
+                        conclusion_state=_CONCLUSION_PENDING,
+                        conclusion_detail=json.dumps(
+                            checkpoint,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    )
+                except DispatchError:
+                    return False, None
+                try:
+                    ended = self.local_end_fn(local_sid)
                 except Exception:
-                    pass
-                return False, None
+                    log.exception(
+                        "failed to end terminal disposable local body %s "
+                        "for task %s",
+                        local_sid,
+                        task.get("id"),
+                    )
+                    ended = False
+                if not ended:
+                    attempts += 1
+                    failure = {
+                        **checkpoint,
+                        "action": "failed",
+                        "reason": "terminal-body-end-failed",
+                        "attempts": attempts,
+                        "next_attempt_at": now + min(
+                            300,
+                            _CONCLUSION_RETRY_BASE_SECONDS
+                            * (2 ** max(0, attempts - 1)),
+                        ),
+                    }
+                    try:
+                        self.client.record_spawn_conclusion(
+                            reservation["key"],
+                            conclusion_state=(
+                                _CONCLUSION_HELD
+                                if attempts >= _CONCLUSION_MAX_ATTEMPTS
+                                else _CONCLUSION_PENDING
+                            ),
+                            conclusion_detail=json.dumps(
+                                failure,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        )
+                    except DispatchError:
+                        pass
+                    return False, None
+                outcome = self._conclude_terminal_worker(
+                    reservation,
+                    task,
+                    session_override=str(acp_session),
+                )
+                return True, outcome
             if (
                 task.get("status") == Status.COMPLETED
                 and task.get("completed_by")
@@ -1965,6 +2088,8 @@ class Supervisor:
                         body_verdict != _tracking().GONE
                         and body_activity != "IDLE"
                     ):
+                        if body_verdict == _tracking().LIVE:
+                            continue
                         attempts = prior_attempts + 1
                         checkpoint = {
                             **self._conclusion_retry_payload(res),

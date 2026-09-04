@@ -231,7 +231,7 @@ def end_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
     if exe is None:
         return False
     completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
-        [*exe, "end", session_id],
+        [*exe, "end", session_id, "--if-idle"],
         check=False,
         capture_output=True,
         text=True,
