@@ -18,7 +18,13 @@ set -euo pipefail
 
 _SETUP_SHELL="${BASH:-}"
 if [[ "$_SETUP_SHELL" != /* || ! -x "$_SETUP_SHELL" ]]; then
-    _SETUP_SHELL="$(command -v bash 2>/dev/null || true)"
+    if [[ -x /bin/bash ]]; then
+        _SETUP_SHELL=/bin/bash
+    elif [[ -x /usr/bin/bash ]]; then
+        _SETUP_SHELL=/usr/bin/bash
+    else
+        _SETUP_SHELL="$(command -v bash 2>/dev/null || true)"
+    fi
 fi
 if [[ -z "$_SETUP_SHELL" || ! -x "$_SETUP_SHELL" ]]; then
     echo "ERROR: Unable to resolve the current Bash executable." >&2

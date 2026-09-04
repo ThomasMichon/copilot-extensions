@@ -364,6 +364,29 @@ test("cutover handles a null JSON result without masking the failure", () => {
   });
 });
 
+test("cutover catch ignores non-object JSON stdout", () => {
+  const result = runHandoffCutover(
+    "/repo",
+    "continue",
+    "session-1",
+    (_bin, args) => {
+      if (args[0] === "session-binding") {
+        return JSON.stringify({ found: false, session_id: "session-1" });
+      }
+      const error = new Error("cutover failed");
+      error.status = 3;
+      error.stdout = JSON.stringify("not structured output");
+      throw error;
+    },
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "no-mux",
+    error: null,
+  });
+});
+
 test("manual fallback clearly delimits the exact copyable seed", () => {
     const seed =
       "Task: Continue | Resume: /consume-handoff to take over | " +

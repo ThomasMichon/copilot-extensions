@@ -1523,15 +1523,19 @@ class LaunchPreflight:
     """Read-only validation required before constructing a launch plan."""
 
     config_root: state_root_mod.ConfigRoot | None = None
+    setup_shell: str | None = None
+    setup_shell_required: bool = False
 
     @property
     def error(self) -> str | None:
-        if self.config_root is None or self.config_root.path:
-            return None
-        return (
-            self.config_root.error
-            or "could not resolve the machine-local configuration root"
-        )
+        if self.config_root is not None and not self.config_root.path:
+            return (
+                self.config_root.error
+                or "could not resolve the machine-local configuration root"
+            )
+        if self.setup_shell_required and not self.setup_shell:
+            return "could not resolve an absolute shell for session setup"
+        return None
 
     @property
     def config_root_path(self) -> str:
@@ -1540,6 +1544,45 @@ class LaunchPreflight:
 
 class LaunchPreflightError(RuntimeError):
     """A launch plan cannot be built without mutating unsafe state."""
+
+
+def _resolve_normalized_shell(*, windows: bool) -> str | None:
+    """Resolve the setup shell to an absolute executable path."""
+    if windows:
+        program_files = [
+            os.environ.get("ProgramW6432"),
+            os.environ.get("ProgramFiles"),
+        ]
+        candidates = [
+            *(
+                str(Path(root) / "PowerShell" / "7" / "pwsh.exe")
+                for root in program_files
+                if root
+            ),
+            shutil.which("pwsh.exe"),
+            shutil.which("pwsh"),
+        ]
+        system_root = os.environ.get("SystemRoot")
+        if system_root:
+            candidates.append(
+                str(
+                    Path(system_root)
+                    / "System32"
+                    / "WindowsPowerShell"
+                    / "v1.0"
+                    / "powershell.exe"
+                )
+            )
+        candidates.extend(
+            [shutil.which("powershell.exe"), shutil.which("powershell")]
+        )
+    else:
+        candidates = ["/bin/bash", "/usr/bin/bash", shutil.which("bash")]
+
+    for candidate in candidates:
+        if candidate and os.path.isabs(candidate) and Path(candidate).is_file():
+            return candidate
+    return None
 
 
 def _preflight_launch(
@@ -1552,14 +1595,27 @@ def _preflight_launch(
     repo = config.default_repo
     plat_key = config.platform if config.platform != "wsl" else "linux"
     launch_map = repo.launch_recovery if recovery else repo.launch
-    if recovery or plat_key in launch_map or not repo.setup_hook.get(plat_key):
-        return LaunchPreflight()
-    return LaunchPreflight(
-        config_root=state_root_mod.resolve_config_root(
+    setup_shell_required = plat_key not in launch_map
+    setup_shell = (
+        _resolve_normalized_shell(windows=platform.system() == "Windows")
+        if setup_shell_required
+        else None
+    )
+    config_root = None
+    if (
+        not recovery
+        and plat_key not in launch_map
+        and repo.setup_hook.get(plat_key)
+    ):
+        config_root = state_root_mod.resolve_config_root(
             config,
             cwd=work_dir,
             project=cfg.active_project(),
         )
+    return LaunchPreflight(
+        config_root=config_root,
+        setup_shell=setup_shell,
+        setup_shell_required=setup_shell_required,
     )
 
 
@@ -1661,6 +1717,8 @@ def _build_launch_cmd(
             configured_copilot_path or fallback_copilot_path or ""
         )
         is_windows = platform.system() == "Windows"
+        setup_shell = preflight.setup_shell
+        assert setup_shell is not None
 
         if hook_path:
             # (1) Normalized launch via the default-setup launcher + repo hook.
@@ -1671,7 +1729,7 @@ def _build_launch_cmd(
             if is_windows:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
                 cmd = [
-                    "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
+                    setup_shell, "-NoProfile", "-NoLogo", "-File",
                     launcher, "-Machine", config.machine,
                     "-SetupHook", resolved_hook,
                 ]
@@ -1691,7 +1749,7 @@ def _build_launch_cmd(
             else:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.sh")
                 cmd = [
-                    "bash", launcher, "--machine", config.machine,
+                    setup_shell, launcher, "--machine", config.machine,
                     "--setup-hook", resolved_hook,
                 ]
                 if config_root_path:
@@ -1717,7 +1775,7 @@ def _build_launch_cmd(
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = [
-                "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
+                setup_shell, "-NoProfile", "-NoLogo", "-File",
                 setup_path, "-Machine", config.machine,
             ]
             # session_path is only understood by the default-setup launcher;
@@ -1740,7 +1798,7 @@ def _build_launch_cmd(
             )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
-            cmd = ["bash", setup_path, "--machine", config.machine]
+            cmd = [setup_shell, setup_path, "--machine", config.machine]
             if session_path_arg and not legacy:
                 cmd += ["--session-path", session_path_arg]
             if resolved_env_script:
@@ -2736,6 +2794,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             if not yaml_path.exists():
                 return _json_error(f"Worktree not found: {wt_id}")
             record = tracking.load_record(yaml_path)
+            launch_preflight = _preflight_launch(
+                config,
+                args,
+                record.worktree_path,
+            )
+            if launch_preflight.error:
+                return _json_error(launch_preflight.error, exit_code=3)
             if getattr(args, "restore", False):
                 session_id = sessions.find_latest_session_id_fast(
                     record.worktree_path, record.sessions
@@ -2751,13 +2816,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     return _json_error(
                         restored.get("reason", "could not restore the session")
                     )
-            launch_preflight = _preflight_launch(
-                config,
-                args,
-                record.worktree_path,
-            )
-            if launch_preflight.error:
-                return _json_error(launch_preflight.error, exit_code=3)
             # Foreground RMW (#4547): reload + bump the resume stamp under the
             # blocking record lock so a concurrent Picker liveness sweep can't
             # clobber the increment (and vice versa). No I/O in the window.
@@ -2876,13 +2934,39 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 output.err(f"Worktree not found: {wt_id_noninteractive}")
                 return 1
             record = tracking.load_record(yaml_path)
+            try:
+                _validate_profile_assignment_config(config)
+            except profile_assignment.ProfileAssignmentError as exc:
+                output.err(str(exc))
+                _emit_plan({
+                    "action": "error",
+                    "error": str(exc),
+                    "exit_code": 3,
+                })
+                return 3
+            plan_work_dir = (
+                os.path.expanduser("~")
+                if getattr(args, "bare_resume", False)
+                else record.worktree_path
+            )
+            launch_preflight = _preflight_launch(
+                config, args, plan_work_dir
+            )
+            if launch_preflight.error:
+                return _launch_preflight_error(launch_preflight)
             if (
                 getattr(args, "restore", False)
                 and not _restore_before_resume(record)
             ):
                 return 1
             profile = _resolve_profile(config, args)
-            return _resolve_resume(record, config, args, profile=profile)
+            return _resolve_resume(
+                record,
+                config,
+                args,
+                profile=profile,
+                launch_preflight=launch_preflight,
+            )
 
         if use_new:
             config = cfg.load_config()
@@ -4390,9 +4474,33 @@ def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
             output.err(f"Worktree not found: {wt_id}")
             return 1
         record = tracking.load_record(yaml_path)
+        try:
+            _validate_profile_assignment_config(config)
+        except profile_assignment.ProfileAssignmentError as exc:
+            output.err(str(exc))
+            _emit_plan({
+                "action": "error",
+                "error": str(exc),
+                "exit_code": 3,
+            })
+            return 3
+        plan_work_dir = (
+            os.path.expanduser("~")
+            if getattr(args, "bare_resume", False)
+            else record.worktree_path
+        )
+        launch_preflight = _preflight_launch(config, args, plan_work_dir)
+        if launch_preflight.error:
+            return _launch_preflight_error(launch_preflight)
         if action == "restore" and not _restore_before_resume(record):
             return 1
-        return _resolve_resume(record, config, args, profile=profile)
+        return _resolve_resume(
+            record,
+            config,
+            args,
+            profile=profile,
+            launch_preflight=launch_preflight,
+        )
     if action == "new":
         opts = decision.get("options") or {}
         if opts.get("no_mux"):
@@ -4432,6 +4540,7 @@ def _resolve_resume(
     args: argparse.Namespace,
     profile: cfg.CopilotProfile | None = None,
     profile_is_explicit: bool = True,
+    launch_preflight: LaunchPreflight | None = None,
 ) -> int:
     """Resolve launch plan for resuming an existing worktree."""
     try:
@@ -4476,7 +4585,9 @@ def _resolve_resume(
 
     bare_resume = getattr(args, "bare_resume", False)
     plan_work_dir = os.path.expanduser("~") if bare_resume else record.worktree_path
-    launch_preflight = _preflight_launch(config, args, plan_work_dir)
+    launch_preflight = launch_preflight or _preflight_launch(
+        config, args, plan_work_dir
+    )
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
 

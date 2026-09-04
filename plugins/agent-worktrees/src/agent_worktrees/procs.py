@@ -253,10 +253,13 @@ def process_executable_path(pid: int) -> str | None:
         finally:
             k32.CloseHandle(handle)
     else:
+        proc_link = Path("/proc") / str(pid) / "exe"
         try:
-            path = os.readlink(Path("/proc") / str(pid) / "exe")
+            path = os.readlink(proc_link)
         except OSError:
             return None
+        if path.endswith(" (deleted)"):
+            path = str(proc_link) if os.access(proc_link, os.X_OK) else ""
     return path if path and os.path.isabs(path) else None
 
 

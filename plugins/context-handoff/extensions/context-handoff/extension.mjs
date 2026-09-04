@@ -184,7 +184,11 @@ function formatHandoffMarkdown(handoffData, scope) {
     "",
     `**Session:** ${handoffData.sessionId}`,
     `**CWD:** ${handoffData.cwd}`,
-    `**Branch:** ${handoffData.branch || "(detached)"}`,
+    `**Branch:** ${
+      handoffData.branch === null
+        ? "(unavailable)"
+        : handoffData.branch || "(detached)"
+    }`,
     `**Turn count:** ${handoffData.turnCount}`,
     `**Context utilization:** ${handoffData.contextUtilization}`,
     `**Generated:** ${handoffData.generatedAt}`,
@@ -271,7 +275,11 @@ const session = await joinSession({
             "",
             `**Session:** ${handoffData.sessionId}`,
             `**CWD:** ${handoffData.cwd}`,
-            `**Branch:** ${handoffData.branch || "(detached)"}`,
+            `**Branch:** ${
+              handoffData.branch === null
+                ? "(unavailable)"
+                : handoffData.branch || "(detached)"
+            }`,
             `**Turn count:** ${handoffData.turnCount}`,
             `**Context utilization:** ${handoffData.contextUtilization}`,
             "",
@@ -285,7 +293,9 @@ const session = await joinSession({
             "",
             "### Git Status",
             "```",
-            handoffData.gitStatus || "(clean)",
+            handoffData.gitStatus === null
+              ? "(unavailable)"
+              : handoffData.gitStatus || "(clean)",
             "```",
             "",
             args.summary ? `### Agent Summary\n${args.summary}\n` : "",

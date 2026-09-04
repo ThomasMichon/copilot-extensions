@@ -1419,8 +1419,11 @@ export function runHandoffCutover(
       error = parsed?.error || null;
     } catch { /* stdout was not JSON */ }
     const reason = status === 2 ? "no-worktree" : status === 3 ? "no-mux" : "error";
+    const details = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
     return {
-      ...(parsed || {}),
+      ...details,
       ok: false,
       reason,
       error,

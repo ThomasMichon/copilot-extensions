@@ -102,7 +102,8 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     cfg_ = _hook_config(setup_hook={"linux": "tools/setup/session-setup.sh"})
     cmd = m._build_launch_cmd(cfg_, _args([]), "/w/wt")
 
-    assert cmd[0] == "bash"
+    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
+    assert Path(cmd[0]).is_absolute()
     assert "default-setup.sh" in cmd[1]
     assert "--machine" in cmd and cmd[cmd.index("--machine") + 1] == "dev6"
     assert "--setup-hook" in cmd
@@ -113,6 +114,21 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     assert "--config-root" in cmd
     assert "--runtime-python" in cmd
     assert cmd[-1] == "--allow-all"
+
+
+def test_missing_setup_shell_is_reported_by_preflight(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        m,
+        "_resolve_normalized_shell",
+        lambda *, windows: None,
+    )
+
+    preflight = m._preflight_launch(_hook_config(), _args([]), "/w/wt")
+
+    assert preflight.error == (
+        "could not resolve an absolute shell for session setup"
+    )
 
 
 def test_setup_hook_absolute_path_preserved(monkeypatch):
@@ -141,7 +157,8 @@ def test_no_hook_uses_default_setup_without_hook_arg(monkeypatch):
     """No setup_hook and no legacy setup.sh -> plain default-setup, no hook arg."""
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cmd = m._build_launch_cmd(_hook_config(), _args([]), "/w/wt")
-    assert cmd[0] == "bash"
+    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
+    assert Path(cmd[0]).is_absolute()
     assert "default-setup.sh" in cmd[1]
     assert "--setup-hook" not in cmd
 
@@ -228,7 +245,22 @@ def test_explicit_launch_remains_authoritative_over_copilot_path(monkeypatch):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cfg_ = _hook_config(
         legacy_launch=True,
+        setup_hook={"linux": "tools/setup/session-setup.sh"},
         copilot_path={"linux": "/opt/copilot-dev"},
+    )
+    monkeypatch.setattr(
+        m.state_root_mod,
+        "resolve_config_root",
+        lambda *args, **kwargs: pytest.fail(
+            "explicit launch must not resolve normalized setup state"
+        ),
+    )
+    monkeypatch.setattr(
+        m,
+        "_resolve_normalized_shell",
+        lambda *, windows: pytest.fail(
+            "explicit launch must not resolve a normalized setup shell"
+        ),
     )
     cmd = m._build_launch_cmd(cfg_, _args([]), "/w/wt")
     assert cmd[0] == "copilot"
@@ -287,7 +319,9 @@ def test_legacy_setup_ignores_predecessor_copilot_path(monkeypatch, tmp_path):
         fallback_copilot_path="/opt/copilot/predecessor",
     )
 
-    assert cmd[:2] == ["bash", str(setup)]
+    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
+    assert Path(cmd[0]).is_absolute()
+    assert cmd[1] == str(setup)
     assert "--copilot-path" not in cmd
 
 
@@ -411,7 +445,8 @@ def test_env_script_linux_builds_default_setup_with_flag(monkeypatch):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cfg_ = _env_config(env_script={"linux": "tools/prime.sh"}, platform_name="linux")
     cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
-    assert cmd[0] == "bash"
+    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
+    assert Path(cmd[0]).is_absolute()
     assert "default-setup.sh" in cmd[1]
     assert "--env-script" in cmd
     assert cmd[cmd.index("--env-script") + 1].endswith("prime.sh")
