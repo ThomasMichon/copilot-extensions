@@ -1758,8 +1758,6 @@ class LaunchPreflight:
     """Read-only validation required before constructing a launch plan."""
 
     config_root: state_root_mod.ConfigRoot | None = None
-    setup_shell: str | None = None
-    setup_shell_required: bool = False
 
     @property
     def error(self) -> str | None:
@@ -1768,8 +1766,6 @@ class LaunchPreflight:
                 self.config_root.error
                 or "could not resolve the machine-local configuration root"
             )
-        if self.setup_shell_required and not self.setup_shell:
-            return "could not resolve an absolute shell for session setup"
         return None
 
     @property
@@ -1779,45 +1775,6 @@ class LaunchPreflight:
 
 class LaunchPreflightError(RuntimeError):
     """A launch plan cannot be built without mutating unsafe state."""
-
-
-def _resolve_normalized_shell(*, windows: bool) -> str | None:
-    """Resolve the setup shell to an absolute executable path."""
-    if windows:
-        program_files = [
-            os.environ.get("ProgramW6432"),
-            os.environ.get("ProgramFiles"),
-        ]
-        candidates = [
-            *(
-                str(Path(root) / "PowerShell" / "7" / "pwsh.exe")
-                for root in program_files
-                if root
-            ),
-            shutil.which("pwsh.exe"),
-            shutil.which("pwsh"),
-        ]
-        system_root = os.environ.get("SystemRoot")
-        if system_root:
-            candidates.append(
-                str(
-                    Path(system_root)
-                    / "System32"
-                    / "WindowsPowerShell"
-                    / "v1.0"
-                    / "powershell.exe"
-                )
-            )
-        candidates.extend(
-            [shutil.which("powershell.exe"), shutil.which("powershell")]
-        )
-    else:
-        candidates = ["/bin/bash", "/usr/bin/bash", shutil.which("bash")]
-
-    for candidate in candidates:
-        if candidate and os.path.isabs(candidate) and Path(candidate).is_file():
-            return candidate
-    return None
 
 
 def _preflight_launch(
@@ -1830,12 +1787,6 @@ def _preflight_launch(
     repo = config.default_repo
     plat_key = config.platform if config.platform != "wsl" else "linux"
     launch_map = repo.launch_recovery if recovery else repo.launch
-    setup_shell_required = plat_key not in launch_map
-    setup_shell = (
-        _resolve_normalized_shell(windows=platform.system() == "Windows")
-        if setup_shell_required
-        else None
-    )
     config_root = None
     if (
         not recovery
@@ -1847,11 +1798,7 @@ def _preflight_launch(
             cwd=work_dir,
             project=cfg.active_project(),
         )
-    return LaunchPreflight(
-        config_root=config_root,
-        setup_shell=setup_shell,
-        setup_shell_required=setup_shell_required,
-    )
+    return LaunchPreflight(config_root=config_root)
 
 
 def _launch_preflight_error(
@@ -1875,7 +1822,6 @@ def _build_launch_cmd(
     profile: cfg.CopilotProfile | None = None,
     *,
     preflight: LaunchPreflight | None = None,
-    fallback_copilot_path: str | None = None,
 ) -> list[str]:
     """Build the launch command from config or fallback convention.
 
@@ -1885,10 +1831,7 @@ def _build_launch_cmd(
     selects the
     **normalized** launch (the default-setup launcher runs the repo hook, then
     execs Copilot); else a legacy ``tools/setup/setup.{ps1,sh}`` is run as the
-    session command; else the plugin's ``default-setup.{ps1,sh}``. A verified
-    predecessor executable may be supplied as a final Copilot-path fallback for
-    normalized/default launch only; explicit launch templates, configured
-    ``copilot_path``, and legacy setup scripts remain authoritative.
+    session command; else the plugin's ``default-setup.{ps1,sh}``.
     """
     recovery = getattr(args, "recovery", False)
     repo = config.default_repo
@@ -1945,15 +1888,10 @@ def _build_launch_cmd(
             if not os.path.isabs(resolved_env_script):
                 resolved_env_script = str(Path(anchor) / resolved_env_script)
         copilot_path = repo.copilot_path.get(plat_key)
-        configured_copilot_path = (
+        resolved_copilot_path = (
             copilot_path.format(**variables) if copilot_path else ""
         )
-        resolved_copilot_path = (
-            configured_copilot_path or fallback_copilot_path or ""
-        )
         is_windows = platform.system() == "Windows"
-        setup_shell = preflight.setup_shell
-        assert setup_shell is not None
 
         if hook_path:
             # (1) Normalized launch via the default-setup launcher + repo hook.
@@ -1964,7 +1902,7 @@ def _build_launch_cmd(
             if is_windows:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
                 cmd = [
-                    setup_shell, "-NoProfile", "-NoLogo", "-File",
+                    "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
                     launcher, "-Machine", config.machine,
                     "-SetupHook", resolved_hook,
                 ]
@@ -1984,7 +1922,7 @@ def _build_launch_cmd(
             else:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.sh")
                 cmd = [
-                    setup_shell, launcher, "--machine", config.machine,
+                    "bash", launcher, "--machine", config.machine,
                     "--setup-hook", resolved_hook,
                 ]
                 if config_root_path:
@@ -2005,12 +1943,12 @@ def _build_launch_cmd(
             legacy = (
                 Path(setup_path).is_file()
                 and not resolved_env_script
-                and not configured_copilot_path
+                and not resolved_copilot_path
             )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = [
-                setup_shell, "-NoProfile", "-NoLogo", "-File",
+                "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
                 setup_path, "-Machine", config.machine,
             ]
             # session_path is only understood by the default-setup launcher;
@@ -2029,11 +1967,11 @@ def _build_launch_cmd(
             legacy = (
                 Path(setup_path).is_file()
                 and not resolved_env_script
-                and not configured_copilot_path
+                and not resolved_copilot_path
             )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
-            cmd = [setup_shell, setup_path, "--machine", config.machine]
+            cmd = ["bash", setup_path, "--machine", config.machine]
             if session_path_arg and not legacy:
                 cmd += ["--session-path", session_path_arg]
             if resolved_env_script:
@@ -2391,27 +2329,12 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         and predecessor_binding.get("session_name") != expected_mux_session
     ):
         predecessor_binding = None
-    predecessor_copilot_path = None
-    if predecessor_binding:
-        predecessor_pid = predecessor_binding.get("copilot_pid")
-        predecessor_start = predecessor_binding.get("copilot_start_time")
-        if predecessor_pid and predecessor_start:
-            predecessor_copilot_path = procs.process_executable_path(
-                predecessor_pid
-            )
-            if (
-                not predecessor_copilot_path
-                or locks.process_start_time(predecessor_pid)
-                != str(predecessor_start)
-            ):
-                predecessor_copilot_path = None
     launch_cmd = _build_launch_cmd(
         config,
         args,
         work_dir,
         profile=selection.profile,
         preflight=launch_preflight,
-        fallback_copilot_path=predecessor_copilot_path,
     )
     env = _apply_assignment_env(
         _build_env(

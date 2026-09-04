@@ -100,7 +100,7 @@ function ensureState(invocation) {
 // Used by both the generate_handoff_prompt tool and the /handoff command.
 function collectHandoffData(sid, overrides = {}) {
   const cwd = state.cwd || process.cwd();
-  const git = collectAdvisoryGitFacts();
+  const git = collectAdvisoryGitFacts(cwd);
   const utilPct = state.tokenLimit > 0
     ? Math.round(state.lastUtilization * 100)
     : null;

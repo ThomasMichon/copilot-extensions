@@ -16,31 +16,7 @@
 
 set -euo pipefail
 
-_SETUP_SHELL="${BASH:-}"
-if [[ "$_SETUP_SHELL" != /* || ! -x "$_SETUP_SHELL" ]]; then
-    if [[ -x /bin/bash ]]; then
-        _SETUP_SHELL=/bin/bash
-    elif [[ -x /usr/bin/bash ]]; then
-        _SETUP_SHELL=/usr/bin/bash
-    else
-        _SETUP_SHELL="$(command -v bash 2>/dev/null || true)"
-    fi
-fi
-if [[ -z "$_SETUP_SHELL" || ! -x "$_SETUP_SHELL" ]]; then
-    echo "ERROR: Unable to resolve the current Bash executable." >&2
-    exit 1
-fi
-
-MACHINE="${HOSTNAME:-}"
-if [[ -z "$MACHINE" ]]; then
-    if [[ -x /bin/hostname ]]; then
-        MACHINE=$(/bin/hostname)
-    elif [[ -x /usr/bin/hostname ]]; then
-        MACHINE=$(/usr/bin/hostname)
-    else
-        MACHINE="unknown"
-    fi
-fi
+MACHINE="${HOSTNAME:-$(hostname)}"
 RECOVERY=false
 SETUP_HOOK=""
 SESSION_PATH=""
@@ -149,10 +125,10 @@ if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
         say "  Setup:    $SETUP_HOOK"
         if $STDIO; then
             # Keep the hook's stdout off the ACP channel.
-            if ! "$_SETUP_SHELL" "$SETUP_HOOK" --machine "$MACHINE" >&2; then
+            if ! bash "$SETUP_HOOK" --machine "$MACHINE" >&2; then
                 echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
             fi
-        elif ! "$_SETUP_SHELL" "$SETUP_HOOK" --machine "$MACHINE"; then
+        elif ! bash "$SETUP_HOOK" --machine "$MACHINE"; then
             echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
         fi
     else
