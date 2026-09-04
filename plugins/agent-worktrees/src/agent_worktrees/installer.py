@@ -683,6 +683,41 @@ def _is_project_binstub(text: str) -> bool:
     return "WORKTREE_PROJECT" in text and ".agent-worktrees" in text
 
 
+def _is_legacy_project_binstub_for(text: str, project: str) -> bool:
+    """Recognize a pre-receipt generated stub for exactly one project."""
+    if "agent-worktrees project binstub" in text:
+        return False
+    if not _is_project_binstub(text):
+        return False
+    escaped = re.escape(project)
+    return any(
+        re.search(pattern, text)
+        for pattern in (
+            rf"--project(?:\s+|=)[\"']?{escaped}(?=[\"'\s]|$)",
+            rf"WORKTREE_PROJECT\s*=\s*[\"']?{escaped}(?=[\"'\s]|$)",
+        )
+    )
+
+
+def _can_migrate_legacy_project_binstub(project: str) -> bool:
+    """Allow automatic transfer only for attributable pre-receipt bytes."""
+    existing = [
+        path
+        for path, _content in _project_binstub_specs(project)
+        if path.exists()
+    ]
+    if not existing:
+        return False
+    for path in existing:
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            return False
+        if not _is_legacy_project_binstub_for(text, project):
+            return False
+    return True
+
+
 def _project_binstub_specs(
     project: str,
     *,
@@ -1002,6 +1037,7 @@ def _reconcile_binstubs_unlocked() -> dict:
             seen[key] = project
 
     added = 0
+    migrated: list[str] = []
     preserved: list[str] = []
     for project in sorted(registered):
         command_key = (
@@ -1011,6 +1047,16 @@ def _reconcile_binstubs_unlocked() -> dict:
             continue
         try:
             added += _deploy_project_binstub(project)
+        except BinstubContentError as exc:
+            if _can_migrate_legacy_project_binstub(project):
+                added += _deploy_project_binstub(project, transfer=True)
+                migrated.append(project)
+                output.changed(
+                    f"Binstubs: migrated legacy project command for {project}"
+                )
+            else:
+                preserved.append(project)
+                output.warn(str(exc))
         except BinstubOwnershipError as exc:
             preserved.append(project)
             output.warn(str(exc))
@@ -1071,6 +1117,7 @@ def _reconcile_binstubs_unlocked() -> dict:
     return {
         "registered": sorted(registered),
         "added": added,
+        "migrated": migrated,
         "removed": [str(p) for p in removed],
         "preserved": sorted(set(preserved)),
     }

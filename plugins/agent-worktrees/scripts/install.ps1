@@ -831,9 +831,43 @@ function Get-ApplicationPath {
         foreach ($command in $commands) {
             $source = [string]$command.Source
             if (-not $source -or $source -match 'WindowsApps') { continue }
+            $wingetTarget = Resolve-WinGetPackageExecutable -Source $source
+            if ($wingetTarget) { return $wingetTarget }
             if (Test-Path -LiteralPath $source -PathType Leaf) { return $source }
         }
     }
+    return $null
+}
+
+function Resolve-WinGetPackageExecutable {
+    <# WinGet's Links directory can contain a reparse shim that PowerShell
+       cannot invoke while native output is redirected. Resolve that link to
+       the ordinary package binary before capture. #>
+    param([Parameter(Mandatory)][string]$Source)
+    if (-not $env:LOCALAPPDATA) { return $null }
+    $linksRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+    $sourceParent = Split-Path -Parent $Source
+    if (-not $sourceParent -or -not [string]::Equals(
+        [IO.Path]::GetFullPath($sourceParent).TrimEnd('\'),
+        [IO.Path]::GetFullPath($linksRoot).TrimEnd('\'),
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        return $null
+    }
+    $packagesRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+    if (-not (Test-Path -LiteralPath $packagesRoot -PathType Container)) {
+        return $null
+    }
+    $leaf = Split-Path -Leaf $Source
+    $match = Get-ChildItem -LiteralPath $packagesRoot -Recurse -Filter $leaf `
+        -File -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Length -gt 0 -and
+            -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        } |
+        Sort-Object FullName |
+        Select-Object -First 1
+    if ($match) { return [string]$match.FullName }
     return $null
 }
 
@@ -1278,7 +1312,8 @@ function Invoke-VenvPackageInstall {
         [Parameter(Mandatory)][string]$PkgDir
     )
 
-    $uvAvailable = [bool](Get-Command uv -ErrorAction SilentlyContinue)
+    $uvPath = Get-ApplicationPath -Name @('uv')
+    $uvAvailable = [bool]$uvPath
     $out = ''
     $rc = 0
 
@@ -1287,8 +1322,9 @@ function Invoke-VenvPackageInstall {
     try {
         if ($uvAvailable) {
             Ensure-UvIndex
+            # Install-contract: resolved-path equivalent of `uv pip install`.
             $result = Invoke-NativeCapture {
-                & uv pip install --python $VenvPython `
+                & $uvPath pip install --python $VenvPython `
                     --reinstall-package $PkgName "$PkgDir" --quiet
             }
             $out = $result.Output

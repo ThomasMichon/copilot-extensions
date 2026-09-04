@@ -155,6 +155,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseInput(
     $source, [ref]$tokens, [ref]$errors
 )
 foreach ($name in @(
+    'Resolve-WinGetPackageExecutable',
     'Get-ApplicationPath',
     'Get-CurrentPowerShellPath',
     'Resolve-CopilotCommand'
