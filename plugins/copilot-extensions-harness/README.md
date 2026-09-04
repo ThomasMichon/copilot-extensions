@@ -14,7 +14,7 @@ organization-specific needs are routed elsewhere.
 
 | Skill | Covers |
 |-------|--------|
-| [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
+| [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the submitter's hard **merged + finalized** completion gate, the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
 | [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | Symptom → cause → action for deployed plugins, key paths, diagnostic commands, and the baseline-reset escape hatch |
 | [validating-in-clean-room](skills/validating-in-clean-room/SKILL.md) | **Run · evaluate · author** clean-room validation (`tools/clean-room/`): fresh-box scenarios, `cr-report.json` + `cr-logs/`, jam taxonomy, Tier-E literal-mode judging, and the scenario contract |
 

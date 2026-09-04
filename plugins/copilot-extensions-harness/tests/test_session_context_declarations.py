@@ -228,7 +228,7 @@ def test_producer_wrappers_are_byte_identical_to_the_authority_copy() -> None:
             ).read_bytes()
 
 
-def test_agent_worktrees_side_effect_hooks_are_explicitly_context_free() -> None:
+def test_agent_worktrees_lifecycle_side_effects_use_one_bounded_client() -> None:
     plugin = PLUGINS / "agent-worktrees"
     manifest = _json(plugin / "plugin.json")
     entries = _session_start_entries(plugin, manifest)
@@ -238,13 +238,25 @@ def test_agent_worktrees_side_effect_hooks_are_explicitly_context_free() -> None
         if isinstance(entry, dict)
         for platform in ("bash", "powershell")
     )
+    lifecycle_entries = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and all(
+            "hook_client.py" in str(entry.get(platform, ""))
+            for platform in ("bash", "powershell")
+        )
+    ]
+    assert len(lifecycle_entries) == 1
+    assert all(
+        "sessionStart" in str(lifecycle_entries[0].get(platform, ""))
+        for platform in ("bash", "powershell")
+    )
     for stem in ("register-session", "register-nudge", "marketplace-overrides"):
-        matching = [
+        assert not [
             line
             for line in commands.splitlines()
             if stem in line and "invoke-context-contributor" not in line
         ]
-        assert matching
-        assert all("--side-effect-only" in line for line in matching)
     assert "session-conduct" not in commands
     assert "session-machine" not in commands

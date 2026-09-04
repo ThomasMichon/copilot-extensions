@@ -125,12 +125,28 @@ installer. Know which kind you are changing.
    worktree, push `pr/<slug>`, and open the GitHub PR (the repo config has
    `auto_open: true`). If review feedback requires more commits in the same
    worktree, use `copilot-extensions push-changes` to update the PR head — never
-   push a worktree branch or `main` by hand.
-7. **Self-merge and finalize.** This repo's effective profile is
+   push a worktree branch or `main` by hand. Opening the PR is a progress
+   milestone, not a handoff or completion condition.
+7. **Steward the PR through self-merge and finalization.** This repo's effective profile is
    **`pr-self-merge`**: the GitHub ruleset blocks direct pushes and requests a
-   non-blocking Copilot review, but the submitter is authorized to merge. After
-   the PR is ready, run `copilot-extensions pr-merge <PR> --now` (or the same
-   verb through `agent-worktrees`) and then `copilot-extensions finalize`.
+   non-blocking Copilot review, but the submitter is authorized to merge.
+   The submitting agent remains responsible until the PR is merged and its
+   worktree is finalized:
+   - Assess Copilot comments as advisory findings; address valid ones and
+     explain or dismiss invalid ones. Never wait for Copilot to approve.
+   - Keep the branch current and mergeable. If `main` moves or conflicts appear,
+     reconcile with the supported worktree PR verbs, re-run the required gates,
+     and update the PR with `push-changes`.
+   - When provider checks are slow, use `pr-watch` or the agent-dispatch
+     hibernation waiter. Sleeping the worker is allowed; dropping ownership is
+     not.
+   - Run `copilot-extensions pr-merge <PR> --now`, verify the provider reports
+     the PR merged, then run `copilot-extensions finalize`.
+
+   **Hard completion gate:** an open PR, a posted review, green checks, or a
+   conflict-free branch is not completion. Stop only after merged + finalized,
+   or after recording a concrete terminal blocker/abandonment in the owning
+   task. This repository has no human-review handoff step.
 8. **Deploy with `<repo> update` — one unified command.** Merging only *primes*
    the change; deploy it on each target machine (over SSH for remotes) with the
    repo's update binstub: **`<repo> update`** (e.g. `agent-worktrees update`, <!-- marketplace-isolation: allow deployment-management -->
