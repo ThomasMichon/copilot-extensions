@@ -114,12 +114,24 @@ def _serve_connection(container: str, connection: socket.socket) -> None:
             process.terminate()
 
 
+def _recv_line(connection: socket.socket, *, limit: int = 16) -> bytes:
+    data = bytearray()
+    while len(data) < limit:
+        chunk = connection.recv(limit - len(data))
+        if not chunk:
+            break
+        data.extend(chunk)
+        if b"\n" in chunk:
+            break
+    return bytes(data)
+
+
 def _serve_control(listener: socket.socket) -> None:
     while True:
         connection, _address = listener.accept()
         with connection:
             try:
-                if connection.recv(16) == b"ping\n":
+                if _recv_line(connection) == b"ping\n":
                     connection.sendall(b"pong\n")
             except (ConnectionError, OSError):
                 pass
@@ -213,7 +225,7 @@ def _healthy_endpoint(endpoint: object, container: str, container_id: str) -> bo
             timeout=0.5,
         ) as connection:
             connection.sendall(b"ping\n")
-            return connection.recv(16) == b"pong\n"
+            return _recv_line(connection) == b"pong\n"
     except (KeyError, TypeError, ValueError, OSError):
         return False
 

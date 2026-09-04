@@ -140,6 +140,42 @@ def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):
     }
 
 
+def test_docker_broker_health_accepts_fragmented_control_response(monkeypatch):
+    class Connection:
+        def __init__(self):
+            self.responses = iter((b"po", b"ng\n"))
+            self.sent = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def sendall(self, data):
+            self.sent.append(data)
+
+        def recv(self, _size):
+            return next(self.responses)
+
+    connection = Connection()
+    monkeypatch.setattr(
+        docker_proxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+    endpoint = {
+        "schema_version": 1,
+        "container": "repo-1",
+        "container_id": "a" * 64,
+        "runtime": str(Path(docker_proxy.__file__).resolve()),
+        "control_port": 54321,
+    }
+
+    assert docker_proxy._healthy_endpoint(endpoint, "repo-1", "a" * 64)
+    assert connection.sent == [b"ping\n"]
+
+
 @pytest.mark.parametrize("container,user", [
     ("repo-1;whoami", "vscode"),
     ("repo-1", "vscode;whoami"),
