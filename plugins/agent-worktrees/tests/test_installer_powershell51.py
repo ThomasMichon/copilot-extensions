@@ -206,14 +206,16 @@ def test_application_path_resolves_winget_link_to_package_binary(
         pytest.skip("PowerShell is unavailable")
 
     local_appdata = tmp_path / "localappdata"
-    link = local_appdata / "Microsoft" / "WinGet" / "Links" / "uv.exe"
+    link = (
+        local_appdata / "Microsoft" / "WinGet" / "Links" / "uv[preview].exe"
+    )
     package = (
         local_appdata
         / "Microsoft"
         / "WinGet"
         / "Packages"
         / "example.uv_source"
-        / "uv.exe"
+        / "uv[preview].exe"
     )
     link.parent.mkdir(parents=True)
     package.parent.mkdir(parents=True)

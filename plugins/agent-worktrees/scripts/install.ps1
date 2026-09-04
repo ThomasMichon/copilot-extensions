@@ -864,10 +864,14 @@ function Resolve-WinGetPackageExecutable {
         return $null
     }
     $leaf = Split-Path -Leaf $Source
-    $matches = @(Get-ChildItem -LiteralPath $packagesRoot -Recurse -Filter $leaf `
+    $matches = @(Get-ChildItem -LiteralPath $packagesRoot -Recurse `
         -File -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.Length -gt 0 -and
+            [string]::Equals(
+                $_.Name,
+                $leaf,
+                [StringComparison]::OrdinalIgnoreCase
+            ) -and $_.Length -gt 0 -and
             -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
         } |
         Select-Object -First 2)
