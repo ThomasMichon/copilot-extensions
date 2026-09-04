@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from agent_ssh import host_restore
+
+PLUGIN = host_restore.Path(__file__).parents[1]
+INSTALL_HOST = (
+    PLUGIN / "transports" / "dtssh" / "scripts" / "install-host.ps1"
+)
+PWSH = shutil.which("pwsh")
+SSH_KEYGEN = shutil.which("ssh-keygen")
 
 
 def _setup(tmp_path, monkeypatch):
@@ -269,12 +282,102 @@ def test_login_preflight_uses_dtssh_sibling_devtunnel(tmp_path, monkeypatch):
 
 
 def test_dtssh_launcher_uses_stable_install_working_directory():
-    script = (
-        host_restore.Path(__file__).parents[1]
-        / "transports"
-        / "dtssh"
-        / "scripts"
-        / "install-host.ps1"
-    ).read_text(encoding="utf-8")
+    script = INSTALL_HOST.read_text(encoding="utf-8")
 
     assert "-WorkingDirectory $InstallDir" in script
+
+
+@pytest.mark.guard
+def test_dtssh_host_identity_is_synced_before_stop_and_after_start():
+    script = INSTALL_HOST.read_text(encoding="utf-8")
+    switch = script[script.index("switch ($Action)") :]
+    update = switch[switch.index("{ $_ -in @('install', 'update') }") :]
+
+    first_sync = update.index("Sync-DtsshHostIdentity")
+    stop_launcher = update.index("Stop-Launcher")
+    start_launcher = update.index("Start-HostLauncher")
+    wait_identity = update.index("Wait-DtsshHostIdentity")
+
+    assert "OneDriveCommercial" in script
+    assert "AGENT_SSH_DTSSH_HOST_KEY_BACKUP_ROOT" in script
+    assert first_sync < stop_launcher < start_launcher < wait_identity
+    assert "Assert-MatchingHostIdentity" in script
+    assert "Protect-PrivateKey" in script
+    assert "'start'" in script
+    assert '"`"$InstallerDst`""' in script
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or PWSH is None or SSH_KEYGEN is None,
+    reason="Windows PowerShell and ssh-keygen are required",
+)
+@pytest.mark.guard
+def test_dtssh_host_identity_round_trips_through_onedrive(tmp_path):
+    local_app_data = tmp_path / "local"
+    host_dir = local_app_data / "dtssh" / "host"
+    host_dir.mkdir(parents=True)
+    private_key = host_dir / "ssh_host_ed25519_key"
+    subprocess.run(
+        [
+            SSH_KEYGEN,
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-f",
+            str(private_key),
+        ],
+        check=True,
+        timeout=30,
+    )
+    expected_hash = private_key.read_bytes()
+
+    text = INSTALL_HOST.read_text(encoding="utf-8")
+    functions = text[
+        text.index("function Resolve-DurableHostIdentityRoot") :
+        text.index("function Add-UserPath")
+    ]
+    script = (
+        "$ErrorActionPreference='Stop';"
+        "$InstallDir=Join-Path $env:LOCALAPPDATA 'agent-ssh-dtssh';"
+        "$OpenSSHDir=Join-Path $env:LOCALAPPDATA 'OpenSSH-Win64';"
+        "$ValidationOpenSSHDir=Join-Path $InstallDir 'validation-OpenSSH';"
+        "$HostStateDir=Join-Path $env:LOCALAPPDATA 'dtssh\\host';"
+        "$HostKeyBackupRoot=$null;"
+        "$Alias='example-host';"
+        + functions
+        + "\nSync-DtsshHostIdentity;"
+        + "$backup=Get-HostIdentityDirectory;"
+        + "$backupCount=@(Get-ChildItem -LiteralPath $backup -File).Count;"
+        + "Remove-Item -LiteralPath "
+        + "(Join-Path $HostStateDir 'ssh_host_ed25519_key') -Force;"
+        + "Remove-Item -LiteralPath "
+        + "(Join-Path $HostStateDir 'ssh_host_ed25519_key.pub') -Force;"
+        + "Sync-DtsshHostIdentity;"
+        + "[pscustomobject]@{Backup=$backup;BackupCount=$backupCount;"
+        + "Restored=(Test-Path -LiteralPath "
+        + "(Join-Path $HostStateDir 'ssh_host_ed25519_key'))}"
+        + "|ConvertTo-Json -Compress"
+    )
+    env = os.environ.copy()
+    env["LOCALAPPDATA"] = str(local_app_data)
+    env["OneDriveCommercial"] = str(tmp_path / "OneDrive - Example")
+    os.makedirs(env["OneDriveCommercial"])
+    env.pop("AGENT_SSH_DTSSH_HOST_KEY_BACKUP_ROOT", None)
+
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.splitlines()[-1])
+    assert payload["BackupCount"] == 2
+    assert payload["Restored"] is True
+    assert ".agent-ssh" in payload["Backup"]
+    assert private_key.read_bytes() == expected_hash

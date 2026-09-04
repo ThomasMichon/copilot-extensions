@@ -36,6 +36,15 @@ interactive login disabled; authentication remains an external prerequisite
 and is never captured. Use `--json` for structured command, output, and result
 data.
 
+On Windows, the installer preserves the dtssh server host identity across
+updates before restarting the host. It automatically uses an available
+`OneDriveCommercial` folder for an alias-scoped durable backup, otherwise it
+uses a separate local backup outside dtssh's state directory. The
+`AGENT_SSH_DTSSH_HOST_KEY_BACKUP_ROOT` environment variable or the install
+script's `-HostKeyBackupRoot` parameter selects an explicit location. Partial,
+corrupt, or conflicting identities fail closed instead of silently rotating a
+key that clients have pinned.
+
 `mesh-status [--json]` is a fail-open view of a calling repository's
 `machines.yaml`. In addition to SSH readiness and environments, it shows the
 optional static machine metadata shared with agent-worktrees and agent-bridge:
