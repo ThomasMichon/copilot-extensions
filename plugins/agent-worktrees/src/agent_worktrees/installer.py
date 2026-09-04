@@ -693,8 +693,12 @@ def _is_legacy_project_binstub_for(text: str, project: str) -> bool:
     normalized = text.replace("\\", "/")
     has_project = bool(
         re.search(
-            rf"WORKTREE_PROJECT\s*=\s*[\"']?{escaped}(?=[\"'\s]|$)",
+            (
+                rf"^\s*(?:(?:set\s+)[\"']?|\$env:)?"
+                rf"WORKTREE_PROJECT\s*=\s*[\"']?{escaped}(?=[\"'\s]|$)"
+            ),
             text,
+            flags=re.IGNORECASE | re.MULTILINE,
         )
     )
     has_launcher = ".agent-worktrees/bin/launch-session." in normalized

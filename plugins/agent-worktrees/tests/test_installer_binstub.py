@@ -317,7 +317,7 @@ def test_reconcile_migrates_matching_legacy_unreceipted_stub(
                 "& 'C:\\payload\\bin\\payload\\agent-worktrees.ps1' "
                 "--project demo @args\n"
             )
-            target.write_text(legacy, encoding="utf-8")
+            target.write_text(legacy, encoding="utf-8", newline="")
     else:
         target = specs[0][0]
         target.write_text(
