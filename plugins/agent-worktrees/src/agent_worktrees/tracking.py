@@ -99,7 +99,7 @@ _MAX_HANDOFFS = 256
 _MAX_PROFILE_ASSIGNMENTS = 128
 _MAX_CONTROLLER_RELATIONS = 32
 MAX_PERSISTED_COUNTER = (1 << 63) - 1
-_DISPATCH_PROVENANCE_TEXT_MAX = 512
+DISPATCH_PROVENANCE_TEXT_MAX = 512
 
 
 def _bounded_nonnegative_int(value: object, *, field: str) -> int:
@@ -158,7 +158,7 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
     strings: dict[str, str] = {}
     for key in required - {"attempt", "ownership"}:
         raw = value.get(key)
-        if not isinstance(raw, str) or not raw or len(raw) > _DISPATCH_PROVENANCE_TEXT_MAX:
+        if not isinstance(raw, str) or not raw or len(raw) > DISPATCH_PROVENANCE_TEXT_MAX:
             return None
         strings[key] = raw
     try:

@@ -10241,12 +10241,12 @@ def cmd_create(args: argparse.Namespace) -> int:
             )
             if not isinstance(dispatch_fields[key], str)
             or not dispatch_fields[key]
-            or len(dispatch_fields[key]) > 512
+            or len(dispatch_fields[key]) > tracking.DISPATCH_PROVENANCE_TEXT_MAX
         ]
         if invalid:
             message = (
                 "dispatch allocation fields must be non-empty and at most "
-                f"512 characters: {', '.join(invalid)}"
+                f"{tracking.DISPATCH_PROVENANCE_TEXT_MAX} characters: {', '.join(invalid)}"
             )
             if args.json:
                 return _json_error(message)
