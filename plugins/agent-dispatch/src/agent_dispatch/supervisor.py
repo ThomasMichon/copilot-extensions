@@ -1554,6 +1554,7 @@ class Supervisor:
                 continue
             can_release = False
             conclusion_session: str | None = None
+            released_target_dir: str | None = None
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             if fleet is not None:
                 try:
@@ -1579,6 +1580,16 @@ class Supervisor:
                 if local_sid is not None:
                     retry_payload = self._conclusion_retry_payload(res)
                     recorded_acp = retry_payload.get("acp_session_id")
+                    try:
+                        target_dir = self.local_body_target_dir_fn(local_sid)
+                    except Exception:
+                        log.exception(
+                            "failed to resolve target directory for releasing "
+                            "cold session %s",
+                            local_sid,
+                        )
+                        target_dir = None
+                    released_target_dir = target_dir
                     try:
                         resolved_acp = self.local_acp_session_fn(local_sid)
                     except Exception:
@@ -1631,7 +1642,18 @@ class Supervisor:
                             can_release = False
             if not can_release:
                 continue
-            if res.get("conclusion_state") == _CONCLUSION_COMPLETE:
+            released_target_missing = (
+                _target_directory_missing(released_target_dir) is True
+                if released_target_dir is not None
+                else False
+            )
+            if released_target_missing:
+                outcome = {
+                    "action": "already-removed",
+                    "reason": "recorded-target-directory-missing",
+                }
+                conclusion_state = _CONCLUSION_COMPLETE
+            elif res.get("conclusion_state") == _CONCLUSION_COMPLETE:
                 outcome = self._conclusion_retry_payload(res) or {
                     "action": "already-removed",
                     "reason": "preconfirmed-before-release",
