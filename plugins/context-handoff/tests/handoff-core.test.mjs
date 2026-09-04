@@ -347,6 +347,23 @@ test("cutover preserves prompt receipt failure details", () => {
   });
 });
 
+test("cutover handles a null JSON result without masking the failure", () => {
+  const result = runHandoffCutover(
+    "/repo",
+    "continue",
+    "session-1",
+    (_bin, args) => args[0] === "session-binding"
+      ? JSON.stringify({ found: false, session_id: "session-1" })
+      : "null",
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "error",
+    error: null,
+  });
+});
+
 test("manual fallback clearly delimits the exact copyable seed", () => {
     const seed =
       "Task: Continue | Resume: /consume-handoff to take over | " +

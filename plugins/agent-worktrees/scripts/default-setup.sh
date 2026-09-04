@@ -29,6 +29,8 @@ MACHINE="${HOSTNAME:-}"
 if [[ -z "$MACHINE" ]]; then
     if [[ -x /bin/hostname ]]; then
         MACHINE=$(/bin/hostname)
+    elif [[ -x /usr/bin/hostname ]]; then
+        MACHINE=$(/usr/bin/hostname)
     else
         MACHINE="unknown"
     fi

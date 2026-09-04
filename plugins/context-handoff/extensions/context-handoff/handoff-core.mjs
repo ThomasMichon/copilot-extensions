@@ -1398,10 +1398,13 @@ export function runHandoffCutover(
     const result = JSON.parse(execute(
       "agent-worktrees", argv, { cwd, timeout: 20000 },
     ));
+    const details = result && typeof result === "object" && !Array.isArray(result)
+      ? result
+      : {};
     return result?.ok
       ? result
       : {
-          ...result,
+          ...details,
           ok: false,
           reason: "error",
           error: result?.error || null,
