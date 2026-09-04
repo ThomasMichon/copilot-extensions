@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,6 +68,24 @@ def test_empty_controller_model_preserves_legacy_bytes(tmp_path: Path) -> None:
     assert loaded.controllers == []
     assert b"controller" not in before
     assert record.resolved_head_session is None
+
+
+def test_controller_findings_skips_control_plane_pr_overlay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = {}
+
+    def load_config(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(machine="host")
+
+    monkeypatch.setattr(controller_lineage.cfg, "load_config", load_config)
+
+    assert controller_lineage.controller_findings(
+        _record(tmp_path, "child")
+    ) == []
+    assert seen == {"include_control_plane_related_pr": False}
 
 
 def test_legacy_creation_metadata_stays_read_only_until_explicit_backfill(
