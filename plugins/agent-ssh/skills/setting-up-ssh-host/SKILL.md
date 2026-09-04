@@ -43,6 +43,17 @@ no-admin Win32-OpenSSH `sshd` when needed, prompts `dtssh login` if the
 Dev Tunnel account is not signed in (unless `-SkipLogin`), installs the hidden
 Startup-folder launcher, and starts it unless `-NoStart`.
 
+The installer also preserves the dedicated SSH server host identity before any
+update and restores it before relaunch. When `OneDriveCommercial` points at an
+available OneDrive for Business folder, the key pair is backed up under its
+machine-alias-scoped `.agent-ssh\dtssh-host-identities` directory. Otherwise a
+separate local backup under `%LOCALAPPDATA%\agent-ssh-dtssh` prevents dtssh state
+recreation from silently rotating the key. Set
+`AGENT_SSH_DTSSH_HOST_KEY_BACKUP_ROOT` or pass `-HostKeyBackupRoot` to select an
+explicit durable location. Existing local keys seed an empty backup; a valid
+backup restores missing local keys; mismatched or partial identities fail closed
+before the running host is stopped.
+
 ### AV / Defender caveat
 
 Scripts that download and install networking binaries are sometimes flagged as
