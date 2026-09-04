@@ -150,6 +150,14 @@ def _candidate_key(candidate: _SettingCandidate) -> tuple[str, str, str]:
     )
 
 
+def _semantic_key(value: Any) -> tuple[str, str]:
+    """Compare JSON-shaped settings independently of mapping insertion order."""
+    return (
+        type(value).__name__,
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+    )
+
+
 def _authority_resolution(
     path: tuple[str, ...],
     candidates: list[_SettingCandidate],
@@ -160,10 +168,7 @@ def _authority_resolution(
         [candidate for candidate in candidates if candidate.authority == highest],
         key=_candidate_key,
     )
-    values = {
-        (type(semantic_value(candidate)).__name__, repr(semantic_value(candidate)))
-        for candidate in selected
-    }
+    values = {_semantic_key(semantic_value(candidate)) for candidate in selected}
     if len(values) > 1:
         return selected, [], True
     selected_value = next(iter(values))
@@ -172,10 +177,7 @@ def _authority_resolution(
             candidate
             for candidate in candidates
             if candidate.authority < highest
-            and (
-                type(semantic_value(candidate)).__name__,
-                repr(semantic_value(candidate)),
-            ) != selected_value
+            and _semantic_key(semantic_value(candidate)) != selected_value
         ],
         key=_candidate_key,
     )

@@ -419,6 +419,28 @@ def test_authority_does_not_reorder_ensure_present_settings(tmp_path):
     )
 
 
+def test_equal_authority_collection_comparison_ignores_mapping_order(tmp_path):
+    first = _settings_package(
+        tmp_path,
+        "first",
+        "example/first",
+        10,
+        {"tabs": [{"name": "sessions", "enabled": True}]},
+    )
+    second = _settings_package(
+        tmp_path,
+        "second",
+        "example/second",
+        10,
+        {"tabs": [{"enabled": True, "name": "sessions"}]},
+    )
+
+    findings = validate([first, second])
+
+    assert not has_errors(findings)
+    assert not any(finding.code == "authority-supersession" for finding in findings)
+
+
 def test_direct_restore_refuses_settings_conflict_before_mutation(tmp_path):
     first = _settings_package(
         tmp_path, "a", "example/a", 0, {"model": "first"}
