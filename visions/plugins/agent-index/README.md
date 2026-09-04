@@ -7,7 +7,7 @@
 - **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
   the [plugin-services](../../plugin-services/README.md) service model)
 - **Status:** Draft
-- **Last revised:** 2026-07-29
+- **Last revised:** 2026-09-04
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's future `plugins/agent-index/docs/`
 
@@ -183,20 +183,29 @@ tracks is the repo's **canonical default branch as fetched from its remote** (th
 pushed/merged state the team shares) — not a local working tree that may sit on a
 feature branch, carry uncommitted edits, or lag `origin`. Freshness means the
 index reflects what has actually landed on the mainline, fetched fresh before it
-reindexes. (A purely local repo with no remote still indexes cleanly from its
-local history — the remote is the *default* source of truth, not a requirement.)
+reindexes. (A configured local-only repo that has opted into hosting still
+indexes cleanly from its local history — the remote is the *default* source of
+truth, not a requirement.)
 
-### self-contained-service
-agent-index is a complete, standalone plugin: a user installs it and it works on
-its own, with no sibling plugin, shared broker, or hand-wired infrastructure
-assumed. It honors the suite's [plugin-services](../../plugin-services/README.md)
-model — self-contained runtime, discoverable local endpoint, platform-native
-lifecycle, à-la-carte install. The plugin provisions **both** of its runtimes
-itself — the light, versioned service and the durable engine — as **platform-native
-lifecycles**, so nothing is hand-wired per host. **Which role a machine takes** —
-hosting the engine versus only consuming search — is resolved from
-**configuration** (machine-local, or a source repo's own `.agent-index` config),
-never a machine list baked into the plugin.
+### lightweight-client-and-declared-host-service
+Formerly `self-contained-service`.
+
+agent-index stays lightweight on every machine unless repository-scoped
+configuration explicitly opts into search and designates a host role. Client
+routing and configuration resolution carry no host store or model dependencies.
+Without effective configuration the plugin is inert; without a reachable or
+locally supervised host runtime the search capability is honestly unavailable.
+
+The hosted service uses the suite's
+[plugin-services](../../plugin-services/README.md)
+`delegated-heavy-companion-runtime` boundary. agent-index contributes attributed
+declarative runtime inputs and lifecycle adapters, while the already-running
+dispatch supervisor alone installs, updates, rolls back, and retires the
+versioned service dependencies. Agent-facing commands and ordinary direct CLI
+calls never provision the host runtime. **Which role a machine takes** — hosting
+the engine versus only consuming search — is resolved from **configuration**
+(machine-local, or a source repo's own `.agent-index` config), never a machine
+list baked into the plugin.
 
 ### reusable-engine-extension-seam
 The connector interface and query API are a **stable extension surface**: a
@@ -398,16 +407,18 @@ generic is what lets many different products reuse it.
 - **2026-08-03** — Extended **The embedding engine** into a **durable, persistent,
   warm runtime decoupled from the versioned service** (the same durable-vs-versioned
   split as the index & store), added the **warm-durable-engine** behavior, and
-  sharpened **self-contained-service** / **local-first-standalone**: the model
-  stack is expensive, so it is provisioned **only where indexing is hosted** and
-  outside the swappable runtime — a routine service cutover **never rebuilds the
-  model stack or restarts the warm engine**; **all embedding (index + query)** is
-  served by that one engine so the service runtime stays light and model-free; a
-  search-only consumer carries **no model stack** and reaches the host over the
-  trusted transport; and a machine's **role** (engine host vs consumer) is resolved
-  from **configuration** (machine-local or a source repo's `.agent-index`), never a
+  sharpened the then-current **self-contained-service** /
+  **local-first-standalone** intent: the model stack is expensive, so it is
+  provisioned **only where indexing is hosted** and outside the swappable runtime
+  — a routine service cutover **never rebuilds the model stack or restarts the
+  warm engine**; **all embedding (index + query)** is served by that one engine
+  so the service runtime stays light and model-free; a search-only consumer
+  carries **no model stack** and reaches the host over the trusted transport; and
+  a machine's **role** (engine host vs consumer) is resolved from
+  **configuration** (machine-local or a source repo's `.agent-index`), never a
   machine list baked into the plugin. Mined from an operator directive that torch
-  belongs only on the indexing host, as a persistent daemon (a session-host  analogue) that survives plugin updates. Drives the `agent-index-engine-daemon`
+  belongs only on the indexing host, as a persistent daemon (a session-host
+  analogue) that survives plugin updates. Drives the `agent-index-engine-daemon`
   effort; `dev16`'s configurable engine-separation modes are the foundation.
 
 - **2026-08-03** — Added **adoption-designates-one-indexer** and
@@ -440,3 +451,13 @@ generic is what lets many different products reuse it.
   `indexer:` block and a lone `endpoint:` still work). Realized in config
   (`indexers:` list, `read_indexers`, ordered-failover `client_url`), adoption
   (`setup` resolves role/routing from an authored list), and tests.
+
+- **2026-09-04** — Replaced **self-contained-service** with
+  **lightweight-client-and-declared-host-service**. Repository-scoped
+  configuration remains the opt-in and role authority, but heavyweight host
+  service dependencies move behind the shared
+  `delegated-heavy-companion-runtime` boundary: agent-index declares inputs and
+  lifecycle adapters, while the running dispatch supervisor alone provisions
+  and selects immutable service runtimes. Direct plugin commands cannot install
+  the host stack, and missing configuration or supervision remains inert rather
+  than triggering a fallback installer.
