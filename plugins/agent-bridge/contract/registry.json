@@ -74,7 +74,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "024b306e8cb82a486560feae9e770fad4dbbda9cc152a901bf266ac8ba7a1fc5",
+          "sha256": "36b93ef8f9f946e0f691b90ca2d94ff0cdc70b8be1fca20fa6fa69d6b4f31003",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -148,7 +148,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
-          "sha256": "8bd623105d686297fec847ee50c4b6db49113e754fafe477f5f4625e752a20bc",
+          "sha256": "5fd49331fbb02c0e7f9d8e7115f5742652aace6d99a183bfab8e3d1384dd0655",
           "role": "current carrier-backed remote command request and response",
           "generation": 14
         }
@@ -163,11 +163,11 @@
           "capture_method": "Read production constants and serialize representative models from this exact source revision."
         },
         {
-          "commit": "154f7ceabe7e4b3ac5029d9b410d9349c7ab9d1d",
+          "commit": "87005812ea3010c6195cae9a48f5593bb86ea5c7",
           "plugin_version": "0.4.0-dev433",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "source_git_blob": "598dd52ff55a442540d934f79712857fe6a61e8b",
+          "source_git_blob": "8d3442fb7c93d5de0a8234ac2d6c66fef53174d8",
           "capture_method": "Serialize the reviewed carrier-backed remote command request and response surface."
         },
         {

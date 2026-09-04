@@ -338,6 +338,10 @@ transport foundation #1763 requires.
   enrichment made it redundant. The generation-14 fixtures now cite the durable
   public PR parent commit rather than an unreachable local checkpoint, so the
   contract registry validates in GitHub's PR checkout.
+- Final review normalized malformed/non-object health responses through the
+  adapter's operation-error boundary and replaced the remote end
+  `DELETE`-with-body shape with an explicit `POST .../end` command endpoint.
+  Contract evidence cites the dedicated HTTP-boundary commit.
 
 ### 2026-09-04 — Agent Dispatch event wake
 
