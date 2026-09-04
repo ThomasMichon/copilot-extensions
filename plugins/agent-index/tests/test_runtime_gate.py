@@ -334,6 +334,27 @@ def _fake_runtime(
     return interpreter
 
 
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_dispatch_companion_mode_is_non_provisioning(
+    tmp_path: Path, shell: str
+) -> None:
+    script, environment = _fixture(tmp_path, shell)
+
+    result = _run(
+        shell,
+        script,
+        environment,
+        "__dispatch-companion-mode",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "schema_version": 1,
+        "supported": True,
+        "mode": "legacy",
+    }
+
+
 def _real_setup_runtime(
     tmp_path: Path,
     runtime_root: Path,

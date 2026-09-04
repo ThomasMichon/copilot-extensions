@@ -374,6 +374,18 @@ function Get-ManagementPython {
     return $null
 }
 
+if ($Command -ceq '__dispatch-companion-mode') {
+    [ordered]@{
+        schema_version = 1
+        supported = (
+            $ActualMode -ceq 'legacy' -and
+            $DesiredMode -ceq 'legacy'
+        )
+        mode = $ActualMode
+    } | ConvertTo-Json -Compress
+    exit 0
+}
+
 if (
     $ActualMode -ceq 'namespaced' -and
     $Command -ceq 'engine' -and
