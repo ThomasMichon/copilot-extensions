@@ -121,6 +121,7 @@ def test_runtime_config_honors_cell_local_state_and_routing(
     monkeypatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "plugin"))
+    monkeypatch.delenv("AGENT_INDEX_DATA_DIR", raising=False)
     monkeypatch.setenv("AGENT_INDEX_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("AGENT_INDEX_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("AGENT_INDEX_CONFIG_ROOT", str(tmp_path / "config"))

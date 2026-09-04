@@ -13,6 +13,12 @@
         "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if ($r) { try { [IO.Directory]::SetCurrentDirectory($env:USERPROFILE) } catch {}; $w = Join-Path (Join-Path $r 'scripts') 'invoke-context-contributor.ps1'; if (Test-Path -LiteralPath $w -PathType Leaf) { & $w 'agent-index@copilot-extensions' 'scope-binding' 'scripts/emit-scope-binding.ps1' } else { [Console]::Out.Write('{}') } } else { [Console]::Out.Write('{}') }",
         "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}\"; w=\"$r/scripts/invoke-context-contributor.sh\"; if [ -n \"$r\" ] && [ -f \"$w\" ]; then bash \"$w\" agent-index@copilot-extensions scope-binding scripts/emit-scope-binding.sh; else printf '{}'; fi",
         "timeoutSec": 30
+      },
+      {
+        "type": "command",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; $s = if ($r) { Join-Path (Join-Path $r 'scripts') 'register-dispatch-companion.ps1' } else { $null }; if ($s -and (Test-Path -LiteralPath $s -PathType Leaf)) { & $s }; [Console]::Out.Write('{}')",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}\"; s=\"$r/scripts/register-dispatch-companion.sh\"; if [ -n \"$r\" ] && [ -f \"$s\" ]; then bash \"$s\"; fi; printf '{}'",
+        "timeoutSec": 10
       }
     ]
   }

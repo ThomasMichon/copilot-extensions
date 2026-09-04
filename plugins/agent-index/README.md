@@ -26,8 +26,18 @@ to search from the sessionStart scope-binding hook's `additionalContext`.
 runs through a durable engine daemon at `127.0.0.1:8421` unless an operator opts
 into another engine mode.
 - **Safe activation**: session-start contributes the command catalog and scope
-binding only when one effective repository configuration is active. It never
-stamps a runtime, installs packages, or starts a service.
+binding only when one effective repository configuration is active. It also
+publishes an attributed, inert `agent-dispatch` companion candidate. The
+session hook never stamps a runtime, installs packages, or starts a service.
+- **Declarative host lifecycle**: when `agent-dispatch` is running, the
+companion provider activates only for an enabled project whose effective
+repository or required-state-root config designates this machine as an
+indexer. It runs only a previously installed runtime with self-provisioning
+forcibly disabled. Client, unconfigured, globally enabled without a project,
+and malformed-config scopes remain inactive. The first integration supervises
+the legacy installed-runtime layout; namespaced installation cells keep their
+existing transaction-owned lifecycle and are never stopped during companion
+admission.
 
 ## Minimal setup
 
@@ -36,8 +46,8 @@ stamps a runtime, installs packages, or starts a service.
 contain an `indexer`/`indexers` designation or at least one `corpus.sources`
 entry. A malformed, unsafe, ambiguous, or empty config is inactive.
 3. Start a new Copilot session. The command catalog and scope guidance appear
-only for an active config. Session start performs no runtime provisioning or
-service startup.
+only for an active config. Session start publishes the companion candidate but
+performs no runtime provisioning or service startup itself.
 4. Pick a role explicitly:
    - single-machine/local indexer: `agent-index setup --single`
    - remote indexer: run `agent-index setup --indexer <machine> --ssh <alias>`
@@ -50,8 +60,10 @@ reconciles the role-specific runtime/service. Provisioning emits
 
 A machine whose resolved role is `client` runs no local indexer daemon. A host
 runs the local service and, when provisioned, the durable engine daemon.
-Provisioning is command-driven after opt-in; no session-start path downloads
-dependencies or starts a daemon.
+Provisioning is command-driven after opt-in; the dispatch companion never
+downloads, installs, or updates dependencies. On first supervision it
+ownership-checks and stops an older service instance before starting the
+already-ready runtime in the generic companion containment boundary.
 
 The installer exposes explicit installation-context actions for disposable
 installation-cell validation:

@@ -1,0 +1,25 @@
+{
+  "name": "agent-index-service",
+  "kind": "plugin-companion",
+  "spec": {
+    "command": [
+      "scripts/companion-service.py",
+      "start"
+    ],
+    "stop_command": [
+      "scripts/companion-service.py",
+      "stop"
+    ],
+    "config_provider": [
+      "scripts/companion-provider.py"
+    ],
+    "health_probe": [
+      "scripts/companion-service.py",
+      "health"
+    ],
+    "config_timeout_seconds": 45,
+    "health_timeout_seconds": 10,
+    "startup_timeout_seconds": 30,
+    "stop_timeout_seconds": 15
+  }
+}

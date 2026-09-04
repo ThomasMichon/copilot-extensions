@@ -297,6 +297,16 @@ _find_management_python() {
     return 1
 }
 
+if [ "$COMMAND" = __dispatch-companion-mode ]; then
+    supported=false
+    if [ "$ACTUAL_MODE" = legacy ] && [ "$DESIRED_MODE" = legacy ]; then
+        supported=true
+    fi
+    printf '{"mode":"%s","schema_version":1,"supported":%s}\n' \
+        "$ACTUAL_MODE" "$supported"
+    exit 0
+fi
+
 if [ "$ACTUAL_MODE" = namespaced ] &&
    [ "$COMMAND" = engine ] &&
    { [ "${2:-status}" = start ] || [ "${2:-status}" = run ]; }; then
