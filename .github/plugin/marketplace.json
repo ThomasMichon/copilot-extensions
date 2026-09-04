@@ -24,13 +24,13 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev112",
+      "version": "0.4.0-dev113",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev115",
+      "version": "0.1.2-dev116",
       "source": "plugins/agent-containers"
     },
     {
