@@ -49,6 +49,79 @@ def _seed_session(app, sid="sess-1", events=None):
     return mgr
 
 
+def test_controlled_stream_pins_preflight_continuity(
+    client, app, monkeypatch
+) -> None:
+    from agent_bridge.events import EventLog
+
+    mgr = _seed_session(app)
+    session = mgr.get_session("sess-1")
+    session.event_log = EventLog(db=mgr.db, session_id="sess-1")
+    session.event_log.append("agent_message", {"text": "one"})
+    captured = {}
+
+    async def fake_stream(
+        _session,
+        _start,
+        *,
+        expected_continuity_id,
+        **_kwargs,
+    ):
+        captured["continuity_id"] = expected_continuity_id
+        if False:
+            yield ""
+
+    monkeypatch.setattr(
+        "agent_bridge.routes.sessions._sse_event_stream", fake_stream
+    )
+
+    with client.stream(
+        "GET",
+        "/api/v1/sessions/sess-1/events",
+        params={"caller_id": "consumer-a", "controlled": True},
+    ) as response:
+        list(response.iter_text())
+
+    assert captured["continuity_id"] == session.event_log.continuity_id
+
+
+def test_controlled_stream_allows_continuity_guarded_transient_resume(
+    client, app, monkeypatch
+) -> None:
+    from agent_bridge.events import EventLog
+
+    mgr = _seed_session(app)
+    session = mgr.get_session("sess-1")
+    session.event_log = EventLog(db=mgr.db, session_id="sess-1")
+    session.event_log.append("agent_message", {"text": "one"})
+    captured = {}
+
+    async def fake_stream(_session, start, **_kwargs):
+        captured["start"] = start
+        if False:
+            yield ""
+
+    monkeypatch.setattr(
+        "agent_bridge.routes.sessions._sse_event_stream", fake_stream
+    )
+
+    with client.stream(
+        "GET",
+        "/api/v1/sessions/sess-1/events",
+        params={
+            "caller_id": "consumer-a",
+            "controlled": True,
+            "after": 1,
+            "continuity_id": session.event_log.continuity_id,
+            "transient": True,
+        },
+    ) as response:
+        list(response.iter_text())
+
+    assert response.status_code == 200
+    assert captured["start"] == 1
+
+
 class TestCursorEndpoints:
     def test_get_cursor_defaults_zero(self, client, app) -> None:
         _seed_session(app)
@@ -108,6 +181,100 @@ class TestCursorEndpoints:
         _seed_session(app)
         resp = client.get("/api/v1/sessions/sess-1/cursor", params={"caller_id": "a"})
         assert resp.json()["head_id"] == 0
+
+    def test_cursor_reports_continuity_and_invalidation(
+        self, client, app
+    ) -> None:
+        from agent_bridge.events import EventLog
+
+        mgr = _seed_session(app)
+        session = mgr._sessions["sess-1"]
+        session.event_log = EventLog(db=mgr.db, session_id="sess-1")
+        session.event_log.append("agent_message", {"text": "before"})
+        mgr.db.flush()
+        client.post(
+            "/api/v1/sessions/sess-1/cursor",
+            json={"caller_id": "consumer-a", "last_id": 1},
+        )
+        prior = session.event_log.continuity_id
+
+        session.event_log.rebuild([("agent_message", {"text": "after"})])
+
+        response = client.get(
+            "/api/v1/sessions/sess-1/cursor",
+            params={"caller_id": "consumer-a"},
+        )
+        body = response.json()
+        assert body["continuity_id"] != prior
+        assert body["invalidation"]["prior_last_acked_id"] == 1
+        assert body["invalidation"]["prior_continuity_id"] == prior
+
+    def test_ack_rejects_replaced_continuity(self, client, app) -> None:
+        from agent_bridge.events import EventLog
+
+        mgr = _seed_session(app)
+        session = mgr._sessions["sess-1"]
+        session.event_log = EventLog(db=mgr.db, session_id="sess-1")
+        session.event_log.append("agent_message", {"text": "one"})
+
+        response = client.post(
+            "/api/v1/sessions/sess-1/cursor",
+            json={
+                "caller_id": "consumer-a",
+                "last_id": 1,
+                "continuity_id": "stale-continuity",
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "cursor_invalidated"
+
+    def test_legacy_ack_without_continuity_survives_rebuild(
+        self, client, app
+    ) -> None:
+        from agent_bridge.events import EventLog
+
+        mgr = _seed_session(app)
+        session = mgr.get_session("sess-1")
+        session.event_log = EventLog(db=mgr.db, session_id="sess-1")
+        session.event_log.append("agent_message", {"text": "before"})
+        client.post(
+            "/api/v1/sessions/sess-1/cursor",
+            json={"caller_id": "legacy", "last_id": 1},
+        )
+        session.event_log.rebuild(
+            [("agent_message", {"text": "replacement"})]
+        )
+
+        response = client.post(
+            "/api/v1/sessions/sess-1/cursor",
+            json={"caller_id": "legacy", "last_id": 1},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["last_acked_id"] == 1
+
+    def test_controlled_stream_rejects_invalidated_cursor(
+        self, client, app
+    ) -> None:
+        from agent_bridge.events import EventLog
+
+        mgr = _seed_session(app)
+        session = mgr._sessions["sess-1"]
+        session.event_log = EventLog(db=mgr.db, session_id="sess-1")
+        session.event_log.append("agent_message", {"text": "before"})
+        mgr.db.set_cursor("consumer-a", "sess-1", 1, time.time())
+        session.event_log.rebuild([("agent_message", {"text": "after"})])
+
+        response = client.get(
+            "/api/v1/sessions/sess-1/events",
+            params={"caller_id": "consumer-a", "controlled": "true"},
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["code"] == "cursor_invalidated"
+        assert detail["action"] == "full_reconcile"
 
 
 class TestRangeEndpoint:

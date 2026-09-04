@@ -261,6 +261,7 @@ class CursorAckRequest(BaseModel):
 
     caller_id: str | None = None
     last_id: int = Field(ge=0)
+    continuity_id: str | None = Field(default=None, max_length=128)
 
 
 # -- API responses -----------------------------------------------------------
@@ -642,6 +643,9 @@ class CursorInfo(BaseModel):
     caller_id: str | None = None
     last_acked_id: int = 0
     head_id: int = 0
+    continuity_id: str | None = None
+    cursor_registered: bool = False
+    invalidation: dict[str, Any] | None = None
     """The session's current max event id (the live head). Lets a caller tell
     whether it is behind unseen history without reading the whole backlog."""
 

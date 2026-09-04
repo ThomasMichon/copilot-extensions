@@ -171,7 +171,31 @@ def _tool_progress_sse(active: dict, now: float) -> str:
     return f": tool_progress {payload}\n\n"
 
 
-async def _sse_event_stream(session, start, *, server, is_disconnected, mgr=None):  # noqa: ANN001
+def _control_sse(code: str, message: str, **details: Any) -> str:
+    """Frame a cursor-neutral subscription control signal."""
+    payload = {
+        "code": code,
+        "message": message,
+        "action": "full_reconcile",
+        **details,
+    }
+    return (
+        "event: bridge_control\n"
+        f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+    )
+
+
+async def _sse_event_stream(  # noqa: ANN001
+    session,
+    start,
+    *,
+    server,
+    is_disconnected,
+    mgr=None,
+    signal_gaps: bool = False,
+    expected_continuity_id: str | None = None,
+    heartbeat_interval: float = 30.0,
+):
     """The SSE event generator for ``GET /{id}/events`` (extracted for testing).
 
     Streams durable events past ``start``; on each quiet ``wait_for_events``
@@ -190,6 +214,23 @@ async def _sse_event_stream(session, start, *, server, is_disconnected, mgr=None
     on shutdown, client disconnect, or generator close.
     """
     cursor = start
+    continuity_id = (
+        getattr(session.event_log, "continuity_id", None)
+        if signal_gaps
+        else None
+    )
+    if (
+        signal_gaps
+        and expected_continuity_id is not None
+        and expected_continuity_id != continuity_id
+    ):
+        yield _control_sse(
+            "cursor_invalidated",
+            "the authoritative event log continuity changed",
+            prior_continuity_id=expected_continuity_id,
+            continuity_id=continuity_id,
+        )
+        return
 
     if mgr is not None:
         mgr.add_subscriber(session.session_id)
@@ -210,8 +251,19 @@ async def _sse_event_stream(session, start, *, server, is_disconnected, mgr=None
         while True:
             if await _closing():
                 return
-            wait_task = asyncio.ensure_future(
-                session.event_log.wait_for_events(cursor, timeout=30.0))
+            wait_snapshot = getattr(
+                session.event_log, "wait_for_events_snapshot", None
+            )
+            if callable(wait_snapshot):
+                wait_task = asyncio.ensure_future(
+                    wait_snapshot(cursor, timeout=heartbeat_interval)
+                )
+            else:
+                wait_task = asyncio.ensure_future(
+                    session.event_log.wait_for_events(
+                        cursor, timeout=heartbeat_interval
+                    )
+                )
             while True:
                 done, _pending = await asyncio.wait({wait_task}, timeout=0.5)
                 if done:
@@ -221,14 +273,70 @@ async def _sse_event_stream(session, start, *, server, is_disconnected, mgr=None
                     with contextlib.suppress(BaseException):
                         await wait_task
                     return
-            events = wait_task.result()
+            wait_result = wait_task.result()
+            if (
+                isinstance(wait_result, tuple)
+                and len(wait_result) == 2
+            ):
+                current_continuity_id, events = wait_result
+            else:
+                events = wait_result
+                current_continuity_id = (
+                    getattr(session.event_log, "continuity_id", None)
+                    if signal_gaps
+                    else None
+                )
+            if signal_gaps and current_continuity_id != continuity_id:
+                if continuity_id is None and cursor == 0 and events:
+                    continuity_id = current_continuity_id
+                else:
+                    yield _control_sse(
+                        "cursor_invalidated",
+                        "the authoritative event log was rebuilt",
+                        prior_continuity_id=continuity_id,
+                        continuity_id=current_continuity_id,
+                    )
+                    return
             if events:
+                if signal_gaps and events[0].id != cursor + 1:
+                    yield _control_sse(
+                        "replay_gap",
+                        "the authoritative event stream is not contiguous",
+                        after=cursor,
+                        next_event_id=events[0].id,
+                        continuity_id=continuity_id,
+                    )
+                    return
                 for evt in events:
-                    data = json.dumps({
+                    if signal_gaps:
+                        current_continuity_id = getattr(
+                            session.event_log, "continuity_id", None
+                        )
+                        if current_continuity_id != continuity_id:
+                            yield _control_sse(
+                                "cursor_invalidated",
+                                "the authoritative event log was rebuilt",
+                                prior_continuity_id=continuity_id,
+                                continuity_id=current_continuity_id,
+                            )
+                            return
+                        if evt.id != cursor + 1:
+                            yield _control_sse(
+                                "replay_gap",
+                                "the authoritative event stream is not contiguous",
+                                after=cursor,
+                                next_event_id=evt.id,
+                                continuity_id=continuity_id,
+                            )
+                            return
+                    event_payload = {
                         "event": evt.event,
                         "data": evt.data,
                         "timestamp": evt.timestamp,
-                    })
+                    }
+                    if signal_gaps:
+                        event_payload["continuity_id"] = continuity_id
+                    data = json.dumps(event_payload)
                     yield f"id: {evt.id}\nevent: {evt.event}\ndata: {data}\n\n"
                     cursor = evt.id
                 continue
@@ -1038,6 +1146,9 @@ async def get_events(
     request: Request,
     after: int | None = None,
     caller_id: str | None = None,
+    controlled: bool = False,
+    continuity_id: str | None = Query(default=None, max_length=128),
+    transient: bool = False,
 ):
     """SSE event stream with durable event IDs.
 
@@ -1062,16 +1173,106 @@ async def get_events(
     if not session.event_log:
         raise HTTPException(status_code=500, detail="No event log for session")
 
+    cursor_state = None
+    current_continuity_id = None
+    if controlled:
+        if not caller_id:
+            raise HTTPException(
+                status_code=422,
+                detail="controlled event delivery requires caller_id",
+            )
+        if transient and (after is None or continuity_id is None):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "transient controlled resume requires after and continuity_id"
+                ),
+            )
+        cursor_state = mgr.db.get_controlled_cursor_state(
+            _cursor_key(caller_id), session_id
+        )
+        invalidation = cursor_state.get("invalidation")
+        if invalidation:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "cursor_invalidated",
+                    "message": "the caller cursor was invalidated by an event-log rebuild",
+                    "action": "full_reconcile",
+                    **invalidation,
+                },
+            )
+        current_continuity_id = cursor_state["continuity_id"]
+        if (
+            continuity_id is not None
+            and continuity_id != current_continuity_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "cursor_invalidated",
+                    "message": "the authoritative event log continuity changed",
+                    "action": "full_reconcile",
+                    "prior_continuity_id": continuity_id,
+                    "continuity_id": current_continuity_id,
+                },
+            )
+
     if after is None:
-        start = mgr.db.get_cursor(_cursor_key(caller_id), session_id)
+        start = (
+            cursor_state["last_acked_id"]
+            if cursor_state is not None
+            else mgr.db.get_cursor(_cursor_key(caller_id), session_id)
+        )
     else:
         start = after
+    if controlled:
+        durable_cursor = int(cursor_state["last_acked_id"])
+        transient_resume = (
+            transient
+            and after is not None
+            and after >= durable_cursor
+            and continuity_id == current_continuity_id
+        )
+        if after is not None and after != durable_cursor and not transient_resume:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "cursor_mismatch",
+                    "message": "the requested start does not match the durable caller cursor",
+                    "action": "full_reconcile",
+                    "requested_after": after,
+                    "last_acked_id": durable_cursor,
+                },
+            )
+        head_id = int(cursor_state["head_id"])
+        if start > head_id:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "replay_gap",
+                    "message": "the durable caller cursor is beyond the authoritative event head",
+                    "action": "full_reconcile",
+                    "last_acked_id": start,
+                    "head_id": head_id,
+                },
+            )
+        mgr.db.ensure_cursor(
+            _cursor_key(caller_id), session_id, time.time()
+        )
 
     server = getattr(request.app.state, "uvicorn_server", None)
     return StreamingResponse(
         _sse_event_stream(session, start, server=server,
                           is_disconnected=getattr(request, "is_disconnected", None),
-                          mgr=mgr),
+                          mgr=mgr,
+                          signal_gaps=controlled,
+                          expected_continuity_id=(
+                              current_continuity_id
+                              if controlled
+                              else continuity_id
+                          ),
+                          heartbeat_interval=5.0 if controlled else 30.0),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1117,10 +1318,17 @@ async def get_cursor(session_id: str, request: Request, caller_id: str | None = 
     session = mgr.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    last = mgr.db.get_cursor(_cursor_key(caller_id), session_id)
+    state = mgr.db.get_controlled_cursor_state(
+        _cursor_key(caller_id), session_id
+    )
     return CursorInfo(
-        session_id=session_id, caller_id=caller_id, last_acked_id=last,
-        head_id=mgr.db.get_max_event_id(session_id),
+        session_id=session_id,
+        caller_id=caller_id,
+        last_acked_id=state["last_acked_id"],
+        head_id=state["head_id"],
+        continuity_id=state["continuity_id"],
+        cursor_registered=state["registered"],
+        invalidation=state["invalidation"],
     )
 
 
@@ -1137,11 +1345,59 @@ async def ack_cursor(
     session = mgr.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    effective = mgr.db.set_cursor(
-        _cursor_key(req.caller_id), session_id, req.last_id, time.time()
+    if req.continuity_id is None:
+        effective = mgr.db.set_cursor(
+            _cursor_key(req.caller_id),
+            session_id,
+            req.last_id,
+            time.time(),
+        )
+        state = mgr.db.get_controlled_cursor_state(
+            _cursor_key(req.caller_id), session_id
+        )
+        return CursorInfo(
+            session_id=session_id,
+            caller_id=req.caller_id,
+            last_acked_id=effective,
+            head_id=state["head_id"],
+            continuity_id=state["continuity_id"],
+            cursor_registered=True,
+            invalidation=state["invalidation"],
+        )
+
+    result = mgr.db.acknowledge_controlled_cursor(
+        _cursor_key(req.caller_id),
+        session_id,
+        req.last_id,
+        time.time(),
+        continuity_id=req.continuity_id,
     )
+    if not result["accepted"]:
+        code = result["code"]
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": code,
+                "message": (
+                    "the acknowledgement names a replaced event log"
+                    if code == "cursor_invalidated"
+                    else "the acknowledgement is beyond the event head"
+                ),
+                "action": "full_reconcile",
+                "prior_continuity_id": req.continuity_id,
+                "continuity_id": result["continuity_id"],
+                "head_id": result["head_id"],
+                **(result["invalidation"] or {}),
+            },
+        )
+    effective = result["last_acked_id"]
     return CursorInfo(
-        session_id=session_id, caller_id=req.caller_id, last_acked_id=effective
+        session_id=session_id,
+        caller_id=req.caller_id,
+        last_acked_id=effective,
+        head_id=result["head_id"],
+        continuity_id=result["continuity_id"],
+        cursor_registered=True,
     )
 
 

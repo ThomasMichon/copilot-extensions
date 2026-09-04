@@ -25,6 +25,7 @@ from agent_bridge.protocol import (
     MACHINE_METADATA_PROTOCOL_VERSION,
     PROVIDER_TARGET_REFRESH_PROTOCOL_VERSION,
     RELAY_INTERRUPT_PROTOCOL_VERSION,
+    REMOTE_OPERATIONS_PROTOCOL_VERSION,
     REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION,
     RESULT_SNAPSHOT_PROTOCOL_VERSION,
     UNVERSIONED,
@@ -50,6 +51,11 @@ def test_result_snapshot_capability_is_advertised() -> None:
 def test_attention_wait_capability_is_advertised() -> None:
     assert ATTENTION_WAIT_PROTOCOL_VERSION == 10
     assert ATTENTION_WAIT_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
+def test_remote_operations_capability_is_advertised() -> None:
+    assert REMOTE_OPERATIONS_PROTOCOL_VERSION == 11
+    assert REMOTE_OPERATIONS_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):

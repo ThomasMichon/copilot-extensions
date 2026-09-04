@@ -695,6 +695,171 @@ def _cmd_carrier(args: argparse.Namespace) -> None:
         pass
 
 
+def _cmd_remote(args: argparse.Namespace) -> None:
+    """Use the authenticated local daemon as the remote Bridge carrier owner."""
+    import time
+
+    from .client import BridgeClientError, BridgeConnectionError
+
+    client = _get_client(ensure=False)
+    try:
+        if args.remote_action == "status":
+            result = client.get_remote_session_status(
+                args.host,
+                args.session_id,
+                caller_id=args.caller_id,
+            )
+            if args.json:
+                _json_out(result)
+            else:
+                print(
+                    f"{result.get('session_id', args.session_id)} "
+                    f"[{result.get('status', 'unknown')}] "
+                    f"cursor={result.get('last_acked_id', 0)}/"
+                    f"{result.get('head_id', 0)}"
+                )
+            return
+        if args.remote_action == "live-session":
+            result = client.resolve_remote_live_session(
+                args.host, args.session_id
+            )
+            if args.json:
+                _json_out(result)
+            else:
+                print(
+                    f"{result.get('session_id', args.session_id)} "
+                    f"[{result.get('status', 'unknown')}]"
+                )
+            return
+        if args.remote_action != "events":
+            raise SystemExit("remote requires status, live-session, or events")
+
+        after = args.after
+        continuity_id = args.continuity_id
+        backoff = 0.25
+        while True:
+            stream = None
+            try:
+                stream = client.stream_remote_events(
+                    args.host,
+                    args.session_id,
+                    caller_id=args.caller_id,
+                    after=after,
+                    continuity_id=continuity_id,
+                )
+                continuity_id = (
+                    continuity_id
+                    or getattr(stream, "headers", {}).get(
+                        "X-Agent-Bridge-Continuity"
+                    )
+                )
+                for event in stream:
+                    event_name = str(event.get("event") or "")
+                    if event_name in {"_heartbeat", "tool_progress"}:
+                        continue
+                    if event_name == "bridge_control":
+                        _json_out({"control": event.get("data") or {}})
+                        raise SystemExit(2)
+                    event_id = int(event.get("id") or 0)
+                    event_continuity = event.get("continuity_id")
+                    if isinstance(event_continuity, str):
+                        continuity_id = event_continuity
+                    if args.json:
+                        _json_out(event)
+                    else:
+                        print(
+                            f"{event_id} {event_name} "
+                            f"{json.dumps(event.get('data') or {}, separators=(',', ':'))}"
+                        )
+                    sys.stdout.flush()
+                    if event_id:
+                        if not continuity_id:
+                            _json_out(
+                                {
+                                    "control": {
+                                        "code": "cursor_invalidated",
+                                        "message": "event continuity is unavailable",
+                                        "action": "full_reconcile",
+                                    }
+                                }
+                            )
+                            raise SystemExit(2)
+                        try:
+                            after = client.ack_remote_cursor(
+                                args.host,
+                                args.session_id,
+                                event_id,
+                                caller_id=args.caller_id,
+                                continuity_id=continuity_id,
+                            )
+                        except (
+                            BridgeConnectionError,
+                            OSError,
+                            urllib.error.URLError,
+                        ):
+                            # The hosting Bridge may have committed the ACK
+                            # before the local cutover lost its response. Let
+                            # its durable cursor choose the resume position.
+                            after = None
+                            raise
+                        except BridgeClientError as exc:
+                            if exc.status == 409:
+                                control = (
+                                    exc.detail
+                                    if isinstance(exc.detail, dict)
+                                    else {
+                                        "code": "cursor_invalidated",
+                                        "message": str(exc.detail),
+                                        "action": "full_reconcile",
+                                    }
+                                )
+                                _json_out({"control": control})
+                                raise SystemExit(2) from exc
+                            if exc.status not in {503, 504}:
+                                raise
+                            after = None
+                            raise BridgeConnectionError(
+                                "remote acknowledgement outcome is ambiguous"
+                            ) from exc
+                        backoff = 0.25
+            except BridgeClientError as exc:
+                if exc.status == 409:
+                    control = (
+                        exc.detail
+                        if isinstance(exc.detail, dict)
+                        else {
+                            "code": "cursor_invalidated",
+                            "message": str(exc.detail),
+                            "action": "full_reconcile",
+                        }
+                    )
+                    _json_out({"control": control})
+                    raise SystemExit(2) from exc
+                if exc.status not in {503, 504}:
+                    raise
+            except BrokenPipeError:
+                raise
+            except (
+                BridgeConnectionError,
+                OSError,
+                urllib.error.URLError,
+            ):
+                pass
+            finally:
+                if stream is not None:
+                    stream.close()
+            client.refresh_endpoint()
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 5.0)
+    except BridgeClientError as exc:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            _json_out({"error": detail})
+        else:
+            print(f"[FAIL] {detail}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
 def _cmd_token(args: argparse.Namespace) -> None:
     """Print the bearer token external ACP clients (e.g. acp-ui) authenticate with.
 
@@ -5142,6 +5307,71 @@ def build_parser() -> argparse.ArgumentParser:
         help="Serve the carrier protocol on stdin/stdout",
     )
     carrier_p.set_defaults(func=_cmd_carrier)
+
+    remote_p = sub.add_parser(
+        "remote",
+        help="Proxy exact remote Bridge reads and event subscriptions",
+    )
+    remote_sub = remote_p.add_subparsers(dest="remote_action")
+    remote_status_p = remote_sub.add_parser(
+        "status", help="Read one exact remote session status"
+    )
+    remote_status_p.add_argument("host", help="Topology machine key or SSH alias")
+    remote_status_p.add_argument("session_id", help="Exact hosting-Bridge session id")
+    remote_status_p.add_argument(
+        "--caller-id",
+        required=True,
+        help="Stable identity unique to this event consumer",
+    )
+    remote_status_p.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Output in JSON format",
+    )
+    remote_status_p.set_defaults(func=_cmd_remote)
+    remote_live_p = remote_sub.add_parser(
+        "live-session",
+        help="Resolve one exact represented session on the hosting Bridge",
+    )
+    remote_live_p.add_argument("host", help="Topology machine key or SSH alias")
+    remote_live_p.add_argument("session_id", help="Exact live session id")
+    remote_live_p.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Output in JSON format",
+    )
+    remote_live_p.set_defaults(func=_cmd_remote)
+    remote_events_p = remote_sub.add_parser(
+        "events",
+        help="Subscribe to exact durable remote session events",
+    )
+    remote_events_p.add_argument("host", help="Topology machine key or SSH alias")
+    remote_events_p.add_argument("session_id", help="Exact hosting-Bridge session id")
+    remote_events_p.add_argument(
+        "--caller-id",
+        required=True,
+        help="Stable identity unique to this event consumer",
+    )
+    remote_events_p.add_argument(
+        "--after",
+        type=int,
+        default=None,
+        help="Expected durable caller cursor (must match the hosting Bridge)",
+    )
+    remote_events_p.add_argument(
+        "--continuity-id",
+        default=None,
+        help="Expected event-log continuity returned by a prior subscription",
+    )
+    remote_events_p.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Output in JSON format",
+    )
+    remote_events_p.set_defaults(func=_cmd_remote)
 
     token_p = sub.add_parser(
         "token",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -168,6 +169,18 @@ CREATE TABLE IF NOT EXISTS delivery_cursors (
     session_id TEXT NOT NULL,
     last_acked_id INTEGER NOT NULL DEFAULT 0,
     updated_at REAL NOT NULL,
+    PRIMARY KEY (caller_id, session_id),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS delivery_cursor_invalidations (
+    caller_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    prior_last_acked_id INTEGER NOT NULL,
+    prior_head_id INTEGER NOT NULL,
+    prior_continuity_id TEXT,
+    current_continuity_id TEXT,
+    invalidated_at REAL NOT NULL,
     PRIMARY KEY (caller_id, session_id),
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
@@ -824,6 +837,28 @@ class Database:
             conn.execute("UPDATE schema_version SET version=?", (16,))
             conn.commit()
             log.info("Schema migrated to version 16: live-message idempotency")
+
+        if from_version < 17:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS delivery_cursor_invalidations (
+                    caller_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    prior_last_acked_id INTEGER NOT NULL,
+                    prior_head_id INTEGER NOT NULL,
+                    prior_continuity_id TEXT,
+                    current_continuity_id TEXT,
+                    invalidated_at REAL NOT NULL,
+                    PRIMARY KEY (caller_id, session_id),
+                    FOREIGN KEY (session_id) REFERENCES sessions(id)
+                )
+                """
+            )
+            conn.execute("UPDATE schema_version SET version=?", (17,))
+            conn.commit()
+            log.info(
+                "Schema migrated to version 17: delivery cursor invalidations"
+            )
 
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
@@ -1666,6 +1701,10 @@ class Database:
             conn.execute(
                 "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
             )
+            conn.execute(
+                "DELETE FROM delivery_cursor_invalidations WHERE session_id=?",
+                (session_id,),
+            )
             conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
             conn.commit()
 
@@ -1680,6 +1719,57 @@ class Database:
             conn = self._get_conn()
             conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
             conn.commit()
+
+    def begin_event_rebuild(
+        self,
+        session_id: str,
+        *,
+        prior_head_id: int,
+        prior_continuity_id: str | None,
+        timestamp: float,
+    ) -> None:
+        """Atomically invalidate cursors and remove the prior event generation."""
+        self.flush()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "INSERT INTO delivery_cursor_invalidations "
+                    "(caller_id, session_id, prior_last_acked_id, prior_head_id, "
+                    "prior_continuity_id, current_continuity_id, invalidated_at) "
+                    "SELECT caller_id, session_id, last_acked_id, ?, ?, NULL, ? "
+                    "FROM delivery_cursors WHERE session_id=? "
+                    "ON CONFLICT(caller_id, session_id) DO UPDATE SET "
+                    "prior_last_acked_id=excluded.prior_last_acked_id, "
+                    "prior_head_id=excluded.prior_head_id, "
+                    "prior_continuity_id=excluded.prior_continuity_id, "
+                    "current_continuity_id=NULL, "
+                    "invalidated_at=excluded.invalidated_at",
+                    (
+                        prior_head_id,
+                        prior_continuity_id,
+                        timestamp,
+                        session_id,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE delivery_cursor_invalidations SET "
+                    "current_continuity_id=NULL, invalidated_at=? "
+                    "WHERE session_id=?",
+                    (timestamp, session_id),
+                )
+                conn.execute(
+                    "DELETE FROM delivery_cursors WHERE session_id=?",
+                    (session_id,),
+                )
+                conn.execute(
+                    "DELETE FROM events WHERE session_id=?", (session_id,)
+                )
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
 
     # -- Turn CRUD -----------------------------------------------------------
 
@@ -1831,6 +1921,236 @@ class Database:
         )
         return rows[0]["last_acked_id"] if rows else 0
 
+    def get_cursor_state(
+        self, caller_id: str, session_id: str
+    ) -> dict[str, Any]:
+        """Return durable cursor position plus any pending log invalidation."""
+        rows = self.execute_read(
+            "SELECT last_acked_id, updated_at FROM delivery_cursors "
+            "WHERE caller_id=? AND session_id=?",
+            (caller_id, session_id),
+        )
+        invalidations = self.execute_read(
+            "SELECT prior_last_acked_id, prior_head_id, "
+            "prior_continuity_id, current_continuity_id, invalidated_at "
+            "FROM delivery_cursor_invalidations "
+            "WHERE caller_id=? AND session_id=?",
+            (caller_id, session_id),
+        )
+        return {
+            "registered": bool(rows),
+            "last_acked_id": rows[0]["last_acked_id"] if rows else 0,
+            "updated_at": rows[0]["updated_at"] if rows else None,
+            "invalidation": (
+                dict(invalidations[0]) if invalidations else None
+            ),
+        }
+
+    @staticmethod
+    def _event_continuity(session_id: str, origin: float | None) -> str | None:
+        if origin is None:
+            return None
+        value = f"{session_id}:{origin!r}".encode()
+        return hashlib.sha256(value).hexdigest()[:16]
+
+    def get_controlled_cursor_state(
+        self, caller_id: str, session_id: str
+    ) -> dict[str, Any]:
+        """Read cursor, invalidation, head, and continuity from one DB snapshot."""
+        self.flush()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT last_acked_id, updated_at FROM delivery_cursors "
+                    "WHERE caller_id=? AND session_id=?",
+                    (caller_id, session_id),
+                ).fetchone()
+                invalidation = conn.execute(
+                    "SELECT prior_last_acked_id, prior_head_id, "
+                    "prior_continuity_id, current_continuity_id, invalidated_at "
+                    "FROM delivery_cursor_invalidations "
+                    "WHERE caller_id=? AND session_id=?",
+                    (caller_id, session_id),
+                ).fetchone()
+                head_row = conn.execute(
+                    "SELECT MAX(event_id) AS head_id, "
+                    "MIN(CASE WHEN event_id=1 THEN timestamp END) AS origin "
+                    "FROM events WHERE session_id=?",
+                    (session_id,),
+                ).fetchone()
+                origin = head_row["origin"] if head_row else None
+                continuity_id = self._event_continuity(session_id, origin)
+                if (
+                    invalidation is not None
+                    and invalidation["current_continuity_id"] is None
+                    and continuity_id is not None
+                ):
+                    conn.execute(
+                        "UPDATE delivery_cursor_invalidations SET "
+                        "current_continuity_id=? "
+                        "WHERE caller_id=? AND session_id=? "
+                        "AND current_continuity_id IS NULL",
+                        (continuity_id, caller_id, session_id),
+                    )
+                    invalidation = conn.execute(
+                        "SELECT prior_last_acked_id, prior_head_id, "
+                        "prior_continuity_id, current_continuity_id, "
+                        "invalidated_at FROM delivery_cursor_invalidations "
+                        "WHERE caller_id=? AND session_id=?",
+                        (caller_id, session_id),
+                    ).fetchone()
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+        return {
+            "registered": row is not None,
+            "last_acked_id": row["last_acked_id"] if row else 0,
+            "updated_at": row["updated_at"] if row else None,
+            "head_id": (head_row["head_id"] if head_row else None) or 0,
+            "continuity_id": continuity_id,
+            "invalidation": dict(invalidation) if invalidation else None,
+        }
+
+    def acknowledge_controlled_cursor(
+        self,
+        caller_id: str,
+        session_id: str,
+        last_acked_id: int,
+        timestamp: float,
+        *,
+        continuity_id: str | None,
+    ) -> dict[str, Any]:
+        """Conditionally ACK one event-log generation in a single transaction."""
+        self.flush()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                invalidation = conn.execute(
+                    "SELECT prior_last_acked_id, prior_head_id, "
+                    "prior_continuity_id, current_continuity_id, invalidated_at "
+                    "FROM delivery_cursor_invalidations "
+                    "WHERE caller_id=? AND session_id=?",
+                    (caller_id, session_id),
+                ).fetchone()
+                head_row = conn.execute(
+                    "SELECT MAX(event_id) AS head_id, "
+                    "MIN(CASE WHEN event_id=1 THEN timestamp END) AS origin "
+                    "FROM events WHERE session_id=?",
+                    (session_id,),
+                ).fetchone()
+                head_id = (head_row["head_id"] if head_row else None) or 0
+                current_continuity = self._event_continuity(
+                    session_id, head_row["origin"] if head_row else None
+                )
+                if (
+                    invalidation is not None
+                    and invalidation["current_continuity_id"] is None
+                    and current_continuity is not None
+                ):
+                    conn.execute(
+                        "UPDATE delivery_cursor_invalidations SET "
+                        "current_continuity_id=? "
+                        "WHERE caller_id=? AND session_id=? "
+                        "AND current_continuity_id IS NULL",
+                        (current_continuity, caller_id, session_id),
+                    )
+                    invalidation = conn.execute(
+                        "SELECT prior_last_acked_id, prior_head_id, "
+                        "prior_continuity_id, current_continuity_id, "
+                        "invalidated_at FROM delivery_cursor_invalidations "
+                        "WHERE caller_id=? AND session_id=?",
+                        (caller_id, session_id),
+                    ).fetchone()
+                if invalidation is not None and (
+                    invalidation["current_continuity_id"] is None
+                    or continuity_id
+                    != invalidation["current_continuity_id"]
+                ):
+                    conn.rollback()
+                    return {
+                        "accepted": False,
+                        "code": "cursor_invalidated",
+                        "continuity_id": current_continuity,
+                        "invalidation": dict(invalidation),
+                        "head_id": head_id,
+                    }
+                if (
+                    continuity_id is not None
+                    and continuity_id != current_continuity
+                ):
+                    conn.rollback()
+                    return {
+                        "accepted": False,
+                        "code": "cursor_invalidated",
+                        "continuity_id": current_continuity,
+                        "invalidation": (
+                            dict(invalidation) if invalidation else None
+                        ),
+                        "head_id": head_id,
+                    }
+                if last_acked_id > head_id:
+                    conn.rollback()
+                    return {
+                        "accepted": False,
+                        "code": "replay_gap",
+                        "continuity_id": current_continuity,
+                        "invalidation": (
+                            dict(invalidation) if invalidation else None
+                        ),
+                        "head_id": head_id,
+                    }
+                row = conn.execute(
+                    "SELECT last_acked_id FROM delivery_cursors "
+                    "WHERE caller_id=? AND session_id=?",
+                    (caller_id, session_id),
+                ).fetchone()
+                current = row["last_acked_id"] if row else 0
+                effective = max(current, last_acked_id)
+                conn.execute(
+                    "INSERT INTO delivery_cursors "
+                    "(caller_id, session_id, last_acked_id, updated_at) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(caller_id, session_id) DO UPDATE SET "
+                    "last_acked_id=excluded.last_acked_id, "
+                    "updated_at=excluded.updated_at",
+                    (caller_id, session_id, effective, timestamp),
+                )
+                if invalidation is not None:
+                    conn.execute(
+                        "DELETE FROM delivery_cursor_invalidations "
+                        "WHERE caller_id=? AND session_id=? "
+                        "AND current_continuity_id=?",
+                        (caller_id, session_id, continuity_id),
+                    )
+                conn.commit()
+                return {
+                    "accepted": True,
+                    "last_acked_id": effective,
+                    "continuity_id": current_continuity,
+                    "head_id": head_id,
+                    "invalidation": None,
+                }
+            except BaseException:
+                conn.rollback()
+                raise
+
+    def ensure_cursor(
+        self, caller_id: str, session_id: str, timestamp: float
+    ) -> int:
+        """Register a zero-position consumer without clearing invalidation."""
+        self.execute_write(
+            "INSERT INTO delivery_cursors "
+            "(caller_id, session_id, last_acked_id, updated_at) "
+            "VALUES (?, ?, 0, ?) "
+            "ON CONFLICT(caller_id, session_id) DO NOTHING",
+            (caller_id, session_id, timestamp),
+        )
+        return self.get_cursor(caller_id, session_id)
+
     def set_cursor(
         self, caller_id: str, session_id: str, last_acked_id: int, timestamp: float
     ) -> int:
@@ -1856,22 +2176,86 @@ class Database:
                 "last_acked_id=excluded.last_acked_id, updated_at=excluded.updated_at",
                 (caller_id, session_id, new_val, timestamp),
             )
+            conn.execute(
+                "DELETE FROM delivery_cursor_invalidations "
+                "WHERE caller_id=? AND session_id=?",
+                (caller_id, session_id),
+            )
             conn.commit()
             return new_val
 
-    def reset_delivery_cursors(self, session_id: str) -> None:
+    def reset_delivery_cursors(
+        self,
+        session_id: str,
+        *,
+        prior_head_id: int = 0,
+        prior_continuity_id: str | None = None,
+        current_continuity_id: str | None = None,
+        timestamp: float | None = None,
+    ) -> None:
         """Drop all delivery cursors for a session (get_cursor -> 0 afterwards).
 
         Called when a session's event log is **rebuilt** (resync replaces the
         log with the agent's authoritative replay, renumbering event ids). The
         cursors are monotonic and would otherwise point past the rebuilt log --
-        orphaning consumers (NF's "odd states"). Resetting them makes consumers
-        re-read the rebuilt log from the start instead of silently stalling.
+        orphaning consumers. Before resetting, preserve one explicit
+        invalidation record per registered caller so reconnecting proxy
+        subscribers can force full reconciliation instead of translating the
+        stale cursor into an empty or silently restarted stream.
         """
         with self._write_lock:
             conn = self._get_conn()
+            invalidated_at = time.time() if timestamp is None else timestamp
+            conn.execute(
+                "INSERT INTO delivery_cursor_invalidations "
+                "(caller_id, session_id, prior_last_acked_id, prior_head_id, "
+                "prior_continuity_id, current_continuity_id, invalidated_at) "
+                "SELECT caller_id, session_id, last_acked_id, ?, ?, ?, ? "
+                "FROM delivery_cursors WHERE session_id=? "
+                "ON CONFLICT(caller_id, session_id) DO UPDATE SET "
+                "prior_last_acked_id=excluded.prior_last_acked_id, "
+                "prior_head_id=excluded.prior_head_id, "
+                "prior_continuity_id=excluded.prior_continuity_id, "
+                "current_continuity_id=excluded.current_continuity_id, "
+                "invalidated_at=excluded.invalidated_at",
+                (
+                    prior_head_id,
+                    prior_continuity_id,
+                    current_continuity_id,
+                    invalidated_at,
+                    session_id,
+                ),
+            )
+            conn.execute(
+                "UPDATE delivery_cursor_invalidations SET "
+                "current_continuity_id=?, invalidated_at=? "
+                "WHERE session_id=?",
+                (current_continuity_id, invalidated_at, session_id),
+            )
             conn.execute(
                 "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
+            )
+            conn.commit()
+
+    def update_delivery_cursor_invalidation_continuity(
+        self,
+        session_id: str,
+        continuity_id: str,
+        *,
+        timestamp: float | None = None,
+    ) -> None:
+        """Fill the replacement epoch after an empty rebuild gets its first event."""
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE delivery_cursor_invalidations SET "
+                "current_continuity_id=?, invalidated_at=? "
+                "WHERE session_id=? AND current_continuity_id IS NULL",
+                (
+                    continuity_id,
+                    time.time() if timestamp is None else timestamp,
+                    session_id,
+                ),
             )
             conn.commit()
 

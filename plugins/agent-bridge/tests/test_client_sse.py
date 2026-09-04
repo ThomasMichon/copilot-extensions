@@ -81,3 +81,27 @@ class TestSseCommentParsing:
         assert events == [
             {"id": "7", "event": "agent_message", "data": {"text": "hi"}}
         ]
+
+    def test_controlled_event_keeps_timestamp_and_continuity(self) -> None:
+        data = json.dumps(
+            {
+                "event": "assistant.turn_end",
+                "data": {"stop_reason": "end_turn"},
+                "timestamp": 123.0,
+                "continuity_id": "epoch-a",
+            }
+        )
+
+        events = _drain(
+            ["id: 8", "event: assistant.turn_end", f"data: {data}", ""]
+        )
+
+        assert events == [
+            {
+                "id": "8",
+                "event": "assistant.turn_end",
+                "data": {"stop_reason": "end_turn"},
+                "timestamp": 123.0,
+                "continuity_id": "epoch-a",
+            }
+        ]
