@@ -416,8 +416,50 @@ def test_validate_accepts_each_kind():
                             "version": "1",
                             "profile": "host",
                             "python_env": "EXAMPLE_PYTHON",
+                            "projects": [
+                                {"path": ".", "extras": ["service", "SERVICE"]}
+                            ],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "unique portable names",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
                             "projects": [{"path": "."}],
                             "imports": ["not-valid!"],
+                        }
+                    ],
+                },
+            },
+            "Python import names",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["example.api", "EXAMPLE.API"],
                         }
                     ],
                 },

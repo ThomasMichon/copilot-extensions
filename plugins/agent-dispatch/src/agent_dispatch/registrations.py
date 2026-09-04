@@ -303,7 +303,7 @@ def _validate_managed_runtime(value: object) -> None:
                     not in _WINDOWS_RESERVED_STEMS
                     for extra in extras
                 )
-                or len(set(extras)) != len(extras)
+                or len({extra.casefold() for extra in extras}) != len(extras)
             ):
                 raise RegistrationError(
                     f"plugin-companion managed runtime '{project_prefix}.extras' "
@@ -326,7 +326,7 @@ def _validate_managed_runtime(value: object) -> None:
                 and _IMPORT_NAME.fullmatch(import_name)
                 for import_name in imports
             )
-            or len(set(imports)) != len(imports)
+            or len({import_name.casefold() for import_name in imports}) != len(imports)
         ):
             raise RegistrationError(
                 f"plugin-companion managed runtime '{prefix}.imports' must contain "
