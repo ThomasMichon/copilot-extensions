@@ -206,6 +206,31 @@ function Write-Skip    { param([string]$Msg) Write-Host "  [SKIP] $Msg" -Foregro
 function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 
+function Install-AgentSshPackage {
+    param(
+        [Parameter(Mandatory = $true)][string]$Python,
+        [Parameter(Mandatory = $true)][string]$Source
+    )
+
+    $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+    if ($uvCommand) {
+        $uvResult = 1
+        try {
+            & $uvCommand.Source pip install --python $Python $Source --quiet 2>&1 | Out-Null
+            $uvResult = $LASTEXITCODE
+        } catch {
+            Write-Step 'uv package install could not start -- falling back to python -m pip'
+        }
+        if ($uvResult -eq 0) { return $true }
+        if ($uvResult -ne 1) {
+            Write-Step "uv package install exited $uvResult -- falling back to python -m pip"
+        }
+    }
+
+    & $Python -m pip install --quiet $Source 2>&1 | Out-Null
+    return $LASTEXITCODE -eq 0
+}
+
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_ssh'
 
@@ -656,14 +681,9 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-    & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
-} else {
-    & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
-}
-$pkgResult = $LASTEXITCODE
+$pkgInstalled = Install-AgentSshPackage -Python $VenvPython -Source $PluginDir
 $ErrorActionPreference = $prevEAP
-if ($pkgResult -ne 0) {
+if (-not $pkgInstalled) {
     Write-Fail 'Failed to install agent-ssh package into venv'
     exit 1
 }
