@@ -31,8 +31,8 @@ def test_status_monitor_registered():
 
 
 def test_resident_lifecycle_requests_wait_for_their_deadline():
-    assert m._resident_hook_lock_timeout("sessionStart", 4.75) == 1.75
-    assert m._resident_hook_lock_timeout("sessionStart", 1.75) == 0.0
+    assert m._resident_hook_lock_timeout("sessionStart", 4.75) == 3.75
+    assert m._resident_hook_lock_timeout("sessionStart", 0.75) == 0.0
     assert m._resident_hook_lock_timeout("preToolUse", 1.75) == 0.05
     assert m._resident_hook_lock_timeout("postToolUse", 0.02) == 0.02
 
