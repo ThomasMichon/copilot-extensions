@@ -400,16 +400,12 @@ def test_enrich_tasks_probes_once_for_a_batch(monkeypatch):
 
 
 def test_enrich_tasks_hoists_probes_and_mixes_local_and_remote(monkeypatch):
-    # A batch with a local-owner and a remote-owner task: each probe runs once,
+    # A batch with a local-owner and a remote-owner task: shared probes run once,
     # and each task resolves against the correct machine (Phase 8 Slice 8b).
-    probes = {"bridge": 0, "ssh": 0, "local": 0}
+    probes = {"bridge": 0, "local": 0}
 
     def fake_bridge():
         probes["bridge"] += 1
-        return True
-
-    def fake_ssh():
-        probes["ssh"] += 1
         return True
 
     def fake_local():
@@ -417,7 +413,6 @@ def test_enrich_tasks_hoists_probes_and_mixes_local_and_remote(monkeypatch):
         return "anomalous-potato"
 
     monkeypatch.setattr(tracking, "bridge_available", fake_bridge)
-    monkeypatch.setattr(tracking.remote_dispatch, "ssh_available", fake_ssh)
     monkeypatch.setattr(tracking.remote_dispatch, "local_machine", fake_local)
 
     resolved = []
@@ -434,7 +429,7 @@ def test_enrich_tasks_hoists_probes_and_mixes_local_and_remote(monkeypatch):
     ]
     out = tracking.enrich_tasks(tasks)
 
-    assert probes == {"bridge": 1, "ssh": 1, "local": 1}
+    assert probes == {"bridge": 1, "local": 1}
     assert ("wt-local", None) in resolved  # local owner -> local bridge
     assert ("wt-remote", "emancipation-cube") in resolved  # remote owner -> mesh
     assert out[0]["embodiment"]["session_id"] == "s-wt-local"

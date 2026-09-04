@@ -334,6 +334,10 @@ transport foundation #1763 requires.
 - Provider review found two adapter boundary gaps. Malformed local Bridge auth
   YAML now degrades as absent capability, and the health capability probe shares
   the caller's total operation timeout instead of adding a fixed five seconds.
+- Follow-up review removed a dead batch SSH-availability probe after carrier-first
+  enrichment made it redundant. The generation-14 fixtures now cite the durable
+  public PR parent commit rather than an unreachable local checkpoint, so the
+  contract registry validates in GitHub's PR checkout.
 
 ### 2026-09-04 — Agent Dispatch event wake
 
