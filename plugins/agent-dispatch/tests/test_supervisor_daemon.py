@@ -428,14 +428,29 @@ def test_plugin_companion_runtime_revision_changes_fingerprint():
     first = _reg("companion", kind="plugin-companion", spec={"command": ["bin/serve"]})
     first["runtime_revision"] = {
         "plugin_root": "/plugins/index",
+        "plugin_owner": "index@example",
+        "plugin_source_path": "/plugins/index/registrar/service.json",
         "plugin_version": "1.0.0",
+        "activation_scopes": ["project:demo"],
     }
     second = dict(first)
     second["runtime_revision"] = {
         "plugin_root": "/plugins/index",
+        "plugin_owner": "index@example",
+        "plugin_source_path": "/plugins/index/registrar/service.json",
         "plugin_version": "1.0.1",
+        "activation_scopes": ["project:demo"],
     }
     assert _spec_fingerprint(first) != _spec_fingerprint(second)
+
+    for field, value in (
+        ("plugin_source_path", "/plugins/index/registrar/replacement.json"),
+        ("activation_scopes", ["project:other"]),
+    ):
+        changed = dict(first)
+        changed["runtime_revision"] = dict(first["runtime_revision"])
+        changed["runtime_revision"][field] = value
+        assert _spec_fingerprint(first) != _spec_fingerprint(changed)
 
 
 def test_lease_scope_format():

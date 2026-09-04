@@ -164,6 +164,19 @@ def test_plugin_companion_registration_preserves_runtime_revision():
                 "command": ["bin/serve"],
                 "stop_command": ["bin/stop"],
                 "health_probe": ["bin/health"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "2.0.0",
+                            "profile": "host",
+                            "python_env": "INDEX_MANAGED_PYTHON",
+                            "projects": [{"path": ".", "extras": ["service"]}],
+                            "imports": ["index_service"],
+                        }
+                    ],
+                },
             },
         },
         allow_plugin_companion=True,
@@ -184,7 +197,23 @@ def test_plugin_companion_registration_preserves_runtime_revision():
     }
     assert reg["runtime_revision"] == {
         "plugin_root": "/plugins/index",
+        "plugin_owner": "plugin@example",
+        "plugin_source_path": "/plugins/index/registrar/index.json",
         "plugin_version": "2.0.0",
+        "activation_scopes": ["global", "project:demo"],
+        "managed_runtime": {
+            "schema_version": 1,
+            "runtimes": [
+                {
+                    "name": "service",
+                    "version": "2.0.0",
+                    "profile": "host",
+                    "python_env": "INDEX_MANAGED_PYTHON",
+                    "projects": [{"path": ".", "extras": ["service"]}],
+                    "imports": ["index_service"],
+                }
+            ],
+        },
     }
 
 

@@ -75,6 +75,7 @@ _COMPANION_KEYS = frozenset(
         "health_timeout_seconds",
         "startup_timeout_seconds",
         "stop_timeout_seconds",
+        "managed_runtime",
     }
 )
 _COMPANION_REQUIRED_KEYS = frozenset({"command"})
@@ -88,6 +89,24 @@ _COMPANION_TIMEOUT_KEYS = frozenset(
 )
 COMPANION_CONFIG_RESULT_VERSION = 1
 COMPANION_HEALTH_RESULT_VERSION = 1
+MANAGED_RUNTIME_SCHEMA_VERSION = 1
+_PORTABLE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+_IMPORT_NAME = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$"
+)
+_MAX_PROJECT_PATH_LENGTH = 1024
+_MAX_PROJECT_COMPONENTS = 32
+_MAX_PROJECT_COMPONENT_LENGTH = 128
+_MAX_IMPORT_LENGTH = 512
+_MAX_IMPORT_COMPONENTS = 16
+_MAX_IMPORT_COMPONENT_LENGTH = 128
+_WINDOWS_RESERVED_STEMS = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{index}" for index in range(1, 10)}
+    | {f"lpt{index}" for index in range(1, 10)}
+    | {f"{prefix}{index}" for prefix in ("com", "lpt") for index in "¹²³"}
+)
 
 
 def _validate_plugin_relative_argv(value: object, *, field: str) -> None:
@@ -107,6 +126,212 @@ def _validate_plugin_relative_argv(value: object, *, field: str) -> None:
         raise RegistrationError(
             f"plugin-companion '{field}' executable must be a contained relative path"
         )
+
+
+def _validate_portable_component(value: object, *, field: str) -> None:
+    if (
+        not isinstance(value, str)
+        or value in {".", ".."}
+        or not _PORTABLE_COMPONENT.fullmatch(value)
+        or value.endswith(".")
+        or value.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_STEMS
+    ):
+        raise RegistrationError(
+            f"plugin-companion managed runtime '{field}' must be a portable "
+            "filesystem component"
+        )
+
+
+def _validate_project_path(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise RegistrationError(
+            f"plugin-companion managed runtime '{field}' must be a plugin-relative path"
+        )
+    normalized = value
+    if normalized == ".":
+        return normalized
+    parts = normalized.split("/")
+    path = PurePosixPath(normalized)
+    if (
+        len(normalized) > _MAX_PROJECT_PATH_LENGTH
+        or len(parts) > _MAX_PROJECT_COMPONENTS
+        or any(len(part) > _MAX_PROJECT_COMPONENT_LENGTH for part in parts)
+        or path.is_absolute()
+        or re.match(r"^[A-Za-z]:", normalized)
+        or any(part in ("", ".", "..") for part in parts)
+        or any(
+            part.endswith((".", " "))
+            or any(ord(character) < 32 or character in '<>:"|?*' for character in part)
+            or part.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_STEMS
+            for part in parts
+        )
+    ):
+        raise RegistrationError(
+            f"plugin-companion managed runtime '{field}' must be a contained "
+            "plugin-relative path"
+        )
+    return path.as_posix()
+
+
+def _validate_managed_runtime(value: object) -> None:
+    if not isinstance(value, dict):
+        raise RegistrationError(
+            "plugin-companion 'managed_runtime' must be a JSON object"
+        )
+    allowed = {"schema_version", "runtimes"}
+    if unknown := sorted(set(value) - allowed):
+        raise RegistrationError(
+            "plugin-companion managed runtime has unknown fields: "
+            + ", ".join(unknown)
+        )
+    schema_version = value.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != MANAGED_RUNTIME_SCHEMA_VERSION
+    ):
+        raise RegistrationError(
+            "plugin-companion managed runtime needs schema_version "
+            f"{MANAGED_RUNTIME_SCHEMA_VERSION}"
+        )
+    runtimes = value.get("runtimes")
+    if not isinstance(runtimes, list) or not runtimes or len(runtimes) > 16:
+        raise RegistrationError(
+            "plugin-companion managed runtime 'runtimes' must contain 1 to 16 objects"
+        )
+
+    runtime_names: set[str] = set()
+    python_environments: set[str] = set()
+    runtime_keys = {
+        "name",
+        "version",
+        "profile",
+        "python_env",
+        "projects",
+        "imports",
+    }
+    for index, runtime in enumerate(runtimes):
+        prefix = f"runtimes[{index}]"
+        if not isinstance(runtime, dict):
+            raise RegistrationError(
+                f"plugin-companion managed runtime '{prefix}' must be a JSON object"
+            )
+        if unknown := sorted(set(runtime) - runtime_keys):
+            raise RegistrationError(
+                f"plugin-companion managed runtime '{prefix}' has unknown fields: "
+                + ", ".join(unknown)
+            )
+        missing = sorted(runtime_keys - set(runtime))
+        if missing:
+            raise RegistrationError(
+                f"plugin-companion managed runtime '{prefix}' is missing required "
+                f"fields: {', '.join(missing)}"
+            )
+        for field in ("name", "version", "profile"):
+            _validate_portable_component(
+                runtime[field], field=f"{prefix}.{field}"
+            )
+        name = runtime["name"]
+        canonical_name = name.casefold()
+        if canonical_name in runtime_names:
+            raise RegistrationError(
+                f"plugin-companion managed runtime has duplicate runtime name: {name}"
+            )
+        runtime_names.add(canonical_name)
+
+        python_env = runtime["python_env"]
+        if (
+            not isinstance(python_env, str)
+            or not _ENVIRONMENT_NAME.fullmatch(python_env)
+        ):
+            raise RegistrationError(
+                f"plugin-companion managed runtime '{prefix}.python_env' must be "
+                "an environment variable name"
+            )
+        canonical_python_env = python_env.casefold()
+        if canonical_python_env in python_environments:
+            raise RegistrationError(
+                "plugin-companion managed runtime has duplicate python environment: "
+                f"{python_env}"
+            )
+        python_environments.add(canonical_python_env)
+
+        projects = runtime["projects"]
+        if not isinstance(projects, list) or not projects or len(projects) > 32:
+            raise RegistrationError(
+                f"plugin-companion managed runtime '{prefix}.projects' must contain "
+                "1 to 32 objects"
+            )
+        project_paths: set[str] = set()
+        for project_index, project in enumerate(projects):
+            project_prefix = f"{prefix}.projects[{project_index}]"
+            if not isinstance(project, dict):
+                raise RegistrationError(
+                    f"plugin-companion managed runtime '{project_prefix}' must be "
+                    "a JSON object"
+                )
+            if unknown := sorted(set(project) - {"path", "extras"}):
+                raise RegistrationError(
+                    f"plugin-companion managed runtime '{project_prefix}' has "
+                    f"unknown fields: {', '.join(unknown)}"
+                )
+            if "path" not in project:
+                raise RegistrationError(
+                    f"plugin-companion managed runtime '{project_prefix}' is "
+                    "missing required field: path"
+                )
+            project_path = _validate_project_path(
+                project["path"], field=f"{project_prefix}.path"
+            )
+            canonical_project_path = project_path.casefold()
+            if canonical_project_path in project_paths:
+                raise RegistrationError(
+                    f"plugin-companion managed runtime '{prefix}' has duplicate "
+                    f"project path: {project_path}"
+                )
+            project_paths.add(canonical_project_path)
+            extras = project.get("extras")
+            if extras is not None and (
+                not isinstance(extras, list)
+                or not extras
+                or len(extras) > 32
+                or not all(
+                    isinstance(extra, str)
+                    and _PORTABLE_COMPONENT.fullmatch(extra)
+                    and not extra.endswith(".")
+                    and extra.split(".", 1)[0].casefold()
+                    not in _WINDOWS_RESERVED_STEMS
+                    for extra in extras
+                )
+                or len(set(extras)) != len(extras)
+            ):
+                raise RegistrationError(
+                    f"plugin-companion managed runtime '{project_prefix}.extras' "
+                    "must contain 1 to 32 unique portable names"
+                )
+
+        imports = runtime["imports"]
+        if (
+            not isinstance(imports, list)
+            or not imports
+            or len(imports) > 32
+            or not all(
+                isinstance(import_name, str)
+                and len(import_name) <= _MAX_IMPORT_LENGTH
+                and len(import_name.split(".")) <= _MAX_IMPORT_COMPONENTS
+                and all(
+                    len(component) <= _MAX_IMPORT_COMPONENT_LENGTH
+                    for component in import_name.split(".")
+                )
+                and _IMPORT_NAME.fullmatch(import_name)
+                for import_name in imports
+            )
+            or len(set(imports)) != len(imports)
+        ):
+            raise RegistrationError(
+                f"plugin-companion managed runtime '{prefix}.imports' must contain "
+                "1 to 32 unique Python import names"
+            )
 
 
 def _validate_plugin_companion(spec: dict) -> None:
@@ -135,6 +360,8 @@ def _validate_plugin_companion(spec: dict) -> None:
             raise RegistrationError(
                 f"plugin-companion '{field}' must be > 0 and <= 3600"
             )
+    if "managed_runtime" in spec:
+        _validate_managed_runtime(spec["managed_runtime"])
 
 
 def validate_companion_config_result(result: dict) -> None:

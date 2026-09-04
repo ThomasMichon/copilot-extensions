@@ -81,6 +81,22 @@ def test_validate_accepts_each_kind():
             "health_probe": ["bin/health", "--json"],
             "config_provider": ["bin/config"],
             "health_timeout_seconds": 5,
+            "managed_runtime": {
+                "schema_version": 1,
+                "runtimes": [
+                    {
+                        "name": "service",
+                        "version": "1.2.3",
+                        "profile": "host",
+                        "python_env": "EXAMPLE_MANAGED_PYTHON",
+                        "projects": [
+                            {"path": "libs/helper"},
+                            {"path": ".", "extras": ["service"]},
+                        ],
+                        "imports": ["example_service", "example_service.api"],
+                    }
+                ],
+            },
         },
     )
 
@@ -154,6 +170,395 @@ def test_validate_accepts_each_kind():
                 "surprise": True,
             },
             "unknown fields",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {"command": ["bin/serve"], "managed_runtime": []},
+            "JSON object",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {"schema_version": 2, "runtimes": []},
+            },
+            "schema_version 1",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "../service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "portable filesystem component",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "CON.txt",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "portable filesystem component",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service.",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "portable filesystem component",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "../outside"}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "contained plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "COM¹"}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "contained plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "LPT².txt"}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "contained plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "libs\\helper"}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "bad:stream"}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "contained plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "project "}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "contained plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "not-an-env",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "environment variable name",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": ".", "extras": ["bad extra"]}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "unique portable names",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["not-valid!"],
+                        }
+                    ],
+                },
+            },
+            "Python import names",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": ".", "installer": "pip"}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "unknown fields",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "C:\\outside"}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        },
+                        {
+                            "name": "service",
+                            "version": "2",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON_2",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        },
+                    ],
+                },
+            },
+            "duplicate runtime name",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service-a",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "RUNTIME_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        },
+                        {
+                            "name": "service-b",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "runtime_python",
+                            "projects": [{"path": "."}],
+                            "imports": ["example"],
+                        },
+                    ],
+                },
+            },
+            "duplicate python environment",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "a" * 1025}],
+                            "imports": ["example"],
+                        }
+                    ],
+                },
+            },
+            "contained plugin-relative path",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "service",
+                            "version": "1",
+                            "profile": "host",
+                            "python_env": "EXAMPLE_PYTHON",
+                            "projects": [{"path": "."}],
+                            "imports": ["a" * 513],
+                        }
+                    ],
+                },
+            },
+            "Python import names",
         ),
         (RegistrationKind.SCHEDULE, {"schedules": "nope", "id": "x", "repo": "r"},
          "non-empty list of objects"),

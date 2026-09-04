@@ -121,8 +121,13 @@ def declaration_to_registration(
         }
         registration["runtime_revision"] = {
             "plugin_root": decl.plugin_root,
+            "plugin_owner": decl.owner,
+            "plugin_source_path": decl.source_path,
             "plugin_version": decl.plugin_version,
+            "activation_scopes": list(decl.activation_scopes),
         }
+        if managed_runtime := decl.spec.get("managed_runtime"):
+            registration["runtime_revision"]["managed_runtime"] = managed_runtime
     return registration
 
 
