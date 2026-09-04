@@ -82,6 +82,23 @@ class TestSseCommentParsing:
             {"id": "7", "event": "agent_message", "data": {"text": "hi"}}
         ]
 
+    def test_empty_event_block_does_not_leak_id_or_type(self) -> None:
+        data = json.dumps({"event": "agent_message", "data": {"text": "hi"}})
+
+        events = _drain(
+            [
+                "id: 6",
+                "event: stale",
+                "",
+                f"data: {data}",
+                "",
+            ]
+        )
+
+        assert events == [
+            {"id": "", "event": "agent_message", "data": {"text": "hi"}}
+        ]
+
     def test_controlled_event_keeps_timestamp_and_continuity(self) -> None:
         data = json.dumps(
             {

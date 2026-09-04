@@ -85,7 +85,11 @@ class SseStream(Iterator[dict[str, Any]]):
                 self._event_type = line[7:]
             elif line.startswith("data: "):
                 self._data_lines.append(line[6:])
-            elif line == "" and self._data_lines:
+            elif line == "":
+                if not self._data_lines:
+                    self._event_type = ""
+                    self._event_id = ""
+                    continue
                 raw_data = "\n".join(self._data_lines)
                 try:
                     parsed = json.loads(raw_data)
