@@ -329,8 +329,11 @@ transport foundation #1763 requires.
   allocation, generated payload, install-contract, contract-registry,
   compilation, and fatal Ruff guards pass.
 - Pulled forward onto #2017 after upstream consumed the original Agent Dispatch
-  allocation. The publication versions are Agent Bridge `0.4.0-dev433` and
-  Agent Dispatch `0.1.2-dev9`.
+  allocation. Publication then advanced again while the PR opened, so the final
+  versions are Agent Bridge `0.4.0-dev433` and Agent Dispatch `0.1.2-dev11`.
+- Provider review found two adapter boundary gaps. Malformed local Bridge auth
+  YAML now degrades as absent capability, and the health capability probe shares
+  the caller's total operation timeout instead of adding a fixed five seconds.
 
 ### 2026-09-04 — Agent Dispatch event wake
 

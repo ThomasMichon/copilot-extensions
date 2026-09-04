@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -60,7 +61,7 @@ class LocalBridgeRemoteClient:
                 (config_dir / "auth.yaml").read_text(encoding="utf-8")
             ) or {}
             token = str(auth.get("token") or "")
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, yaml.YAMLError) as exc:
             raise RemoteBridgeUnavailable(
                 "Agent Bridge authentication is unavailable"
             ) from exc
@@ -121,8 +122,18 @@ class LocalBridgeRemoteClient:
         timeout: float = 30.0,
         required_protocol: int = REMOTE_COMMAND_PROTOCOL_VERSION,
     ) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
         base_url, token = self._connection()
-        health_response = self._open(f"{base_url}/health", token, timeout=5.0)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RemoteBridgeOperationError(
+                "Agent Bridge remote command timed out"
+            )
+        health_response = self._open(
+            f"{base_url}/health",
+            token,
+            timeout=min(5.0, remaining),
+        )
         try:
             health = json.loads(health_response.read().decode("utf-8"))
         finally:
@@ -135,12 +146,17 @@ class LocalBridgeRemoteClient:
                 f"Agent Bridge HTTP protocol {required} is required "
                 f"(daemon advertises {minimum}-{version})"
             )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RemoteBridgeOperationError(
+                "Agent Bridge remote command timed out"
+            )
         response = self._open(
             f"{base_url}{path}",
             token,
             method=method,
             body=body,
-            timeout=timeout,
+            timeout=remaining,
         )
         try:
             raw = response.read()

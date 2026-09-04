@@ -1,6 +1,24 @@
 """Tests for the independent local Bridge remote-command adapter."""
 
-from agent_dispatch.bridge_remote import LocalBridgeRemoteClient
+import json
+
+import pytest
+
+from agent_dispatch.bridge_remote import (
+    LocalBridgeRemoteClient,
+    RemoteBridgeUnavailable,
+)
+
+
+class _Response:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def read(self):
+        return json.dumps(self._payload).encode("utf-8")
+
+    def close(self):
+        pass
 
 
 def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch):
@@ -31,3 +49,44 @@ def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch)
     assert calls[0][2]["required_protocol"] == 11
     assert calls[1][2]["required_protocol"] == 11
     assert "required_protocol" not in calls[2][2]
+
+
+def test_malformed_auth_degrades_as_unavailable(tmp_path, monkeypatch):
+    (tmp_path / "auth.yaml").write_text("token: [", encoding="utf-8")
+    monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", "http://127.0.0.1:1")
+
+    with pytest.raises(RemoteBridgeUnavailable, match="authentication"):
+        LocalBridgeRemoteClient(config_dir=tmp_path)._connection()
+
+
+def test_health_probe_shares_operation_timeout_budget(monkeypatch):
+    client = LocalBridgeRemoteClient()
+    monkeypatch.setattr(
+        client,
+        "_connection",
+        lambda: ("http://127.0.0.1:1", "token"),
+    )
+    clock = iter([100.0, 100.2, 100.4])
+    monkeypatch.setattr(
+        "agent_dispatch.bridge_remote.time.monotonic",
+        lambda: next(clock),
+    )
+    calls = []
+
+    def open_response(url, _token, **kwargs):
+        calls.append((url, kwargs["timeout"]))
+        if url.endswith("/health"):
+            return _Response(
+                {"protocol_version": 14, "min_protocol_version": 1}
+            )
+        return _Response({"session_id": "session-a"})
+
+    monkeypatch.setattr(client, "_open", open_response)
+
+    result = client._request("GET", "/operation", timeout=1.0)
+
+    assert result == {"session_id": "session-a"}
+    assert calls == [
+        ("http://127.0.0.1:1/health", pytest.approx(0.8)),
+        ("http://127.0.0.1:1/operation", pytest.approx(0.6)),
+    ]
