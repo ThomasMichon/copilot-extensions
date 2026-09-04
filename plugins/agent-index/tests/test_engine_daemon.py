@@ -46,6 +46,20 @@ def test_engine_command_targets_durable_venv(tmp_path):
     assert str(tmp_path) in cmd[0]
 
 
+def test_engine_command_keeps_console_interpreter_for_no_window_spawn(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(daemon.os, "name", "nt")
+    scripts = tmp_path / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "python.exe").write_bytes(b"")
+    (scripts / "pythonw.exe").write_bytes(b"")
+
+    cmd = daemon.engine_command(tmp_path)
+
+    assert cmd[0] == str(scripts / "python.exe")
+
+
 # -- health ------------------------------------------------------------------
 
 
