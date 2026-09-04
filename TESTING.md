@@ -146,6 +146,9 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   agent-worktrees status-core gates, strict bounded input, exact config shape,
   symlink/reparse and contaminated-Git-environment rejection, exact output,
   process-cwd isolation, and live platform-aware Bash/PowerShell parity).
+- **agent-index:** fail-closed effective repository/required-state-root
+  activation, gated command/scope contribution, non-mutating CLI admission,
+  explicit first-use provisioning, and ordered direct-SSH routing parity.
 - **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
 - **agent-containers:** config, lifecycle, the lease broker, and the resolver.
 - **agent-mcp:** config loading, auth injectors, transports, bridge framing, the

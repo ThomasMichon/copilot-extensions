@@ -127,6 +127,30 @@ def _session_hook_problem(plugin: Path) -> str | None:
         data = json.loads((plugin / "plugin.json").read_text(encoding="utf-8"))
     except Exception:
         return "plugin.json unreadable (cannot verify sessionStart reconcile hook)"
+    try:
+        invocation = json.loads(
+            (plugin / "payload-invocation.json").read_text(encoding="utf-8")
+        )
+    except Exception:
+        invocation = {}
+    if invocation.get("sessionStartBootstrap") is False:
+        dispatcher = invocation.get("payloadDispatcher")
+        if not isinstance(invocation.get("catalogGate"), str) or not invocation[
+            "catalogGate"
+        ]:
+            return (
+                "sessionStartBootstrap false requires a fail-closed catalogGate"
+            )
+        if not isinstance(dispatcher, dict) or not all(
+            isinstance(dispatcher.get(platform), str)
+            and dispatcher[platform]
+            for platform in ("posix", "windows")
+        ):
+            return (
+                "sessionStartBootstrap false requires gated payload dispatchers "
+                "for both platforms"
+            )
+        return None
     hooks_ref = data.get("hooks")
     if not hooks_ref:
         return ('no sessionStart runtime-reconcile hook -- set plugin.json "hooks" to a '

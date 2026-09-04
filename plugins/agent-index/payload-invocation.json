@@ -8,7 +8,9 @@
   "noSelfProvisionEnv": "AGENT_INDEX_NO_SELFPROVISION",
   "purpose": "Search and operate the semantic index",
   "installer": "install",
+  "sessionStartBootstrap": false,
   "payloadRootEnv": "AGENT_INDEX_PAYLOAD_ROOT",
+  "catalogGate": "scripts/resolve_effective_config.py",
   "payloadDispatcher": {
     "posix": "scripts/runtime-gate.sh",
     "windows": "scripts/runtime-gate.ps1"

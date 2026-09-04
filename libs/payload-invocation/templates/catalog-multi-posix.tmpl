@@ -23,7 +23,7 @@ py="$(command -v python3 || command -v python || true)"
     printf '%s\n' '{}'
     exit 0
 }
-
+@@CATALOG_GATE_POSIX@@
 if output="$(SELF_ROOT="$self_root" INSTALLER_PATH="$installer_path" COMMAND_SPECS="$command_specs" "$py" <<'PY'
 import json
 import os
