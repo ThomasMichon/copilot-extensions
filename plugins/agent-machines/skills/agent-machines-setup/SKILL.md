@@ -3,14 +3,21 @@ name: agent-machines-setup
 description: >
   Install, update, and author for the agent-machines runtime -- the portable
   restore-machinestate engine. Use this skill to enable or repair the
-  self-provisioning binstub/venv, inspect runtime readiness, or author
-  requirement packages under a repo's .agent-machines/ namespace.
+  self-provisioning binstub/venv, inspect runtime readiness, or change desired
+  machine configuration by authoring requirement packages under a repo's
+  .agent-machines/ namespace. Fleet-wide requests such as standardizing a
+  setting, application, service, or default across machines are configuration
+  changes and belong here; use restore-machinestate only to inspect or apply
+  desired state that is already declared.
   Trigger phrases include:
   - 'install agent-machines'
   - 'update agent-machines'
   - 'set up agent-machines'
   - 'author a requirement package'
   - 'add a machine-state manifest'
+  - 'change configuration across all machines'
+  - 'ensure this setting on every machine'
+  - 'make this the default on all machines'
   - 'agent-machines setup'
 ---
 

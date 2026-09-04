@@ -5,7 +5,9 @@ description: >
   requirement packages via the agent-machines engine -- Copilot settings first,
   then repo-local modules. Use this skill to inspect or apply machine state:
   discover which packages apply, plan the change, validate for conflicts, and
-  restore.
+  restore. This is an apply-only workflow for desired state that is already
+  declared; requests to add, change, or standardize configuration across
+  machines belong to agent-machines-setup instead.
   Trigger phrases include:
   - 'restore machine state'
   - 'restore-machinestate'
@@ -13,7 +15,7 @@ description: >
   - 'apply my machine config'
   - 'what requirement packages apply here'
   - 'validate machine state'
-  - 'agent-machines'
+  - 'apply declared agent-machines state'
 ---
 
 # restore-machinestate
