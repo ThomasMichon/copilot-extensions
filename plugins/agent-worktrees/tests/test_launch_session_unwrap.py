@@ -144,19 +144,18 @@ def test_launchers_render_status_bar_from_worktree_path():
     assert '--path "$spath"' in sh
 
 
-def test_windows_launcher_passes_psmux_pane_verbatim():
-    """psmux wraps every pane command in `pwsh -NoLogo -Command "<args>"`. An
-    earlier optimization (#102) collapsed `pwsh -File <script> <args>` to a
-    single `& '<script>' <args>` string to avoid a second pwsh -- but under
-    `-Command`, PowerShell treats the always-appended `--allow-all` as the
-    end-of-parameters marker, so it binds POSITIONALLY to a string param
-    (-SetupHook/-EnvScript) and never reaches Copilot (auto-approve silently
-    lost; "env_script not found: --allow-all"). The launcher must pass the
-    command VERBATIM so `pwsh -File` receives its args literally."""
+def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
+    """The encoded wrapper preserves complete argv through psmux's space join."""
     ps = _LAUNCH_PS1.read_text()
-    # The collapse helper must be gone, and new-session must launch @cmd raw.
+    # The collapse helper must be gone. Wrapped pane argv travels through a
+    # space-free payload so absolute executable paths remain one argument.
     assert "ConvertTo-PsmuxPaneCommand" not in ps
-    assert "new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd" in ps
+    assert "$argsJson = ConvertTo-Json -InputObject @($wrapperArgs) -Compress" in ps
+    assert "[Text.Encoding]::Unicode.GetBytes($wrapperScript)" in ps
+    assert "'-EncodedCommand', $encodedWrapper" in ps
+    assert "$paneCmd = $wrapPrefix + $cmd" not in ps
+    assert "& $script:AwPsmuxBin new-session -d -s $sessName" in ps
+    assert "-c $plan.work_dir @envFlags @paneCmd" in ps
 
 
 _TERMINAL = Path(__file__).resolve().parents[1] / "terminal"

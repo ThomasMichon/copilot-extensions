@@ -2160,15 +2160,16 @@ function Ensure-Psmux {
         return
     }
     $psmuxVer = Get-AwPsmuxBinaryVersion -Path $muxBin
+    $psmuxDisplay = if ($psmuxVer) { $psmuxVer } else { '<unknown>' }
     $compatible = Test-AwPsmuxVersionCompatible -Version $psmuxVer
     if (-not $compatible) {
         $sessionState = Get-AwPsmuxSessionState -Path $muxBin
         if (-not $sessionState.Known) {
-            Write-ServiceWarn "psmux $psmuxVer is incompatible, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
+            Write-ServiceWarn "psmux $psmuxDisplay is incompatible, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
         } elseif ($sessionState.Sessions.Count -gt 0) {
-            Write-ServiceWarn "psmux $psmuxVer is incompatible. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them). Close all worktree sessions and re-run 'update' to upgrade."
+            Write-ServiceWarn "psmux $psmuxDisplay is incompatible. $($sessionState.Sessions.Count) live session(s) present -- not replacing it now (that would kill them). Close all worktree sessions and re-run 'update' to upgrade."
         } else {
-            Write-ServiceChanged "psmux $psmuxVer is incompatible -- refreshing the portable package"
+            Write-ServiceChanged "psmux $psmuxDisplay is incompatible -- refreshing the portable package"
             & winget install --id marlocarlo.psmux --version $installVersion --exact `
                 --uninstall-previous --force --accept-source-agreements `
                 --accept-package-agreements 2>&1 | Out-Null
@@ -2181,7 +2182,7 @@ function Ensure-Psmux {
             }
         }
     } else {
-        Write-ServiceOk "psmux available ($psmuxVer; compatible)"
+        Write-ServiceOk "psmux available ($psmuxDisplay; compatible)"
     }
     Ensure-PsmuxSshSafe
 }

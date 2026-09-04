@@ -1504,10 +1504,10 @@ if (-not $noMux) {
     # Route the pane through pane-wrapper.ps1 so the child's real exit code is
     # observable (recorded as a pane_exited activity mark) and a crash shows a
     # diagnostic before the pane closes -- the Windows counterpart of the Linux
-    # pane-wrapper.sh path. The wrapper uses $args (no param block) and invokes
-    # the child via `& $exe @args`, so the verbatim `pwsh -File … --allow-all`
-    # form is preserved through both this prefix and psmux's outer `-Command`
-    # wrap (validated). `-AwWt <id>` (added only when known) is consumed by the
+    # pane-wrapper.sh path. Psmux space-joins pane argv, so carry the wrapper
+    # path and complete child argv inside a space-free EncodedCommand payload.
+    # This preserves executable paths such as `C:\Program Files\...\pwsh.exe`
+    # and matches sessions.py `_mux_pane_cmd`. `-AwWt <id>` is consumed by the
     # wrapper, never forwarded to Copilot. If the wrapper is missing, fall back
     # to the verbatim command unchanged.
     $paneCmd = $cmd
@@ -1538,14 +1538,37 @@ if (-not $noMux) {
         }
     }
     if (Test-Path -LiteralPath $paneWrapper) {
-        $wrapPrefix = @('pwsh.exe', '-NoProfile', '-NoLogo', '-File', $paneWrapper)
+        $wrapperArgs = @()
         if (-not [string]::IsNullOrWhiteSpace($plan.worktree_id)) {
-            $wrapPrefix += @('-AwWt', [string]$plan.worktree_id)
+            $wrapperArgs += @('-AwWt', [string]$plan.worktree_id)
         }
         if ($ahpTokenFile) {
-            $wrapPrefix += @('-AwAhpTokenFile', $ahpTokenFile)
+            $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
         }
-        $paneCmd = $wrapPrefix + $cmd
+        $wrapperArgs += $cmd
+        $wrapperB64 = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes($paneWrapper)
+        )
+        $argsJson = ConvertTo-Json -InputObject @($wrapperArgs) -Compress
+        $argsB64 = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes($argsJson)
+        )
+        $wrapperScript = (
+            "`$w=[Text.Encoding]::UTF8.GetString(" +
+            "[Convert]::FromBase64String('$wrapperB64'));" +
+            "`$j=[Text.Encoding]::UTF8.GetString(" +
+            "[Convert]::FromBase64String('$argsB64'));" +
+            "`$a=@(ConvertFrom-Json -InputObject `$j);" +
+            "& `$w @a;" +
+            "exit `$LASTEXITCODE"
+        )
+        $encodedWrapper = [Convert]::ToBase64String(
+            [Text.Encoding]::Unicode.GetBytes($wrapperScript)
+        )
+        $paneCmd = @(
+            'pwsh.exe', '-NoProfile', '-NoLogo',
+            '-EncodedCommand', $encodedWrapper
+        )
     } else {
         Write-SetupLog "pane wrapper missing at $paneWrapper; using verbatim command" 'WARN'
     }

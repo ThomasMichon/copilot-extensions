@@ -143,7 +143,10 @@ def test_compatibility_accepts_335_and_337_but_blocks_336(tmp_path):
         """
 param($Helper)
 . $Helper
-$versions = @('3.3.4', '3.3.5', '3.3.6', '3.3.7', '3.3.8') | ForEach-Object {
+$versions = @(
+    '3.3.4', '3.3.5', '3.3.6', '3.3.6.0', '3.3.6.1',
+    '3.3.7', '3.3.7.0', '3.3.8'
+) | ForEach-Object {
     [pscustomobject]@{
         version = $_
         compatible = Test-AwPsmuxVersionCompatible -Version $_
@@ -171,7 +174,10 @@ $versions = @('3.3.4', '3.3.5', '3.3.6', '3.3.7', '3.3.8') | ForEach-Object {
         "3.3.4": False,
         "3.3.5": True,
         "3.3.6": False,
+        "3.3.6.0": False,
+        "3.3.6.1": False,
         "3.3.7": True,
+        "3.3.7.0": True,
         "3.3.8": True,
     }
     assert result["nullCompatible"] is False

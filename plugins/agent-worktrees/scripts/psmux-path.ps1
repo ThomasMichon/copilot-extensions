@@ -63,10 +63,18 @@ function Test-AwPsmuxVersionCompatible {
     if ($parsed -lt $minimum) { return $false }
     foreach ($blocked in $BlockedVersions) {
         try {
-            if ($parsed -eq [version]$blocked) { return $false }
+            $blockedParsed = [version]$blocked
         } catch {
             return $false
         }
+        $blockedMatch = if ($blockedParsed.Revision -lt 0) {
+            $parsed.Major -eq $blockedParsed.Major -and
+                $parsed.Minor -eq $blockedParsed.Minor -and
+                $parsed.Build -eq $blockedParsed.Build
+        } else {
+            $parsed -eq $blockedParsed
+        }
+        if ($blockedMatch) { return $false }
     }
     return $true
 }
