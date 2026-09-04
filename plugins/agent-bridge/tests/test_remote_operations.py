@@ -252,6 +252,32 @@ async def test_event_subscription_rejects_legacy_hosting_daemon() -> None:
 
 
 @pytest.mark.asyncio
+async def test_event_ack_requires_continuity_for_non_empty_log() -> None:
+    client = _RemoteClient()
+
+    response = await CarrierRequestRouter(lambda: client)(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="ack",
+            payload={
+                "operation": "session.events.ack",
+                "version": 1,
+                "session_id": "session-a",
+                "caller_id": "consumer-a",
+                "last_id": 5,
+            },
+        )
+    )
+
+    assert isinstance(response, Envelope)
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["status"] == 400
+    assert response.payload["code"] == "invalid_request"
+    assert response.payload["details"]["continuity_id"] == "epoch-a"
+    assert client.ack_calls == []
+
+
+@pytest.mark.asyncio
 async def test_event_subscription_survives_hosting_bridge_cutover(
     monkeypatch,
 ) -> None:

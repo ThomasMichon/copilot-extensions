@@ -317,6 +317,13 @@ class CarrierRequestRouter:
                     caller_id=caller_id,
                 )
                 current_continuity = info.get("continuity_id")
+                if continuity_id is None and current_continuity is not None:
+                    raise RemoteBridgeError(
+                        400,
+                        "invalid_request",
+                        "continuity_id is required for a non-empty event log",
+                        details={"continuity_id": current_continuity},
+                    )
                 if continuity_id != current_continuity:
                     raise RemoteBridgeError(
                         409,
