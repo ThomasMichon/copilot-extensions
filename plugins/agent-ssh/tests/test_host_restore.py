@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -105,6 +106,124 @@ def test_dtssh_apply_updates_existing_binary_without_login(tmp_path, monkeypatch
     assert any("update" in command for command in calls)
     assert any("-SkipLogin" in command for command in calls)
     assert result["healthy"] is True
+
+
+def test_dtssh_apply_over_ssh_launches_detached_and_requires_verification(
+    tmp_path, monkeypatch
+):
+    script = _setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("SSH_CONNECTION", "192.0.2.1 50000 192.0.2.2 22")
+    captured = {}
+
+    def run(command, **kwargs):
+        assert "user" in command
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"status": "Logged in"}',
+            stderr="",
+        )
+
+    def spawn(command):
+        captured["command"] = command
+        return True, "C:\\logs\\restore-host-detached.log"
+
+    monkeypatch.setattr(host_restore.subprocess, "run", run)
+    monkeypatch.setattr(host_restore, "_spawn_dtssh_update_via_wmi", spawn)
+
+    result = host_restore.restore_host(
+        "dtssh",
+        "example-host",
+        2222,
+        apply=True,
+    )
+
+    assert result["ok"] is True
+    assert result["detached"] is True
+    assert result["verification_required"] is True
+    assert result["applied"] is False
+    assert result["healthy"] is False
+    assert str(script) in captured["command"]
+    assert "update" in captured["command"]
+    assert "-Alias" in captured["command"]
+    assert "example-host" in captured["command"]
+    assert "-SkipLogin" in captured["command"]
+
+
+def test_dtssh_apply_over_ssh_reports_detached_launch_failure(
+    tmp_path, monkeypatch
+):
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setenv("SSH_CLIENT", "192.0.2.1 50000 22")
+    monkeypatch.setattr(
+        host_restore.subprocess,
+        "run",
+        lambda command, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout='{"status": "Logged in"}',
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        host_restore,
+        "_spawn_dtssh_update_via_wmi",
+        lambda command: (False, "broker failed"),
+    )
+
+    result = host_restore.restore_host(
+        "dtssh",
+        "example-host",
+        2222,
+        apply=True,
+    )
+
+    assert result["ok"] is False
+    assert result["detached"] is False
+    assert result["verification_required"] is False
+    assert result["applied"] is False
+    assert result["error"] == "broker failed"
+
+
+def test_wmi_broker_uses_resolved_powershell_path(monkeypatch):
+    resolved = r"C:\Custom PowerShell\powershell.exe"
+    captured = {}
+
+    monkeypatch.setattr(
+        host_restore.shutil,
+        "which",
+        lambda name: resolved if name == "powershell" else None,
+    )
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(host_restore.subprocess, "run", run)
+
+    launched, _detail = host_restore._spawn_dtssh_update_via_wmi(
+        [r"C:\Program Files\PowerShell\7\pwsh.exe", "-NoProfile"]
+    )
+
+    assert launched is True
+    assert captured["command"][0] == resolved
+    broker = base64.b64decode(captured["command"][-1]).decode("utf-16-le")
+    assert f'"{resolved}" -NoProfile -NonInteractive' in broker
+
+
+def test_detached_guidance_includes_complete_verification_command(capsys):
+    result = {
+        "ok": True,
+        "transport": "dtssh",
+        "alias": "example-host",
+        "port": 2222,
+        "verification_required": True,
+    }
+
+    assert host_restore.emit_result(result, json_output=False) == 0
+    output = capsys.readouterr().out
+    assert (
+        "agent-ssh restore-host --transport dtssh "
+        "--alias example-host --port 2222 --dry-run"
+    ) in output
 
 
 def test_dtssh_restore_launches_helpers_without_console_windows(
@@ -227,6 +346,41 @@ def test_nonzero_status_is_never_healthy(tmp_path, monkeypatch):
     )
 
     assert result["ok"] is False
+    assert result["healthy"] is False
+    assert result["would_change"] is True
+
+
+def test_pending_durable_identity_is_not_healthy(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+
+    def run(command, **kwargs):
+        if "user" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"status": "Logged in"}',
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "host running\n"
+                "watchdog running\n"
+                "tunnel example: 1 host connection(s)\n"
+                "durable host identity: pending first successful host launch"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(host_restore.subprocess, "run", run)
+
+    result = host_restore.restore_host(
+        "dtssh",
+        "example-host",
+        2222,
+        apply=False,
+    )
+
+    assert result["ok"] is True
     assert result["healthy"] is False
     assert result["would_change"] is True
 
