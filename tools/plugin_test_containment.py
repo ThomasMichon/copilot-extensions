@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence, TypeVar
+from typing import Any, Mapping, Sequence, TypeVar
 
 CONTAINED_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 SANDBOX_ENV = "COPILOT_EXTENSIONS_TEST_SANDBOX"
@@ -74,6 +74,84 @@ class Limits:
 
 class ContainmentError(RuntimeError):
     """Raised when the process tree cannot be contained safely."""
+
+
+@dataclass(frozen=True)
+class _WindowsEnvironmentSnapshot:
+    user: dict[str, tuple[Any, int]]
+    machine: dict[str, tuple[Any, int]]
+
+
+def _read_registry_environment() -> _WindowsEnvironmentSnapshot | None:
+    if os.name != "nt":
+        return None
+    import winreg
+
+    def read(hive: int, subkey: str) -> dict[str, tuple[Any, int]]:
+        values: dict[str, tuple[Any, int]] = {}
+        try:
+            key = winreg.OpenKey(hive, subkey, 0, winreg.KEY_READ)
+        except FileNotFoundError:
+            return values
+        with key:
+            index = 0
+            while True:
+                try:
+                    name, value, value_type = winreg.EnumValue(key, index)
+                except OSError as exc:
+                    if exc.winerror != 259:
+                        raise
+                    break
+                values[name] = (value, value_type)
+                index += 1
+        return values
+
+    return _WindowsEnvironmentSnapshot(
+        user=read(winreg.HKEY_CURRENT_USER, "Environment"),
+        machine=read(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        ),
+    )
+
+
+def _registry_environment_drift(
+    snapshot: _WindowsEnvironmentSnapshot | None,
+) -> list[str]:
+    if snapshot is None:
+        return []
+    current_snapshot = _read_registry_environment()
+    if current_snapshot is None:
+        raise ContainmentError("Windows environment registry became unavailable")
+
+    def compare(
+        label: str,
+        expected: dict[str, tuple[Any, int]],
+        current: dict[str, tuple[Any, int]],
+    ) -> list[str]:
+        expected_folded = {
+            name.casefold(): (name, data) for name, data in expected.items()
+        }
+        current_folded = {
+            name.casefold(): (name, data) for name, data in current.items()
+        }
+        names = sorted(set(expected_folded) | set(current_folded))
+        drifted = [
+            name
+            for name in names
+            if expected_folded.get(name, (None, None))[1]
+            != current_folded.get(name, (None, None))[1]
+        ]
+        return [
+            f"{label}:{current_folded.get(name, expected_folded.get(name))[0]}"
+            for name in drifted
+        ]
+
+    return compare("User", snapshot.user, current_snapshot.user) + compare(
+        "Machine",
+        snapshot.machine,
+        current_snapshot.machine,
+    )
 
 
 def partition(items: list[_T], size: int) -> list[list[_T]]:
@@ -376,7 +454,7 @@ def _worker_main(argv: Sequence[str]) -> int:
     return subprocess.run(command, check=False).returncode
 
 
-def run_contained(
+def _run_contained_process(
     command: Sequence[str],
     *,
     cwd: Path,
@@ -468,6 +546,37 @@ def run_contained(
                 except subprocess.TimeoutExpired:
                     proc.kill()
         ready.unlink(missing_ok=True)
+
+
+def run_contained(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    sandbox: Path,
+    limits: Limits,
+) -> int:
+    """Run a contained tree and fail if it escapes into Windows environment state."""
+    environment_snapshot = _read_registry_environment()
+    try:
+        result = _run_contained_process(
+            command,
+            cwd=cwd,
+            env=env,
+            sandbox=sandbox,
+            limits=limits,
+        )
+    finally:
+        changed = _registry_environment_drift(environment_snapshot)
+        if changed:
+            print(
+                "[HOST-STATE] contained test changed persistent Windows "
+                f"environment state; detected without rollback: {', '.join(changed)}",
+                file=sys.stderr,
+            )
+    if changed:
+        return 125
+    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:

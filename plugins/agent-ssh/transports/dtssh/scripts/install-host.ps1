@@ -17,6 +17,29 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# === install-contract:test-persistent-environment -- keep byte-identical across installers ===
+function Get-CopilotPersistentEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
+    )
+    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
+    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
+    return [Environment]::GetEnvironmentVariable($Name, $effectiveTarget)
+}
+
+function Set-CopilotPersistentEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][string]$Value,
+        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
+    )
+    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
+    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
+    [Environment]::SetEnvironmentVariable($Name, $Value, $effectiveTarget)
+}
+# === end install-contract:test-persistent-environment ===
 $InstallRelease = 'https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.ps1'
 $InstallDir = Join-Path $env:LOCALAPPDATA 'agent-ssh-dtssh'
 $DtsshDir = Join-Path $env:LOCALAPPDATA 'dtssh\bin'
@@ -27,9 +50,9 @@ $LauncherDst = Join-Path $InstallDir 'dtssh-host-launcher.ps1'
 $StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'agent-ssh-dtssh-host.lnk'
 
 function Add-UserPath([string]$PathToAdd) {
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'Path' -Target 'User'
     if ($userPath -notlike "*$PathToAdd*") {
-        [Environment]::SetEnvironmentVariable('Path', "$PathToAdd;$userPath", 'User')
+        Set-CopilotPersistentEnvironmentVariable -Name 'Path' -Value "$PathToAdd;$userPath" -Target 'User'
     }
     if ($env:Path -notlike "*$PathToAdd*") { $env:Path = "$PathToAdd;$env:Path" }
 }
