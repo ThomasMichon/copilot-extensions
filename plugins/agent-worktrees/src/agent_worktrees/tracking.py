@@ -230,6 +230,35 @@ class SessionEntry:
 
 
 @dataclass
+class SessionBackendBinding:
+    """Current externally hosted session bound to this worktree."""
+
+    kind: str
+    endpoint_url: str
+    session_id: str
+    protocol_version: str
+    auth_account: str
+    created_at: str
+    last_seen_at: str
+    state: str = "active"
+    binding_revision: int = 1
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "version": 1,
+            "kind": self.kind,
+            "endpoint_url": self.endpoint_url,
+            "session_id": self.session_id,
+            "protocol_version": self.protocol_version,
+            "auth_account": self.auth_account,
+            "created_at": self.created_at,
+            "last_seen_at": self.last_seen_at,
+            "state": self.state,
+            "binding_revision": self.binding_revision,
+        }
+
+
+@dataclass
 class HeadTransition:
     """A monotonic, replayable change to a worktree's current session."""
 
@@ -524,6 +553,13 @@ class WorktreeRecord:
     status: WorktreeStatus
     completed_at: str | None
     sessions: list[SessionEntry] | None = field(default=None)
+    session_backend: SessionBackendBinding | None = None
+    session_backend_opaque: bool = field(
+        default=False, repr=False, compare=False
+    )
+    session_backend_raw: object = field(
+        default=None, repr=False, compare=False
+    )
     # PR records (PR mode).  A worktree can track multiple PRs -- serially
     # (re-PR after a merge) or in parallel -- each self-describing (including
     # its target ``repo``).  Empty when the worktree has not entered the PR
@@ -1913,6 +1949,45 @@ def load_record(path: Path) -> WorktreeRecord:
                         ),
                     ))
 
+    raw_session_backend = data.get("session_backend")
+    session_backend: SessionBackendBinding | None = None
+    session_backend_opaque = False
+    if raw_session_backend is not None:
+        session_backend_opaque = True
+    if isinstance(raw_session_backend, dict):
+        if raw_session_backend.get("version", 1) != 1:
+            pass
+        elif raw_session_backend.get("kind") == "ahp":
+            required = (
+                "endpoint_url",
+                "session_id",
+                "protocol_version",
+                "auth_account",
+                "created_at",
+                "last_seen_at",
+            )
+            if all(raw_session_backend.get(name) for name in required):
+                state = str(raw_session_backend.get("state", "active"))
+                if state not in {"active", "disposed", "unknown"}:
+                    state = "unknown"
+                session_backend = SessionBackendBinding(
+                    kind="ahp",
+                    endpoint_url=str(raw_session_backend["endpoint_url"]),
+                    session_id=str(raw_session_backend["session_id"]),
+                    protocol_version=str(
+                        raw_session_backend["protocol_version"]
+                    ),
+                    auth_account=str(raw_session_backend["auth_account"]),
+                    created_at=str(raw_session_backend["created_at"]),
+                    last_seen_at=str(raw_session_backend["last_seen_at"]),
+                    state=state,
+                    binding_revision=_bounded_nonnegative_int(
+                        raw_session_backend.get("binding_revision", 1),
+                        field="session backend binding_revision",
+                    ),
+                )
+                session_backend_opaque = False
+
     # Parse PR records -- the multi-PR ``prs:`` list (preferred) or a legacy
     # single ``pr:`` mapping (loaded as a one-element list).  Absent in
     # non-PR worktrees.
@@ -2214,6 +2289,9 @@ def load_record(path: Path) -> WorktreeRecord:
         status=data.get("status", "active"),
         completed_at=str(completed_raw) if completed_raw else None,
         sessions=sessions_list,
+        session_backend=session_backend,
+        session_backend_opaque=session_backend_opaque,
+        session_backend_raw=raw_session_backend,
         prs=prs_list,
         kind=kind_val,
         owner=str(owner_raw) if owner_raw else None,
@@ -2361,6 +2439,23 @@ def _save_record_unlocked(
             record.head_transitions = current.head_transitions
             record.handoff_counter = current.handoff_counter
             record.handoffs = current.handoffs
+        current_backend = current.session_backend
+        record_backend = record.session_backend
+        if current.session_backend_opaque:
+            record.session_backend = None
+            record.session_backend_opaque = True
+            record.session_backend_raw = current.session_backend_raw
+        elif (
+            current_backend is not None
+            and (
+                record_backend is None
+                or current_backend.binding_revision
+                > record_backend.binding_revision
+            )
+        ):
+            record.session_backend = current_backend
+            record.session_backend_opaque = False
+            record.session_backend_raw = None
         if (
             current.profile_assignment_revision
             > record.profile_assignment_revision
@@ -2497,6 +2592,18 @@ def _save_record_unlocked(
         )
     if not record.checkout_managed:
         content += "checkout_managed: false\n"
+    if record.session_backend_opaque:
+        content += yaml.safe_dump(
+            {"session_backend": record.session_backend_raw},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    elif record.session_backend is not None:
+        content += yaml.safe_dump(
+            {"session_backend": record.session_backend.to_dict()},
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
     # worktree-status-core: the agent-asserted disposition overlay -- emitted
     # only when explicitly set, so an un-annotated session YAML stays

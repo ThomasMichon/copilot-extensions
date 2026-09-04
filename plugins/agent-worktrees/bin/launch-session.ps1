@@ -596,6 +596,7 @@ function Invoke-UpdateApply {
 $DirectCommands = @(
     'services', 'repos', 'knowledge', 'agent-worktrees',
     'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
+    'session-backend',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
     'register', 'unregister', 'uninstall', 'update', 'install-status',
     'deploy-instructions', 'get', 'pre-launch', 'stage-update', 'reconcile-plugins', 'dev', 'handoff-cutover',
@@ -787,7 +788,8 @@ function Test-AwJoiningLiveSession {
 # payload (no re-exec -- a launcher change applies next launch), then the
 # pre-launch self-update and plugin reconcile, so Copilot starts on the
 # finished update.
-if (Test-AwJoiningLiveSession) {
+$joiningLiveSession = Test-AwJoiningLiveSession
+if ($joiningLiveSession) {
     Write-SetupLog 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
     if ($script:StageJob) {
         try { Remove-Job $script:StageJob -Force -ErrorAction SilentlyContinue } catch {}
@@ -880,9 +882,149 @@ Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
 
 $cmd = @($plan.cmd)
 
+$sessionBackend = $null
+$ahpArgs = @()
+if (
+    -not $joiningLiveSession -and
+    -not [string]::IsNullOrWhiteSpace([string]$plan.worktree_id)
+) {
+    $backendBaseArgs = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) {
+        $backendBaseArgs += @('--project', $script:LaunchProject)
+    }
+    $backendStatusArgs = $backendBaseArgs + @(
+        'session-backend', 'status',
+        '--worktree-id', [string]$plan.worktree_id,
+        '--json'
+    )
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $backendStatusOutput = & $VenvPython @backendStatusArgs 2>&1
+        $backendStatusExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorAction
+    }
+    $backendStatusText = (
+        ($backendStatusOutput | ForEach-Object { "$_" }) -join ''
+    ).Trim()
+    if ($backendStatusExit -ne 0) {
+        Write-SetupLog (
+            "Session backend status failed (exit ${backendStatusExit}): " +
+            $backendStatusText
+        ) 'ERROR'
+        [Console]::Error.WriteLine(
+            "ERROR: Session backend status failed: $backendStatusText"
+        )
+        exit $backendStatusExit
+    }
+    try {
+        $sessionBackend = $backendStatusText |
+            ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        Write-SetupLog (
+            "Session backend returned invalid JSON: $backendStatusText"
+        ) 'ERROR'
+        [Console]::Error.WriteLine('ERROR: Session backend returned invalid JSON.')
+        exit 3
+    }
+    if ($sessionBackend.enabled -and $sessionBackend.kind -eq 'ahp') {
+        $token = & gh auth token --user ([string]$sessionBackend.auth_account) 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
+            $message = "Could not mint the AHP client token for account $($sessionBackend.auth_account)."
+            Write-SetupLog $message 'ERROR'
+            [Console]::Error.WriteLine("ERROR: $message")
+            exit 3
+        }
+        $backendEnsureArgs = $backendBaseArgs + @(
+            'session-backend', 'ensure',
+            '--worktree-id', [string]$plan.worktree_id,
+            '--json'
+        )
+        $savedErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $env:AGENT_WORKTREES_AHP_AUTH_TOKEN = $token.Trim()
+            $backendOutput = & $VenvPython @backendEnsureArgs 2>&1
+            $backendExit = $LASTEXITCODE
+        } finally {
+            Remove-Item Env:AGENT_WORKTREES_AHP_AUTH_TOKEN `
+                -ErrorAction SilentlyContinue
+            $ErrorActionPreference = $savedErrorAction
+        }
+        $backendText = (
+            ($backendOutput | ForEach-Object { "$_" }) -join ''
+        ).Trim()
+        if ($backendExit -ne 0) {
+            Write-SetupLog (
+                "Session backend ensure failed (exit ${backendExit}): " +
+                $backendText
+            ) 'ERROR'
+            [Console]::Error.WriteLine(
+                "ERROR: Session backend ensure failed: $backendText"
+            )
+            exit $backendExit
+        }
+        try {
+            $sessionBackend = $backendText |
+                ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            Write-SetupLog (
+                "Session backend returned invalid JSON: $backendText"
+            ) 'ERROR'
+            [Console]::Error.WriteLine(
+                'ERROR: Session backend returned invalid JSON.'
+            )
+            exit 3
+        }
+        $features = @(
+            ([string]$env:COPILOT_CLI_ENABLED_FEATURE_FLAGS -split ',')
+            | ForEach-Object { $_.Trim() }
+            | Where-Object { $_ }
+        )
+        if ($features -notcontains 'AHP_CLIENT') {
+            $features += 'AHP_CLIENT'
+        }
+        $env:COPILOT_CLI_ENABLED_FEATURE_FLAGS = $features -join ','
+        $ahpArgs = @(
+            '--ahp', [string]$sessionBackend.endpoint_url,
+            "--resume=$($sessionBackend.session_id)"
+        )
+        $plan.post_exit = $false
+        Write-SetupLog (
+            "AHP client bound to session $($sessionBackend.session_id) " +
+            "at $($sessionBackend.endpoint_url)"
+        )
+    }
+}
+
 # Append copilot passthrough args (from after -- separator)
 if ($CopilotPassthrough.Count -gt 0) {
     $cmd += $CopilotPassthrough
+}
+
+if ($ahpArgs.Count -gt 0) {
+    $filteredCmd = [System.Collections.Generic.List[string]]::new()
+    $skipNext = $false
+    foreach ($arg in $cmd) {
+        if ($skipNext) {
+            $skipNext = $false
+            continue
+        }
+        if ($arg -eq '--ahp') {
+            $skipNext = $true
+            continue
+        }
+        if ($arg -like '--ahp=*' -or $arg -like '--resume=*') {
+            continue
+        }
+        $filteredCmd.Add([string]$arg)
+    }
+    $cmd = @($filteredCmd)
+    if ($cmd -notcontains '--experimental') {
+        $cmd += '--experimental'
+    }
+    $cmd += $ahpArgs
 }
 
 # ── psmux pane command: pass VERBATIM (`pwsh -File <script>`) ─────────────
@@ -1184,9 +1326,32 @@ function Start-StatusUpdater {
         if ($WorkDir) { $updArgs += @('--path', $WorkDir) }
         # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
         # handoff and can flash a console (windows-launch-hardening #786).
-        Start-Process -FilePath 'conhost.exe' `
-            -ArgumentList (@('--headless', "`"$VenvPython`"") + $updArgs) `
-            -WorkingDirectory $HOME -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        $savedAuth = @{}
+        foreach ($name in @(
+            'GH_TOKEN',
+            'GITHUB_TOKEN',
+            'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+        )) {
+            $savedAuth[$name] = [Environment]::GetEnvironmentVariable(
+                $name,
+                'Process'
+            )
+            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        }
+        try {
+            Start-Process -FilePath 'conhost.exe' `
+                -ArgumentList (@('--headless', "`"$VenvPython`"") + $updArgs) `
+                -WorkingDirectory $HOME -WindowStyle Hidden `
+                -ErrorAction Stop | Out-Null
+        } finally {
+            foreach ($name in $savedAuth.Keys) {
+                [Environment]::SetEnvironmentVariable(
+                    $name,
+                    $savedAuth[$name],
+                    'Process'
+                )
+            }
+        }
         Write-SetupLog "psmux: started status-updater for $Session"
     } catch {
         Write-SetupLog "psmux: status-updater spawn failed: $($_.Exception.Message)" 'WARN'
@@ -1298,6 +1463,16 @@ if (-not $noMux) {
     $mergedEnv = [ordered]@{}
     if ($plan.env) {
         foreach ($prop in $plan.env.PSObject.Properties) {
+            if (
+                $ahpArgs.Count -gt 0 -and
+                $prop.Name -in @(
+                    'GH_TOKEN',
+                    'GITHUB_TOKEN',
+                    'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+                )
+            ) {
+                continue
+            }
             $mergedEnv[$prop.Name] = [string]$prop.Value
         }
     }
@@ -1339,10 +1514,38 @@ if (-not $noMux) {
     # to the verbatim command unchanged.
     $paneCmd = $cmd
     $paneWrapper = Join-Path $PSScriptRoot 'pane-wrapper.ps1'
+    $ahpTokenFile = $null
+    if ($ahpArgs.Count -gt 0) {
+        if (-not (Test-Path -LiteralPath $paneWrapper -PathType Leaf)) {
+            $message = 'AHP psmux launch requires the agent-worktrees pane wrapper.'
+            Write-SetupLog $message 'ERROR'
+            Write-Error $message -ErrorAction Continue
+            exit 3
+        }
+        $ahpTokenFile = Join-Path $env:TEMP (
+            "agent-worktrees-ahp-$PID-$([guid]::NewGuid().ToString('N')).token"
+        )
+        try {
+            $secureToken = ConvertTo-SecureString $token.Trim() `
+                -AsPlainText -Force
+            $encryptedToken = ConvertFrom-SecureString $secureToken
+            [IO.File]::WriteAllText($ahpTokenFile, $encryptedToken)
+        } catch {
+            Remove-Item -LiteralPath $ahpTokenFile `
+                -Force -ErrorAction SilentlyContinue
+            Write-SetupLog 'Could not create the protected AHP token handoff.' 'ERROR'
+            Write-Error 'Could not create the protected AHP token handoff.' `
+                -ErrorAction Continue
+            exit 3
+        }
+    }
     if (Test-Path -LiteralPath $paneWrapper) {
         $wrapPrefix = @('pwsh.exe', '-NoProfile', '-NoLogo', '-File', $paneWrapper)
         if (-not [string]::IsNullOrWhiteSpace($plan.worktree_id)) {
             $wrapPrefix += @('-AwWt', [string]$plan.worktree_id)
+        }
+        if ($ahpTokenFile) {
+            $wrapPrefix += @('-AwAhpTokenFile', $ahpTokenFile)
         }
         $paneCmd = $wrapPrefix + $cmd
     } else {
@@ -1365,8 +1568,46 @@ if (-not $noMux) {
             $newSessionExit = 1
             $newSessionError = ''
             try {
-                & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd
-                $newSessionExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+                $savedAuth = $null
+                if ($ahpArgs.Count -gt 0) {
+                    $savedAuth = @{}
+                    foreach ($name in @(
+                        'GH_TOKEN',
+                        'GITHUB_TOKEN',
+                        'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+                    )) {
+                        $savedAuth[$name] = (
+                            [Environment]::GetEnvironmentVariable(
+                                $name,
+                                'Process'
+                            )
+                        )
+                        [Environment]::SetEnvironmentVariable(
+                            $name,
+                            $null,
+                            'Process'
+                        )
+                    }
+                }
+                try {
+                    & $script:AwPsmuxBin new-session -d -s $sessName `
+                        -c $plan.work_dir @envFlags @paneCmd
+                    $newSessionExit = if ($null -eq $LASTEXITCODE) {
+                        0
+                    } else {
+                        [int]$LASTEXITCODE
+                    }
+                } finally {
+                    if ($null -ne $savedAuth) {
+                        foreach ($name in $savedAuth.Keys) {
+                            [Environment]::SetEnvironmentVariable(
+                                $name,
+                                $savedAuth[$name],
+                                'Process'
+                            )
+                        }
+                    }
+                }
             } catch {
                 $newSessionError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
             }
@@ -1396,6 +1637,10 @@ if (-not $noMux) {
     $env:TMUX = $savedTmux
     $env:TMUX_PANE = $savedTmuxPane
     if ($newSessionExit -ne 0) {
+        if ($ahpTokenFile) {
+            Remove-Item -LiteralPath $ahpTokenFile `
+                -Force -ErrorAction SilentlyContinue
+        }
         $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
         $recoveryProject = if ($script:LaunchProject) { $script:LaunchProject } else { 'agent-worktrees' }
         $recoveryCommand = "$recoveryProject --worktree-id $($plan.worktree_id)"
@@ -1417,6 +1662,26 @@ if (-not $noMux) {
         Write-Error $message -ErrorAction Continue
         exit $newSessionExit
     } else {
+        if ($ahpTokenFile) {
+            $tokenDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            while (
+                (Test-Path -LiteralPath $ahpTokenFile) -and
+                [DateTime]::UtcNow -lt $tokenDeadline
+            ) {
+                Start-Sleep -Milliseconds 50
+            }
+            if (Test-Path -LiteralPath $ahpTokenFile) {
+                Remove-Item -LiteralPath $ahpTokenFile `
+                    -Force -ErrorAction SilentlyContinue
+                Stop-AwOwnedPsmuxSession $sessName
+                Write-AwMuxFailure -Reason 'ahp_token_handoff_failed' `
+                    -ExitCode 3
+                Write-Error (
+                    'AHP client did not consume its protected token handoff.'
+                ) -ErrorAction Continue
+                exit 3
+            }
+        }
         Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @(
             'mux=create',
             "attempts=$totalCreateAttempts"
@@ -1503,8 +1768,34 @@ Write-Host 'Launching Copilot...'
 Write-Host ''
 
 $copilotExit = 0
+$savedDirectAuth = @{}
+foreach ($name in @(
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+)) {
+    $savedDirectAuth[$name] = [Environment]::GetEnvironmentVariable(
+        $name,
+        'Process'
+    )
+}
 try {
     try {
+        if ($ahpArgs.Count -gt 0) {
+            [Environment]::SetEnvironmentVariable(
+                'GITHUB_TOKEN',
+                $null,
+                'Process'
+            )
+            [Environment]::SetEnvironmentVariable(
+                'AGENT_WORKTREES_AHP_AUTH_TOKEN',
+                $null,
+                'Process'
+            )
+            [Environment]::SetEnvironmentVariable(
+                'GH_TOKEN', $token.Trim(), 'Process'
+            )
+        }
         & $cmd[0] $cmd[1..($cmd.Count - 1)]
         $copilotExit = $LASTEXITCODE
     } catch [System.Management.Automation.PipelineStoppedException] {
@@ -1512,6 +1803,13 @@ try {
         Write-SetupLog "Session interrupted (Ctrl+C)"
     }
 } finally {
+    foreach ($name in $savedDirectAuth.Keys) {
+        [Environment]::SetEnvironmentVariable(
+            $name,
+            $savedDirectAuth[$name],
+            'Process'
+        )
+    }
     Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=none', "exit_code=$copilotExit")
     # ── Post-exit finalization ───────────────────────────────────────────
     if ($plan.post_exit -and $plan.worktree_id) {

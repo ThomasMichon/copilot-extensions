@@ -95,6 +95,7 @@ $rest = @($args)
 $awWt = ''
 $initialPromptB64 = ''
 $initialPromptReceiptB64 = ''
+$ahpTokenFile = ''
 while ($rest.Count -ge 2) {
     $key = [string]$rest[0]
     if ($key -eq '-AwWt') {
@@ -103,6 +104,8 @@ while ($rest.Count -ge 2) {
         $initialPromptB64 = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-receipt-b64') {
         $initialPromptReceiptB64 = [string]$rest[1]
+    } elseif ($key -eq '-AwAhpTokenFile') {
+        $ahpTokenFile = [string]$rest[1]
     } else {
         break
     }
@@ -110,6 +113,45 @@ while ($rest.Count -ge 2) {
 }
 
 if ($rest.Count -eq 0) { exit 0 }
+
+$ahpChildToken = $null
+$ahpChildFeatures = $null
+if (-not [string]::IsNullOrWhiteSpace($ahpTokenFile)) {
+    try {
+        $encryptedToken = [IO.File]::ReadAllText($ahpTokenFile)
+        $secureToken = $encryptedToken | ConvertTo-SecureString
+        $tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR(
+            $secureToken
+        )
+        try {
+            $ahpChildToken = (
+                [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
+            )
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr)
+        }
+        if ([string]::IsNullOrWhiteSpace($ahpChildToken)) {
+            throw 'empty AHP token handoff'
+        }
+        $featureList = @(
+            ([string]$env:COPILOT_CLI_ENABLED_FEATURE_FLAGS -split ',')
+            | ForEach-Object { $_.Trim() }
+            | Where-Object { $_ }
+        )
+        if ($featureList -notcontains 'AHP_CLIENT') {
+            $featureList += 'AHP_CLIENT'
+        }
+        $ahpChildFeatures = $featureList -join ','
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-worktrees] invalid AHP token handoff: $($_.Exception.Message)"
+        )
+        exit 2
+    } finally {
+        Remove-Item -LiteralPath $ahpTokenFile `
+            -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # Native interactive handoff seed. psmux cannot preserve a multi-word pane argv
 # element, so handoff-cutover sends UTF-8 base64 + a receipt token as space-free
@@ -145,8 +187,36 @@ if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
 }
 
 $start = Get-Date
-& $rest[0] @($rest[1..($rest.Count - 1)])
-$exitCode = $LASTEXITCODE
+if ($ahpChildToken) {
+    try {
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = [string]$rest[0]
+        $startInfo.UseShellExecute = $false
+        foreach ($argument in @($rest[1..($rest.Count - 1)])) {
+            $startInfo.ArgumentList.Add([string]$argument)
+        }
+        $startInfo.Environment['GH_TOKEN'] = $ahpChildToken
+        $null = $startInfo.Environment.Remove('GITHUB_TOKEN')
+        $null = $startInfo.Environment.Remove(
+            'AGENT_WORKTREES_AHP_AUTH_TOKEN'
+        )
+        $startInfo.Environment['COPILOT_CLI_ENABLED_FEATURE_FLAGS'] = (
+            $ahpChildFeatures
+        )
+        $child = [Diagnostics.Process]::Start($startInfo)
+        $ahpChildToken = $null
+        $child.WaitForExit()
+        $exitCode = $child.ExitCode
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-worktrees] AHP child launch failed: $($_.Exception.Message)"
+        )
+        $exitCode = 1
+    }
+} else {
+    & $rest[0] @($rest[1..($rest.Count - 1)])
+    $exitCode = $LASTEXITCODE
+}
 if ($null -eq $exitCode) { $exitCode = 0 }
 $runtime = [int]((Get-Date) - $start).TotalSeconds
 

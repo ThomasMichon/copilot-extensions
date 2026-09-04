@@ -44,7 +44,8 @@ INREPO_CONFIG_FILENAME = ".agent-worktrees.yaml"  # legacy single-file fallback
 
 # Global, machine-wide config: the user-owned BASE layer holding only
 # machine-wide settings -- top-level ``srcroot`` / ``machine`` / ``platform`` /
-# ``copilot_profiles`` / ``auto_fast_forward`` / ``headless``. It never carries
+# ``copilot_profiles`` / ``session_backend`` / ``auto_fast_forward`` /
+# ``headless``. It never carries
 # per-repo settings or a registry of repos/machines; the full merged config for
 # a target repo is computed on demand by ``load_config``. Lives at
 # ``~/.agent-worktrees/config.yaml`` (the shared runtime root).
@@ -58,6 +59,22 @@ class CopilotProfile:
     label: str
     env: dict[str, str] = field(default_factory=dict)
     copilot_args: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SessionBackendConfig:
+    """Machine-local interactive session host selection."""
+
+    kind: str = "direct"
+    endpoint_url: str = ""
+    github_account: str = ""
+    protocol_versions: tuple[str, ...] = ("0.7.0",)
+    auth_resource: str = "https://api.github.com"
+    connect_timeout_seconds: float = 15.0
+
+    @property
+    def is_ahp(self) -> bool:
+        return self.kind == "ahp"
 
 
 @dataclass(frozen=True)
@@ -372,6 +389,9 @@ class Config:
     Empty means unbound -- the resolver then refuses to silently write state into
     the harness. See the ``stateless-harness`` vision."""
     copilot_profiles: list[CopilotProfile] = field(default_factory=list)
+    session_backend: SessionBackendConfig = field(
+        default_factory=SessionBackendConfig
+    )
     profile_assignment: ProfileAssignmentPolicy | None = None
     headless: bool = False
     """When true, the project is driven via CLI only -- its bare binstub
@@ -1034,6 +1054,12 @@ def load_config(
             or ""
         ),
         copilot_profiles=parsed_profiles,
+        session_backend=_parse_session_backend(
+            machine_raw.get(
+                "session_backend",
+                global_raw.get("session_backend"),
+            )
+        ),
         profile_assignment=_parse_profile_assignment(
             user_assignment_raw,
             repository_assignment_raw,
@@ -1062,6 +1088,67 @@ def load_config(
                 ),
             )
         ),
+    )
+
+
+def _parse_session_backend(raw: Any) -> SessionBackendConfig:
+    """Parse the user-owned same-machine session backend configuration."""
+    if raw in (None, "", {}):
+        return SessionBackendConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("session_backend must be a mapping")
+    kind = str(raw.get("kind", "direct")).strip().lower()
+    if kind not in {"direct", "ahp"}:
+        raise ValueError("session_backend.kind must be 'direct' or 'ahp'")
+    if kind == "direct":
+        return SessionBackendConfig()
+
+    endpoint_url = str(raw.get("endpoint_url", "")).strip()
+    if not endpoint_url:
+        raise ValueError(
+            "session_backend.endpoint_url is required when kind is 'ahp'"
+        )
+    github_account = str(raw.get("github_account", "")).strip()
+    auth_resource = str(
+        raw.get("auth_resource", "https://api.github.com")
+    ).strip()
+    if not auth_resource:
+        raise ValueError("session_backend.auth_resource must be non-empty")
+
+    versions_raw = raw.get("protocol_versions", ["0.7.0"])
+    if not isinstance(versions_raw, list) or not versions_raw:
+        raise ValueError(
+            "session_backend.protocol_versions must be a non-empty list"
+        )
+    protocol_versions = tuple(
+        str(value).strip() for value in versions_raw if str(value).strip()
+    )
+    if not protocol_versions:
+        raise ValueError(
+            "session_backend.protocol_versions must contain a version"
+        )
+    timeout_raw = raw.get("connect_timeout_seconds", 15)
+    if isinstance(timeout_raw, bool):
+        raise ValueError(
+            "session_backend.connect_timeout_seconds must be a number"
+        )
+    try:
+        timeout = float(timeout_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "session_backend.connect_timeout_seconds must be a number"
+        ) from exc
+    if timeout <= 0 or timeout > 120:
+        raise ValueError(
+            "session_backend.connect_timeout_seconds must be in (0, 120]"
+        )
+    return SessionBackendConfig(
+        kind="ahp",
+        endpoint_url=endpoint_url,
+        github_account=github_account,
+        protocol_versions=protocol_versions,
+        auth_resource=auth_resource,
+        connect_timeout_seconds=timeout,
     )
 
 

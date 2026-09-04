@@ -21,6 +21,8 @@ Events are intentionally high-level:
                             launch_id + the setup-log path)
   session_started           a Copilot session registered against a worktree
   session_ended             a Copilot session deregistered
+  ahp_session_bound         an AHP session was created or verified for a worktree
+  ahp_session_disposed      the bound AHP session was explicitly disposed
   copilot_exited            the Copilot process exited (launcher)
   pane_exited               the wrapped pane command exited (pane wrapper) --
                             the only mark carrying the mux pane's real exit_code
