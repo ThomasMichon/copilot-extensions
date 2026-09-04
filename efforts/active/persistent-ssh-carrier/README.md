@@ -324,7 +324,7 @@ transport foundation #1763 requires.
   and raw-SSH stop fallback failures normalize to `False` rather than escaping
   the existing best-effort API.
 - The final complete managed portfolios pass 2,158 Agent Bridge tests with 13
-  skips and 1,839 Agent Dispatch tests with 3 skips. The focused migration sets
+  skips and 1,843 Agent Dispatch tests with 3 skips. The focused migration sets
   pass 57 Bridge tests and 127 Dispatch tests. Version consistency, version
   allocation, generated payload, install-contract, contract-registry,
   compilation, and fatal Ruff guards pass.
