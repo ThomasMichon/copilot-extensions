@@ -211,7 +211,9 @@ def controller_findings(
     """Resolve controller relations without mutating authoritative records."""
     if local_machine is None:
         try:
-            local_machine = cfg.load_config().machine
+            local_machine = cfg.load_config(
+                include_control_plane_related_pr=False
+            ).machine
         except Exception:
             local_machine = child.machine
 
