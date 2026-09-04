@@ -5797,8 +5797,7 @@ class SessionManager:
                 and not session.is_at_rest()
             ):
                 raise ValueError(f"Session {session_id} is not idle")
-            pending = self._db.list_pending_prompts(session_id)
-            if pending:
+            if self._db.count_pending_prompts(session_id) > 0:
                 raise ValueError(
                     f"Session {session_id} has queued prompts and is not idle"
                 )
