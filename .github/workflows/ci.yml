@@ -203,13 +203,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install test tooling
-        run: python -m pip install pytest
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Test runner admission and isolation
         env:
           PYTHONPATH: libs/single-instance-lease/src
         run: >-
-          python -m pytest -q
+          uv run --with pytest python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
           tools/test_run_plugin_tests.py
 
