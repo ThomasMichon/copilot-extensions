@@ -2399,6 +2399,26 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     assert calls["wait"] is False  # fire-and-forget; the worker drives itself
 
 
+def test_make_headless_spawn_resolves_allocation_project_lazily(monkeypatch):
+    from agent_dispatch import bridge
+    from agent_dispatch.supervisor import make_headless_spawn
+
+    calls = []
+    monkeypatch.setattr(
+        bridge,
+        "registered_agent_project",
+        lambda agent, **kwargs: calls.append((agent, kwargs)) or "review-harness",
+    )
+
+    spawn = make_headless_spawn(agent="review-worker")
+
+    assert calls == []
+    assert spawn.allocation_project_for({"id": "task-1"}) == "review-harness"
+    assert calls == [
+        ("review-worker", {"timeout": 30.0, "strict": True}),
+    ]
+
+
 def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
     import subprocess
 
@@ -2570,7 +2590,7 @@ def test_make_label_routed_spawn_routes_by_label():
         return True, {"session": "headless", "worktree": None}
 
     default.allocation_project = "default-project"
-    headless.allocation_project = "headless-project"
+    headless.allocation_project_for = lambda _task: "headless-project"
     routed = make_label_routed_spawn(default, overrides={"sweep": headless})
 
     assert routed({"id": "a", "labels": ["sweep"]})[1]["session"] == "headless"

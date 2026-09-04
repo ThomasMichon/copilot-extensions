@@ -554,10 +554,19 @@ def registered_agent_names(*, timeout: float = 8.0) -> set[str] | None:
     }
 
 
-def registered_agent_project(agent: str, *, timeout: float = 8.0) -> str | None:
+def registered_agent_project(
+    agent: str,
+    *,
+    timeout: float = 8.0,
+    strict: bool = False,
+) -> str | None:
     """Return a registered local agent's explicit project, when available."""
     rows = registered_agents(timeout=timeout)
     if rows is None:
+        if strict:
+            raise BridgeUnavailable(
+                f"could not read the local agent registry while resolving {agent!r}"
+            )
         return None
     for row in rows:
         if row.get("name") != agent:
