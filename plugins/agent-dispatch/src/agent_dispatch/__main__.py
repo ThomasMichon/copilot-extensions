@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 import httpx
 
@@ -2629,18 +2629,11 @@ def _reviewer_loop_status(
 
     task_items = []
     for task in tasks:
-        label_caps = [
-            pool.label_max_attempts[label]
-            for label in (task.get("labels") or [])
-            if label in pool.label_max_attempts
-        ]
-        max_attempts = max(label_caps) if label_caps else pool.max_attempts
-        failures = failed_counts.get(task["id"], 0)
-        dead_lettered = bool(
-            task.get("status") == "queued"
-            and not task.get("owner")
-            and max_attempts
-            and failures >= max_attempts
+        spawn = _spawn_attempt_projection(
+            task,
+            failures=failed_counts.get(task["id"], 0),
+            default_max_attempts=pool.max_attempts,
+            label_max_attempts=pool.label_max_attempts,
         )
         blocked = bool(task.get("awaiting_steer"))
         matches_repo = pool_repo is None or task.get("repo") == pool_repo
@@ -2654,20 +2647,8 @@ def _reviewer_loop_status(
             "owner": task.get("owner"),
             "awaiting_steer": blocked,
             "inactive_by_filter": inactive_by_filter,
-            "failed_spawns": failures,
-            "max_attempts": max_attempts,
-            "dead_lettered": dead_lettered,
+            **spawn,
         }
-        if dead_lettered and failures >= 3:
-            item["rearm"] = (
-                f"agent-dispatch reservations rearm {task['id']} --permit "
-                "--reason <reason>"
-            )
-        elif dead_lettered:
-            item["recovery"] = (
-                "the atomic rearm command requires at least 3 failed spawns; "
-                "raise this loop's attempt bound or resolve the task explicitly"
-            )
         task_items.append(item)
 
     diagnoses = []
@@ -3013,6 +2994,45 @@ def _repository_issue_loop_health_path(
     )
 
 
+def _spawn_attempt_projection(
+    task: dict,
+    *,
+    failures: int,
+    default_max_attempts: int,
+    label_max_attempts: Mapping[str, int],
+) -> dict:
+    label_caps = [
+        int(label_max_attempts[label])
+        for label in (task.get("labels") or [])
+        if label in label_max_attempts
+    ]
+    max_attempts = (
+        max(label_caps) if label_caps else int(default_max_attempts)
+    )
+    dead_lettered = bool(
+        task.get("status") == "queued"
+        and not task.get("owner")
+        and max_attempts
+        and failures >= max_attempts
+    )
+    result = {
+        "failed_spawns": failures,
+        "max_attempts": max_attempts,
+        "dead_lettered": dead_lettered,
+    }
+    if dead_lettered and failures >= 3:
+        result["rearm"] = (
+            f"agent-dispatch reservations rearm {task['id']} --permit "
+            "--reason <reason>"
+        )
+    elif dead_lettered:
+        result["recovery"] = (
+            "the atomic rearm command requires at least 3 failed spawns; "
+            "raise this loop's attempt bound or resolve the task explicitly"
+        )
+    return result
+
+
 def _repository_issue_loop_status(
     args: argparse.Namespace, registrations: list[dict]
 ) -> tuple[dict, bool]:
@@ -3089,7 +3109,7 @@ def _repository_issue_loop_status(
 
     coordinator_error = None
     tasks = []
-    failed_spawns: dict[str, list[dict]] = {}
+    failed_spawn_counts: dict[str, int] = {}
     try:
         with _client(args, ensure=False) as client:
             tasks = [
@@ -3105,11 +3125,13 @@ def _repository_issue_loop_status(
                 )
             ]
             for task in tasks:
-                if task.get("status") not in Status.TERMINAL:
-                    failed_spawns[str(task["id"])] = client.list_reservations(
-                        task_id=str(task["id"]),
-                        state="failed",
-                        limit=10000,
+                if task.get("status") == Status.QUEUED and not task.get("owner"):
+                    failed_spawn_counts[str(task["id"])] = len(
+                        client.list_reservations(
+                            task_id=str(task["id"]),
+                            state="failed",
+                            limit=10000,
+                        )
                     )
     except (DispatchError, httpx.TransportError) as exc:
         coordinator_error = str(exc)
@@ -3163,27 +3185,20 @@ def _repository_issue_loop_status(
             worker_config.get("label_max_attempts") or {}
         ).items()
     }
-
-    def effective_spawn_attempts(task: dict) -> int:
-        overrides = [
-            label_spawn_attempts[label]
-            for label in (task.get("labels") or [])
-            if label in label_spawn_attempts
-        ]
-        return max(overrides) if overrides else default_spawn_attempts
-
-    spawn_dead_letters = {}
-    for task in active:
-        task_id = str(task["id"])
-        cap = effective_spawn_attempts(task)
-        failures = failed_spawns.get(task_id, [])
-        if (
-            task.get("status") == Status.QUEUED
-            and not task.get("owner")
-            and cap
-            and len(failures) >= cap
-        ):
-            spawn_dead_letters[task_id] = failures
+    spawn_projections = {
+        str(task["id"]): _spawn_attempt_projection(
+            task,
+            failures=failed_spawn_counts.get(str(task["id"]), 0),
+            default_max_attempts=default_spawn_attempts,
+            label_max_attempts=label_spawn_attempts,
+        )
+        for task in active
+    }
+    spawn_dead_letters = {
+        task_id: projection
+        for task_id, projection in spawn_projections.items()
+        if projection["dead_lettered"]
+    }
     diagnoses = []
     actions = []
     if not pointers:
@@ -3219,10 +3234,9 @@ def _repository_issue_loop_status(
     if spawn_dead_letters:
         diagnoses.append("spawn-dead-lettered")
         actions.extend(
-            "agent-dispatch reservations rearm "
-            f"{task_id} --permit --reason <reason>"
+            spawn_dead_letters[task_id]["rearm"]
             for task_id in sorted(spawn_dead_letters)
-            if len(spawn_dead_letters[task_id]) >= 3
+            if "rearm" in spawn_dead_letters[task_id]
         )
     healthy = not diagnoses
     if healthy:
@@ -3258,23 +3272,18 @@ def _repository_issue_loop_status(
                     "origin_ref": active[0].get("origin_ref"),
                     "status": active[0].get("status"),
                     "awaiting_steer": active[0].get("awaiting_steer"),
-                    "spawn_failures": len(
-                        failed_spawns.get(str(active[0].get("id")), [])
-                    ),
-                    "spawn_attempt_limit": effective_spawn_attempts(active[0]),
-                    "spawn_dead_lettered": str(active[0].get("id"))
-                    in spawn_dead_letters,
-                    "spawn_recovery": (
-                        "the atomic rearm command requires at least 3 failed "
-                        "spawns; raise this loop's attempt bound or resolve "
-                        "the task explicitly"
-                        if str(active[0].get("id")) in spawn_dead_letters
-                        and len(
-                            failed_spawns.get(str(active[0].get("id")), [])
-                        )
-                        < 3
-                        else None
-                    ),
+                    "spawn_failures": spawn_projections[
+                        str(active[0]["id"])
+                    ]["failed_spawns"],
+                    "spawn_attempt_limit": spawn_projections[
+                        str(active[0]["id"])
+                    ]["max_attempts"],
+                    "spawn_dead_lettered": spawn_projections[
+                        str(active[0]["id"])
+                    ]["dead_lettered"],
+                    "spawn_recovery": spawn_projections[
+                        str(active[0]["id"])
+                    ].get("recovery"),
                 }
                 if active
                 else None
