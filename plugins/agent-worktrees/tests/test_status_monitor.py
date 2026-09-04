@@ -394,7 +394,12 @@ def test_sweep_republishes_for_recreated_mux_session(tmp_path, monkeypatch):
 
 def test_segment_cache_throttles_and_invalidates(monkeypatch):
     renders = []
-    monkeypatch.setattr(m, "_find_record_for_path", lambda path: None)
+    lookups = []
+    monkeypatch.setattr(
+        m,
+        "_find_record_for_path",
+        lambda path: lookups.append(path) or None,
+    )
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(
         m, "_render_status_segment",
@@ -405,6 +410,35 @@ def test_segment_cache_throttles_and_invalidates(monkeypatch):
     assert cache.get("/w/a") == "SEG-1"
     cache.invalidate("/w/a/src")
     assert cache.get("/w/a") == "SEG-2"
+    assert renders == ["/w/a", "/w/a"]
+    assert lookups == ["/w/a", "/w/a"]
+
+
+def test_segment_cache_reuses_canonical_target_before_record_lookup(monkeypatch):
+    lookups = []
+    renders = []
+    monkeypatch.setattr(
+        m,
+        "_find_record_for_path",
+        lambda path: lookups.append(path)
+        or types.SimpleNamespace(worktree_path="/w/a"),
+    )
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(
+        m,
+        "_render_status_segment",
+        lambda path, **kwargs: renders.append(path) or f"SEG-{len(renders)}",
+    )
+    cache = m._StatusSegmentCache(ttl=60)
+
+    assert cache.get("/w/a/src") == "SEG-1"
+    assert cache.get("/w/a/src") == "SEG-1"
+    assert cache.get("/w/a") == "SEG-1"
+    assert lookups == ["/w/a/src"]
+
+    cache.invalidate("/w/a/src/file.py")
+    assert cache.get("/w/a/src") == "SEG-2"
+    assert lookups == ["/w/a/src", "/w/a/src"]
     assert renders == ["/w/a", "/w/a"]
 
 
