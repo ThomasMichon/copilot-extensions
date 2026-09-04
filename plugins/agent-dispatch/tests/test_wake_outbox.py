@@ -351,7 +351,12 @@ def test_passive_drainer_waits_until_promoted(q):
         nonlocal active
         loop = asyncio.create_task(
             drain_wake_outbox(
-                q, EventBus(), interval=0.01, deliver=deliver, is_active=is_active
+                q,
+                EventBus(),
+                interval=0.01,
+                idle_interval=10.0,
+                deliver=deliver,
+                is_active=is_active,
             )
         )
         try:

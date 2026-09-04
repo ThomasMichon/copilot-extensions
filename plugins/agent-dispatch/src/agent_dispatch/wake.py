@@ -96,7 +96,7 @@ async def drain_wake_outbox(
                 log.warning("wake active-route check failed", exc_info=True)
                 active = False
             if not active:
-                await _wait(idle_interval)
+                await _wait(interval)
                 continue
         await asyncio.to_thread(
             queue.recover_inflight_wakes, lease_seconds=delivery_lease
