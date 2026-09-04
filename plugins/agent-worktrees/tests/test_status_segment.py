@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from types import SimpleNamespace
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import git_ops, sessions, tracking
@@ -45,6 +46,33 @@ def _wire(monkeypatch, target, *, state, turns):
     if turns:
         ctx.turn_count[m._normalize_path(target)] = turns
     monkeypatch.setattr(m.sessions, "scan_sessions_fast", lambda recs: ctx)
+
+
+def test_status_segment_skips_control_plane_pr_overlay(monkeypatch):
+    seen = {}
+
+    def load_config(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            default_repo=SimpleNamespace(
+                remote="origin",
+                default_branch="main",
+            )
+        )
+
+    monkeypatch.setattr(m.cfg, "load_config", load_config)
+    monkeypatch.setattr(m, "_detect_upstream_branch", lambda *args: "main")
+    monkeypatch.setattr(m, "_find_record_for_path", lambda path: None)
+    monkeypatch.setattr(
+        m.git_ops,
+        "classify_worktree",
+        lambda *args, **kwargs: git_ops.WorktreeStateInfo(
+            state=git_ops.WorktreeState.GONE
+        ),
+    )
+
+    assert m._render_status_segment(str(Path.cwd())) == ""
+    assert seen == {"include_control_plane_related_pr": False}
 
 
 def test_unused_with_turns_renders_convo(monkeypatch, capsys):
