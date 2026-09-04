@@ -3,7 +3,7 @@
 The guard flags a raw process-creation flag literal in an ``agent-procutil``
 adopter and forbids ``CREATE_NEW_CONSOLE`` across all production plugin and
 canonical shared-library sources. It is AST-based (docstrings/comments never
-count) and supports an inline ``# headless-guard: allow`` escape hatch.
+count) and supports an inline ``# headless-guard: allow <reason>`` escape hatch.
 
 Run:  python -m pytest tools/test_check_headless_launch.py
 """
@@ -125,6 +125,12 @@ def test_forbids_new_console_in_shipped_plugin_script(repo):
         encoding="utf-8",
     )
     assert any("plugins/agent-script/scripts" in p for p in guard.verify())
+
+
+def test_production_syntax_error_fails_closed(repo):
+    _mk_plugin(repo, "agent-invalid", adopts=False, body="if (\n")
+    problems = guard.verify()
+    assert any("cannot parse production Python" in p for p in problems)
 
 
 def test_forbids_annotated_new_console_numeric_constant(repo):

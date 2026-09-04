@@ -170,10 +170,7 @@ class _FlagFinder(ast.NodeVisitor):
 
 def _find_flags(f: Path) -> tuple[str, list[tuple[int, str]]]:
     text = f.read_text(encoding="utf-8")
-    try:
-        tree = ast.parse(text, filename=str(f))
-    except SyntaxError:
-        return text, []
+    tree = ast.parse(text, filename=str(f))
     finder = _FlagFinder()
     finder.visit(tree)
     return text, sorted(set(finder.hits))
@@ -201,13 +198,33 @@ def _allowed(lines: list[str], lineno: int) -> bool:
 
 def verify() -> list[str]:
     problems: list[str] = []
+    cache: dict[Path, tuple[str, list[tuple[int, str]]]] = {}
+    parse_failures: set[Path] = set()
+
+    def scan(f: Path) -> tuple[str, list[tuple[int, str]]]:
+        if f in cache:
+            return cache[f]
+        try:
+            result = _find_flags(f)
+        except SyntaxError as exc:
+            text = f.read_text(encoding="utf-8")
+            result = (text, [])
+            if f not in parse_failures:
+                parse_failures.add(f)
+                rel = f.relative_to(REPO).as_posix()
+                problems.append(
+                    f"{rel}:{exc.lineno or 1}: cannot parse production Python; "
+                    f"headless launch policy cannot be verified: {exc.msg}"
+                )
+        cache[f] = result
+        return result
 
     # CREATE_NEW_CONSOLE is unsafe for background work regardless of whether a
     # package has adopted agent-procutil. Scan canonical shared libs as well as
     # plugin source so a vendored primitive cannot bypass the adoption gate.
     for src in _production_src_roots():
         for f in _iter_py(src):
-            text, hits = _find_flags(f)
+            text, hits = scan(f)
             lines = text.splitlines()
             rel = f.relative_to(REPO).as_posix()
             for lineno, tok in hits:
@@ -226,7 +243,7 @@ def verify() -> list[str]:
         if not src.is_dir():
             continue
         for f in _iter_py(src):
-            text, hits = _find_flags(f)
+            text, hits = scan(f)
             if not hits:
                 continue
             lines = text.splitlines()
@@ -268,11 +285,7 @@ def main() -> int:
         )
         return 1
     checked = len(_adopting_plugins())
-    roots = len(_production_src_roots())
-    print(
-        "check-headless-launch: OK "
-        f"({checked} agent-procutil adopters; {roots} production source trees)."
-    )
+    print(f"check-headless-launch: OK ({checked} agent-procutil adopters).")
     return 0
 
 
