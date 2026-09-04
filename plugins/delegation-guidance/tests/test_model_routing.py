@@ -29,7 +29,12 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
-def _run(repo: Path, home: Path) -> subprocess.CompletedProcess[str]:
+def _run(
+    repo: Path,
+    home: Path,
+    *args: str,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment["HOME"] = str(home)
     environment["USERPROFILE"] = str(home)
@@ -39,8 +44,9 @@ def _run(repo: Path, home: Path) -> subprocess.CompletedProcess[str]:
             str(RESOLVER),
             "--repo",
             str(repo),
+            *args,
         ],
-        check=True,
+        check=check,
         capture_output=True,
         text=True,
         env=environment,
@@ -360,3 +366,295 @@ def test_resolver_is_inert_and_uses_no_process_execution() -> None:
     assert "eval(" not in source
     assert "exec(" not in source
     assert '"--home"' not in source
+
+
+def test_selects_lowest_cost_demonstrated_model(tmp_path: Path) -> None:
+    repo, home = _repo(tmp_path)
+    _write(
+        home / ".copilot" / "model-routing.json",
+        _config({
+            "evidence": [
+                {
+                    "model": "higher-cost",
+                    "state": "demonstrated",
+                    "surfaces": ["task"],
+                    "costRank": 20,
+                    "fallbackOrder": ["lower-cost"],
+                    "evidence": [{
+                        "ref": "https://example.com/higher",
+                        "observedAt": "2026-01-01",
+                        "sampleCount": 3,
+                    }],
+                },
+                {
+                    "model": "lower-cost",
+                    "state": "demonstrated",
+                    "surfaces": ["task"],
+                    "costRank": 10,
+                    "evidence": [{
+                        "ref": "https://example.com/lower",
+                        "observedAt": "2026-01-01",
+                        "sampleCount": 3,
+                    }],
+                },
+            ],
+        }),
+    )
+
+    payload = json.loads(_run(
+        repo,
+        home,
+        "--purpose",
+        "evidence",
+        "--surface",
+        "task",
+        "--available-model",
+        "higher-cost",
+        "--available-model",
+        "lower-cost",
+        "--as-of",
+        "2026-02-01",
+    ).stdout)
+
+    assert payload["decision"]["model"] == "lower-cost"
+    assert payload["decision"]["mode"] == "ordinary"
+    assert payload["decision"]["fallbacks"] == ["higher-cost"]
+
+
+def test_unavailable_demonstrated_model_falls_through(tmp_path: Path) -> None:
+    repo, home = _repo(tmp_path)
+    _write(
+        home / ".copilot" / "model-routing.json",
+        _config({
+            "coding": [
+                {
+                    "model": "preferred",
+                    "state": "demonstrated",
+                    "surfaces": ["task"],
+                    "costRank": 1,
+                    "evidence": [{
+                        "ref": "https://example.com/preferred",
+                        "observedAt": "2026-01-01",
+                        "sampleCount": 3,
+                    }],
+                },
+                {
+                    "model": "available-fallback",
+                    "state": "demonstrated",
+                    "surfaces": ["task"],
+                    "costRank": 2,
+                    "evidence": [{
+                        "ref": "https://example.com/fallback",
+                        "observedAt": "2026-01-01",
+                        "sampleCount": 3,
+                    }],
+                },
+            ],
+        }),
+    )
+
+    payload = json.loads(_run(
+        repo,
+        home,
+        "--purpose",
+        "coding",
+        "--surface",
+        "task",
+        "--available-model",
+        "available-fallback",
+        "--as-of",
+        "2026-02-01",
+    ).stdout)
+
+    assert payload["decision"]["model"] == "available-fallback"
+    preferred = payload["decision"]["considered"][0]
+    assert preferred["reasons"] == ["unavailable"]
+
+
+def test_candidate_requires_explicit_model_and_trial_id(tmp_path: Path) -> None:
+    repo, home = _repo(tmp_path)
+    _write(
+        home / ".copilot" / "model-routing.json",
+        _config({
+            "review": [{
+                "model": "candidate-reviewer",
+                "state": "candidate",
+                "surfaces": ["task"],
+                "costRank": 1,
+            }],
+        }),
+    )
+    base_args = (
+        "--purpose",
+        "review",
+        "--surface",
+        "task",
+        "--available-model",
+        "candidate-reviewer",
+        "--as-of",
+        "2026-02-01",
+    )
+
+    ordinary = json.loads(_run(repo, home, *base_args).stdout)
+    assert ordinary["decision"]["status"] == "no-eligible-model"
+
+    missing_id = _run(
+        repo,
+        home,
+        *base_args,
+        "--trial-model",
+        "candidate-reviewer",
+        check=False,
+    )
+    assert missing_id.returncode != 0
+    assert "requires a non-empty --trial-id" in missing_id.stderr
+
+    blank_id = _run(
+        repo,
+        home,
+        *base_args,
+        "--trial-model",
+        "candidate-reviewer",
+        "--trial-id",
+        "   ",
+        check=False,
+    )
+    assert blank_id.returncode != 0
+    assert "requires a non-empty --trial-id" in blank_id.stderr
+
+    trial = json.loads(_run(
+        repo,
+        home,
+        *base_args,
+        "--trial-model",
+        "candidate-reviewer",
+        "--trial-id",
+        "trial-1",
+    ).stdout)
+    assert trial["decision"]["model"] == "candidate-reviewer"
+    assert trial["decision"]["mode"] == "trial"
+    assert trial["decision"]["trialId"] == "trial-1"
+
+
+def test_selection_filters_surface_context_constraints_and_expiry(
+    tmp_path: Path,
+) -> None:
+    repo, home = _repo(tmp_path)
+    _write(
+        home / ".copilot" / "model-routing.json",
+        _config({
+            "coding": [
+                {
+                    "model": "wrong-surface",
+                    "state": "demonstrated",
+                    "surfaces": ["restricted-container"],
+                    "evidence": [{
+                        "ref": "https://example.com/surface",
+                        "observedAt": "2026-01-01",
+                        "sampleCount": 3,
+                    }],
+                },
+                {
+                    "model": "expired",
+                    "state": "demonstrated",
+                    "surfaces": ["task"],
+                    "recheckAfter": "2026-01-31",
+                    "evidence": [{
+                        "ref": "https://example.com/expired",
+                        "observedAt": "2026-01-01",
+                        "sampleCount": 3,
+                    }],
+                },
+                {
+                    "model": "eligible",
+                    "state": "demonstrated",
+                    "surfaces": ["task"],
+                    "contextTiers": ["long_context"],
+                    "reasoningEfforts": ["high"],
+                    "constraints": ["typescript"],
+                    "evidence": [{
+                        "ref": "https://example.com/eligible",
+                        "observedAt": "2026-01-01",
+                        "sampleCount": 3,
+                    }],
+                },
+            ],
+        }),
+    )
+
+    payload = json.loads(_run(
+        repo,
+        home,
+        "--purpose",
+        "coding",
+        "--surface",
+        "task",
+        "--available-model",
+        "wrong-surface",
+        "--available-model",
+        "expired",
+        "--available-model",
+        "eligible",
+        "--context-tier",
+        "long_context",
+        "--reasoning-effort",
+        "high",
+        "--constraint",
+        "typescript",
+        "--as-of",
+        "2026-02-01",
+    ).stdout)
+
+    assert payload["decision"]["model"] == "eligible"
+    reasons = {
+        row["model"]: row["reasons"]
+        for row in payload["decision"]["considered"]
+    }
+    assert reasons["wrong-surface"] == ["surface-mismatch"]
+    assert reasons["expired"] == ["evidence-expired"]
+
+
+def test_selection_requires_purpose_surface_and_availability(
+    tmp_path: Path,
+) -> None:
+    repo, home = _repo(tmp_path)
+
+    missing_surface = _run(
+        repo,
+        home,
+        "--purpose",
+        "evidence",
+        "--available-model",
+        "example",
+        check=False,
+    )
+    assert missing_surface.returncode != 0
+    assert "--surface" in missing_surface.stderr
+
+    missing_availability = _run(
+        repo,
+        home,
+        "--purpose",
+        "evidence",
+        "--surface",
+        "task",
+        check=False,
+    )
+    assert missing_availability.returncode != 0
+    assert "--available-model" in missing_availability.stderr
+
+    trial_id_without_model = _run(
+        repo,
+        home,
+        "--purpose",
+        "evidence",
+        "--surface",
+        "task",
+        "--available-model",
+        "example",
+        "--trial-id",
+        "trial-1",
+        check=False,
+    )
+    assert trial_id_without_model.returncode != 0
+    assert "--trial-id requires --trial-model" in trial_id_without_model.stderr
