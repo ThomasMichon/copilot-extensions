@@ -12,6 +12,7 @@ try:
         ALLOW_HOST_STATE_ENV,
         ALWAYS_SANDBOX_ENV_NAMES,
         CONTAINED_ENV,
+        OPTIONAL_FILE_ENV_NAMES,
         ROOT_ENV_NAMES,
         SANDBOX_ENV,
     )
@@ -20,6 +21,7 @@ except ModuleNotFoundError:
         ALLOW_HOST_STATE_ENV,
         ALWAYS_SANDBOX_ENV_NAMES,
         CONTAINED_ENV,
+        OPTIONAL_FILE_ENV_NAMES,
         ROOT_ENV_NAMES,
         SANDBOX_ENV,
     )
@@ -72,6 +74,11 @@ def validate_contained_environment() -> None:
         value = os.environ.get(name)
         if not value or not _is_within(Path(value), sandbox):
             escaped.append(f"{name}={value!r}")
+    if not allow_host_state:
+        for name in OPTIONAL_FILE_ENV_NAMES:
+            value = os.environ.get(name)
+            if value and not _is_within(Path(value), sandbox):
+                escaped.append(f"{name}={value!r}")
     if escaped:
         raise pytest.UsageError(
             "test state roots escape the runner sandbox: " + ", ".join(escaped)

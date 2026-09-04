@@ -58,7 +58,8 @@ _FILE_ENV = {
     "AGENT_WORKTREES_REPOS_YAML": "agent-worktrees/repos.yaml",
 }
 
-ROOT_ENV_NAMES = tuple((*_ROOT_ENV, *_FILE_ENV))
+ROOT_ENV_NAMES = tuple(_ROOT_ENV)
+OPTIONAL_FILE_ENV_NAMES = tuple(_FILE_ENV)
 ALWAYS_SANDBOX_ENV_NAMES = (
     "TEMP",
     "TMP",
@@ -223,6 +224,9 @@ def isolated_environment(
             value.mkdir(parents=True, exist_ok=True)
             env[name] = str(value)
         for name, relative in _FILE_ENV.items():
+            if name not in base:
+                env.pop(name, None)
+                continue
             value = root.joinpath(*relative.split("/"))
             value.parent.mkdir(parents=True, exist_ok=True)
             env[name] = str(value)

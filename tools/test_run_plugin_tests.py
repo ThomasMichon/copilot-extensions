@@ -27,6 +27,7 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
             "PATH": os.environ.get("PATH", ""),
             "HOME": "/real/home",
             "AGENT_WORKTREES_HOME": "/real/agent-worktrees",
+            "AGENT_WORKTREES_PROJECTS_YAML": "/real/projects.yaml",
             "GH_TOKEN": "not-a-real-token",
             "COPILOT_AGENT_SESSION_ID": "live-session",
             "AGENT_WORKTREES_OWNER_REF": "live-owner",
@@ -40,6 +41,27 @@ def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None
     assert "AGENT_WORKTREES_OWNER_REF" not in env
     for name in containment.ROOT_ENV_NAMES:
         Path(env[name]).resolve().relative_to(tmp_path.resolve())
+    assert "AGENT_CONTAINERS_CONFIG" not in env
+    Path(env["AGENT_WORKTREES_PROJECTS_YAML"]).resolve().relative_to(
+        tmp_path.resolve()
+    )
+
+
+def test_optional_file_override_is_validated_only_when_present(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env = containment.isolated_environment(os.environ, tmp_path)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    for name in containment.OPTIONAL_FILE_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+    portfolio_guard.validate_contained_environment()
+
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(tmp_path.parent / "config.yaml"))
+    with pytest.raises(pytest.UsageError, match="AGENT_CONTAINERS_CONFIG"):
+        portfolio_guard.validate_contained_environment()
 
 
 def test_host_state_opt_in_preserves_credentials_not_session_affinity(
