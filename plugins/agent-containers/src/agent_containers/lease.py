@@ -36,8 +36,17 @@ from .private_state import atomic_write_json
 log = logging.getLogger("agent-containers")
 
 _LOCK_FILE = STATE_DIR / "leases.lock"
+_LEASE_DETAILS_FILE = STATE_DIR / "lease-details.json"
 _DEPLOY_HOLDS_FILE = STATE_DIR / "deploy-holds.json"
 _SESSION_ADMISSIONS_FILE = STATE_DIR / "session-admissions.json"
+_LEASE_CORE_FIELDS = {
+    "container",
+    "effort",
+    "pid",
+    "host",
+    "acquired_at",
+    "heartbeat_at",
+}
 # Leases are held by an *effort* (a logical entity), not by the short-lived
 # CLI process that created them, so reclamation is TTL-based. A long-running
 # holder can refresh via ``heartbeat``; otherwise a forgotten lease expires
@@ -175,19 +184,94 @@ def _read_leases() -> dict[str, Lease]:
     except (OSError, json.JSONDecodeError):
         log.warning("leases.json unreadable; treating as empty")
         return {}
+    details = _read_lease_details()
     leases: dict[str, Lease] = {}
     for container, rec in (raw or {}).items():
         try:
-            leases[container] = Lease(**rec)
-        except TypeError:
+            core = {
+                key: value
+                for key, value in rec.items()
+                if key in _LEASE_CORE_FIELDS
+            }
+            lease = Lease(**core)
+        except (AttributeError, TypeError):
             continue
+        detail = details.get(container)
+        if _lease_detail_matches(lease, detail):
+            for field in (
+                "environment",
+                "reclaim_reason",
+                "reclaimed_from_effort",
+                "reclaimed_from_pid",
+                "reclaimed_from_environment",
+                "reclaimed_at",
+            ):
+                setattr(lease, field, detail.get(field))
+        leases[container] = lease
     return leases
 
 
 def _write_leases(leases: dict[str, Lease]) -> None:
-    """Atomically write leases.json."""
-    payload = {c: asdict(lease) for c, lease in leases.items()}
+    """Atomically write legacy-compatible leases plus extension details."""
+    details = {
+        container: {
+            "effort": lease.effort,
+            "pid": lease.pid,
+            "host": lease.host,
+            "acquired_at": lease.acquired_at,
+            "heartbeat_at": lease.heartbeat_at,
+            "environment": lease.environment,
+            "reclaim_reason": lease.reclaim_reason,
+            "reclaimed_from_effort": lease.reclaimed_from_effort,
+            "reclaimed_from_pid": lease.reclaimed_from_pid,
+            "reclaimed_from_environment": lease.reclaimed_from_environment,
+            "reclaimed_at": lease.reclaimed_at,
+        }
+        for container, lease in leases.items()
+        if (
+            lease.environment is not None
+            or lease.reclaim_reason is not None
+        )
+    }
+    if details or _LEASE_DETAILS_FILE.exists():
+        _write_private_json(_LEASE_DETAILS_FILE, details)
+    payload = {
+        container: {
+            key: value
+            for key, value in asdict(lease).items()
+            if key in _LEASE_CORE_FIELDS
+        }
+        for container, lease in leases.items()
+    }
     _write_private_json(LEASE_FILE, payload)
+
+
+def _read_lease_details() -> dict[str, dict]:
+    if not _LEASE_DETAILS_FILE.exists():
+        return {}
+    try:
+        raw = json.loads(_LEASE_DETAILS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        log.warning("lease-details.json unreadable; lease liveness is indeterminate")
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: value
+        for key, value in raw.items()
+        if isinstance(key, str) and isinstance(value, dict)
+    }
+
+
+def _lease_detail_matches(lease: Lease, detail: dict | None) -> bool:
+    return bool(
+        detail
+        and detail.get("effort") == lease.effort
+        and detail.get("pid") == lease.pid
+        and detail.get("host") == lease.host
+        and detail.get("acquired_at") == lease.acquired_at
+        and detail.get("heartbeat_at") == lease.heartbeat_at
+    )
 
 
 def _read_records(path, record_type, *, fail_closed: bool = False):

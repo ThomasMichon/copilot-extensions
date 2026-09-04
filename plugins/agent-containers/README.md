@@ -433,7 +433,12 @@ not for stamping the binstub.
 ## Runtime state
 
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
-  lock file; corrupt/unreadable state is treated as empty.
+  lock file and kept backward-compatible across runtime versions;
+  corrupt/unreadable state is treated as empty.
+- `~/.agent-containers/lease-details.json` — optional environment and reclaim
+  audit metadata keyed to the exact core lease identity. Missing, stale, or
+  unreadable details make early PID-based reclaim indeterminate without hiding
+  the active lease from older runtimes.
 - `~/.agent-containers/deploy-holds.json` and `session-admissions.json` —
   short-lived, heartbeated provider admission records sharing the lease lock
   discipline across Windows/WSL access to the same Docker provider.

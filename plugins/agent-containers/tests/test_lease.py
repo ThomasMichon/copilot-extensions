@@ -25,6 +25,11 @@ def fleet(monkeypatch, tmp_path):
     monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
     monkeypatch.setattr(
         lease_mod,
+        "_LEASE_DETAILS_FILE",
+        tmp_path / "lease-details.json",
+    )
+    monkeypatch.setattr(
+        lease_mod,
         "_DEPLOY_HOLDS_FILE",
         tmp_path / "deploy-holds.json",
     )
@@ -245,7 +250,11 @@ def test_borrow_reclaims_definitively_dead_local_holder(fleet, monkeypatch):
     assert lease.reclaimed_from_environment == lease_mod._this_environment()
     assert lease.reclaimed_at is not None
     stored = json.loads(lease_mod.LEASE_FILE.read_text(encoding="utf-8"))
-    assert stored["myrepo-1"]["reclaim_reason"] == "dead-local-holder-pid"
+    assert set(stored["myrepo-1"]) == lease_mod._LEASE_CORE_FIELDS
+    details = json.loads(
+        lease_mod._LEASE_DETAILS_FILE.read_text(encoding="utf-8")
+    )
+    assert details["myrepo-1"]["reclaim_reason"] == "dead-local-holder-pid"
 
 
 def test_borrow_preserves_live_local_holder(fleet, monkeypatch):
@@ -334,6 +343,41 @@ def test_borrow_keeps_legacy_lease_without_environment_until_ttl(
         ttl=-1,
     )
     assert lease.reclaim_reason is None
+
+
+def test_lease_file_stays_compatible_with_older_readers(fleet):
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+
+    stored = json.loads(lease_mod.LEASE_FILE.read_text(encoding="utf-8"))
+
+    assert set(stored["myrepo-1"]) == lease_mod._LEASE_CORE_FIELDS
+    assert "environment" not in stored["myrepo-1"]
+    assert lease_mod._LEASE_DETAILS_FILE.exists()
+
+
+def test_lease_reader_ignores_unknown_future_fields(fleet):
+    now = time.time()
+    lease_mod.LEASE_FILE.write_text(
+        json.dumps(
+            {
+                "myrepo-1": {
+                    "container": "myrepo-1",
+                    "effort": "future-effort",
+                    "pid": 123,
+                    "host": "future-host",
+                    "acquired_at": now,
+                    "heartbeat_at": now,
+                    "future_field": "preserved by another version",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    leases = lease_mod.list_leases(prune=False)
+
+    assert len(leases) == 1
+    assert leases[0].effort == "future-effort"
 
 
 def test_borrow_keeps_unknown_local_liveness_until_ttl(fleet, monkeypatch):
