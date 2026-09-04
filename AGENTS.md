@@ -174,6 +174,17 @@ focused smoke lane, path gating, and an explicit scheduled/manual full lane.
 Preserve real process boundaries for concurrency tests. `TESTING.md` owns the
 detailed portfolio invariants and execution mechanics.
 
+### Windows Background Process Launches
+
+Background work must remain invisible when launched from a consoleless parent.
+Use the launch-kind matrix in
+`docs/patterns/windows-background-process-launch.md`; never rely on the user's
+default-terminal setting or combine `CREATE_NEW_CONSOLE` with `SW_HIDE`.
+Required CI runs `tools/check-headless-launch.py`. Reviewers require a real
+Windows regression for launch-path changes: exercise a console descendant from
+a windowless parent and observe zero visible windows and foreground transitions
+across at least two periodic cycles.
+
 ### Branch and Publication
 
 This repo is **PR-required** and uses the `pr-self-merge` profile. Work in an

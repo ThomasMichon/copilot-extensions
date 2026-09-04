@@ -7431,7 +7431,7 @@ def _remove_monitor_entry(reg_dir: Path, sess: str) -> None:
         pass
 
 
-_CREATE_NEW_CONSOLE = 0x00000010  # a child that explicitly requested its own console
+_CREATE_NEW_CONSOLE = 0x00000010  # headless-guard: allow interactive child request
 
 
 def _windowless_python() -> str:
@@ -7471,7 +7471,7 @@ def _install_headless_child_guard() -> None:
 
     def _headless_init(self, *args, **kwargs):  # noqa: ANN002, ANN003
         flags = kwargs.get("creationflags", 0)
-        if not (flags & _CREATE_NEW_CONSOLE):
+        if not (flags & _CREATE_NEW_CONSOLE):  # headless-guard: allow interactive child
             kwargs["creationflags"] = flags | cnw
         return orig(self, *args, **kwargs)
 
