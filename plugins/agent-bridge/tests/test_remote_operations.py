@@ -449,6 +449,52 @@ async def test_cancelled_create_preserves_cancellation_when_cleanup_fails() -> N
 
 
 @pytest.mark.asyncio
+async def test_cancelled_create_tolerates_repeated_cancellation_during_cleanup() -> None:
+    create_started = threading.Event()
+    create_release = threading.Event()
+    cleanup_started = threading.Event()
+    cleanup_release = threading.Event()
+
+    class _SlowCleanupClient(_RemoteClient):
+        def start_session(self, **kwargs):
+            create_started.set()
+            create_release.wait(timeout=5)
+            return {"session_id": "late-session"}
+
+        def end_session(self, session_id, **kwargs):
+            cleanup_started.set()
+            cleanup_release.wait(timeout=5)
+            super().end_session(session_id, **kwargs)
+
+    client = _SlowCleanupClient()
+    task = asyncio.create_task(
+        CarrierRequestRouter(lambda: client)(
+            Envelope(
+                EnvelopeType.REQUEST,
+                request_id="create",
+                payload={
+                    "operation": "session.create",
+                    "version": 2,
+                    "agent": "task-worker",
+                    "prompt": "do the work",
+                    "caller_id": "fleet-task-a",
+                },
+            )
+        )
+    )
+    assert await asyncio.to_thread(create_started.wait, 5)
+    task.cancel()
+    create_release.set()
+    assert await asyncio.to_thread(cleanup_started.wait, 5)
+    task.cancel()
+    cleanup_release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=5)
+    assert client.end_calls == [("late-session", {"force": True})]
+
+
+@pytest.mark.asyncio
 async def test_remote_client_validates_live_message_guards() -> None:
     client = RemoteOperationService(SimpleNamespace())
 

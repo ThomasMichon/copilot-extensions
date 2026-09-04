@@ -182,8 +182,13 @@ class LocalBridgeRemoteClient:
             raise RemoteBridgeOperationError(
                 "Agent Bridge returned an invalid health response"
             )
-        version = int(health.get("protocol_version") or 0)
-        minimum = int(health.get("min_protocol_version") or 1)
+        try:
+            version = int(health.get("protocol_version", 0))
+            minimum = int(health.get("min_protocol_version", 1))
+        except (TypeError, ValueError) as exc:
+            raise RemoteBridgeOperationError(
+                "Agent Bridge returned invalid health protocol versions"
+            ) from exc
         required = required_protocol
         if not minimum <= required <= version:
             raise RemoteBridgeUnavailable(

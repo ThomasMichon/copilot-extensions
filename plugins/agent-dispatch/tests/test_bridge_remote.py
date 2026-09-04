@@ -166,3 +166,27 @@ def test_invalid_health_response_is_an_operation_error(monkeypatch, payload):
 
     with pytest.raises(RemoteBridgeOperationError, match="health"):
         client._request("GET", "/operation", timeout=1.0)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"protocol_version": "invalid", "min_protocol_version": 1},
+        {"protocol_version": 14, "min_protocol_version": []},
+    ],
+)
+def test_invalid_health_versions_are_an_operation_error(monkeypatch, payload):
+    client = LocalBridgeRemoteClient()
+    monkeypatch.setattr(
+        client,
+        "_connection",
+        lambda: ("http://127.0.0.1:1", "token"),
+    )
+    monkeypatch.setattr(
+        client,
+        "_open",
+        lambda *_args, **_kwargs: _Response(payload),
+    )
+
+    with pytest.raises(RemoteBridgeOperationError, match="protocol versions"):
+        client._request("GET", "/operation", timeout=1.0)

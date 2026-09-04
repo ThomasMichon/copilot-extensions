@@ -309,6 +309,9 @@ class CarrierRequestRouter:
             try:
                 await asyncio.shield(cleanup)
             except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and hasattr(current, "uncancel"):
+                    current.uncancel()
                 continue
             except _BRIDGE_IO_ERRORS:
                 return
