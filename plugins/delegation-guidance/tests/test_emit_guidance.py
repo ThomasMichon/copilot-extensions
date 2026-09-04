@@ -18,6 +18,9 @@ BASH_PRODUCER = PLUGIN / "scripts" / "emit-guidance.sh"
 SKILL = PLUGIN / "skills" / "delegating-work" / "SKILL.md"
 README = PLUGIN / "README.md"
 SESSION_CONTEXT = PLUGIN / "session-context.json"
+MODEL_ROUTING_RESOLVER = PLUGIN / "scripts" / "resolve-model-routing.py"
+MODEL_ROUTING_SCHEMA = PLUGIN / "schemas" / "model-routing.schema.json"
+MODEL_ROUTING_EXAMPLE = PLUGIN / "examples" / "model-routing.json"
 
 
 def _hook_input() -> str:
@@ -120,7 +123,8 @@ def test_powershell_emits_owned_bounded_guidance() -> None:
     assert "If you were invoked as a sub-agent" in context
     assert "do not create child agents" in context
     assert "once per unchanged artifact" in context
-    assert "Use the `delegating-work` skill" in context
+    assert "use the `delegating-work` skill to load model routing" in context
+    assert "candidates require explicit trials" in context
     assert len(context.encode("utf-8")) < 2048
 
 
@@ -140,16 +144,21 @@ def test_bash_matches_powershell_guidance() -> None:
 
 
 def test_aggregate_guidance_is_owned_compact_and_cross_platform() -> None:
-    context = _context(_run_bash("--aggregate"))
+    if os.name == "nt":
+        assert _powershell()
+        context = _context(_run_powershell("--aggregate"))
+    else:
+        context = _context(_run_bash("--aggregate"))
     assert context.startswith("[owner: delegation-guidance@")
     assert "3+ independent tracks" in context
     assert "reviewer is not a track substitute" in context
     assert "coordinator retains synthesis" in context
     assert "do not spawn children unless explicitly authorized" in context
-    assert "Use the `delegating-work` skill" in context
+    assert "use the `delegating-work` skill to load model routing" in context
+    assert "candidates require explicit trials" in context
     assert len(context.encode("utf-8")) <= 768
 
-    if _powershell():
+    if os.name != "nt" and _powershell():
         assert _context(_run_powershell("--aggregate")) == context
 
 
@@ -289,6 +298,11 @@ def test_skill_trigger_boundary_and_inventory() -> None:
     assert "delegate research" in normalized
     assert "use agents to compare or evaluate" in normalized
     assert "split disjoint bulk code" in normalized
+    assert "selecting an appropriate worker model" in normalized
+    assert "model-routing configuration" in normalized
+    assert "state is `demonstrated`" in normalized
+    assert "`recheckAfter` date has not elapsed" in normalized
+    assert "candidate" in normalized
     assert "also use proactively before opening broad multi-subsystem research" in normalized
     assert "three or more independent implementations or subsystems" in normalized
     assert "reviewers judge a completed artifact" in normalized
@@ -301,3 +315,9 @@ def test_skill_trigger_boundary_and_inventory() -> None:
     assert "What this plugin provides - and what it doesn't" in readme
     assert "Dependencies & assumptions" in readme
     assert "Troubleshooting, contributing & issues" in readme
+    assert "Model-routing configuration" in readme
+    assert "schemas/model-routing.schema.json" in readme
+    assert "examples/model-routing.json" in readme
+    assert MODEL_ROUTING_RESOLVER.is_file()
+    assert MODEL_ROUTING_SCHEMA.is_file()
+    assert MODEL_ROUTING_EXAMPLE.is_file()

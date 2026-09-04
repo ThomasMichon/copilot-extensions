@@ -5,7 +5,9 @@
 This payload-only plugin keeps the main agent focused on decomposition,
 synthesis, integration, and completion while moving broad separable work into
 bounded sub-agent contexts before it consumes the coordinator's context window.
-It is model-neutral and independently enableable.
+Its strategy is model-neutral and independently enableable. Optional inert
+configuration can map delegated purposes to current demonstrated or candidate
+models without hardcoding a preferred provider into the plugin.
 
 The ambient kernel is deliberately concise and ordered into the spill
 compatibility engine's bounded first-turn kernel before continuity guidance, so
@@ -47,6 +49,32 @@ The coordinator should assign bounded evidence tracks, continue any independent
 coordinator-owned work, synthesize the reports, and retain the implementation
 and completion decision.
 
+## Model-routing configuration
+
+The plugin ships the portable strategy and schema, but no real preferred
+models. A trusted repository may provide
+`.github/copilot/model-routing.json`; the operator may provide
+`~/.copilot/model-routing.json`. The operator layer overrides the same
+purpose/model entry.
+
+Use the bundled stdlib-only resolver when Python is available:
+
+```text
+python <plugin-root>/scripts/resolve-model-routing.py --repo <repository-root>
+```
+
+The resolver validates both layers as inert JSON, ignores malformed or
+unsupported layers with bounded diagnostics, and emits one deterministic merged
+registry. Repository configuration is ignored unless that exact repository is
+listed in Copilot's `trustedFolders`. If an operator config exists but is
+invalid, lower-precedence repository choices are suppressed so an intended
+operator hold cannot disappear because of a typo.
+
+Start from [`examples/model-routing.json`](examples/model-routing.json) and
+validate against
+[`schemas/model-routing.schema.json`](schemas/model-routing.schema.json). The
+example model IDs are intentionally synthetic.
+
 ## What this plugin provides - and what it doesn't
 
 **Provides**
@@ -56,11 +84,13 @@ and completion decision.
   domain-tool calls, and disjoint bulk edits;
 - bounded, non-overlapping delegate contract guidance;
 - limits on recursive delegation, duplicate investigation, and repeated review.
+- a versioned purpose-to-model configuration contract and inert resolver;
+- demonstrated/candidate/held/failed model eligibility guidance.
 
 **Does NOT provide**
 
 - a sub-agent runtime, task queue, cross-machine transport, or MCP server;
-- named domain agents or environment-specific routing;
+- named domain agents, real preferred models, or environment-specific defaults;
 - automatic delegation enforcement or a replacement for coordinator judgment;
 - custom-agent authoring or validation guidance.
 
@@ -73,9 +103,11 @@ and completion decision.
 
 ## Dependencies & assumptions
 
-The plugin has no runtime, service, network, authentication, or configuration
-dependency. Its hook uses the platform's Bash or PowerShell environment and
-fails open with `{}` when the plugin payload is incomplete.
+The plugin has no runtime, service, network, or authentication dependency. Its
+hook uses the platform's Bash or PowerShell environment and fails open with `{}`
+when the plugin payload is incomplete. Model-routing configuration is optional;
+the stdlib-only resolver uses Python when invoked, while the ambient hook remains
+independent of it.
 
 Plugin manifests do not install companion plugins transitively. Enable domain
 agent, MCP, bridge, or dispatch plugins separately when the task needs them.
@@ -88,7 +120,11 @@ agent, MCP, bridge, or dispatch plugins separately when the task needs them.
 | [`hooks.json`](hooks.json) | Cross-platform `sessionStart` registration |
 | [`scripts/emit-guidance.ps1`](scripts/emit-guidance.ps1) | PowerShell policy producer |
 | [`scripts/emit-guidance.sh`](scripts/emit-guidance.sh) | Bash policy producer |
+| [`scripts/resolve-model-routing.py`](scripts/resolve-model-routing.py) | Strict inert repository/operator registry resolver |
+| [`schemas/model-routing.schema.json`](schemas/model-routing.schema.json) | Versioned purpose-to-model configuration contract |
+| [`examples/model-routing.json`](examples/model-routing.json) | Synthetic configuration example |
 | [`tests/test_emit_guidance.py`](tests/test_emit_guidance.py) | Hook, parity, budget, and payload tests |
+| [`tests/test_model_routing.py`](tests/test_model_routing.py) | Trust, layering, validation, and fail-open resolver tests |
 
 The skill file is the source of truth for task-time routing behavior.
 
@@ -100,6 +136,10 @@ The skill file is the source of truth for task-time routing behavior.
   variable, then reinstall or update the plugin if the payload is incomplete.
 - **No suitable sub-agent is available:** use the skill's unavailable-agent
   path; the plugin does not install agent types.
+- **Repository routing config is ignored:** confirm the exact repository root is
+  listed in Copilot `trustedFolders` and the config matches the bundled schema.
+- **A config layer is reported invalid:** fix the named layer; the resolver
+  excludes it instead of partially accepting ambiguous policy.
 
 Contributions follow the repository's PR-required workflow in
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md). File issues in the

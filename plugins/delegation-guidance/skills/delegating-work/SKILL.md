@@ -6,9 +6,9 @@ description: >
   research, use agents to compare or evaluate options, parallelize independent
   investigation, isolate domain MCP/service calls, or split disjoint bulk code
   or file edits; also use proactively before opening broad multi-subsystem
-  research, evaluating several candidate options, or editing many files across
-  disjoint components. Not for choosing a named domain agent or authoring an
-  agent definition.
+  research, evaluating several candidate options, editing many files across
+  disjoint components, or selecting an appropriate worker model for delegated
+  work. Not for choosing a named domain agent or authoring an agent definition.
 ---
 
 # Delegating Work
@@ -34,6 +34,50 @@ bodies.
 
 Do not split work merely to maximize agent count. Delegation should reduce
 coordinator context pressure or elapsed time enough to repay coordination cost.
+
+## Select a model after deciding to delegate
+
+Model availability is not a reason to fragment cohesive work. Decide
+direct-versus-delegated ownership first, then classify the delegated purpose and
+select a worker.
+
+When model-routing configuration is present:
+
+1. Classify the worker purpose, such as evidence, coding, testing, review, or a
+   domain-tool operation.
+2. Identify the actual execution surface, required tools, context tier,
+   reasoning depth, authority, and task-size constraints.
+3. Resolve the repository and operator registries. Repository configuration is
+   accepted only when that exact repository is trusted; the operator layer
+   overrides the same purpose/model entry.
+4. Prefer the lowest `costRank` model whose state is `demonstrated`, whose
+   surfaces and constraints fit, and whose optional `recheckAfter` date has not
+   elapsed. Expired evidence makes the entry ineligible until it is revalidated.
+   An unavailable choice may fall through only to another fitting demonstrated
+   choice.
+5. Use a `candidate` only when the assignment is explicitly identified and
+   contained as a trial. `held` and `failed` choices are not ordinary fallbacks.
+6. Record the purpose, surface, model, evidence state, selection or escalation
+   reason, bounded scope, and integration owner in the delegate prompt/result.
+
+The optional inert resolver is
+`scripts/resolve-model-routing.py` in this plugin payload:
+
+```text
+python <plugin-root>/scripts/resolve-model-routing.py --repo <repository-root>
+```
+
+It reads:
+
+- trusted repository configuration:
+  `<repository-root>/.github/copilot/model-routing.json`;
+- operator configuration: `~/.copilot/model-routing.json`.
+
+Both use the bundled
+`schemas/model-routing.schema.json` contract. The plugin ships no real preferred
+models; current model IDs are configuration and evidence. If the helper or
+configuration is unavailable, continue with model-neutral delegation rather
+than treating an unproven candidate as demonstrated.
 
 ## Keep coordinator ownership
 
@@ -129,3 +173,5 @@ Do not respond by ingesting the entire original research surface.
 - It does not choose among environment-specific named agent rosters.
 - It does not replace domain safety, authentication, or publication policy.
 - It does not authorize recursive delegation by sub-agents.
+- It does not make a candidate model an ordinary default or allow a worker to
+  validate itself.
