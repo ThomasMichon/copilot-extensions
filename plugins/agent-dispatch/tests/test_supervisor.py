@@ -3798,11 +3798,29 @@ def test_nudge_skips_when_not_confirmed_alive(q, client):
     assert sent == []
 
 
-# -- retired turn-state polling ----------------------------------------------
+# -- push-driven turn-state wake ---------------------------------------------
 
 
-def test_wait_for_turn_end_never_polls_workers(q, client, monkeypatch):
-    """The compatibility path performs one full sleep and no bridge/SSH probes."""
+def test_wait_for_turn_end_uses_push_client_without_polling(q, client, monkeypatch):
+    """The reactive path waits on one aggregate client and never probes workers."""
+    class _Wake:
+        def __init__(self):
+            self.waits = []
+
+        def wait(self, timeout):
+            self.waits.append(timeout)
+            return True
+
+        def update(self, subscriptions):
+            pass
+
+        def acknowledge(self):
+            pass
+
+        def close(self):
+            pass
+
+    event_wake = _Wake()
     task = q.create("work")
     sup = Supervisor(
         client,
@@ -3810,6 +3828,7 @@ def test_wait_for_turn_end_never_polls_workers(q, client, monkeypatch):
         repo=TEST_REPO,
         max_concurrent=5,
         reactive=True,
+        event_wake=event_wake,
     )
     sup.poll_once()
     q.claim_one("m/wt-1", task_id=task.id, machine="m", worktree="wt-1")
@@ -3819,13 +3838,12 @@ def test_wait_for_turn_end_never_polls_workers(q, client, monkeypatch):
         "resolve_live_session",
         lambda *_args, **_kwargs: pytest.fail("turn-state polling is forbidden"),
     )
-    slept: list[float] = []
-    assert sup.wait_for_turn_end(30.0, sleep=slept.append) is False
-    assert slept == [30.0]
+    assert sup.wait_for_turn_end(30.0) is True
+    assert event_wake.waits == [30.0]
 
 
 def test_wait_for_turn_end_ignores_retired_reactive_flag(q, client):
-    """reactive=False still performs the one fixed-interval sleep."""
+    """reactive=False performs exactly one fixed-interval sleep."""
     sup = Supervisor(
         client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5, reactive=False
     )
@@ -3869,6 +3887,52 @@ def test_serve_uses_one_full_interval_wait(q, client):
     sup.serve(interval=30.0)
 
     assert waits == [30.0]
+
+
+def test_supervisor_syncs_fleet_subscriptions_and_acks_after_cycle(q, client):
+    class _Wake:
+        def __init__(self):
+            self.calls = []
+
+        def wait(self, timeout):
+            return False
+
+        def update(self, subscriptions):
+            self.calls.append(("update", tuple(subscriptions)))
+
+        def acknowledge(self):
+            self.calls.append(("ack",))
+
+        def close(self):
+            pass
+
+    wake = _Wake()
+    task = q.create("work")
+    sup = Supervisor(
+        client,
+        spawn_fn=_fleet_spawn("fleet-body:host-a:session-a"),
+        repo=TEST_REPO,
+        max_concurrent=5,
+        reactive=True,
+        supervisor_id="registration-a",
+        event_wake=wake,
+    )
+
+    assert sup.poll_once() == [task.id]
+
+    assert wake.calls[0] == ("ack",)
+    subscriptions = wake.calls[1][1]
+    assert len(subscriptions) == 1
+    assert subscriptions[0].host == "host-a"
+    assert subscriptions[0].session_id == "session-a"
+    assert subscriptions[0].caller_id.startswith("agent-dispatch:")
+
+    q.claim_one("host-a/wt-1", task_id=task.id, machine="host-a", worktree="wt-1")
+    q.start(task.id, "host-a/wt-1")
+    q.complete(task.id, "host-a/wt-1")
+    sup.poll_once()
+
+    assert wake.calls[-2:] == [("ack",), ("update", ())]
 
 
 # -- Slice 5: headless fleet-body recovery (confirmed-gone over SSH) ----------

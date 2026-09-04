@@ -2131,7 +2131,11 @@ class Database:
                     (caller_id, session_id),
                 ).fetchone()
                 current = row["last_acked_id"] if row else 0
-                effective = max(current, last_acked_id)
+                effective = (
+                    last_acked_id
+                    if current > head_id
+                    else max(current, last_acked_id)
+                )
                 conn.execute(
                     "INSERT INTO delivery_cursors "
                     "(caller_id, session_id, last_acked_id, updated_at) "

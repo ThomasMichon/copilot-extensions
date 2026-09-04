@@ -89,6 +89,9 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         "conditional_idle_end": (
             bridge_protocol.CONDITIONAL_IDLE_END_PROTOCOL_VERSION
         ),
+        "remote_event_multiplex": (
+            bridge_protocol.REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION
+        ),
     }
 
 

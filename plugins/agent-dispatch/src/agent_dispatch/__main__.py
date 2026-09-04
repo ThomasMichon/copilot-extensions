@@ -3999,8 +3999,12 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             ),
             heartbeat=not args.no_heartbeat,
             publish_activity=True,
-            reactive=False,
+            reactive=(
+                not bool(getattr(args, "no_reactive", False))
+                and not bool(args.once)
+            ),
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
+            supervisor_id=getattr(args, "supervisor_id", None),
             disposable_cli_labels=disposable_cli_labels,
             capacity_gate=capacity_gate,
             evaluator=evaluator,
@@ -5687,13 +5691,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--no-reactive", action="store_true",
-        help="compatibility flag; supervision already waits the full --interval "
-             "until push-driven turn events replace the retired polling path",
+        help="disable push-driven Agent Bridge lifecycle wakes and use only "
+             "the configured --interval",
     )
     p.add_argument(
         "--reactive-interval", type=float, default=2.0,
-        help="deprecated compatibility value; never used for polling",
+        help="deprecated compatibility value; push wakes never poll",
     )
+    p.add_argument("--supervisor-id", help=argparse.SUPPRESS)
     p.add_argument(
         "--once", action="store_true", help="run a single supervision cycle and exit"
     )

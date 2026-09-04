@@ -201,6 +201,29 @@ class TestDeliveryCursor:
         assert result["code"] == "replay_gap"
         assert tmp_db.get_cursor("caller-a", "s1") == 0
 
+    def test_controlled_ack_recovers_stored_cursor_beyond_head(
+        self, tmp_db: Database
+    ) -> None:
+        _seed_session(tmp_db)
+        tmp_db.append_event(
+            "s1", 1, "agent_message", {"text": "one"}, 100.0
+        )
+        tmp_db.flush()
+        tmp_db.set_cursor("caller-a", "s1", 5, time.time())
+        state = tmp_db.get_controlled_cursor_state("caller-a", "s1")
+
+        result = tmp_db.acknowledge_controlled_cursor(
+            "caller-a",
+            "s1",
+            1,
+            time.time(),
+            continuity_id=state["continuity_id"],
+        )
+
+        assert result["accepted"] is True
+        assert result["last_acked_id"] == 1
+        assert tmp_db.get_cursor("caller-a", "s1") == 1
+
     def test_ensure_cursor_registers_zero_without_clearing_invalidation(
         self, tmp_db: Database
     ) -> None:

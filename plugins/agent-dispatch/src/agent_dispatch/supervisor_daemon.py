@@ -338,7 +338,12 @@ def build_command(
         return materialize(name, payload)
 
     if kind == RegistrationKind.SUPERVISED_LANE:
-        return base + ["supervise", *_lane_flags(spec)]
+        return base + [
+            "supervise",
+            "--supervisor-id",
+            str(reg["id"]),
+            *_lane_flags(spec),
+        ]
 
     if kind == RegistrationKind.EVALUATOR:
         eval_ref = spec.get("evaluator")
@@ -349,7 +354,13 @@ def build_command(
                 "evaluator registration needs 'evaluator_spec' (inline) or "
                 "'evaluator' (a path)"
             )
-        argv = base + ["supervise", "--evaluator", str(eval_ref)]
+        argv = base + [
+            "supervise",
+            "--supervisor-id",
+            str(reg["id"]),
+            "--evaluator",
+            str(eval_ref),
+        ]
         if spec.get("evaluator_ref"):
             argv += ["--evaluator-ref", str(spec["evaluator_ref"])]
         return argv + _lane_flags(spec)

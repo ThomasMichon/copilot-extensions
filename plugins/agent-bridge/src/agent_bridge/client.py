@@ -484,7 +484,11 @@ class BridgeClient:
         return True
 
     def _stream_sse(
-        self, path: str, *, params: dict[str, str] | None = None
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        body: dict[str, Any] | None = None,
     ) -> SseStream:
         """Stream SSE events from an endpoint. Yields parsed event dicts.
 
@@ -499,9 +503,12 @@ class BridgeClient:
             if qs:
                 url = f"{url}?{qs}"
 
-        req = urllib.request.Request(url)
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(url, data=data)
         req.add_header("Authorization", f"Bearer {self._token}")
         req.add_header("Accept", "text/event-stream")
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
 
         try:
             resp = urllib.request.urlopen(req, timeout=120)
@@ -1431,6 +1438,25 @@ class BridgeClient:
                 + "/events",
             ),
             params=params,
+        )
+
+    def stream_remote_event_multiplex(
+        self, subscriptions: list[dict[str, Any]]
+    ) -> SseStream:
+        """Stream several exact remote sessions over one local SSE connection."""
+        from .protocol import REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION
+
+        if not self.daemon_supports(REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION):
+            version, _minimum = self.daemon_protocol()
+            raise BridgeClientError(
+                426,
+                "remote event multiplexing requires agent-bridge HTTP protocol "
+                f"v{REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION}; the daemon "
+                f"advertises v{version}. Update the agent-bridge plugin + runtime.",
+            )
+        return self._stream_sse(
+            "/api/v1/remote/events",
+            body={"subscriptions": subscriptions},
         )
 
     def ack_remote_cursor(
