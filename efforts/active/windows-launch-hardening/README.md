@@ -72,10 +72,11 @@ kind:
    guard in required CI, cover canonical shared libraries, reject
    `CREATE_NEW_CONSOLE` in production background paths, and require live
    windowless-parent validation for launch-path reviews.
-9. **agent-worktrees status-loop containment** — #1974. Launch the resident
-   status monitor and per-session status updater from one console-subsystem
-   Python root under `CREATE_NO_WINDOW`, so repeated `psmux` probes inherit one
-   hidden console instead of allocating a new `conhost` per refresh.
+9. **agent-worktrees status-loop containment** — completed by #1980. The
+   resident status monitor and per-session status updater now launch from one
+   console-subsystem Python root under `CREATE_NO_WINDOW`, so repeated `psmux`
+   probes inherit one hidden console instead of allocating a new console host
+   per refresh.
 
 ## Deferred Backlog Intake
 
@@ -201,3 +202,15 @@ against real behavior.
   use the console-root primitive for both the resident monitor and its
   per-session fallback, then validate multiple real periodic cycles with no
   Default Terminal process or foreground transition.
+
+### 2026-09-04 - agent-worktrees status-loop containment landed
+- PR #1980 merged the console-root launch path for both status loops, removed
+  the process-wide child-spawn monkeypatch, and shipped agent-worktrees
+  `1.5.5-dev2`.
+- The focused Windows lane downloads a checksum-pinned psmux release, starts a
+  real session, exercises the production daemon spawn seam, and rejects visible
+  terminal windows, focus transitions, repeated console hosts, incomplete
+  process snapshots, and leaked probe processes.
+- The reusable Windows launch pattern now distinguishes fully detached
+  `pythonw` daemons from daemons with recurring console descendants that need
+  one inherited hidden console.
