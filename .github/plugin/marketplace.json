@@ -30,7 +30,7 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev117",
+      "version": "0.1.2-dev118",
       "source": "plugins/agent-containers"
     },
     {
