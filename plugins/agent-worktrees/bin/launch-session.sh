@@ -506,7 +506,7 @@ for key, value in update.get('environment', {}).items():
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve session-backend post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
 _IS_DIRECT=""
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
@@ -651,7 +651,9 @@ if [[ "$ACTION" == "exec" ]]; then
     # changed the payload (no re-exec -- a launcher change applies next launch),
     # then the pre-launch self-update and plugin reconcile. Skipped entirely on
     # a fast re-attach to an already-live session (see above).
+    _JOINING_LIVE=0
     if aw_joining_live_session; then
+        _JOINING_LIVE=1
         setup_log INFO 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
     else
         invoke_update_apply 1 1
@@ -706,9 +708,108 @@ d = json.load(sys.stdin)
 print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 ") )"
 
+    SESSION_BACKEND_JSON=""
+    _BACKEND_ENABLED=0
+    if [[ -n "$WORKTREE_ID" && "$_JOINING_LIVE" != "1" ]]; then
+        _BACKEND_BASE_ARGS=(-m agent_worktrees)
+        [[ -n "$LAUNCH_PROJECT" ]] \
+            && _BACKEND_BASE_ARGS+=(--project "$LAUNCH_PROJECT")
+        _BACKEND_STATUS_ARGS=(
+            "${_BACKEND_BASE_ARGS[@]}" session-backend status
+            --worktree-id "$WORKTREE_ID" --json
+        )
+        if SESSION_BACKEND_STATUS_JSON=$(
+            "$PYTHON" "${_BACKEND_STATUS_ARGS[@]}" 2>&1
+        ); then
+            :
+        else
+            _BACKEND_RC=$?
+            setup_log ERROR "Session backend status failed (exit $_BACKEND_RC): $SESSION_BACKEND_STATUS_JSON"
+            printf 'ERROR: Session backend status failed: %s\n' \
+                "$SESSION_BACKEND_STATUS_JSON" >&2
+            exit "$_BACKEND_RC"
+        fi
+        _BACKEND_ENABLED=$(printf '%s' "$SESSION_BACKEND_STATUS_JSON" | "$PYTHON" -c "
+import json, sys
+d = json.load(sys.stdin)
+print('1' if d.get('enabled') and d.get('kind') == 'ahp' else '0')
+")
+        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+            _AHP_ACCOUNT=$(printf '%s' "$SESSION_BACKEND_STATUS_JSON" | "$PYTHON" -c \
+                "import json,sys; print(json.load(sys.stdin)['auth_account'])")
+            if ! GH_TOKEN="$(gh auth token --user "$_AHP_ACCOUNT" 2>/dev/null)" \
+                || [[ -z "$GH_TOKEN" ]]; then
+                setup_log ERROR "Could not mint the AHP client token for account $_AHP_ACCOUNT."
+                printf 'ERROR: Could not mint the AHP client token for account %s.\n' \
+                    "$_AHP_ACCOUNT" >&2
+                exit 3
+            fi
+            _BACKEND_ENSURE_ARGS=(
+                "${_BACKEND_BASE_ARGS[@]}" session-backend ensure
+                --worktree-id "$WORKTREE_ID" --json
+            )
+            if SESSION_BACKEND_JSON=$(
+                AGENT_WORKTREES_AHP_AUTH_TOKEN="$GH_TOKEN" \
+                    "$PYTHON" "${_BACKEND_ENSURE_ARGS[@]}" 2>&1
+            ); then
+                :
+            else
+                _BACKEND_RC=$?
+                setup_log ERROR "Session backend ensure failed (exit $_BACKEND_RC): $SESSION_BACKEND_JSON"
+                printf 'ERROR: Session backend ensure failed: %s\n' \
+                    "$SESSION_BACKEND_JSON" >&2
+                exit "$_BACKEND_RC"
+            fi
+            _AHP_ENDPOINT=$(printf '%s' "$SESSION_BACKEND_JSON" | "$PYTHON" -c \
+                "import json,sys; print(json.load(sys.stdin)['endpoint_url'])")
+            _AHP_SESSION=$(printf '%s' "$SESSION_BACKEND_JSON" | "$PYTHON" -c \
+                "import json,sys; print(json.load(sys.stdin)['session_id'])")
+            export -n GH_TOKEN 2>/dev/null || true
+            if [[ ",${COPILOT_CLI_ENABLED_FEATURE_FLAGS:-}," != *",AHP_CLIENT,"* ]]; then
+                if [[ -n "${COPILOT_CLI_ENABLED_FEATURE_FLAGS:-}" ]]; then
+                    export COPILOT_CLI_ENABLED_FEATURE_FLAGS="${COPILOT_CLI_ENABLED_FEATURE_FLAGS},AHP_CLIENT"
+                else
+                    export COPILOT_CLI_ENABLED_FEATURE_FLAGS="AHP_CLIENT"
+                fi
+            fi
+            POST_EXIT=0
+            setup_log INFO "AHP client bound to session $_AHP_SESSION at $_AHP_ENDPOINT"
+        fi
+    fi
+
     # Append copilot passthrough args (from after -- separator)
     if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
         CMD_ARRAY+=("${COPILOT_PASSTHROUGH[@]}")
+    fi
+
+    if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+        _FILTERED_CMD=()
+        _SKIP_NEXT=0
+        _HAS_EXPERIMENTAL=0
+        for _ARG in "${CMD_ARRAY[@]}"; do
+            if [[ "$_SKIP_NEXT" == "1" ]]; then
+                _SKIP_NEXT=0
+                continue
+            fi
+            case "$_ARG" in
+                --ahp)
+                    _SKIP_NEXT=1
+                    ;;
+                --ahp=*|--resume=*)
+                    ;;
+                --experimental)
+                    _HAS_EXPERIMENTAL=1
+                    _FILTERED_CMD+=("$_ARG")
+                    ;;
+                *)
+                    _FILTERED_CMD+=("$_ARG")
+                    ;;
+            esac
+        done
+        CMD_ARRAY=("${_FILTERED_CMD[@]}")
+        [[ "$_HAS_EXPERIMENTAL" == "1" ]] \
+            || CMD_ARRAY+=(--experimental)
+        CMD_ARRAY+=(--ahp "$_AHP_ENDPOINT" "--resume=$_AHP_SESSION")
     fi
 
     # Identity vars are stripped from the CHILD Copilot process so the session
@@ -843,7 +944,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             # replacing the payload on Windows (os error 32). Uniform on POSIX
             # (harmless: it locates its worktree via --path).
             ( cd "$HOME" 2>/dev/null || cd / ;
-              setsid "$aw" status-updater --session "$sess" --mux tmux \
+              env -u GH_TOKEN -u GITHUB_TOKEN \
+                  -u AGENT_WORKTREES_AHP_AUTH_TOKEN \
+                  setsid "$aw" status-updater --session "$sess" --mux tmux \
                   --path "$spath" >/dev/null 2>&1 < /dev/null & )
             disown 2>/dev/null || true
         }
@@ -903,8 +1006,20 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             while IFS= read -r line; do
                 # Strip 'export ' prefix → KEY=VALUE
                 local_kv="${line#export }"
+                if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+                    case "$local_kv" in
+                        GH_TOKEN=*|GITHUB_TOKEN=*|AGENT_WORKTREES_AHP_AUTH_TOKEN=*)
+                            continue
+                            ;;
+                    esac
+                fi
                 TMUX_ENV_FLAGS+=(-e "$local_kv")
             done <<< "$ENV_EXPORTS"
+        fi
+        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+            TMUX_ENV_FLAGS+=(
+                -e "COPILOT_CLI_ENABLED_FEATURE_FLAGS=$COPILOT_CLI_ENABLED_FEATURE_FLAGS"
+            )
         fi
 
         # Pane wrapper — catches exit codes, records the pane_exited activity
@@ -912,11 +1027,50 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         # remain-on-exit doesn't trap the pane. `--aw-wt` carries the worktree
         # id for the mark and is consumed by the wrapper (not forwarded).
         PANE_WRAPPER="$HOME/.agent-worktrees/bin/pane-wrapper.sh"
+        AHP_TOKEN_FILE=""
+        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+            if [[ ! -r "$PANE_WRAPPER" ]]; then
+                setup_log ERROR "AHP tmux launch requires the pane wrapper at $PANE_WRAPPER"
+                echo "ERROR: AHP tmux launch requires the agent-worktrees pane wrapper." >&2
+                exit 3
+            fi
+            AHP_TOKEN_DIR=$(mktemp -d \
+                "${TMPDIR:-/tmp}/agent-worktrees-ahp.XXXXXX") || exit 3
+            if ! chmod 700 "$AHP_TOKEN_DIR"; then
+                rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
+                exit 3
+            fi
+            AHP_TOKEN_FILE="$AHP_TOKEN_DIR/token"
+            if ! (umask 077 && printf '%s' "$GH_TOKEN" > "$AHP_TOKEN_FILE"); then
+                rm -f -- "$AHP_TOKEN_FILE"
+                rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
+                exit 3
+            fi
+            trap '
+                [[ -z "${AHP_TOKEN_FILE:-}" ]] || rm -f -- "$AHP_TOKEN_FILE"
+                [[ -z "${AHP_TOKEN_DIR:-}" ]] || rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
+            ' EXIT
+        fi
         if [[ -r "$PANE_WRAPPER" ]]; then
-            PANE_CMD=("${CLEAN_ENV[@]}" bash "$PANE_WRAPPER" --aw-wt "${WORKTREE_ID:-}" "${CMD_ARRAY[@]}")
+            PANE_CONTROL=(--aw-wt "${WORKTREE_ID:-}")
+            if [[ -n "$AHP_TOKEN_FILE" ]]; then
+                PANE_CONTROL+=(--aw-ahp-token-file "$AHP_TOKEN_FILE")
+            fi
+            PANE_CMD=(
+                "${CLEAN_ENV[@]}" bash "$PANE_WRAPPER"
+                "${PANE_CONTROL[@]}" "${CMD_ARRAY[@]}"
+            )
         else
             setup_log WARN "pane wrapper missing at $PANE_WRAPPER; using direct command"
             PANE_CMD=("${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}")
+        fi
+        TMUX_COMMAND=(tmux)
+        if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+            TMUX_COMMAND=(
+                env -u GH_TOKEN -u GITHUB_TOKEN
+                -u AGENT_WORKTREES_AHP_AUTH_TOKEN
+                -u COPILOT_CLI_ENABLED_FEATURE_FLAGS tmux
+            )
         fi
 
         TMUX_CREATE_MAX_ATTEMPTS=3
@@ -933,7 +1087,8 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
                   TMUX_CREATE_ATTEMPT<=TMUX_CREATE_MAX_ATTEMPTS;
                   TMUX_CREATE_ATTEMPT++)); do
                 TMUX_CREATE_TOTAL_ATTEMPTS=$((TMUX_CREATE_TOTAL_ATTEMPTS + 1))
-                tmux new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
+                "${TMUX_COMMAND[@]}" new-session -d -s "$TMUX_SESS" \
+                    -c "${WORK_DIR:-.}" \
                     "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" \
                     "${PANE_CMD[@]}"
                 TMUX_CREATE_EXIT=$?
@@ -1023,7 +1178,14 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     echo ""
 
     set +e
-    "${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"
+    if [[ "$_BACKEND_ENABLED" == "1" ]]; then
+        GH_TOKEN="$GH_TOKEN" \
+        COPILOT_CLI_ENABLED_FEATURE_FLAGS="$COPILOT_CLI_ENABLED_FEATURE_FLAGS" \
+            env -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN \
+            "${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"
+    else
+        "${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"
+    fi
     COPILOT_EXIT=$?
     set -e
     activity_log copilot_exited "$WORKTREE_ID" mux=none "exit_code=$COPILOT_EXIT"

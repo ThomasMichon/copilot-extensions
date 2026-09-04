@@ -215,7 +215,8 @@ def test_launchers_fast_reattach_skips_update_on_live_session():
                  "update")
     # Windows: the self-contained probe gates Invoke-UpdateApply.
     assert "function Test-AwJoiningLiveSession" in ps
-    assert "if (Test-AwJoiningLiveSession) {" in ps
+    assert "$joiningLiveSession = Test-AwJoiningLiveSession" in ps
+    assert "if ($joiningLiveSession) {" in ps
     assert _skip_log in ps
     # bash: the mirror probe gates invoke_update_apply.
     assert "aw_joining_live_session() {" in sh

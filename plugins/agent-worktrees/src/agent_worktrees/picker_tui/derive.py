@@ -149,7 +149,8 @@ def _state(w):
     # bridge-lock means a live Copilot session.
     if (w.get("mux_session") or w.get("mux_attached")
             or w.get("session_lock_live") or w.get("session_bound_live")
-            or w.get("session_bridge_live") or w.get("session_bare_orphan")):
+            or w.get("session_bridge_live") or w.get("session_ahp_live")
+            or w.get("session_bare_orphan")):
         return "ACTIVE"
     st = (w.get("state") or "").lower()
     if st:
@@ -175,7 +176,8 @@ def _sess(w):
     if w.get("mux_session"):
         return "○"
     if (w.get("session_lock_live") or w.get("session_bound_live")
-            or w.get("session_bridge_live") or w.get("session_bare_orphan")):
+            or w.get("session_bridge_live") or w.get("session_ahp_live")
+            or w.get("session_bare_orphan")):
         return "PROC"
     if w.get("session_lock_stale"):
         return "LOCK"
@@ -315,7 +317,8 @@ def _sessionless(w):
         return False
     if (w.get("kind") or "session") in ("system", "bridge"):
         return False
-    if w.get("turn_count", 0) > 0 or w.get("mux_session") or w.get("mux_attached"):
+    if (w.get("turn_count", 0) > 0 or w.get("mux_session")
+            or w.get("mux_attached") or w.get("session_ahp_live")):
         return False
     return True
 
@@ -466,6 +469,7 @@ def norm(
         # bare-resumed session (cwd=home) in the Active section. Distinct from
         # mux_live; drives the classification-absent fast-pass ACTIVE.
         "session_bound_live": bool(w.get("session_bound_live")),
+        "session_ahp_live": bool(w.get("session_ahp_live")),
         # Controller metadata is passed through for future presentation and
         # recovery actions. It is deliberately absent from state/active/resume
         # derivation: control is not binding.

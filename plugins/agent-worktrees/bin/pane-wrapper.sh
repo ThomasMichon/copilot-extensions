@@ -23,15 +23,46 @@ PROMPT_STARTUP_GRACE="${WORKTREE_PROMPT_STARTUP_GRACE:-3}"
 AW_WT=""
 INITIAL_PROMPT_B64=""
 INITIAL_PROMPT_RECEIPT_B64=""
+AHP_TOKEN_FILE=""
 while [[ $# -ge 2 ]]; do
     case "$1" in
         --aw-wt) AW_WT="$2" ;;
         --aw-prompt-b64) INITIAL_PROMPT_B64="$2" ;;
         --aw-prompt-receipt-b64) INITIAL_PROMPT_RECEIPT_B64="$2" ;;
+        --aw-ahp-token-file) AHP_TOKEN_FILE="$2" ;;
         *) break ;;
     esac
     shift 2
 done
+
+if [[ -n "$AHP_TOKEN_FILE" ]]; then
+    if [[ -L "$AHP_TOKEN_FILE" || ! -f "$AHP_TOKEN_FILE" ]]; then
+        echo "[agent-worktrees] invalid AHP token handoff file" >&2
+        exit 2
+    fi
+    AHP_TOKEN=$(cat -- "$AHP_TOKEN_FILE") || exit 2
+    if ! rm -f -- "$AHP_TOKEN_FILE"; then
+        unset AHP_TOKEN
+        echo "[agent-worktrees] could not retire AHP token handoff file" >&2
+        exit 2
+    fi
+    if [[ -z "$AHP_TOKEN" || "$AHP_TOKEN" == *$'\n'* ]]; then
+        unset AHP_TOKEN
+        echo "[agent-worktrees] invalid AHP token handoff payload" >&2
+        exit 2
+    fi
+    AHP_CHILD_TOKEN="$AHP_TOKEN"
+    unset AHP_TOKEN
+    if [[ ",${COPILOT_CLI_ENABLED_FEATURE_FLAGS:-}," != *",AHP_CLIENT,"* ]]; then
+        if [[ -n "${COPILOT_CLI_ENABLED_FEATURE_FLAGS:-}" ]]; then
+            AHP_CHILD_FEATURES="${COPILOT_CLI_ENABLED_FEATURE_FLAGS},AHP_CLIENT"
+        else
+            AHP_CHILD_FEATURES="AHP_CLIENT"
+        fi
+    else
+        AHP_CHILD_FEATURES="$COPILOT_CLI_ENABLED_FEATURE_FLAGS"
+    fi
+fi
 
 # Native interactive handoff seed. UTF-8 base64 keeps every wrapper control
 # argument space-free so psmux never sees a multi-word pane argument. Decode
@@ -75,8 +106,15 @@ if [[ -n "$INITIAL_PROMPT_B64" ]]; then
 fi
 
 START_TIME=$(date +%s)
-"$@"
+if [[ -n "${AHP_CHILD_TOKEN:-}" ]]; then
+    GH_TOKEN="$AHP_CHILD_TOKEN" \
+    COPILOT_CLI_ENABLED_FEATURE_FLAGS="$AHP_CHILD_FEATURES" \
+        env -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN "$@"
+else
+    "$@"
+fi
 EXIT_CODE=$?
+unset AHP_CHILD_TOKEN AHP_CHILD_FEATURES
 END_TIME=$(date +%s)
 RUNTIME=$((END_TIME - START_TIME))
 
