@@ -263,7 +263,7 @@ function Save-DurableHostIdentity {
             -LocalIdentity $LocalIdentity `
             -BackupIdentity $stagedIdentity
         if (Test-Path -LiteralPath $BackupDirectory -PathType Container) {
-            Remove-Item -LiteralPath $BackupDirectory -Force
+            Remove-Item -LiteralPath $BackupDirectory -Recurse -Force
         }
         Move-Item -LiteralPath $staging -Destination $BackupDirectory
         Write-Host "Backed up dtssh host identity to $BackupDirectory"
