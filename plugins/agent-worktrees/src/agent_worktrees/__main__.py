@@ -8151,18 +8151,8 @@ def _reconcile_marketplace_snapshot(payload: dict, cwd: str) -> None:
     )
 
 
-def _start_provisioning_if_needed(
-    cwd: str,
-    session_environment: dict[str, str] | None = None,
-) -> str:
-    session_environment = session_environment or {}
-    if (
-        session_environment.get("WORKTREE_NO_RECONCILE") == "1"
-        or session_environment.get("WORKTREE_NO_PROVISION") == "1"
-    ):
-        return ""
+def _provisioning_status_diagnostic(cwd: str) -> str:
     status = _aw_runtime_home() / "logs" / "provision-status.json"
-    diagnostic = ""
     try:
         previous = json.loads(status.read_text(encoding="utf-8"))
         if (
@@ -8176,13 +8166,35 @@ def _start_provisioning_if_needed(
                 for item in previous.get("failed", [])
                 if isinstance(item, dict) and item.get("service")
             ) or str(previous.get("reason") or "unknown failure")
-            diagnostic += (
+            return (
                 "[agent-worktrees] Previous background provisioning failed: "
                 f"{failed}. Inspect {_aw_runtime_home() / 'logs'} and rerun "
                 "reconcile-plugins.\n"
             )
     except (OSError, UnicodeError, ValueError, TypeError):
         pass
+    return ""
+
+
+def _start_provisioning_if_needed(
+    cwd: str,
+    session_environment: dict[str, str] | None = None,
+    *,
+    include_status_diagnostic: bool = True,
+    process_holder: list[subprocess.Popen] | None = None,
+) -> str:
+    session_environment = session_environment or {}
+    if (
+        session_environment.get("WORKTREE_NO_RECONCILE") == "1"
+        or session_environment.get("WORKTREE_NO_PROVISION") == "1"
+    ):
+        return ""
+    status = _aw_runtime_home() / "logs" / "provision-status.json"
+    diagnostic = (
+        _provisioning_status_diagnostic(cwd)
+        if include_status_diagnostic
+        else ""
+    )
     try:
         from . import reconcile
 
@@ -8224,7 +8236,11 @@ def _start_provisioning_if_needed(
         stdout = log.open("w", encoding="utf-8")
         stderr = log.with_suffix(".log.err").open("w", encoding="utf-8")
         try:
-            subprocess.Popen(argv, stdout=stdout, stderr=stderr, **kwargs)
+            process = subprocess.Popen(
+                argv, stdout=stdout, stderr=stderr, **kwargs
+            )
+            if process_holder is not None:
+                process_holder.append(process)
         finally:
             stdout.close()
             stderr.close()
@@ -8243,10 +8259,83 @@ def _start_provisioning_if_needed(
     return diagnostic
 
 
+_PROVISIONING_WORKERS_LOCK = threading.Lock()
+_PROVISIONING_WORKERS: set[str] = set()
+
+
+def _schedule_provisioning_if_needed(
+    cwd: str,
+    session_environment: dict[str, str] | None = None,
+    *,
+    start_event: threading.Event | None = None,
+) -> str:
+    session_environment = dict(session_environment or {})
+    if (
+        session_environment.get("WORKTREE_NO_RECONCILE") == "1"
+        or session_environment.get("WORKTREE_NO_PROVISION") == "1"
+    ):
+        return ""
+    diagnostic = _provisioning_status_diagnostic(cwd)
+    key = os.path.normcase(os.path.realpath(cwd))
+    with _PROVISIONING_WORKERS_LOCK:
+        if key in _PROVISIONING_WORKERS:
+            return diagnostic
+        _PROVISIONING_WORKERS.add(key)
+
+    def _worker() -> None:
+        try:
+            if start_event is not None:
+                start_event.wait()
+            process_holder: list[subprocess.Popen] = []
+            worker_diagnostic = _start_provisioning_if_needed(
+                cwd,
+                session_environment,
+                include_status_diagnostic=False,
+                process_holder=process_holder,
+            )
+            if worker_diagnostic:
+                log = (
+                    _aw_runtime_home()
+                    / "logs"
+                    / "provision-preview.log"
+                )
+                try:
+                    log.parent.mkdir(parents=True, exist_ok=True)
+                    with log.open("a", encoding="utf-8") as stream:
+                        stream.write(
+                            f"{datetime.now(timezone.utc).isoformat()} "
+                            f"{cwd}\n{worker_diagnostic}"
+                        )
+                except OSError:
+                    pass
+            if process_holder:
+                process_holder[-1].wait()
+        finally:
+            with _PROVISIONING_WORKERS_LOCK:
+                _PROVISIONING_WORKERS.discard(key)
+
+    try:
+        threading.Thread(
+            target=_worker,
+            name="agent-worktrees-provision-preview",
+            daemon=True,
+        ).start()
+    except (OSError, RuntimeError) as exc:
+        with _PROVISIONING_WORKERS_LOCK:
+            _PROVISIONING_WORKERS.discard(key)
+        diagnostic += (
+            "[agent-worktrees] Could not schedule background provisioning "
+            f"preview: {exc}\n"
+        )
+    return diagnostic
+
+
 def _run_session_lifecycle(
     payload: dict,
     *,
     deadline: float | None = None,
+    provisioning_start_event: threading.Event | None = None,
+    plugin_related_anchors: list[str] | None = None,
 ) -> dict:
     cwd = _hook_payload_cwd(payload)
     _version, session_environment = _session_lifecycle_metadata(payload)
@@ -8288,6 +8377,7 @@ def _run_session_lifecycle(
             result_holder=[],
             resident_environment=True,
             hook_payload=payload,
+            plugin_related_anchors=plugin_related_anchors,
         )
         try:
             cmd_register_session(registration_args)
@@ -8305,9 +8395,16 @@ def _run_session_lifecycle(
         if deadline is None or time.time() < deadline - 1.0:
             diagnostics += _anchor_hygiene_diagnostic(cwd)
         if deadline is None or time.time() < deadline - 1.0:
-            diagnostics += _start_provisioning_if_needed(
-                cwd, session_environment
-            )
+            if provisioning_start_event is None:
+                diagnostics += _start_provisioning_if_needed(
+                    cwd, session_environment
+                )
+            else:
+                diagnostics += _schedule_provisioning_if_needed(
+                    cwd,
+                    session_environment,
+                    start_event=provisioning_start_event,
+                )
     except Exception as exc:
         diagnostics += f"[agent-worktrees] Session lifecycle failed: {exc}\n"
     finally:
@@ -8352,6 +8449,7 @@ class _ResidentHookPolicy:
         self._anchors: tuple[float, tuple[int, int] | None, list[dict]] = (
             0.0, None, [])
         self._guarded: dict[str, tuple[float, list[dict]]] = {}
+        self._plugin_related_anchors: list[str] | None = None
 
     def _module(self, name: str):
         if self.hook_client is None:
@@ -8368,6 +8466,15 @@ class _ResidentHookPolicy:
                 "nudge_status.py",
             )
         )
+
+    def plugin_related_anchors(self) -> list[str]:
+        if self._plugin_related_anchors is None:
+            from . import related
+
+            self._plugin_related_anchors = (
+                related.installed_plugin_related_anchors()
+            )
+        return self._plugin_related_anchors
 
     def anchors(self) -> list[dict]:
         now = time.monotonic()
@@ -8397,7 +8504,10 @@ class _ResidentHookPolicy:
         if cached and now - cached[0] < self.ttl:
             return cached[1]
         try:
-            anchors = _related_config_source_anchors(str(root))
+            anchors = _related_config_source_anchors(
+                str(root),
+                installed_anchors=self.plugin_related_anchors(),
+            )
             entries = related.list_related_grafted(anchors)
             value = []
             for entry in entries:
@@ -8508,6 +8618,7 @@ def _resident_hook_decision(
     segment_cache: _StatusSegmentCache,
     policy: _ResidentHookPolicy,
     deadline: float | None = None,
+    provisioning_start_event: threading.Event | None = None,
 ) -> dict:
     cwd = _hook_payload_cwd(payload)
     previous_project = cfg.active_project()
@@ -8532,7 +8643,12 @@ def _resident_hook_decision(
         if kind == "snapshot":
             return {"segment": segment_cache.get(cwd)}
         if kind == "sessionStart":
-            return _run_session_lifecycle(payload, deadline=deadline)
+            return _run_session_lifecycle(
+                payload,
+                deadline=deadline,
+                provisioning_start_event=provisioning_start_event,
+                plugin_related_anchors=policy.plugin_related_anchors(),
+            )
         return {}
     finally:
         cfg.set_active_project(previous_project)
@@ -8621,10 +8737,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     lifecycle_count = 0
     hook_client = _load_hook_client_module()
     hook_policy = _ResidentHookPolicy(hook_client)
+    if hook_policy.ready():
+        hook_policy.plugin_related_anchors()
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
         nonlocal lifecycle_count
         is_lifecycle = kind == "sessionStart"
+        provisioning_start_event = threading.Event() if is_lifecycle else None
         if is_lifecycle:
             with lifecycle_count_lock:
                 lifecycle_count += 1
@@ -8646,9 +8765,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     raise HookUnavailable
                 return _resident_hook_decision(
                     kind, payload, segment_cache=segment_cache,
-                    policy=hook_policy, deadline=deadline)
+                    policy=hook_policy, deadline=deadline,
+                    provisioning_start_event=provisioning_start_event)
             finally:
                 state_lock.release()
+                if provisioning_start_event is not None:
+                    provisioning_start_event.set()
         finally:
             if is_lifecycle:
                 with lifecycle_count_lock:
@@ -17098,7 +17220,11 @@ def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
         return ""
 
 
-def _related_config_source_anchors(base_anchor: str) -> list[str]:
+def _related_config_source_anchors(
+    base_anchor: str,
+    *,
+    installed_anchors: list[str] | None = None,
+) -> list[str]:
     """Ordered ``.agent-*`` config-source anchor paths for a related lookup.
 
     The E1e **knowledge overlay** (config-graft): the base (harness / launch)
@@ -17136,9 +17262,14 @@ def _related_config_source_anchors(base_anchor: str) -> list[str]:
     # CodeSpace locus, which any base/knowledge/user entry can still override.
     try:
         existing = {_related_mod._anchor_key(a) for a in anchors}
+        discovered = (
+            _related_mod.installed_plugin_related_anchors()
+            if installed_anchors is None
+            else installed_anchors
+        )
         plugin_anchors = [
             p
-            for p in _related_mod.installed_plugin_related_anchors()
+            for p in discovered
             if _related_mod._anchor_key(p) not in existing
         ]
     except Exception:
@@ -20411,7 +20542,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         message = ""
         if record is not None:
             try:
-                context_config = cfg.load_config()
+                context_config = cfg.load_config(
+                    include_control_plane_related_pr=False
+                )
                 registry_context = session_context_mod.render_registry_context(
                     context_config,
                     record,
@@ -20421,6 +20554,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                         recovered_mux.get("session_name")
                         if recovered_mux
                         else None
+                    ),
+                    plugin_related_anchors=getattr(
+                        args, "plugin_related_anchors", None
                     ),
                 )
                 message = (
