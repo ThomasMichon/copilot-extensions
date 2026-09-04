@@ -19,6 +19,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO
 
@@ -36,6 +37,7 @@ MAX_CONTRIBUTORS = 128
 MAX_TIMEOUT_SECONDS = 10
 MAX_TOTAL_TIMEOUT_SECONDS = 20
 RENDEZVOUS_DEADLINE_SECONDS = 25
+FAST_REPLAY_TTL_SECONDS = 60
 MAX_WORKERS = 16
 PROCESS_START_GRACE_SECONDS = 5 if os.name == "nt" else 0
 COMMAND_CATALOG_BUDGET_BYTES = 32 * 1024
@@ -394,6 +396,7 @@ def _spill_context(
     return kernel
 
 
+@lru_cache(maxsize=512)
 def _load_json(path: Path) -> dict | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -1538,6 +1541,10 @@ def _stack_fingerprint(
     by_source: dict[str, list[Contributor]] = {}
     for contributor in contributors:
         by_source.setdefault(contributor.source, []).append(contributor)
+    relevant_sources = {adoption.authority_source, *by_source}
+    relevant_plugins = [
+        plugin for plugin in active if plugin.source in relevant_sources
+    ]
     digest = hashlib.sha256()
     header = {
         "schema": "copilot-extensions.context-injection-cache-generation",
@@ -1549,7 +1556,7 @@ def _stack_fingerprint(
                 "source": plugin.source,
                 "root": os.path.normcase(str(plugin.root)),
             }
-            for plugin in sorted(active, key=lambda item: item.source)
+            for plugin in sorted(relevant_plugins, key=lambda item: item.source)
         ],
     }
     digest.update(
@@ -1560,7 +1567,7 @@ def _stack_fingerprint(
             separators=(",", ":"),
         ).encode("utf-8")
     )
-    for plugin in sorted(active, key=lambda item: item.source):
+    for plugin in sorted(relevant_plugins, key=lambda item: item.source):
         manifest = _manifest(plugin)
         if manifest is None:
             return None
@@ -1626,25 +1633,41 @@ def _cache_path(
     canonical_cwd: str,
     stack_fingerprint: str,
 ) -> Path:
-    configured = os.environ.get("COPILOT_CONTEXT_INJECTION_CACHE_DIR")
-    if configured:
-        root = Path(configured)
-    elif os.name == "nt":
-        root = (
-            Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
-            / "copilot-context-injection"
-            / "v1"
-        )
-    else:
-        runtime = os.environ.get("XDG_RUNTIME_DIR")
-        base = Path(runtime) if runtime else Path.home() / ".cache"
-        root = base / "copilot-context-injection" / "v1"
+    root = _cache_root()
     identity = json.dumps(
         [session_id, canonical_cwd, stack_fingerprint],
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
     return root / f"{hashlib.sha256(identity).hexdigest()}.json"
+
+
+def _cache_root() -> Path:
+    configured = os.environ.get("COPILOT_CONTEXT_INJECTION_CACHE_DIR")
+    if configured:
+        return Path(configured)
+    elif os.name == "nt":
+        return (
+            Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
+            / "copilot-context-injection"
+            / "v1"
+        )
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    base = Path(runtime) if runtime else Path.home() / ".cache"
+    return base / "copilot-context-injection" / "v1"
+
+
+def _fast_replay_path(
+    session_id: str,
+    canonical_cwd: str,
+    hook_timestamp: int,
+) -> Path:
+    identity = json.dumps(
+        [session_id, canonical_cwd, hook_timestamp],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return _cache_root() / f"{hashlib.sha256(identity).hexdigest()}.replay.json"
 
 
 def _private_cache_root(root: Path) -> bool:
@@ -1694,6 +1717,118 @@ def _load_cached(path: Path) -> bytes | None:
     ):
         return None
     return value
+
+
+def _fast_replay_callers(
+    active: list[ActivePlugin],
+    adoption: Adoption,
+    contributors: list[Contributor],
+) -> dict[str, str] | None:
+    roots = {plugin.source: plugin.root for plugin in active}
+    authority_root = roots.get(adoption.authority_source)
+    if authority_root is None:
+        return None
+    callers = {
+        "@authority": os.path.normcase(str(authority_root)),
+    }
+    for contributor in contributors:
+        root = roots.get(contributor.source)
+        if root is None:
+            return None
+        callers[
+            f"{contributor.source}/{contributor.contributor_id}"
+        ] = os.path.normcase(str(root))
+    return callers
+
+
+def _load_fast_replay(
+    path: Path,
+    caller: str,
+    caller_root: Path,
+) -> bytes | None:
+    if not _private_cache_file(path):
+        return None
+    try:
+        value = path.read_bytes()
+        if len(value) > MAX_AGGREGATE_BYTES + 64 * 1024:
+            return None
+        payload = json.loads(value.decode("utf-8"))
+        created_at = payload.get("createdAt")
+        callers = payload.get("callers")
+        output = payload.get("output")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+        return None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema")
+        != "copilot-extensions.context-injection-fast-replay"
+        or payload.get("version") != 1
+        or not isinstance(created_at, (int, float))
+        or created_at > time.time() + 5
+        or time.time() - created_at > FAST_REPLAY_TTL_SECONDS
+        or not isinstance(callers, dict)
+        or callers.get(caller) != os.path.normcase(str(caller_root))
+        or not isinstance(output, str)
+    ):
+        return None
+    encoded = output.encode("utf-8")
+    return encoded if _valid_cached_output(encoded) else None
+
+
+def _valid_cached_output(value: bytes) -> bool:
+    try:
+        payload = json.loads(value.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return payload == {} or (
+        isinstance(payload, dict)
+        and set(payload) == {"additionalContext"}
+        and isinstance(payload["additionalContext"], str)
+        and bool(payload["additionalContext"])
+    )
+
+
+def _store_fast_replay(
+    path: Path,
+    callers: dict[str, str],
+    output: bytes,
+) -> bool:
+    if not _valid_cached_output(output):
+        return False
+    value = json.dumps(
+        {
+            "schema": "copilot-extensions.context-injection-fast-replay",
+            "version": 1,
+            "createdAt": time.time(),
+            "callers": callers,
+            "output": output.decode("utf-8"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    temporary = path.with_name(
+        f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+    )
+    try:
+        if not _private_cache_root(path.parent):
+            raise OSError("cache root is not private")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(temporary, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(value)
+            handle.flush()
+        os.replace(temporary, path)
+        return _private_cache_file(path)
+    except OSError:
+        _diagnose("aggregate fast replay write failed")
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
 
 
 def _store_cached(path: Path, value: bytes) -> bool:
@@ -2047,6 +2182,7 @@ def main() -> int:
         return fail("hook input is not valid JSON", direct=False)
     cwd = payload.get("cwd") if isinstance(payload, dict) else None
     session_id = payload.get("sessionId") if isinstance(payload, dict) else None
+    hook_timestamp = payload.get("timestamp") if isinstance(payload, dict) else None
     if not isinstance(cwd, str) or not cwd:
         return fail("hook input has no cwd", direct=False)
     try:
@@ -2063,6 +2199,21 @@ def main() -> int:
 
     if not isinstance(session_id, str) or not session_id:
         return fail("hook input has no sessionId")
+    canonical_cwd = os.path.normcase(str(launch_cwd))
+    fast_replay_path = (
+        _fast_replay_path(session_id, canonical_cwd, hook_timestamp)
+        if isinstance(hook_timestamp, int) and hook_timestamp >= 0
+        else None
+    )
+    if fast_replay_path is not None:
+        fast_replay = _load_fast_replay(
+            fast_replay_path,
+            producer_value or "@authority",
+            caller_root,
+        )
+        if fast_replay is not None:
+            sys.stdout.buffer.write(fast_replay)
+            return 0
     staged_launch = _staged_launch()
     if staged_launch is None:
         return fail("host-loaded plugin inventory is not authoritative")
@@ -2099,15 +2250,27 @@ def main() -> int:
             "active session-start stack fingerprint is unavailable",
             direct=False,
         )
-    canonical_cwd = os.path.normcase(str(launch_cwd))
     cache_path = _cache_path(
         session_id,
         canonical_cwd,
         stack_fingerprint,
     )
+    fast_replay_callers = _fast_replay_callers(
+        active,
+        adoption,
+        contributors,
+    )
+    if fast_replay_callers is None:
+        return fail("aggregate fast replay callers are unavailable", direct=False)
     try:
         with _cache_lock(cache_path):
             def emit_shared(output: bytes) -> int:
+                if fast_replay_path is not None:
+                    _store_fast_replay(
+                        fast_replay_path,
+                        fast_replay_callers,
+                        output,
+                    )
                 sys.stdout.buffer.write(output)
                 return 0
 
