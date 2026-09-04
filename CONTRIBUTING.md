@@ -494,8 +494,8 @@ The repo ships git hooks under `tools/hooks/`:
   over it, the loader silently drops the skill).
 - **`pre-push`** — runs the repo-wide guards: `tools/check-install-contract.py`
   (the [install contract](docs/install-contract.md)),
-  `tools/check-no-internal-identifiers.py`, `tools/check-headless-launch.py`,
-  `tools/check-vendored-libs-sync.py`, `tools/check-skills.py`,
+  `tools/check-no-internal-identifiers.py`, `tools/check-vendored-libs-sync.py`,
+  `tools/check-headless-launch.py`, `tools/check-skills.py`,
   `tools/check-docs-consistency.py`, `tools/check-runbook-references.py`, and
   `tools/check-version-consistency.py` (every plugin's version identical across
   `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
