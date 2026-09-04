@@ -64,6 +64,9 @@ def test_status_segment_skips_control_plane_pr_overlay(monkeypatch):
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *args: "main")
     monkeypatch.setattr(m, "_find_record_for_path", lambda path: None)
     monkeypatch.setattr(
+        m.git_ops, "_get_current_branch_safe", lambda path: "main"
+    )
+    monkeypatch.setattr(
         m.git_ops,
         "classify_worktree",
         lambda *args, **kwargs: git_ops.WorktreeStateInfo(
