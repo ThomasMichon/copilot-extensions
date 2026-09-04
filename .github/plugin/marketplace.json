@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev3"
+    "version": "1.7.7-dev4"
   },
   "plugins": [
     {
