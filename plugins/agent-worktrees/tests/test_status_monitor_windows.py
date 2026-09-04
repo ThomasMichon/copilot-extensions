@@ -87,6 +87,8 @@ def _process_snapshot() -> dict[int, tuple[str, int]]:
         entry = _ProcessEntry()
         entry.dwSize = ctypes.sizeof(entry)
         ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        if not ok:
+            raise ctypes.WinError(ctypes.get_last_error())
         while ok:
             found[int(entry.th32ProcessID)] = (
                 entry.szExeFile,
