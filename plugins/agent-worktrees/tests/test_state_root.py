@@ -1181,6 +1181,23 @@ class TestStateRootPairCLI:
         knowledge.mkdir()
         self._pair_records(tracking_dir, harness, knowledge)
         monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tracking_dir)
+        knowledge_project = tmp_path / "knowledge-project"
+        knowledge_tracking = knowledge_project / "worktrees"
+        knowledge_tracking.mkdir(parents=True)
+        tk.save_record(
+            tk.load_record(tracking_dir / "wt-knowledge.yaml"),
+            knowledge_tracking / "wt-knowledge.yaml",
+        )
+        original_project_dir = tk.cfg.project_dir
+        monkeypatch.setattr(
+            tk.cfg,
+            "project_dir",
+            lambda project=None: (
+                knowledge_project
+                if project == "knowledge"
+                else original_project_dir(project)
+            ),
+        )
         monkeypatch.setattr("agent_worktrees.__main__.os.getcwd", lambda: str(harness))
 
         rc = cmd_state_root_dispatch(["--pair"])
@@ -1202,6 +1219,23 @@ class TestStateRootPairCLI:
         knowledge.mkdir()
         self._pair_records(tracking_dir, harness, knowledge)
         monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tracking_dir)
+        knowledge_project = tmp_path / "knowledge-project"
+        knowledge_tracking = knowledge_project / "worktrees"
+        knowledge_tracking.mkdir(parents=True)
+        tk.save_record(
+            tk.load_record(tracking_dir / "wt-knowledge.yaml"),
+            knowledge_tracking / "wt-knowledge.yaml",
+        )
+        original_project_dir = tk.cfg.project_dir
+        monkeypatch.setattr(
+            tk.cfg,
+            "project_dir",
+            lambda project=None: (
+                knowledge_project
+                if project == "knowledge"
+                else original_project_dir(project)
+            ),
+        )
         monkeypatch.setattr("agent_worktrees.__main__.os.getcwd", lambda: str(harness))
 
         rc = cmd_state_root_dispatch(["--pair", "--json"])
