@@ -14,6 +14,7 @@ from dataclasses import asdict
 import pytest
 
 from agent_dispatch import tracking
+from agent_dispatch import supervisor as supervisor_module
 from agent_dispatch.client import DispatchError
 from agent_dispatch.queue import SpawnState, Status
 from agent_dispatch.supervisor import Supervisor
@@ -211,6 +212,38 @@ class QueueBackedClient:
 
     def progress_log(self, task_id):
         return self._q.progress_log(task_id)
+
+
+def test_default_liveness_uses_local_bridge_for_local_machine(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        tracking.remote_dispatch, "is_peer_machine", lambda machine: False
+    )
+    monkeypatch.setattr(
+        tracking,
+        "resolve_live_session",
+        lambda worktree, *, machine=None: calls.append((worktree, machine)) or {},
+    )
+
+    supervisor_module._default_liveness("wt-local", "LOCAL-HOST")
+
+    assert calls == [("wt-local", None)]
+
+
+def test_default_liveness_uses_ssh_for_peer_machine(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        tracking.remote_dispatch, "is_peer_machine", lambda machine: True
+    )
+    monkeypatch.setattr(
+        tracking,
+        "resolve_live_session",
+        lambda worktree, *, machine=None: calls.append((worktree, machine)) or {},
+    )
+
+    supervisor_module._default_liveness("wt-peer", "peer-host")
+
+    assert calls == [("wt-peer", "peer-host")]
 
 
 @pytest.fixture

@@ -401,8 +401,13 @@ def enrich_task(
         return task
     machine = machine_from_owner(owner)
     if local is _UNSET:
-        local = remote_dispatch.local_machine()
-    is_remote = bool(machine) and bool(local) and machine != local
+        is_remote = remote_dispatch.is_peer_machine(machine)
+    else:
+        is_remote = (
+            bool(machine)
+            and bool(local)
+            and machine.strip().casefold() != str(local).strip().casefold()
+        )
     if is_remote:
         if ssh_ok is None:
             ssh_ok = remote_dispatch.ssh_available()

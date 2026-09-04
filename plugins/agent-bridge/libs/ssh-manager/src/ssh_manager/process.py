@@ -20,17 +20,13 @@ def _kill_process(proc: asyncio.subprocess.Process) -> None:
 def ssh_subprocess_kwargs(**kwargs: Any) -> dict[str, Any]:
     """Return kwargs that keep an SSH process tree invisible and isolated.
 
-    ``CREATE_NO_WINDOW`` suppresses the direct ``ssh.exe`` child, but an SSH
-    ``ProxyCommand`` can still start console-subsystem descendants that invoke
-    Windows Default Terminal. A hidden new console gives the whole tree a
-    console to inherit without presenting a visible window.
+    ``CREATE_NEW_CONSOLE`` remains visible to Windows Default Terminal even
+    when paired with ``SW_HIDE``. ``CREATE_NO_WINDOW`` keeps the SSH root and
+    its console descendants on the same windowless process tree while
+    preserving redirected stdio and the root PID used for tree teardown.
     """
     if sys.platform == "win32":
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
-        kwargs["startupinfo"] = startupinfo
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     else:
         kwargs["start_new_session"] = True
     return kwargs

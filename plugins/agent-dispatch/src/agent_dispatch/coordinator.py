@@ -199,8 +199,7 @@ def _resolve_owner_session_id(worker_id: str | None) -> str | None:
     machine, _sep, worktree = worker_id.partition("/")
     if not worktree:
         return None
-    local = tracking.remote_dispatch.local_machine()
-    is_remote = bool(machine) and bool(local) and machine != local
+    is_remote = tracking.remote_dispatch.is_peer_machine(machine)
     session = tracking.resolve_live_session(
         worktree, machine=machine if is_remote else None
     )
