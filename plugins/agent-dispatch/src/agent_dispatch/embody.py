@@ -201,6 +201,7 @@ def prepare_reusable_worktree(
     task: dict,
     reservation: dict,
     *,
+    project: str | None = None,
     interface: str,
     driver: str,
     supervisor: str,
@@ -213,7 +214,7 @@ def prepare_reusable_worktree(
     propagates without creating a replacement, so a possibly live binding is
     never overwritten.
     """
-    project = project_for_task(task)
+    project = project or project_for_task(task)
     carried = reservation.get("worktree")
     if isinstance(carried, str) and carried:
         try:
