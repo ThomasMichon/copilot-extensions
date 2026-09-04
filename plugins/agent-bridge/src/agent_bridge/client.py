@@ -63,7 +63,10 @@ class SseStream(Iterator[dict[str, Any]]):
         self.close()
 
     def __del__(self) -> None:
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def __next__(self) -> dict[str, Any]:
         while True:

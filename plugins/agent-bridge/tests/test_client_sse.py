@@ -30,6 +30,12 @@ class _FakeSseResp:
         self.closed = True
 
 
+class _FailingCloseSseResp(_FakeSseResp):
+    def close(self) -> None:
+        self.closed = True
+        raise OSError("close failed")
+
+
 def _drain(lines: list[str]) -> list[dict]:
     client = BridgeClient("http://127.0.0.1:0", "tok")
     with patch(
@@ -63,6 +69,18 @@ class TestSseCommentParsing:
         ):
             with client.stream_events("sess-1") as stream:
                 assert next(stream)["event"] == "_heartbeat"
+
+        assert response.closed is True
+
+    def test_abandoned_stream_suppresses_close_failure(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([": heartbeat", ""])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            stream = client.stream_events("sess-1")
+            stream.__del__()
 
         assert response.closed is True
 
