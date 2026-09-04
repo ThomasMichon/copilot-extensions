@@ -403,8 +403,11 @@ def _default_local_body_target_dir(bridge_session_id: str) -> str | None:
 
 def _target_directory_missing(target_dir: str) -> bool | None:
     """Classify an absolute target directory without treating stat errors as loss."""
+    path = Path(target_dir)
+    if not path.is_absolute():
+        return None
     try:
-        target_stat = Path(target_dir).stat()
+        target_stat = path.stat()
     except (FileNotFoundError, NotADirectoryError):
         return True
     except OSError:

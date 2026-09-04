@@ -643,9 +643,9 @@ def test_cold_resume_missing_worktree_releases_same_task_for_fresh_embodiment(
     assert sum(r.state == SpawnState.SPAWNED for r in reservations) == 1
 
 
-@pytest.mark.parametrize("target_known", [False, True])
+@pytest.mark.parametrize("target_kind", ["unknown", "present", "relative"])
 def test_cold_resume_preserves_unknown_or_present_worktree(
-    q, client, tmp_path, target_known
+    q, client, tmp_path, target_kind
 ):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
@@ -658,14 +658,17 @@ def test_cold_resume_preserves_unknown_or_present_worktree(
     q.record_cold(reservation.key)
     q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
     resumed: list[str] = []
+    target_dir = {
+        "unknown": None,
+        "present": str(tmp_path),
+        "relative": "relative/worktree",
+    }[target_kind]
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         labels=["review"],
-        local_body_target_dir_fn=(
-            (lambda _sid: str(tmp_path)) if target_known else (lambda _sid: None)
-        ),
+        local_body_target_dir_fn=lambda _sid: target_dir,
         local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True,
     )
 
