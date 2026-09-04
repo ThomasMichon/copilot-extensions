@@ -29,7 +29,7 @@ that pattern to this repository.
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
 | [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 |
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
-| [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Draft | #1303 |
+| [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Active | #1303 |
 | [Terminal Worktree Reclamation](active/terminal-worktree-reclamation/README.md) | Draft | #1488 |
 | [Venue Parity](active/venue-parity/README.md) | Active | #954 |
 | [Windows Launch Hardening](active/windows-launch-hardening/README.md) | Active | #786 |
