@@ -7707,6 +7707,7 @@ def _monitor_sweep(
     segment_cache=None,
     published: dict[tuple[str, str], str] | None = None,
     incarnations: dict[str, str] | None = None,
+    session_projects: dict[str, str] | None = None,
     project_lock=None,
     lifecycle_priority=None,
 ) -> int:
@@ -7754,6 +7755,15 @@ def _monitor_sweep(
                             published.pop(key, None)
                 incarnations[sess] = incarnation
         served = [(s, p) for s, p in registry.items() if s in live_wt and p]
+    if session_projects is not None:
+        registered_paths = {
+            os.path.normcase(os.path.realpath(path))
+            for path in registry.values()
+            if path
+        }
+        for key in list(session_projects):
+            if key not in registered_paths:
+                session_projects.pop(key, None)
     warm_projects: dict[str, str | None] = {
         project: None for project in (picker_projects or set())
     }
@@ -7769,8 +7779,19 @@ def _monitor_sweep(
             else contextlib.nullcontext()
         ):
             try:
-                _activate_project_for_path(path, force=True)
-                warm_projects.setdefault(cfg.project_name(), path)
+                path_key = os.path.normcase(os.path.realpath(path))
+                project = (
+                    session_projects.get(path_key)
+                    if session_projects is not None else None
+                )
+                if project:
+                    cfg.set_active_project(project)
+                else:
+                    _activate_project_for_path(path, force=True)
+                    project = cfg.project_name()
+                    if session_projects is not None:
+                        session_projects[path_key] = project
+                warm_projects.setdefault(project, path)
             except Exception:
                 pass
             if sess not in ctx_done:
@@ -7804,7 +7825,7 @@ def _monitor_sweep(
         if context_value is not None and _publish("@aw_ctx", context_value):
             ctx_done.add(sess)
         _publish("@aw_seg", segment_value)
-    for project, path in warm_projects.items():
+    for project in warm_projects:
         _wait_for_lifecycle_priority(lifecycle_priority)
         with (
             project_lock
@@ -7812,10 +7833,7 @@ def _monitor_sweep(
             else contextlib.nullcontext()
         ):
             try:
-                if path:
-                    _activate_project_for_path(path, force=True)
-                else:
-                    cfg.set_active_project(project)
+                cfg.set_active_project(project)
                 _warm_list_cache_for_active_project(interval=interval)
             except Exception:
                 pass
@@ -7823,7 +7841,11 @@ def _monitor_sweep(
 
 
 class _StatusSegmentCache:
-    """Share throttled Git classification across monitor and IPC consumers."""
+    """Share throttled Git classification across monitor and IPC consumers.
+
+    Callers establish the target's active project before ``get`` so record
+    resolution and rendering share one activation.
+    """
 
     def __init__(self, ttl: float = 60.0):
         self.ttl = max(15.0, float(ttl))
@@ -7853,7 +7875,6 @@ class _StatusSegmentCache:
             if cached and now - cached[0] < self.ttl:
                 self._aliases[input_key] = key
                 return cached[1]
-        _activate_project_for_path(target, force=True)
         value = _render_status_segment(
             target, fetch=False, plain=False, no_title=False, persist_title=True)
         with self._lock:
@@ -8806,6 +8827,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     segment_cache = _StatusSegmentCache(cache_ttl)
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
+    session_projects: dict[str, str] = {}
     state_lock = threading.RLock()
     lifecycle_priority = threading.Event()
     lifecycle_count_lock = threading.Lock()
@@ -8902,7 +8924,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 catalog_observer=reconciler.observe_mux,
                 pane_observer=pane_reconciler.observe,
                 segment_cache=segment_cache, published=published,
-                incarnations=incarnations, project_lock=state_lock,
+                incarnations=incarnations, session_projects=session_projects,
+                project_lock=state_lock,
                 lifecycle_priority=lifecycle_priority)
             _wait_for_lifecycle_priority(lifecycle_priority)
             with state_lock:

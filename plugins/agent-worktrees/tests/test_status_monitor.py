@@ -338,6 +338,44 @@ def test_sweep_reuses_segment_and_skips_unchanged_mux_values(
     ]
 
 
+def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_monitor_mux_set", lambda *a, **k: True)
+    activations = []
+
+    def activate(path, *, force):
+        activations.append((path, force))
+        m.cfg.set_active_project("repo-a")
+
+    monkeypatch.setattr(m, "_activate_project_for_path", activate)
+
+    class Cache:
+        def get(self, path):
+            assert m.cfg.active_project() == "repo-a"
+            return "SEG"
+
+    prior = m.cfg.active_project()
+    projects = {}
+    try:
+        m._monitor_sweep(
+            "tmux", "T", "P", set(), segment_cache=Cache(),
+            session_projects=projects)
+        m._monitor_sweep(
+            "tmux", "T", "P", set(), segment_cache=Cache(),
+            session_projects=projects)
+    finally:
+        m.cfg.set_active_project(prior)
+
+    assert activations == [("/w/a", True)]
+    assert projects == {m.os.path.normcase(m.os.path.realpath("/w/a")): "repo-a"}
+
+
 def test_sweep_retries_failed_mux_publish(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
