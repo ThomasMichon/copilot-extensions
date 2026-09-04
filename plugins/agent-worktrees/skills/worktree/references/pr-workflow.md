@@ -239,6 +239,12 @@ Set `head_scheme` per repo to choose; the multi-machine system default is `refsp
 <agent-worktrees catalog argv[0]> create-pr --title "Concise PR title"
 ```
 
+Provide a reviewable description with `--body` or `--body-file`. A repository
+may configure `pr.required_body_sections` (for example `Intent`, `Changes`, and
+`Validation`); `create-pr` then fails before publishing unless every named
+Markdown section contains visible text. A hidden source marker never satisfies
+the human-readable body requirement.
+
 Squashes the worktree's commits into one and rebases onto upstream, leaving HEAD
 on `worktree/{id}` at the squashed commit (both schemes — it is never reset off
 it, #1804). Under the default **refspec** scheme it pushes `worktree/{id}`
@@ -275,6 +281,11 @@ must stay off for public PRs. Useful flags: `--no-open` (push only),
 `--repo owner/name`. If the provider call fails the branch is still pushed, and
 the result carries `pr_open_error` so you can fall back to Steps 2-3 below. A
 repo **without** provider credentials configured uses the manual flow unchanged.
+
+`push-changes` and an idempotent `create-pr` re-run publish the final pushed
+head as a dedicated hidden PR comment. Consumers use the newest source marker
+across the initial body and managed comments. Mutable attribution never
+replaces the authored PR description.
 
 > **Trust the result -- do not open a second PR.** When `create-pr` returns
 > `pr_opened: true` (or any `number`/`url`), the PR is already open and recorded

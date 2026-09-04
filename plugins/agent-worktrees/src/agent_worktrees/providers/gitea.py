@@ -406,6 +406,30 @@ class GiteaProvider:
             base_ref=str((data.get("base") or {}).get("ref", "")),
         )
 
+    def publish_source_marker(
+        self,
+        repo: str,
+        number: int,
+        marker: str,
+        *,
+        api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        if not token:
+            return "Gitea provider needs a token to publish source attribution."
+        status, response = self._curl(
+            "POST",
+            self._api(api_base, f"/repos/{repo}/issues/{number}/comments"),
+            token,
+            payload={"body": marker},
+        )
+        if status not in (200, 201):
+            return (
+                f"Gitea PR #{number} source comment failed (HTTP {status}): "
+                f"{response.strip()[:300]}"
+            )
+        return ""
+
     def head_contained_in_base(
         self, repo: str, base: str, head_sha: str, *, api_base: str = "",
         token: str | None = None,

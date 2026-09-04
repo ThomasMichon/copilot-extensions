@@ -508,11 +508,16 @@ ownership transfer uses the current payload command's
 > <path>`). Running `register <name>` from a *different* repo silently adopts
 > *that* repo's path under `<name>`.
 
+Before `create-pr`, prepare a human-readable body with the target repository's
+required sections and pass it through `--body` or `--body-file`. Repositories
+may enforce those headings with `pr.required_body_sections`; hidden source
+metadata never substitutes for reviewable intent, changes, and validation.
+
 | Action | Command |
 |--------|---------|
 | **Push changes to the default branch** (normal sign-off step 1) | `<agent-worktrees catalog argv[0]> push-changes --title "desc"` |
 | **Finalize** (validate + clean up, step 2) | `<agent-worktrees catalog argv[0]> finalize` |
-| **PR mode: create + push a feature branch** | `<agent-worktrees catalog argv[0]> create-pr --title "desc"` |
+| **PR mode: create + push a feature branch** | `<agent-worktrees catalog argv[0]> create-pr --title "desc" --body-file <path>` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `<agent-worktrees catalog argv[0]> set-pr --url URL --number N` |
 | **PR mode: show tracked PR state** (reconciles vs. provider; flags pull-forward when merged) | `<agent-worktrees catalog argv[0]> pr-status` |
 | **Check the target repo's PR flow** (direct / human-merge / agent-merge / self-merge) | `<agent-worktrees catalog argv[0]> get pr-profile` |
