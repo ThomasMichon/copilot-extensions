@@ -7,7 +7,7 @@
 - **Status:** Draft
 - **Vision:** `visions/plugins/agent-dispatch` §Features/`terminal-worktree-reclamation`
   and §Behaviors/`allocator-reclaims-what-it-creates`
-- **Umbrella issue:** #1488
+- **Umbrella issues:** #1488, #1918
 - **Dependencies:** #1312 (`worktree-finality-and-obligations`)
 
 ## Guiding Intent
@@ -39,6 +39,10 @@ become terminal. It can also detect whether embodied workers are live or gone.
 What it does not yet own is the final workspace obligation: worktrees allocated
 for completed or abandoned tasks can remain registered indefinitely, forcing
 each producer to invent cleanup logic or leaving stale workspaces behind.
+The same ownership gap exists before task finality: a failed or yielded
+embodiment attempt can settle while its created worktree is absent from the
+spawn reservation, so repeated retries accumulate unattributed worktrees even
+though the task remains queued.
 
 The generic boundary is:
 
@@ -60,12 +64,22 @@ Build a cleanup daemon into agent-dispatch that removes worktrees from completed
 or abandoned tasks it embodied, without making calling services reimplement
 worktree lifecycle safety.
 
+Additional operator request:
+
+> We need to ensure that these dispatched autopilot workers and tracked and
+> attributed correctly. We also need to ensure they are garbage collected.
+
 ## Plan
 
 ### Phase 1 — Durable allocation and resolution contract
 - [ ] Extend spawn/embodiment records with the exact created worktree identity
       and whether the spawn created it or targeted a pre-existing worktree.
       Missing legacy origin is `unknown`, never inferred as owned.
+- [ ] Pre-create locally managed worker worktrees and durably bind them to the
+      exact task, reservation, attempt, driver, and creating host before the
+      worker body is allowed to run.
+- [ ] Publish that allocation provenance through `agent-worktrees list --json`
+      so consumers never have to infer dispatch ownership from a session title.
 - [ ] Bind allocation ownership to the durable creating
       machine/environment. Retain the individual supervisor process id only as
       audit provenance so a same-host successor can reclaim across restarts.
@@ -79,6 +93,10 @@ worktree lifecycle safety.
       prune-eligibility ledger.
 
 ### Phase 2 — Supervisor reclamation loop
+- [ ] Reconcile release-requested, failed, and yielded attempts before reserving
+      a replacement: retire the exact session, delegate safe conclusion to
+      agent-worktrees, and retain a visible retryable cleanup state until the
+      created allocation is final or explicitly held.
 - [ ] Reconcile terminal `completed` and `abandoned` tasks whose embodiments
       were created by this machine/environment; foreign-host allocations and
       pre-existing targeted worktrees are never evaluated for removal.
@@ -130,6 +148,9 @@ worktree lifecycle safety.
 - [ ] A concurrent worktree resume or new claim wins the atomic removal check
       and leaves the worktree intact.
 - [ ] A headless body that allocated no worktree is a no-op.
+- [ ] Repeated yielded or failed attempts do not accumulate one worktree per
+      attempt; created worktrees are concluded while targeted, reused, dirty,
+      live, foreign-host, and origin-unknown worktrees are preserved.
 - [ ] Repeated reconciliation and process restart do not repeat destructive
       work or lose cleanup state.
 - [ ] Older task records and older ground-layer versions fail closed without
@@ -155,3 +176,10 @@ capability leaves the worktree in place with a visible reason.
 - Opened #1488 as the public coordination token.
 - Carved this effort to define the durable allocation contract, singleton
   reclamation loop, operational visibility, and safe historical adoption.
+
+### 2026-09-03 — Attempt-level reclamation
+- Opened #1918 after confirming that a yielded or failed nonterminal attempt can
+  lose its created worktree identity and leak one allocation per retry.
+- Extended the effort through the attempt boundary: provenance is recorded
+  before execution, and replacement remains blocked until exact safe cleanup is
+  complete or visibly held.
