@@ -45,6 +45,100 @@ def test_ordinary_hooks_yield_to_waiting_lifecycle_request():
     assert m._resident_hook_should_yield("sessionStart", priority) is False
 
 
+def test_identical_resident_lifecycle_requests_coalesce():
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(m.Path.cwd()),
+        "source": "resume",
+        "timestamp": 1_800_000_000.25,
+        "_agentWorktrees": {"pluginVersion": "1.5.3-dev759"},
+    }
+    claims = {}
+
+    launch_key, claimed = m._claim_resident_lifecycle(
+        payload, claims, now=10.0
+    )
+    duplicate_key, duplicate_claimed = m._claim_resident_lifecycle(
+        payload, claims, now=10.0
+    )
+
+    assert launch_key
+    assert duplicate_key == launch_key
+    assert claimed is True
+    assert duplicate_claimed is False
+
+
+def test_distinct_resident_lifecycle_requests_do_not_coalesce():
+    first = {
+        "sessionId": "session-1",
+        "cwd": str(m.Path.cwd()),
+        "source": "resume",
+        "timestamp": 1_800_000_000.25,
+        "_agentWorktrees": {"pluginVersion": "1.5.3-dev759"},
+    }
+    second = {**first, "timestamp": 1_800_000_000.5}
+    claims = {}
+
+    first_key, first_claimed = m._claim_resident_lifecycle(
+        first, claims, now=10.0
+    )
+    second_key, second_claimed = m._claim_resident_lifecycle(
+        second, claims, now=10.0
+    )
+
+    assert first_key != second_key
+    assert first_claimed is True
+    assert second_claimed is True
+
+
+def test_completed_resident_lifecycle_claim_expires():
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(m.Path.cwd()),
+        "source": "resume",
+        "timestamp": 1_800_000_000.25,
+        "_agentWorktrees": {"pluginVersion": "1.5.3-dev759"},
+    }
+    launch_key = m._session_lifecycle_launch_key(
+        payload, "1.5.3-dev759"
+    )
+    claims = {launch_key: 20.0}
+
+    duplicate_key, duplicate_claimed = m._claim_resident_lifecycle(
+        payload, claims, now=19.0
+    )
+    retried_key, retried_claimed = m._claim_resident_lifecycle(
+        payload, claims, now=20.0
+    )
+
+    assert duplicate_key == launch_key
+    assert duplicate_claimed is False
+    assert retried_key == launch_key
+    assert retried_claimed is True
+
+
+def test_completed_resident_lifecycle_claim_is_retained():
+    claims = {"launch-key": float("inf")}
+
+    m._release_resident_lifecycle(
+        "launch-key", claims, completed=True, now=10.0
+    )
+
+    assert claims == {
+        "launch-key": 10.0 + m._RESIDENT_LIFECYCLE_DEDUPE_S
+    }
+
+
+def test_failed_resident_lifecycle_claim_is_released():
+    claims = {"launch-key": float("inf")}
+
+    m._release_resident_lifecycle(
+        "launch-key", claims, completed=False, now=10.0
+    )
+
+    assert claims == {}
+
+
 def test_monitor_yields_to_waiting_lifecycle_request(monkeypatch):
     states = iter((True, True, False))
     priority = types.SimpleNamespace(is_set=lambda: next(states))

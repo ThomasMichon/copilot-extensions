@@ -8672,6 +8672,45 @@ def _wait_for_lifecycle_priority(priority_event) -> None:
         time.sleep(0.01)
 
 
+def _claim_resident_lifecycle(
+    payload: dict,
+    claims: dict[str, float],
+    *,
+    now: float | None = None,
+) -> tuple[str, bool]:
+    current = time.monotonic() if now is None else now
+    for expired in [
+        key for key, deadline in claims.items() if deadline <= current
+    ]:
+        claims.pop(expired, None)
+    version, _environment = _session_lifecycle_metadata(payload)
+    launch_key = _session_lifecycle_launch_key(payload, version)
+    if launch_key and launch_key in claims:
+        return launch_key, False
+    if launch_key:
+        claims[launch_key] = float("inf")
+    return launch_key, True
+
+
+_RESIDENT_LIFECYCLE_DEDUPE_S = 60.0
+
+
+def _release_resident_lifecycle(
+    launch_key: str,
+    claims: dict[str, float],
+    *,
+    completed: bool,
+    now: float | None = None,
+) -> None:
+    if not launch_key:
+        return
+    if completed:
+        current = time.monotonic() if now is None else now
+        claims[launch_key] = current + _RESIDENT_LIFECYCLE_DEDUPE_S
+    else:
+        claims.pop(launch_key, None)
+
+
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 
@@ -8735,6 +8774,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     lifecycle_priority = threading.Event()
     lifecycle_count_lock = threading.Lock()
     lifecycle_count = 0
+    lifecycle_claims: dict[str, float] = {}
     hook_client = _load_hook_client_module()
     hook_policy = _ResidentHookPolicy(hook_client)
     if hook_policy.ready():
@@ -8744,8 +8784,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal lifecycle_count
         is_lifecycle = kind == "sessionStart"
         provisioning_start_event = threading.Event() if is_lifecycle else None
+        lifecycle_key = ""
+        lifecycle_completed = False
         if is_lifecycle:
             with lifecycle_count_lock:
+                lifecycle_key, claimed = _claim_resident_lifecycle(
+                    payload, lifecycle_claims
+                )
+                if not claimed:
+                    return {}
                 lifecycle_count += 1
                 lifecycle_priority.set()
         remaining = deadline - time.time()
@@ -8763,10 +8810,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     and deadline - time.time() < _RESIDENT_LIFECYCLE_RUNWAY_S
                 ):
                     raise HookUnavailable
-                return _resident_hook_decision(
+                result = _resident_hook_decision(
                     kind, payload, segment_cache=segment_cache,
                     policy=hook_policy, deadline=deadline,
                     provisioning_start_event=provisioning_start_event)
+                lifecycle_completed = True
+                return result
             finally:
                 state_lock.release()
                 if provisioning_start_event is not None:
@@ -8775,6 +8824,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if is_lifecycle:
                 with lifecycle_count_lock:
                     lifecycle_count -= 1
+                    _release_resident_lifecycle(
+                        lifecycle_key,
+                        lifecycle_claims,
+                        completed=lifecycle_completed,
+                    )
                     if lifecycle_count == 0:
                         lifecycle_priority.clear()
 
