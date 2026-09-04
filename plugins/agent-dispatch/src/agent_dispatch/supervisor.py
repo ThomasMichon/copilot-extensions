@@ -1622,11 +1622,18 @@ class Supervisor:
         elif bridge_session and session_override is None:
             retry_payload = self._conclusion_retry_payload(reservation)
             recorded_acp = retry_payload.get("acp_session_id")
-            session = (
-                str(recorded_acp)
-                if recorded_acp
-                else self.local_acp_session_fn(bridge_session)
-            )
+            try:
+                session = (
+                    str(recorded_acp)
+                    if recorded_acp
+                    else self.local_acp_session_fn(bridge_session)
+                )
+            except Exception:
+                log.exception(
+                    "ACP session identity lookup failed for bridge session %s",
+                    bridge_session,
+                )
+                session = None
             if not session:
                 return {
                     "action": "failed",

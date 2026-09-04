@@ -1845,6 +1845,48 @@ def test_disposable_terminal_missing_acp_identity_is_bounded(q, client):
     assert detail["next_attempt_at"] > 0
 
 
+def test_disposable_terminal_acp_identity_error_is_bounded(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    spawn = _ok_spawn(
+        {
+            "session": "local-body:brg-disposable",
+            "worktree": "worktree-disposable",
+        }
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        disposable_cli_labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_acp_session_fn=lambda _sid: (_ for _ in ()).throw(
+            RuntimeError("bridge unavailable")
+        ),
+        local_end_fn=lambda _sid: pytest.fail(
+            "body must not end without a durable ACP identity"
+        ),
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=task.id)
+    q.start(task.id, "local-o")
+    q.complete(task.id, "local-o")
+
+    assert sup.reconcile() == 0
+    pending = q.latest_reservation(task.id)
+    assert pending.state == SpawnState.SPAWNED
+    assert pending.conclusion_state == "pending"
+    detail = json.loads(pending.conclusion_detail)
+    assert detail["reason"] == "session-identity-unavailable"
+    assert detail["attempts"] == 1
+    assert detail["next_attempt_at"] > 0
+
+
 def test_reconcile_retains_terminal_local_reservation_when_end_fails(q, client):
     t = q.create("work")
     spawn = _local_spawn("local-body:brg-terminal")
