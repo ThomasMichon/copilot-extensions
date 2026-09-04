@@ -404,16 +404,18 @@ generic is what lets many different products reuse it.
 - **2026-08-03** — Extended **The embedding engine** into a **durable, persistent,
   warm runtime decoupled from the versioned service** (the same durable-vs-versioned
   split as the index & store), added the **warm-durable-engine** behavior, and
-  sharpened **self-contained-service** / **local-first-standalone**: the model
-  stack is expensive, so it is provisioned **only where indexing is hosted** and
-  outside the swappable runtime — a routine service cutover **never rebuilds the
-  model stack or restarts the warm engine**; **all embedding (index + query)** is
-  served by that one engine so the service runtime stays light and model-free; a
-  search-only consumer carries **no model stack** and reaches the host over the
-  trusted transport; and a machine's **role** (engine host vs consumer) is resolved
-  from **configuration** (machine-local or a source repo's `.agent-index`), never a
+  sharpened the then-current **self-contained-service** /
+  **local-first-standalone** intent: the model stack is expensive, so it is
+  provisioned **only where indexing is hosted** and outside the swappable runtime
+  — a routine service cutover **never rebuilds the model stack or restarts the
+  warm engine**; **all embedding (index + query)** is served by that one engine
+  so the service runtime stays light and model-free; a search-only consumer
+  carries **no model stack** and reaches the host over the trusted transport; and
+  a machine's **role** (engine host vs consumer) is resolved from
+  **configuration** (machine-local or a source repo's `.agent-index`), never a
   machine list baked into the plugin. Mined from an operator directive that torch
-  belongs only on the indexing host, as a persistent daemon (a session-host  analogue) that survives plugin updates. Drives the `agent-index-engine-daemon`
+  belongs only on the indexing host, as a persistent daemon (a session-host
+  analogue) that survives plugin updates. Drives the `agent-index-engine-daemon`
   effort; `dev16`'s configurable engine-separation modes are the foundation.
 
 - **2026-08-03** — Added **adoption-designates-one-indexer** and

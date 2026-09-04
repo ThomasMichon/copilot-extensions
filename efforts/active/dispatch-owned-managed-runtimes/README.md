@@ -67,7 +67,7 @@ these runtimes.
 ### Phase 0 — Reviewed intent
 
 - [x] Extend the plugin-service and agent-index visions with the narrow
-  delegated-heavy-companion exception.
+  `delegated-heavy-companion-runtime` exception.
 - [ ] Land this effort proposal before implementation.
 
 ### Slice 3A — Declaration contract
