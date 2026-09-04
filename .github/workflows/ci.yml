@@ -325,7 +325,9 @@ jobs:
           if (-not $psmux) {
             throw "psmux.exe not found in release archive"
           }
-          $psmux.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append
+          Add-Content -LiteralPath $env:GITHUB_PATH `
+            -Value $psmux.DirectoryName `
+            -Encoding utf8
       - name: Test Windows status-loop launch
         run: >-
           python tools/run-plugin-tests.py agent-worktrees

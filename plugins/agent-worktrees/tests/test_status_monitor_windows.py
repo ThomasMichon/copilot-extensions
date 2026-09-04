@@ -30,12 +30,58 @@ class _ProcessEntry(ctypes.Structure):
     ]
 
 
-def _process_snapshot() -> dict[int, tuple[str, int]]:
+def _kernel32():
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
     kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ProcessEntry),
+    ]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ProcessEntry),
+    ]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return kernel32
+
+
+def _user32():
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.GetWindowThreadProcessId.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = [
+        wintypes.HWND,
+        wintypes.LPWSTR,
+        ctypes.c_int,
+    ]
+    user32.GetWindowTextW.restype = ctypes.c_int
+    user32.GetClassNameW.argtypes = [
+        wintypes.HWND,
+        wintypes.LPWSTR,
+        ctypes.c_int,
+    ]
+    user32.GetClassNameW.restype = ctypes.c_int
+    user32.GetForegroundWindow.argtypes = []
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    return user32
+
+
+def _process_snapshot() -> dict[int, tuple[str, int]]:
+    kernel32 = _kernel32()
     snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
     if snapshot == wintypes.HANDLE(-1).value:
-        return {}
+        raise ctypes.WinError(ctypes.get_last_error())
     found: dict[int, tuple[str, int]] = {}
     try:
         entry = _ProcessEntry()
@@ -55,9 +101,11 @@ def _process_snapshot() -> dict[int, tuple[str, int]]:
 def _window_snapshot(
     processes: dict[int, tuple[str, int]],
 ) -> dict[int, tuple[int, str, str, str]]:
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32 = _user32()
     windows: dict[int, tuple[int, str, str, str]] = {}
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
 
     def visit(hwnd, _lparam):
         if not user32.IsWindowVisible(hwnd):
@@ -85,7 +133,7 @@ def _window_snapshot(
 def _foreground_state(
     processes: dict[int, tuple[str, int]],
 ) -> tuple[int, int, str, str, str]:
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32 = _user32()
     hwnd = user32.GetForegroundWindow()
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
@@ -172,9 +220,11 @@ def test_status_daemon_console_root_contains_psmux_descendants(
     openconsole_pids: set[int] = set()
     visible_terminal_windows: set[tuple[int, int, str, str, str]] = set()
     foreground_transitions: set[tuple[int, int, str, str, str]] = set()
+    observed_root = False
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline and not marker.exists():
         processes = _process_snapshot()
+        observed_root = observed_root or process.pid in processes
         descendants = _descendants(process.pid, processes)
         for pid in descendants:
             name = processes.get(pid, ("", 0))[0].lower()
@@ -191,10 +241,11 @@ def test_status_daemon_console_root_contains_psmux_descendants(
         foreground = _foreground_state(processes)
         if foreground != baseline_foreground and _is_terminal_window(foreground):
             foreground_transitions.add(foreground)
-        time.sleep(0.002)
+        time.sleep(0.02)
 
     assert marker.exists()
     assert process.wait(timeout=5) == 0
+    assert observed_root
     assert len(conhost_pids) <= 1
     assert openconsole_pids == set()
     assert visible_terminal_windows == set()
