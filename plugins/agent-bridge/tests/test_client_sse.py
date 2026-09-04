@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gc
 import json
+import weakref
 from unittest.mock import patch
 
 from agent_bridge.client import BridgeClient
@@ -80,8 +81,11 @@ class TestSseCommentParsing:
             return_value=response,
         ):
             stream = client.stream_events("sess-1")
-            stream.__del__()
+            stream_ref = weakref.ref(stream)
+            del stream
+            gc.collect()
 
+        assert stream_ref() is None
         assert response.closed is True
 
     def test_successful_stream_resets_outage_budget(self) -> None:

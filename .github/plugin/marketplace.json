@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev5"
+    "version": "1.7.7-dev4"
   },
   "plugins": [
     {
@@ -18,7 +18,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev430",
+      "version": "0.4.0-dev431",
       "source": "plugins/agent-bridge"
     },
     {
