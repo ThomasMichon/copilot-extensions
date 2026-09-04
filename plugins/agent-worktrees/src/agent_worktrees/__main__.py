@@ -1140,7 +1140,7 @@ def _creation_parent_session(
     *,
     inherit_ambient: bool,
 ) -> str | None:
-    if explicit:
+    if explicit is not None:
         return explicit
     if inherit_ambient:
         return os.environ.get("COPILOT_AGENT_SESSION_ID") or None
