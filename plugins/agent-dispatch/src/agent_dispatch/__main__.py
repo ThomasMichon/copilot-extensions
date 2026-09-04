@@ -3035,7 +3035,13 @@ def _repository_issue_loop_status(
         for registration in registrations
         if registration["kind"] == RegistrationKind.EMITTER
     )
+    worker = next(
+        registration
+        for registration in registrations
+        if registration["kind"] == RegistrationKind.SUPERVISED_LANE
+    )
     source_config = source["spec"]["repository_issue_loop"]
+    worker_config = worker["spec"]
     exclusive_key = f"repository-issue-loop:{source_config['name']}"
     path_pointers = [
         pointer
@@ -3083,6 +3089,7 @@ def _repository_issue_loop_status(
 
     coordinator_error = None
     tasks = []
+    failed_spawns: dict[str, list[dict]] = {}
     try:
         with _client(args, ensure=False) as client:
             tasks = [
@@ -3097,6 +3104,13 @@ def _repository_issue_loop_status(
                     limit=args.limit,
                 )
             ]
+            for task in tasks:
+                if task.get("status") not in Status.TERMINAL:
+                    failed_spawns[str(task["id"])] = client.list_reservations(
+                        task_id=str(task["id"]),
+                        state="failed",
+                        limit=10000,
+                    )
     except (DispatchError, httpx.TransportError) as exc:
         coordinator_error = str(exc)
 
@@ -3142,6 +3156,34 @@ def _repository_issue_loop_status(
     active = [
         task for task in tasks if task.get("status") not in Status.TERMINAL
     ]
+    default_spawn_attempts = int(worker_config.get("max_attempts", 3))
+    label_spawn_attempts = {
+        str(label): int(value)
+        for label, value in (
+            worker_config.get("label_max_attempts") or {}
+        ).items()
+    }
+
+    def effective_spawn_attempts(task: dict) -> int:
+        overrides = [
+            label_spawn_attempts[label]
+            for label in (task.get("labels") or [])
+            if label in label_spawn_attempts
+        ]
+        return max(overrides) if overrides else default_spawn_attempts
+
+    spawn_dead_letters = {}
+    for task in active:
+        task_id = str(task["id"])
+        cap = effective_spawn_attempts(task)
+        failures = failed_spawns.get(task_id, [])
+        if (
+            task.get("status") == Status.QUEUED
+            and not task.get("owner")
+            and cap
+            and len(failures) >= cap
+        ):
+            spawn_dead_letters[task_id] = failures
     diagnoses = []
     actions = []
     if not pointers:
@@ -3174,6 +3216,14 @@ def _repository_issue_loop_status(
         diagnoses.append("emitter-stale")
     if any(task.get("awaiting_steer") for task in active):
         diagnoses.append("blocked")
+    if spawn_dead_letters:
+        diagnoses.append("spawn-dead-lettered")
+        actions.extend(
+            "agent-dispatch reservations rearm "
+            f"{task_id} --permit --reason <reason>"
+            for task_id in sorted(spawn_dead_letters)
+            if len(spawn_dead_letters[task_id]) >= 3
+        )
     healthy = not diagnoses
     if healthy:
         diagnoses.append("healthy")
@@ -3208,6 +3258,23 @@ def _repository_issue_loop_status(
                     "origin_ref": active[0].get("origin_ref"),
                     "status": active[0].get("status"),
                     "awaiting_steer": active[0].get("awaiting_steer"),
+                    "spawn_failures": len(
+                        failed_spawns.get(str(active[0].get("id")), [])
+                    ),
+                    "spawn_attempt_limit": effective_spawn_attempts(active[0]),
+                    "spawn_dead_lettered": str(active[0].get("id"))
+                    in spawn_dead_letters,
+                    "spawn_recovery": (
+                        "the atomic rearm command requires at least 3 failed "
+                        "spawns; raise this loop's attempt bound or resolve "
+                        "the task explicitly"
+                        if str(active[0].get("id")) in spawn_dead_letters
+                        and len(
+                            failed_spawns.get(str(active[0].get("id")), [])
+                        )
+                        < 3
+                        else None
+                    ),
                 }
                 if active
                 else None

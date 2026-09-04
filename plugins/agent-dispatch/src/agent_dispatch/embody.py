@@ -193,6 +193,17 @@ def resolve_worktree(
         if not isinstance(row, dict):
             continue
         if row.get("id") == worktree_id:
+            if row.get("status") in {
+                "finalizing",
+                "finalized",
+                "complete",
+                "completed",
+                "orphaned",
+                "terminal",
+            }:
+                raise WorktreeNotFound(
+                    f"worktree is terminal and cannot be reused: {worktree_id}"
+                )
             return {"worktree": worktree_id, "path": row.get("path")}
     raise WorktreeNotFound(f"worktree not found: {worktree_id}")
 
