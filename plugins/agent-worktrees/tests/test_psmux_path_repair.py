@@ -143,11 +143,16 @@ def test_compatibility_accepts_335_and_337_but_blocks_336(tmp_path):
         """
 param($Helper)
 . $Helper
-@('3.3.4', '3.3.5', '3.3.6', '3.3.7', '3.3.8') | ForEach-Object {
+$versions = @('3.3.4', '3.3.5', '3.3.6', '3.3.7', '3.3.8') | ForEach-Object {
     [pscustomobject]@{
         version = $_
         compatible = Test-AwPsmuxVersionCompatible -Version $_
     }
+}
+[pscustomobject]@{
+    versions = $versions
+    nullCompatible = Test-AwPsmuxVersionCompatible -Version $null
+    invalidCompatible = Test-AwPsmuxVersionCompatible -Version 'unknown'
 } | ConvertTo-Json -Compress
 """,
         encoding="utf-8",
@@ -158,14 +163,19 @@ param($Helper)
         text=True,
         check=True,
     )
-    result = {item["version"]: item["compatible"] for item in json.loads(proc.stdout)}
-    assert result == {
+    result = json.loads(proc.stdout)
+    versions = {
+        item["version"]: item["compatible"] for item in result["versions"]
+    }
+    assert versions == {
         "3.3.4": False,
         "3.3.5": True,
         "3.3.6": False,
         "3.3.7": True,
         "3.3.8": True,
     }
+    assert result["nullCompatible"] is False
+    assert result["invalidCompatible"] is False
 
 
 def test_path_repair_does_not_mutate_live_sessions():

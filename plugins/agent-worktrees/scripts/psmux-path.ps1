@@ -49,10 +49,11 @@ function Get-AwPsmuxBinaryVersion {
 
 function Test-AwPsmuxVersionCompatible {
     param(
-        [Parameter(Mandatory)][string]$Version,
+        [AllowNull()][AllowEmptyString()][string]$Version,
         [string]$MinimumVersion = '3.3.5',
         [string[]]$BlockedVersions = @('3.3.6')
     )
+    if ([string]::IsNullOrWhiteSpace($Version)) { return $false }
     try {
         $parsed = [version]$Version
         $minimum = [version]$MinimumVersion
