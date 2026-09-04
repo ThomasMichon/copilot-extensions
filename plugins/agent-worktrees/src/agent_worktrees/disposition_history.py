@@ -155,7 +155,7 @@ def remove(worktree_id: str) -> None:
     raises) -- called wherever the tracking ``<id>.yaml`` is unlinked."""
     try:
         history_path(worktree_id).unlink(missing_ok=True)
-    except OSError:
+    except Exception:
         pass
 
 

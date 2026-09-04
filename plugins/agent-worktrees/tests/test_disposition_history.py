@@ -89,6 +89,18 @@ def test_remove_deletes_sidecar(_tracking_dir):
     dh.remove("wt-e")  # idempotent, no raise
 
 
+def test_remove_is_fail_open_without_project_context(monkeypatch):
+    monkeypatch.setattr(
+        cfg,
+        "tracking_dir",
+        lambda: (_ for _ in ()).throw(
+            ValueError("No active project could be resolved")
+        ),
+    )
+
+    dh.remove("wt-e")
+
+
 # --- set_disposition integration --------------------------------------------
 
 def test_set_disposition_appends_history(_tracking_dir):
