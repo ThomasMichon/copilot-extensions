@@ -102,6 +102,12 @@ def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
 def create_worktree(
     *,
     project: str | None = None,
+    interface: str = "cli",
+    task_id: str,
+    reservation_key: str,
+    attempt: int,
+    driver: str,
+    supervisor: str,
     timeout: float | None = None,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
@@ -122,6 +128,18 @@ def create_worktree(
         "create",
         "--origin",
         "delegate",
+        "--interface",
+        interface,
+        "--dispatch-task-id",
+        task_id,
+        "--dispatch-reservation-key",
+        reservation_key,
+        "--dispatch-attempt",
+        str(attempt),
+        "--dispatch-driver",
+        driver,
+        "--dispatch-supervisor",
+        supervisor,
         "--json",
     ]
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
@@ -182,6 +200,9 @@ def prepare_reusable_worktree(
     task: dict,
     reservation: dict,
     *,
+    interface: str,
+    driver: str,
+    supervisor: str,
     timeout: float | None = None,
 ) -> dict[str, object]:
     """Resolve or create the worktree carried by an exclusive reservation.
@@ -200,18 +221,28 @@ def prepare_reusable_worktree(
                 project=project,
                 timeout=timeout,
             )
-        except WorktreeNotFound:
-            created = create_worktree(project=project, timeout=timeout)
+        except WorktreeNotFound as exc:
+            created = create_worktree(
+                project=project,
+                interface=interface,
+                task_id=str(task["id"]),
+                reservation_key=str(reservation["key"]),
+                attempt=int(reservation["attempt"]),
+                driver=driver,
+                supervisor=supervisor,
+                timeout=timeout,
+            )
             path = created.get("path")
             if not isinstance(path, str) or not path:
                 raise EmbodyUnavailable(
                     "agent-worktrees create returned no worktree path"
-                )
+                ) from exc
             return {
                 "worktree": created["worktree"],
                 "path": path,
                 "created": True,
                 "replaced": True,
+                "ownership": "created",
             }
         path = resolved.get("path")
         if not isinstance(path, str) or not path:
@@ -223,9 +254,19 @@ def prepare_reusable_worktree(
             "path": path,
             "created": False,
             "replaced": False,
+            "ownership": reservation.get("worktree_ownership") or "reused",
         }
 
-    created = create_worktree(project=project, timeout=timeout)
+    created = create_worktree(
+        project=project,
+        interface=interface,
+        task_id=str(task["id"]),
+        reservation_key=str(reservation["key"]),
+        attempt=int(reservation["attempt"]),
+        driver=driver,
+        supervisor=supervisor,
+        timeout=timeout,
+    )
     path = created.get("path")
     if not isinstance(path, str) or not path:
         raise EmbodyUnavailable("agent-worktrees create returned no worktree path")
@@ -234,6 +275,7 @@ def prepare_reusable_worktree(
         "path": path,
         "created": True,
         "replaced": False,
+        "ownership": "created",
     }
 
 
@@ -320,6 +362,60 @@ def conclude_disposable_worker(
         )
         raise DisposableConclusionError(
             str(detail or (result.stderr or "").strip() or "terminal conclusion failed")[
+                :300
+            ]
+        )
+    return payload
+
+
+def conclude_dispatch_attempt(
+    worktree: str,
+    session: str | None,
+    reservation_key: str,
+    *,
+    owner: str = DEFAULT_DRIVER,
+    timeout: float = 30.0,
+) -> dict:
+    """Safely conclude one provenance-verified dispatch-created worktree."""
+    args = [
+        "conclude-disposable",
+        "--worktree",
+        worktree,
+        "--policy",
+        "dispatch-attempt",
+        "--reservation",
+        reservation_key,
+        "--owner",
+        owner,
+        "--remove",
+        "--json",
+    ]
+    if session:
+        args += ["--session", session]
+    prefix = _agent_worktrees_launch_prefix()
+    if prefix is None:
+        raise DisposableConclusionError(
+            "agent-worktrees CLI not found on this host"
+        )
+    result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+        [*prefix, *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except (TypeError, ValueError) as exc:
+        raise DisposableConclusionError(
+            (result.stderr or "").strip()[:300]
+            or "agent-worktrees returned invalid dispatch conclusion output"
+        ) from exc
+    if result.returncode != 0 or not isinstance(payload, dict) or payload.get("error"):
+        detail = payload.get("error") if isinstance(payload, dict) else None
+        raise DisposableConclusionError(
+            str(detail or (result.stderr or "").strip() or "dispatch conclusion failed")[
                 :300
             ]
         )

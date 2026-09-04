@@ -580,18 +580,45 @@ class DispatchClient:
             )
         )
 
-    def record_spawn_worktree(self, key: str, worktree: str) -> dict:
+    def record_spawn_worktree(
+        self,
+        key: str,
+        worktree: str,
+        *,
+        ownership: str = "unknown",
+        creating_host: str | None = None,
+        driver: str | None = None,
+    ) -> dict:
         """Record the reserved worktree before launching the worker session."""
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/worktree",
-                json={"worktree": worktree},
+                json={
+                    "worktree": worktree,
+                    "ownership": ownership,
+                    "creating_host": creating_host,
+                    "driver": driver,
+                },
             )
         )
 
     def fail_spawn(self, key: str, *, detail: str | None = None) -> dict:
         return self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/fail", json={"detail": detail})
+        )
+
+    def request_spawn_release(
+        self,
+        key: str,
+        *,
+        detail: str | None = None,
+        disposition: str = "failed",
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/release",
+                json={"detail": detail, "disposition": disposition},
+            )
         )
 
     def record_cold(self, key: str) -> dict:

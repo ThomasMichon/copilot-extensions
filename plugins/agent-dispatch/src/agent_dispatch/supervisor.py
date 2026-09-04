@@ -43,6 +43,10 @@ from .queue import SpawnState, Status
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
+
+class SpawnPreparationRetained(RuntimeError):
+    """A created worktree could not be recorded; retain the reservation fence."""
+
 #: A spawn function: given a task snapshot, launch a worker and report
 #: ``(ok, handle)`` where ``handle`` carries ``session``/``worktree`` (on
 #: success) or ``error`` (on failure).
@@ -69,6 +73,7 @@ RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
 #: Prime a terminal CLI worker for ground-layer managed GC:
 #: ``(worktree, session) -> structured outcome``.
 ConclusionFn = Callable[[str, "str | None"], dict]
+AttemptConclusionFn = Callable[[str, str | None, str, str], dict]
 
 #: Stop a local headless bridge session while preserving it for later resume.
 LocalColdFn = Callable[[str], bool]
@@ -224,6 +229,22 @@ def _default_conclusion(worktree: str, session: str | None) -> dict:
     from . import embody
 
     return embody.conclude_disposable_worker(worktree, session)
+
+
+def _default_attempt_conclusion(
+    worktree: str,
+    session: str | None,
+    reservation_key: str,
+    driver: str,
+) -> dict:
+    from . import embody
+
+    return embody.conclude_dispatch_attempt(
+        worktree,
+        session,
+        reservation_key,
+        owner=driver,
+    )
 
 
 def _worktree_from_owner(owner: str | None) -> str | None:
@@ -442,7 +463,9 @@ def make_embody_spawn(
             return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
         handle = embody.parse_handle(result)
         return True, handle
-    setattr(spawn, "requires_reusable_worktree", True)
+    spawn.requires_reusable_worktree = True
+    spawn.allocation_driver = driver
+    spawn.allocation_interface = "cli"
     return spawn
 
 
@@ -469,9 +492,9 @@ def make_headless_spawn(
     cleanly: if the ``agent-bridge`` CLI is absent, the spawn reports failure (the
     supervisor fails the reservation, leaving the task queued).
 
-    A headless body is not a parallel worktree, so no worktree handle is recorded
-    -- the supervisor's worktree-keyed lease heartbeat does not apply to it.
-    Instead it records a ``local-body:<bridge-session-id>`` recovery handle, so a
+    The supervisor pre-creates and records the headless body's worktree before
+    launch, then passes that exact target to agent-bridge. It also records a
+    ``local-body:<bridge-session-id>`` recovery handle, so a
     body that ends before completing (crash, or an explicit ``agent-bridge end``
     after a run cancel) is **liveness-recovered**: the supervisor probes the
     session locally and, on a confirmed-gone verdict, settles the orphaned
@@ -528,7 +551,9 @@ def make_headless_spawn(
             "worktree": task.get("spawn_worktree"),
         }
 
-    setattr(spawn, "requires_reusable_worktree", True)
+    spawn.requires_reusable_worktree = True
+    spawn.allocation_driver = "agent-dispatch"
+    spawn.allocation_interface = "acp"
     return spawn
 
 
@@ -563,10 +588,21 @@ def make_label_routed_spawn(
                 break
         return bool(getattr(selected, "requires_reusable_worktree", False))
 
-    setattr(
-        spawn,
-        "requires_reusable_worktree_for",
-        requires_reusable_worktree,
+    def selected_attribute(task: dict, name: str, fallback: str) -> str:
+        selected = default
+        for label in task.get("labels") or []:
+            if label in overrides:
+                selected = overrides[label]
+                break
+        value = getattr(selected, name, fallback)
+        return value if isinstance(value, str) and value else fallback
+
+    spawn.requires_reusable_worktree_for = requires_reusable_worktree
+    spawn.allocation_driver_for = lambda task: selected_attribute(
+        task, "allocation_driver", "agent-dispatch"
+    )
+    spawn.allocation_interface_for = lambda task: selected_attribute(
+        task, "allocation_interface", "cli"
     )
     return spawn
 
@@ -621,6 +657,8 @@ class Supervisor:
         redrive_fn: RedriveFn | None = None,
         disposable_cli_labels: Sequence[str] | None = None,
         conclusion_fn: ConclusionFn | None = None,
+        attempt_conclusion_fn: AttemptConclusionFn | None = None,
+        machine: str | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
         evaluator: Any | None = None,
         evaluator_ref: str | None = None,
@@ -706,6 +744,14 @@ class Supervisor:
         #: conclusion path; arbitrary CLI worktrees remain untouched.
         self.disposable_cli_labels = set(disposable_cli_labels or ())
         self.conclusion_fn = conclusion_fn or _default_conclusion
+        self.attempt_conclusion_fn = (
+            attempt_conclusion_fn or _default_attempt_conclusion
+        )
+        if machine is None:
+            from . import remote_dispatch
+
+            machine = remote_dispatch.local_machine()
+        self.machine = machine
         #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
         #: live worker is nudged at most once per stall window, not every cycle).
         self._last_nudge: dict[str, float] = {}
@@ -769,7 +815,10 @@ class Supervisor:
 
     def _active_reservations(self) -> list[dict]:
         reservations = self._pool_reservations(
-            state=f"{SpawnState.RESERVING},{SpawnState.SPAWNED}"
+            state=(
+                f"{SpawnState.RESERVING},{SpawnState.SPAWNED},"
+                f"{SpawnState.RELEASING}"
+            )
         )
         active: list[dict] = []
         for reservation in reservations:
@@ -828,24 +877,58 @@ class Supervisor:
             getattr(self.spawn_fn, "requires_reusable_worktree", False)
         )
 
+    def _spawn_attribute(self, task: dict, name: str, default: str) -> str:
+        selector = getattr(self.spawn_fn, f"{name}_for", None)
+        if callable(selector):
+            value = selector(task)
+        else:
+            value = getattr(self.spawn_fn, name, default)
+        return value if isinstance(value, str) and value else default
+
     def _prepare_spawn_task(self, task: dict, reservation: dict) -> dict:
-        """Pre-create or resolve an opted-in reusable exclusive worktree."""
-        if (
-            not task.get("exclusive_key")
-            or not self._spawn_requires_reusable_worktree(task)
-        ):
+        """Pre-create or resolve a backend-required worktree before launch."""
+        if not self._spawn_requires_reusable_worktree(task):
             return task
         from . import embody
 
-        prepared = embody.prepare_reusable_worktree(task, reservation)
+        driver = self._spawn_attribute(
+            task, "allocation_driver", "agent-dispatch"
+        )
+        interface = self._spawn_attribute(task, "allocation_interface", "cli")
+        prepared = embody.prepare_reusable_worktree(
+            task,
+            reservation,
+            interface=interface,
+            driver=driver,
+            supervisor=self.supervisor_id,
+        )
         worktree = str(prepared["worktree"])
         replaced = bool(prepared.get("replaced"))
-        if reservation.get("worktree") != worktree:
-            self.client.record_spawn_worktree(reservation["key"], worktree)
+        ownership = str(prepared.get("ownership") or "unknown")
+        if (
+            reservation.get("worktree") != worktree
+            or reservation.get("worktree_ownership") != ownership
+        ):
+            try:
+                self.client.record_spawn_worktree(
+                    reservation["key"],
+                    worktree,
+                    ownership=ownership,
+                    creating_host=self.machine if ownership == "created" else None,
+                    driver=driver,
+                )
+            except DispatchError as exc:
+                if ownership == "created":
+                    raise SpawnPreparationRetained(
+                        f"created worktree {worktree} could not be recorded; "
+                        "reservation retained for repair"
+                    ) from exc
+                raise
         return {
             **task,
             "spawn_worktree": worktree,
             "spawn_worktree_path": prepared["path"],
+            "spawn_worktree_ownership": ownership,
             "spawn_session_handle": (
                 None if replaced else reservation.get("session_handle")
             ),
@@ -854,6 +937,38 @@ class Supervisor:
     def _reservation_has_live_process(
         self, reservation: dict, task: dict
     ) -> bool:
+        if reservation.get("state") == SpawnState.RELEASING:
+            fleet = _parse_fleet_body_handle(reservation.get("session_handle"))
+            if fleet is not None:
+                try:
+                    return self.fleet_verdict_fn(*fleet) != _tracking().GONE
+                except Exception:
+                    return True
+            local_sid = _parse_local_body_handle(
+                reservation.get("session_handle")
+            )
+            if local_sid is not None:
+                try:
+                    return self.local_body_verdict_fn(local_sid) != _tracking().GONE
+                except Exception:
+                    return True
+            worktree = _worktree_from_reservation(
+                reservation,
+                task.get("owner"),
+            )
+            if not worktree:
+                return bool(reservation.get("session_handle"))
+            try:
+                return (
+                    self.verdict_fn(
+                        worktree,
+                        _machine_from_owner(task.get("owner")),
+                        task.get("owner_session_id"),
+                    )
+                    != _tracking().GONE
+                )
+            except Exception:
+                return True
         if task.get("status") != Status.SUSPENDED:
             return True
         key = str(reservation.get("key") or "")
@@ -1158,10 +1273,15 @@ class Supervisor:
                         )
                     continue
                 try:
-                    self.client.fail_spawn(
-                        res["key"],
-                        detail="carried local body confirmed gone while reserving",
-                    )
+                    detail = "carried local body confirmed gone while reserving"
+                    if res.get("worktree_ownership") == "created":
+                        self.client.request_spawn_release(
+                            res["key"],
+                            detail=detail,
+                            disposition="failed",
+                        )
+                    else:
+                        self.client.fail_spawn(res["key"], detail=detail)
                     reconciled += 1
                 except DispatchError:
                     log.exception(
@@ -1184,10 +1304,15 @@ class Supervisor:
                 continue
             if verdict == _tracking().GONE:
                 try:
-                    self.client.fail_spawn(
-                        res["key"],
-                        detail="reserved worktree confirmed without a live worker",
-                    )
+                    detail = "reserved worktree confirmed without a live worker"
+                    if res.get("worktree_ownership") == "created":
+                        self.client.request_spawn_release(
+                            res["key"],
+                            detail=detail,
+                            disposition="failed",
+                        )
+                    else:
+                        self.client.fail_spawn(res["key"], detail=detail)
                     reconciled += 1
                 except DispatchError:
                     log.exception(
@@ -1221,16 +1346,79 @@ class Supervisor:
                 )
         return reconciled
 
+    def _conclude_released_attempt(
+        self,
+        reservation: dict,
+        *,
+        session_id: str | None,
+    ) -> tuple[str, dict]:
+        """Conclude only an allocation proven created by this reservation."""
+        worktree = reservation.get("worktree")
+        if not isinstance(worktree, str) or not worktree:
+            return _CONCLUSION_COMPLETE, {
+                "action": "skipped",
+                "reason": "reservation-has-no-worktree",
+            }
+        ownership = reservation.get("worktree_ownership")
+        if ownership in {"targeted", "reused"}:
+            return _CONCLUSION_COMPLETE, {
+                "action": "preserved",
+                "reason": f"{ownership}-worktree",
+            }
+        if ownership != "created":
+            return _CONCLUSION_HELD, {
+                "action": "skipped",
+                "reason": "allocation-ownership-unknown",
+            }
+        creating_host = reservation.get("creating_host")
+        if (
+            not isinstance(creating_host, str)
+            or not creating_host
+            or not self.machine
+            or creating_host.casefold() != self.machine.casefold()
+        ):
+            return _CONCLUSION_HELD, {
+                "action": "skipped",
+                "reason": "foreign-or-unknown-creating-host",
+            }
+        driver = reservation.get("driver")
+        if not isinstance(driver, str) or not driver:
+            return _CONCLUSION_HELD, {
+                "action": "skipped",
+                "reason": "allocation-driver-unknown",
+            }
+        try:
+            outcome = self.attempt_conclusion_fn(
+                worktree,
+                session_id,
+                str(reservation["key"]),
+                driver,
+            )
+        except Exception as exc:
+            log.exception(
+                "attempt conclusion failed for reservation %s",
+                reservation.get("key"),
+            )
+            outcome = {"action": "failed", "reason": str(exc)[:300]}
+        if session_id:
+            outcome = {**outcome, "acp_session_id": session_id}
+        return self._conclusion_state(outcome), outcome
+
     def release_requested_bodies(self) -> int:
         """Fulfill durable yield/release requests after safe body teardown."""
         released = 0
         reservations = self._pool_reservations(
             state=(
                 f"{SpawnState.RESERVING},{SpawnState.SPAWNED},"
-                f"{SpawnState.COLD}"
+                f"{SpawnState.COLD},{SpawnState.RELEASING}"
             )
         )
         for res in reservations:
+            if (
+                res.get("state") == SpawnState.RELEASING
+                and res.get("conclusion_state") == _CONCLUSION_HELD
+            ):
+                continue
             if not res.get("release_requested"):
                 continue
             try:
@@ -1240,6 +1428,7 @@ class Supervisor:
             if not self._matches_pool(task):
                 continue
             can_release = False
+            conclusion_session: str | None = None
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             if fleet is not None:
                 try:
@@ -1263,6 +1452,17 @@ class Supervisor:
                     res.get("session_handle")
                 )
                 if local_sid is not None:
+                    retry_payload = self._conclusion_retry_payload(res)
+                    recorded_acp = retry_payload.get("acp_session_id")
+                    try:
+                        resolved_acp = self.local_acp_session_fn(local_sid)
+                    except Exception:
+                        resolved_acp = None
+                    conclusion_session = (
+                        str(recorded_acp)
+                        if recorded_acp
+                        else (resolved_acp or task.get("owner_session_id"))
+                    )
                     try:
                         verdict = self.local_body_verdict_fn(local_sid)
                     except Exception:
@@ -1280,6 +1480,9 @@ class Supervisor:
                                 local_sid,
                             )
                 else:
+                    raw_session = res.get("session_handle")
+                    if isinstance(raw_session, str) and raw_session:
+                        conclusion_session = raw_session
                     worktree = _worktree_from_reservation(
                         res,
                         task.get("owner"),
@@ -1303,11 +1506,45 @@ class Supervisor:
                             can_release = False
             if not can_release:
                 continue
+            conclusion_state, outcome = self._conclude_released_attempt(
+                res,
+                session_id=conclusion_session,
+            )
+            conclusion_detail = json.dumps(
+                outcome,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if conclusion_state in {_CONCLUSION_PENDING, _CONCLUSION_HELD}:
+                try:
+                    self.client.record_spawn_conclusion(
+                        res["key"],
+                        conclusion_state=conclusion_state,
+                        conclusion_detail=conclusion_detail,
+                    )
+                except DispatchError:
+                    log.exception(
+                        "failed to persist attempt conclusion for %s",
+                        res["key"],
+                    )
+                continue
             try:
-                self.client.settle_spawn(
-                    res["key"],
-                    detail=res.get("detail") or "spawn release requested",
+                detail = self._append_conclusion_detail(
+                    res.get("detail") or "spawn release requested",
+                    outcome,
                 )
+                if (
+                    res.get("state") == SpawnState.RELEASING
+                    and res.get("release_disposition") != "settled"
+                ):
+                    self.client.fail_spawn(res["key"], detail=detail)
+                else:
+                    self.client.settle_spawn(
+                        res["key"],
+                        detail=detail,
+                        conclusion_state=conclusion_state,
+                        conclusion_detail=conclusion_detail,
+                    )
                 released += 1
             except DispatchError:
                 log.exception(
@@ -1648,6 +1885,23 @@ class Supervisor:
             except DispatchError:
                 continue  # task vanished; leave the reservation for a human
             if task.get("status") in _TERMINAL:
+                if (
+                    res.get("worktree_ownership") == "created"
+                    and res.get("state") != SpawnState.SETTLED
+                ):
+                    try:
+                        if res.get("state") != SpawnState.RELEASING:
+                            self.client.request_spawn_release(
+                                res["key"],
+                                detail=self._completion_detail(task),
+                                disposition="settled",
+                            )
+                    except DispatchError:
+                        log.exception(
+                            "could not fence terminal allocation cleanup for %s",
+                            res["key"],
+                        )
+                    continue
                 prior_attempts = 0
                 exclusive = bool(res.get("exclusive_key"))
                 if res.get("state") == SpawnState.RESERVING and not exclusive:
@@ -2185,7 +2439,18 @@ class Supervisor:
                             pass  # lease-expiry GC is the backstop requeue
                     try:
                         detail = f"fleet body confirmed gone ({host}:{bridge_sid})"
-                        if _reservation_made_progress(res, task):
+                        productive = _reservation_made_progress(res, task)
+                        if res.get("worktree_ownership") == "created":
+                            self.client.request_spawn_release(
+                                res["key"],
+                                detail=(
+                                    f"{detail}; productive turn completed"
+                                    if productive
+                                    else detail
+                                ),
+                                disposition="settled" if productive else "failed",
+                            )
+                        elif productive:
                             self.client.settle_spawn(
                                 res["key"],
                                 detail=f"{detail}; productive turn completed",
@@ -2233,7 +2498,18 @@ class Supervisor:
                             pass  # lease-expiry GC is the backstop requeue
                     try:
                         detail = f"local body confirmed gone ({local_sid})"
-                        if _reservation_made_progress(res, task):
+                        productive = _reservation_made_progress(res, task)
+                        if res.get("worktree_ownership") == "created":
+                            self.client.request_spawn_release(
+                                res["key"],
+                                detail=(
+                                    f"{detail}; productive turn completed"
+                                    if productive
+                                    else detail
+                                ),
+                                disposition="settled" if productive else "failed",
+                            )
+                        elif productive:
                             self.client.settle_spawn(
                                 res["key"],
                                 detail=f"{detail}; productive turn completed",
@@ -2281,7 +2557,18 @@ class Supervisor:
                     except DispatchError:
                         pass  # lease-expiry GC is the backstop requeue
                 detail = f"owner confirmed gone ({worktree})"
-                if _reservation_made_progress(res, task):
+                productive = _reservation_made_progress(res, task)
+                if res.get("worktree_ownership") == "created":
+                    self.client.request_spawn_release(
+                        res["key"],
+                        detail=(
+                            f"{detail}; productive turn completed"
+                            if productive
+                            else detail
+                        ),
+                        disposition="settled" if productive else "failed",
+                    )
+                elif productive:
                     self.client.settle_spawn(
                         res["key"],
                         detail=f"{detail}; productive turn completed",
@@ -2615,6 +2902,14 @@ class Supervisor:
 
             try:
                 spawn_task = self._prepare_spawn_task(task, reservation)
+            except SpawnPreparationRetained as exc:
+                log.error(
+                    "spawn preparation retained reservation %s for task %s: %s",
+                    key,
+                    task["id"],
+                    exc,
+                )
+                continue
             except (DispatchError, EmbodyUnavailable) as exc:
                 try:
                     self.client.fail_spawn(
@@ -2648,7 +2943,17 @@ class Supervisor:
                     spawned.append(task["id"])
                     log.info("spawned embody for task %s (%s)", task["id"], key)
                 else:
-                    self.client.fail_spawn(key, detail=handle.get("error", "spawn failed"))
+                    detail = handle.get("error", "spawn failed")
+                    if (
+                        spawn_task.get("spawn_worktree_ownership") == "created"
+                    ):
+                        self.client.request_spawn_release(
+                            key,
+                            detail=detail,
+                            disposition="failed",
+                        )
+                    else:
+                        self.client.fail_spawn(key, detail=detail)
                     log.warning(
                         "spawn failed for task %s (%s): %s",
                         task["id"], key, handle.get("error"),
