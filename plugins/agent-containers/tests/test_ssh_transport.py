@@ -256,8 +256,7 @@ def test_docker_broker_failed_start_retires_process_and_endpoint(
 
     monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(docker_proxy, "_healthy_endpoint", lambda *_args: False)
-    monkeypatch.setattr(docker_proxy, "windowless_python", lambda value: value)
-    monkeypatch.setattr(docker_proxy, "detached_kwargs", lambda **_kwargs: {})
+    monkeypatch.setattr(docker_proxy, "windowless_daemon_kwargs", lambda **_kwargs: {})
 
     with pytest.raises(RuntimeError, match="did not become ready"):
         docker_proxy.ensure_broker(
@@ -286,8 +285,7 @@ def test_docker_broker_clean_early_exit_fails_without_waiting(
         lambda *_args, **_kwargs: process,
     )
     monkeypatch.setattr(docker_proxy, "_healthy_endpoint", lambda *_args: False)
-    monkeypatch.setattr(docker_proxy, "windowless_python", lambda value: value)
-    monkeypatch.setattr(docker_proxy, "detached_kwargs", lambda **_kwargs: {})
+    monkeypatch.setattr(docker_proxy, "windowless_daemon_kwargs", lambda **_kwargs: {})
     monkeypatch.setattr(
         docker_proxy.time,
         "sleep",
@@ -301,6 +299,46 @@ def test_docker_broker_clean_early_exit_fails_without_waiting(
             tmp_path / "proxy.json",
             timeout=10,
         )
+
+
+def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
+    endpoint_file = tmp_path / "proxy.json"
+    seen = {}
+    process = SimpleNamespace(pid=123, poll=lambda: None)
+
+    def fake_popen(args, **kwargs):
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        endpoint_file.write_text(
+            json.dumps({"pid": process.pid, "port": 54320}),
+            encoding="utf-8",
+        )
+        return process
+
+    health_results = iter((False, True))
+    monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        docker_proxy,
+        "_healthy_endpoint",
+        lambda *_args: next(health_results),
+    )
+    monkeypatch.setattr(
+        docker_proxy,
+        "windowless_daemon_kwargs",
+        lambda **kwargs: {"creationflags": 0x09000000, "breakaway": kwargs["breakaway"]},
+    )
+
+    assert (
+        docker_proxy.ensure_broker(
+            "repo-1",
+            "a" * 64,
+            endpoint_file,
+        )
+        == 54320
+    )
+    assert seen["args"][0] == docker_proxy.sys.executable
+    assert seen["kwargs"]["creationflags"] == 0x09000000
+    assert seen["kwargs"]["breakaway"] is True
 
 
 @pytest.mark.parametrize("container,user", [
