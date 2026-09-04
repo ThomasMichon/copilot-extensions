@@ -416,7 +416,10 @@ def test_resident_agent_bridge_policy_denies_guarded_write(
         ),
     )
     monkeypatch.setattr(
-        m, "_related_config_source_anchors", lambda root: [root])
+        m,
+        "_related_config_source_anchors",
+        lambda root, **_kwargs: [root],
+    )
     monkeypatch.setattr(
         related, "list_related_grafted", lambda anchors: [entry])
     monkeypatch.setattr(

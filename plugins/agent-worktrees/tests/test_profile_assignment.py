@@ -527,6 +527,12 @@ def test_lifecycle_mismatch_bind_does_not_break_session_start(
         "render_registry_context",
         lambda *_args, **_kwargs: "registry context",
     )
+    config_calls = []
+    monkeypatch.setattr(
+        m.cfg,
+        "load_config",
+        lambda **kwargs: config_calls.append(kwargs) or argparse.Namespace(),
+    )
     args = argparse.Namespace(
         worktree_id="wt-slow",
         session_id=f"session-{mismatch}",
@@ -548,6 +554,7 @@ def test_lifecycle_mismatch_bind_does_not_break_session_start(
     )
     assert any(event[0] == ("session_started",) for event in activity_events)
     assert updater_calls == [("wt-slow", str(tmp_path / "wt-slow"))]
+    assert config_calls == [{"include_control_plane_related_pr": False}]
 
 
 def test_handoff_redraws_after_binding_only_when_armed(assignment_home):
@@ -621,7 +628,7 @@ def test_handoff_cutover_wires_assignment_profile_and_token(
         profile_assignment=_policy(profiles),
     )
     monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wt-cutover")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda **_kwargs: config)
     monkeypatch.setattr(m.sessions, "has_mux_session", lambda _wt: True)
     monkeypatch.setattr(m.sessions, "mux_active_pane", lambda _wt: "%1")
     monkeypatch.setattr(

@@ -33,10 +33,20 @@ def _bounded_prefix(prefix: str, required_suffix: str) -> str:
     return kept + suffix
 
 
-def _related_summary(config: Any, cwd: str) -> tuple[str, str]:
+def _related_summary(
+    config: Any,
+    cwd: str,
+    *,
+    plugin_related_anchors: list[str] | None = None,
+) -> tuple[str, str]:
     anchors = state_root.config_source_anchors(config, cwd=cwd)
+    plugin_anchors = (
+        related.installed_plugin_related_anchors()
+        if plugin_related_anchors is None
+        else plugin_related_anchors
+    )
     topology = related.read_related_grafted(
-        [*related.installed_plugin_related_anchors(), *[item.anchor for item in anchors]]
+        [*plugin_anchors, *[item.anchor for item in anchors]]
     )
     primary = _clean(topology.primary)
     entries = sorted(
@@ -77,6 +87,7 @@ def render_registry_context(
     cwd: str,
     pane_id: str | None = None,
     mux_session: str | None = None,
+    plugin_related_anchors: list[str] | None = None,
 ) -> str:
     """Render current checkout, state pairing, and bounded related topology."""
 
@@ -146,7 +157,11 @@ def render_registry_context(
     state += pairing
 
     try:
-        primary, entries = _related_summary(config, cwd)
+        primary, entries = _related_summary(
+            config,
+            cwd,
+            plugin_related_anchors=plugin_related_anchors,
+        )
     except Exception:
         primary, entries = "-", ""
     related_line = f"Related: primary={primary}"
