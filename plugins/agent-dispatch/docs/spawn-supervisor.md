@@ -317,6 +317,13 @@ set against the registry on every tick.
   POSIX uses a process group and can recover a matching receipt after supervisor
   restart. Confirmed unhealthy probes restart the unit; indeterminate probes do
   not.
+- **Managed companion runtime declarations.** A plugin companion may carry a
+  versioned `managed_runtime` data contract containing bounded logical runtime
+  identities, plugin-relative Python project inputs, validation imports, and
+  interpreter environment bindings. The contract is attributed and
+  restart-significant, but this increment is non-operative: the daemon does not
+  create a runtime, invoke a package manager, or alter launch behavior from this
+  metadata.
 
 > **Increment status.** The **registration store + verbs**, the **singleton
 > daemon** (reconcile, per-unit subprocesses, crash-safe OS-lock single-instance,
