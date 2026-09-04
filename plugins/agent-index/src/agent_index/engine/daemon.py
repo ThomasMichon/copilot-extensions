@@ -23,7 +23,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from agent_procutil import windowless_daemon_kwargs, windowless_python
+from agent_procutil import windowless_daemon_kwargs
 
 
 def engine_home() -> Path:
@@ -110,7 +110,7 @@ def engine_command(home: Path | None = None) -> list[str]:
     host, port = engine_endpoint()
     py = engine_venv_python(home)
     return [
-        windowless_python(py),
+        str(py),
         "-m",
         "agent_index.engine.app",
         "--host",
