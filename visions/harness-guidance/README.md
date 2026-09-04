@@ -174,6 +174,8 @@ fallback when a launch path cannot load the richer plugin-owned guidance.
 Plugin setup should own any compatibility/fallback prose through a stable,
 idempotently reconciled marker or dedicated rule file.
 
+### ambient-delivery-fails-open
+
 Ambient delivery plumbing should fail open and never block session startup when
 a contributor is inapplicable, unavailable, or malformed. That delivery
 failure must remain attributable and diagnosable rather than being mistaken for
