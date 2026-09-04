@@ -864,8 +864,18 @@ function Resolve-WinGetPackageExecutable {
         return $null
     }
     $leaf = Split-Path -Leaf $Source
-    $matches = @(Get-ChildItem -LiteralPath $packagesRoot -Recurse `
-        -File -ErrorAction SilentlyContinue |
+    $enumeration = @{
+        LiteralPath = $packagesRoot
+        Recurse = $true
+        File = $true
+        ErrorAction = 'SilentlyContinue'
+    }
+    if (-not [Management.Automation.WildcardPattern]::ContainsWildcardCharacters(
+        $leaf
+    )) {
+        $enumeration.Filter = $leaf
+    }
+    $matches = @(Get-ChildItem @enumeration |
         Where-Object {
             [string]::Equals(
                 $_.Name,
