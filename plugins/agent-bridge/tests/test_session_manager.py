@@ -15,6 +15,7 @@ from agent_bridge.models import SessionStatus
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.routes.sessions import _session_info
 from agent_bridge.session_host.host_index import HostRecord
+from agent_bridge.session_host.endpoints import CredentialRelayReadinessError
 from agent_bridge.session_manager import (
     _STALL_AFTER_S,
     RemoteHostRecoveryPendingError,
@@ -1838,6 +1839,149 @@ class TestRemoteForwardRelaySupervision:
         assert manager._relays["s1"] == [self._Relay.instances[-1]]
 
     @pytest.mark.asyncio
+    async def test_stopped_container_refreshes_relay_to_current_host_port(
+        self, tmp_db, tmp_path, monkeypatch,
+    ):
+        from agent_bridge import relay_state
+        from agent_bridge.session_host import endpoints as endpoints_mod
+
+        manager = SessionManager(
+            tmp_db, session_host_state_dir=str(tmp_path),
+        )
+        endpoint = self._endpoint(["9857:127.0.0.1:60000"])
+        endpoint["kind"] = "container"
+        rec = SimpleNamespace(
+            session_id="s1",
+            boundary="container",
+            endpoint=endpoint,
+        )
+        forward = self._Forward(None, 51000)
+        prior_relay = self._Relay(None, 9857)
+        prior_relay.is_alive = True
+        manager._forwards["s1"] = forward
+        manager._relays["s1"] = [prior_relay]
+
+        async def ready_probe():
+            return True
+
+        monkeypatch.setattr(relay_state, "get_live_relay_port", lambda: 62000)
+        monkeypatch.setattr(
+            endpoints_mod,
+            "endpoint_serving_probe_factory",
+            lambda _endpoint, fail_open=True: lambda _port: ready_probe,
+        )
+
+        await manager._ensure_forward(
+            rec,
+            refresh_relays=True,
+            require_relay_ready=True,
+        )
+
+        current = self._Relay.instances[-1]
+        assert prior_relay.stopped == 1
+        assert current is not prior_relay
+        assert current.kw["host_port_resolver"]() == 62000
+        assert current.started == 1
+        assert manager._relays["s1"] == [current]
+
+    @pytest.mark.asyncio
+    async def test_stopped_container_relay_failure_is_explicit(
+        self, tmp_db, tmp_path, monkeypatch,
+    ):
+        from agent_bridge.session_host import endpoints as endpoints_mod
+
+        manager = SessionManager(
+            tmp_db, session_host_state_dir=str(tmp_path),
+        )
+        endpoint = self._endpoint(["9857:127.0.0.1:60000"])
+        endpoint["kind"] = "container"
+        rec = SimpleNamespace(
+            session_id="s1",
+            boundary="container",
+            endpoint=endpoint,
+        )
+        prior_relay = self._Relay(None, 9857)
+        prior_relay.is_alive = True
+        manager._relays["s1"] = [prior_relay]
+
+        async def failed_start(_relay):
+            raise RuntimeError("reverse-forward failed")
+
+        monkeypatch.setattr(self._Relay, "start", failed_start)
+        monkeypatch.setattr(
+            endpoints_mod,
+            "endpoint_serving_probe_factory",
+            lambda _endpoint, fail_open=True: lambda _port: AsyncMock(
+                return_value=True
+            ),
+        )
+
+        with pytest.raises(
+            CredentialRelayReadinessError,
+            match="before stopped session",
+        ):
+            await manager._ensure_forward(
+                rec,
+                refresh_relays=True,
+                require_relay_ready=True,
+            )
+
+        assert prior_relay.stopped == 1
+        assert "s1" not in manager._relays
+
+    @pytest.mark.asyncio
+    async def test_stopped_container_missing_relay_declaration_is_explicit(
+        self, tmp_db, tmp_path,
+    ):
+        manager = SessionManager(
+            tmp_db, session_host_state_dir=str(tmp_path),
+        )
+        endpoint = self._endpoint()
+        endpoint["kind"] = "container"
+        rec = SimpleNamespace(
+            session_id="s1",
+            boundary="container",
+            endpoint=endpoint,
+        )
+
+        with pytest.raises(
+            CredentialRelayReadinessError,
+            match="no recoverable reverse-forward declaration",
+        ):
+            await manager._ensure_forward(
+                rec,
+                refresh_relays=True,
+                require_relay_ready=True,
+            )
+
+        assert "s1" not in manager._relays
+        assert self._Relay.instances == []
+
+    @pytest.mark.asyncio
+    async def test_stopped_container_relay_disabled_skips_readiness_gate(
+        self, tmp_db, tmp_path,
+    ):
+        manager = SessionManager(
+            tmp_db, session_host_state_dir=str(tmp_path),
+        )
+        endpoint = self._endpoint()
+        endpoint["kind"] = "container"
+        rec = SimpleNamespace(
+            session_id="s1",
+            boundary="container",
+            endpoint=endpoint,
+        )
+
+        await manager._ensure_forward(
+            rec,
+            refresh_relays=False,
+            require_relay_ready=False,
+        )
+
+        assert "s1" not in manager._relays
+        assert self._Relay.instances == []
+
+    @pytest.mark.asyncio
     async def test_drop_forward_stops_relay_and_l_forward(self, tmp_db, tmp_path):
         manager = SessionManager(
             tmp_db, session_host_state_dir=str(tmp_path),
@@ -1918,6 +2062,168 @@ async def test_startup_reattach_leaves_prior_idle_session_idle(
 
     assert await manager.reattach_session_hosts(remote_recovery_timeout=1.0) == 1
     assert attach.await_args.kwargs["send_resume"] is False
+
+
+@pytest.mark.asyncio
+async def test_stopped_container_resume_refreshes_provider_before_reattach(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A surviving Host is inspected through the provider's current generation."""
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session(
+        "session-1",
+        "agent",
+        SpawnTarget(
+            type="command",
+            container={
+                "name": "container-1",
+                "ssh": {"host_alias": "old-generation"},
+            },
+            venue={
+                "_agent_bridge_request_overrides": {
+                    "env": {},
+                    "copilot_args": [],
+                },
+            },
+        ),
+        "container:container-1",
+    )
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+
+    class Resolver:
+        async def resolve_async(self, _name):
+            return SpawnTarget(
+                type="command",
+                container={
+                    "name": "container-1",
+                    "ssh": {"host_alias": "current-generation"},
+                },
+                venue={"provider": "agent-containers"},
+            )
+
+    manager.set_resolver(Resolver())
+
+    async def reattach(refreshed_session):
+        assert (
+            refreshed_session.target.container["ssh"]["host_alias"]
+            == "current-generation"
+        )
+        refreshed_session.status = SessionStatus.IDLE
+        return True
+
+    monkeypatch.setattr(manager, "_try_reattach_live_host", reattach)
+
+    resumed = await manager.resume_session(session.session_id)
+
+    assert resumed is session
+    assert session.status is SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("container", "relay_required"),
+    [
+        ({"name": "container-1", "relay_remote_port": 9857}, True),
+        ({"name": "container-1"}, False),
+    ],
+)
+async def test_stopped_container_live_host_applies_current_relay_policy(
+    tmp_db, tmp_path, monkeypatch, container, relay_required,
+) -> None:
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session(
+        "session-1",
+        "agent",
+        SpawnTarget(
+            type="command",
+            container=container,
+        ),
+        "container:container-1",
+    )
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+    rec = HostRecord(
+        session_id=session.session_id,
+        port=49555,
+        host_pid=123,
+        child_pid=456,
+        host_version="test",
+        protocol_version=1,
+        state_file="/tmp/host.json",
+        created_at=time.time(),
+        nonce="nonce",
+        boundary="container",
+        endpoint={
+            "kind": "container",
+            "remote_port": 51000,
+            "local_port": 49555,
+            "reverse_forwards": ["9857:127.0.0.1:60000"],
+            "ssh": {"host_alias": "container-1"},
+        },
+        extra={},
+    )
+    manager._host_index.register(rec)
+    monkeypatch.setattr(manager, "_rec_host_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    reattach = AsyncMock(return_value=True)
+    monkeypatch.setattr(manager, "_reattach_one", reattach)
+
+    assert await manager._try_reattach_live_host(session) is True
+
+    assert reattach.await_args.kwargs["refresh_relays"] is relay_required
+    assert reattach.await_args.kwargs["require_relay_ready"] is relay_required
+
+
+@pytest.mark.asyncio
+async def test_stopped_container_relay_failure_prevents_prompt_admission(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session(
+        "session-1",
+        "agent",
+        SpawnTarget(
+            type="command",
+            container={"name": "container-1"},
+        ),
+        "container:container-1",
+    )
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+    monkeypatch.setattr(
+        manager,
+        "_refresh_provider_target",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_try_reattach_live_host",
+        AsyncMock(
+            side_effect=CredentialRelayReadinessError(
+                "credential relay readiness could not be proved"
+            )
+        ),
+    )
+    fresh_host = AsyncMock()
+    monkeypatch.setattr(manager, "_resume_via_new_remote_host", fresh_host)
+    run_prompt = AsyncMock()
+    monkeypatch.setattr(manager, "_run_prompt", run_prompt)
+
+    with pytest.raises(
+        CredentialRelayReadinessError,
+        match="could not be proved",
+    ):
+        await manager.submit_prompt(session.session_id, "do work")
+
+    assert session.status is SessionStatus.STOPPED
+    assert session.turn_count == 0
+    assert tmp_db.get_turns(session.session_id) == []
+    fresh_host.assert_not_awaited()
+    run_prompt.assert_not_awaited()
 
 
 class TestSubmitPrompt:

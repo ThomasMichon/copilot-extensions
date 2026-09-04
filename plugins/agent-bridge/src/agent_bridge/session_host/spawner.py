@@ -370,6 +370,8 @@ class CodeSpaceSpawner:
         launch_timeout: float = 60.0,
         unexpected_reap_seconds: float = 60.0,
         active_reap_seconds: float = 0.0,
+        require_relay_ready: bool = False,
+        relay_ready_timeout: float = 5.0,
     ) -> None:
         self._transport = transport
         self.boundary = getattr(transport, "boundary", "codespace")
@@ -379,6 +381,8 @@ class CodeSpaceSpawner:
         self._launch_timeout = launch_timeout
         self._unexpected_reap_seconds = unexpected_reap_seconds
         self._active_reap_seconds = active_reap_seconds
+        self._require_relay_ready = require_relay_ready
+        self._relay_ready_timeout = relay_ready_timeout
 
     @property
     def transport(self) -> RemoteTransport:
@@ -398,7 +402,13 @@ class CodeSpaceSpawner:
         from .. import __version__
         from . import protocol as proto
         from .bundle import build_session_host_bundle
-        from .endpoints import endpoint_from_ssh_config, relay_forwards_from_ssh_config
+        from .endpoints import (
+            CredentialRelayReadinessError,
+            endpoint_from_ssh_config,
+            relay_forwards_from_ssh_config,
+            relay_ports_from_reverse_forwards,
+            wait_for_relay_serving,
+        )
 
         nonce = new_nonce()
         bundle_path, _sha = await asyncio.to_thread(build_session_host_bundle)
@@ -517,18 +527,53 @@ class CodeSpaceSpawner:
             serving_probe_for_port=self._serving_probe_for_port,
             host_port_resolver=get_live_relay_port,
         )
+        relay_ports = relay_ports_from_reverse_forwards(reverse)
         started_relays = []
-        for relay in relays:
+        for relay, relay_port in zip(relays, relay_ports, strict=True):
             try:
                 await relay.start()
-            except Exception:
+                if self._require_relay_ready:
+                    try:
+                        await wait_for_relay_serving(
+                            self._serving_probe_for_port(
+                                relay_port,
+                                fail_open=False,
+                            ),
+                            timeout=self._relay_ready_timeout,
+                        )
+                    except Exception as exc:
+                        raise CredentialRelayReadinessError(
+                            "credential relay readiness probe failed for "
+                            f"remote loopback port {relay_port}"
+                        ) from exc
+            except Exception as exc:
+                with contextlib.suppress(Exception):
+                    await relay.stop()
+                if self._require_relay_ready:
+                    for prior in started_relays:
+                        with contextlib.suppress(Exception):
+                            await prior.stop()
+                    with contextlib.suppress(Exception):
+                        await forward.cancel()
+                    if not await self._abort_remote_launch(
+                        state_remote, session_id,
+                    ):
+                        raise RemoteSpawnCleanupPendingError(
+                            "required credential relay failed and remote "
+                            f"Session Host cleanup is inconclusive for {session_id}; "
+                            "retaining target ownership"
+                        ) from exc
+                    if isinstance(exc, CredentialRelayReadinessError):
+                        raise
+                    raise CredentialRelayReadinessError(
+                        "credential relay reverse-forward failed before ACP "
+                        f"startup for session {session_id}"
+                    ) from exc
                 log.warning(
                     "Credential relay supervisor failed to start for "
                     "session %s (boundary=%s); continuing auth-light",
                     session_id, self.boundary, exc_info=True,
                 )
-                with contextlib.suppress(Exception):
-                    await relay.stop()
                 continue
             started_relays.append(relay)
 
@@ -906,7 +951,12 @@ print("__REAPED__")
             },
         )
 
-    def _serving_probe_for_port(self, relay_port: int) -> Callable[[], Awaitable[bool]]:
+    def _serving_probe_for_port(
+        self,
+        relay_port: int,
+        *,
+        fail_open: bool = True,
+    ) -> Callable[[], Awaitable[bool]]:
         """Build a best-effort far-side relay-serving probe for Session-Host use.
 
         A false result means the SSH process is alive but the CodeSpace-side
@@ -927,7 +977,9 @@ print("__REAPED__")
                     timeout=5.0,
                 )
             except Exception:
-                return True
+                if fail_open:
+                    return True
+                raise
             return rc == 0 and "OK" in (out or "")
 
         return _probe

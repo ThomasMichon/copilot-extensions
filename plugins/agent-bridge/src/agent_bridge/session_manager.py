@@ -2330,7 +2330,13 @@ class SessionManager:
                     self._remote_recovery_skipped.add(session.session_id)
         return recovered
 
-    async def _ensure_forward(self, rec: Any) -> None:
+    async def _ensure_forward(
+        self,
+        rec: Any,
+        *,
+        refresh_relays: bool = False,
+        require_relay_ready: bool = False,
+    ) -> None:
         """Ensure a remote-boundary Host's frontend ``-L`` forward is up.
 
         No-op for a local Host (direct loopback, no forward). For a CodeSpace /
@@ -2377,7 +2383,17 @@ class SessionManager:
                 rec.endpoint = endpoint
                 if self._host_index is not None and is_dataclass(rec):
                     self._host_index.register(rec)
-            await self._ensure_relays_from_endpoint(rec.session_id, endpoint)
+            if refresh_relays:
+                await self._replace_relays_from_endpoint(
+                    rec.session_id,
+                    endpoint,
+                    require_ready=require_relay_ready,
+                )
+            else:
+                await self._ensure_relays_from_endpoint(
+                    rec.session_id,
+                    endpoint,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -2403,24 +2419,55 @@ class SessionManager:
             return
         await self._replace_relays_from_endpoint(session_id, endpoint)
 
-    async def _replace_relays_from_endpoint(self, session_id: str, endpoint: dict) -> None:
+    async def _replace_relays_from_endpoint(
+        self,
+        session_id: str,
+        endpoint: dict,
+        *,
+        require_ready: bool = False,
+    ) -> None:
         """Stop any prior relay owner and start supervisors from ``endpoint``."""
         from .relay_state import get_live_relay_port
         from .session_host.endpoints import (
+            CredentialRelayReadinessError,
             endpoint_serving_probe_factory,
             relay_forwards_from_endpoint,
+            relay_ports_from_reverse_forwards,
+            wait_for_relay_serving,
         )
 
         await self._stop_relays(session_id)
+        reverse_forwards = list(endpoint.get("reverse_forwards") or [])
         relays = relay_forwards_from_endpoint(
             endpoint,
             host_port_resolver=get_live_relay_port,
             serving_probe_for_port=endpoint_serving_probe_factory(endpoint),
         )
+        relay_ports = relay_ports_from_reverse_forwards(reverse_forwards)
+        if require_ready and not relay_ports:
+            raise CredentialRelayReadinessError(
+                "credential relay is enabled but the stopped session has no "
+                "recoverable reverse-forward declaration"
+            )
+        strict_probe_for_port = endpoint_serving_probe_factory(
+            endpoint,
+            fail_open=False,
+        )
         started = []
-        for relay in relays:
+        for relay, relay_port in zip(relays, relay_ports, strict=True):
             try:
                 await relay.start()
+                if require_ready:
+                    try:
+                        await wait_for_relay_serving(
+                            strict_probe_for_port(relay_port),
+                            timeout=5.0,
+                        )
+                    except Exception as exc:
+                        raise CredentialRelayReadinessError(
+                            "credential relay readiness probe failed for "
+                            f"remote loopback port {relay_port}"
+                        ) from exc
             except asyncio.CancelledError:
                 with contextlib.suppress(Exception):
                     await relay.stop()
@@ -2428,14 +2475,24 @@ class SessionManager:
                     with contextlib.suppress(Exception):
                         await prior.stop()
                 raise
-            except Exception:
+            except Exception as exc:
+                with contextlib.suppress(Exception):
+                    await relay.stop()
+                if require_ready:
+                    for prior in started:
+                        with contextlib.suppress(Exception):
+                            await prior.stop()
+                    if isinstance(exc, CredentialRelayReadinessError):
+                        raise
+                    raise CredentialRelayReadinessError(
+                        "credential relay reverse-forward failed before stopped "
+                        f"session {session_id} could resume"
+                    ) from exc
                 log.warning(
                     "Failed to start credential relay supervisor for session %s; "
                     "continuing without relay",
                     session_id, exc_info=True,
                 )
-                with contextlib.suppress(Exception):
-                    await relay.stop()
                 continue
             started.append(relay)
         if started:
@@ -2828,6 +2885,8 @@ class SessionManager:
         new_status: SessionStatus,
         send_resume: bool = False,
         prune_on_fail: bool = False,
+        refresh_relays: bool = False,
+        require_relay_ready: bool = False,
     ) -> bool:
         """(Re)connect to a live Session Host and adopt its session -- the shared
         core of both startup reattach and in-session liveness-driven recovery.
@@ -2846,6 +2905,7 @@ class SessionManager:
         """
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
+        from .session_host.endpoints import CredentialRelayReadinessError
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             if session.event_log:
@@ -2896,7 +2956,11 @@ class SessionManager:
                 })
 
         try:
-            await self._ensure_forward(rec)
+            await self._ensure_forward(
+                rec,
+                refresh_relays=refresh_relays,
+                require_relay_ready=require_relay_ready,
+            )
             sock = await SessionHostClient.connect(port=rec.port)
             await sock.attach(0, nonce=getattr(rec, "nonce", "").encode())
             streams = await open_acp_streams(sock)
@@ -2940,11 +3004,13 @@ class SessionManager:
         except asyncio.CancelledError:
             await _close_partial_reattach()
             raise
-        except Exception:
+        except Exception as exc:
             child_exit_code = (
                 streams.child_exit_code if streams is not None else None
             )
             await _close_partial_reattach()
+            if isinstance(exc, CredentialRelayReadinessError):
+                raise
             if child_exit_code is not None:
                 session.client = client
                 _settle_dead_child(child_exit_code)
@@ -3063,8 +3129,17 @@ class SessionManager:
                     f"authoritative but cannot be reattached: {plan.reason}"
                 )
             return False
+        relay_required = (
+            getattr(rec, "boundary", "local") == "container"
+            and container_target.get("relay_remote_port") is not None
+        )
         attached = await self._reattach_one(
-            rec, session, new_status=SessionStatus.IDLE, send_resume=False,
+            rec,
+            session,
+            new_status=SessionStatus.IDLE,
+            send_resume=False,
+            refresh_relays=relay_required,
+            require_relay_ready=relay_required,
         )
         if (
             not attached
@@ -3132,6 +3207,7 @@ class SessionManager:
                         self._session_host_unexpected_reap_seconds
                     ),
                     active_reap_seconds=self._session_host_active_reap_seconds,
+                    require_relay_ready=True,
                 )
                 remote_cwd = (
                     prepared.get("workspace_folder")
@@ -4606,6 +4682,18 @@ class SessionManager:
                     f"Session {session_id} has no ACP session ID -- cannot resume"
                 )
 
+            container_resume = (
+                isinstance(session.target.container, dict)
+                and bool(session.target.container.get("name"))
+            )
+            if container_resume:
+                # A stopped container session must resolve the provider's
+                # current serving generation before inspecting or reattaching
+                # its far-side authority. The recovered endpoint then uses the
+                # current SSH transport, while relay replacement below resolves
+                # the daemon's current live credential-relay port.
+                await self._refresh_provider_target(session)
+
             # Prefer reattaching to a surviving Session Host (adopt the running
             # child + its in-flight turn) over a fresh child + load_session, so a
             # resume after a transport drop (laptop sleep / tunnel flap / SSH
@@ -4620,7 +4708,8 @@ class SessionManager:
                 session.touch()
                 return session
 
-            await self._refresh_provider_target(session)
+            if not container_resume:
+                await self._refresh_provider_target(session)
 
             session.status = SessionStatus.STARTING
             self._db.update_session_status(
