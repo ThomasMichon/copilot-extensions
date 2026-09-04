@@ -52,6 +52,29 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+# === install-contract:test-persistent-environment -- keep byte-identical across installers ===
+function Get-CopilotPersistentEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
+    )
+    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
+    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
+    return [Environment]::GetEnvironmentVariable($Name, $effectiveTarget)
+}
+
+function Set-CopilotPersistentEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][string]$Value,
+        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
+    )
+    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
+    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
+    [Environment]::SetEnvironmentVariable($Name, $Value, $effectiveTarget)
+}
+# === end install-contract:test-persistent-environment ===
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -1889,9 +1912,9 @@ function Invoke-Install {
     Register-ScheduledTask_
 
     # Ensure ~/.local/bin is on user PATH
-    $userPath = [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+    $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
     if ($userPath -and $userPath -notlike "*$LocalBin*") {
-        [System.Environment]::SetEnvironmentVariable('PATH', "$LocalBin;$userPath", 'User')
+        Set-CopilotPersistentEnvironmentVariable -Name 'PATH' -Value "$LocalBin;$userPath" -Target 'User'
         $env:PATH = "$LocalBin;$env:PATH"
         Write-Ok "Added $LocalBin to user PATH"
     }

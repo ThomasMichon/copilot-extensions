@@ -28,6 +28,16 @@ time scales: 30 seconds per test, 300 seconds per sequential 25-file sub-suite,
 and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage:
 
+On Windows, contained runs also set the installer test-mode contract
+`COPILOT_EXTENSIONS_TEST_CONTAINED=1`. Conforming installers virtualize
+persistent User/Machine environment reads and writes to Process scope. The
+runner separately snapshots both registry environment keys and fails the
+sub-suite if it detects drift, so a missed adapter cannot silently alter host
+PATH or other persistent environment state. It deliberately does not roll the
+key back because another process may have made a legitimate concurrent edit.
+Installer subprocesses launched by a direct pytest invocation receive the same
+prevention through pytest's inherited `PYTEST_CURRENT_TEST` marker.
+
 ```bash
 python tools/run-plugin-tests.py agent-dispatch \
   --test-timeout 20 --subsuite-timeout 180 --plugin-timeout 600 \

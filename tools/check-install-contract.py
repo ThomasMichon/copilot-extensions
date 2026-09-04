@@ -40,6 +40,12 @@ import re
 import sys
 from pathlib import Path
 
+from install_contract_guard import (
+    PERSISTENT_ENV_END,
+    PERSISTENT_ENV_START,
+    persistent_environment_violations,
+)
+
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 
@@ -213,6 +219,40 @@ def check() -> int:
         print("No plugins with install scripts found.", file=sys.stderr)
         return 1
 
+    persistent_environment_blocks: dict[str, str | None] = {}
+    for path in sorted(PLUGINS_DIR.rglob("*.ps1")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        direct_access = persistent_environment_violations(text)
+        uses_adapter = (
+            "Get-CopilotPersistentEnvironmentVariable" in text
+            or "Set-CopilotPersistentEnvironmentVariable" in text
+        )
+        if (
+            PERSISTENT_ENV_START not in text
+            and not uses_adapter
+            and not direct_access
+        ):
+            continue
+        relative = path.relative_to(REPO).as_posix()
+        block = _extract_marker(text, PERSISTENT_ENV_START, PERSISTENT_ENV_END)
+        persistent_environment_blocks[relative] = _norm(block)
+        if block is None:
+            violations.append(
+                f"{relative}: direct User/Machine environment access is not "
+                "test-virtualized"
+            )
+            continue
+        if not uses_adapter:
+            violations.append(
+                f"{relative}: test-persistent-environment adapter is present "
+                "but no persistent access routes through it"
+            )
+        for problem in direct_access:
+            violations.append(
+                f"{relative}: {problem} outside the shared "
+                "test-persistent-environment adapter"
+            )
+
     for plugin in plugins:
         name = plugin.name
         # Payload-runtime plugins ship a non-Python runtime (a JS extension
@@ -309,6 +349,11 @@ def check() -> int:
     for ext in ("ps1", "sh"):
         _check_identical(f"install-contract:v4 self-stage ({ext})", v4_selfstage[ext], violations)
         _check_identical(f"install-contract:v4 smoke seam ({ext})", v4_smoke[ext], violations)
+    _check_identical(
+        "test-persistent-environment (ps1)",
+        persistent_environment_blocks,
+        violations,
+    )
 
     # The versioned_runtime.py primitive is a self-contained per-plugin copy
     # vendored byte-identically from the canonical source

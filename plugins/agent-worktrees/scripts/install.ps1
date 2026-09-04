@@ -48,6 +48,29 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# === install-contract:test-persistent-environment -- keep byte-identical across installers ===
+function Get-CopilotPersistentEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
+    )
+    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
+    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
+    return [Environment]::GetEnvironmentVariable($Name, $effectiveTarget)
+}
+
+function Set-CopilotPersistentEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][string]$Value,
+        [Parameter(Mandatory)][ValidateSet('User', 'Machine')][string]$Target
+    )
+    $testMode = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1' -or [bool]$env:PYTEST_CURRENT_TEST
+    $effectiveTarget = if ($testMode) { 'Process' } else { $Target }
+    [Environment]::SetEnvironmentVariable($Name, $Value, $effectiveTarget)
+}
+# === end install-contract:test-persistent-environment ===
+
 $InstallDirSpecified = [bool]$InstallDir
 if ($InstallDir) {
     $InstallDir = [IO.Path]::GetFullPath($InstallDir)
@@ -1977,12 +2000,12 @@ function Ensure-PsmuxSshSafe {
         return
     }
 
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'Path' -Target 'User'
     if (-not $userPath) { $userPath = '' }
     $repair = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
         -UserPath $userPath -ProcessPath $env:Path -PackageRoot $packageRoot
     if ($repair.UserChanged) {
-        [Environment]::SetEnvironmentVariable('Path', $repair.UserPath, 'User')
+        Set-CopilotPersistentEnvironmentVariable -Name 'Path' -Value $repair.UserPath -Target 'User'
         Write-ServiceChanged "psmux: selected compatible $($selected.Version) package binary and removed stale package dirs from User PATH (SSH-safe): $($selected.Directory)"
     }
     $env:Path = $repair.ProcessPath

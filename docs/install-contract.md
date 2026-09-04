@@ -1117,6 +1117,30 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
       Thread-B service runtimes and must shrink as each lands. See the
       `correct-install-flows` effort.
 
+### Contained-test persistent environment contract (Windows)
+
+Redirecting `USERPROFILE` or `HOME` does not redirect .NET
+`EnvironmentVariableTarget.User` or `EnvironmentVariableTarget.Machine`; those
+targets still address the real Windows registry. Every PowerShell installer or
+transport setup script that reads or writes persistent User/Machine environment
+state must use the shared `install-contract:test-persistent-environment`
+adapter. When `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the adapter maps those
+operations to Process scope. A subprocess launched by pytest receives the same
+mapping through pytest's inherited `PYTEST_CURRENT_TEST` marker, including when
+the suite is run directly instead of through the repository runner. Outside
+those test contexts, the adapter preserves the real User/Machine behavior
+required by production installation.
+
+`tools/check-install-contract.py` scans every plugin PowerShell script, rejects
+multiline .NET calls whose target is not explicitly Process (including target
+variables and `EnvironmentVariableTarget.User` / `.Machine`), and rejects direct
+access to the persistent User or Machine environment registry paths outside the
+byte-identical adapter. This automatically covers new installers and nested
+transport scripts. The contained test runner adds detection-only defense in
+depth: it snapshots the real User and Machine registry environment keys and
+fails the test flow if drift is observed. It never rolls back the whole key,
+because doing so could overwrite a legitimate concurrent edit.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is
@@ -1541,6 +1565,8 @@ runtime entrypoint (`install.*` if present, else `init.*`):
   (`plugin.json` `hooks` → a `sessionStart` `bootstrap-check`). Plugins predating
   the invariant are listed in `EXEMPT_SESSION_HOOK` (tracked in dotfiles#779) —
   new runtime plugins must comply, not be added to that set.
+- every plugin PowerShell script routes persistent User/Machine environment
+  access through the shared contained-test adapter; direct access is rejected.
 
 Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 `tools/check-no-internal-identifiers.py` — a repo-wide guard that fails the push
