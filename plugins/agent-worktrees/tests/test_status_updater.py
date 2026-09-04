@@ -480,6 +480,10 @@ def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
         m, "windowless_daemon_kwargs",
         lambda **_kw: {"windowless_daemon": True},
     )
+    monkeypatch.setenv("GH_TOKEN", "secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "other-secret")
+    monkeypatch.setenv("AGENT_WORKTREES_AHP_AUTH_TOKEN", "handoff-secret")
+    monkeypatch.setenv("SAFE_VALUE", "kept")
 
     assert m._spawn_status_updater("x", "/w/x") is True
     argv = captured["argv"]
@@ -491,6 +495,10 @@ def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
     # Detached: stdio is silenced so the loop never blocks on the hook's pipes.
     assert captured["kw"].get("stdin") is subprocess.DEVNULL
     assert captured["kw"]["windowless_daemon"] is True
+    assert captured["kw"]["env"]["SAFE_VALUE"] == "kept"
+    assert "GH_TOKEN" not in captured["kw"]["env"]
+    assert "GITHUB_TOKEN" not in captured["kw"]["env"]
+    assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in captured["kw"]["env"]
 
 
 def test_spawn_status_updater_omits_path_when_absent(monkeypatch):

@@ -15,6 +15,7 @@ authors = [
 dependencies = [
     "pyyaml>=6.0.3",
     "textual>=8.2.8",
+    "websocket-client>=1.8.0",
     "agent-config-migrate",
     "agent-plugin-resolve",
     "agent-procutil",

@@ -12,7 +12,7 @@ agent-worktrees merges configuration from the layers below at load time.
 | **Highest** | **Machine-local** | `~/.{project}/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
 | *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`, `new_picker`). Machine-specifics and the binding never graft. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. | Yes |
-| **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`. | No |
+| **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`, `session_backend`. | No |
 
 **A repo designed for this system needs no machine-local file.** Its anchor
 resolves from the repos registry (`~/.agent-worktrees/repos.yaml`), its settings
@@ -21,9 +21,13 @@ config. Machine-local config is only needed to **override** a setting on a
 specific machine, or to adopt a *foreign* repo (work product, external GitHub)
 that carries no in-repo config.
 
-- **Top-level fields** (`srcroot`/`machine`/`platform`/`copilot_profiles`/
-  `profile_assignment`/`headless`/`auto_fast_forward`/`new_picker`) resolve **machine-local >
-  knowledge overlay (portable prefs only) > global > detected/default**.
+- **Portable top-level fields** (`srcroot`/`machine`/`platform`/
+  `copilot_profiles`/`profile_assignment`/`headless`/`auto_fast_forward`/
+  `new_picker`) resolve **machine-local > knowledge overlay (portable prefs
+  only) > global > detected/default**.
+- **Machine-host fields** (`session_backend`) resolve **machine-local >
+  global > default**. They are never read from committed in-repo config or a
+  knowledge overlay.
 - **Per-repo settings** merge **in-repo flat settings < machine-local
   `repos.<name>` block**. The global tier carries *only* machine-wide top-level
   settings — never per-repo settings.
@@ -52,6 +56,10 @@ global config.
 repo_name: my-project             # which repos.<name> is the active/default repo
 headless: false                   # CLI-only project (bare binstub lists worktrees)
 auto_fast_forward: true           # FF a stale, clean worktree on resume (override)
+session_backend:                  # optional same-machine hosted sessions
+  kind: ahp
+  endpoint_url: ws://127.0.0.1:8765
+  github_account: octocat
 
 repos:
   my-project:
@@ -115,7 +123,57 @@ repos:
 | `new_picker` | bool | `true` | Use the Textual picker. `picker disable` writes `false` to opt the machine out to the legacy picker. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
+| `session_backend` | map | `{kind: direct}` | Machine-local interactive session host. `direct` preserves one ordinary Copilot process per launched terminal; `ahp` binds worktrees to a same-machine `copilotd`. Not accepted from in-repo config or a knowledge overlay. |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
+
+### Same-machine AHP session backend — `session_backend`
+
+This experimental opt-in hosts durable worktree sessions in an externally
+managed same-machine `copilotd`. Agent-worktrees still creates, tracks, lands,
+and finalizes the exact worktree. AHP owns the Copilot conversation and lets
+terminal clients detach and later reattach to the same session.
+
+```yaml
+session_backend:
+  kind: ahp
+  endpoint_url: ws://127.0.0.1:8765
+  github_account: octocat
+  protocol_versions: ["0.7.0"]
+  auth_resource: https://api.github.com
+  connect_timeout_seconds: 15
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `kind` | string | `direct` | `direct` or `ahp`. The default leaves existing launch behavior unchanged. |
+| `endpoint_url` | string | `""` | Required for `ahp`. Must be `ws://` on `localhost`, `127.0.0.1`, or `::1`, with an explicit port and no credentials, query, or fragment. |
+| `github_account` | string | `""` | GitHub login used to mint a repository-scoped token. When omitted, the registered repository account must resolve it. Ambient-account fallback is not allowed. |
+| `protocol_versions` | list[string] | `["0.7.0"]` | Offered AHP versions. Startup fails closed if the host selects a version outside this list. |
+| `auth_resource` | string | `https://api.github.com` | AHP authentication resource paired with the minted GitHub token. |
+| `connect_timeout_seconds` | number | `15` | Connection and ordinary request timeout, in `(0, 120]`. Session create/dispose use a 30-second minimum lifecycle budget and retry one host-owner startup timeout with a fresh session id. |
+
+The endpoint is intentionally explicit in the first release: agent-worktrees
+does not start, stop, upgrade, or discover `copilotd`. The launcher runs
+`session-backend ensure` after worktree preflight, persists the exact hosted
+session id, and starts Copilot with
+`--experimental --ahp <endpoint> --resume=<session-id>`. Selecting the worktree
+again verifies the same id and exact working directory before attach.
+The launcher mints one account-scoped token per fresh attach and passes that
+same token privately to both the controller and Copilot client. Mux launches
+use a one-shot protected handoff consumed by the pane wrapper, so the token is
+not inherited by the tmux/psmux server, status updater, or resident monitor. It
+is never written to the binding or JSON output.
+
+Exiting the terminal client does **not** dispose the hosted session or trigger
+ordinary post-exit finalization. `session-backend status` reads the persisted
+binding; `ensure` is the host-backed liveness/path check. Finalization refuses
+bindings in `active` or `unknown` state. Run `session-backend dispose` only when
+the hosted transcript may be retired; a successful dispose marks the binding
+terminal and permits normal finalization. Switching configuration back to
+`direct` while a binding is active or unknown fails closed rather than launching
+a duplicate local Copilot process. The initial backend is wired only through the
+normal Worktree Manager launcher; `embody` and `handoff-cutover` fail closed
+instead of starting an unbound direct client.
 
 ### Config drop-ins — `~/.{project}/config.d/`
 

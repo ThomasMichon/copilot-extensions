@@ -179,6 +179,11 @@ class TestFastPassActive:
         n = derive.norm(self._raw_active(session_bound_live=True), "m", "e")
         assert n["state"] == "ACTIVE"
 
+    def test_ahp_live_marks_active_without_mux(self):
+        n = derive.norm(self._raw_active(session_ahp_live=True), "m", "e")
+        assert n["state"] == "ACTIVE"
+        assert n["sessionless"] is False
+
     def test_bridge_live_marks_active_without_git(self):
         # #4272 bridge-lock: no mux, no lock, no bound hint -- only a live
         # bridge.lock (a bridge-owned bare session) marks the worktree ACTIVE.

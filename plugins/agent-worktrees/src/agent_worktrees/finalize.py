@@ -69,6 +69,11 @@ def _has_live_session(record) -> bool:
     """
     if record is None:
         return False
+    if getattr(record, "session_backend_opaque", False):
+        return True
+    backend = getattr(record, "session_backend", None)
+    if backend is not None and backend.state in {"active", "unknown"}:
+        return True
     if sessions.worktree_has_live_session(record):
         return True
     wt_id = getattr(record, "worktree_id", None)
@@ -1641,6 +1646,10 @@ def validate_and_finalize(
 
     try:
         # Cleanup -- remove worktree and branch
+        if yaml_path.exists():
+            with tracking._RecordLock(yaml_path, require_sidecar=True):
+                record = tracking.load_record(yaml_path)
+                checkout_managed = record.checkout_managed
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = _has_live_session(record)
 

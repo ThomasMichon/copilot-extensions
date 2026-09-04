@@ -141,6 +141,11 @@ class TestDataModels:
         assert profile.name == "test"
         assert profile.label == "Test"
 
+    def test_session_backend_defaults_to_direct(self):
+        backend = cfg.SessionBackendConfig()
+        assert backend.kind == "direct"
+        assert backend.is_ahp is False
+
     def test_repo_config(self):
         repo = cfg.RepoConfig(
             anchor="/tmp/repo",
@@ -173,6 +178,39 @@ class TestDataModels:
         assert pr.branch_update_strategy == "rebase"
         assert pr.merge_strategy == "squash"
         assert pr.prefer_auto_merge is True
+
+
+class TestSessionBackendConfig:
+    def test_parses_explicit_ahp_backend(self):
+        backend = cfg._parse_session_backend({
+            "kind": "ahp",
+            "endpoint_url": "ws://127.0.0.1:8765",
+            "github_account": "octocat",
+            "protocol_versions": ["0.7.0"],
+        })
+        assert backend.is_ahp
+        assert backend.endpoint_url == "ws://127.0.0.1:8765"
+        assert backend.github_account == "octocat"
+        assert backend.protocol_versions == ("0.7.0",)
+
+    @pytest.mark.parametrize(
+        "raw, message",
+        [
+            ({"kind": "ahp"}, "endpoint_url"),
+            ({"kind": "other"}, "kind"),
+            (
+                {
+                    "kind": "ahp",
+                    "endpoint_url": "ws://127.0.0.1:8765",
+                    "protocol_versions": [],
+                },
+                "protocol_versions",
+            ),
+        ],
+    )
+    def test_rejects_invalid_backend(self, raw, message):
+        with pytest.raises(ValueError, match=message):
+            cfg._parse_session_backend(raw)
 
 
 # ---------------------------------------------------------------------------

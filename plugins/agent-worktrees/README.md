@@ -40,6 +40,24 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
 
+## Same-Machine AHP Sessions
+
+Interactive worktree sessions can optionally be hosted by one same-machine
+`copilotd` over Agent Host Protocol (AHP). Agent-worktrees remains authoritative
+for repository and worktree lifecycle; the host owns the durable Copilot
+session. A mux pane is then only an attachable client, so closing it does not
+destroy the hosted transcript.
+
+The backend is machine-local and off by default. Configure an explicit loopback
+WebSocket endpoint and GitHub account under `session_backend`, then use the
+normal picker/create/resume flow. The launcher creates or verifies one exact
+AHP session for the worktree and starts Copilot hard-bound to that session.
+Finalization refuses while the binding is active or unknown; explicitly run
+`agent-worktrees session-backend dispose` after the hosted session is no longer
+needed. See the
+[Configuration Reference](docs/config-reference.md#same-machine-ahp-session-backend--session_backend)
+and [CLI Reference](docs/cli-reference.md#session-lifecycle).
+
 ## Balanced Profile Assignment
 
 Agent-worktrees can optionally assign eligible new interactive session

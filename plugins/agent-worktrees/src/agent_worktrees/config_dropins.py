@@ -429,6 +429,50 @@ def _validate_config(raw: object) -> str | None:
                 )
                 if error:
                     return error
+    session_backend = raw.get("session_backend")
+    if session_backend is not None:
+        if not isinstance(session_backend, dict):
+            return "session_backend must be a mapping"
+        allowed = {
+            "kind",
+            "endpoint_url",
+            "github_account",
+            "protocol_versions",
+            "auth_resource",
+            "connect_timeout_seconds",
+        }
+        unknown = set(session_backend) - allowed
+        if unknown:
+            return (
+                "session_backend has unknown key(s): "
+                + ", ".join(sorted(str(value) for value in unknown))
+            )
+        if "kind" in session_backend and session_backend["kind"] not in {
+            "direct",
+            "ahp",
+        }:
+            return "session_backend.kind must be 'direct' or 'ahp'"
+        for name in ("endpoint_url", "github_account", "auth_resource"):
+            if name in session_backend and not isinstance(
+                session_backend[name], str
+            ):
+                return f"session_backend.{name} must be a string"
+        if "protocol_versions" in session_backend:
+            error = _validate_string_list(
+                session_backend["protocol_versions"],
+                location="session_backend.protocol_versions",
+            )
+            if error:
+                return error
+        if (
+            "connect_timeout_seconds" in session_backend
+            and not isinstance(
+                session_backend["connect_timeout_seconds"], int | float
+            )
+        ):
+            return (
+                "session_backend.connect_timeout_seconds must be a number"
+            )
     for name in ("headless", "auto_fast_forward", "new_picker"):
         if name in raw and not isinstance(raw[name], bool):
             return f"{name} must be a boolean"
