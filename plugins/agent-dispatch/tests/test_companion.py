@@ -179,7 +179,7 @@ def test_captured_provider_uses_owned_no_window_launch_on_windows(monkeypatch):
     assert "start_new_session" not in seen["kwargs"]
 
 
-def test_captured_provider_preserves_process_group_on_posix(monkeypatch):
+def test_captured_provider_preserves_timeout_process_group_on_posix(monkeypatch):
     seen = {}
 
     class Process:

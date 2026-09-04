@@ -128,7 +128,10 @@ def _recv_line(connection: socket.socket, *, limit: int = 16) -> bytes:
 
 def _serve_control(listener: socket.socket) -> None:
     while True:
-        connection, _address = listener.accept()
+        try:
+            connection, _address = listener.accept()
+        except OSError:
+            return
         with connection:
             try:
                 if _recv_line(connection) == b"ping\n":
@@ -270,6 +273,19 @@ def ensure_broker(
         if process.poll() not in (None, 0):
             break
         time.sleep(0.05)
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+    try:
+        published = json.loads(endpoint_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        published = None
+    if isinstance(published, dict) and published.get("pid") == process.pid:
+        endpoint_file.unlink(missing_ok=True)
     raise RuntimeError("container SSH broker did not become ready")
 
 

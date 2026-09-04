@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -174,6 +175,63 @@ def test_docker_broker_health_accepts_fragmented_control_response(monkeypatch):
 
     assert docker_proxy._healthy_endpoint(endpoint, "repo-1", "a" * 64)
     assert connection.sent == [b"ping\n"]
+
+
+def test_docker_broker_control_exits_when_listener_closes():
+    listener = SimpleNamespace(
+        accept=lambda: (_ for _ in ()).throw(OSError("closed")),
+    )
+
+    assert docker_proxy._serve_control(listener) is None
+
+
+def test_docker_broker_failed_start_retires_process_and_endpoint(
+    monkeypatch,
+    tmp_path,
+):
+    endpoint_file = tmp_path / "proxy.json"
+
+    class Process:
+        pid = 123
+
+        def __init__(self):
+            self.running = True
+            self.terminated = False
+            self.waited = False
+
+        def poll(self):
+            return None if self.running else 0
+
+        def terminate(self):
+            self.terminated = True
+            self.running = False
+
+        def wait(self, timeout):
+            self.waited = True
+            return 0
+
+    process = Process()
+
+    def fake_popen(args, **_kwargs):
+        endpoint_file.write_text(json.dumps({"pid": process.pid}), encoding="utf-8")
+        return process
+
+    monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(docker_proxy, "_healthy_endpoint", lambda *_args: False)
+    monkeypatch.setattr(docker_proxy, "windowless_python", lambda value: value)
+    monkeypatch.setattr(docker_proxy, "detached_kwargs", lambda **_kwargs: {})
+
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        docker_proxy.ensure_broker(
+            "repo-1",
+            "a" * 64,
+            endpoint_file,
+            timeout=0,
+        )
+
+    assert process.terminated
+    assert process.waited
+    assert not endpoint_file.exists()
 
 
 @pytest.mark.parametrize("container,user", [
