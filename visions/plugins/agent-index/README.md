@@ -183,10 +183,13 @@ tracks is the repo's **canonical default branch as fetched from its remote** (th
 pushed/merged state the team shares) — not a local working tree that may sit on a
 feature branch, carry uncommitted edits, or lag `origin`. Freshness means the
 index reflects what has actually landed on the mainline, fetched fresh before it
-reindexes. (A purely local repo with no remote still indexes cleanly from its
-local history — the remote is the *default* source of truth, not a requirement.)
+reindexes. (A configured local-only repo that has opted into hosting still
+indexes cleanly from its local history — the remote is the *default* source of
+truth, not a requirement.)
 
 ### lightweight-client-and-declared-host-service
+Formerly `self-contained-service`.
+
 agent-index stays lightweight on every machine unless repository-scoped
 configuration explicitly opts into search and designates a host role. Client
 routing and configuration resolution carry no host store or model dependencies.
