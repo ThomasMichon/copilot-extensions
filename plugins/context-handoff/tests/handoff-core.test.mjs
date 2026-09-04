@@ -159,12 +159,24 @@ test("runtime invocation isolates imports and forces UTF-8", () => {
   );
 });
 
-test("advisory Git facts do not require an ambient git command", () => {
-  assert.deepEqual(collectAdvisoryGitFacts(), {
-    branch: null,
-    repo: null,
-    status: null,
+test("advisory Git facts use the external git command from PATH", () => {
+  const calls = [];
+  const execute = (bin, args, options) => {
+    calls.push({ bin, args, options });
+    return `${args[0]}\n`;
+  };
+
+  assert.deepEqual(collectAdvisoryGitFacts("/repo", execute), {
+    branch: "rev-parse",
+    repo: "remote",
+    status: "status",
   });
+  assert.deepEqual(calls.map(({ bin, args }) => [bin, args]), [
+    ["git", ["rev-parse", "--abbrev-ref", "HEAD"]],
+    ["git", ["remote", "get-url", "origin"]],
+    ["git", ["status", "--short"]],
+  ]);
+  assert.ok(calls.every(({ options }) => options.cwd === "/repo"));
 });
 
 test("handoff titles are normalized to one line at entry", () => {

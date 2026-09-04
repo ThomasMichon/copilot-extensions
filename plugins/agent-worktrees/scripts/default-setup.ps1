@@ -48,10 +48,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$setupShell = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-if (-not $setupShell -or -not (Test-Path -LiteralPath $setupShell -PathType Leaf)) {
-    throw 'Unable to resolve the current PowerShell executable.'
-}
 
 # ── --stdio (ACP) mode: keep human output off the JSON-RPC channel ────────
 # In --stdio mode stdout is the ACP JSON-RPC stream (SSH merges Information into
@@ -177,10 +173,10 @@ if ($SetupHook -and -not $Recovery) {
         Write-Host "  Setup:    $SetupHook" -ForegroundColor DarkGray
         if ($script:StdioMode) {
             # Keep the hook's stdout off the ACP channel.
-            & $setupShell -NoProfile -NoLogo -File $SetupHook -Machine $Machine 2>&1 |
+            & pwsh.exe -NoProfile -NoLogo -File $SetupHook -Machine $Machine 2>&1 |
                 ForEach-Object { [Console]::Error.WriteLine($_) }
         } else {
-            & $setupShell -NoProfile -NoLogo -File $SetupHook -Machine $Machine
+            & pwsh.exe -NoProfile -NoLogo -File $SetupHook -Machine $Machine
         }
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Setup hook exited with code $LASTEXITCODE; continuing to launch."

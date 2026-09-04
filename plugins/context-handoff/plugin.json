@@ -1,7 +1,7 @@
 {
   "name": "context-handoff",
   "description": "Context window monitoring and session handoff for Copilot CLI -- a session-start continuity kernel plus an extension that tracks token utilization via session.usage_info, nudges before auto-compaction, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover",
-  "version": "0.1.1-dev1",
+  "version": "0.1.1-dev2",
   "runtimeScope": "none",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",

@@ -320,19 +320,31 @@ export function worktreeInfo(cwd, sid, get = agentWorktreesGet) {
   return { wtDir, worktree, stateDir };
 }
 
-export function collectAdvisoryGitFacts() {
-  // This payload has no attributable Git command surface. Advisory handoff
-  // facts stay null rather than consulting an ambient PATH entry.
+export function collectAdvisoryGitFacts(
+  cwd = process.cwd(),
+  execute = execFileSync,
+) {
+  const git = (args) => {
+    try {
+      return execute("git", args, {
+        cwd,
+        timeout: 5000,
+        encoding: "utf-8",
+      }).trim() || null;
+    } catch {
+      return null;
+    }
+  };
   return {
-    branch: null,
-    repo: null,
-    status: null,
+    branch: git(["rev-parse", "--abbrev-ref", "HEAD"]),
+    repo: git(["remote", "get-url", "origin"]),
+    status: git(["status", "--short"]),
   };
 }
 
 export function collectCliHandoffFacts(cwd, sid) {
   const info = worktreeInfo(cwd, sid);
-  const git = collectAdvisoryGitFacts();
+  const git = collectAdvisoryGitFacts(cwd);
   return {
     sessionId: sid || null,
     cwd,
