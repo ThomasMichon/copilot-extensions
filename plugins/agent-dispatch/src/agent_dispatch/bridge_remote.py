@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import time
@@ -35,13 +36,47 @@ class LocalBridgeRemoteClient:
     def __init__(self, *, config_dir: Path | None = None) -> None:
         self._config_dir = config_dir
 
+    @staticmethod
+    def _explicit_base_url(value: str) -> str:
+        try:
+            parsed = urllib.parse.urlsplit(value)
+            host = parsed.hostname
+            _ = parsed.port
+        except ValueError as exc:
+            raise RemoteBridgeUnavailable(
+                "Agent Bridge explicit endpoint is invalid"
+            ) from exc
+        if (
+            parsed.scheme.casefold() not in {"http", "https"}
+            or not host
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise RemoteBridgeUnavailable(
+                "Agent Bridge explicit endpoint must be a loopback HTTP URL"
+            )
+        normalized_host = host.rstrip(".").casefold()
+        if normalized_host != "localhost":
+            try:
+                is_loopback = ipaddress.ip_address(normalized_host).is_loopback
+            except ValueError:
+                is_loopback = False
+            if not is_loopback:
+                raise RemoteBridgeUnavailable(
+                    "Agent Bridge explicit endpoint must be a loopback HTTP URL"
+                )
+        return value.rstrip("/")
+
     def _connection(self) -> tuple[str, str]:
         config_dir = self._config_dir or Path(
             os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
         ).expanduser()
         explicit = os.environ.get("AGENT_BRIDGE_BASE_URL")
         if explicit:
-            base_url = explicit.rstrip("/")
+            base_url = self._explicit_base_url(explicit)
         else:
             try:
                 from zdd.routing import read_active_endpoint
@@ -61,7 +96,7 @@ class LocalBridgeRemoteClient:
                 (config_dir / "auth.yaml").read_text(encoding="utf-8")
             ) or {}
             token = str(auth.get("token") or "")
-        except (OSError, ValueError, yaml.YAMLError) as exc:
+        except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
             raise RemoteBridgeUnavailable(
                 "Agent Bridge authentication is unavailable"
             ) from exc

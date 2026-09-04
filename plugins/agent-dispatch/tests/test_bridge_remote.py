@@ -70,6 +70,53 @@ def test_malformed_auth_degrades_as_unavailable(tmp_path, monkeypatch):
         LocalBridgeRemoteClient(config_dir=tmp_path)._connection()
 
 
+def test_undecodable_auth_degrades_as_unavailable(tmp_path, monkeypatch):
+    (tmp_path / "auth.yaml").write_bytes(b"\xff")
+    monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", "http://127.0.0.1:1")
+
+    with pytest.raises(RemoteBridgeUnavailable, match="authentication"):
+        LocalBridgeRemoteClient(config_dir=tmp_path)._connection()
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://example.com:8080",
+        "http://user@127.0.0.1:8080",
+        "file://127.0.0.1/tmp/bridge",
+        "http://127.0.0.1:8080/bridge",
+    ],
+)
+def test_explicit_base_url_must_be_loopback_http(
+    tmp_path, monkeypatch, base_url
+):
+    (tmp_path / "auth.yaml").write_text("token: secret", encoding="utf-8")
+    monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", base_url)
+
+    with pytest.raises(RemoteBridgeUnavailable, match="loopback HTTP"):
+        LocalBridgeRemoteClient(config_dir=tmp_path)._connection()
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://localhost:8080/",
+        "http://127.0.0.2:8080",
+        "http://[::1]:8080",
+    ],
+)
+def test_explicit_base_url_accepts_loopback_hosts(
+    tmp_path, monkeypatch, base_url
+):
+    (tmp_path / "auth.yaml").write_text("token: secret", encoding="utf-8")
+    monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", base_url)
+
+    assert LocalBridgeRemoteClient(config_dir=tmp_path)._connection() == (
+        base_url.rstrip("/"),
+        "secret",
+    )
+
+
 def test_health_probe_shares_operation_timeout_budget(monkeypatch):
     client = LocalBridgeRemoteClient()
     monkeypatch.setattr(
