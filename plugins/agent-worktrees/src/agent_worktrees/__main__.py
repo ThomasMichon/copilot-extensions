@@ -70,7 +70,11 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 import yaml
-from agent_procutil import detached_kwargs, no_window_flags, windowless_python
+from agent_procutil import (
+    detached_kwargs,
+    windowless_daemon_kwargs,
+    windowless_python,
+)
 
 from . import (
     activity,
@@ -7290,7 +7294,7 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         if r.returncode != 0:
             return False
 
-        argv = [_windowless_python(), "-m", "agent_worktrees", "status-updater",
+        argv = [sys.executable, "-m", "agent_worktrees", "status-updater",
                 "--session", sess, "--mux", mux]
         if path:
             argv += ["--path", path]
@@ -7308,7 +7312,7 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
             # cwd is irrelevant to its work -- root it at HOME.
             "cwd": os.path.expanduser("~"),
         }
-        kwargs.update(detached_kwargs(breakaway=True))
+        kwargs.update(windowless_daemon_kwargs(breakaway=True))
 
         subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
         return True
@@ -7338,8 +7342,6 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     import shutil
     import subprocess
     import time
-
-    _install_headless_child_guard()
 
     sess = args.session
     if not sess:
@@ -7603,75 +7605,44 @@ def _remove_monitor_entry(reg_dir: Path, sess: str) -> None:
         pass
 
 
-_CREATE_NEW_CONSOLE = 0x00000010  # headless-guard: allow preserve caller-requested interactive console
-
-
 def _windowless_python() -> str:
-    """The interpreter to spawn a detached, consoleless background daemon with.
+    """The interpreter for a detached daemon with no recurring console children.
 
     On Windows a venv ``python.exe`` is a *console* launcher: even started with
     ``DETACHED_PROCESS`` it re-launches the base interpreter as a child that
     allocates its OWN console, which Windows Terminal (DefTerm) then surfaces as
-    a visible window/tab -- the "headed status-monitor / status-updater" bug.
+    a visible window/tab.
     ``pythonw.exe`` (the GUI-subsystem sibling) never allocates a console, so a
     fully-background daemon (DEVNULL stdio, no console I/O) stays truly
     windowless through the trampoline. Falls back to ``sys.executable`` when no
-    sibling ``pythonw`` exists (non-standard layout) or off Windows.
+    sibling ``pythonw`` exists (non-standard layout) or off Windows. Daemons
+    with recurring console descendants intentionally retain console Python
+    under ``windowless_daemon_kwargs()`` instead, so those descendants inherit
+    one hidden console tree.
     """
     return windowless_python(sys.executable)
 
 
-def _install_headless_child_guard() -> None:
-    """Make every child this (consoleless) daemon spawns windowless on Windows.
-
-    A background daemon started via :func:`_windowless_python` runs under
-    ``pythonw`` with NO console of its own. When it then shells out to a
-    *console-subsystem* child -- ``psmux``/``pwsh`` for the status vars, ``git``
-    for the segment render -- Windows allocates that child a BRAND-NEW console,
-    which DefTerm surfaces as a flashing window every tick. OR-ing
-    ``CREATE_NO_WINDOW`` into every ``Popen`` (unless a new console was
-    explicitly requested) keeps the whole daemon silent without threading the
-    flag through each call site. Idempotent; mirrors the test-suite conftest
-    guard. No-op off Windows.
-    """
-    cnw = no_window_flags()
-    if not cnw:
-        return
-    orig = subprocess.Popen.__init__
-    if getattr(orig, "_aw_headless", False):
-        return
-
-    def _headless_init(self, *args, **kwargs):  # noqa: ANN002, ANN003
-        flags = kwargs.get("creationflags", 0)
-        if not (flags & _CREATE_NEW_CONSOLE):  # headless-guard: allow preserve caller-requested interactive console
-            kwargs["creationflags"] = flags | cnw
-        return orig(self, *args, **kwargs)
-
-    _headless_init._aw_headless = True
-    subprocess.Popen.__init__ = _headless_init
-
-
 def _spawn_detached(argv: list[str]) -> bool:
-    """Detached-spawn a fixed, trusted argv rooted at HOME.
+    """Spawn a survivable, windowless daemon rooted at HOME.
 
     Rooted at HOME (never the plugin payload dir): a detached child that keeps
     the payload dir as its cwd holds an open handle that blocks
     ``copilot plugin update`` on Windows.  Never raises.
 
-    A leading ``sys.executable`` is swapped for :func:`_windowless_python` so a
-    detached background daemon stays windowless through the Windows venv
-    ``python.exe`` trampoline (see that helper).
+    On Windows the console-subsystem interpreter is intentionally retained and
+    launched under ``CREATE_NO_WINDOW``. Its periodic console children then
+    inherit one hidden console tree instead of each allocating a Default
+    Terminal host from a consoleless ``pythonw`` parent.
     """
     argv = list(argv)
-    if argv and argv[0] == sys.executable:
-        argv[0] = _windowless_python()
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "cwd": os.path.expanduser("~"),
     }
-    kwargs.update(detached_kwargs(breakaway=True))
+    kwargs.update(windowless_daemon_kwargs(breakaway=True))
     try:
         subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
         return True
@@ -8945,8 +8916,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import pane_reaper
     from . import session_catalog
     from .hook_ipc import HookIpcServer, HookUnavailable
-
-    _install_headless_child_guard()
 
     mux = ("psmux" if shutil.which("psmux") else
            ("tmux" if shutil.which("tmux") else None))
