@@ -552,3 +552,115 @@ class TestClassifyGitTimeout:
         assert info.state == go.WorktreeState.UNKNOWN
         # Branch metadata from the successful pre-git read is still reported.
         assert info.current_branch == "worktree/x"
+
+
+class TestClassifyGitProcessCount:
+    """Classification avoids separate merge-base and rev-list count spawns."""
+
+    @staticmethod
+    def _run(monkeypatch, responses):
+        calls = []
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+            calls.append(args)
+            return responses(args)
+
+        monkeypatch.setattr(go, "git", fake_git)
+        info = go._classify_git_state(
+            Path("."),
+            "worktree/x",
+            "origin/main",
+            fetch=False,
+            remote="origin",
+            default_branch="main",
+            actual_branch="worktree/x",
+            drift=False,
+        )
+        return info, calls
+
+    def test_dirty_ahead_path_gets_counts_without_merge_base(self, monkeypatch):
+        def responses(args):
+            if args[:1] == ("status",):
+                return types.SimpleNamespace(
+                    returncode=0, stdout=" M changed.txt\n", stderr="")
+            if args[:1] == ("rev-list",):
+                return types.SimpleNamespace(
+                    returncode=0, stdout="2\t0\n", stderr="")
+            if args[:2] == ("--no-pager", "log"):
+                return types.SimpleNamespace(
+                    returncode=0, stdout="Pending work\n", stderr="")
+            raise AssertionError(f"unexpected git call: {args}")
+
+        info, calls = self._run(monkeypatch, responses)
+
+        assert info.state == WorktreeState.DIRTY
+        assert (info.ahead, info.behind, info.dirty) == (2, 0, 1)
+        assert [call[0] for call in calls] == [
+            "status", "rev-list", "--no-pager",
+        ]
+        assert calls[1] == (
+            "rev-list", "--left-right", "--count",
+            "worktree/x...origin/main",
+        )
+
+    def test_diverged_orphan_still_requires_failed_merge_base(self, monkeypatch):
+        def responses(args):
+            if args[:1] == ("status",):
+                return types.SimpleNamespace(
+                    returncode=0, stdout="", stderr="")
+            if args[:1] == ("rev-list",):
+                return types.SimpleNamespace(
+                    returncode=0, stdout="1 4\n", stderr="")
+            if args[:1] == ("merge-base",):
+                return types.SimpleNamespace(
+                    returncode=1, stdout="", stderr="")
+            raise AssertionError(f"unexpected git call: {args}")
+
+        info, calls = self._run(monkeypatch, responses)
+
+        assert info.state == WorktreeState.ORPHAN
+        assert [call[0] for call in calls] == [
+            "status", "rev-list", "merge-base",
+        ]
+
+    def test_failed_count_preserves_orphan_detection(self, monkeypatch):
+        def responses(args):
+            if args[:1] == ("status",):
+                return types.SimpleNamespace(
+                    returncode=0, stdout="", stderr="")
+            if args[:1] == ("rev-list",):
+                return types.SimpleNamespace(
+                    returncode=128, stdout="", stderr="bad revision")
+            if args[:1] == ("merge-base",):
+                return types.SimpleNamespace(
+                    returncode=1, stdout="", stderr="bad revision")
+            raise AssertionError(f"unexpected git call: {args}")
+
+        info, calls = self._run(monkeypatch, responses)
+
+        assert info.state == WorktreeState.ORPHAN
+        assert [call[0] for call in calls] == [
+            "status", "rev-list", "merge-base",
+        ]
+
+    def test_patch_equivalent_ahead_branch_never_needs_merge_base(
+        self, monkeypatch,
+    ):
+        def responses(args):
+            if args[:1] == ("status",):
+                stdout = ""
+            elif args[:1] == ("rev-list",):
+                stdout = "2 0\n"
+            elif args[:2] == ("--no-pager", "log"):
+                stdout = "Already landed\n"
+            elif args[:1] == ("cherry",):
+                stdout = "- deadbeef\n- cafef00d\n"
+            else:
+                raise AssertionError(f"unexpected git call: {args}")
+            return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        info, calls = self._run(monkeypatch, responses)
+
+        assert info.state == WorktreeState.COMPLETED
+        assert (info.ahead, info.behind) == (2, 0)
+        assert "merge-base" not in [call[0] for call in calls]
