@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-machines"
-version = "0.1.0-dev87"
+version = "0.1.0-dev88"
 description = "Portable machine setup and restore for Copilot CLI."
 readme = "README.md"
 license = "MIT"

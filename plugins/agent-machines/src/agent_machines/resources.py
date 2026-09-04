@@ -34,16 +34,15 @@ power-scheme AC/DC values via ``powercfg``). Adding a type is a new
 ``ResourceHandler`` subclass registered in :data:`HANDLERS` -- nothing else in
 the engine changes.
 
-**Collision handling mirrors the validator's stance: detect-and-report, resolve
-only the unambiguously-compatible.** When two packages target the same resource
+**Collision handling is field-local.** When two packages target the same resource
 identity -- ``(manager, id)`` for a package; ``(path, block)`` for a file (the
 block is empty for whole-file strategies); ``(key, value-name)`` for a registry
 value; ``(manager, id)`` for a feature; or ``(scheme, subgroup, setting)`` for
-a power setting -- compatible declarations are merged
-deterministically; incompatible desired values, version pins, ownership, or
-strategies raise an ``error`` (or ``advisory``) finding. Distinct managed blocks
-in one file are compatible; a whole-file owner and a block on the same path are
-not.
+a power setting -- each conflicting semantic field uses its highest-authority
+participants. Equal-highest disagreement retains the existing error (or
+advisory), while compatible union and safety fields retain every declaration.
+Distinct managed blocks in one file are compatible; a whole-file owner and a
+block on the same path are not, regardless of authority.
 """
 
 from __future__ import annotations
@@ -60,6 +59,7 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
+from .authority import contributor, effective_authority, sort_decisions
 from .manifest import (
     RequirementPackage,
     canonical_power_token,
@@ -112,6 +112,8 @@ class ResolvedResource:
     identity: tuple
     desired: dict[str, Any]
     contributors: list[str] = field(default_factory=list)
+    contributor_details: list[dict[str, Any]] = field(default_factory=list)
+    authority_decisions: list[dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> str:
         """A one-word disposition-ish label for plan output."""
@@ -176,6 +178,89 @@ class ResourceContext:
     repo_paths: dict[str, Path]
     platform: str
     runner: Runner = default_runner
+
+
+@dataclass(frozen=True)
+class ResourceContribution:
+    """One package's declaration plus authority and display provenance."""
+
+    package: RequirementPackage
+    declaration: dict[str, Any]
+    owner: str
+
+    @property
+    def authority(self) -> int:
+        return effective_authority(self.package, self.declaration)
+
+    @property
+    def provenance(self) -> dict[str, Any]:
+        return contributor(self.package, self.declaration)
+
+    @property
+    def sort_key(self) -> tuple[str, str, str]:
+        return (self.owner, self.package.source_repo, self.package.name)
+
+
+def _semantic_key(value: Any) -> tuple[str, str]:
+    return type(value).__name__, repr(value)
+
+
+def _select_field(
+    members: list[ResourceContribution],
+    identity: tuple,
+    field_name: str,
+    value_of,
+    *,
+    include=lambda _member: True,
+) -> tuple[
+    Any,
+    list[ResourceContribution],
+    list[ResourceContribution],
+    bool,
+    dict[str, Any] | None,
+    ResourceFinding | None,
+]:
+    """Select one semantic field from its highest-authority participants."""
+    participants = sorted(
+        [member for member in members if include(member)],
+        key=lambda member: member.sort_key,
+    )
+    if not participants:
+        return None, [], [], False, None, None
+    highest = max(member.authority for member in participants)
+    selected = [member for member in participants if member.authority == highest]
+    selected_values = {_semantic_key(value_of(member)) for member in selected}
+    chosen = value_of(selected[0])
+    if len(selected_values) > 1:
+        return chosen, selected, [], True, None, None
+    chosen_key = _semantic_key(chosen)
+    superseded = [
+        member
+        for member in participants
+        if member.authority < highest
+        and _semantic_key(value_of(member)) != chosen_key
+    ]
+    if not superseded:
+        return chosen, selected, [], False, None, None
+    decision = {
+        "domain": "resource",
+        "identity": {
+            "type": str(identity[0]),
+            "key": [str(part) for part in identity[1:]],
+            "field": field_name,
+        },
+        "selected": [member.provenance for member in selected],
+        "superseded": [member.provenance for member in superseded],
+    }
+    label = ":".join(str(part) for part in identity)
+    finding = ResourceFinding(
+        "info",
+        "authority-supersession",
+        f"resource '{label}' field '{field_name}' uses authority {highest} from "
+        f"{', '.join(member.package.name for member in selected)} over "
+        f"{', '.join(member.package.name for member in superseded)}",
+    )
+    return chosen, selected, superseded, False, decision, finding
 
 
 # --------------------------------------------------------------------------- #
@@ -266,8 +351,10 @@ class ResourceHandler:
         return not platforms or plat in platforms
 
     def merge(
-        self, decls: list[dict[str, Any]], owners: list[str]
-    ) -> tuple[dict[str, Any], list[ResourceFinding]]:  # pragma: no cover - abstract
+        self, members: list[ResourceContribution]
+    ) -> tuple[
+        dict[str, Any], list[ResourceFinding], list[dict[str, Any]]
+    ]:  # pragma: no cover - abstract
         raise NotImplementedError
 
     def apply(
@@ -294,29 +381,48 @@ class PackageResourceHandler(ResourceHandler):
         return mgr is None or plat in mgr["platforms"]
 
     def merge(
-        self, decls: list[dict[str, Any]], owners: list[str]
-    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        self, members: list[ResourceContribution]
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
         findings: list[ResourceFinding] = []
+        decisions: list[dict[str, Any]] = []
+        decls = [member.declaration for member in members]
         ident = self.identity(decls[0])
-        who = ", ".join(sorted(set(owners)))
-        states = {str(d.get("state", "present")) for d in decls}
-        state = "present"
-        if states == {"absent"}:
-            state = "absent"
-        elif len(states) > 1:
+        state, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "state",
+            lambda member: str(member.declaration.get("state", "present")),
+        )
+        if conflict:
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
                 f"package '{ident[2]}' ({ident[1]}) is declared both present and "
-                f"absent across packages: {who}.",
+                f"absent across packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
-        versions = {str(d["version"]) for d in decls if d.get("version")}
-        version = sorted(versions)[0] if versions else None
-        if len(versions) > 1:
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
+        version, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "version",
+            lambda member: str(member.declaration["version"]),
+            include=lambda member: bool(member.declaration.get("version")),
+        )
+        if conflict:
+            versions = sorted({
+                str(member.declaration["version"]) for member in selected
+            })
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
                 f"package '{ident[2]}' ({ident[1]}) is pinned to conflicting "
-                f"versions {sorted(versions)} across packages: {who}.",
+                f"versions {versions} across packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
         pin = any(bool(d.get("pin")) for d in decls)
         guard_names = sorted({
             str(name).strip().casefold()
@@ -326,7 +432,7 @@ class PackageResourceHandler(ResourceHandler):
         desired = {"manager": ident[1], "id": ident[2], "state": state,
                    "version": version, "pin": pin,
                    "process_guard": {"names": guard_names} if guard_names else None}
-        return desired, findings
+        return desired, findings, decisions
 
     # -- detect / apply -----------------------------------------------------
     def _detect(self, ctx: ResourceContext, mgr: dict, pkg_id: str) -> dict[str, Any]:
@@ -551,110 +657,178 @@ class FileResourceHandler(ResourceHandler):
         return str(decl.get("id") or decl.get("path"))
 
     def merge(
-        self, decls: list[dict[str, Any]], owners: list[str]
-    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        self, members: list[ResourceContribution]
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
+        decls = [member.declaration for member in members]
+        owners = [member.owner for member in members]
         if str(decls[0].get("strategy")) == "managed-block":
-            return self._merge_managed_block(decls, owners)
+            return self._merge_managed_block(members)
         findings: list[ResourceFinding] = []
+        decisions: list[dict[str, Any]] = []
         path = str(decls[0].get("path"))
         who = ", ".join(sorted(set(owners)))
+        ident = self.identity(decls[0])
 
-        formats = {str(d.get("format", "text")) for d in decls}
-        fmt = sorted(formats)[0]
-        if len(formats) > 1:
-            findings.append(ResourceFinding(
-                "error", "resource-conflict",
-                f"file '{path}' is declared with conflicting formats {sorted(formats)} "
-                f"across packages: {who}.",
-            ))
-
-        # Order declarations deterministically (owner, then content) so the pick
-        # and any advisory are reproducible.
-        ordered = sorted(
-            zip(decls, owners, strict=False),
-            key=lambda t: (t[1], str(t[0].get("content", ""))),
-        )
-        enforce = [(d, o) for d, o in ordered if d.get("strategy", "enforce") == "enforce"]
-        floor = [(d, o) for d, o in ordered if d.get("strategy", "enforce") == "ensure-present"]
-
-        def content_of(pair):
-            return pair[0].get("content", "")
+        ordered = sorted(members, key=lambda member: member.sort_key)
+        enforce = [
+            member for member in ordered
+            if member.declaration.get("strategy", "enforce") == "enforce"
+        ]
+        floor = [
+            member for member in ordered
+            if member.declaration.get("strategy", "enforce") == "ensure-present"
+        ]
 
         if enforce:
-            contents = {str(content_of(p)) for p in enforce}
-            if len(contents) > 1:
+            format_members = enforce
+            fmt, selected, _, conflict, decision, info = _select_field(
+                format_members,
+                ident,
+                "format",
+                lambda member: str(member.declaration.get("format", "text")),
+            )
+            if conflict:
+                formats = sorted({
+                    str(member.declaration.get("format", "text"))
+                    for member in selected
+                })
+                findings.append(ResourceFinding(
+                    "error", "resource-conflict",
+                    f"file '{path}' is declared with conflicting formats {formats} "
+                    f"across packages: "
+                    f"{', '.join(sorted(member.owner for member in selected))}.",
+                ))
+            if decision:
+                decisions.append(decision)
+                findings.append(info)
+            content, selected, _, conflict, decision, info = _select_field(
+                enforce,
+                ident,
+                "content",
+                lambda member: member.declaration.get("content", ""),
+            )
+            if conflict:
                 findings.append(ResourceFinding(
                     "error", "resource-conflict",
                     f"file '{path}' is enforced to conflicting content by "
-                    f"{', '.join(sorted(o for _, o in enforce))}.",
+                    f"{', '.join(sorted(member.owner for member in selected))}.",
                 ))
+            if decision:
+                decisions.append(decision)
+                findings.append(info)
             if floor:
                 findings.append(ResourceFinding(
                     "advisory", "resource-precedence",
                     f"file '{path}' has both enforce and ensure-present declarations; "
                     f"enforce content wins.",
                 ))
-            chosen = enforce[0]
             strategy = "enforce"
         else:
-            contents = {str(content_of(p)) for p in floor}
-            if len(contents) > 1:
+            format_members = floor
+            fmt, selected, _, conflict, decision, info = _select_field(
+                format_members,
+                ident,
+                "format",
+                lambda member: str(member.declaration.get("format", "text")),
+            )
+            if conflict:
+                formats = sorted({
+                    str(member.declaration.get("format", "text"))
+                    for member in selected
+                })
+                findings.append(ResourceFinding(
+                    "error", "resource-conflict",
+                    f"file '{path}' is declared with conflicting formats {formats} "
+                    f"across packages: "
+                    f"{', '.join(sorted(member.owner for member in selected))}.",
+                ))
+            if decision:
+                decisions.append(decision)
+                findings.append(info)
+            content, selected, _, conflict, decision, info = _select_field(
+                floor,
+                ident,
+                "content",
+                lambda member: member.declaration.get("content", ""),
+            )
+            if conflict:
                 findings.append(ResourceFinding(
                     "advisory", "resource-precedence",
                     f"file '{path}' has ensure-present declarations with differing "
                     f"content across {who}; the first by owner order is used.",
                 ))
-            chosen = floor[0]
+            if decision:
+                decisions.append(decision)
+                findings.append(info)
             strategy = "ensure-present"
 
         desired = {"path": path, "format": fmt, "strategy": strategy,
-                   "content": chosen[0].get("content", "")}
-        return desired, findings
+                   "content": content}
+        return desired, findings, decisions
 
     def _merge_managed_block(
-        self, decls: list[dict[str, Any]], owners: list[str]
-    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        self, members: list[ResourceContribution]
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
         """Resolve a group that all target the *same* ``(path, block)`` identity."""
         findings: list[ResourceFinding] = []
+        decisions: list[dict[str, Any]] = []
+        decls = [member.declaration for member in members]
         path = str(decls[0].get("path"))
         block = str(decls[0].get("block"))
-        who = ", ".join(sorted(set(owners)))
+        ident = self.identity(decls[0])
 
-        marker_sets = {(self._marker_begin(d), self._marker_end(d)) for d in decls}
+        marker_sets = {
+            (
+                self._marker_begin(member.declaration),
+                self._marker_end(member.declaration),
+            )
+            for member in members
+        }
         begin, end = sorted(marker_sets)[0]
         if len(marker_sets) > 1:
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
                 f"managed block '{block}' in '{path}' has conflicting begin/end markers "
-                f"across packages: {who}.",
+                f"across packages: {', '.join(sorted(member.owner for member in members))}.",
             ))
 
-        states = {str(d.get("state", "present")) for d in decls}
-        state = "absent" if states == {"absent"} else "present"
-        if len(states) > 1:
+        state, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "state",
+            lambda member: str(member.declaration.get("state", "present")),
+        )
+        if conflict:
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
                 f"managed block '{block}' in '{path}' is declared both present and absent "
-                f"across packages: {who}.",
+                f"across packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
 
-        contents = {str(d.get("content", "")) for d in decls}
-        if len(contents) > 1:
+        content, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "content",
+            lambda member: member.declaration.get("content", ""),
+        )
+        if conflict:
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
                 f"managed block '{block}' in '{path}' has conflicting content across "
-                f"packages: {who}.",
+                f"packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
-
-        ordered = sorted(
-            zip(decls, owners, strict=False),
-            key=lambda t: (t[1], str(t[0].get("content", ""))),
-        )
-        chosen = ordered[0][0]
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
         desired = {"path": path, "format": "text", "strategy": "managed-block",
                    "block": block, "begin": begin, "end": end, "state": state,
-                   "content": chosen.get("content", "")}
-        return desired, findings
+                   "content": content}
+        return desired, findings, decisions
 
     def apply(
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
@@ -743,8 +917,14 @@ class FileResourceHandler(ResourceHandler):
             try:
                 content = json.loads(content) if content.strip() else {}
             except json.JSONDecodeError as exc:
-                return ResourceResult(self.TYPE, resolved.id, False, dry_run, "skip",
-                                      skipped_reason=f"content is not valid JSON: {exc}")
+                return ResourceResult(
+                    self.TYPE,
+                    resolved.id,
+                    False,
+                    dry_run,
+                    "error",
+                    detail=f"content is not valid JSON: {exc}",
+                )
         live = read_json(target) if exists else {}
         merged = merge_floor(live, content) if strategy == "ensure-present" \
             else merge_enforce(live, content)
@@ -827,41 +1007,75 @@ class RegistryResourceHandler(ResourceHandler):
         return plat == "windows"
 
     def merge(
-        self, decls: list[dict[str, Any]], owners: list[str]
-    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        self, members: list[ResourceContribution]
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
         findings: list[ResourceFinding] = []
+        decisions: list[dict[str, Any]] = []
+        decls = [member.declaration for member in members]
         key = canonical_reg_key(str(decls[0].get("path")))
         name = str(decls[0].get("name") or "")
-        who = ", ".join(sorted(set(owners)))
         label = f"{key}\\{name or '(Default)'}"
+        ident = self.identity(decls[0])
 
-        states = {str(d.get("state", "present")) for d in decls}
-        state = "absent" if states == {"absent"} else "present"
-        if len(states) > 1:
+        state, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "state",
+            lambda member: str(member.declaration.get("state", "present")),
+        )
+        if conflict:
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
                 f"registry value '{label}' is declared both present and absent across "
-                f"packages: {who}.",
+                f"packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
-        values = {str(d.get("value")) for d in decls if d.get("value") is not None}
-        value = sorted(values)[0] if values else None
-        if len(values) > 1:
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
+        value, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "value",
+            lambda member: member.declaration.get("value"),
+            include=lambda member: member.declaration.get("value") is not None,
+        )
+        if conflict:
+            values = sorted({
+                str(member.declaration.get("value")) for member in selected
+            })
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
-                f"registry value '{label}' is set to conflicting values {sorted(values)} "
-                f"across packages: {who}.",
+                f"registry value '{label}' is set to conflicting values {values} "
+                f"across packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
-        vtypes = {str(d.get("value_type", "String")) for d in decls}
-        vtype = sorted(vtypes)[0]
-        if len(vtypes) > 1:
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
+        vtype, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "value_type",
+            lambda member: str(member.declaration.get("value_type", "String")),
+        )
+        if conflict:
+            vtypes = sorted({
+                str(member.declaration.get("value_type", "String"))
+                for member in selected
+            })
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
-                f"registry value '{label}' has conflicting value types {sorted(vtypes)} "
-                f"across packages: {who}.",
+                f"registry value '{label}' has conflicting value types {vtypes} "
+                f"across packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
         desired = {"key": key, "name": name, "value": value,
                    "value_type": vtype, "state": state}
-        return desired, findings
+        return desired, findings, decisions
 
     def _detect(self, ctx: ResourceContext, key: str, name: str) -> dict[str, Any]:
         argv = ["reg", "query", key] + (["/v", name] if name else ["/ve"])
@@ -994,21 +1208,30 @@ class FeatureResourceHandler(ResourceHandler):
         return mgr is None or plat in mgr["platforms"]
 
     def merge(
-        self, decls: list[dict[str, Any]], owners: list[str]
-    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        self, members: list[ResourceContribution]
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
         findings: list[ResourceFinding] = []
+        decisions: list[dict[str, Any]] = []
+        decls = [member.declaration for member in members]
         ident = self.identity(decls[0])
-        who = ", ".join(sorted(set(owners)))
-        states = {str(d.get("state", "present")) for d in decls}
-        state = "absent" if states == {"absent"} else "present"
-        if len(states) > 1:
+        state, selected, _, conflict, decision, info = _select_field(
+            members,
+            ident,
+            "state",
+            lambda member: str(member.declaration.get("state", "present")),
+        )
+        if conflict:
             findings.append(ResourceFinding(
                 "error", "resource-conflict",
                 f"feature '{ident[2]}' ({ident[1]}) is declared both present and absent "
-                f"across packages: {who}.",
+                f"across packages: "
+                f"{', '.join(sorted(member.owner for member in selected))}.",
             ))
+        if decision:
+            decisions.append(decision)
+            findings.append(info)
         desired = {"manager": ident[1], "id": str(decls[0].get("id")), "state": state}
-        return desired, findings
+        return desired, findings, decisions
 
     def _detect(self, ctx: ResourceContext, mgr: dict, fid: str) -> dict[str, Any]:
         try:
@@ -1117,33 +1340,47 @@ class PowerSettingResourceHandler(ResourceHandler):
         return super().applies_on(decl, plat) and plat == "windows"
 
     def merge(
-        self, decls: list[dict[str, Any]], owners: list[str]
-    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        self, members: list[ResourceContribution]
+    ) -> tuple[dict[str, Any], list[ResourceFinding], list[dict[str, Any]]]:
         findings: list[ResourceFinding] = []
+        decisions: list[dict[str, Any]] = []
+        decls = [member.declaration for member in members]
         _, scheme, subgroup, setting = self.identity(decls[0])
         label = f"{scheme}/{subgroup}/{setting}"
-        who = ", ".join(sorted(set(owners)))
+        ident = self.identity(decls[0])
         desired: dict[str, Any] = {
             "scheme": scheme,
             "subgroup": subgroup,
             "setting": setting,
         }
         for source in ("ac", "dc"):
-            values = {
-                normalize_power_setting_value(decl[source])
-                for decl in decls
-                if source in decl
-            }
-            if len(values) > 1:
+            value, selected, _, conflict, decision, info = _select_field(
+                members,
+                ident,
+                source,
+                lambda member: normalize_power_setting_value(
+                    member.declaration[source]
+                ),
+                include=lambda member: source in member.declaration,
+            )
+            if conflict:
+                values = sorted({
+                    normalize_power_setting_value(member.declaration[source])
+                    for member in selected
+                })
                 findings.append(ResourceFinding(
                     "error",
                     "resource-conflict",
                     f"power setting '{label}' has conflicting {source.upper()} "
-                    f"values {sorted(values)} across packages: {who}.",
+                    f"values {values} across packages: "
+                    f"{', '.join(sorted(member.owner for member in selected))}.",
                 ))
-            if values:
-                desired[source] = sorted(values)[0]
-        return desired, findings
+            if decision:
+                decisions.append(decision)
+                findings.append(info)
+            if selected:
+                desired[source] = value
+        return desired, findings, decisions
 
     def _detect(self, ctx: ResourceContext, desired: dict[str, Any]) -> dict[str, Any]:
         argv = [
@@ -1570,19 +1807,40 @@ def resolve_resources(
                                  key=lambda kv: [str(x) for x in kv[0]]):
         rtype = ident[0]
         decls = [d for _, d in members]
-        owners = [str(d.get("owner") or pkg.name) for pkg, d in members]
+        contributions = sorted(
+            [
+                ResourceContribution(
+                    package=pkg,
+                    declaration=decl,
+                    owner=str(decl.get("owner") or pkg.name),
+                )
+                for pkg, decl in members
+            ],
+            key=lambda member: member.sort_key,
+        )
+        owners = [member.owner for member in contributions]
+        contributor_details = [member.provenance for member in contributions]
         handler = HANDLERS.get(rtype)
         if handler is None:
             # Reserved type -- carry it through so plan lists it, but there is
             # nothing to merge or apply yet.
             resolved.append(ResolvedResource(
                 rtype, str(decls[0].get("id") or decls[0].get("path")),
-                ident, dict(decls[0]), sorted(set(owners))))
+                ident, dict(decls[0]), sorted(set(owners)),
+                contributor_details=contributor_details,
+            ))
             continue
-        desired, fnd = handler.merge(decls, owners)
+        desired, fnd, decisions = handler.merge(contributions)
         findings.extend(fnd)
         resolved.append(ResolvedResource(
-            rtype, handler.display_id(decls[0]), ident, desired, sorted(set(owners))))
+            rtype,
+            handler.display_id(contributions[0].declaration),
+            ident,
+            desired,
+            sorted(set(owners)),
+            contributor_details=contributor_details,
+            authority_decisions=sort_decisions(decisions),
+        ))
     findings.extend(_file_ownership_findings(resolved))
     return resolved, findings
 

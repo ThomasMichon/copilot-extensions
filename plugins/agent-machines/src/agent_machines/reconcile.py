@@ -5,10 +5,9 @@ enumerate the managed surfaces + a reproducible drift key) is implemented here;
 the *apply* half (mutating ``~/.copilot/`` per disposition, backup-before-write)
 is delegated to the ``surfaces`` package and is built out per issue #4006.
 
-The drift key is ``hash(resolved package union)`` so a re-run with no manifest
-change does ~zero work -- mirroring agent-worktrees' version-keyed reconcile,
-but keyed on **manifest content**, not plugin version (that is why restore is a
-distinct stage, not overloaded onto plugin-runtime install).
+The drift key hashes effective selected state, so changing only a superseded
+losing value does not create drift. A separate provenance hash covers the full
+resolved package union, including authority metadata.
 """
 
 from __future__ import annotations
@@ -16,15 +15,23 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import modules as _modules
 from . import resources as _resources
+from . import validator as _validator
+from .authority import (
+    AUTHORITY_MODE_OPAQUE_ADDITIVE,
+    effective_authority,
+    sort_decisions,
+)
 from .discover import current_platform
 from .manifest import RequirementPackage, resolve_for_machine
-from .surfaces import SurfaceResult, apply_surfaces
+from .surfaces import SurfaceResult, apply_surfaces, collect_contributions
+from .surfaces._common import merge_enforce
 
 
 @dataclass
@@ -44,10 +51,13 @@ class Plan:
     surfaces: list[ManagedSurface]
     drift_key: str
     package_names: list[str]
-    modules: list[dict[str, str]] = field(default_factory=list)
+    provenance_hash: str = ""
+    modules: list[dict[str, Any]] = field(default_factory=list)
     resources: list[dict[str, Any]] = field(default_factory=list)
-    package_sources: list[dict[str, str]] = field(default_factory=list)
+    package_sources: list[dict[str, Any]] = field(default_factory=list)
+    package_authorities: list[dict[str, Any]] = field(default_factory=list)
     removals: list[dict[str, Any]] = field(default_factory=list)
+    authority_decisions: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
@@ -82,6 +92,7 @@ def manifest_hash(resolved: list[RequirementPackage]) -> str:
         {
             "package": pkg.name,
             "source_repo": pkg.source_repo,
+            "authority": pkg.authority,
             "manage": pkg.manage,
             "exclude": pkg.exclude,
             "aliases": pkg.aliases,
@@ -91,6 +102,98 @@ def manifest_hash(resolved: list[RequirementPackage]) -> str:
         }
         for pkg in sorted(resolved, key=lambda p: (p.source_repo, p.name))
     ]
+    blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def _without_declaration_authority(value: Any) -> Any:
+    """Remove only a declaration's top-level authority metadata."""
+    copied = copy.deepcopy(value)
+    if isinstance(copied, dict):
+        copied.pop("authority", None)
+    return copied
+
+
+def _settings_operations(resolved: list[RequirementPackage]) -> dict[str, Any]:
+    """Normalize settings behavior without depending on hypothetical live state."""
+    floors: list[dict[str, Any]] = []
+    enforced: dict[str, Any] = {}
+    removals: set[str] = set()
+    contributions = collect_contributions(resolved, "copilot.settings")
+    for disposition in ("ensure-present", "enforce"):
+        for disp, values, _ in contributions:
+            if disp != disposition:
+                continue
+            if disposition == "ensure-present":
+                floors.append(copy.deepcopy(values))
+                continue
+            for key, value in values.items():
+                enforced[key] = merge_enforce(enforced.get(key), value)
+    for disposition, keys, _ in contributions:
+        if disposition == "ensure-absent":
+            removals.update(str(item) for item in keys.get("enabledPlugins", []))
+    return {
+        "ensure-present": floors,
+        "enforce": enforced,
+        "ensure-absent": {"enabledPlugins": sorted(removals)},
+    }
+
+
+def effective_state_hash(
+    resolved: list[RequirementPackage],
+    machine: str,
+    plat: str,
+) -> str:
+    """Hash behaviorally effective state, excluding losing authority values."""
+    resources, _ = _resources.resolve_resources(resolved, machine, plat)
+    non_settings_manage = []
+    package_metadata = []
+    modules = [
+        {
+            "package": pkg.name,
+            "source_repo": pkg.source_repo,
+            "module": _without_declaration_authority(module),
+        }
+        for pkg, module in _modules.resolve_modules(resolved, machine, plat)
+    ]
+    for pkg in sorted(resolved, key=lambda item: (item.source_repo, item.name)):
+        for key, spec in sorted(pkg.manage.items()):
+            if key == "copilot.settings" or key.startswith("copilot.settings."):
+                continue
+            non_settings_manage.append({
+                "package": pkg.name,
+                "source_repo": pkg.source_repo,
+                "key": key,
+                "spec": _without_declaration_authority(spec),
+            })
+        package_metadata.append({
+            "package": pkg.name,
+            "source_repo": pkg.source_repo,
+            "exclude": pkg.exclude,
+            "aliases": pkg.aliases,
+            "bootstrap_floor": pkg.bootstrap_floor,
+        })
+    payload = {
+        "settings": _settings_operations(resolved),
+        "manage": non_settings_manage,
+        "packages": package_metadata,
+        "modules": sorted(
+            modules,
+            key=lambda item: (
+                item["source_repo"],
+                item["package"],
+                str(item["module"].get("name", "")),
+            ),
+        ),
+        "resources": [
+            {
+                "type": resource.type,
+                "identity": [str(part) for part in resource.identity],
+                "desired": resource.desired,
+            }
+            for resource in resources
+        ],
+    }
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
 
@@ -113,8 +216,16 @@ def plan(
             # An enforced surface dominates the reported disposition.
             if disp == "enforce":
                 surface.disposition = "enforce"
+    for surface in surfaces.values():
+        surface.contributing_packages = sorted(set(surface.contributing_packages))
     module_list = [
-        {"name": str(mod.get("name")), "source_repo": pkg.source_repo}
+        {
+            "name": str(mod.get("name")),
+            "package": pkg.name,
+            "source_repo": pkg.source_repo,
+            "authority": effective_authority(pkg, mod),
+            "authority_mode": AUTHORITY_MODE_OPAQUE_ADDITIVE,
+        }
         for pkg, mod in _modules.resolve_modules(resolved, machine, plat)
     ]
     resolved_resources, _ = _resources.resolve_resources(resolved, machine, plat)
@@ -124,9 +235,19 @@ def plan(
             "id": res.id,
             "summary": res.summary(),
             "contributors": res.contributors,
+            "contributor_details": res.contributor_details,
+            "authority_decisions": res.authority_decisions,
         }
         for res in resolved_resources
     ]
+    authority_decisions = sort_decisions(
+        _validator.settings_authority_decisions(resolved)
+        + [
+            decision
+            for resource in resolved_resources
+            for decision in resource.authority_decisions
+        ]
+    )
     removals: dict[str, set[str]] = {}
     for pkg in resolved:
         for spec in pkg.manage.values():
@@ -137,12 +258,21 @@ def plan(
     return Plan(
         machine=machine,
         surfaces=sorted(surfaces.values(), key=lambda s: s.key),
-        drift_key=manifest_hash(resolved),
+        drift_key=effective_state_hash(resolved, machine, plat),
+        provenance_hash=manifest_hash(resolved),
         package_names=sorted(pkg.name for pkg in resolved),
         modules=module_list,
         resources=resource_list,
         package_sources=[
             {"package": pkg.name, "source_repo": pkg.source_repo}
+            for pkg in sorted(resolved, key=lambda item: (item.source_repo, item.name))
+        ],
+        package_authorities=[
+            {
+                "package": pkg.name,
+                "source_repo": pkg.source_repo,
+                "authority": pkg.authority,
+            }
             for pkg in sorted(resolved, key=lambda item: (item.source_repo, item.name))
         ],
         removals=[
@@ -154,6 +284,7 @@ def plan(
             }
             for identity, contributors in sorted(removals.items())
         ],
+        authority_decisions=authority_decisions,
     )
 
 
@@ -161,12 +292,15 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
     return {
         "machine": p.machine,
         "drift_key": p.drift_key,
+        "provenance_hash": p.provenance_hash,
         "packages": p.package_names,
         "package_sources": p.package_sources,
+        "package_authorities": p.package_authorities,
         "surfaces": [dataclasses.asdict(s) for s in p.surfaces],
         "modules": p.modules,
         "resources": p.resources,
         "removals": p.removals,
+        "authority_decisions": p.authority_decisions,
     }
 
 
@@ -190,6 +324,19 @@ class RestoreResult:
         )
 
 
+class RestoreValidationError(RuntimeError):
+    """Restore was refused because the resolved package union is invalid."""
+
+    def __init__(self, findings: list[Any]):
+        self.findings = findings
+        detail = "; ".join(
+            f"{finding.code}: {finding.message}"
+            for finding in findings
+            if finding.level == "error"
+        )
+        super().__init__(f"validator reported errors: {detail}")
+
+
 def restore(
     packages: list[RequirementPackage],
     machine: str,
@@ -208,8 +355,11 @@ def restore(
     just that section" flow.
     """
     plat = plat or current_platform()
-    p = plan(packages, machine, plat, accepted_machines)
     resolved = resolve_union(packages, machine, accepted_machines)
+    findings = _validator.validate(resolved, machine, plat)
+    if _validator.has_errors(findings):
+        raise RestoreValidationError(findings)
+    p = plan(packages, machine, plat, accepted_machines)
     surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
 
     resource_names = _resources.resource_only_names(resolved, machine, plat)
@@ -272,5 +422,6 @@ def restore_result_to_dict(result: RestoreResult) -> dict[str, Any]:
         "surfaces": [dataclasses.asdict(s) for s in result.surface_results],
         "resources": resources,
         "modules": [dataclasses.asdict(m) for m in result.module_results],
+        "authority_decisions": result.plan.authority_decisions,
         "ok": result.ok,
     }

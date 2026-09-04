@@ -75,18 +75,34 @@ fails. It never guesses machine scoping from package gates.
 
 ## Requirement-package schema
 
-`src\agent_machines\manifest.py` writes schema version `2` packages and retains
-read compatibility for legacy version `1`. Required keys are:
+`src\agent_machines\manifest.py` implements schema version `4` and retains read
+compatibility for versions `1`, `2`, and `3`. Required keys are:
 
-- `schema_version: 2`
+- `schema_version: 1|2|3|4`
 - `package: <name>`
 
-Optional keys include `gate`, `aliases`, `manage`, `per-machine` /
+Optional keys include `authority`, `gate`, `aliases`, `manage`, `per-machine` /
 `per_machine`, `bootstrap-floor` / `bootstrap_floor`, `exclude`, `modules`, and
 `resources`. `per-machine.<machine>` is deep-merged onto `manage`; a `null` leaf
 unsets a key. Machine overlay keys resolve case-insensitively, matching package
 gate semantics; keys are normalized once at load time for constant-time lookup,
 and case-duplicate or surrounding-whitespace keys are rejected as ambiguous.
+
+Schema version 4 is the fail-closed boundary for authority metadata. Authority
+is an integer from `-1000` through `1000`, defaults to `0` at package level,
+and may be overridden by a manage spec, resource, or module. Any authority field
+under an older schema is rejected so an older runtime cannot silently ignore
+the selection contract. Per-machine overlays remain manage-only: they may
+override or remove a manage-spec authority, but do not introduce per-machine
+package authority, resources, or modules.
+
+Authority is rejected on `ensure-absent`,
+`copilot.settings.plugin-tombstones`,
+`copilot.settings.plugin-activation`, and any manage payload containing
+`enabledPlugins` or `extraKnownMarketplaces`. Package authority is inherited,
+so it is also rejected when the package contains one of those sensitive specs.
+This keeps plugin tombstones, activation, marketplace bootstrap, and removal
+protections outside authority arbitration.
 
 Schema version 2 is the fail-closed capability boundary for
 `enabledPlugins.<plugin>: false` tombstones. A v1 package cannot rely on that
@@ -117,8 +133,10 @@ The accepted dispositions are:
 `src\agent_machines\reconcile.py` owns the restore flow:
 
 1. Resolve each package for the target machine.
-2. Compute a drift key from the full resolved package union, including source
-   provenance, surfaces, resources, and modules.
+2. Compute `drift_key` from normalized effective operations (ordered floors,
+   authority-resolved enforce values, explicit removals, resources, and
+   modules) and `provenance_hash` from the full resolved package union,
+   including package authority.
 3. Apply Copilot surfaces first.
 4. Apply declarative resources second (packages/files; see below).
 5. Run repo-local modules third.
@@ -139,7 +157,7 @@ The implemented surfaces live in `src\agent_machines\surfaces\`:
 
 | Logical key | File | Behavior |
 | --- | --- | --- |
-| `copilot.settings` | `~/.copilot/settings.json` | `ensure-present` floors first, then `enforce`; only declared keys are touched. `enabledPlugins.<plugin>: false` tombstones one plugin without replacing the map. |
+| `copilot.settings` | `~/.copilot/settings.json` | `ensure-present` floors first, then `enforce`; enforce contributions use ascending effective authority and a source/package/manage-key tiebreak, while ensure-present remains an authority-neutral union floor with stable source ordering. Only declared keys are touched. `enabledPlugins.<plugin>: false` tombstones one plugin without replacing the map. |
 | `copilot.permissions` | `~/.copilot/permissions-config.json` | Adds declared `tool_approvals` to existing concrete locations resolved from location classes. |
 | `copilot.trustedFolders` | `~/.copilot/config.json` | Adds concrete trusted folders while preserving other config keys. |
 
@@ -158,6 +176,9 @@ Module failures are reported in the result but do not prevent later modules from
 running.
 
 The public plugin does not ship OS-mutating modules. Those stay repo-local.
+Module authority is reporting-only and uses the explicit
+`authority_mode: opaque-additive`: all applicable modules remain additive,
+including same-named modules from different packages.
 
 ## Declarative resources
 
@@ -215,12 +236,25 @@ guide.
 - if any package manages marketplaces, omitting the bootstrap-critical
   `copilot-extensions` marketplace is an error.
 
-For `resources:`, cross-package collisions on the same identity are reported
-(delegated to `resources.detect_conflicts`): incompatible `present`/`absent`
-states, disagreeing version pins, and conflicting `enforce` file content or
-formats are errors; enforce-over-ensure-present precedence and differing
-ensure-present content are advisories. Compatible declarations merge
-deterministically (pins OR together; the deterministic pick is stable across
-package order).
+For `resources:`, authority is applied at each existing semantic conflict
+field rather than filtering whole declarations. Only highest-authority
+participants decide package state/version, file format/content/block
+state/content, registry state/value/type, feature state, and power AC/DC.
+Equal-highest disagreement retains the field's existing error or advisory.
+Compatible safety fields still merge from every declaration (`pin` OR and
+case-folded `process_guard.names` union), and whole-file versus managed-block
+ownership plus managed-block marker disagreement remain hard errors regardless
+of authority.
+
+For `copilot.settings*`, conflicting same-shape enforced scalar/collection
+leaves use the same highest-authority rule. A valid lower-authority disagreement
+emits an informational `authority-supersession` finding; equal-highest value
+disagreement retains the existing error. Incompatible settings shapes remain
+errors at every authority because declaration ordering cannot safely reconstruct
+the effective tree. Disposition classes do not arbitrate against each other: an
+`ensure-present` declaration cannot defeat `enforce` because it has more
+authority.
 
 The validator reads only manifests, not live `~/.copilot/` state.
+Both CLI and library restore paths run it before any surface, resource, or
+module mutation; direct callers receive `RestoreValidationError` on errors.

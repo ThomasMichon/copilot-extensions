@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..authority import effective_authority
 from ._common import SurfaceResult
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -41,7 +42,9 @@ def collect_contributions(
     packages: list[RequirementPackage], prefix: str
 ) -> list[tuple[str, dict[str, Any], str]]:
     """Gather ``(disposition, payload, package)`` under ``prefix``."""
-    out: list[tuple[str, dict[str, Any], str]] = []
+    out: list[
+        tuple[int, str, str, str, str, dict[str, Any]]
+    ] = []
     for pkg in packages:
         for key, spec in pkg.manage.items():
             if key == prefix or key.startswith(prefix + "."):
@@ -52,8 +55,21 @@ def collect_contributions(
                     else spec.get("values", spec.get("value"))
                 )
                 if isinstance(payload, dict):
-                    out.append((disposition, payload, pkg.name))
-    return out
+                    order_authority = (
+                        effective_authority(pkg, spec)
+                        if disposition == "enforce"
+                        else 0
+                    )
+                    out.append((
+                        order_authority,
+                        pkg.source_repo,
+                        pkg.name,
+                        key,
+                        disposition,
+                        payload,
+                    ))
+    out.sort(key=lambda item: item[:4])
+    return [(disposition, payload, package) for _, _, package, _, disposition, payload in out]
 
 
 def collect_specs(packages: list[RequirementPackage], prefix: str) -> list[dict[str, Any]]:

@@ -213,10 +213,12 @@ layouts, destination collisions, nested content, and unknown legacy entries
 rather than guessing. Reorganizing a migrated package into `machines/<machine>/`
 is a separate explicit edit.
 
-A package under `.agent-machines/all/` has this shape:
+A package under `.agent-machines/all/` has this shape. Schema v4 is required
+only when the package uses `authority`; runtimes continue to read v1-v3
+packages that do not:
 
 ```yaml
-schema_version: 3
+schema_version: 4
 package: myrepo/copilot-defaults
 gate: [my-box]                         # omit or ["*"] for all machines
 manage:
@@ -330,6 +332,75 @@ Recognized dispositions are `enforce`, `ensure-present`, `ensure-absent`,
 `capture-only`, `ignore`, `exclude`, `prune`, and `prerequisite-check`.
 Current restore applies `enforce`, `ensure-present`, and `ensure-absent`;
 `capture` and `prune` are placeholder CLI verbs today.
+
+### Deterministic authority
+
+Schema v4 adds an optional signed integer `authority` from `-1000` through
+`1000`. Package authority defaults to `0`; a `manage` spec, resource, or module
+may override it:
+
+```yaml
+schema_version: 4
+package: example/project-policy
+authority: 20
+manage:
+  copilot.settings.model:
+    disposition: enforce
+    authority: 30
+    values: { model: gpt-5.4 }
+resources:
+  - type: package
+    manager: winget
+    id: Example.Tool
+    authority: 10
+modules:
+  - name: project-bootstrap
+    authority: 5
+    windows:
+      command: ["pwsh", "-File", "tools/bootstrap.ps1"]
+      dry_run_args: ["-DryRun"]
+```
+
+For same-shape `copilot.settings*` scalar/collection conflicts and supported
+declarative resource conflict fields, a unique highest authority selects the
+effective value. Equal-highest disagreement remains a validation error (or the
+existing advisory where the field was already advisory), and non-overlapping
+lower-authority leaves still apply. Incompatible settings shapes and
+managed-block marker changes remain hard conflicts regardless of authority;
+neither is safe to migrate by ordering alone.
+`enforce` settings are applied in ascending authority with the stable tiebreak
+`source_repo`, package, and manage key. `ensure-present` settings retain their
+authority-neutral union-floor behavior and use only the stable source/package/key
+order; authority never turns a floor into an override. Resource compatibility
+fields remain conservative: package `pin` is ORed and every
+`process_guard.names` entry is retained.
+
+Authority is forbidden on plugin activation, tombstones, marketplaces, and
+desired-removal specs. A package-level authority is inherited, so a package
+that manages `enabledPlugins` or `extraKnownMarketplaces` must omit package
+authority and keep that safety-sensitive policy separate. Authority never
+overrides bootstrap or removal protections.
+
+`per-machine` continues to overlay only `manage`: it may override or remove a
+manage-spec authority (`authority: null` falls back to package authority).
+Per-machine package authority, resources, and modules are intentionally not
+part of schema v4.
+
+Modules are **opaque-additive** in v1 authority semantics. Every applicable
+module still runs, including same-named modules from different packages;
+authority is reported in plans/results but does not suppress imperative work.
+
+Every restore entry point validates the resolved package union before applying
+surfaces, resources, or modules. Direct library callers receive
+`RestoreValidationError`; conflict safety does not depend on using the CLI.
+
+Plan and restore JSON expose stable `authority_decisions` with selected and
+superseded source-qualified contributors. `drift_key` hashes normalized
+effective operations: ordered `ensure-present` floors, authority-resolved
+`enforce` values, explicit desired removals, resolved resources, and additive
+modules. `provenance_hash` hashes the complete resolved package union, including
+package authority. A change only to a losing enforce value therefore leaves the
+drift key stable but changes provenance.
 
 The top-level `resources:` list declares typed, identity-bearing machine state
 -- package-manager packages, canonical config files (whole-file or a marked

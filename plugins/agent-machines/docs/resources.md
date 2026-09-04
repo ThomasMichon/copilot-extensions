@@ -8,13 +8,15 @@ per-repo scripts. They sit between the Copilot **surfaces** (which converge
 A requirement package declares them under a top-level `resources:` list:
 
 ```yaml
-schema_version: 2
+schema_version: 4
 package: your-repo/machine-defaults
+authority: 0                  # optional, -1000..1000
 gate: ["your-box"]
 resources:
   - type: package
     id: marlocarlo.psmux        # identity within (type, manager)
     manager: winget             # winget | apt | pipx | uv-tool | pip
+    authority: 10               # optional override of package authority
     version: "3.3.5"           # exact pin (optional)
     state: present              # present (default) | absent
     pin: true                   # hold at version where the manager supports it
@@ -198,37 +200,52 @@ always declarations of desired AC/DC indexes.
 
 ## Collision handling
 
-When two packages target the same resource identity, the resolver mirrors the
-validator's stance -- **detect-and-report, resolve only the unambiguously
-compatible**:
+When two packages target the same resource identity, authority is resolved per
+semantic field. A unique highest authority selects that field and emits
+structured selected/superseded provenance plus an informational
+`authority-supersession` finding. Equal-highest disagreement retains the
+existing error (or advisory for differing `ensure-present` file content).
+Declarations are not filtered wholesale, so unrelated fields and conservative
+compatibility data from lower-authority declarations remain effective:
 
 | Situation | Result |
 | --- | --- |
-| package `present` + `absent` | error |
-| package two different `version` pins | error |
+| package `present` + `absent` | highest authority wins; equal-highest disagreement errors |
+| package two different `version` pins | highest authority wins; equal-highest disagreement errors |
 | package `pin` flags differ | OR'd to pinned (compatible) |
 | package `process_guard.names` differ | names are case-folded and unioned (conservative, compatible) |
-| file two `enforce` with different `content` | error |
-| file conflicting `format` | error |
+| file two `enforce` with different `content` | highest enforce authority wins; equal-highest disagreement errors |
+| file conflicting `format` | highest authority wins; equal-highest disagreement errors |
 | file `enforce` + `ensure-present` | enforce wins (advisory) |
-| file two `ensure-present` with different content | deterministic pick (advisory) |
-| file same `(path, block)` with different content | error |
+| file two `ensure-present` with different content | highest authority wins; equal-highest disagreement keeps the deterministic advisory |
+| file same `(path, block)` with different state or content | highest field authority wins; equal-highest disagreement errors |
+| file same `(path, block)` with different begin/end markers | error regardless of authority; marker migration is not implicit |
 | file distinct `block` ids in one file | compatible (coexist) |
 | file whole-file owner + managed block on one path | error |
-| registry `present` + `absent` | error |
-| registry conflicting `value` or `value_type` | error |
-| feature `present` + `absent` | error |
-| power setting conflicting `ac` or `dc` value | error |
+| registry `present` + `absent` | highest authority wins; equal-highest disagreement errors |
+| registry conflicting `value` or `value_type` | highest field authority wins; equal-highest disagreement errors |
+| feature `present` + `absent` | highest authority wins; equal-highest disagreement errors |
+| power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
 
-The deterministic pick is stable regardless of package order, so plans and drift
-keys are reproducible. Errors block `restore`; advisories do not.
+File `format` and `content` are selected from declarations participating in the
+winning strategy (`enforce` when present, otherwise `ensure-present`), so
+resolution never synthesizes a format/content pair that no compatible
+declaration supplied. Invalid JSON content is an error result, not a successful
+skip.
+
+Package `pin` remains an OR across every declaration, and
+`process_guard.names` remains a case-folded union across every declaration.
+Whole-file and managed-block ownership of the same path remains a hard error
+regardless of authority. The deterministic selection is stable regardless of
+package order, so plans and drift keys are reproducible. Errors block
+`restore`; advisories and authority information do not.
 
 ## CLI
 
 Resources appear in every verb:
 
-- `agent-machines plan` lists each resolved resource with a one-word summary and
-  its contributors.
+- `agent-machines plan` lists each resolved resource with a one-word summary
+  and contributors, then renders any source-qualified authority decisions.
 - `agent-machines validate` reports resource collisions alongside surface and
   bootstrap findings.
 - `agent-machines restore` applies resources between surfaces and modules;
@@ -236,8 +253,9 @@ Resources appear in every verb:
   performs them, and `--only <id|type|type:id>` restricts the run to a resource
   (and skips modules when nothing else is selected).
 - `agent-machines restore --json` includes a `resources` list (each result has
-  `status: ok|changed|deferred|skipped|error`) and a `plan.resources` list. Any resource
-  error makes the top-level `ok` false and the command exit nonzero.
+  `status: ok|changed|deferred|skipped|error`), a `plan.resources` list, and
+  stable `authority_decisions`. Any resource error makes the top-level `ok`
+  false and the command exit nonzero.
 
 ## Adopter guide
 

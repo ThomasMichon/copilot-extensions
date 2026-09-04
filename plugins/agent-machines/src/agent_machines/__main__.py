@@ -270,10 +270,15 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         owners = ", ".join(removal["contributors"])
         print(f"    - enabledPlugins.{removal['item']}  <- {owners}")
     for mod in plan.modules:
-        print(f"  module  {mod['name']}  <- {mod['source_repo']}")
+        print(
+            f"  module  {mod['name']}  "
+            f"[authority {mod['authority']}; {mod['authority_mode']}]  "
+            f"<- {mod['source_repo']}:{mod['package']}"
+        )
     for res in plan.resources:
         owners = ", ".join(res.get("contributors", []))
         print(f"  resource {res['type']}:{res['id']}  [{res['summary']}]  <- {owners}")
+    _print_authority_decisions(plan.authority_decisions)
     return 0
 
 
@@ -320,6 +325,29 @@ def _fmt_val(v: object) -> str:
     return s if len(s) <= 80 else s[:77] + "..."
 
 
+def _print_authority_decisions(decisions: list[dict[str, object]]) -> None:
+    for decision in decisions:
+        identity = decision["identity"]
+        if isinstance(identity, dict):
+            key = ":".join([str(identity.get("type", ""))]
+                           + [str(item) for item in identity.get("key", [])])
+            label = f"{key}.{identity.get('field', '')}"
+        else:
+            label = str(identity)
+        selected = ", ".join(
+            f"{item['source_repo']}:{item['package']}@{item['authority']}"
+            for item in decision.get("selected", [])
+        )
+        superseded = ", ".join(
+            f"{item['source_repo']}:{item['package']}@{item['authority']}"
+            for item in decision.get("superseded", [])
+        )
+        print(
+            f"  authority {decision['domain']} {label}: "
+            f"{selected} supersedes {superseded}"
+        )
+
+
 def _cmd_restore(args: argparse.Namespace) -> int:
     identity = _resolve_machine_identity(args)
     _emit_identity_warnings(identity)
@@ -351,7 +379,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             only=args.only,
             accepted_machines=identity.accepted,
         )
-    except SurfaceStateError as exc:
+    except (_reconcile.RestoreValidationError, SurfaceStateError) as exc:
         print(f"restore refused: {exc}", file=sys.stderr)
         return 1
     if args.json:
@@ -364,6 +392,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
         return 0 if result.ok else 2
     header = "DRY-RUN (preview only; re-run with --apply to make changes)" if dry_run else "APPLY"
     print(f"restore [{header}] for {machine} [{scope}]  (drift-key {result.plan.drift_key})")
+    _print_authority_decisions(result.plan.authority_decisions)
 
     if not result.surface_results:
         print("  surfaces: none")
@@ -420,14 +449,22 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     for r in result.module_results:
         if r.ran:
             status = "ok" if r.returncode == 0 else f"FAILED rc={r.returncode}"
-            print(f"  module {r.name} <- {r.source_repo}: {status}")
+            owner = f"{r.source_repo}:{r.package}" if r.package else r.source_repo
+            print(
+                f"  module {r.name} <- {owner}: {status} "
+                f"[authority {r.authority}; {r.authority_mode}]"
+            )
             if show_output and r.stdout_tail:
                 for line in r.stdout_tail.rstrip().splitlines():
                     print(f"      {line}")
             if r.returncode not in (0, None) and r.stderr_tail:
                 print(f"      {r.stderr_tail.strip().splitlines()[-1]}", file=sys.stderr)
         else:
-            print(f"  module {r.name} <- {r.source_repo}: skipped ({r.skipped_reason})")
+            owner = f"{r.source_repo}:{r.package}" if r.package else r.source_repo
+            print(
+                f"  module {r.name} <- {owner}: skipped ({r.skipped_reason}) "
+                f"[authority {r.authority}; {r.authority_mode}]"
+            )
     return 0 if result.ok else 2
 
 
