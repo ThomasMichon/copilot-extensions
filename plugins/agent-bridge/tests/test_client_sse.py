@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import gc
 import json
+import sys
 import weakref
 from unittest.mock import patch
+
+import pytest
 
 from agent_bridge.client import BridgeClient
 
@@ -73,9 +76,13 @@ class TestSseCommentParsing:
 
         assert response.closed is True
 
-    def test_abandoned_stream_suppresses_close_failure(self) -> None:
+    def test_abandoned_stream_suppresses_close_failure(
+        self, monkeypatch
+    ) -> None:
         client = BridgeClient("http://127.0.0.1:0", "tok")
         response = _FailingCloseSseResp([": heartbeat", ""])
+        unraisable = []
+        monkeypatch.setattr(sys, "unraisablehook", unraisable.append)
         with patch(
             "agent_bridge.client.urllib.request.urlopen",
             return_value=response,
@@ -86,6 +93,20 @@ class TestSseCommentParsing:
             gc.collect()
 
         assert stream_ref() is None
+        assert response.closed is True
+        assert unraisable == []
+
+    def test_exhausted_stream_suppresses_close_failure(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            stream = client.stream_events("sess-1")
+            with pytest.raises(StopIteration):
+                next(stream)
+
         assert response.closed is True
 
     def test_successful_stream_resets_outage_budget(self) -> None:

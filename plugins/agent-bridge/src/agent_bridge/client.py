@@ -63,6 +63,9 @@ class SseStream(Iterator[dict[str, Any]]):
         self.close()
 
     def __del__(self) -> None:
+        self._close_safely()
+
+    def _close_safely(self) -> None:
         try:
             self.close()
         except Exception:
@@ -73,7 +76,7 @@ class SseStream(Iterator[dict[str, Any]]):
             try:
                 raw_line = next(self._lines)
             except StopIteration:
-                self.close()
+                self._close_safely()
                 raise
             line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
 
