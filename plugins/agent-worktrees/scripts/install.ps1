@@ -854,6 +854,11 @@ function Resolve-WinGetPackageExecutable {
     )) {
         return $null
     }
+    $link = Get-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
+    if (-not $link -or
+        -not ($link.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        return $null
+    }
     $packagesRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
     if (-not (Test-Path -LiteralPath $packagesRoot -PathType Container)) {
         return $null

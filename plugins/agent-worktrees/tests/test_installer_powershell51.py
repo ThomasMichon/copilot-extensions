@@ -239,6 +239,11 @@ foreach ($name in @('Resolve-WinGetPackageExecutable', 'Get-ApplicationPath')) {
 function Get-Command {
     [pscustomobject]@{ Source = $env:WINGET_LINK }
 }
+function Get-Item {
+    [pscustomobject]@{
+        Attributes = [IO.FileAttributes]::ReparsePoint
+    }
+}
 Get-ApplicationPath -Name @('uv')
 """
     proc = subprocess.run(
@@ -299,6 +304,11 @@ foreach ($name in @('Resolve-WinGetPackageExecutable', 'Get-ApplicationPath')) {
 }
 function Get-Command {
     [pscustomobject]@{ Source = $env:WINGET_LINK }
+}
+function Get-Item {
+    [pscustomobject]@{
+        Attributes = [IO.FileAttributes]::ReparsePoint
+    }
 }
 Get-ApplicationPath -Name @('tool')
 """
