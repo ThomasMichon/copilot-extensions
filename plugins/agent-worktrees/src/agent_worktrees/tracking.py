@@ -158,13 +158,14 @@ def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
     strings: dict[str, str] = {}
     for key in required - {"attempt", "ownership"}:
         raw = value.get(key)
+        normalized = raw.strip() if isinstance(raw, str) else ""
         if (
             not isinstance(raw, str)
-            or not raw.strip()
-            or len(raw) > DISPATCH_PROVENANCE_TEXT_MAX
+            or not normalized
+            or len(normalized) > DISPATCH_PROVENANCE_TEXT_MAX
         ):
             return None
-        strings[key] = raw
+        strings[key] = normalized
     try:
         attempt = _bounded_nonnegative_int(
             value.get("attempt"), field="dispatch_attempt.attempt"

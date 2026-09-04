@@ -10241,7 +10241,8 @@ def cmd_create(args: argparse.Namespace) -> int:
             )
             if not isinstance(dispatch_fields[key], str)
             or not dispatch_fields[key].strip()
-            or len(dispatch_fields[key]) > tracking.DISPATCH_PROVENANCE_TEXT_MAX
+            or len(dispatch_fields[key].strip())
+            > tracking.DISPATCH_PROVENANCE_TEXT_MAX
         ]
         if invalid:
             message = (
@@ -10252,6 +10253,10 @@ def cmd_create(args: argparse.Namespace) -> int:
                 return _json_error(message)
             output.err(message)
             return 1
+        for key in ("task_id", "reservation_key", "driver", "supervisor"):
+            value = dispatch_fields[key]
+            if isinstance(value, str):
+                dispatch_fields[key] = value.strip()
     dispatch_attempt = dispatch_fields if present_dispatch_fields else None
     with output.stdout_to_stderr():
         try:

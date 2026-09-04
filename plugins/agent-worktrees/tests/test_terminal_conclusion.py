@@ -231,7 +231,7 @@ def test_dispatch_attempt_policy_concludes_exact_acp_allocation(
         attempt=1,
         driver="dispatcher",
         supervisor="supervisor-1",
-        creator_machine=record.machine,
+        creator_machine=record.machine.swapcase(),
     )
     tracking.save_record(record, record_path)
 
@@ -352,6 +352,34 @@ def test_blank_dispatch_provenance_is_preserved_but_not_trusted(
     )
     assert result["action"] == "skipped"
     assert result["reason"] == "dispatch-provenance-missing"
+
+
+def test_dispatch_provenance_strings_are_normalized(tmp_path, monkeypatch):
+    _repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    raw["dispatch_attempt"] = {
+        "task_id": " task-1 ",
+        "reservation_key": " dispatch-task:task-1:1 ",
+        "attempt": 1,
+        "driver": " dispatcher ",
+        "supervisor": " supervisor-1 ",
+        "creator_machine": " host-a ",
+        "ownership": "created",
+    }
+    record_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    loaded = tracking.load_record(record_path)
+    assert loaded.dispatch_attempt == tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine="host-a",
+    )
 
 
 def test_lifecycle_change_during_git_inspection_blocks_priming(

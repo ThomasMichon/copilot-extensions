@@ -194,7 +194,7 @@ def conclude_disposable_worktree(
                         reason="reservation-mismatch",
                     )
                     return result
-                if allocation.creator_machine != record.machine:
+                if allocation.creator_machine.casefold() != record.machine.casefold():
                     result.update(
                         action="skipped",
                         reason="creator-machine-mismatch",
