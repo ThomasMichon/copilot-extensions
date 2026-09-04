@@ -1793,9 +1793,7 @@ class PickerScreen(Widget):
             for tab in self.source_tabs
         ]
         self.loader = loader
-        records = loader.records() if loader is not None else []
-        if records or not self.data:
-            self.data = records
+        self._apply_loader_records()
         self._source_local = prepared.get("local") or self._source_local
         self._source_repo_branch = prepared.get("repo_branch") or ("", "")
         self._roster_ready = True
@@ -1833,6 +1831,53 @@ class PickerScreen(Widget):
         if callable(blr_fn):
             self._start_bound_live_reconcile(blr_fn)
         self._reconcile_wt_sel()
+
+    def _apply_loader_records(self):
+        """Merge incomplete stream prefixes over cached rows."""
+        if self.loader is None:
+            return
+        records = self.loader.records()
+        authoritative_fn = getattr(
+            self.loader, "authoritative_source_ids", None
+        )
+        if not callable(authoritative_fn):
+            _ready, loading, failed = self.loader.counts()
+            if records or (loading == 0 and failed == 0):
+                self.data = records
+            return
+
+        authoritative = set(authoritative_fn())
+        current_sources = {
+            rec.get("source_id") for rec in self.data if rec.get("source_id")
+        }
+        incoming_sources = {
+            rec.get("source_id") for rec in records if rec.get("source_id")
+        }
+        if current_sources | incoming_sources <= authoritative:
+            self.data = records
+            return
+
+        incoming = {
+            self._row_key(rec): rec
+            for rec in records
+            if self._row_key(rec) is not None
+        }
+        merged = []
+        seen = set()
+        for rec in self.data:
+            key = self._row_key(rec)
+            if key in incoming:
+                merged.append(incoming[key])
+                seen.add(key)
+            elif rec.get("source_id") not in authoritative:
+                merged.append(rec)
+        for rec in records:
+            key = self._row_key(rec)
+            if key is None or key not in seen:
+                merged.append(rec)
+                if key is not None:
+                    seen.add(key)
+        self.data = merged
 
     def on_unmount(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Kill any
@@ -1957,13 +2002,8 @@ class PickerScreen(Widget):
             busy = True
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
-            records = self.loader.records()
             _ready, loading, _failed = self.loader.counts()
-            # Keep the cache-only bootstrap rows visible while the replacement
-            # fleet loader is still resolving its first source. Once loading
-            # finishes, an authoritative empty result is allowed to clear them.
-            if records or loading == 0:
-                self.data = records
+            self._apply_loader_records()
             busy = busy or loading > 0
             self._maybe_repoll()
             if self._wt_reconcile_after is not None:

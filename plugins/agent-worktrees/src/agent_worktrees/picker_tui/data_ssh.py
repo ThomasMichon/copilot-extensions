@@ -1363,6 +1363,11 @@ class LiveLoader:
         # repoll that started earlier never commits stale rows over a newer
         # intentional reload (#1421, ordering fix).
         self._gen: dict = {}
+        # A streaming source becomes usable after its first row, before its
+        # roster is authoritative. Track that distinction by generation so the
+        # Picker can merge the prefix over last-good rows instead of treating
+        # omitted identities as removals.
+        self._stream_incomplete: dict = {}
         for s in all_sources:
             self._state[s.cache_key] = "loading" if s.ready else "failed"
             self._records[s.cache_key] = []
@@ -1512,6 +1517,8 @@ class LiveLoader:
                 ):
                     self._records[source.cache_key] = recs
                     self._state[source.cache_key] = "ready"
+                    if self._stream_incomplete.get(source.cache_key) == gen:
+                        self._stream_incomplete.pop(source.cache_key, None)
         finally:
             with self._lock:
                 self._refreshing.discard(source.cache_key)
@@ -1581,6 +1588,8 @@ class LiveLoader:
                         and self._state.get(source.cache_key) == "ready"
                         and self._gen.get(source.cache_key, 0) == gen):
                     self._records[source.cache_key] = recs
+                    if self._stream_incomplete.get(source.cache_key) == gen:
+                        self._stream_incomplete.pop(source.cache_key, None)
         finally:
             with self._lock:
                 self._refreshing.discard(source.cache_key)
@@ -1812,6 +1821,7 @@ class LiveLoader:
                             break
                         if self._gen.get(source.cache_key, 0) != gen:
                             break   # superseded by a reload()
+                        self._stream_incomplete[source.cache_key] = gen
                         if rid not in by_id:
                             order.append(rid)
                         by_id[rid] = rec
@@ -1821,6 +1831,9 @@ class LiveLoader:
                             ready = True
                 elif typ == "done":
                     done = True
+                    with self._lock:
+                        if self._stream_incomplete.get(source.cache_key) == gen:
+                            self._stream_incomplete.pop(source.cache_key, None)
         finally:
             timer.cancel()
             try:
@@ -2055,6 +2068,21 @@ class LiveLoader:
         """Return a copy of one canonical source's current rows."""
         with self._lock:
             return list(self._records.get(source_id, []))
+
+    def authoritative_source_ids(self):
+        """Sources whose current rows describe a complete roster.
+
+        Streaming sources intentionally flip to ``ready`` on their first row so
+        the Picker can render and interact with that prefix. ``ready`` alone
+        therefore does not mean identities absent from the prefix are gone.
+        """
+        with self._lock:
+            return {
+                key
+                for key, state in self._state.items()
+                if state == "ready"
+                and self._stream_incomplete.get(key) != self._gen.get(key, 0)
+            }
 
     def counts(self):
         """(ready, loading, failed) machine counts for the status note."""
