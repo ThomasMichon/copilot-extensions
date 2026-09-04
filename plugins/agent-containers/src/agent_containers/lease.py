@@ -6,8 +6,10 @@ agents on the same machine. Leases are *advisory*: the ``container:`` resolver
 does not hard-block dispatch, but ``borrow`` will not hand out a container that
 is already leased to a live holder.
 
-A lease is reclaimed when its holder process is gone (same-host pid check) or
-its heartbeat is older than the TTL.
+A lease can be reclaimed during acquisition when its exact same-host,
+same-environment holder PID is definitively gone and no provider lifecycle or
+session admission protects the container. Remote, cross-environment, legacy,
+and otherwise indeterminate holders remain leased until the TTL.
 """
 
 from __future__ import annotations
@@ -34,8 +36,17 @@ from .private_state import atomic_write_json
 log = logging.getLogger("agent-containers")
 
 _LOCK_FILE = STATE_DIR / "leases.lock"
+_LEASE_DETAILS_FILE = STATE_DIR / "lease-details.json"
 _DEPLOY_HOLDS_FILE = STATE_DIR / "deploy-holds.json"
 _SESSION_ADMISSIONS_FILE = STATE_DIR / "session-admissions.json"
+_LEASE_CORE_FIELDS = {
+    "container",
+    "effort",
+    "pid",
+    "host",
+    "acquired_at",
+    "heartbeat_at",
+}
 # Leases are held by an *effort* (a logical entity), not by the short-lived
 # CLI process that created them, so reclamation is TTL-based. A long-running
 # holder can refresh via ``heartbeat``; otherwise a forgotten lease expires
@@ -56,6 +67,12 @@ class Lease:
     host: str
     acquired_at: float
     heartbeat_at: float
+    environment: str | None = None
+    reclaim_reason: str | None = None
+    reclaimed_from_effort: str | None = None
+    reclaimed_from_pid: int | None = None
+    reclaimed_from_environment: str | None = None
+    reclaimed_at: float | None = None
 
     def age(self) -> float:
         return time.time() - self.heartbeat_at
@@ -167,19 +184,94 @@ def _read_leases() -> dict[str, Lease]:
     except (OSError, json.JSONDecodeError):
         log.warning("leases.json unreadable; treating as empty")
         return {}
+    details = _read_lease_details()
     leases: dict[str, Lease] = {}
     for container, rec in (raw or {}).items():
         try:
-            leases[container] = Lease(**rec)
-        except TypeError:
+            core = {
+                key: value
+                for key, value in rec.items()
+                if key in _LEASE_CORE_FIELDS
+            }
+            lease = Lease(**core)
+        except (AttributeError, TypeError):
             continue
+        detail = details.get(container)
+        if _lease_detail_matches(lease, detail):
+            for field in (
+                "environment",
+                "reclaim_reason",
+                "reclaimed_from_effort",
+                "reclaimed_from_pid",
+                "reclaimed_from_environment",
+                "reclaimed_at",
+            ):
+                setattr(lease, field, detail.get(field))
+        leases[container] = lease
     return leases
 
 
 def _write_leases(leases: dict[str, Lease]) -> None:
-    """Atomically write leases.json."""
-    payload = {c: asdict(lease) for c, lease in leases.items()}
+    """Atomically write legacy-compatible leases plus extension details."""
+    details = {
+        container: {
+            "effort": lease.effort,
+            "pid": lease.pid,
+            "host": lease.host,
+            "acquired_at": lease.acquired_at,
+            "heartbeat_at": lease.heartbeat_at,
+            "environment": lease.environment,
+            "reclaim_reason": lease.reclaim_reason,
+            "reclaimed_from_effort": lease.reclaimed_from_effort,
+            "reclaimed_from_pid": lease.reclaimed_from_pid,
+            "reclaimed_from_environment": lease.reclaimed_from_environment,
+            "reclaimed_at": lease.reclaimed_at,
+        }
+        for container, lease in leases.items()
+        if (
+            lease.environment is not None
+            or lease.reclaim_reason is not None
+        )
+    }
+    if details or _LEASE_DETAILS_FILE.exists():
+        _write_private_json(_LEASE_DETAILS_FILE, details)
+    payload = {
+        container: {
+            key: value
+            for key, value in asdict(lease).items()
+            if key in _LEASE_CORE_FIELDS
+        }
+        for container, lease in leases.items()
+    }
     _write_private_json(LEASE_FILE, payload)
+
+
+def _read_lease_details() -> dict[str, dict]:
+    if not _LEASE_DETAILS_FILE.exists():
+        return {}
+    try:
+        raw = json.loads(_LEASE_DETAILS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        log.warning("lease-details.json unreadable; lease liveness is indeterminate")
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: value
+        for key, value in raw.items()
+        if isinstance(key, str) and isinstance(value, dict)
+    }
+
+
+def _lease_detail_matches(lease: Lease, detail: dict | None) -> bool:
+    return bool(
+        detail
+        and detail.get("effort") == lease.effort
+        and detail.get("pid") == lease.pid
+        and detail.get("host") == lease.host
+        and detail.get("acquired_at") == lease.acquired_at
+        and detail.get("heartbeat_at") == lease.heartbeat_at
+    )
 
 
 def _read_records(path, record_type, *, fail_closed: bool = False):
@@ -340,6 +432,32 @@ def _prune(leases: dict[str, Lease], ttl: float) -> dict[str, Lease]:
     return live
 
 
+def _lease_holder_liveness(lease: Lease) -> bool | None:
+    """Return local holder liveness, or None when it cannot be established."""
+    if (
+        lease.host != _this_host()
+        or lease.environment != _this_environment()
+    ):
+        return None
+    try:
+        alive = _pid_alive(lease.pid)
+    except (OSError, RuntimeError) as exc:
+        log.warning(
+            "Could not determine lease holder liveness for %s "
+            "(host=%s, pid=%s): %s",
+            lease.container,
+            lease.host,
+            lease.pid,
+            exc,
+        )
+        return None
+    if alive is True:
+        return True
+    if alive is False:
+        return False
+    return None
+
+
 def list_leases(ttl: float = DEFAULT_TTL, prune: bool = True) -> list[Lease]:
     """Return current (optionally pruned) leases."""
     with _lease_lock():
@@ -406,6 +524,7 @@ def borrow(
             )
 
         by_name = {c.name: c for c in members}
+        reclaimed: Lease | None = None
 
         if container:
             if container not in by_name:
@@ -419,15 +538,20 @@ def borrow(
                     f"{hold.operation} is in progress"
                 )
             held = leases.get(container)
-            if container in admitted and held is None:
+            if container in admitted and (
+                held is None or held.effort != effort
+            ):
                 raise ProviderAdmissionError(
                     f"Container '{container}' has an active provider session"
                 )
             if held and held.effort != effort:
-                raise RuntimeError(
-                    f"Container '{container}' is leased by effort "
-                    f"'{held.effort}' (host={held.host}, pid={held.pid})"
-                )
+                if _lease_holder_liveness(held) is False:
+                    reclaimed = held
+                else:
+                    raise RuntimeError(
+                        f"Container '{container}' is leased by effort "
+                        f"'{held.effort}' (host={held.host}, pid={held.pid})"
+                    )
             chosen = container
         else:
             # Effort-level idempotency: a normal fleet-scoped re-borrow should
@@ -446,34 +570,82 @@ def borrow(
                         f"{hold.operation} is in progress"
                     )
             else:
-                # Prefer running, then startable; skip those already leased.
-                free = [
-                    c for c in members
-                    if (
-                        c.name not in leases
-                        and c.name not in holds
-                        and c.name not in admitted
-                    )
-                ]
-                if not free:
+                # Treat a definitively dead same-host holder as available, but
+                # only when no lifecycle or connection admission protects it.
+                available = []
+                for member in members:
+                    if member.name in holds or member.name in admitted:
+                        continue
+                    held = leases.get(member.name)
+                    if held is None:
+                        available.append((member, None))
+                    elif _lease_holder_liveness(held) is False:
+                        available.append((member, held))
+                if not available:
                     raise RuntimeError(
                         "All fleet containers are currently leased or under "
                         "provider lifecycle hold. Release one or grow the fleet."
                     )
-                free.sort(key=lambda c: (not c.is_running, c.name))
-                chosen = free[0].name
+                available.sort(
+                    key=lambda candidate: (
+                        not candidate[0].is_running,
+                        candidate[0].name,
+                    )
+                )
+                chosen, reclaimed = (
+                    available[0][0].name,
+                    available[0][1],
+                )
 
         now = time.time()
+        previous = leases.get(chosen)
+        same_effort = previous is not None and previous.effort == effort
         lease = Lease(
             container=chosen,
             effort=effort,
             pid=os.getpid(),
             host=_this_host(),
-            acquired_at=leases[chosen].acquired_at if chosen in leases else now,
+            acquired_at=previous.acquired_at if same_effort else now,
             heartbeat_at=now,
+            environment=_this_environment(),
+            reclaim_reason=(
+                previous.reclaim_reason
+                if same_effort
+                else "dead-local-holder-pid" if reclaimed else None
+            ),
+            reclaimed_from_effort=(
+                previous.reclaimed_from_effort
+                if same_effort
+                else reclaimed.effort if reclaimed else None
+            ),
+            reclaimed_from_pid=(
+                previous.reclaimed_from_pid
+                if same_effort
+                else reclaimed.pid if reclaimed else None
+            ),
+            reclaimed_from_environment=(
+                previous.reclaimed_from_environment
+                if same_effort
+                else reclaimed.environment if reclaimed else None
+            ),
+            reclaimed_at=(
+                previous.reclaimed_at
+                if same_effort
+                else now if reclaimed else None
+            ),
         )
         leases[chosen] = lease
         _write_leases(leases)
+        if reclaimed is not None:
+            log.info(
+                "Reclaimed lease on '%s' from effort '%s': "
+                "dead-local-holder-pid (host=%s, environment=%s, pid=%s)",
+                chosen,
+                reclaimed.effort,
+                reclaimed.host,
+                reclaimed.environment,
+                reclaimed.pid,
+            )
         log.info("Leased container '%s' to effort '%s'", chosen, effort)
         return lease
 

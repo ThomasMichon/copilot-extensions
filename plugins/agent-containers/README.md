@@ -36,9 +36,14 @@ this plugin and work standalone; without agent-bridge only bridge addressing
   devcontainer spec. Kept warm (stopped, not destroyed) between uses.
 - **Lease / borrow** — an *effort* (a logical unit of work) borrows a
   container for the duration of its work, then releases it. Leases persist
-  across CLI invocations and agent dispatches; they expire only on explicit
-  `release` or after a TTL (default 24h). Enforcement is **advisory** — the
-  resolver logs but does not block cross-effort dispatch. Restricted destructive
+  across CLI invocations and agent dispatches; they expire on explicit
+  `release` or after a TTL (default 24h). Acquisition may reclaim a lease sooner
+  only when its exact same-host, same-environment holder PID is definitively
+  gone. Remote, cross-environment, legacy, or otherwise indeterminate holder
+  liveness keeps the TTL behavior, and active lifecycle or provider-session
+  admissions block reclamation. The replacement lease records the reclaim
+  reason and prior holder for audit. Enforcement is **advisory** — the resolver
+  logs but does not block cross-effort dispatch. Restricted destructive
   lifecycle adds a separate provider-owned hold: while a member is being checked
   for recreate/remove, new borrows and provider launches are refused.
 - **`container:` resolver** — `agent-bridge send container:<name> "..."`
@@ -428,7 +433,12 @@ not for stamping the binstub.
 ## Runtime state
 
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
-  lock file; corrupt/unreadable state is treated as empty.
+  lock file and kept backward-compatible across runtime versions;
+  corrupt/unreadable state is treated as empty.
+- `~/.agent-containers/lease-details.json` — optional environment and reclaim
+  audit metadata keyed to the exact core lease identity. Missing, stale, or
+  unreadable details make early PID-based reclaim indeterminate without hiding
+  the active lease from older runtimes.
 - `~/.agent-containers/deploy-holds.json` and `session-admissions.json` —
   short-lived, heartbeated provider admission records sharing the lease lock
   discipline across Windows/WSL access to the same Docker provider.
