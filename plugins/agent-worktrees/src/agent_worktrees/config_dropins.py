@@ -346,7 +346,12 @@ def _validate_pr(raw: object, *, location: str) -> str | None:
         "branch_update_strategy",
         "merge_strategy",
     }
-    list_or_string_fields = {"labels", "hold_labels", "wip_title_prefixes"}
+    list_or_string_fields = {
+        "labels",
+        "hold_labels",
+        "required_body_sections",
+        "wip_title_prefixes",
+    }
     for name in boolean_fields:
         if name in raw and not isinstance(raw[name], bool):
             return f"{location}.{name} must be a boolean"

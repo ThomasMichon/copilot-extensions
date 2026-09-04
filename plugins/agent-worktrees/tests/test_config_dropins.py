@@ -82,6 +82,15 @@ def test_operator_yaml_fault_isolated_from_valid_peer(tmp_path):
     assert report.findings[0].remedy
 
 
+def test_pr_required_body_sections_rejects_non_string_shape():
+    error = dropins._validate_pr(
+        {"required_body_sections": 7},
+        location="repos.sample.pr",
+    )
+
+    assert error == "repos.sample.pr.required_body_sections must be a list"
+
+
 def test_managed_pointer_requires_current_project_scope_and_root(tmp_path):
     source = "sample@example-marketplace"
     root = tmp_path / "plugin"

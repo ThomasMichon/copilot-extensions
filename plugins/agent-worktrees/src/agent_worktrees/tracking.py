@@ -219,6 +219,7 @@ class PRRecord:
     branch: str = ""
     base_sha: str = ""
     head_sha: str = ""
+    attribution_head: str = ""
     patch_id: str = ""       # squash-invariant patch-id of base..head (#898)
     url: str = ""
     number: int | None = None
@@ -1611,6 +1612,7 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         branch=str(raw.get("branch", "")),
         base_sha=str(raw.get("base_sha", "")),
         head_sha=str(raw.get("head_sha", "")),
+        attribution_head=str(raw.get("attribution_head", "")),
         patch_id=str(raw.get("patch_id", "")),
         url=str(raw.get("url", "")),
         number=num_val,
@@ -1633,6 +1635,8 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
     }
     if pr.patch_id:
         d["patch_id"] = pr.patch_id
+    if pr.attribution_head:
+        d["attribution_head"] = pr.attribution_head
     if pr.number is not None:
         d["number"] = pr.number
     d["provider"] = pr.provider

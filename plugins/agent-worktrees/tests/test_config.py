@@ -210,7 +210,8 @@ class TestPRConfigParsing:
             "      provider: github\n"
             "      strategy: keep-alive\n"
             "      branch_prefix: pr\n"
-            "      source_attribution: true\n",
+            "      source_attribution: true\n"
+            "      required_body_sections: [Intent, Changes, Validation]\n",
         )
         conf = cfg.load_config(cfgfile)
         pr = conf.repos["ext"].pr
@@ -220,6 +221,7 @@ class TestPRConfigParsing:
         assert pr.strategy == "keep-alive"
         assert pr.branch_prefix == "pr"
         assert pr.source_attribution is True
+        assert pr.required_body_sections == ("Intent", "Changes", "Validation")
 
     def test_pr_autocomplete_block_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"

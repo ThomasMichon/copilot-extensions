@@ -888,6 +888,19 @@ def _push_changes_pr(
             if pushed_pr.state in ("", "creating"):
                 pushed_pr.state = "open"
         tracking.save_record(record)
+        from . import pr_ops
+        attribution_error = pr_ops.refresh_source_attribution(
+            worktree_id,
+            config,
+            record,
+            pushed_pr,
+            head_sha,
+        )
+        if attribution_error:
+            output.warn(
+                f"PR head was pushed, but source attribution publication "
+                f"failed: {attribution_error}"
+            )
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
@@ -997,6 +1010,19 @@ def _push_changes_pr_refspec(
             if pushed_pr.state in ("", "creating"):
                 pushed_pr.state = "open"
         tracking.save_record(record)
+        from . import pr_ops
+        attribution_error = pr_ops.refresh_source_attribution(
+            worktree_id,
+            config,
+            record,
+            pushed_pr,
+            head_sha,
+        )
+        if attribution_error:
+            output.warn(
+                f"PR head was pushed, but source attribution publication "
+                f"failed: {attribution_error}"
+            )
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,

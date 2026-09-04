@@ -104,6 +104,35 @@ class GitHubProvider:
             merged=(state == "merged"),
         )
 
+    def publish_source_marker(
+        self,
+        repo: str,
+        number: int,
+        marker: str,
+        *,
+        api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        proc = run_cli(
+            [
+                "gh",
+                "pr",
+                "comment",
+                str(number),
+                "--repo",
+                repo,
+                "--body",
+                marker,
+            ],
+            env=self._env(token),
+        )
+        if proc.returncode != 0:
+            return (
+                f"gh pr comment #{number} failed for {repo}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        return ""
+
     def remove_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
         token: str | None = None,

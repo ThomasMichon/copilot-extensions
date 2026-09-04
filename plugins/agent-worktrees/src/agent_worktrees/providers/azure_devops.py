@@ -161,6 +161,44 @@ class AzureDevOpsProvider:
             merged=merged,
         )
 
+    def publish_source_marker(
+        self,
+        repo: str,
+        number: int,
+        marker: str,
+        *,
+        api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        if not api_base:
+            return "Azure DevOps provider needs the org URL (api_base)."
+        auth_header, auth_error = self._auth_header(token)
+        if auth_error:
+            return auth_error
+        status, response = self._rest_call(
+            "POST",
+            f"{self._rest_base(api_base, repo, number)}/threads?api-version=7.1",
+            auth_header,
+            json.dumps(
+                {
+                    "comments": [
+                        {
+                            "parentCommentId": 0,
+                            "content": marker,
+                            "commentType": 1,
+                        }
+                    ],
+                    "status": 1,
+                }
+            ),
+        )
+        if status not in (200, 201):
+            return (
+                f"Azure DevOps PR #{number} source comment failed "
+                f"(HTTP {status}): {response[:300]}"
+            )
+        return ""
+
     def remove_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
         token: str | None = None,
