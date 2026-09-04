@@ -2058,6 +2058,108 @@ class TestEndSession:
         assert session_manager.get_session(sid) is None
 
     @pytest.mark.asyncio
+    async def test_end_if_idle_removes_idle_session(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+
+        await session_manager.end_session_if_idle(session.session_id)
+
+        assert session_manager.get_session(session.session_id) is None
+
+    @pytest.mark.asyncio
+    async def test_end_if_idle_removes_stopped_session(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        await session_manager.stop_session(session.session_id)
+
+        await session_manager.end_session_if_idle(session.session_id)
+
+        assert session_manager.get_session(session.session_id) is None
+
+    @pytest.mark.asyncio
+    async def test_end_if_idle_preserves_running_session(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session.status = SessionStatus.RUNNING
+
+        with pytest.raises(ValueError, match="is not idle"):
+            await session_manager.end_session_if_idle(session.session_id)
+
+        assert session_manager.get_session(session.session_id) is session
+
+    @pytest.mark.asyncio
+    async def test_end_if_idle_preserves_queued_prompts(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        session_manager._db.enqueue_prompt(
+            session.session_id,
+            "continue later",
+            session.updated_at,
+        )
+
+        with pytest.raises(ValueError, match="has queued prompts"):
+            await session_manager.end_session_if_idle(session.session_id)
+
+        assert session_manager.get_session(session.session_id) is session
+
+    @pytest.mark.asyncio
+    async def test_end_if_idle_excludes_concurrent_prompt_admission(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        ending = asyncio.Event()
+        release_end = asyncio.Event()
+        original_end = session_manager.end_session
+
+        async def delayed_end(session_id: str, *, force: bool = False) -> None:
+            ending.set()
+            await release_end.wait()
+            await original_end(session_id, force=force)
+
+        session_manager.end_session = delayed_end
+        end_task = asyncio.create_task(
+            session_manager.end_session_if_idle(session.session_id)
+        )
+        await ending.wait()
+
+        submit_task = asyncio.create_task(
+            session_manager.submit_or_queue_prompt(
+                session.session_id,
+                "do not discard",
+            )
+        )
+        await asyncio.sleep(0)
+        assert not submit_task.done()
+
+        release_end.set()
+        await end_task
+        with pytest.raises(KeyError, match="not found"):
+            await submit_task
+        assert session_manager._db.count_pending_prompts(session.session_id) == 0
+
+    @pytest.mark.asyncio
+    async def test_end_if_idle_revalidates_after_waiting_for_lock(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        await session._turn_start_lock.acquire()
+        end_task = asyncio.create_task(
+            session_manager.end_session_if_idle(session.session_id)
+        )
+        await asyncio.sleep(0)
+        assert not end_task.done()
+
+        await session_manager.end_session(session.session_id)
+        session._turn_start_lock.release()
+
+        with pytest.raises(KeyError, match="not found"):
+            await end_task
+
+    @pytest.mark.asyncio
     async def test_end_succeeds_when_shutdown_raises(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:
@@ -3263,6 +3365,41 @@ class TestDurablePromptQueue:
         assert sent == ["A", "B", "C"]
         assert session.status == SessionStatus.IDLE
         assert session_manager._db.count_pending_prompts(sid) == 0
+
+    @pytest.mark.asyncio
+    async def test_queue_drain_excludes_conditional_teardown(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        sid = session.session_id
+        session_manager._db.enqueue_prompt(sid, "next", session.updated_at)
+        submitting = asyncio.Event()
+        release_submit = asyncio.Event()
+
+        async def delayed_submit(session_id: str, prompt: str) -> int:
+            submitting.set()
+            await release_submit.wait()
+            session.status = SessionStatus.RUNNING
+            return 0
+
+        session_manager._submit_prompt_locked = delayed_submit
+        drain_task = asyncio.create_task(
+            session_manager._drain_pending_prompts(session)
+        )
+        await submitting.wait()
+
+        end_task = asyncio.create_task(
+            session_manager.end_session_if_idle(sid)
+        )
+        await asyncio.sleep(0)
+        assert not end_task.done()
+
+        release_submit.set()
+        await drain_task
+        with pytest.raises(ValueError, match="is not idle"):
+            await end_task
+        assert session_manager.get_session(sid) is session
+        assert session.status == SessionStatus.RUNNING
 
     @pytest.mark.asyncio
     async def test_interrupt_clears_queue(

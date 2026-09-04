@@ -1619,13 +1619,23 @@ async def handoff_session(
 
 
 @router.delete("/{session_id}", status_code=204)
-async def end_session(session_id: str, request: Request, force: bool = False):
+async def end_session(
+    session_id: str,
+    request: Request,
+    force: bool = False,
+    if_idle: bool = False,
+):
     mgr: SessionManager = request.app.state.session_manager
     try:
-        await mgr.end_session(session_id, force=force)
+        if if_idle:
+            await mgr.end_session_if_idle(session_id, force=force)
+        else:
+            await mgr.end_session(session_id, force=force)
     except SessionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
