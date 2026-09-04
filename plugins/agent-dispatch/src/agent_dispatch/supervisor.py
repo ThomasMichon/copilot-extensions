@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import stat
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -398,6 +399,17 @@ def _default_local_body_target_dir(bridge_session_id: str) -> str | None:
         path = Path(target_dir)
         return str(path) if path.is_absolute() else None
     return None
+
+
+def _target_directory_missing(target_dir: str) -> bool | None:
+    """Classify an absolute target directory without treating stat errors as loss."""
+    try:
+        target_stat = Path(target_dir).stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return None
+    return not stat.S_ISDIR(target_stat.st_mode)
 
 
 def _default_local_cold(bridge_session_id: str) -> bool:
@@ -1197,7 +1209,7 @@ class Supervisor:
             state=SpawnState.COLD, resume_requested=True
         ):
             key = str(res.get("key") or "")
-            if not key:
+            if not key or now < self._resume_retry_after.get(key, 0.0):
                 continue
             try:
                 task = self.client.get(res["task_id"])
@@ -1217,7 +1229,12 @@ class Supervisor:
                     local_sid,
                 )
                 target_dir = None
-            if target_dir is not None and not Path(target_dir).is_dir():
+            target_missing = (
+                _target_directory_missing(target_dir)
+                if target_dir is not None
+                else None
+            )
+            if target_missing is True:
                 try:
                     self.client.release(
                         task["id"],
@@ -1228,6 +1245,9 @@ class Supervisor:
                         ),
                     )
                 except DispatchError:
+                    self._resume_retry_after[key] = (
+                        now + _COLD_RESUME_RETRY_SECONDS
+                    )
                     log.exception(
                         "failed to release missing-worktree cold task %s",
                         task["id"],
@@ -1244,8 +1264,6 @@ class Supervisor:
                     task["id"],
                     target_dir,
                 )
-                continue
-            if now < self._resume_retry_after.get(key, 0.0):
                 continue
             prompt = (
                 f"Task {task['id']} has new durable steering. Resume this same "

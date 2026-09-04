@@ -675,6 +675,73 @@ def test_cold_resume_preserves_unknown_or_present_worktree(
     assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
 
 
+def test_cold_resume_preserves_worktree_on_stat_error(q, client, monkeypatch):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+
+    def deny_stat(_path):
+        raise PermissionError("temporarily inaccessible")
+
+    monkeypatch.setattr(supervisor_module.Path, "stat", deny_stat)
+    resumed: list[str] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_target_dir_fn=lambda _sid: "/inaccessible/worktree",
+        local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True,
+    )
+
+    assert sup.release_resumed_cold_tasks() == 1
+    assert resumed == ["blocked-session"]
+    assert q.get(blocked.id).status == Status.STARTED
+
+
+def test_cold_resume_missing_worktree_release_failure_backs_off(
+    q, client, tmp_path, monkeypatch
+):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
+    attempts: list[str] = []
+
+    def fail_release(task_id, _owner, *, reason=None):
+        attempts.append(task_id)
+        raise DispatchError(500, reason or "release failed")
+
+    monkeypatch.setattr(client, "release", fail_release)
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_target_dir_fn=lambda _sid: str(tmp_path / "missing"),
+    )
+
+    assert sup.release_resumed_cold_tasks(now=1000) == 0
+    assert sup.release_resumed_cold_tasks(now=1299) == 0
+    assert attempts == [blocked.id]
+    assert sup.release_resumed_cold_tasks(now=1300) == 0
+    assert attempts == [blocked.id, blocked.id]
+    assert q.get(blocked.id).status == Status.SUSPENDED
+
+
 def test_cold_resume_does_not_start_process_before_reservation_transition(
     q, client, monkeypatch
 ):
