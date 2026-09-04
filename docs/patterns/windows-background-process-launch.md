@@ -22,9 +22,10 @@ change the symptom, but it is never part of the launch contract.
 
 | Launch kind | Windows mechanism | Required properties |
 |---|---|---|
-| Short-lived child with captured or redirected stdio | A console-subsystem root plus `agent_procutil.no_window_kwargs()` / `no_window_flags()` | `CREATE_NO_WINDOW`; pipes and exit status preserved; timeout owns the complete tree |
+| Short-lived child with captured or redirected stdio | A console-subsystem root plus `agent_procutil.no_window_kwargs()` / `no_window_flags()`, or the owning shared library's equivalent | `CREATE_NO_WINDOW`; pipes and exit status preserved; timeout owns the complete tree |
 | Non-interactive OpenSSH transport with redirected stdio | `ssh_manager.ssh_subprocess_kwargs()` | `DETACHED_PROCESS`; no console exists for Default Terminal to surface; pipes, exit status, and root PID remain owned |
-| Long-lived Python daemon | `windowless_python()` plus `windowless_daemon_kwargs()` | No visible root console; survivability is explicit; every console child still uses the short-lived primitive |
+| Long-lived Python daemon with no recurring console descendants | `windowless_python()` plus `detached_kwargs()` | No root console; survivability is explicit; occasional captured console children use the short-lived primitive |
+| Long-lived Python daemon with recurring console descendants | Console-subsystem Python plus `windowless_daemon_kwargs()` | One inherited hidden console contains descendants that would otherwise allocate their own Default Terminal hosts |
 | PowerShell startup or scheduled launcher whose output is not captured | `conhost.exe --headless <interpreter> ...` | Headless console inherited by descendants; stable installed target; explicit stop/cutover ownership |
 | Intentional interactive terminal | An explicit interactive launcher | Reviewable exception with `# headless-guard: allow <reason>` when low-level flags are necessary |
 
@@ -32,8 +33,11 @@ Do not use `conhost.exe --headless` for a process whose stdout, stderr, or exit
 status must be captured: the host owns that stream boundary. Do not use
 `DETACHED_PROCESS` for an arbitrary captured child. The narrow OpenSSH exception
 is safe only because every call is non-interactive, owns all stdio through pipes
-or null handles, and tears down the tree by root PID. Do not launch a console
-descendant from `pythonw.exe` without an explicit no-window primitive.
+or null handles, and tears down the tree by root PID. Do not launch recurring
+console descendants from `pythonw.exe`: per-child `CREATE_NO_WINDOW` is
+insufficient for programs such as terminal-multiplexer clients that allocate
+their own console host. Give that daemon a console-subsystem root under
+`windowless_daemon_kwargs()` so every cycle inherits one hidden console tree.
 
 ## Routing before launching
 

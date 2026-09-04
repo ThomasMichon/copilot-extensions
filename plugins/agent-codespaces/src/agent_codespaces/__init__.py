@@ -8,4 +8,4 @@ from importlib.metadata import version as _pkg_version
 try:
     __version__ = _pkg_version("agent-codespaces")
 except PackageNotFoundError:
-    __version__ = "0.4.0-dev111"
+    __version__ = "0.4.0-dev113"
