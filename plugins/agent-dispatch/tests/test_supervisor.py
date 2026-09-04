@@ -13,8 +13,8 @@ from dataclasses import asdict
 
 import pytest
 
-from agent_dispatch import tracking
 from agent_dispatch import supervisor as supervisor_module
+from agent_dispatch import tracking
 from agent_dispatch.client import DispatchError
 from agent_dispatch.queue import SpawnState, Status
 from agent_dispatch.supervisor import Supervisor
@@ -86,11 +86,24 @@ class QueueBackedClient:
     def record_spawn(self, key, *, session_handle=None, worktree=None):
         return asdict(self._q.record_spawn(key, session_handle=session_handle, worktree=worktree))
 
-    def record_spawn_worktree(self, key, worktree):
-        return asdict(self._q.record_spawn_worktree(key, worktree))
+    def record_spawn_worktree(self, key, worktree, **kwargs):
+        return asdict(
+            self._q.record_spawn_worktree(key, worktree, **kwargs)
+        )
 
     def fail_spawn(self, key, *, detail=None):
         return asdict(self._q.fail_spawn(key, detail=detail))
+
+    def request_spawn_release(
+        self, key, *, detail=None, disposition="failed"
+    ):
+        return asdict(
+            self._q.request_spawn_release(
+                key,
+                detail=detail,
+                disposition=disposition,
+            )
+        )
 
     def record_cold(self, key):
         return asdict(self._q.record_cold(key))
@@ -326,6 +339,42 @@ def test_suspended_reservation_does_not_consume_supervisor_capacity(q, client):
     assert spawn.calls == [first.id, second.id]
     assert q.get(first.id).status == Status.SUSPENDED
     assert q.get(first.id).attempts == 1
+
+
+def test_live_releasing_reservation_consumes_supervisor_capacity(q, client):
+    first = q.create("releasing")
+    reservation, _ = q.reserve_spawn(first.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:session-live",
+        worktree="wt-created",
+    )
+    q.request_spawn_release(reservation.key, disposition="failed")
+    second = q.create("runnable")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=1,
+        machine="host-a",
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "ACTIVE",
+        local_acp_session_fn=lambda _sid: "acp-live",
+        local_end_fn=lambda _sid: False,
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.latest_reservation(first.id).state == SpawnState.RELEASING
+    assert q.latest_reservation(second.id) is None
 
 
 def test_other_pool_reservation_does_not_consume_process_capacity(q, client):
@@ -1598,6 +1647,7 @@ def test_reconcile_ends_terminal_local_body_before_settling(q, client):
         spawn_fn=spawn,
         repo=TEST_REPO,
         max_concurrent=5,
+        machine="host-a",
         local_body_verdict_fn=lambda _sid: "live",
         local_end_fn=lambda sid: ended.append(sid) or True,
     )
@@ -2347,29 +2397,40 @@ def test_cli_supervise_headless_is_default(monkeypatch, q, client):
     assert embody_calls == []
 
 
-def test_ordinary_headless_task_does_not_require_worktree_precreation(
+def test_ordinary_headless_task_records_created_worktree_before_launch(
     monkeypatch, q, client
 ):
     from agent_dispatch import embody
 
     task = q.create("ordinary")
-    spawn = _ok_spawn({"session": "local-body:s1", "worktree": None})
-    setattr(spawn, "requires_reusable_worktree", True)
+    spawn = _ok_spawn({"session": "local-body:s1", "worktree": "wt-created"})
+    spawn.requires_reusable_worktree = True
+    spawn.allocation_interface = "acp"
     monkeypatch.setattr(
         embody,
         "prepare_reusable_worktree",
-        lambda *_args, **_kwargs: pytest.fail(
-            "ordinary headless task must not use agent-worktrees"
-        ),
+        lambda *_args, **_kwargs: {
+            "worktree": "wt-created",
+            "path": "/tmp/wt-created",
+            "created": True,
+            "replaced": False,
+            "ownership": "created",
+        },
     )
     sup = Supervisor(
         client,
         spawn_fn=spawn,
         repo=TEST_REPO,
         max_concurrent=5,
+        machine="host-a",
     )
 
     assert sup.poll_once() == [task.id]
+    reservation = q.latest_reservation(task.id)
+    assert reservation.worktree == "wt-created"
+    assert reservation.worktree_ownership == "created"
+    assert reservation.driver == "agent-dispatch"
+    assert reservation.creating_host == "host-a"
 
 
 def test_exclusive_spawn_records_precreated_worktree_before_launch(
@@ -2388,15 +2449,16 @@ def test_exclusive_spawn_records_precreated_worktree_before_launch(
             "worktree": spawn_task["spawn_worktree"],
         }
 
-    setattr(spawn, "requires_reusable_worktree", True)
+    spawn.requires_reusable_worktree = True
     monkeypatch.setattr(
         embody,
         "prepare_reusable_worktree",
-        lambda _task, _reservation: {
+        lambda _task, _reservation, **_kwargs: {
             "worktree": "wt-precreated",
             "path": "/tmp/wt-precreated",
             "created": True,
             "replaced": False,
+            "ownership": "created",
         },
     )
     sup = Supervisor(
@@ -2404,12 +2466,51 @@ def test_exclusive_spawn_records_precreated_worktree_before_launch(
         spawn_fn=spawn,
         repo=TEST_REPO,
         max_concurrent=5,
+        machine="host-a",
     )
 
     assert sup.poll_once() == [task.id]
     assert observed["reservation"].state == SpawnState.RESERVING
     assert observed["reservation"].worktree == "wt-precreated"
     assert observed["task"]["spawn_worktree_path"] == "/tmp/wt-precreated"
+
+
+def test_created_worktree_bookkeeping_failure_retains_spawn_fence(
+    monkeypatch, q, client
+):
+    from agent_dispatch import embody
+
+    task = q.create("work")
+    spawn = _ok_spawn()
+    spawn.requires_reusable_worktree = True
+    monkeypatch.setattr(
+        embody,
+        "prepare_reusable_worktree",
+        lambda *_args, **_kwargs: {
+            "worktree": "wt-created",
+            "path": "/tmp/wt-created",
+            "created": True,
+            "replaced": False,
+            "ownership": "created",
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "record_spawn_worktree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            DispatchError(503, "coordinator unavailable")
+        ),
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.latest_reservation(task.id).state == SpawnState.RESERVING
 
 
 def test_cli_supervise_cli_label_opts_out(monkeypatch, q, client):
@@ -2700,6 +2801,190 @@ def test_yielded_fleet_body_respawns_only_after_explicit_end(q, client):
     assert spawn.calls == [task.id]
     assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
     assert q.latest_reservation(task.id).attempt == 2
+
+
+def test_yielded_created_worktree_is_concluded_before_respawn(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:bridge-1",
+        worktree="wt-created",
+    )
+    q.claim_one("host-a/wt-created", task_id=task.id)
+    q.start(
+        task.id,
+        "host-a/wt-created",
+        owner_session_id="acp-session-1",
+    )
+    q.yield_task(task.id, "host-a/wt-created")
+    conclusions = []
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        machine="host-a",
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_acp_session_fn=lambda _sid: "acp-session-1",
+        attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
+            "action": "primed",
+            "reason": "managed-gc-candidate",
+        },
+        nudge=False,
+    )
+
+    assert sup.poll_once() == [task.id]
+    first = q.get_reservation(reservation.key)
+    assert first.state == SpawnState.SETTLED
+    assert first.conclusion_state == "complete"
+    assert conclusions == [
+        (
+            "wt-created",
+            "acp-session-1",
+            reservation.key,
+            "agent-dispatch",
+        )
+    ]
+    assert q.latest_reservation(task.id).attempt == 2
+
+
+def test_failed_attempt_cleanup_retries_across_supervisor_restart(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        detail="launch failed",
+        disposition="failed",
+    )
+    spawn = _ok_spawn()
+    first = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "gone",
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "failed",
+            "reason": "lifecycle lock busy",
+        },
+        nudge=False,
+    )
+
+    assert first.poll_once() == []
+    pending = q.get_reservation(reservation.key)
+    assert pending.state == SpawnState.RELEASING
+    assert pending.conclusion_state == "pending"
+    assert spawn.calls == []
+
+    second = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        verdict_fn=lambda *_args: "gone",
+        attempt_conclusion_fn=lambda *_args: {
+            "action": "primed",
+            "reason": "managed-gc-candidate",
+        },
+        nudge=False,
+    )
+
+    assert second.poll_once() == [task.id]
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
+    assert q.latest_reservation(task.id).attempt == 2
+
+
+def test_terminal_created_worktree_uses_attempt_cleanup_without_label(
+    q, client
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:bridge-1",
+        worktree="wt-created",
+    )
+    q.claim_one("host-a/wt-created", task_id=task.id)
+    q.start(
+        task.id,
+        "host-a/wt-created",
+        owner_session_id="acp-session-1",
+    )
+    q.complete(task.id, "host-a/wt-created")
+    conclusions = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_acp_session_fn=lambda _sid: "acp-session-1",
+        attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
+            "action": "primed",
+            "reason": "managed-gc-candidate",
+        },
+        nudge=False,
+    )
+
+    assert sup.poll_once() == []
+    settled = q.get_reservation(reservation.key)
+    assert settled.state == SpawnState.SETTLED
+    assert settled.conclusion_state == "complete"
+    assert conclusions
+
+
+def test_yielded_targeted_worktree_is_preserved_without_conclusion(q, client):
+    task = q.create("work", affinity={"worktree": "wt-target"})
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:bridge-1",
+        worktree="wt-target",
+    )
+    q.claim_one("host-a/wt-target", task_id=task.id)
+    q.start(task.id, "host-a/wt-target")
+    q.yield_task(task.id, "host-a/wt-target")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        machine="host-a",
+        local_body_verdict_fn=lambda _sid: "gone",
+        attempt_conclusion_fn=lambda *_args: pytest.fail(
+            "targeted worktree must never be concluded as dispatch-owned"
+        ),
+        nudge=False,
+    )
+
+    assert sup.poll_once() == [task.id]
+    settled = q.get_reservation(reservation.key)
+    assert settled.state == SpawnState.SETTLED
+    assert settled.conclusion_state == "complete"
+    assert "targeted-worktree" in (settled.conclusion_detail or "")
 
 
 def test_yielded_cli_worker_is_not_redriven_while_release_is_pending(

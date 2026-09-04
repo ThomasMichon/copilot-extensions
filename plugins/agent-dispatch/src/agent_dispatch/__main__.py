@@ -973,46 +973,97 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     reservation = resp["reservation"]
     key = reservation["key"]
     spawn_task = task
-    if task.get("exclusive_key"):
-        from . import embody
+    prepared = None
+    ownership = "unknown"
+    from . import embody, remote_dispatch
 
-        try:
-            prepared = embody.prepare_reusable_worktree(task, reservation)
-            worktree = str(prepared["worktree"])
-            if reservation.get("worktree") != worktree:
-                with _client(args) as c:
-                    c.record_spawn_worktree(key, worktree)
-            spawn_task = {
-                **task,
-                "spawn_worktree": worktree,
-                "spawn_worktree_path": prepared["path"],
-                "spawn_session_handle": (
-                    None
-                    if prepared.get("replaced")
-                    else reservation.get("session_handle")
-                ),
-            }
-        except (DispatchError, embody.EmbodyUnavailable) as exc:
+    try:
+        interface = (
+            "cli"
+            if getattr(args, "spawn_backend", "bridge") == "embody"
+            else "acp"
+        )
+        prepared = embody.prepare_reusable_worktree(
+            task,
+            reservation,
+            interface=interface,
+            driver="agent-dispatch",
+            supervisor=reserved_by,
+        )
+        worktree = str(prepared["worktree"])
+        ownership = str(prepared.get("ownership") or "unknown")
+        if (
+            reservation.get("worktree") != worktree
+            or reservation.get("worktree_ownership") != ownership
+        ):
+            with _client(args) as c:
+                c.record_spawn_worktree(
+                    key,
+                    worktree,
+                    ownership=ownership,
+                    creating_host=(
+                        remote_dispatch.local_machine()
+                        if ownership == "created"
+                        else None
+                    ),
+                    driver="agent-dispatch",
+                )
+        spawn_task = {
+            **task,
+            "spawn_worktree": worktree,
+            "spawn_worktree_path": prepared["path"],
+            "spawn_worktree_ownership": ownership,
+            "spawn_session_handle": (
+                None
+                if prepared.get("replaced")
+                else reservation.get("session_handle")
+            ),
+        }
+    except (DispatchError, embody.EmbodyUnavailable) as exc:
+        if prepared is None or ownership != "created":
             try:
                 with _client(args) as c:
                     c.fail_spawn(key, detail=f"worktree create failed: {exc}")
             except DispatchError:
                 pass
-            print(
-                f"agent-dispatch: --spawn skipped (could not create worktree: {exc}); "
-                f"task {task_id} left queued for any worker to claim",
-                file=sys.stderr,
-            )
-            return
+        print(
+            f"agent-dispatch: --spawn skipped (could not create worktree: {exc}); "
+            + (
+                f"reservation {key} retained for repair"
+                if prepared is not None and ownership == "created"
+                else f"task {task_id} left queued for any worker to claim"
+            ),
+            file=sys.stderr,
+        )
+        return
     spawned = _do_spawn(args, spawn_task, route=route)
     try:
         with _client(args) as c:
             if spawned is None:
-                c.fail_spawn(key, detail="no spawn mechanism available")
+                if spawn_task.get("spawn_worktree_ownership") == "created":
+                    _release_failed_created_spawn(
+                        c,
+                        key,
+                        worktree=str(spawn_task["spawn_worktree"]),
+                        session_id=None,
+                        detail="no spawn mechanism available",
+                    )
+                else:
+                    c.fail_spawn(key, detail="no spawn mechanism available")
             else:
                 result, via, handle = spawned
                 if result.returncode != 0:
-                    c.fail_spawn(key, detail=f"{via} exited {result.returncode}")
+                    detail = f"{via} exited {result.returncode}"
+                    if spawn_task.get("spawn_worktree_ownership") == "created":
+                        _release_failed_created_spawn(
+                            c,
+                            key,
+                            worktree=str(spawn_task["spawn_worktree"]),
+                            session_id=handle.get("session"),
+                            detail=detail,
+                        )
+                    else:
+                        c.fail_spawn(key, detail=detail)
                 else:
                     c.record_spawn(
                         key,
@@ -1023,6 +1074,51 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
         # Best-effort bookkeeping -- the spawn itself already ran and was
         # reported; a coordinator hiccup here must not crash `create`.
         pass
+
+
+def _release_failed_created_spawn(
+    client: DispatchClient,
+    key: str,
+    *,
+    worktree: str,
+    session_id: str | None,
+    detail: str,
+) -> None:
+    """Fence and synchronously conclude a one-shot spawn's created checkout."""
+    from . import embody
+    from .supervisor import Supervisor
+
+    client.request_spawn_release(
+        key,
+        detail=detail,
+        disposition="failed",
+    )
+    try:
+        outcome = embody.conclude_dispatch_attempt(
+            worktree,
+            session_id,
+            key,
+        )
+    except embody.DisposableConclusionError:
+        return
+    state = Supervisor._conclusion_state(outcome)
+    conclusion_detail = json.dumps(
+        outcome,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    client.record_spawn_conclusion(
+        key,
+        conclusion_state=state,
+        conclusion_detail=conclusion_detail,
+    )
+    if state != "pending":
+        action = str(outcome.get("action") or "unknown")
+        reason = str(outcome.get("reason") or "")
+        suffix = f"attempt conclusion {action}"
+        if reason:
+            suffix += f" ({reason})"
+        client.fail_spawn(key, detail=f"{detail}; {suffix}")
 
 
 def _embody_handle(result) -> dict[str, str | None]:

@@ -1200,7 +1200,10 @@ Tasks embody as a mux-wrapped **CLI autopilot** by default. Mark **self-containe
 sweep** labels with `--headless-label L` (repeatable, `--headless-agent` to name the
 agent-bridge agent) to embody *those* labels as a **headless agent-bridge ACP** body
 instead — no human attach, no CLI-start-prompt race — while other labels stay
-CLI-first. See the design doc's "Per-label embody body" section.
+CLI-first. Local headless bodies run in the exact reservation worktree
+pre-created and attributed before launch, so failed, yielded, and terminal
+attempts can be conservatively reclaimed without guessing ownership. See the
+design doc's "Per-label embody body" section.
 
 For a remote host pool, `--pool host-a,host-b [--origin <alias>]` dispatches the
 body to the first live pool host. The default body is still CLI/mux embody on

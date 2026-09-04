@@ -204,6 +204,7 @@ def test_exclusive_key_reuses_prior_worktree_after_settle(q):
     assert ok2 is True
     assert r2.task_id == t2.id
     assert r2.worktree == "wt-reviewer"
+    assert r2.worktree_ownership == "reused"
     assert r2.exclusive_key == "review:repo:42"
 
 
@@ -218,6 +219,7 @@ def test_exclusive_key_can_take_affinity_as_initial_resume_target(q):
 
     assert reserved is True
     assert reservation.worktree == "wt-recorded"
+    assert reservation.worktree_ownership == "targeted"
 
 
 def test_record_spawn_worktree_does_not_mark_spawned(q):
@@ -225,10 +227,19 @@ def test_record_spawn_worktree_does_not_mark_spawned(q):
     reservation, reserved = q.reserve_spawn(t.id)
     assert reserved is True
 
-    updated = q.record_spawn_worktree(reservation.key, "wt-created")
+    updated = q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
 
     assert updated.state == SpawnState.RESERVING
     assert updated.worktree == "wt-created"
+    assert updated.worktree_ownership == "created"
+    assert updated.creating_host == "host-a"
+    assert updated.driver == "agent-dispatch"
     q.record_spawn(updated.key, session_handle="sess-created")
     final = q.get_reservation(updated.key)
     assert final.state == SpawnState.SPAWNED
@@ -272,6 +283,51 @@ def test_yield_requests_release_without_settling_live_reservation(q):
     assert yielded.status == "queued"
     assert updated.state == SpawnState.SPAWNED
     assert updated.release_requested is True
+
+
+def test_failed_created_spawn_stays_fenced_until_cleanup(q):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+
+    releasing = q.request_spawn_release(
+        reservation.key,
+        detail="launch failed",
+        disposition="failed",
+    )
+    blocked, acquired = q.reserve_spawn(task.id)
+
+    assert releasing.state == SpawnState.RELEASING
+    assert releasing.release_requested is True
+    assert releasing.release_disposition == "failed"
+    assert acquired is False
+    assert blocked.key == reservation.key
+
+
+def test_releasing_reservation_fences_same_exclusive_key(q):
+    first = q.create("first", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(first.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(reservation.key, disposition="failed")
+    second = q.create("second", exclusive_key="review:repo:42")
+
+    blocked, acquired = q.reserve_spawn(second.id)
+
+    assert acquired is False
+    assert blocked.key == reservation.key
+    assert blocked.state == SpawnState.RELEASING
 
 
 def test_supersede_exclusive_key_abandons_only_queued_or_proposed(q):
@@ -621,10 +677,57 @@ class _QueueBackedClient:
 
         return asdict(self._q.record_spawn(key, session_handle=session_handle, worktree=worktree))
 
+    def record_spawn_worktree(self, key, worktree, **kwargs):
+        from dataclasses import asdict
+
+        return asdict(self._q.record_spawn_worktree(key, worktree, **kwargs))
+
     def fail_spawn(self, key, *, detail=None):
         from dataclasses import asdict
 
         return asdict(self._q.fail_spawn(key, detail=detail))
+
+    def request_spawn_release(
+        self, key, *, detail=None, disposition="failed"
+    ):
+        from dataclasses import asdict
+
+        return asdict(
+            self._q.request_spawn_release(
+                key,
+                detail=detail,
+                disposition=disposition,
+            )
+        )
+
+    def record_spawn_conclusion(
+        self, key, *, conclusion_state, conclusion_detail
+    ):
+        from dataclasses import asdict
+
+        return asdict(
+            self._q.record_spawn_conclusion(
+                key,
+                conclusion_state=conclusion_state,
+                conclusion_detail=conclusion_detail,
+            )
+        )
+
+
+def _mock_created_worktree(monkeypatch):
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "prepare_reusable_worktree",
+        lambda _task, reservation, **_kwargs: {
+            "worktree": f"wt-{reservation['attempt']}",
+            "path": f"/tmp/wt-{reservation['attempt']}",
+            "created": True,
+            "replaced": False,
+            "ownership": "created",
+        },
+    )
 
 
 def test_create_spawn_never_double_spawns(monkeypatch, q):
@@ -633,6 +736,7 @@ def test_create_spawn_never_double_spawns(monkeypatch, q):
     spawns: list[str] = []
 
     monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
 
     def fake_do_spawn(_args, task, *, route=""):
         spawns.append(task["id"])
@@ -649,12 +753,20 @@ def test_create_spawn_never_double_spawns(monkeypatch, q):
     assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
 
 
-def test_create_spawn_failure_allows_retry(monkeypatch, q):
-    """A failed spawn releases the reservation so a later run can retry."""
+def test_create_spawn_failure_cleans_up_before_retry(monkeypatch, q):
+    """A one-shot failed spawn concludes its created checkout synchronously."""
     t = q.create("work")
     calls: list[int] = []
 
     monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: {"action": "removed"},
+    )
 
     def failing_do_spawn(_args, task, *, route=""):
         calls.append(1)
@@ -664,9 +776,48 @@ def test_create_spawn_failure_allows_retry(monkeypatch, q):
     args = types.SimpleNamespace(url=None, token=None)
 
     m._spawn_worker_for(args, {"id": t.id})
-    assert q.latest_reservation(t.id).state == SpawnState.FAILED
+    first = q.latest_reservation(t.id)
+    assert first.state == SpawnState.FAILED
 
-    # a second run reserves a fresh attempt and spawns again
     m._spawn_worker_for(args, {"id": t.id})
     assert len(calls) == 2
     assert q.latest_reservation(t.id).attempt == 2
+
+
+def test_create_spawn_failure_stays_fenced_when_cleanup_is_pending(
+    monkeypatch, q
+):
+    t = q.create("work")
+    calls: list[int] = []
+
+    monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: {
+            "action": "skipped",
+            "reason": "live-session",
+        },
+    )
+
+    def failing_do_spawn(_args, task, *, route=""):
+        calls.append(1)
+        return (
+            types.SimpleNamespace(returncode=1),
+            "fake",
+            {"session": "session-live", "worktree": task["spawn_worktree"]},
+        )
+
+    monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
+    args = types.SimpleNamespace(url=None, token=None)
+
+    m._spawn_worker_for(args, {"id": t.id})
+    first = q.latest_reservation(t.id)
+    assert first.state == SpawnState.RELEASING
+    assert first.conclusion_state == "pending"
+
+    m._spawn_worker_for(args, {"id": t.id})
+    assert len(calls) == 1

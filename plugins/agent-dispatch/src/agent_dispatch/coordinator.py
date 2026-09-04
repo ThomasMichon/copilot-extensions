@@ -455,12 +455,20 @@ class RecordSpawnBody(BaseModel):
 
 class RecordSpawnWorktreeBody(BaseModel):
     worktree: str
+    ownership: str = "unknown"
+    creating_host: str | None = None
+    driver: str | None = None
 
 
 class ReservationDetailBody(BaseModel):
     detail: str | None = None
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
+
+
+class RequestSpawnReleaseBody(BaseModel):
+    detail: str | None = None
+    disposition: str = "failed"
 
 
 class RearmSpawnBody(BaseModel):
@@ -1558,9 +1566,27 @@ def create_app(
     @app.post("/spawn-reservations/{key}/worktree")
     def record_spawn_worktree(key: str, body: RecordSpawnWorktreeBody) -> dict:
         result = _reservation_guard(
-            lambda: queue.record_spawn_worktree(key, body.worktree)
+            lambda: queue.record_spawn_worktree(
+                key,
+                body.worktree,
+                ownership=body.ownership,
+                creating_host=body.creating_host,
+                driver=body.driver,
+            )
         )
         bus.publish({"type": "spawn.worktree_recorded", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/release")
+    def request_spawn_release(key: str, body: RequestSpawnReleaseBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.request_spawn_release(
+                key,
+                detail=body.detail,
+                disposition=body.disposition,
+            )
+        )
+        bus.publish({"type": "spawn.release_requested", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/fail")

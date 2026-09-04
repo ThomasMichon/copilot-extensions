@@ -689,6 +689,8 @@ def _worktree_to_dict(
     if not rec.checkout_managed:
         d["checkout_managed"] = False
     d["picker_hidden"] = rec.is_picker_hidden
+    if rec.dispatch_attempt is not None:
+        d["dispatch_attempt"] = rec.dispatch_attempt.to_dict()
     # worktree-status-core: the agent-asserted disposition overlay so the Picker
     # can render a follow-up glyph + summary and feed the prune verdict. Absent
     # summary/status_note_at stay off the dict to keep it lean for un-annotated
@@ -1143,6 +1145,7 @@ def _create_worktree_core(
     parent_session: str | None = None,
     caller_worktree: str | None = None,
     owner_ref: str | None = None,
+    dispatch_attempt: dict[str, object] | None = None,
     launch_preflight: LaunchPreflight | None = None,
     recovery: bool = False,
 ) -> dict:
@@ -1264,6 +1267,18 @@ def _create_worktree_core(
             owner=owner,
             interface=interface,
             origin=origin,
+            dispatch_attempt=(
+                tracking.DispatchAttempt(
+                    task_id=str(dispatch_attempt["task_id"]),
+                    reservation_key=str(dispatch_attempt["reservation_key"]),
+                    attempt=int(dispatch_attempt["attempt"]),
+                    driver=str(dispatch_attempt["driver"]),
+                    supervisor=str(dispatch_attempt["supervisor"]),
+                    creator_machine=config.machine,
+                )
+                if dispatch_attempt is not None
+                else None
+            ),
             # #1029: link the new worktree back to the session that spawned it, so a
             # later resume (esp. a PR/feedback worktree with no sessions of its own)
             # restores context instead of cold-starting.
@@ -10188,6 +10203,56 @@ def cmd_create(args: argparse.Namespace) -> int:
               or os.environ.get("AGENT_WORKTREES_OWNER_REF")
               or _resolve_owner_ref() or None)
     )
+    dispatch_fields = {
+        "task_id": getattr(args, "dispatch_task_id", None),
+        "reservation_key": getattr(args, "dispatch_reservation_key", None),
+        "attempt": getattr(args, "dispatch_attempt", None),
+        "driver": getattr(args, "dispatch_driver", None),
+        "supervisor": getattr(args, "dispatch_supervisor", None),
+    }
+    present_dispatch_fields = {
+        key for key, value in dispatch_fields.items() if value is not None
+    }
+    if present_dispatch_fields and len(present_dispatch_fields) != len(dispatch_fields):
+        missing = sorted(set(dispatch_fields) - present_dispatch_fields)
+        message = (
+            "dispatch allocation provenance requires all fields; missing "
+            + ", ".join(missing)
+        )
+        if args.json:
+            return _json_error(message)
+        output.err(message)
+        return 1
+    if present_dispatch_fields:
+        attempt = dispatch_fields["attempt"]
+        if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt <= 0:
+            message = "dispatch attempt must be a positive integer"
+            if args.json:
+                return _json_error(message)
+            output.err(message)
+            return 1
+        invalid = [
+            key
+            for key in (
+                "task_id",
+                "reservation_key",
+                "driver",
+                "supervisor",
+            )
+            if not isinstance(dispatch_fields[key], str)
+            or not dispatch_fields[key]
+            or len(dispatch_fields[key]) > 512
+        ]
+        if invalid:
+            message = (
+                "dispatch allocation fields must be non-empty and at most "
+                f"512 characters: {', '.join(invalid)}"
+            )
+            if args.json:
+                return _json_error(message)
+            output.err(message)
+            return 1
+    dispatch_attempt = dispatch_fields if present_dispatch_fields else None
     with output.stdout_to_stderr():
         try:
             config = cfg.load_config()
@@ -10200,6 +10265,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 interface=getattr(args, "interface", None),
                 origin=getattr(args, "origin", None),
                 owner_ref=owner_ref,
+                dispatch_attempt=dispatch_attempt,
             )
         except CoordinationReadinessFailure as exc:
             return _emit_coordination_rejection(
@@ -19328,6 +19394,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "user = operator (NF/Picker), delegate = agent-spawned, "
                         "system = background/daemon. Default: derived from kind + "
                         "caller. Governs Picker/cockpit visibility. See #2668.")
+    p.add_argument("--dispatch-task-id", default=None,
+                   help="Task id for a dispatch-created attempt worktree")
+    p.add_argument("--dispatch-reservation-key", default=None,
+                   help="Exact spawn reservation that created this worktree")
+    p.add_argument("--dispatch-attempt", type=int, default=None,
+                   help="Positive dispatch spawn-attempt ordinal")
+    p.add_argument("--dispatch-driver", default=None,
+                   help="Dispatch lifecycle driver that owns this allocation")
+    p.add_argument("--dispatch-supervisor", default=None,
+                   help="Exact supervisor process provenance for this allocation")
     p.add_argument("--owner-ref", default=None, dest="owner_ref",
                    help="Qualified ref (machine/project/worktree_id[#session]) of "
                         "the worktree that owns this one as an outbound resource. "
@@ -20146,9 +20222,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument(
         "--policy",
-        choices=[terminal_conclusion.DISPOSABLE_CLI_POLICY],
+        choices=[
+            terminal_conclusion.DISPOSABLE_CLI_POLICY,
+            terminal_conclusion.DISPATCH_ATTEMPT_POLICY,
+        ],
         required=True,
         help="Explicit discard policy authorizing generated checkout reconciliation",
+    )
+    sp.add_argument(
+        "--reservation",
+        dest="reservation_key",
+        default=None,
+        help="Exact dispatch reservation required by dispatch-attempt policy",
     )
     sp.add_argument(
         "--owner",
@@ -22232,6 +22317,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 session_id=getattr(args, "session_id", None),
                 owner=args.owner,
                 policy=args.policy,
+                reservation_key=getattr(args, "reservation_key", None),
             )
         except FileNotFoundError:
             if getattr(args, "remove", False) and not yaml_path.exists():

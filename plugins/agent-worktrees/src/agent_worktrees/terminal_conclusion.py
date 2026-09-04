@@ -1,4 +1,4 @@
-"""Safely prime a disposable CLI worker worktree for managed garbage collection.
+"""Safely prime a disposable worker worktree for managed garbage collection.
 
 This module deliberately does not remove worktrees. It concludes an exact
 recorded session when the worker is already gone, reconciles a checkout only
@@ -16,6 +16,7 @@ from typing import Any
 from . import finalize, git_ops, sessions, tracking
 
 DISPOSABLE_CLI_POLICY = "disposable-cli"
+DISPATCH_ATTEMPT_POLICY = "dispatch-attempt"
 
 def _normalized(path: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
@@ -83,8 +84,10 @@ def _save_session_conclusion(
     }, not already
 
 
-def _preservation_reason(record: tracking.WorktreeRecord) -> str | None:
-    if record.resolved_interface != "cli":
+def _preservation_reason(
+    record: tracking.WorktreeRecord, *, policy: str
+) -> str | None:
+    if policy == DISPOSABLE_CLI_POLICY and record.resolved_interface != "cli":
         return "not-cli-worktree"
     if record.pending_handoffs:
         return "pending-handoff"
@@ -123,14 +126,15 @@ def conclude_disposable_worktree(
     session_id: str | None,
     owner: str,
     policy: str,
+    reservation_key: str | None = None,
 ) -> dict[str, Any]:
-    """Prime one exact disposable CLI worktree for the existing managed GC.
+    """Prime one exact disposable worktree for the existing managed GC.
 
     Safe skips return ``action="skipped"`` with a stable reason. Operational
     failures raise so a higher layer can distinguish a failed conclusion from a
     deliberate preservation decision.
     """
-    if policy != DISPOSABLE_CLI_POLICY:
+    if policy not in {DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY}:
         raise ValueError(f"unsupported terminal conclusion policy: {policy!r}")
 
     record_path = Path(record_path)
@@ -170,6 +174,38 @@ def conclude_disposable_worktree(
             if reason := _identity_reason(record, record_path):
                 result.update(action="skipped", reason=reason)
                 return result
+            if policy == DISPATCH_ATTEMPT_POLICY:
+                allocation = record.dispatch_attempt
+                if allocation is None:
+                    result.update(
+                        action="skipped",
+                        reason="dispatch-provenance-missing",
+                    )
+                    return result
+                if not reservation_key:
+                    result.update(
+                        action="skipped",
+                        reason="reservation-identity-missing",
+                    )
+                    return result
+                if allocation.reservation_key != reservation_key:
+                    result.update(
+                        action="skipped",
+                        reason="reservation-mismatch",
+                    )
+                    return result
+                if allocation.creator_machine != record.machine:
+                    result.update(
+                        action="skipped",
+                        reason="creator-machine-mismatch",
+                    )
+                    return result
+                if allocation.driver != owner:
+                    result.update(
+                        action="skipped",
+                        reason="driver-owner-mismatch",
+                    )
+                    return result
             live_reason = _session_is_live(record)
             if live_reason:
                 result.update(action="skipped", reason=live_reason)
@@ -208,7 +244,7 @@ def conclude_disposable_worktree(
                 }
                 return result
 
-            if reason := _preservation_reason(record):
+            if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)
                 return result
 
@@ -341,7 +377,7 @@ def conclude_disposable_worktree(
             ):
                 result.update(action="skipped", reason="lifecycle-changed")
                 return result
-            if reason := _preservation_reason(record):
+            if reason := _preservation_reason(record, policy=policy):
                 result.update(action="skipped", reason=reason)
                 return result
             session_result, _session_changed = _save_session_conclusion(
@@ -358,11 +394,15 @@ def conclude_disposable_worktree(
                 and record.status in {"complete", "finalized"}
                 and record.owner == owner
                 and record.resolved_origin == "delegate"
-                and record.resolved_interface == "cli"
+                and (
+                    policy == DISPATCH_ATTEMPT_POLICY
+                    or record.resolved_interface == "cli"
+                )
             )
             record.kind = "bridge"
             record.owner = owner
-            record.interface = "cli"
+            if policy == DISPOSABLE_CLI_POLICY:
+                record.interface = "cli"
             record.origin = "delegate"
             tracking.update_status(record, "complete", save=False)
             tracking.save_record(record, record_path)
@@ -379,6 +419,7 @@ def conclude_disposable_worktree(
 
 
 __all__ = [
+    "DISPATCH_ATTEMPT_POLICY",
     "DISPOSABLE_CLI_POLICY",
     "conclude_disposable_worktree",
 ]

@@ -99,6 +99,7 @@ _MAX_HANDOFFS = 256
 _MAX_PROFILE_ASSIGNMENTS = 128
 _MAX_CONTROLLER_RELATIONS = 32
 MAX_PERSISTED_COUNTER = (1 << 63) - 1
+_DISPATCH_PROVENANCE_TEXT_MAX = 512
 
 
 def _bounded_nonnegative_int(value: object, *, field: str) -> int:
@@ -114,6 +115,68 @@ def _bounded_nonnegative_int(value: object, *, field: str) -> int:
             f"{field} must be between 0 and {MAX_PERSISTED_COUNTER}"
         )
     return int(value)
+
+
+@dataclass(frozen=True)
+class DispatchAttempt:
+    """Immutable provenance for a worktree created by one dispatch attempt."""
+
+    task_id: str
+    reservation_key: str
+    attempt: int
+    driver: str
+    supervisor: str
+    creator_machine: str
+    ownership: Literal["created"] = "created"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "task_id": self.task_id,
+            "reservation_key": self.reservation_key,
+            "attempt": self.attempt,
+            "driver": self.driver,
+            "supervisor": self.supervisor,
+            "creator_machine": self.creator_machine,
+            "ownership": self.ownership,
+        }
+
+
+def _dispatch_attempt_from_mapping(value: object) -> DispatchAttempt | None:
+    if not isinstance(value, dict):
+        return None
+    required = {
+        "task_id",
+        "reservation_key",
+        "attempt",
+        "driver",
+        "supervisor",
+        "creator_machine",
+        "ownership",
+    }
+    if set(value) != required or value.get("ownership") != "created":
+        return None
+    strings: dict[str, str] = {}
+    for key in required - {"attempt", "ownership"}:
+        raw = value.get(key)
+        if not isinstance(raw, str) or not raw or len(raw) > _DISPATCH_PROVENANCE_TEXT_MAX:
+            return None
+        strings[key] = raw
+    try:
+        attempt = _bounded_nonnegative_int(
+            value.get("attempt"), field="dispatch_attempt.attempt"
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if attempt <= 0:
+        return None
+    return DispatchAttempt(
+        task_id=strings["task_id"],
+        reservation_key=strings["reservation_key"],
+        attempt=attempt,
+        driver=strings["driver"],
+        supervisor=strings["supervisor"],
+        creator_machine=strings["creator_machine"],
+    )
 
 
 @dataclass
@@ -471,6 +534,13 @@ class WorktreeRecord:
     # resolved_origin, never these raw fields.
     interface: WorktreeInterface | None = None
     origin: WorktreeOrigin | None = None
+    dispatch_attempt: DispatchAttempt | None = None
+    dispatch_attempt_opaque: bool = field(
+        default=False, repr=False, compare=False)
+    dispatch_attempt_raw: object = field(
+        default=None, repr=False, compare=False)
+    dispatch_attempt_raw_present: bool = field(
+        default=False, repr=False, compare=False)
     # False when an external host created and owns the checkout. We may track
     # its sessions, but cleanup must never remove its directory or branch.
     checkout_managed: bool = True
@@ -1867,6 +1937,12 @@ def load_record(path: Path) -> WorktreeRecord:
     origin_raw = data.get("origin")
     origin_val: WorktreeOrigin | None = (
         origin_raw if origin_raw in ("user", "system", "delegate") else None)
+    dispatch_attempt_raw_present = "dispatch_attempt" in data
+    dispatch_attempt_raw = data.get("dispatch_attempt")
+    dispatch_attempt = _dispatch_attempt_from_mapping(dispatch_attempt_raw)
+    dispatch_attempt_opaque = (
+        dispatch_attempt_raw_present and dispatch_attempt is None
+    )
 
     controller_metadata_opaque = False
     controllers_list: list[ControllerRelation] = []
@@ -2138,6 +2214,10 @@ def load_record(path: Path) -> WorktreeRecord:
         owner=str(owner_raw) if owner_raw else None,
         interface=iface_val,
         origin=origin_val,
+        dispatch_attempt=dispatch_attempt,
+        dispatch_attempt_opaque=dispatch_attempt_opaque,
+        dispatch_attempt_raw=dispatch_attempt_raw,
+        dispatch_attempt_raw_present=dispatch_attempt_raw_present,
         checkout_managed=data.get("checkout_managed", True) is not False,
         parent_session=(str(data["parent_session"])
                         if data.get("parent_session") else None),
@@ -2398,6 +2478,18 @@ def _save_record_unlocked(
         content += f"interface: {record.interface}\n"
     if record.origin in ("user", "system", "delegate"):
         content += f"origin: {record.origin}\n"
+    if record.dispatch_attempt is not None:
+        content += yaml.safe_dump(
+            {"dispatch_attempt": record.dispatch_attempt.to_dict()},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    elif record.dispatch_attempt_opaque and record.dispatch_attempt_raw_present:
+        content += yaml.safe_dump(
+            {"dispatch_attempt": record.dispatch_attempt_raw},
+            default_flow_style=False,
+            sort_keys=False,
+        )
     if not record.checkout_managed:
         content += "checkout_managed: false\n"
 
@@ -3744,6 +3836,7 @@ def create_new_record(
     owner: str | None = None,
     interface: WorktreeInterface | None = None,
     origin: WorktreeOrigin | None = None,
+    dispatch_attempt: DispatchAttempt | None = None,
     parent_session: str | None = None,
     caller_worktree: str | None = None,
     owner_ref: str | None = None,
@@ -3786,6 +3879,7 @@ def create_new_record(
         owner=owner,
         interface=interface,
         origin=origin,
+        dispatch_attempt=dispatch_attempt,
         parent_session=normalized_parent_session,
         controller_revision=controller_revision,
         controllers=controllers,

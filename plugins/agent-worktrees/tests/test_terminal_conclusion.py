@@ -6,10 +6,11 @@ import types
 from pathlib import Path
 
 import pytest
+import yaml
 
+from agent_worktrees import __main__ as cli
 from agent_worktrees import git_ops, sessions, tracking
 from agent_worktrees import terminal_conclusion as tc
-from agent_worktrees import __main__ as cli
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -86,7 +87,8 @@ def _conclude(record_path: Path, repo, **over):
         repo,
         session_id=over.get("session_id", "session-exact"),
         owner=over.get("owner", "dispatcher"),
-        policy=tc.DISPOSABLE_CLI_POLICY,
+        policy=over.get("policy", tc.DISPOSABLE_CLI_POLICY),
+        reservation_key=over.get("reservation_key"),
     )
 
 
@@ -214,6 +216,106 @@ def test_duplicate_worktree_path_is_preserved(tmp_path, monkeypatch):
 
     assert result["action"] == "skipped"
     assert result["reason"] == "worktree-path-conflict"
+
+
+def test_dispatch_attempt_policy_concludes_exact_acp_allocation(
+    tmp_path, monkeypatch
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine=record.machine,
+    )
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:1",
+    )
+
+    record = tracking.load_record(record_path)
+    assert result["action"] == "primed"
+    assert record.interface == "acp"
+    assert record.kind == "bridge"
+    assert record.owner == "dispatcher"
+    assert record.dispatch_attempt is not None
+    assert cli._worktree_to_dict(record)["dispatch_attempt"] == (
+        record.dispatch_attempt.to_dict()
+    )
+
+
+def test_dispatch_attempt_policy_rejects_wrong_reservation(
+    tmp_path, monkeypatch
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.dispatch_attempt = tracking.DispatchAttempt(
+        task_id="task-1",
+        reservation_key="dispatch-task:task-1:1",
+        attempt=1,
+        driver="dispatcher",
+        supervisor="supervisor-1",
+        creator_machine=record.machine,
+    )
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:2",
+    )
+
+    assert result["action"] == "skipped"
+    assert result["reason"] == "reservation-mismatch"
+    assert tracking.load_record(record_path).resolved_head_session == "session-exact"
+
+
+def test_newer_dispatch_provenance_is_preserved_but_not_trusted(
+    tmp_path, monkeypatch
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    raw["dispatch_attempt"] = {
+        "schema_version": 2,
+        "task_id": "task-1",
+        "reservation_key": "dispatch-task:task-1:1",
+        "attempt": 1,
+        "driver": "dispatcher",
+        "supervisor": "supervisor-1",
+        "creator_machine": "host",
+        "ownership": "created",
+    }
+    record_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    record = tracking.load_record(record_path)
+    assert record.dispatch_attempt is None
+    assert record.dispatch_attempt_opaque is True
+    tracking.save_record(record, record_path)
+
+    saved = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    assert saved["dispatch_attempt"] == raw["dispatch_attempt"]
+    result = _conclude(
+        record_path,
+        repo,
+        policy=tc.DISPATCH_ATTEMPT_POLICY,
+        reservation_key="dispatch-task:task-1:1",
+    )
+    assert result["action"] == "skipped"
+    assert result["reason"] == "dispatch-provenance-missing"
 
 
 def test_lifecycle_change_during_git_inspection_blocks_priming(
