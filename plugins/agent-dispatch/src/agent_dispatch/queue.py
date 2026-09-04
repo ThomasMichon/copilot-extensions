@@ -868,12 +868,26 @@ class TaskQueue:
         self.eval_lease_seconds = eval_lease_seconds
         self.blob_threshold = blob_threshold
         self.result_max_bytes = result_max_bytes
+        self._wake_notifier: Callable[[], None] | None = None
         # Blobs live in a ``payloads/`` directory beside the queue DB unless the
         # caller overrides it (e.g. a shared blob volume).
         if payload_dir is None:
             payload_dir = Path(self.db_path).parent / "payloads"
         self.payloads = PayloadStore(payload_dir)
         self._migrate()
+
+    def set_wake_notifier(self, notifier: Callable[[], None] | None) -> None:
+        """Set the process-local signal invoked after a wake transaction commits."""
+        self._wake_notifier = notifier
+
+    def _notify_wake(self) -> None:
+        notifier = self._wake_notifier
+        if notifier is None:
+            return
+        try:
+            notifier()
+        except Exception:
+            log.warning("wake notifier failed after durable commit", exc_info=True)
 
     # -- connection / schema -------------------------------------------------
 
@@ -4026,6 +4040,7 @@ class TaskQueue:
         """
         ts = self._now(now)
         payload = json.dumps(fields, separators=(",", ":"))
+        wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -4101,8 +4116,11 @@ class TaskQueue:
                     message=wake_message,
                     ts=ts,
                 )
+                wake_enqueued = True
                 result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
+        if wake_enqueued:
+            self._notify_wake()
         return result  # type: ignore[return-value]
 
     def take_steer(
@@ -4821,6 +4839,7 @@ class TaskQueue:
     ) -> Task:
         ts = self._now(now)
         allowed_set = set(allowed)
+        wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -4919,8 +4938,11 @@ class TaskQueue:
                     message=wake_message,
                     ts=ts,
                 )
+                wake_enqueued = True
                 result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
+        if wake_enqueued:
+            self._notify_wake()
         return result  # type: ignore[return-value]
 
     # -- read helpers --------------------------------------------------------
@@ -4928,6 +4950,14 @@ class TaskQueue:
     def get(self, task_id: str) -> Task | None:
         with self._connect() as conn:
             return self._fetch(conn, task_id)
+
+    def has_pending_wakes(self) -> bool:
+        """Return whether a pending wake exists, including a delayed retry."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM wake_outbox WHERE status = 'pending' LIMIT 1"
+            ).fetchone()
+        return row is not None
 
     def list(
         self,
