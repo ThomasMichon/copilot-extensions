@@ -1,7 +1,7 @@
 {
   "name": "context-injection",
   "description": "Deterministic session-start context aggregation for Copilot CLI plugins. Resolves the active plugin stack, runs declared pure context contributors, and emits one aggregate while affected hosts fail to merge multiple non-empty additionalContext values.",
-  "version": "0.1.0-dev24",
+  "version": "0.1.0-dev25",
   "runtimeScope": "none",
   "hooks": "hooks.json",
   "sessionContextEngine": "engine.json",

@@ -1466,6 +1466,188 @@ def test_windows_contributors_receive_process_start_grace() -> None:
     assert AGGREGATE_CONTEXT.PROCESS_START_GRACE_SECONDS == 5
 
 
+def test_fast_replay_is_caller_qualified_and_expires(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "COPILOT_CONTEXT_INJECTION_CACHE_DIR",
+        str(tmp_path / "cache"),
+    )
+    caller_root = tmp_path / "producer"
+    caller_root.mkdir()
+    path = AGGREGATE_CONTEXT._fast_replay_path(
+        "session-1",
+        os.path.normcase(str(tmp_path)),
+        123,
+    )
+    output = b'{"additionalContext":"READY"}'
+    monkeypatch.setattr(AGGREGATE_CONTEXT.time, "time", lambda: 1000.0)
+
+    assert AGGREGATE_CONTEXT._store_fast_replay(
+        path,
+        {"policy@example/main": os.path.normcase(str(caller_root))},
+        output,
+    )
+    assert (
+        AGGREGATE_CONTEXT._load_fast_replay(
+            path,
+            "policy@example/main",
+            caller_root,
+        )
+        == output
+    )
+    assert (
+        AGGREGATE_CONTEXT._load_fast_replay(
+            path,
+            "other@example/main",
+            caller_root,
+        )
+        is None
+    )
+    monkeypatch.setattr(
+        AGGREGATE_CONTEXT.time,
+        "time",
+        lambda: 1000.0 + AGGREGATE_CONTEXT.FAST_REPLAY_TTL_SECONDS + 1,
+    )
+    assert (
+        AGGREGATE_CONTEXT._load_fast_replay(
+            path,
+            "policy@example/main",
+            caller_root,
+        )
+        is None
+    )
+
+
+def test_fast_replay_short_circuits_stack_discovery(
+    tmp_path: Path,
+) -> None:
+    cache = tmp_path / "cache"
+    caller_root = tmp_path / "producer"
+    caller_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    session_id = "fast-replay"
+    hook_timestamp = 456
+    canonical_cwd = os.path.normcase(str(cwd.resolve()))
+    environment = os.environ.copy()
+    environment["COPILOT_CONTEXT_INJECTION_CACHE_DIR"] = str(cache)
+    environment["COPILOT_PLUGIN_ROOT"] = str(caller_root)
+    previous_cache = os.environ.get("COPILOT_CONTEXT_INJECTION_CACHE_DIR")
+    os.environ["COPILOT_CONTEXT_INJECTION_CACHE_DIR"] = str(cache)
+    try:
+        path = AGGREGATE_CONTEXT._fast_replay_path(
+            session_id,
+            canonical_cwd,
+            hook_timestamp,
+        )
+        assert AGGREGATE_CONTEXT._store_fast_replay(
+            path,
+            {
+                "policy@example/main":
+                os.path.normcase(str(caller_root.resolve()))
+            },
+            b'{"additionalContext":"CACHED"}',
+        )
+    finally:
+        if previous_cache is None:
+            os.environ.pop("COPILOT_CONTEXT_INJECTION_CACHE_DIR", None)
+        else:
+            os.environ["COPILOT_CONTEXT_INJECTION_CACHE_DIR"] = previous_cache
+
+    result = subprocess.run(
+        [
+            os.environ.get("PYTHON") or sys.executable,
+            str(SCRIPT),
+            "--producer",
+            "policy@example/main",
+        ],
+        input=json.dumps(
+            {
+                "cwd": str(cwd),
+                "source": "new",
+                "sessionId": session_id,
+                "timestamp": hook_timestamp,
+            }
+        ),
+        text=True,
+        capture_output=True,
+        env=environment,
+        check=True,
+    )
+
+    assert result.stdout == '{"additionalContext":"CACHED"}'
+    assert result.stderr == ""
+
+
+def test_stack_fingerprint_ignores_plugins_without_context_contracts(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "authority"
+    producer_root = tmp_path / "producer"
+    unrelated_root = tmp_path / "unrelated"
+    for root, name in (
+        (authority_root, "context-injection"),
+        (producer_root, "policy"),
+    ):
+        (root / "scripts").mkdir(parents=True)
+        (root / "plugin.json").write_text(
+            json.dumps({"name": name}),
+            encoding="utf-8",
+        )
+    (producer_root / "scripts" / "emit.ps1").write_text(
+        "[Console]::Out.Write('{}')\n",
+        encoding="utf-8",
+    )
+    active = [
+        AGGREGATE_CONTEXT.ActivePlugin(
+            "context-injection@example",
+            "context-injection",
+            "example",
+            authority_root,
+        ),
+        AGGREGATE_CONTEXT.ActivePlugin(
+            "policy@example",
+            "policy",
+            "example",
+            producer_root,
+        ),
+        AGGREGATE_CONTEXT.ActivePlugin(
+            "unrelated@example",
+            "unrelated",
+            "example",
+            unrelated_root,
+        ),
+    ]
+    adoption = AGGREGATE_CONTEXT.Adoption("context-injection@example")
+    contributors = [
+        AGGREGATE_CONTEXT.Contributor(
+            "policy@example",
+            producer_root,
+            "main",
+            100,
+            1,
+            1024,
+            ("scripts/emit.ps1",),
+        )
+    ]
+
+    with_unrelated = AGGREGATE_CONTEXT._stack_fingerprint(
+        active,
+        adoption,
+        contributors,
+    )
+    without_unrelated = AGGREGATE_CONTEXT._stack_fingerprint(
+        active[:2],
+        adoption,
+        contributors,
+    )
+
+    assert with_unrelated is not None
+    assert with_unrelated == without_unrelated
+
+
 def test_aggregate_file_budget_supports_broad_plugin_stacks() -> None:
     assert AGGREGATE_CONTEXT.MAX_AGGREGATE_BYTES == 128 * 1024
     assert (
