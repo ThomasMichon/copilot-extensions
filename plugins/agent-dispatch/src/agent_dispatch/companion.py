@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
-from agent_procutil import no_window_kwargs
+from agent_procutil import contained_test_mode, detached_kwargs, no_window_kwargs
 from plugin_activation import read_json_object, write_json_object_atomic
 
 from .registrations import (
@@ -245,13 +245,7 @@ def _run_captured(
     timeout: float,
     input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    kwargs: dict[str, object] = no_window_kwargs()
-    if os.name == "nt":
-        kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | int(
-            subprocess.CREATE_NEW_PROCESS_GROUP
-        )
-    else:
-        kwargs["start_new_session"] = True
+    kwargs: dict[str, object] = detached_kwargs()
     try:
         process = subprocess.Popen(  # noqa: S603 -- attributed fixed argv
             list(command),
@@ -266,7 +260,9 @@ def _run_captured(
         try:
             stdout, stderr = process.communicate(input_text, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            if os.name == "nt":
+            if contained_test_mode():
+                process.kill()
+            elif os.name == "nt":
                 _terminate_windows_tree(process.pid)
             else:
                 _terminate_posix_group(process.pid, grace=1.0)
