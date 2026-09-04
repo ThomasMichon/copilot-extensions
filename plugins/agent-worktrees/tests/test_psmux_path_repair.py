@@ -190,6 +190,7 @@ def test_path_repair_does_not_mutate_live_sessions():
     ]
     assert "compatibility cannot be validated because the helper is missing" in ensure
     assert "compatibility cannot be validated because the helper is unavailable" in ensure
+    assert "$psmuxVer = Get-AwPsmuxBinaryVersion -Path $muxBin" in ensure
     assert "& winget install" not in unknown_branch
     assert "not replacing it" in unknown_branch
     assert "& winget install" not in live_branch

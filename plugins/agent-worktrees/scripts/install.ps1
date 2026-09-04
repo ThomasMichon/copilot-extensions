@@ -2148,24 +2148,21 @@ function Ensure-Psmux {
         return
     }
     $muxBin = Resolve-AwPsmuxBin (Get-Command psmux -ErrorAction SilentlyContinue)
-    $psmuxVer = (& $muxBin --help 2>&1 | Select-Object -First 1) -replace '.*psmux v([0-9.]+).*', '$1'
     $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (-not (Test-Path -LiteralPath $helper)) {
-        Write-ServiceWarn "psmux $psmuxVer compatibility cannot be validated because the helper is missing -- not replacing it"
+        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is missing -- not replacing it"
         return
     }
     . $helper
-    if (-not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue)) {
-        Write-ServiceWarn "psmux $psmuxVer compatibility cannot be validated because the helper is unavailable -- not replacing it"
+    if (-not (Get-Command Get-AwPsmuxBinaryVersion -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Test-AwPsmuxVersionCompatible -ErrorAction SilentlyContinue)) {
+        Write-ServiceWarn "psmux compatibility cannot be validated because the helper is unavailable -- not replacing it"
         return
     }
+    $psmuxVer = Get-AwPsmuxBinaryVersion -Path $muxBin
     $compatible = Test-AwPsmuxVersionCompatible -Version $psmuxVer
     if (-not $compatible) {
-        if (Test-Path -LiteralPath $helper) {
-            $sessionState = Get-AwPsmuxSessionState -Path $muxBin
-        } else {
-            $sessionState = [pscustomobject]@{ Known = $false; Sessions = @() }
-        }
+        $sessionState = Get-AwPsmuxSessionState -Path $muxBin
         if (-not $sessionState.Known) {
             Write-ServiceWarn "psmux $psmuxVer is incompatible, but live-session state could not be determined -- not replacing it. Re-run 'update' after confirming all psmux sessions are closed."
         } elseif ($sessionState.Sessions.Count -gt 0) {
@@ -2175,12 +2172,8 @@ function Ensure-Psmux {
             & winget install --id marlocarlo.psmux --version $installVersion --exact `
                 --uninstall-previous --force --accept-source-agreements `
                 --accept-package-agreements 2>&1 | Out-Null
-            if (Test-Path -LiteralPath $helper) {
-                $selected = Find-AwCompatiblePsmuxPackageBinary `
-                    -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
-            } else {
-                $selected = $null
-            }
+            $selected = Find-AwCompatiblePsmuxPackageBinary `
+                -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
             if ($selected) {
                 Write-ServiceOk "psmux upgraded to compatible version $($selected.Version)"
             } else {
