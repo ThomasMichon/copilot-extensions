@@ -431,6 +431,7 @@ def build_container_spawner(
     ready_timeout: float = 120.0,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    require_relay_ready: bool = False,
 ):
     """Construct the generic remote spawner for a trusted container."""
     from .spawner import CodeSpaceSpawner
@@ -453,4 +454,5 @@ def build_container_spawner(
         ready_timeout=ready_timeout,
         unexpected_reap_seconds=unexpected_reap_seconds,
         active_reap_seconds=active_reap_seconds,
+        require_relay_ready=require_relay_ready,
     )

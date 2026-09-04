@@ -580,6 +580,69 @@ async def test_relay_start_failure_does_not_break_spawn(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["start", "serving"])
+async def test_required_relay_failure_aborts_before_acp_ready(
+    monkeypatch,
+    failure,
+):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    if failure == "start":
+        _FakeRelay.start_error = RuntimeError("reverse-forward failed")
+
+    class CleanupTransport(_FakeTransport):
+        async def run(self, command, *, timeout=60.0):
+            if command.startswith("python3 -c "):
+                self.runs.append(command)
+                return 0, "__REAPED__", ""
+            return await super().run(command, timeout=timeout)
+
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    transport = CleanupTransport(
+        state,
+        reverse_forwards=["9857:127.0.0.1:61234"],
+        probe_result=(
+            (0, "OK\n", "")
+            if failure == "start"
+            else (1, "", "connection refused")
+        ),
+    )
+
+    with pytest.raises(
+        endpoints_mod.CredentialRelayReadinessError,
+        match="credential relay",
+    ):
+        await sp.CodeSpaceSpawner(
+            transport,
+            ready_timeout=5,
+            require_relay_ready=True,
+            relay_ready_timeout=0.01,
+        ).spawn(["copilot"], session_id="s")
+
+    assert _FakeRelay.instances[0].stopped == 1
+    assert _FakeForward.instances[-1].cancelled is True
+    assert any(command.startswith("python3 -c ") for command in transport.runs)
+
+
+@pytest.mark.asyncio
+async def test_required_relay_disabled_path_remains_auth_light(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
+    state = {"pid": 1, "child_pid": 2, "port": 51000}
+    transport = _FakeTransport(state)
+
+    spawned = await sp.CodeSpaceSpawner(
+        transport,
+        ready_timeout=5,
+        require_relay_ready=True,
+    ).spawn(["copilot"], session_id="s")
+
+    assert spawned.local_port == 49555
+    assert spawned.relay == []
+    assert _FakeRelay.instances == []
+
+
+@pytest.mark.asyncio
 async def test_relay_serving_probe_checks_far_side_port(monkeypatch):
     _patch_common(monkeypatch)
     monkeypatch.setattr(endpoints_mod, "SupervisedRelayForward", _FakeRelay)
