@@ -973,11 +973,10 @@ def test_terminal_refresh_uses_durable_owner_session_for_mux_placeholder(
     assert settled.conclusion_state == "complete"
 
 
-def test_terminal_refresh_preserves_headless_session_type_before_nudge(q, client):
+def test_terminal_refresh_preserves_headless_session_type_before_end(q, client):
     task = q.create(
         "review",
         labels=["review"],
-        exclusive_key="review:repo:42",
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
@@ -992,33 +991,33 @@ def test_terminal_refresh_preserves_headless_session_type_before_nudge(q, client
         owner_session_id="owner-session-exact",
     )
     q.complete(task.id, "headless-worker")
-    nudges = []
+    ended = []
+    concluded = []
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         disposable_cli_labels=["review"],
-        conclusion_fn=lambda worktree, session: {
-            "action": "skipped",
-            "reason": "live-session",
-            "worktree": worktree,
-            "session": session,
-        },
+        conclusion_fn=lambda worktree, session: (
+            concluded.append((worktree, session))
+            or {"action": "removed", "reason": "managed-gc-removed"}
+        ),
         verdict_fn=lambda *_args: tracking.UNKNOWN,
         local_body_verdict_fn=lambda _sid: tracking.LIVE,
         local_body_activity_fn=lambda _sid: "IDLE",
         local_acp_session_fn=lambda _sid: "acp-session-exact",
-        local_resume_fn=lambda sid, _prompt: nudges.append(sid) or True,
+        local_end_fn=lambda sid: ended.append(sid) or True,
     )
 
-    assert sup.reconcile() == 0
+    assert sup.reconcile() == 1
     settled = q.get_reservation(reservation.key)
     assert settled.session_handle == "local-body:owner-session-exact"
-    assert settled.state == SpawnState.SPAWNED
-    assert settled.conclusion_state == "pending"
-    assert nudges == ["owner-session-exact"]
+    assert settled.state == SpawnState.SETTLED
+    assert settled.conclusion_state == "complete"
+    assert ended == ["owner-session-exact"]
+    assert concluded == [("worktree-exact", "acp-session-exact")]
     detail = json.loads(settled.conclusion_detail or "{}")
-    assert detail["session"] == "acp-session-exact"
+    assert detail["acp_session_id"] == "acp-session-exact"
 
 
 def test_terminal_conclusion_is_opt_in_only(q, client):
@@ -1171,11 +1170,10 @@ def test_live_terminal_conclusion_retries_after_settlement(q, client):
     assert len(calls) == 2
 
 
-def test_live_headless_terminal_conclusion_nudges_same_session_once(q, client):
+def test_nonexclusive_disposable_idle_body_ends_before_conclusion(q, client):
     task = q.create(
         "review",
         labels=["review"],
-        exclusive_key="review:repo:42",
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
@@ -1186,20 +1184,15 @@ def test_live_headless_terminal_conclusion_nudges_same_session_once(q, client):
     q.claim_one("headless-worker", task_id=task.id)
     q.start(task.id, "headless-worker", owner_session_id="session-exact")
     q.complete(task.id, "headless-worker")
-    nudges = []
+    ended = []
     conclusions = []
 
     def conclude(worktree, session):
         conclusions.append((worktree, session))
         return {
-            "action": "skipped",
-            "reason": "live-session",
+            "action": "removed",
+            "reason": "managed-gc-removed",
         }
-
-    def resume(sid, prompt):
-        assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
-        nudges.append((sid, prompt))
-        return True
 
     sup = Supervisor(
         client,
@@ -1210,34 +1203,18 @@ def test_live_headless_terminal_conclusion_nudges_same_session_once(q, client):
         local_body_verdict_fn=lambda _sid: tracking.LIVE,
         local_body_activity_fn=lambda _sid: "IDLE",
         local_acp_session_fn=lambda _sid: "acp-session-exact",
-        local_resume_fn=resume,
+        local_end_fn=lambda sid: ended.append(sid) or True,
     )
 
-    assert sup.reconcile() == 0
-    pending = q.get_reservation(reservation.key)
-    assert pending.state == SpawnState.SPAWNED
-    assert pending.conclusion_state == "pending"
-    detail = json.loads(pending.conclusion_detail or "{}")
-    assert detail["same_owner_nudge"] == "delivered"
+    assert sup.reconcile() == 1
+    complete = q.get_reservation(reservation.key)
+    assert complete.state == SpawnState.SETTLED
+    assert complete.conclusion_state == "complete"
+    assert ended == ["session-exact"]
     assert conclusions == [("worktree-exact", "acp-session-exact")]
-    assert nudges and nudges[0][0] == "session-exact"
-    assert "not FINAL" in nudges[0][1]
-
-    q.record_spawn_conclusion(
-        reservation.key,
-        conclusion_state="pending",
-        conclusion_detail=json.dumps(
-            {
-                **detail,
-                "next_attempt_at": 0,
-            }
-        ),
-    )
-    assert sup.reconcile() == 0
-    assert len(nudges) == 1
 
 
-def test_live_headless_conclusion_keeps_exclusive_fence_until_nudge(q, client):
+def test_idle_disposable_end_failure_keeps_exclusive_fence(q, client):
     task = q.create(
         "review",
         labels=["review"],
@@ -1257,14 +1234,13 @@ def test_live_headless_conclusion_keeps_exclusive_fence_until_nudge(q, client):
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         disposable_cli_labels=["review"],
-        conclusion_fn=lambda *_args: {
-            "action": "skipped",
-            "reason": "live-session",
-        },
+        conclusion_fn=lambda *_args: pytest.fail(
+            "conclusion must wait until the body ends"
+        ),
         local_body_verdict_fn=lambda _sid: tracking.LIVE,
         local_body_activity_fn=lambda _sid: "IDLE",
         local_acp_session_fn=lambda _sid: "acp-session-exact",
-        local_resume_fn=lambda _sid, _prompt: False,
+        local_end_fn=lambda _sid: False,
     )
 
     assert sup.reconcile() == 0
@@ -1273,10 +1249,11 @@ def test_live_headless_conclusion_keeps_exclusive_fence_until_nudge(q, client):
     assert still_active.conclusion_state == "pending"
     detail = json.loads(still_active.conclusion_detail or "{}")
     assert detail["attempts"] == 1
-    assert detail["same_owner_nudge"] == "unavailable"
+    assert detail["reason"] == "terminal-body-end-failed"
+    assert detail["acp_session_id"] == "acp-session-exact"
 
 
-def test_failed_headless_nudges_reach_durable_held_bound(q, client):
+def test_failed_disposable_body_ends_reach_durable_held_bound(q, client):
     task = q.create(
         "review",
         labels=["review"],
@@ -1298,14 +1275,13 @@ def test_failed_headless_nudges_reach_durable_held_bound(q, client):
             spawn_fn=_ok_spawn(),
             repo=TEST_REPO,
             disposable_cli_labels=["review"],
-            conclusion_fn=lambda *_args: {
-                "action": "skipped",
-                "reason": "live-session",
-            },
+            conclusion_fn=lambda *_args: pytest.fail(
+                "conclusion must wait until the body ends"
+            ),
             local_body_verdict_fn=lambda _sid: tracking.LIVE,
             local_body_activity_fn=lambda _sid: "IDLE",
             local_acp_session_fn=lambda _sid: "acp-session-exact",
-            local_resume_fn=lambda _sid, _prompt: False,
+            local_end_fn=lambda _sid: False,
         )
         assert sup.reconcile() == 0
         current = q.get_reservation(reservation.key)
@@ -1328,7 +1304,7 @@ def test_failed_headless_nudges_reach_durable_held_bound(q, client):
     assert held.conclusion_state == "held"
 
 
-def test_successful_headless_nudge_holds_fence_until_conclusion(q, client):
+def test_successful_disposable_body_end_runs_conclusion(q, client):
     task = q.create(
         "review",
         labels=["review"],
@@ -1343,43 +1319,30 @@ def test_successful_headless_nudge_holds_fence_until_conclusion(q, client):
     q.claim_one("headless-worker", task_id=task.id)
     q.start(task.id, "headless-worker", owner_session_id="session-exact")
     q.complete(task.id, "headless-worker")
-    nudges = []
-    live = True
-
-    def verdict(_sid):
-        return tracking.LIVE if live else tracking.GONE
-
-    outcomes = iter([
-        {"action": "skipped", "reason": "live-session"},
-        {"action": "primed", "reason": "managed-gc-candidate"},
-    ])
+    ended = []
+    concluded = []
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         disposable_cli_labels=["review"],
-        conclusion_fn=lambda *_args: next(outcomes),
-        local_body_verdict_fn=verdict,
-        local_body_activity_fn=lambda _sid: "IDLE" if live else None,
+        conclusion_fn=lambda worktree, session: (
+            concluded.append((worktree, session))
+            or {"action": "removed", "reason": "managed-gc-removed"}
+        ),
+        local_body_verdict_fn=lambda _sid: tracking.LIVE,
+        local_body_activity_fn=lambda _sid: "IDLE",
         local_acp_session_fn=lambda _sid: "acp-session-exact",
-        local_resume_fn=lambda sid, _prompt: nudges.append(sid) or True,
+        local_end_fn=lambda sid: ended.append(sid) or True,
     )
 
-    assert sup.reconcile() == 0
-    checkpoint = q.get_reservation(reservation.key)
-    assert checkpoint.state == SpawnState.SPAWNED
-    assert checkpoint.conclusion_state == "pending"
-    assert json.loads(
-        checkpoint.conclusion_detail or "{}"
-    )["same_owner_nudge"] == "delivered"
-
-    live = False
     assert sup.reconcile() == 1
-    assert nudges == ["session-exact"]
+    assert ended == ["session-exact"]
+    assert concluded == [("worktree-exact", "acp-session-exact")]
     assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
 
 
-def test_successful_nudge_counts_after_legacy_pending_attempts(q, client):
+def test_end_failure_counts_after_legacy_pending_attempts(q, client):
     task = q.create(
         "review",
         labels=["review"],
@@ -1398,6 +1361,7 @@ def test_successful_nudge_counts_after_legacy_pending_attempts(q, client):
             {
                 "action": "failed",
                 "reason": "session-identity-unavailable",
+                "session": "acp-session-exact",
                 "attempts": 3,
                 "next_attempt_at": 0,
             }
@@ -1411,14 +1375,15 @@ def test_successful_nudge_counts_after_legacy_pending_attempts(q, client):
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         disposable_cli_labels=["review"],
-        conclusion_fn=lambda *_args: {
-            "action": "skipped",
-            "reason": "live-session",
-        },
+        conclusion_fn=lambda *_args: pytest.fail(
+            "conclusion must wait until the body ends"
+        ),
         local_body_verdict_fn=lambda _sid: tracking.LIVE,
         local_body_activity_fn=lambda _sid: "IDLE",
-        local_acp_session_fn=lambda _sid: "acp-session-exact",
-        local_resume_fn=lambda _sid, _prompt: True,
+        local_acp_session_fn=lambda _sid: pytest.fail(
+            "legacy checkpoint must avoid a fresh identity lookup"
+        ),
+        local_end_fn=lambda _sid: False,
     )
 
     assert sup.reconcile() == 0
@@ -1426,10 +1391,11 @@ def test_successful_nudge_counts_after_legacy_pending_attempts(q, client):
         q.get_reservation(reservation.key).conclusion_detail or "{}"
     )
     assert detail["attempts"] == 4
-    assert detail["same_owner_nudge"] == "delivered"
+    assert detail["reason"] == "terminal-body-end-failed"
+    assert detail["acp_session_id"] == "acp-session-exact"
 
 
-def test_nonexclusive_headless_conclusion_nudges_before_settlement(q, client):
+def test_nonexclusive_disposable_running_body_is_preserved(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
@@ -1440,34 +1406,24 @@ def test_nonexclusive_headless_conclusion_nudges_before_settlement(q, client):
     q.claim_one("headless-worker", task_id=task.id)
     q.start(task.id, "headless-worker", owner_session_id="session-exact")
     q.complete(task.id, "headless-worker")
-    ended = []
-    nudged = []
-
-    def resume(sid, _prompt):
-        assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
-        nudged.append(sid)
-        return True
-
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
         disposable_cli_labels=["review"],
-        conclusion_fn=lambda *_args: {
-            "action": "skipped",
-            "reason": "live-session",
-        },
+        conclusion_fn=lambda *_args: pytest.fail(
+            "running body must not reach conclusion"
+        ),
         local_body_verdict_fn=lambda _sid: tracking.LIVE,
-        local_body_activity_fn=lambda _sid: "IDLE",
+        local_body_activity_fn=lambda _sid: "RUNNING",
         local_acp_session_fn=lambda _sid: "acp-session-exact",
-        local_end_fn=lambda sid: ended.append(sid) or True,
-        local_resume_fn=resume,
+        local_end_fn=lambda _sid: pytest.fail("running body must not end"),
     )
 
-    assert sup.reconcile() == 1
-    assert nudged == ["session-exact"]
-    assert ended == []
-    assert q.get_reservation(reservation.key).conclusion_state == "pending"
+    assert sup.reconcile() == 0
+    current = q.get_reservation(reservation.key)
+    assert current.state == SpawnState.SPAWNED
+    assert current.conclusion_state is None
 
 
 def test_pending_headless_conclusion_does_not_end_running_session(q, client):
@@ -1514,7 +1470,7 @@ def test_pending_headless_conclusion_does_not_end_running_session(q, client):
     assert q.get_reservation(reservation.key).conclusion_state == "pending"
 
 
-def test_nonidle_headless_conclusion_reaches_durable_held_bound(q, client):
+def test_nonidle_headless_conclusion_preserves_without_retry_budget(q, client):
     task = q.create(
         "review",
         labels=["review"],
@@ -1530,7 +1486,7 @@ def test_nonidle_headless_conclusion_reaches_durable_held_bound(q, client):
     q.start(task.id, "headless-worker", owner_session_id="session-exact")
     q.complete(task.id, "headless-worker")
 
-    for attempt in range(12):
+    for _attempt in range(3):
         sup = Supervisor(
             client,
             spawn_fn=_ok_spawn(),
@@ -1541,21 +1497,9 @@ def test_nonidle_headless_conclusion_reaches_durable_held_bound(q, client):
         )
         assert sup.reconcile() == 0
         current = q.get_reservation(reservation.key)
-        detail = json.loads(current.conclusion_detail or "{}")
-        assert detail["attempts"] == attempt + 1
-        if attempt < 11:
-            q.record_spawn_conclusion(
-                reservation.key,
-                conclusion_state="pending",
-                conclusion_detail=json.dumps(
-                    {
-                        **detail,
-                        "next_attempt_at": 0,
-                    }
-                ),
-            )
-
-    assert q.get_reservation(reservation.key).conclusion_state == "held"
+        assert current.state == SpawnState.SPAWNED
+        assert current.conclusion_state is None
+        assert current.conclusion_detail is None
 
 
 def test_terminal_conclusion_retries_are_bounded(q, client):
@@ -1659,6 +1603,291 @@ def test_reconcile_ends_terminal_local_body_before_settling(q, client):
     assert sup.reconcile() == 1
     assert ended == ["brg-terminal"]
     assert q.latest_reservation(t.id).state == SpawnState.SETTLED
+
+
+def test_disposable_terminal_local_body_ends_before_conclusion(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    spawn = _ok_spawn(
+        {
+            "session": "local-body:brg-disposable",
+            "worktree": "worktree-disposable",
+        }
+    )
+    ended: list[str] = []
+    concluded: list[tuple[str, str | None]] = []
+
+    def end_body(sid):
+        checkpoint = q.get_reservation(
+            q.latest_reservation(task.id).key
+        )
+        detail = json.loads(checkpoint.conclusion_detail)
+        assert checkpoint.conclusion_state == "pending"
+        assert detail["acp_session_id"] == "session-exact"
+        ended.append(sid)
+        return True
+
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        disposable_cli_labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_acp_session_fn=lambda _sid: "session-exact",
+        local_end_fn=end_body,
+        conclusion_fn=lambda worktree, session: (
+            concluded.append((worktree, session))
+            or {"action": "removed", "reason": "managed-gc-removed"}
+        ),
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=task.id)
+    q.start(task.id, "local-o", owner_session_id="session-exact")
+    q.complete(task.id, "local-o")
+
+    assert sup.reconcile() == 1
+    assert ended == ["brg-disposable"]
+    assert concluded == [("worktree-disposable", "session-exact")]
+    reservation = q.latest_reservation(task.id)
+    assert reservation.state == SpawnState.SETTLED
+    assert reservation.conclusion_state == "complete"
+    assert json.loads(reservation.conclusion_detail)["acp_session_id"] == (
+        "session-exact"
+    )
+
+
+def test_stopped_disposable_local_body_is_ended_before_conclusion(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    spawn = _ok_spawn(
+        {
+            "session": "local-body:brg-stopped",
+            "worktree": "worktree-disposable",
+        }
+    )
+    ended = []
+    concluded = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        disposable_cli_labels=["review"],
+        local_body_verdict_fn=lambda _sid: tracking.GONE,
+        local_acp_session_fn=lambda _sid: "session-exact",
+        local_end_fn=lambda sid: ended.append(sid) or True,
+        conclusion_fn=lambda worktree, session: (
+            concluded.append((worktree, session))
+            or {"action": "removed", "reason": "managed-gc-removed"}
+        ),
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=task.id)
+    q.start(task.id, "local-o", owner_session_id="session-exact")
+    q.complete(task.id, "local-o")
+
+    assert sup.reconcile() == 1
+    assert ended == ["brg-stopped"]
+    assert concluded == [("worktree-disposable", "session-exact")]
+    assert q.latest_reservation(task.id).conclusion_state == "complete"
+
+
+def test_disposable_terminal_retry_keeps_acp_identity_after_end(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    spawn = _ok_spawn(
+        {
+            "session": "local-body:brg-disposable",
+            "worktree": "worktree-disposable",
+        }
+    )
+    outcomes = iter(
+        [
+            RuntimeError("transient"),
+            {"action": "removed", "reason": "managed-gc-removed"},
+        ]
+    )
+    sessions_seen = []
+
+    def conclude(_worktree, session):
+        sessions_seen.append(session)
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        disposable_cli_labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_acp_session_fn=lambda _sid: "session-exact",
+        local_end_fn=lambda _sid: True,
+        conclusion_fn=conclude,
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=task.id)
+    q.start(task.id, "local-o", owner_session_id="session-exact")
+    q.complete(task.id, "local-o")
+
+    assert sup.reconcile() == 1
+    pending = q.latest_reservation(task.id)
+    assert pending.conclusion_state == "pending"
+    assert json.loads(pending.conclusion_detail)["acp_session_id"] == (
+        "session-exact"
+    )
+    q.settle_spawn(
+        pending.key,
+        detail=pending.detail,
+        conclusion_state="pending",
+        conclusion_detail=json.dumps(
+            {
+                **json.loads(pending.conclusion_detail),
+                "next_attempt_at": 0,
+            }
+        ),
+    )
+
+    assert sup.reconcile() == 0
+    assert sessions_seen == ["session-exact", "session-exact"]
+    assert q.latest_reservation(task.id).conclusion_state == "complete"
+
+
+def test_disposable_terminal_end_failure_is_bounded_and_retryable(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    spawn = _ok_spawn(
+        {
+            "session": "local-body:brg-disposable",
+            "worktree": "worktree-disposable",
+        }
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        disposable_cli_labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_acp_session_fn=lambda _sid: "session-exact",
+        local_end_fn=lambda _sid: False,
+        conclusion_fn=lambda *_args: pytest.fail(
+            "conclusion must wait until the body ends"
+        ),
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=task.id)
+    q.start(task.id, "local-o", owner_session_id="session-exact")
+    q.complete(task.id, "local-o")
+
+    assert sup.reconcile() == 0
+    pending = q.latest_reservation(task.id)
+    assert pending.state == SpawnState.SPAWNED
+    assert pending.conclusion_state == "pending"
+    detail = json.loads(pending.conclusion_detail)
+    assert detail["reason"] == "terminal-body-end-failed"
+    assert detail["acp_session_id"] == "session-exact"
+    assert detail["attempts"] == 1
+    assert detail["next_attempt_at"] > 0
+
+
+def test_disposable_terminal_missing_acp_identity_is_bounded(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    spawn = _ok_spawn(
+        {
+            "session": "local-body:brg-disposable",
+            "worktree": "worktree-disposable",
+        }
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        disposable_cli_labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_acp_session_fn=lambda _sid: None,
+        local_end_fn=lambda _sid: pytest.fail(
+            "body must not end without a durable ACP identity"
+        ),
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=task.id)
+    q.start(task.id, "local-o")
+    q.complete(task.id, "local-o")
+
+    assert sup.reconcile() == 0
+    pending = q.latest_reservation(task.id)
+    assert pending.state == SpawnState.SPAWNED
+    assert pending.conclusion_state == "pending"
+    detail = json.loads(pending.conclusion_detail)
+    assert detail["reason"] == "session-identity-unavailable"
+    assert detail["attempts"] == 1
+    assert detail["next_attempt_at"] > 0
+
+
+def test_disposable_terminal_acp_identity_error_is_bounded(q, client):
+    task = q.create(
+        "review",
+        labels=["review"],
+        exclusive_key="review:repo:42",
+    )
+    spawn = _ok_spawn(
+        {
+            "session": "local-body:brg-disposable",
+            "worktree": "worktree-disposable",
+        }
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        disposable_cli_labels=["review"],
+        local_body_verdict_fn=lambda _sid: "live",
+        local_body_activity_fn=lambda _sid: "IDLE",
+        local_acp_session_fn=lambda _sid: (_ for _ in ()).throw(
+            RuntimeError("bridge unavailable")
+        ),
+        local_end_fn=lambda _sid: pytest.fail(
+            "body must not end without a durable ACP identity"
+        ),
+    )
+    sup.poll_once()
+    q.claim_one("local-o", task_id=task.id)
+    q.start(task.id, "local-o")
+    q.complete(task.id, "local-o")
+
+    assert sup.reconcile() == 0
+    pending = q.latest_reservation(task.id)
+    assert pending.state == SpawnState.SPAWNED
+    assert pending.conclusion_state == "pending"
+    detail = json.loads(pending.conclusion_detail)
+    assert detail["reason"] == "session-identity-unavailable"
+    assert detail["attempts"] == 1
+    assert detail["next_attempt_at"] > 0
 
 
 def test_reconcile_retains_terminal_local_reservation_when_end_fails(q, client):

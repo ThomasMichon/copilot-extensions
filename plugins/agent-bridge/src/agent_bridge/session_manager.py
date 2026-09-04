@@ -690,6 +690,7 @@ class Session:
         self.progress: dict[str, str] = {}
         self._prompt_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._turn_start_lock = asyncio.Lock()
         # Set when a context-pressure handoff is owed but the session is not yet
         # idle (usage crosses critical mid-turn). The turn-settle path fires the
         # deferred handoff once the session is idle. In-memory only.
@@ -5025,6 +5026,17 @@ class SessionManager:
         return count
 
     async def submit_prompt(self, session_id: str, prompt: str) -> int:
+        """Atomically start a turn against conditional idle teardown."""
+        if self._draining:
+            raise DaemonDrainingError("turn")
+        resolved = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(resolved)
+        if not session:
+            raise KeyError(f"Session {resolved} not found")
+        async with session._turn_start_lock:
+            return await self._submit_prompt_locked(resolved, prompt)
+
+    async def _submit_prompt_locked(self, session_id: str, prompt: str) -> int:
         """Submit a prompt to a session, returning the turn index.
 
         The prompt is sent to the ACP subprocess. Streaming events
@@ -5164,6 +5176,27 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        async with session._turn_start_lock:
+            if self._sessions.get(session_id) is not session:
+                raise KeyError(f"Session {session_id} not found")
+            result, kick_session = await self._submit_or_queue_prompt_locked(
+                session,
+                prompt,
+                caller_id=caller_id,
+            )
+        if kick_session is not None:
+            await self._kick_pending_drain(kick_session)
+        return result
+
+    async def _submit_or_queue_prompt_locked(
+        self,
+        session: Session,
+        prompt: str,
+        *,
+        caller_id: str | None = None,
+    ) -> tuple[dict[str, Any], Session | None]:
+        """Admit or queue one prompt while conditional teardown is excluded."""
+        session_id = session.session_id
 
         # Context-pressure handoff (opt-in, prompt-triggered): a prompt into an
         # already-saturated session that is idle rolls the worktree to a fresh
@@ -5181,8 +5214,11 @@ class SessionManager:
             successor = await self.handoff_session(
                 session_id, reason="context-pressure-prompt"
             )
-            return await self.submit_or_queue_prompt(
-                successor.session_id, prompt, caller_id=caller_id
+            return (
+                await self.submit_or_queue_prompt(
+                    successor.session_id, prompt, caller_id=caller_id
+                ),
+                None,
             )
 
         turn_live = (
@@ -5196,12 +5232,15 @@ class SessionManager:
         must_queue = turn_live or queue_nonempty or self._draining
 
         if not must_queue:
-            turn_index = await self.submit_prompt(session_id, prompt)
-            return {
-                "queued": False,
-                "turn_index": turn_index,
-                "status": session.status.value,
-            }
+            turn_index = await self._submit_prompt_locked(session_id, prompt)
+            return (
+                {
+                    "queued": False,
+                    "turn_index": turn_index,
+                    "status": session.status.value,
+                },
+                None,
+            )
 
         now = time.time()
         queue_id = self._db.enqueue_prompt(
@@ -5222,14 +5261,16 @@ class SessionManager:
         # mid-drain -- kick delivery now, resuming a recoverable STOPPED session
         # if needed. A live turn's settle tail (or the post-restart resume) will
         # drain otherwise.
-        if not turn_live and not self._draining:
-            await self._kick_pending_drain(session)
-        return {
-            "queued": True,
-            "queue_id": queue_id,
-            "position": position,
-            "status": session.status.value,
-        }
+        kick_session = session if not turn_live and not self._draining else None
+        return (
+            {
+                "queued": True,
+                "queue_id": queue_id,
+                "position": position,
+                "status": session.status.value,
+            },
+            kick_session,
+        )
 
     async def _kick_pending_drain(self, session: Session) -> None:
         """Start draining a queue when no turn-settle will do it for us.
@@ -5263,6 +5304,13 @@ class SessionManager:
         drains instead, so a queued message is never lost to a dead process, and
         pop-then-submit stays exactly-once (no loss, no dup).
         """
+        async with session._turn_start_lock:
+            if self._sessions.get(session.session_id) is not session:
+                return
+            await self._drain_pending_prompts_locked(session)
+
+    async def _drain_pending_prompts_locked(self, session: Session) -> None:
+        """Pop and submit one queued prompt while teardown is excluded."""
         if session.status != SessionStatus.IDLE:
             return
         if not (session.client and session.client.is_running):
@@ -5277,7 +5325,7 @@ class SessionManager:
                 "caller_id": row.get("caller_id"),
             })
         try:
-            await self.submit_prompt(session.session_id, prompt)
+            await self._submit_prompt_locked(session.session_id, prompt)
         except Exception as exc:
             # Defensive: an unexpected submit failure must not drop the message.
             # Re-enqueue (at the tail -- a rare reorder is better than a loss);
@@ -5731,6 +5779,29 @@ class SessionManager:
             })
         session.touch()
         log.info("Session %s (%s) stopped", session_id, session.name)
+
+    async def end_session_if_idle(
+        self,
+        session_id: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        """End only if no turn can start between the idle check and teardown."""
+        session_id = self._resolve_ref(session_id) or session_id
+        session = self._sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+        async with session._turn_start_lock:
+            if self._sessions.get(session_id) is not session:
+                raise KeyError(f"Session {session_id} not found")
+            if (
+                session.status != SessionStatus.STOPPED
+                and not session.is_at_rest()
+            ):
+                raise ValueError(f"Session {session_id} is not idle")
+            if self._db.count_pending_prompts(session_id) > 0:
+                raise ValueError(f"Session {session_id} has queued prompts")
+            await self.end_session(session_id, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.

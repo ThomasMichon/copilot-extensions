@@ -195,6 +195,26 @@ def test_stop_worker_preserves_session(monkeypatch):
     assert calls["cmd"] == ["/usr/bin/agent-bridge", "stop", "session-1"]
 
 
+def test_end_worker_requires_atomic_idle_state(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge.end_worker("session-1") is True
+    assert calls["cmd"] == [
+        "/usr/bin/agent-bridge",
+        "end",
+        "session-1",
+        "--if-idle",
+    ]
+
+
 def test_resume_worker_sends_to_existing_session(monkeypatch):
     calls = {}
     monkeypatch.setattr(

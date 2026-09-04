@@ -17,6 +17,7 @@ from agent_bridge.models import ServiceConfig
 from agent_bridge.protocol import (
     AT_REST_PROJECTION_PROTOCOL_VERSION,
     ATTENTION_WAIT_PROTOCOL_VERSION,
+    CONDITIONAL_IDLE_END_PROTOCOL_VERSION,
     CONTAINER_RECREATE_PROTOCOL_VERSION,
     FAILED_ACP_HANDSHAKE_FAULT,
     FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION,
@@ -56,6 +57,11 @@ def test_attention_wait_capability_is_advertised() -> None:
 def test_remote_operations_capability_is_advertised() -> None:
     assert REMOTE_OPERATIONS_PROTOCOL_VERSION == 11
     assert REMOTE_OPERATIONS_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
+def test_conditional_idle_end_capability_is_advertised() -> None:
+    assert CONDITIONAL_IDLE_END_PROTOCOL_VERSION == 12
+    assert CONDITIONAL_IDLE_END_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):
@@ -98,6 +104,18 @@ def test_daemon_supports_gates_on_version():
     assert c.daemon_supports(1) is True
     assert c.daemon_supports(2) is True
     assert c.daemon_supports(3) is False  # newer client feature, older daemon
+
+
+def test_conditional_idle_end_refuses_daemon_before_capability_version():
+    c = _client({
+        "protocol_version": CONDITIONAL_IDLE_END_PROTOCOL_VERSION - 1,
+        "min_protocol_version": 1,
+    })
+
+    with pytest.raises(BridgeClientError) as raised:
+        c.end_session("session-1", if_idle=True)
+
+    assert raised.value.status == 426
 
 
 def test_relay_interruption_refuses_daemon_before_capability_version():
