@@ -102,8 +102,7 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     cfg_ = _hook_config(setup_hook={"linux": "tools/setup/session-setup.sh"})
     cmd = m._build_launch_cmd(cfg_, _args([]), "/w/wt")
 
-    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
-    assert Path(cmd[0]).is_absolute()
+    assert cmd[0] == "bash"
     assert "default-setup.sh" in cmd[1]
     assert "--machine" in cmd and cmd[cmd.index("--machine") + 1] == "dev6"
     assert "--setup-hook" in cmd
@@ -114,21 +113,6 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     assert "--config-root" in cmd
     assert "--runtime-python" in cmd
     assert cmd[-1] == "--allow-all"
-
-
-def test_missing_setup_shell_is_reported_by_preflight(monkeypatch):
-    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(
-        m,
-        "_resolve_normalized_shell",
-        lambda *, windows: None,
-    )
-
-    preflight = m._preflight_launch(_hook_config(), _args([]), "/w/wt")
-
-    assert preflight.error == (
-        "could not resolve an absolute shell for session setup"
-    )
 
 
 def test_setup_hook_absolute_path_preserved(monkeypatch):
@@ -157,8 +141,7 @@ def test_no_hook_uses_default_setup_without_hook_arg(monkeypatch):
     """No setup_hook and no legacy setup.sh -> plain default-setup, no hook arg."""
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cmd = m._build_launch_cmd(_hook_config(), _args([]), "/w/wt")
-    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
-    assert Path(cmd[0]).is_absolute()
+    assert cmd[0] == "bash"
     assert "default-setup.sh" in cmd[1]
     assert "--setup-hook" not in cmd
 
@@ -255,55 +238,12 @@ def test_explicit_launch_remains_authoritative_over_copilot_path(monkeypatch):
             "explicit launch must not resolve normalized setup state"
         ),
     )
-    monkeypatch.setattr(
-        m,
-        "_resolve_normalized_shell",
-        lambda *, windows: pytest.fail(
-            "explicit launch must not resolve a normalized setup shell"
-        ),
-    )
     cmd = m._build_launch_cmd(cfg_, _args([]), "/w/wt")
     assert cmd[0] == "copilot"
     assert "--copilot-path" not in cmd
 
 
-def test_predecessor_copilot_path_falls_back_for_default_launch(monkeypatch):
-    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
-    cmd = m._build_launch_cmd(
-        _hook_config(),
-        _args([]),
-        "/w/wt",
-        fallback_copilot_path="/opt/copilot/current/copilot",
-    )
-    assert cmd[cmd.index("--copilot-path") + 1] == (
-        "/opt/copilot/current/copilot"
-    )
-
-
-def test_configured_copilot_path_wins_over_predecessor_fallback(monkeypatch):
-    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
-    cmd = m._build_launch_cmd(
-        _hook_config(copilot_path={"linux": "/opt/copilot/configured"}),
-        _args([]),
-        "/w/wt",
-        fallback_copilot_path="/opt/copilot/predecessor",
-    )
-    assert cmd[cmd.index("--copilot-path") + 1] == "/opt/copilot/configured"
-
-
-def test_explicit_launch_ignores_predecessor_copilot_path(monkeypatch):
-    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
-    cmd = m._build_launch_cmd(
-        _hook_config(legacy_launch=True),
-        _args([]),
-        "/w/wt",
-        fallback_copilot_path="/opt/copilot/predecessor",
-    )
-    assert cmd[0] == "copilot"
-    assert "--copilot-path" not in cmd
-
-
-def test_legacy_setup_ignores_predecessor_copilot_path(monkeypatch, tmp_path):
+def test_legacy_setup_uses_path_resolved_shell(monkeypatch, tmp_path):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     setup = tmp_path / "tools" / "setup" / "setup.sh"
     setup.parent.mkdir(parents=True)
@@ -316,13 +256,32 @@ def test_legacy_setup_ignores_predecessor_copilot_path(monkeypatch, tmp_path):
         cfg_,
         _args([]),
         str(tmp_path),
-        fallback_copilot_path="/opt/copilot/predecessor",
     )
 
-    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
-    assert Path(cmd[0]).is_absolute()
+    assert cmd[0] == "bash"
     assert cmd[1] == str(setup)
     assert "--copilot-path" not in cmd
+
+
+def test_windows_normalized_launch_uses_path_resolved_shell(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    cfg_ = cfg.Config(
+        srcroot="/s",
+        machine="dev6",
+        platform="windows",
+        repo_name="ext",
+        repos={
+            "ext": cfg.RepoConfig(
+                anchor=r"C:\a",
+                worktree_root=r"C:\w",
+                setup_hook={"windows": r"tools\setup\session-setup.ps1"},
+            ),
+        },
+    )
+
+    cmd = m._build_launch_cmd(cfg_, _args([]), r"C:\w\wt")
+
+    assert cmd[0] == "pwsh.exe"
 
 
 def test_session_env_config_parsing():
@@ -445,8 +404,7 @@ def test_env_script_linux_builds_default_setup_with_flag(monkeypatch):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cfg_ = _env_config(env_script={"linux": "tools/prime.sh"}, platform_name="linux")
     cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
-    assert Path(cmd[0]).name.casefold() in ("bash", "bash.exe")
-    assert Path(cmd[0]).is_absolute()
+    assert cmd[0] == "bash"
     assert "default-setup.sh" in cmd[1]
     assert "--env-script" in cmd
     assert cmd[cmd.index("--env-script") + 1].endswith("prime.sh")
@@ -505,7 +463,7 @@ def test_default_setup_sh_supports_hook_and_session_path():
     assert 'exec "$COPILOT_PATH_OVERRIDE"' in text
     # --stdio (ACP) mode keeps human output off the JSON-RPC channel
     assert "STDIO=true" in text
-    assert '"$_SETUP_SHELL" "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
+    assert 'bash "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
 
 
 def test_default_setup_ps1_supports_hook_and_session_path():
@@ -526,8 +484,7 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "SetEnvironmentVariable" in text
     assert "-not $Recovery" in text  # hook skipped in recovery
     assert "$env:PATH" in text
-    assert "[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName" in text
-    assert "& $setupShell -NoProfile -NoLogo -File $SetupHook" in text
+    assert "& pwsh.exe -NoProfile -NoLogo -File $SetupHook" in text
     assert "& $overrideCmd.Source @CopilotArgs" in text
     assert "copilot @CopilotArgs" in text
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
