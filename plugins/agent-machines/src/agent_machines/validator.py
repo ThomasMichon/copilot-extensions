@@ -250,7 +250,6 @@ def _settings_authority_analysis(
                 ):
                     collection_leaves.setdefault(leaf_key, []).append(candidate)
 
-    decision_paths: set[tuple[str, ...]] = set()
     for leaf_key, candidates in sorted(enforced_shapes.items()):
         shapes = {_shape(candidate.value) for candidate in candidates}
         if len(shapes) > 1:
@@ -324,23 +323,6 @@ def _settings_authority_analysis(
                 "selected": [candidate.provenance for candidate in selected],
                 "superseded": [candidate.provenance for candidate in superseded],
             }
-            if leaf_key in decision_paths:
-                decisions = [
-                    existing
-                    for existing in decisions
-                    if not (
-                        existing["domain"] == "settings"
-                        and existing["identity"] == decision["identity"]
-                    )
-                ]
-                findings = [
-                    finding
-                    for finding in findings
-                    if not (
-                        finding.code == "authority-supersession"
-                        and f"'{decision['identity']}'" in finding.message
-                    )
-                ]
             decisions.append(decision)
             findings.append(Finding(
                 "info",
