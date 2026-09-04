@@ -59,18 +59,38 @@ class SseStream(Iterator[dict[str, Any]]):
     def __enter__(self) -> SseStream:
         return self
 
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
+    def __exit__(
+        self,
+        exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
+        if exc_type is None:
+            self.close()
+        else:
+            self._close_safely()
 
     def __del__(self) -> None:
-        self.close()
+        self._close_safely()
+
+    def _close_safely(self) -> None:
+        try:
+            self.close()
+        except BaseException:
+            pass
+
+    def _close_on_exhaustion(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def __next__(self) -> dict[str, Any]:
         while True:
             try:
                 raw_line = next(self._lines)
             except StopIteration:
-                self.close()
+                self._close_on_exhaustion()
                 raise
             line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
 

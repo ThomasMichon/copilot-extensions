@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import gc
 import json
+import sys
+import weakref
 from unittest.mock import patch
+
+import pytest
 
 from agent_bridge.client import BridgeClient
 
@@ -28,6 +32,20 @@ class _FakeSseResp:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _FailingCloseSseResp(_FakeSseResp):
+    def __init__(
+        self,
+        lines: list[str],
+        failure_type: type[BaseException] = OSError,
+    ) -> None:
+        super().__init__(lines)
+        self.failure_type = failure_type
+
+    def close(self) -> None:
+        self.closed = True
+        raise self.failure_type("close failed")
 
 
 def _drain(lines: list[str]) -> list[dict]:
@@ -63,6 +81,82 @@ class TestSseCommentParsing:
         ):
             with client.stream_events("sess-1") as stream:
                 assert next(stream)["event"] == "_heartbeat"
+
+        assert response.closed is True
+
+    def test_context_manager_preserves_body_exception(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            with pytest.raises(ValueError, match="body failed"):
+                with client.stream_events("sess-1"):
+                    raise ValueError("body failed")
+
+        assert response.closed is True
+
+    def test_context_manager_surfaces_close_failure(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            with pytest.raises(OSError, match="close failed"):
+                with client.stream_events("sess-1"):
+                    pass
+
+        assert response.closed is True
+
+    @pytest.mark.parametrize("failure_type", [OSError, KeyboardInterrupt])
+    def test_abandoned_stream_suppresses_close_failure(
+        self, monkeypatch, failure_type
+    ) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp(
+            [": heartbeat", ""],
+            failure_type,
+        )
+        unraisable = []
+        monkeypatch.setattr(sys, "unraisablehook", unraisable.append)
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            stream = client.stream_events("sess-1")
+            stream_ref = weakref.ref(stream)
+            del stream
+            gc.collect()
+
+        assert stream_ref() is None
+        assert response.closed is True
+        assert unraisable == []
+
+    def test_exhausted_stream_suppresses_close_failure(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([])
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            stream = client.stream_events("sess-1")
+            with pytest.raises(StopIteration):
+                next(stream)
+
+        assert response.closed is True
+
+    def test_exhausted_stream_preserves_cancellation(self) -> None:
+        client = BridgeClient("http://127.0.0.1:0", "tok")
+        response = _FailingCloseSseResp([], KeyboardInterrupt)
+        with patch(
+            "agent_bridge.client.urllib.request.urlopen",
+            return_value=response,
+        ):
+            stream = client.stream_events("sess-1")
+            with pytest.raises(KeyboardInterrupt):
+                next(stream)
 
         assert response.closed is True
 
