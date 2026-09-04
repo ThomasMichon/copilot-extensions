@@ -37,7 +37,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import contained_test_mode, windowless_daemon_kwargs
+from agent_procutil import (
+    contained_test_mode,
+    no_window_flags,
+    windowless_daemon_kwargs,
+)
 
 from .. import winjob
 from . import protocol as proto
@@ -223,6 +227,7 @@ async def _spawn_child(
         env=child_env,
         limit=_ACP_STDIO_LIMIT_BYTES,
         preexec_fn=preexec,
+        creationflags=no_window_flags(),
     )
 
 
