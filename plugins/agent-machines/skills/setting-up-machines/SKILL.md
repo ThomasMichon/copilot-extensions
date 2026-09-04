@@ -149,7 +149,7 @@ Do not reinterpret a broad setup request as blanket approval for these actions.
 
 Verify only what the derived plan says should exist:
 
-1. `agent-machines validate` succeeds.
+1. `<agent-machines catalog argv[0]> validate` succeeds.
 2. A final restore preview reports no unexpected drift.
 3. Every selected capability's published readiness command succeeds.
 4. Declared services are healthy and use their configured lifecycle.
