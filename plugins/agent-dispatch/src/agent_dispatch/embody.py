@@ -126,6 +126,7 @@ def create_worktree(
     # creation provenance alone hides this worker checkout from the Picker.
     cmd += [
         "create",
+        "--no-owner",
         "--origin",
         "delegate",
         "--interface",

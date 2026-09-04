@@ -121,7 +121,9 @@ on the SSE bus.
    `created|targeted|reused` ownership while the reservation is still
    `reserving`. A newly created worktree is stamped before launch with its
    task, reservation, attempt, driver, supervisor, and creating-machine
-   provenance. A positively missing carried id may be replaced; an
+   provenance. It is deliberately top-level: the dispatch reservation owns its
+   cleanup, so an interactive caller's worktree does not acquire a competing
+   outbound-resource claim. A positively missing carried id may be replaced; an
    indeterminate lookup fails closed.
 3. Run the spawn (`embody` or `bridge` backend) in that recorded checkout. The
    bridge backend first resumes a valid carried ACP session and creates a
