@@ -103,6 +103,27 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
     assert daemon._read_pid(tmp_path) == 5150
 
 
+def test_spawn_uses_windowless_daemon_contract(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        daemon,
+        "windowless_daemon_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
+    monkeypatch.setattr(
+        daemon.subprocess,
+        "Popen",
+        lambda cmd, **kwargs: captured.update(cmd=cmd, kwargs=kwargs) or FakeProc(),
+    )
+
+    daemon._spawn(["pythonw.exe", "-m", "agent_index.engine.app"])
+
+    assert captured["kwargs"]["creationflags"] == 0x08000000
+    assert captured["kwargs"]["stdin"] is daemon.subprocess.DEVNULL
+    assert captured["kwargs"]["stdout"] is daemon.subprocess.DEVNULL
+    assert captured["kwargs"]["stderr"] is daemon.subprocess.DEVNULL
+
+
 def test_start_raises_on_early_exit(monkeypatch, tmp_path):
     py = daemon.engine_venv_python(tmp_path)
     py.parent.mkdir(parents=True, exist_ok=True)

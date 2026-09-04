@@ -23,7 +23,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import windowless_daemon_kwargs, windowless_python
 
 
 def engine_home() -> Path:
@@ -101,7 +101,7 @@ def _spawn(cmd: list[str]) -> subprocess.Popen:
         "stderr": subprocess.DEVNULL,
         "env": os.environ.copy(),
     }
-    kwargs.update(detached_kwargs())
+    kwargs.update(windowless_daemon_kwargs())
     return subprocess.Popen(cmd, **kwargs)  # type: ignore[arg-type]  # noqa: S603
 
 
