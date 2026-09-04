@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-09-01
+- **Last revised:** 2026-09-04
 - **Reality docs:** `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -27,6 +27,13 @@ portable, attributable, and intentionally budgeted.
   completion, while bounded delegates isolate independent evidence gathering,
   domain-tool interaction, explicitly disjoint implementation, and independent
   review roles.
+- **Role/model routing policy** classifies delegated work by purpose, risk,
+  execution surface, and demonstrated capability, then selects from an
+  evidence-backed mapping of acceptable models rather than treating every
+  worker as interchangeable.
+- **Routing evidence** links model-purpose eligibility to reviewed outcomes,
+  including retries, discarded work, coordinator repair, and downstream
+  findings, so a cheap call is not mistaken for a cheap accepted result.
 - **Operator policy** is personal ambient guidance that can follow an agent
   across target repositories. A plugin may explicitly delegate narrow
   configuration keys to a repository, but safety, publication, attribution,
@@ -119,6 +126,29 @@ Domain-specific service catalogs and verbose tool payloads should remain with
 the delegate that owns that domain; compact shared research and orchestration
 signals may remain with the coordinator.
 
+### evidence-calibrated-model-routing
+
+Harnesses should help a coordinator choose the least-expensive available model
+that has demonstrated the capability, tools, context, and reliability required
+for the delegated role. Model choice should follow task classification and the
+direct-versus-delegate decision rather than becoming a reason to fragment
+cohesive work.
+
+### purpose-to-model-grounding
+
+Current model eligibility should be supplied through attributable, configurable
+grounding that distinguishes demonstrated choices from candidates, holds, and
+known failures. The portable strategy should remain stable while repositories
+and operators can update the models that satisfy it as providers, costs,
+capabilities, and execution surfaces change.
+
+### guarded-real-work-evidence
+
+Model-routing evidence should come from bounded real work whose authority grows
+through explicit stages: read-only investigation, reviewed documentation,
+contained implementation, and ordinary publication gates. Trial workers should
+be isolated from credentials and authority their assigned role does not need.
+
 ## Behaviors
 
 ### lean-repository-waypoint
@@ -143,6 +173,15 @@ Critical safety and publication constraints should retain a minimal static
 fallback when a launch path cannot load the richer plugin-owned guidance.
 Plugin setup should own any compatibility/fallback prose through a stable,
 idempotently reconciled marker or dedicated rule file.
+
+### ambient-delivery-fails-open
+
+Ambient delivery plumbing should fail open and never block session startup when
+a contributor is inapplicable, unavailable, or malformed. That delivery
+failure must remain attributable and diagnosable rather than being mistaken for
+successful policy application. Fail-closed behavior belongs at authorization,
+trust, and model-eligibility boundaries, not in the mechanism that lets an
+otherwise-usable session start.
 
 ### recovery-revalidates-authority
 
@@ -202,6 +241,47 @@ Independent review should preserve distinct required roles without becoming an
 unbounded loop. An unchanged artifact should not receive repeated same-role
 review unless a concrete defect or materially changed evidence justifies it.
 
+### routing-policy-before-delegation
+
+A Task-capable decision-maker should receive the compact model-routing policy
+before its first delegation decision. A worker that cannot delegate should
+receive its bounded assignment rather than paying the context cost of the
+complete routing catalog.
+
+### least-expensive-demonstrated-choice
+
+Selection should prefer the least-expensive available choice that has
+demonstrated the required task capability and execution-surface support. An
+unavailable preferred model may fall through to another demonstrated choice;
+an unproven candidate runs only as an explicit trial and never becomes a silent
+default.
+
+### accepted-outcome-economics
+
+Model-routing decisions should be evaluated against accepted work products, not
+isolated call prices. Retries, abandoned output, coordinator repair, review
+findings, and attributable follow-up work remain visible so apparent savings
+cannot be created by moving cost or failure outside the selected worker's call.
+
+### independent-promotion
+
+The agents and pairs being evaluated should not validate themselves. Promotion
+into ordinary routing should derive from durable trial evidence and a separate
+reviewed decision with explicit uncertainty and applicability boundaries.
+
+### product-gates-outrank-routing
+
+Routing optimization must not lower the correctness, safety, review, or
+publication requirements of the work being routed. A cheaper pair that fails
+the product's ordinary acceptance gate is not an optimization.
+
+### configuration-is-inert-data
+
+Repository, plugin, and operator configuration used to compose guidance or
+resolve model eligibility should be parsed and validated as inert declarative
+data. A harness must not source or execute configuration merely to discover
+policy, availability, or routing choices.
+
 ## Non-Goals / Boundaries
 
 - This vision does not prescribe one configuration schema or hook script.
@@ -209,6 +289,12 @@ review unless a concrete defect or materially changed evidence justifies it.
 - It does not delegate final synthesis, goal ownership, or completion judgment.
 - It does not prescribe one model, task API, agent runtime, or orchestration
   transport.
+- It does not treat the cheapest available model as qualified merely because it
+  can be launched.
+- It does not let a model, coordinator, worker, or pair promote itself into the
+  accepted routing policy.
+- It does not replace product review, safety, deployment, or publication gates
+  with a routing score.
 - It does not authorize recursive self-delegation or overlapping edit ownership.
 - It does not move repository-specific identity or invariants into plugins.
 - It does not make skills an always-on policy channel.
