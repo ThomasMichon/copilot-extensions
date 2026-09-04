@@ -19,6 +19,13 @@ WakeActive = Callable[[], bool]
 log = logging.getLogger(__name__)
 
 
+def _next_wait_interval(
+    *, has_pending: bool, retry_interval: float, idle_interval: float
+) -> float:
+    """Use the short cadence only while a delayed retry remains pending."""
+    return retry_interval if has_pending else idle_interval
+
+
 def _default_deliver(
     owner: str,
     owner_session_id: str,
@@ -60,6 +67,8 @@ async def drain_wake_outbox(
     retry_base: float = 1.0,
     is_active: WakeActive | None = None,
     delivery_lease: float = DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
+    idle_interval: float | None = None,
+    wake_signal: asyncio.Event | None = None,
 ) -> None:
     """Drain durable wake operations until cancelled.
 
@@ -68,6 +77,18 @@ async def drain_wake_outbox(
     uses the outbox row id as the downstream idempotency key; task generation,
     owner-session identity, status, and latest-wake identity fence stale work.
     """
+    idle_interval = interval if idle_interval is None else idle_interval
+
+    async def _wait(delay: float) -> None:
+        if wake_signal is None:
+            await asyncio.sleep(delay)
+            return
+        try:
+            await asyncio.wait_for(wake_signal.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            pass
+        wake_signal.clear()
+
     while True:
         if is_active is not None:
             try:
@@ -76,7 +97,7 @@ async def drain_wake_outbox(
                 log.warning("wake active-route check failed", exc_info=True)
                 active = False
             if not active:
-                await asyncio.sleep(interval)
+                await _wait(idle_interval)
                 continue
         await asyncio.to_thread(
             queue.recover_inflight_wakes, lease_seconds=delivery_lease
@@ -85,7 +106,14 @@ async def drain_wake_outbox(
             queue.claim_due_wake, lease_seconds=delivery_lease
         )
         if wake is None:
-            await asyncio.sleep(interval)
+            has_pending = await asyncio.to_thread(queue.has_pending_wakes)
+            await _wait(
+                _next_wait_interval(
+                    has_pending=has_pending,
+                    retry_interval=interval,
+                    idle_interval=idle_interval,
+                )
+            )
             continue
         try:
             delivered = await asyncio.to_thread(

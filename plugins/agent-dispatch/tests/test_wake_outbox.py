@@ -8,7 +8,7 @@ import pytest
 
 from agent_dispatch.events import EventBus
 from agent_dispatch.queue import Status, TaskError
-from agent_dispatch.wake import drain_wake_outbox
+from agent_dispatch.wake import _next_wait_interval, drain_wake_outbox
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
@@ -65,6 +65,29 @@ def test_steer_state_and_wake_are_one_transaction(q, monkeypatch):
     assert unchanged.awaiting_steer is True
     assert q.steer_log(task.id) == []
     assert q.list_wakes(task.id) == []
+
+
+def test_wake_notifier_runs_only_after_commit(q, monkeypatch):
+    task, owner = _suspended(q)
+    notifications = []
+    q.set_wake_notifier(lambda: notifications.append(q.list_wakes(task.id)))
+
+    q.resume(task.id, owner, wake_requested=True, now=1000.0)
+
+    assert len(notifications) == 1
+    assert [wake.status for wake in notifications[0]] == ["pending"]
+
+    def fail_enqueue(*_args, **_kwargs):
+        raise TaskError("outbox unavailable")
+
+    monkeypatch.setattr(q, "_enqueue_wake", fail_enqueue)
+    with pytest.raises(TaskError, match="outbox unavailable"):
+        q.submit_steer(
+            task.id,
+            fields={"decision": "continue"},
+            wake_requested=True,
+        )
+    assert len(notifications) == 1
 
 
 def test_retry_reuses_operation_id_with_backoff(q):
@@ -226,6 +249,72 @@ def test_drain_loop_retries_with_same_idempotency_key(q):
     assert len(calls) == 2
     assert {call[1] for call in calls} == {"session-1"}
     assert {call[4] for call in calls} == {wake.id}
+
+
+def test_idle_drainer_wakes_immediately_on_post_commit_signal(q):
+    task, owner = _suspended(q)
+
+    async def scenario():
+        event_loop = asyncio.get_running_loop()
+        signal = asyncio.Event()
+        delivered = asyncio.Event()
+        q.set_wake_notifier(
+            lambda: event_loop.call_soon_threadsafe(signal.set)
+        )
+
+        def deliver(*_args):
+            event_loop.call_soon_threadsafe(delivered.set)
+            return True
+
+        drain_task = asyncio.create_task(
+            drain_wake_outbox(
+                q,
+                EventBus(),
+                interval=0.01,
+                idle_interval=10.0,
+                wake_signal=signal,
+                deliver=deliver,
+            )
+        )
+        try:
+            await asyncio.sleep(0.05)
+            await asyncio.to_thread(
+                q.resume,
+                task.id,
+                owner,
+                wake_requested=True,
+                wake_message="continue",
+            )
+            await asyncio.wait_for(delivered.wait(), timeout=0.5)
+            for _ in range(50):
+                if q.list_wakes(task.id)[0].status == "delivered":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("delivered wake was not committed")
+        finally:
+            drain_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await drain_task
+
+    asyncio.run(scenario())
+    assert q.list_wakes(task.id)[0].status == "delivered"
+
+
+def test_pending_retry_keeps_short_poll_interval():
+    assert _next_wait_interval(
+        has_pending=True,
+        retry_interval=0.25,
+        idle_interval=5.0,
+    ) == 0.25
+
+
+def test_empty_outbox_uses_slow_recovery_interval():
+    assert _next_wait_interval(
+        has_pending=False,
+        retry_interval=0.25,
+        idle_interval=5.0,
+    ) == 5.0
 
 
 def test_missing_owner_session_fences_wake_stale(q):

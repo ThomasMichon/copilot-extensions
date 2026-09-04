@@ -706,13 +706,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        bus.bind_loop(asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
+        bus.bind_loop(loop)
         from .wake import drain_wake_outbox
 
+        wake_signal = asyncio.Event()
+        if wake_interval > 0:
+            queue.set_wake_notifier(
+                lambda: loop.call_soon_threadsafe(wake_signal.set)
+            )
         wake_options = {
             "interval": wake_interval,
             "max_attempts": wake_max_attempts,
             "retry_base": wake_retry_base,
+            "idle_interval": max(wake_interval, 5.0),
+            "wake_signal": wake_signal,
         }
         if wake_deliver is not None:
             wake_options["deliver"] = wake_deliver
@@ -836,6 +844,7 @@ def create_app(
             try:
                 yield
             finally:
+                queue.set_wake_notifier(None)
                 if wake_task is not None:
                     wake_task.cancel()
                     try:
