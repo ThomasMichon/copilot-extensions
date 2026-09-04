@@ -1,0 +1,59 @@
+{
+  "schema": "copilot-extensions.model-routing",
+  "version": 1,
+  "purposes": {
+    "evidence": [
+      {
+        "model": "example-fast-model",
+        "state": "candidate",
+        "surfaces": [
+          "task"
+        ],
+        "contextTiers": [
+          "default"
+        ],
+        "reasoningEfforts": [
+          "low",
+          "medium"
+        ],
+        "costRank": 10,
+        "constraints": [
+          "bounded read-only source inventory"
+        ],
+        "escalationConditions": [
+          "conflicting evidence",
+          "required source exceeds the assignment boundary"
+        ],
+        "evidence": []
+      }
+    ],
+    "coding": [
+      {
+        "model": "example-code-model",
+        "state": "demonstrated",
+        "surfaces": [
+          "task",
+          "restricted-container"
+        ],
+        "contextTiers": [
+          "long_context"
+        ],
+        "reasoningEfforts": [
+          "high"
+        ],
+        "costRank": 20,
+        "constraints": [
+          "bounded implementation with explicit file ownership"
+        ],
+        "evidence": [
+          {
+            "ref": "https://example.com/model-routing-evidence",
+            "observedAt": "2026-01-01",
+            "sampleCount": 3,
+            "notes": "Synthetic example only."
+          }
+        ]
+      }
+    ]
+  }
+}

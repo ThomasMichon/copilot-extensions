@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice worktrees and pull requests
 - **Created:** 2026-09-04
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** [`visions/harness-guidance`](../../../visions/harness-guidance/README.md)
   - `evidence-calibrated-model-routing`
   - `purpose-to-model-grounding`
@@ -98,23 +98,23 @@ Public formulation from issue #2014:
   [PR #2025](https://github.com/ThomasMichon/copilot-extensions/pull/2025).
 - [x] Run a bounded coordinator/evidence-worker planning pass against the
   current plugin, configuration, dispatch, and restricted-container surfaces.
-- [ ] Land this effort through the repository's review gate before changing
+- [x] Land this effort through the repository's review gate before changing
   plugin code.
 
 ### Phase 1 - Registry and on-demand strategy (`delegation-guidance`)
 
-- [ ] Define and register a versioned inert purpose-to-model configuration
+- [x] Define and register a versioned inert purpose-to-model configuration
   schema with demonstrated, candidate, held, and failed eligibility.
-- [ ] Define plugin, repository, and operator configuration layers without
+- [x] Define plugin, repository, and operator configuration layers without
   allowing a consumer to seize ownership of portable strategy or safety policy.
-- [ ] Ship no real model defaults. Examples remain obvious placeholders; current
+- [x] Ship no real model defaults. Examples remain obvious placeholders; current
   model IDs arrive only through configuration and reviewed evidence.
-- [ ] Extend the delegation skill with task classification, selection,
+- [x] Extend the delegation skill with task classification, selection,
   availability fallback, explicit-trial, escalation, and result-integration
   guidance.
-- [ ] Add one compact first-turn decision cue that tells a coordinator to load
+- [x] Add one compact first-turn decision cue that tells a coordinator to load
   the detailed routing grounding before delegating.
-- [ ] Keep malformed, unavailable, or inapplicable routing configuration
+- [x] Keep malformed, unavailable, or inapplicable routing configuration
   startup-nonblocking; unproven candidates still fail closed at eligibility.
 
 ### Phase 2 - Deterministic selection helper
@@ -225,3 +225,19 @@ See [design.md](design.md).
   dispatch/container boundaries.
 - This PR carries only the reviewed implementation plan. Plugin changes begin
   after it merges.
+
+### 2026-09-04 - Registry and grounding code complete
+
+- Added a strict versioned JSON schema, synthetic examples, and a stdlib-only
+  resolver for trusted repository plus operator configuration. The operator
+  layer wins by purpose/model identity; an invalid operator file suppresses
+  lower-precedence choices rather than accidentally removing a hold.
+- Added the compact first-turn routing cue and detailed on-demand guidance for
+  purpose, execution surface, demonstrated/candidate state, availability
+  fallback, explicit trials, evidence expiry, and integration ownership.
+- Independent diff review found and corrected duplicate-key acceptance,
+  schema/loader mismatches, trust spoofing through a test override, expired
+  evidence eligibility, and the invalid-operator precedence defect.
+- Focused delegation-guidance coverage passes with 21 tests and 2
+  platform-specific skips. Bash syntax and aggregate output were checked
+  separately under WSL; the compact context remains inside its declared budget.
