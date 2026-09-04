@@ -4,66 +4,77 @@
 from __future__ import annotations
 
 import argparse
-import re
+import base64
+import json
+import sys
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from resolve_effective_config import (
+    ConfigError,
+    _load_yaml_mapping,
+    _parse_simple_yaml,
+    _validate_config,
+)
 
 
 def _fallback_machines(text: str) -> list[str]:
-    match = re.search(
-        r"(?ms)^indexers?\s*:.*?(?=^(?!-)\S|\Z)",
-        text,
-    )
-    if match is None:
-        return []
-    return [
-        item.strip().lower()
-        for item in re.findall(
-            r"""machine\s*:\s*["']?([^,}\]\r\n#"'']+)""",
-            match.group(0),
-        )
-        if item.strip()
-    ]
-
-
-def configured_machines(path: Path) -> list[str]:
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
+        normalized = _validate_config(_parse_simple_yaml(text))
+    except ConfigError:
         return []
-    try:
-        import yaml
-    except ImportError:
-        return _fallback_machines(text)
-    try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError:
-        return []
-    if not isinstance(data, dict):
-        return []
-    raw = data.get("indexers")
-    if not isinstance(raw, list):
-        singular = data.get("indexer")
-        raw = [singular] if isinstance(singular, dict) else []
-    return [
-        str(item["machine"]).strip().lower()
-        for item in raw
-        if isinstance(item, dict) and str(item.get("machine") or "").strip()
-    ]
+    return [item["machine"].casefold() for item in normalized["indexers"]]
 
 
-def resolve(path: Path, machine: str) -> str:
-    machines = configured_machines(path)
+def configured_machines(
+    path: Path | None = None, *, data_b64: str | None = None
+) -> list[str]:
+    if data_b64 is not None:
+        try:
+            raw = base64.urlsafe_b64decode(data_b64.encode("ascii"))
+            value = json.loads(raw.decode("utf-8"))
+            normalized = _validate_config(value)
+        except (ConfigError, TypeError, ValueError, UnicodeError):
+            return []
+    elif path is not None:
+        state, value = _load_yaml_mapping(path)
+        if state != "ready" or value is None:
+            return []
+        try:
+            normalized = _validate_config(value)
+        except ConfigError:
+            return []
+    else:
+        return []
+    return [item["machine"].casefold() for item in normalized["indexers"]]
+
+
+def resolve(
+    path: Path | None, machine: str, *, data_b64: str | None = None
+) -> str:
+    machines = configured_machines(path, data_b64=data_b64)
     if not machines:
         return "unconfigured"
-    return "host" if machine.strip().lower() in machines else "client"
+    return "host" if machine.strip().casefold() in machines else "client"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--config")
+    source.add_argument("--data-b64")
     parser.add_argument("--machine", required=True)
     args = parser.parse_args()
-    print(resolve(Path(args.config), args.machine))
+    print(
+        resolve(
+            Path(args.config) if args.config else None,
+            args.machine,
+            data_b64=args.data_b64,
+        )
+    )
     return 0
 
 

@@ -1,7 +1,7 @@
 {
   "name": "agent-index",
   "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion of source systems.",
-  "version": "0.1.0-dev129",
+  "version": "0.1.0-dev130",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",
   "runtimeScope": "machine-gated",

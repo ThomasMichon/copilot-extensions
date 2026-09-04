@@ -25,32 +25,33 @@ to search from the sessionStart scope-binding hook's `additionalContext`.
 - **Engine split**: the light service runtime is torch-free by default; embedding
 runs through a durable engine daemon at `127.0.0.1:8421` unless an operator opts
 into another engine mode.
-- **Lifecycle hooks**: session-start hooks stamp the setup-gated binstub, ensure
-an already-configured host-side daemon is healthy, and emit configured scope
-binding when the current repo has `.agent-index/config.yaml` `corpus.sources`.
+- **Safe activation**: session-start contributes the command catalog and scope
+binding only when one effective repository configuration is active. It never
+stamps a runtime, installs packages, or starts a service.
 
 ## Minimal setup
 
 1. Enable the plugin from the `copilot-extensions` marketplace.
-2. Start a new Copilot session. The `sessionStart` hook performs a fast **stamp**
-when needed and installs a setup-gated `agent-index` binstub under
-`~/.local/bin`. `agent-index status` is safe here: it reports
-`state: setup_required` without installing a runtime or starting a service.
-3. Pick a role explicitly:
+2. Opt the repository in by authoring `.agent-index/config.yaml`. A config must
+contain an `indexer`/`indexers` designation or at least one `corpus.sources`
+entry. A malformed, unsafe, ambiguous, or empty config is inactive.
+3. Start a new Copilot session. The command catalog and scope guidance appear
+only for an active config. Session start performs no runtime provisioning or
+service startup.
+4. Pick a role explicitly:
    - single-machine/local indexer: `agent-index setup --single`
    - remote indexer: run `agent-index setup --indexer <machine> --ssh <alias>`
      from the repo; clients route read commands to that host over SSH.
    In automation, add `--yes`; omitting both `--single` and `--indexer` is an
    error rather than silently choosing a role.
-4. The setup command provisions the light runtime, writes the selected role, and
+5. The setup command provisions the light runtime, writes the selected role, and
 reconciles the role-specific runtime/service. Provisioning emits
 `::agent-provisioning::` and may take ~30-120s.
 
 A machine whose resolved role is `client` runs no local indexer daemon. A host
 runs the local service and, when provisioned, the durable engine daemon.
-Namespaced session-start ensure is nonblocking: a short coalescing check either
-starts one detached cell-runtime ensure worker or returns immediately when an
-ensure/provision transaction already owns the installation lock.
+Provisioning is command-driven after opt-in; no session-start path downloads
+dependencies or starts a daemon.
 
 The installer exposes explicit installation-context actions for disposable
 installation-cell validation:
@@ -149,15 +150,19 @@ The runtime belongs to this plugin; scope is data/config:
 `.agent-index/config.yaml` with `corpus.sources`; the runtime grafts sources from
 locally adopted projects plus any machine-local supplement in
 `~/.agent-index/config.yaml`.
-- The session-start scope-binding hook reads the current repo's
-`.agent-index/config.yaml` directly and tells agents which configured scopes are
-safe to prefer `agent-index search` for (and how to invoke it).
+- Resolution selects a valid current-repository config first. Only when the
+repository declares `stateless: true` or `requires_external_state_root: true`
+may it fall back to the valid `.agent-index/config.yaml` in the bound knowledge
+repo. A present invalid local config never falls through.
+- The session-start scope-binding hook reads that effective config and tells
+agents which configured scopes are safe to prefer `agent-index search` for.
 
 ## Troubleshooting quick checks
 
 - `agent-index status` — service reachability, version, chunk count, sources,
-and indexing state. Before setup it returns a structured, non-mutating
-`setup_required` result.
+and indexing state. Outside an opted-in repository it returns a structured,
+non-mutating `inactive` result; before setup in an active repository it returns
+`setup_required`.
 - `agent-index role` — whether this machine is acting as `host` or `client`.
 - `agent-index engine status` — durable engine health, PID, endpoint, and venv.
 - Legacy mode: `agent-index deploy --recover` recovers an interrupted zdd cutover.

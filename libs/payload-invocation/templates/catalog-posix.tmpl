@@ -25,7 +25,7 @@ py="$(command -v python3 || command -v python || true)"
     printf '%s\n' '{}'
     exit 0
 }
-
+@@CATALOG_GATE_POSIX@@
 if output="$(COMMAND_PATH="$command_path" AVAILABILITY="$availability" "$py" <<'PY'
 import json
 import os

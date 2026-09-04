@@ -146,6 +146,21 @@ def test_payload_root_env_is_opt_in_and_preserves_defaults(tmp_path: Path) -> No
     assert "} finally {" in generated[powershell_path]
 
 
+def test_session_start_bootstrap_defaults_true_and_requires_boolean(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(tmp_path)
+    assert generator.load_manifest(manifest)["sessionStartBootstrap"] is True
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["sessionStartBootstrap"] = False
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert generator.load_manifest(manifest)["sessionStartBootstrap"] is False
+    data["sessionStartBootstrap"] = "false"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="sessionStartBootstrap"):
+        generator.load_manifest(manifest)
+
+
 def test_payload_dispatcher_delegates_both_platform_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     scripts = manifest.parent / "scripts"
@@ -181,6 +196,33 @@ def test_payload_dispatcher_requires_platform_parity(tmp_path: Path) -> None:
     manifest.write_text(json.dumps(data), encoding="utf-8")
 
     with pytest.raises(ValueError, match="must declare both"):
+        generator.load_manifest(manifest)
+
+
+def test_catalog_gate_is_root_relative_and_rendered_on_both_platforms(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(tmp_path)
+    gate = manifest.parent / "scripts" / "catalog_gate.py"
+    gate.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["catalogGate"] = "scripts/catalog_gate.py"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    generated = generator.expected_files(manifest)
+
+    posix = generated[manifest.parent / "scripts" / "emit-command-catalog.sh"]
+    powershell = generated[
+        manifest.parent / "scripts" / "emit-command-catalog.ps1"
+    ]
+    assert 'catalog_gate="$self_root/scripts/catalog_gate.py"' in posix
+    assert '"$py" -E -X utf8 "$catalog_gate" --check --cwd "$PWD"' in posix
+    assert "$catalogGate = Join-Path $selfRoot 'scripts\\catalog_gate.py'" in powershell
+    assert "-E -X utf8 $catalogGate --check" in powershell
+
+    data["catalogGate"] = "../escape.py"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="catalogGate"):
         generator.load_manifest(manifest)
 
 

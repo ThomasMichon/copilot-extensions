@@ -15,9 +15,13 @@ service, or retrieval through its read CLI.
 
 ## Readiness
 
-- A new session's hook stamps a setup-gated payload command when needed. Before
-role adoption, `status` reports structured `setup_required` state and no command
-provisions a runtime or starts a daemon. An operator explicitly chooses
+- The command catalog appears only when the current repository has a valid
+`.agent-index/config.yaml`, or when a repository that requires external state
+has a valid config in its bound knowledge repo. A present invalid local config
+never falls through. Outside that scope, `status` reports `inactive` and other
+commands are refused.
+- Session start is non-mutating: it does not stamp or provision a runtime and
+does not start a service. After repository opt-in, an operator explicitly chooses
 `setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call
 then provisions (`::agent-provisioning::`, usually ~30-120s). Automation must
 also pass `--yes` and an explicit role choice. If the command is missing, the
@@ -66,8 +70,8 @@ default; `--full` is explicit.
 
 ## Scope and fallback
 
-- The session-start scope-binding hook emits configured scopes from the current
-repo's `.agent-index/config.yaml` `corpus.sources` when present.
+- The session-start scope-binding hook emits `corpus.sources` from the same
+effective config used by the CLI gate.
 - For a plain repo with no corpus config, the catalog command's `index`
 subcommand defaults to the
 current git checkout (`git`) and its commits.
@@ -78,8 +82,8 @@ clearly scoped, pass `source` or `repo` rather than doing an unscoped search.
 
 ## Troubleshooting
 
-- Service down on a host: run/check `<catalog argv[0]> status`; session-start
-`ensure-service` should start the user-mode daemon in the background.
+- Service down on a host: run/check `<catalog argv[0]> status`, then use the
+explicit setup/installer lifecycle. Session start never starts the daemon.
 - Client cannot search: run inside a repo with `.agent-index/config.yaml`
 `indexer.ssh` or set `AGENT_INDEX_REPO`; the CLI read transport needs a project
 to choose the SSH target.

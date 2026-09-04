@@ -26,6 +26,60 @@ JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 LEGACY_ROOT="${AGENT_INDEX_HOME:-$HOME/.agent-index}"
 RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
 COMMAND="${1:-status}"
+PY_GATE="$(command -v python3 || command -v python || true)"
+EFFECTIVE_RESOLVER="$SCRIPT_DIR/resolve_effective_config.py"
+
+_emit_inactive() {
+    printf '%s\n' \
+        '{"configured":false,"opted_in":false,"plugin":"agent-index","running":false,"schema":"agent-index.lifecycle","schema_version":1,"state":"inactive"}'
+}
+
+if [ -z "$PY_GATE" ] || [ ! -f "$EFFECTIVE_RESOLVER" ]; then
+    if [ "$COMMAND" = installer-readiness ]; then
+        printf '%s\n' \
+            '{"detail":"No effective repository configuration is available; session startup remains non-mutating.","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"configuration-empty","version":1}'
+        exit 0
+    fi
+    _emit_inactive
+    [ "$COMMAND" = status ] && exit 0
+    exit 2
+fi
+EFFECTIVE_JSON="$("$PY_GATE" -E -X utf8 "$EFFECTIVE_RESOLVER" \
+    --cwd "${AGENT_INDEX_REPO:-$PWD}" 2>/dev/null || true)"
+EFFECTIVE_FIELDS=()
+while IFS= read -r field; do
+    EFFECTIVE_FIELDS[${#EFFECTIVE_FIELDS[@]}]="$field"
+done < <(
+    printf '%s' "$EFFECTIVE_JSON" | "$PY_GATE" -E -X utf8 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+except Exception:
+    value = {}
+print("1" if value.get("opted_in") else "0")
+print(value.get("config") if isinstance(value.get("config"), str) else "")
+print(value.get("repo_root") if isinstance(value.get("repo_root"), str) else "")
+print(value.get("source") if isinstance(value.get("source"), str) else "")
+'
+)
+if [ "${EFFECTIVE_FIELDS[0]:-0}" != 1 ]; then
+    if [ "$COMMAND" = installer-readiness ]; then
+        printf '%s\n' \
+            '{"detail":"No effective .agent-index/config.yaml opts this repository in; session startup remains non-mutating.","module":"agent-index/runtime","schema":"copilot-extensions.module-readiness","state":"configuration-empty","version":1}'
+        exit 0
+    fi
+    _emit_inactive
+    [ "$COMMAND" = status ] && exit 0
+    exit 2
+fi
+[ -n "${EFFECTIVE_FIELDS[1]:-}" ] &&
+    export AGENT_INDEX_EFFECTIVE_CONFIG="${EFFECTIVE_FIELDS[1]}"
+[ -n "${EFFECTIVE_FIELDS[2]:-}" ] &&
+    export AGENT_INDEX_REPO="${EFFECTIVE_FIELDS[2]}"
+if [ "${EFFECTIVE_FIELDS[3]:-}" = forwarded ]; then
+    export AGENT_INDEX_FORWARDED=1
+    unset AGENT_INDEX_REPO
+fi
 SEP=$'\034'
 
 _json_path() {
@@ -296,6 +350,18 @@ _configured_role() {
     local role=""
     role="$(printf '%s' "${AGENT_INDEX_ROLE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
     case "$role" in host|client) printf '%s' "$role"; return 0 ;; esac
+    local machine="${AGENT_INDEX_MACHINE:-$(hostname -s 2>/dev/null || true)}"
+    local args=(--machine "$machine")
+    if [ -n "${AGENT_INDEX_CONFIG_DATA_B64:-}" ]; then
+        args+=(--data-b64 "$AGENT_INDEX_CONFIG_DATA_B64")
+    elif [ -n "${AGENT_INDEX_EFFECTIVE_CONFIG:-}" ]; then
+        args+=(--config "$AGENT_INDEX_EFFECTIVE_CONFIG")
+    fi
+    if [ "${#args[@]}" -gt 2 ]; then
+        role="$("$PY_GATE" -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" \
+            "${args[@]}" 2>/dev/null || true)"
+        case "$role" in host|client) printf '%s' "$role"; return 0 ;; esac
+    fi
     local config="${AGENT_INDEX_CONFIG:-$ROOT/config.yaml}"
     if [ -f "$config" ]; then
         role="$(sed -n 's/^[[:space:]]*\(role\|engine\)[[:space:]]*:[[:space:]]*["'\'']\?\([A-Za-z]*\)["'\'']\?.*/\2/p' "$config" | head -n1 | tr '[:upper:]' '[:lower:]')"
@@ -530,8 +596,9 @@ _provision_runtime() {
         [ -f "$installer" ] || return 127
         printf '%s\n' '[agent-index] provisioning the active installation cell after explicit setup/configuration.' >&2
         printf '%s\n' '::agent-provisioning:: plugin=agent-index eta_seconds=120 reason=setup' >&2
-        if [ -n "${SETUP_ROLE:-}" ]; then
-            AGENT_INDEX_NO_ENGINE_DEPS=1 AGENT_INDEX_ROLE="$SETUP_ROLE" \
+        local provision_role="${SETUP_ROLE:-$(_configured_role 2>/dev/null || true)}"
+        if [ -n "$provision_role" ]; then
+            AGENT_INDEX_NO_ENGINE_DEPS=1 AGENT_INDEX_ROLE="$provision_role" \
                 bash "$installer" cell-provision \
                 --context "$CONTEXT" \
                 --expected-marketplace-id "$MARKETPLACE_ID" >&2 || return $?
@@ -567,11 +634,8 @@ _provision_runtime() {
     }
     local prior_role="${AGENT_INDEX_ROLE-}" had_role=0
     [ -n "${AGENT_INDEX_ROLE+x}" ] && had_role=1
-    if [ -n "${SETUP_ROLE:-}" ]; then
-        export AGENT_INDEX_ROLE="$SETUP_ROLE"
-    elif ! _configured_role >/dev/null 2>&1; then
-        export AGENT_INDEX_ROLE=client
-    fi
+    local provision_role="${SETUP_ROLE:-$(_configured_role 2>/dev/null || true)}"
+    export AGENT_INDEX_ROLE="${provision_role:-client}"
     printf '%s\n' '[agent-index] provisioning the runtime after explicit setup/configuration.' >&2
     printf '%s\n' '::agent-provisioning:: plugin=agent-index eta_seconds=120 reason=setup' >&2
     bash "$SNAPSHOT_INSTALLER" provision >&2
@@ -634,15 +698,8 @@ case "$COMMAND" in
         exec "$AGENT_RT_PY" -I -X utf8 -m agent_index "$@"
         ;;
     installer-readiness)
-        if [ -z "$ROLE" ]; then
-            _emit_readiness configuration-empty 'agent-index is dormant until a role is selected; readiness did not provision or start anything.'
-            exit 0
-        fi
-        if [ -z "${AGENT_RT_PY:-}" ]; then
-            _emit_readiness failed "agent-index role is configured, but the runtime is $RUNTIME_STATE; run setup again to repair it."
-            exit 1
-        fi
-        exec "$AGENT_RT_PY" -I -X utf8 -m agent_index "$@"
+        _emit_readiness configuration-empty 'agent-index runtime activation is explicit; session startup does not provision packages or start services.'
+        exit 0
         ;;
     role)
         if [ -z "$ROLE" ]; then
@@ -674,6 +731,10 @@ case "$COMMAND" in
 esac
 
 if [ -z "${AGENT_RT_PY:-}" ]; then
+    if [ -n "${AGENT_INDEX_FORWARDED:-}" ]; then
+        _emit_runtime_unavailable "$RUNTIME_STATE" "$ROLE"
+        exit 1
+    fi
     if [ -n "${AGENT_INDEX_NO_SELFPROVISION:-}" ]; then
         printf '%s\n' '[agent-index] runtime is not ready and self-provisioning is disabled.' >&2
         exit 1

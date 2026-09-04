@@ -10,7 +10,7 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($contextRoot, $selfRoot)) {
     Write-Output '{}'
     exit 0
 }
-
+@@CATALOG_GATE_POWERSHELL@@
 $commandPath = Join-Path $selfRoot '@@OUTPUT_DIR_PS@@\@@COMMAND@@@@WINDOWS_CATALOG_SUFFIX@@'
 $installerPath = Join-Path $selfRoot 'scripts\@@INSTALLER@@.ps1'
 $availability = if (

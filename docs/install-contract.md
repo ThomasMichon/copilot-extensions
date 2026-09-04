@@ -830,8 +830,12 @@ Consequence — a rule for every plugin in this repo:
   ships:
   3. `payload-invocation.json` plus its generated POSIX, PowerShell, and CMD
      payload-local command shims, and
-  4. attributable `sessionStart` hooks for both `bootstrap-check` and
-     `emit-command-catalog`.
+  4. an attributable `sessionStart` hook for `emit-command-catalog`, plus
+     `bootstrap-check` unless `payload-invocation.json` explicitly declares
+     `"sessionStartBootstrap": false`. That exception is for repository-gated,
+     explicit-first-use runtimes whose session start must remain non-mutating;
+     their catalog and payload dispatcher must share the same fail-closed
+     activation gate.
 
 Every agent-facing command belongs to its implementing payload. Skills consume
 the owning plugin's exact catalog `argv`; they do not hardcode another plugin's
@@ -1562,7 +1566,10 @@ runtime entrypoint (`install.*` if present, else `init.*`):
   canonical `libs/versioned-runtime/versioned_runtime.py` (edit the canonical and
   run `python tools/sync-versioned-runtime.py`; `--check` verifies in CI/pre-push),
 - each Python runtime wires the **session-start reconcile hook** above
-  (`plugin.json` `hooks` → a `sessionStart` `bootstrap-check`). Plugins predating
+  (`plugin.json` `hooks` → a `sessionStart` `bootstrap-check`), unless its
+  payload manifest explicitly sets `sessionStartBootstrap: false` for a
+  repository-gated, explicit-first-use runtime whose session start is required
+  to remain non-mutating. Plugins predating
   the invariant are listed in `EXEMPT_SESSION_HOOK` (tracked in dotfiles#779) —
   new runtime plugins must comply, not be added to that set.
 - every plugin PowerShell script routes persistent User/Machine environment
