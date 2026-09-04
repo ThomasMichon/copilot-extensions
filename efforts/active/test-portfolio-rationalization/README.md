@@ -213,7 +213,7 @@ suites first.
 
 - [ ] The containment harness kills and reaps all descendants after success,
   failure, timeout, and interruption on Windows and POSIX.
-- [ ] Default-tier suites cannot resolve real user, Copilot, plugin, or service
+- [x] Default-tier suites cannot resolve real user, Copilot, plugin, or service
   state roots.
 - [ ] Default suites perform no undeclared network, service, host-state, or
   external-system interaction.
@@ -279,3 +279,15 @@ the inventory and evidence gates are available.
 - Portfolio waves will split large files by contract and aggressively
   consolidate process-heavy micro-tests into evidence-dense scenario families
   that validate multiple related features per launch.
+
+### 2026-09-04 — Heavy-run admission merged
+
+- Merged #1314: potentially heavy plugin test runs now share one host-wide
+  admission lease, while guard and collection-only paths remain concurrent.
+- Default suites receive runner-owned user, Copilot, plugin, service, and
+  temporary state roots. Explicit-tier checks may opt into host configuration
+  without inheriting live session affinity or escaping temporary-state
+  accounting.
+- Added focused Linux and Windows contract coverage for admission and state
+  isolation. Complete descendant cleanup after every exit mode remains the
+  outstanding Phase 1 gate.
