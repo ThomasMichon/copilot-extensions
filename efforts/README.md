@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Unreachable Machine Maintenance](active/unreachable-machine-maintenance/README.md) | Draft | #1891 |
 | [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active | #1817 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
 | [Persistent SSH Carrier and Push Supervision](active/persistent-ssh-carrier/README.md) | Active | #1763 |
