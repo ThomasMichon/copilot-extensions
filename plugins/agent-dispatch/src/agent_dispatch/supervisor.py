@@ -1239,6 +1239,18 @@ class Supervisor:
             )
             if target_missing is True:
                 try:
+                    self.client.record_spawn_conclusion(
+                        key,
+                        conclusion_state=_CONCLUSION_COMPLETE,
+                        conclusion_detail=json.dumps(
+                            {
+                                "action": "already-removed",
+                                "reason": "recorded-target-directory-missing",
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    )
                     self.client.release(
                         task["id"],
                         owner,
@@ -1619,10 +1631,17 @@ class Supervisor:
                             can_release = False
             if not can_release:
                 continue
-            conclusion_state, outcome = self._conclude_released_attempt(
-                res,
-                session_id=conclusion_session,
-            )
+            if res.get("conclusion_state") == _CONCLUSION_COMPLETE:
+                outcome = self._conclusion_retry_payload(res) or {
+                    "action": "already-removed",
+                    "reason": "preconfirmed-before-release",
+                }
+                conclusion_state = _CONCLUSION_COMPLETE
+            else:
+                conclusion_state, outcome = self._conclude_released_attempt(
+                    res,
+                    session_id=conclusion_session,
+                )
             conclusion_detail = json.dumps(
                 outcome,
                 sort_keys=True,

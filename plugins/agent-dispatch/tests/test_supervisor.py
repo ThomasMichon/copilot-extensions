@@ -573,13 +573,6 @@ def test_cold_resume_missing_worktree_releases_same_task_for_fresh_embodiment(
         done_criteria="post a verdict for the current head",
     )
     reservation, _ = q.reserve_spawn(blocked.id)
-    q.record_spawn_worktree(
-        reservation.key,
-        "removed-review-worktree",
-        ownership="created",
-        creating_host="test-machine",
-        driver="agent-dispatch",
-    )
     q.record_spawn(
         reservation.key,
         session_handle="local-body:blocked-session",
@@ -613,11 +606,6 @@ def test_cold_resume_missing_worktree_releases_same_task_for_fresh_embodiment(
         local_body_target_dir_fn=lambda _sid: str(missing_worktree),
         local_body_verdict_fn=lambda _sid: "gone",
         local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True,
-        attempt_conclusion_fn=lambda *_args: {
-            "action": "already-removed",
-            "reason": "worktree-missing",
-        },
-        machine="test-machine",
     )
     sup._cooled_reservations.add(reservation.key)
 
@@ -635,6 +623,7 @@ def test_cold_resume_missing_worktree_releases_same_task_for_fresh_embodiment(
     held = q.get_reservation(reservation.key)
     assert held.state == SpawnState.COLD
     assert held.release_requested is True
+    assert held.conclusion_state == "complete"
 
     assert sup.poll_once(now=1001) == [blocked.id]
     assert spawn.calls == [blocked.id]
