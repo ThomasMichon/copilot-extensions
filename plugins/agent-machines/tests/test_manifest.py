@@ -78,7 +78,7 @@ def test_legacy_schema_version_remains_readable(tmp_path):
 
     package = load_package(path)
 
-    assert SCHEMA_VERSION == 3
+    assert SCHEMA_VERSION == 4
     assert package.schema_version == 1
 
 
