@@ -2340,12 +2340,16 @@ def test_make_label_routed_spawn_routes_by_label():
     def headless(_task):
         return True, {"session": "headless", "worktree": None}
 
+    default.allocation_project = "default-project"
+    headless.allocation_project = "headless-project"
     routed = make_label_routed_spawn(default, overrides={"sweep": headless})
 
     assert routed({"id": "a", "labels": ["sweep"]})[1]["session"] == "headless"
     assert routed({"id": "b", "labels": ["other"]})[1]["session"] == "cli"
     assert routed({"id": "c", "labels": []})[1]["session"] == "cli"
     assert routed({"id": "d"})[1]["session"] == "cli"  # no labels key
+    assert routed.allocation_project_for({"labels": ["sweep"]}) == "headless-project"
+    assert routed.allocation_project_for({"labels": ["other"]}) == "default-project"
 
 
 def test_make_label_routed_spawn_no_overrides_returns_default_unwrapped():
@@ -2406,16 +2410,23 @@ def test_ordinary_headless_task_records_created_worktree_before_launch(
     spawn = _ok_spawn({"session": "local-body:s1", "worktree": "wt-created"})
     spawn.requires_reusable_worktree = True
     spawn.allocation_interface = "acp"
-    monkeypatch.setattr(
-        embody,
-        "prepare_reusable_worktree",
-        lambda *_args, **_kwargs: {
+    spawn.allocation_project = "worker-harness"
+    prepared = {}
+
+    def prepare(*_args, **kwargs):
+        prepared.update(kwargs)
+        return {
             "worktree": "wt-created",
             "path": "/tmp/wt-created",
             "created": True,
             "replaced": False,
             "ownership": "created",
-        },
+        }
+
+    monkeypatch.setattr(
+        embody,
+        "prepare_reusable_worktree",
+        prepare,
     )
     sup = Supervisor(
         client,
@@ -2431,6 +2442,7 @@ def test_ordinary_headless_task_records_created_worktree_before_launch(
     assert reservation.worktree_ownership == "created"
     assert reservation.driver == "agent-dispatch"
     assert reservation.creating_host == "host-a"
+    assert prepared["project"] == "worker-harness"
 
 
 def test_exclusive_spawn_records_precreated_worktree_before_launch(

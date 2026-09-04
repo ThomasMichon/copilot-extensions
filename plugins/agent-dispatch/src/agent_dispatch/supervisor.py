@@ -554,6 +554,7 @@ def make_headless_spawn(
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
+    spawn.allocation_project = bridge.registered_agent_project(agent) or ""
     return spawn
 
 
@@ -603,6 +604,9 @@ def make_label_routed_spawn(
     )
     spawn.allocation_interface_for = lambda task: selected_attribute(
         task, "allocation_interface", "cli"
+    )
+    spawn.allocation_project_for = lambda task: selected_attribute(
+        task, "allocation_project", ""
     )
     return spawn
 
@@ -895,9 +899,13 @@ class Supervisor:
             task, "allocation_driver", "agent-dispatch"
         )
         interface = self._spawn_attribute(task, "allocation_interface", "cli")
+        project = self._spawn_attribute(
+            task, "allocation_project", embody.project_for_task(task) or ""
+        )
         prepared = embody.prepare_reusable_worktree(
             task,
             reservation,
+            project=project or None,
             interface=interface,
             driver=driver,
             supervisor=self.supervisor_id,

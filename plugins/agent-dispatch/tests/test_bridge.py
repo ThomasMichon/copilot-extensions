@@ -439,6 +439,39 @@ def test_registered_agent_names_parses_list(monkeypatch):
     assert seen["cmd"] == ["/usr/bin/agent-bridge", "--json", "agents"]
 
 
+def test_registered_agents_skips_human_preamble(monkeypatch):
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(
+        bridge.subprocess,
+        "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 0, "Loading agents...\n" + _AGENTS_JSON, ""
+        ),
+    )
+
+    assert bridge.registered_agents() == [
+        {"name": "general-loop-worker"},
+        {"name": "sweep-worker"},
+        {"name": "document-intake-processor"},
+    ]
+
+
+def test_registered_agent_project_reads_explicit_project(monkeypatch):
+    monkeypatch.setattr(
+        bridge,
+        "registered_agents",
+        lambda **_kw: [
+            {"name": "reviewer", "project": "review-harness"},
+            {"name": "other", "project": "other-harness"},
+        ],
+    )
+
+    assert bridge.registered_agent_project("reviewer") == "review-harness"
+    assert bridge.registered_agent_project("missing") is None
+
+
 def test_preflight_local_warns_when_agent_absent(monkeypatch):
     monkeypatch.setattr(
         bridge, "registered_agent_names", lambda **_kw: {"general-loop-worker"}
