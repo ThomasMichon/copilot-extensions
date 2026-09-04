@@ -6,4 +6,4 @@ from importlib.metadata import version as _pkg_version
 try:
     __version__ = _pkg_version("agent-ssh")
 except PackageNotFoundError:  # running from source without install
-    __version__ = "0.1.0-dev76"
+    __version__ = "0.1.0-dev77"

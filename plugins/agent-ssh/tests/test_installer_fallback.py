@@ -48,9 +48,13 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
     marker = tmp_path / "pip-fallback-ran"
     fake_python = fake_bin / "python.cmd"
     fake_python.write_text(
-        f'@echo fallback>"{marker}"\n@exit /b 0\n',
+        f'@echo %*>"{marker}"\n@exit /b 0\n',
         encoding="ascii",
     )
+    dependency_a = tmp_path / "dependency-a"
+    dependency_b = tmp_path / "dependency-b"
+    dependency_a.mkdir()
+    dependency_b.mkdir()
 
     def ps_quote(value: str) -> str:
         return value.replace("'", "''")
@@ -65,7 +69,11 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
                 (
                     "$ok = Install-AgentSshPackage "
                     f"-Python '{ps_quote(str(fake_python))}' "
-                    f"-Source '{ps_quote(str(tmp_path))}'"
+                    f"-Source '{ps_quote(str(tmp_path))}' "
+                    "-Dependencies @("
+                    f"'{ps_quote(str(dependency_a))}',"
+                    f"'{ps_quote(str(dependency_b))}'"
+                    ")"
                 ),
                 "if (-not $ok) { throw 'fallback install failed' }",
             ]
@@ -89,3 +97,7 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "falling back to python -m pip" in proc.stdout
     assert marker.is_file()
+    fallback_args = marker.read_text(encoding="ascii")
+    assert str(dependency_a) in fallback_args
+    assert str(dependency_b) in fallback_args
+    assert str(tmp_path) in fallback_args
