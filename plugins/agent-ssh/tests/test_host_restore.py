@@ -248,6 +248,89 @@ def test_payload_root_uses_runtime_marker(tmp_path, monkeypatch):
     assert host_restore._payload_root() == payload.resolve()
 
 
+def test_payload_root_prefers_current_marketplace_over_stale_marker(
+    tmp_path, monkeypatch
+):
+    home = tmp_path / "home"
+    stale = tmp_path / "stale"
+    current = (
+        home
+        / ".copilot"
+        / "installed-plugins"
+        / "copilot-extensions"
+        / "agent-ssh"
+    )
+    for payload, version in ((stale, "0.1.0-dev1"), (current, "0.1.0-dev2")):
+        payload.mkdir(parents=True)
+        (payload / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "agent-ssh",
+                    "version": version,
+                }
+            ),
+            encoding="utf-8",
+        )
+    state = home / ".agent-ssh"
+    state.mkdir(parents=True)
+    (state / "payload-dir").write_text(str(stale), encoding="utf-8")
+    (state / "deploy-manifest.json").write_text(
+        json.dumps(
+            {
+                "source": {
+                    "kind": "marketplace",
+                    "repo": "copilot-extensions",
+                    "plugin": "agent-ssh",
+                    "version": "0.1.0-dev2",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(host_restore.Path, "home", lambda: home)
+
+    assert host_restore._payload_root() == current.resolve()
+
+
+def test_payload_root_keeps_local_deployment_marker(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    local = tmp_path / "local"
+    marketplace = (
+        home
+        / ".copilot"
+        / "installed-plugins"
+        / "copilot-extensions"
+        / "agent-ssh"
+    )
+    for payload, version in ((local, "0.1.0-dev2"), (marketplace, "0.1.0-dev1")):
+        payload.mkdir(parents=True)
+        (payload / "plugin.json").write_text(
+            json.dumps({"name": "agent-ssh", "version": version}),
+            encoding="utf-8",
+        )
+    state = home / ".agent-ssh"
+    state.mkdir(parents=True)
+    (state / "payload-dir").write_text(str(local), encoding="utf-8")
+    (state / "deploy-manifest.json").write_text(
+        json.dumps(
+            {
+                "source": {
+                    "kind": "local",
+                    "repo": "copilot-extensions",
+                    "plugin": "agent-ssh",
+                    "version": "0.1.0-dev2",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(host_restore.Path, "home", lambda: home)
+
+    assert host_restore._payload_root() == local.resolve()
+
+
 def test_zero_tunnel_connections_are_unhealthy():
     assert not host_restore._healthy_status(
         "host running\nwatchdog running\n"

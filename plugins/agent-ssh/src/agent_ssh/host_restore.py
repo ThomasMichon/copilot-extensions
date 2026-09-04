@@ -15,18 +15,71 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 
+def _payload_manifest(path: Path) -> dict[str, Any] | None:
+    try:
+        manifest = json.loads((path / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(manifest, dict) and manifest.get("name") == "agent-ssh":
+        return manifest
+    return None
+
+
 def _payload_root() -> Path:
     configured = os.environ.get("COPILOT_PLUGIN_ROOT")
     if configured:
         return Path(configured).expanduser().resolve()
-    marker = Path.home() / ".agent-ssh" / "payload-dir"
+
+    home = Path.home()
+    marker = home / ".agent-ssh" / "payload-dir"
+    marker_payload = None
+    marker_manifest = None
     try:
-        payload = Path(marker.read_text(encoding="utf-8").strip()).resolve()
-        manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
-        if isinstance(manifest, dict) and manifest.get("name") == "agent-ssh":
-            return payload
-    except (OSError, ValueError):
+        marker_payload = Path(
+            marker.read_text(encoding="utf-8").strip()
+        ).resolve()
+        marker_manifest = _payload_manifest(marker_payload)
+    except OSError:
         pass
+
+    deploy_manifest = home / ".agent-ssh" / "deploy-manifest.json"
+    try:
+        deployed = json.loads(deploy_manifest.read_text(encoding="utf-8"))
+        source = deployed.get("source", {})
+        kind = source.get("kind")
+        marketplace = source.get("repo")
+        plugin = source.get("plugin")
+        version = source.get("version")
+        if kind != "marketplace" and marker_manifest is not None:
+            return marker_payload
+        if (
+            kind == "marketplace"
+            and marker_manifest is not None
+            and marker_manifest.get("version") == version
+        ):
+            return marker_payload
+        if (
+            kind == "marketplace"
+            and isinstance(marketplace, str)
+            and marketplace
+            and plugin == "agent-ssh"
+            and isinstance(version, str)
+        ):
+            payload = (
+                home
+                / ".copilot"
+                / "installed-plugins"
+                / marketplace
+                / plugin
+            ).resolve()
+            manifest = _payload_manifest(payload)
+            if manifest is not None and manifest.get("version") == version:
+                return payload
+    except (AttributeError, OSError, ValueError):
+        pass
+
+    if marker_manifest is not None:
+        return marker_payload
     source = Path(__file__).resolve().parents[2]
     if (source / "plugin.json").is_file():
         return source
