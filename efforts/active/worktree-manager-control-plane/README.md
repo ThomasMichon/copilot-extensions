@@ -147,6 +147,16 @@ realized in `main`; unchecked items are the remaining delta.
       both Picker implementations over the JSON process boundary; neither UI owns
       process discovery or termination policy. Tracks #1478 and closes
       agent-fabric §`recover-not-lose` plus picker §`programmatic-parity`.
+- [ ] Add an optional same-machine **AHP session backend** for create and resume
+      actions. agent-worktrees creates the exact managed worktree and remains the
+      lifecycle authority; the backend creates or reattaches one durable hosted
+      session at that path, records a typed binding, and launches any visible mux
+      pane as a hard-bound client attachment. Closing the client detaches without
+      ending the hosted session, unavailable or mismatched hosts fail closed, and
+      finalization requires confirmed disposal or explicit transfer. Tracks #1657
+      and closes agent-worktrees §`explicit session binding` plus picker
+      §`explicit-launch-target`, §`render-derive-not-own`, and
+      §`programmatic-parity`.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
@@ -204,6 +214,10 @@ realized in `main`; unchecked items are the remaining delta.
   and ambiguous-owner states, performs no mutation in preview mode, retires only
   a confirmed unreachable no-mux owner, and launches exactly one mux-wrapped
   resume of the selected persisted session.
+- **AHP backend lifecycle.** Prove exact-path `target=workspace` creation,
+  deterministic hard-bound reattach without an anchor/default session, durable
+  zero-client state, fail-closed host/version mismatch, and a finalization barrier
+  for live or unknown hosted sessions.
 - **Clean-room / fresh-box.** Bootstrap → provision → core-install → bare-launch
   handoff exercised on a disposable fresh machine (the repo's clean-room rig),
   including the absent-Manager onboarding path and the stale-stub health-probe
@@ -255,3 +269,7 @@ its issues; the public artifacts stay self-contained and general-purpose.
   process has a known head session; the standalone Manager prepares recovery
   through the JSON engine boundary, then launches through the installed project
   binstub so the normal mux wrapper is restored.
+- **2026-09-03** — Accepted #1657 into Phase 3 as the optional same-machine AHP
+  session-backend slice. The reviewed contract keeps worktree and finalization
+  authority in agent-worktrees, treats mux clients as detachable presentation,
+  and requires exact-path binding plus fail-closed lifecycle handling.
