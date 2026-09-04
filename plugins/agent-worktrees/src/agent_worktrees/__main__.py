@@ -19609,7 +19609,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-owner", action="store_true", dest="no_owner",
                    help="Create a deliberately top-level worktree: do NOT inherit "
                         "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, or a "
-                        "controller from COPILOT_AGENT_SESSION_ID, so no parent's "
+                        "parent session from COPILOT_AGENT_SESSION_ID, so no parent's "
                         "finalize or terminal-cleanup gate is held on it (Ph6).")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
