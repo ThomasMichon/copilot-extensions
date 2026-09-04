@@ -2,7 +2,7 @@
 
 A **payload-only** Copilot CLI plugin that teaches an agent how to customize and
 extend the GitHub Copilot CLI. There is no runtime, service, venv, or binstub:
-**enable the plugin and restart the session** so the seven skills are available
+**enable the plugin and restart the session** so the eight skills are available
 on demand.
 
 The skills are standalone authoring guidance. They work in any repo that enables
@@ -24,6 +24,7 @@ skill name) and Copilot loads the matching skill:
 | [building-harnesses](skills/building-harnesses/SKILL.md) | building or auditing an agent control harness | Entry point to the [Control-Harness Runbook](../../docs/harness-runbook.md): plugin set, repo adoption, `AGENTS.md`, delegation, validation, efforts, and visions |
 | [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | reviewing a repo's customization surfaces | Mechanical scan + design critique over skills, project/`.ai` agents, origin/version-aware advisory checks for enabled external plugin agents, instructions, hooks, and MCP configs |
 | [authoring-harness-plugins](skills/authoring-harness-plugins/SKILL.md) | packaging a repo's operator guidance for other control repos | The payload-only `<repo>-harness` pattern: contribute/diagnose skills, README bar, marketplace wiring, and adoption |
+| [diagnosing-copilot-cli-startup](skills/diagnosing-copilot-cli-startup/SKILL.md) | an interactive CLI is stuck on `Loading` or `Resuming` | Mux capture, process/session correlation, persisted events and logs, startup-boundary classification, bridge differential diagnosis, and operator-authorized reproduction |
 
 Each skill supplements the base CLI documentation with this repo's authoring
 patterns, and points at authoritative GitHub Copilot CLI and Anthropic Agent
@@ -74,7 +75,7 @@ Extensions API is not yet fully replaceable.
 
 Provides:
 
-- Seven skills, the bundled `reviewing-customizations` scanner, and the
+- Eight skills, the bundled `reviewing-customizations` scanner, and the
   cross-platform `installing-plugins/scripts/plugin-activation.py` state helper.
 - Source-aware agent validation: editable project, `.ai`, and suite agents are
   enforced locally; enabled external plugin agents produce actionable advisory
