@@ -9,6 +9,7 @@ from __future__ import annotations
 import types
 
 import agent_worktrees.__main__ as m
+from agent_worktrees import knowledge_plugins as kp
 from agent_worktrees import repos as repos_mod
 from agent_worktrees import state_root as sr
 from agent_worktrees import tracking as tk
@@ -187,6 +188,120 @@ class TestCarvePairedKnowledge:
         assert refreshed["called"] is True
         # No knowledge tracking record either.
         assert list(tmp_path.glob("*.yaml")) == []
+
+
+class TestCreatePairPluginComposition:
+    def test_stamps_pair_before_composing_plugins(self, monkeypatch, tmp_path):
+        record = tk.WorktreeRecord(
+            worktree_id="wt-h",
+            branch="worktree/wt-h",
+            worktree_path=str(tmp_path / "harness"),
+            repo="citadel-harness",
+            machine="test",
+            platform="windows",
+            started_at="2026-09-02T00:00:00",
+            last_resumed_at="2026-09-02T00:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        stamp = {
+            "pair_id": "pair-1",
+            "pair_role": "harness",
+            "pair_ref": "test/knowledge/wt-k",
+            "pair_kind": "worktree",
+        }
+        saved = []
+
+        def _save(current):
+            saved.append(
+                (
+                    current.pair_id,
+                    current.pair_role,
+                    current.pair_ref,
+                    current.pair_kind,
+                )
+            )
+
+        composed = []
+
+        def _compose(*, cwd, config):
+            assert saved == [
+                ("pair-1", "harness", "test/knowledge/wt-k", "worktree")
+            ]
+            composed.append((cwd, config))
+            return {"action": "composed"}
+
+        config = _config()
+        monkeypatch.setattr(tk, "save_record", _save)
+        monkeypatch.setattr(kp, "compose_from_pair", _compose)
+
+        result = m._stamp_and_compose_paired_knowledge(
+            config, record, str(tmp_path / "harness"), stamp
+        )
+
+        assert result == {"action": "composed"}
+        assert composed == [(str(tmp_path / "harness"), config)]
+
+    def test_unpaired_create_does_not_compose_plugins(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            kp,
+            "compose_from_pair",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unpaired create must not compose")
+            ),
+        )
+
+        assert (
+            m._stamp_and_compose_paired_knowledge(
+                _config(), object(), str(tmp_path / "harness"), None
+            )
+            is None
+        )
+
+    def test_composition_failure_preserves_created_pair_identity(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        record = types.SimpleNamespace(
+            pair_id=None,
+            pair_role=None,
+            pair_ref=None,
+            pair_kind=None,
+        )
+        saved = []
+        monkeypatch.setattr(
+            tk,
+            "save_record",
+            lambda current: saved.append(current.pair_id),
+        )
+        monkeypatch.setattr(
+            kp,
+            "compose_from_pair",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                kp.KnowledgePluginError("settings are malformed")
+            ),
+        )
+
+        result = m._stamp_and_compose_paired_knowledge(
+            _config(),
+            record,
+            str(tmp_path / "harness"),
+            {
+                "pair_id": "pair-1",
+                "pair_role": "harness",
+                "pair_ref": "test/knowledge/wt-k",
+                "pair_kind": "worktree",
+            },
+        )
+
+        assert saved == ["pair-1"]
+        assert record.pair_ref == "test/knowledge/wt-k"
+        assert result == {"action": "error", "error": "settings are malformed"}
+        assert "launch preflight will retry" in capsys.readouterr().err
 
 
 class TestStateRootPairAnchor:
