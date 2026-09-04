@@ -5,8 +5,8 @@
 - **Branch(es):** independent per-slice PRs
 - **Created:** 2026-09-04
 - **Status:** Draft
-- **Vision:** plugin-services/`delegated-heavy-companion-runtime`;
-  plugins/agent-index/`lightweight-client-and-declared-host-service`
+- **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
+  [agent-index/`lightweight-client-and-declared-host-service`](../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
 - **Umbrella issue:** #2007
 - **Sub-issues:** Pending per-slice carving
 
