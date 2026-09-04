@@ -1147,7 +1147,9 @@ async def get_events(
     after: int | None = None,
     caller_id: str | None = None,
     controlled: bool = False,
-    continuity_id: str | None = Query(default=None, max_length=128),
+    continuity_id: str | None = Query(
+        default=None, min_length=1, max_length=128
+    ),
     transient: bool = False,
 ):
     """SSE event stream with durable event IDs.

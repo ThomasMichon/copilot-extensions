@@ -764,7 +764,7 @@ def _cmd_remote(args: argparse.Namespace) -> None:
                     event_continuity = event.get("continuity_id")
                     if isinstance(event_continuity, str):
                         continuity_id = event_continuity
-                    if args.json:
+                    if getattr(args, "json", False):
                         _json_out(event)
                     else:
                         print(

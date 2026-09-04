@@ -229,6 +229,18 @@ class TestCursorEndpoints:
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "cursor_invalidated"
 
+    def test_ack_rejects_empty_continuity(self, client) -> None:
+        response = client.post(
+            "/api/v1/sessions/sess-1/cursor",
+            json={
+                "caller_id": "consumer-a",
+                "last_id": 1,
+                "continuity_id": "",
+            },
+        )
+
+        assert response.status_code == 422
+
     def test_legacy_ack_without_continuity_survives_rebuild(
         self, client, app
     ) -> None:
@@ -275,6 +287,18 @@ class TestCursorEndpoints:
         detail = response.json()["detail"]
         assert detail["code"] == "cursor_invalidated"
         assert detail["action"] == "full_reconcile"
+
+    def test_controlled_stream_rejects_empty_continuity(self, client) -> None:
+        response = client.get(
+            "/api/v1/sessions/sess-1/events",
+            params={
+                "caller_id": "consumer-a",
+                "controlled": "true",
+                "continuity_id": "",
+            },
+        )
+
+        assert response.status_code == 422
 
 
 class TestRangeEndpoint:

@@ -261,7 +261,9 @@ class CursorAckRequest(BaseModel):
 
     caller_id: str | None = None
     last_id: int = Field(ge=0)
-    continuity_id: str | None = Field(default=None, max_length=128)
+    continuity_id: str | None = Field(
+        default=None, min_length=1, max_length=128
+    )
 
 
 # -- API responses -----------------------------------------------------------

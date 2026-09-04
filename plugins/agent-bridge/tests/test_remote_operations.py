@@ -1074,7 +1074,6 @@ def test_remote_cli_events_ack_after_output(monkeypatch, capsys) -> None:
         caller_id="consumer-a",
         after=4,
         continuity_id="epoch-a",
-        json=True,
     )
 
     monkeypatch.setattr("time.sleep", lambda _delay: None)
@@ -1083,7 +1082,7 @@ def test_remote_cli_events_ack_after_output(monkeypatch, capsys) -> None:
 
     output = capsys.readouterr().out
     assert exc.value.code == 2
-    assert '"event": "assistant.turn_end"' in output
+    assert '5 assistant.turn_end {"stop_reason":"end_turn"}' in output
     assert client.acks == [
         ("example-host", "session-a", 5, "consumer-a", "epoch-a")
     ]
