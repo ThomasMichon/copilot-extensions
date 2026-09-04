@@ -103,24 +103,11 @@ def test_background_capture_preserves_timeout_failure(monkeypatch):
     assert procutil.run_background_capture(["probe"], timeout=3) is None
 
 
-def test_ssh_subprocess_kwargs_uses_hidden_console_on_windows(monkeypatch):
-    class FakeStartupInfo:
-        def __init__(self):
-            self.dwFlags = 0
-            self.wShowWindow = None
-
+def test_ssh_subprocess_kwargs_uses_no_window_on_windows(monkeypatch):
     monkeypatch.setattr(procutil.sys, "platform", "win32")
-    monkeypatch.setattr(procutil.subprocess, "STARTUPINFO", FakeStartupInfo, raising=False)
-    monkeypatch.setattr(procutil.subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
-    monkeypatch.setattr(procutil.subprocess, "SW_HIDE", 0, raising=False)
-    monkeypatch.setattr(procutil.subprocess, "CREATE_NEW_CONSOLE", 16, raising=False)
+    monkeypatch.setattr(procutil.subprocess, "CREATE_NO_WINDOW", 8, raising=False)
 
-    kwargs = procutil.ssh_subprocess_kwargs()
-
-    assert kwargs["creationflags"] == 16
-    startupinfo = kwargs["startupinfo"]
-    assert startupinfo.dwFlags & 1
-    assert startupinfo.wShowWindow == 0
+    assert procutil.ssh_subprocess_kwargs() == {"creationflags": 8}
 
 
 def test_ssh_capture_reaps_tree_on_timeout(monkeypatch):

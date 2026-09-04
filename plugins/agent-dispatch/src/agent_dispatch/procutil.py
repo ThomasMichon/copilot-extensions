@@ -202,15 +202,9 @@ def run_background_capture(
 
 
 def ssh_subprocess_kwargs() -> dict[str, object]:
-    """Contain SSH and ProxyCommand descendants in an invisible console."""
+    """Contain SSH and ProxyCommand descendants in a windowless process tree."""
     if sys.platform == "win32":
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        return {
-            "creationflags": subprocess.CREATE_NEW_CONSOLE,
-            "startupinfo": startupinfo,
-        }
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
     return {"start_new_session": True}
 
 
