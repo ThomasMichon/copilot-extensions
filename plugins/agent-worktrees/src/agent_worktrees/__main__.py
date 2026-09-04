@@ -1212,6 +1212,38 @@ def _carve_paired_knowledge(
     }
 
 
+def _stamp_and_compose_paired_knowledge(
+    config: cfg.Config,
+    record: tracking.WorktreeRecord,
+    worktree_path: str,
+    pair_stamp: dict | None,
+) -> dict | None:
+    """Persist a new pair before composing its launch-time plugin overlay."""
+    if not pair_stamp:
+        return None
+    record.pair_id = pair_stamp.get("pair_id")
+    record.pair_role = pair_stamp.get("pair_role")
+    record.pair_ref = pair_stamp.get("pair_ref")
+    record.pair_kind = pair_stamp.get("pair_kind")
+    tracking.save_record(record)
+
+    from . import knowledge_plugins
+
+    try:
+        return knowledge_plugins.compose_from_pair(
+            cwd=worktree_path, config=config
+        )
+    except knowledge_plugins.KnowledgePluginError as exc:
+        # The pair is already durable. Keep create's resource identity usable
+        # and let the normal launcher retry its strict pre-Copilot preflight.
+        print(
+            "paired-knowledge plugin composition failed; "
+            f"the launch preflight will retry: {exc}",
+            file=sys.stderr,
+        )
+        return {"action": "error", "error": str(exc)}
+
+
 def _journal_owner_reciprocal_claim(
     config: cfg.Config, worktree_id: str, owner_ref: str | None,
     *, owner_locked: bool = False,
@@ -1535,12 +1567,9 @@ def _create_worktree_core(
             print(f"paired-knowledge carve failed (non-fatal): {exc}",
                   file=sys.stderr)
             pair_stamp = None
-        if pair_stamp:
-            record.pair_id = pair_stamp.get("pair_id")
-            record.pair_role = pair_stamp.get("pair_role")
-            record.pair_ref = pair_stamp.get("pair_ref")
-            record.pair_kind = pair_stamp.get("pair_kind")
-            tracking.save_record(record)
+        _stamp_and_compose_paired_knowledge(
+            config, record, worktree_path, pair_stamp
+        )
 
     # Copilot discovers repository settings before sessionStart. Seed the
     # worktree-local source overlay now so programmatic create callers and
