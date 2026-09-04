@@ -68,7 +68,7 @@ async def drain_wake_outbox(
     is_active: WakeActive | None = None,
     delivery_lease: float = DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
     idle_interval: float | None = None,
-    wake_signal: asyncio.Event | None = None,
+    wake_signal: asyncio.Queue[None] | None = None,
 ) -> None:
     """Drain durable wake operations until cancelled.
 
@@ -84,10 +84,9 @@ async def drain_wake_outbox(
             await asyncio.sleep(delay)
             return
         try:
-            await asyncio.wait_for(wake_signal.wait(), timeout=delay)
+            await asyncio.wait_for(wake_signal.get(), timeout=delay)
         except asyncio.TimeoutError:
             pass
-        wake_signal.clear()
 
     while True:
         if is_active is not None:

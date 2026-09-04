@@ -710,10 +710,14 @@ def create_app(
         bus.bind_loop(loop)
         from .wake import drain_wake_outbox
 
-        wake_signal = asyncio.Event()
+        wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         if wake_interval > 0:
+            def _signal_wake() -> None:
+                if wake_signal.empty():
+                    wake_signal.put_nowait(None)
+
             queue.set_wake_notifier(
-                lambda: loop.call_soon_threadsafe(wake_signal.set)
+                lambda: loop.call_soon_threadsafe(_signal_wake)
             )
         wake_options = {
             "interval": wake_interval,

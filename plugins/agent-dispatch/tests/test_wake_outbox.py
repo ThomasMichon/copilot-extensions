@@ -256,10 +256,15 @@ def test_idle_drainer_wakes_immediately_on_post_commit_signal(q):
 
     async def scenario():
         event_loop = asyncio.get_running_loop()
-        signal = asyncio.Event()
+        signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         delivered = asyncio.Event()
+
+        def signal_wake():
+            if signal.empty():
+                signal.put_nowait(None)
+
         q.set_wake_notifier(
-            lambda: event_loop.call_soon_threadsafe(signal.set)
+            lambda: event_loop.call_soon_threadsafe(signal_wake)
         )
 
         def deliver(*_args):
