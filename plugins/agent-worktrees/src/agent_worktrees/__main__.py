@@ -7837,8 +7837,8 @@ class _StatusSegmentCache:
 
     def get(self, path: str) -> str:
         input_key = self._key(path)
-        now = time.monotonic()
         with self._lock:
+            now = time.monotonic()
             key = self._aliases.get(input_key, input_key)
             cached = self._entries.get(key)
             if cached and now - cached[0] < self.ttl:
@@ -7848,6 +7848,7 @@ class _StatusSegmentCache:
         target = record.worktree_path if record and record.worktree_path else path
         key = self._key(target)
         with self._lock:
+            now = time.monotonic()
             cached = self._entries.get(key)
             if cached and now - cached[0] < self.ttl:
                 self._aliases[input_key] = key
@@ -7857,7 +7858,7 @@ class _StatusSegmentCache:
             target, fetch=False, plain=False, no_title=False, persist_title=True)
         with self._lock:
             self._aliases[input_key] = key
-            self._entries[key] = (now, value)
+            self._entries[key] = (time.monotonic(), value)
         return value
 
     def invalidate(self, cwd: str | None) -> None:
