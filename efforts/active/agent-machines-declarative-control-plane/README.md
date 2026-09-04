@@ -9,7 +9,7 @@
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
 - **Umbrella issue:** #1418
-- **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631 · #1721
+- **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631 · #1721 · #1961
 
 ## Guiding Intent
 
@@ -117,6 +117,10 @@ fleet, topology, or operating environment.
 - [x] Let agent-ssh expose transport-host plan/status/apply behavior through its
   own command and transport metadata; agent-machines remains the optional
   declarative orchestrator rather than learning dtssh internals (#1627).
+- [ ] Add an attributable, source-neutral Playwright CLI provisioning command
+  that installs `@playwright/cli`, runs its supported skill-registration task,
+  verifies both results, and can be consumed through a requirement-package
+  invocation module (#1961).
 - [ ] Order actions from declared dependencies and preserve idempotence across
   interrupted or repeated runs.
 - [x] Define whether imperative modules participate in authority selection or
@@ -173,6 +177,10 @@ fleet, topology, or operating environment.
   dry-run, idempotent apply, missing authentication, unavailable provider,
   unsupported platform, and repeated no-op behavior without hardcoded payload
   paths (#1627).
+- [ ] Playwright provisioning fixtures prove prerequisite failures, install and
+  registration planning, apply, healthy no-op, repeated idempotence, provider
+  invocation, and payload-command synchronization on supported platforms
+  (#1961).
 
 ## Proposal
 
@@ -303,3 +311,12 @@ behavioral parity is demonstrated.
   input order, legacy schemas, safety boundaries, every supported resource
   authority field, direct-library restore validation, and loser-only drift
   stability in the agent-machines suite.
+
+### 2026-09-03 - Reusable Playwright CLI provisioning slice
+
+- Added #1961 for a generic-safe, payload-attributable provisioning command
+  that owns `@playwright/cli` installation plus the CLI's supported skill
+  registration task.
+- Kept browser profiles, credentials, navigation maps, and product-specific
+  test policy downstream; requirement packages consume only the reusable
+  provisioning mechanism through the existing invocation contract.
