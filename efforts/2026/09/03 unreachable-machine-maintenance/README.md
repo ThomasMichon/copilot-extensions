@@ -4,9 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial pull requests from one worktree
 - **Created:** 2026-09-03
-- **Status:** Active
+- **Status:** Done
 - **Vision:** vision-extending for
-  [`visions/agent-fabric`](../../../visions/agent-fabric/README.md)
+  [`visions/agent-fabric`](../../../../visions/agent-fabric/README.md)
   - durable maintenance handoff when live reach is unavailable
 - **Umbrella issue:** #1891
 
@@ -95,7 +95,7 @@ reproducible. The workflow needs:
 - [x] Add cross-platform assertions for the emitted guidance and skill
       structure.
 - [x] Validate version surfaces and install contracts for both changed plugins.
-- [ ] Land, deploy through the normal marketplace path, close #1891, and
+- [x] Land, deploy through the normal marketplace path, close #1891, and
       archive the effort.
 
 ## Validation Plan
@@ -158,3 +158,12 @@ not imported into any plugin.
 - Re-review made the dispatch exclusion stable at issue identity rather than
   issue revision, limited suspension to owners with a durable resume path, and
   made the no-agent-machines fallback unconditionally inspection-only.
+
+### 2026-09-03 - Released and deployed
+- The reviewed proposal landed through #1893 and the implementation through
+  #1895. All required checks and both plugin suites passed.
+- Deployed the merged payloads on Windows and POSIX environments. The installed
+  agent-ssh payload reports `0.1.0-dev72`; agent-machines advanced to
+  `0.1.0-dev85` and includes the `performing-machine-maintenance` skill.
+- Closed #1891 after verifying the installed mesh pointer and target-local skill.
+- Status is Done and every Plan and Validation Plan item is resolved.
