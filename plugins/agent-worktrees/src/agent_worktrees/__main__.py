@@ -1135,6 +1135,18 @@ def _prepare_worktree_source(
     return prepared
 
 
+def _creation_parent_session(
+    explicit: str | None,
+    *,
+    inherit_ambient: bool,
+) -> str | None:
+    if explicit is not None:
+        return explicit
+    if inherit_ambient:
+        return os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    return None
+
+
 def _create_worktree_core(
     config: cfg.Config,
     *,
@@ -1147,6 +1159,7 @@ def _create_worktree_core(
     origin: tracking.WorktreeOrigin | None = None,
     name: str | None = None,
     parent_session: str | None = None,
+    inherit_parent_session: bool = True,
     caller_worktree: str | None = None,
     owner_ref: str | None = None,
     dispatch_attempt: dict[str, object] | None = None,
@@ -1286,8 +1299,10 @@ def _create_worktree_core(
             # #1029: link the new worktree back to the session that spawned it, so a
             # later resume (esp. a PR/feedback worktree with no sessions of its own)
             # restores context instead of cold-starting.
-            parent_session=(parent_session
-                            or os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
+            parent_session=_creation_parent_session(
+                parent_session,
+                inherit_ambient=inherit_parent_session,
+            ),
             # #2178: for a bridge spawn, record the caller worktree so the Picker can
             # jump back to it.
             caller_worktree=caller_worktree or None,
@@ -10445,6 +10460,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 interface=getattr(args, "interface", None),
                 origin=getattr(args, "origin", None),
                 owner_ref=owner_ref,
+                inherit_parent_session=not (is_system or no_owner),
                 dispatch_attempt=dispatch_attempt,
             )
         except CoordinationReadinessFailure as exc:
@@ -19592,8 +19608,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "that already know both sides.")
     p.add_argument("--no-owner", action="store_true", dest="no_owner",
                    help="Create a deliberately top-level worktree: do NOT inherit "
-                        "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, so no "
-                        "parent's finalize gate is held on it (Ph6).")
+                        "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, or a "
+                        "parent session from COPILOT_AGENT_SESSION_ID, so no parent's "
+                        "finalize or terminal-cleanup gate is held on it (Ph6).")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 

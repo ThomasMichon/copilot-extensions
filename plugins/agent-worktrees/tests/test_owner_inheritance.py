@@ -110,6 +110,7 @@ def _patch_core(monkeypatch, captured):
 
     def fake_core(config, **kw):
         captured["owner_ref"] = kw.get("owner_ref")
+        captured["inherit_parent_session"] = kw.get("inherit_parent_session")
         return {"worktree": {"id": "w", "path": "p", "branch": "b"}}
 
     monkeypatch.setattr(m, "_create_worktree_core", fake_core)
@@ -148,6 +149,7 @@ def test_cmd_create_no_owner_forces_top_level(monkeypatch):
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "env/proj/parent")
     m.cmd_create(_create_args(no_owner=True))
     assert captured["owner_ref"] is None
+    assert captured["inherit_parent_session"] is False
 
 
 def test_cmd_create_system_is_never_owned(monkeypatch):
@@ -156,6 +158,30 @@ def test_cmd_create_system_is_never_owned(monkeypatch):
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "env/proj/parent")
     m.cmd_create(_create_args(system=True, name="svc"))
     assert captured["owner_ref"] is None
+    assert captured["inherit_parent_session"] is False
+
+
+def test_cmd_create_normal_worktree_inherits_parent_session(monkeypatch):
+    captured: dict = {}
+    _patch_core(monkeypatch, captured)
+    m.cmd_create(_create_args())
+    assert captured["inherit_parent_session"] is True
+
+
+def test_creation_parent_session_suppresses_only_ambient_value(monkeypatch):
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "ambient-session")
+    assert m._creation_parent_session(
+        None, inherit_ambient=False
+    ) is None
+    assert m._creation_parent_session(
+        None, inherit_ambient=True
+    ) == "ambient-session"
+    assert m._creation_parent_session(
+        "explicit-session", inherit_ambient=False
+    ) == "explicit-session"
+    assert m._creation_parent_session(
+        "", inherit_ambient=True
+    ) == ""
 
 
 def test_cmd_create_emits_structured_coordination_rejection(
