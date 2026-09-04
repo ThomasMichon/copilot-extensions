@@ -223,8 +223,12 @@ def _healthy_endpoint(endpoint: object, container: str, container_id: str) -> bo
     ):
         return False
     try:
+        port = int(endpoint["port"])
+        control_port = int(endpoint["control_port"])
+        if not (1 <= port <= 65535 and 1 <= control_port <= 65535):
+            return False
         with socket.create_connection(
-            ("127.0.0.1", int(endpoint["control_port"])),
+            ("127.0.0.1", control_port),
             timeout=0.5,
         ) as connection:
             connection.sendall(b"ping\n")

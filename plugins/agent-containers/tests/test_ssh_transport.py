@@ -170,11 +170,49 @@ def test_docker_broker_health_accepts_fragmented_control_response(monkeypatch):
         "container": "repo-1",
         "container_id": "a" * 64,
         "runtime": str(Path(docker_proxy.__file__).resolve()),
+        "port": 54320,
         "control_port": 54321,
     }
 
     assert docker_proxy._healthy_endpoint(endpoint, "repo-1", "a" * 64)
     assert connection.sent == [b"ping\n"]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("port", None),
+        ("port", "invalid"),
+        ("port", 0),
+        ("control_port", None),
+        ("control_port", "invalid"),
+        ("control_port", 65536),
+    ],
+)
+def test_docker_broker_rejects_invalid_endpoint_ports(
+    monkeypatch,
+    field,
+    value,
+):
+    endpoint = {
+        "schema_version": 1,
+        "container": "repo-1",
+        "container_id": "a" * 64,
+        "runtime": str(Path(docker_proxy.__file__).resolve()),
+        "port": 54320,
+        "control_port": 54321,
+    }
+    if value is None:
+        endpoint.pop(field)
+    else:
+        endpoint[field] = value
+    monkeypatch.setattr(
+        docker_proxy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: pytest.fail("invalid endpoint must not connect"),
+    )
+
+    assert not docker_proxy._healthy_endpoint(endpoint, "repo-1", "a" * 64)
 
 
 def test_docker_broker_control_exits_when_listener_closes():
