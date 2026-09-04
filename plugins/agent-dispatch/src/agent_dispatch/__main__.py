@@ -5740,7 +5740,7 @@ def build_parser() -> argparse.ArgumentParser:
              "(does not run the loop; the singleton supervisor runs it)",
     )
     rp.add_argument(
-        "--kind", choices=sorted(RegistrationKind.ALL), default="supervised-lane",
+        "--kind", choices=sorted(RegistrationKind.DIRECT), default="supervised-lane",
         help="the unit kind to register (default: supervised-lane)",
     )
     rp.add_argument(

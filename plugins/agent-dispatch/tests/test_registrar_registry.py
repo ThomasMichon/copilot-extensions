@@ -55,7 +55,7 @@ def _plugin_root(tmp_path: Path, name: str = "plugin") -> Path:
     root = tmp_path / name
     root.mkdir()
     (root / "plugin.json").write_text(
-        json.dumps({"name": name}),
+        json.dumps({"name": name, "version": "1.2.3"}),
         encoding="utf-8",
     )
     return root
@@ -72,6 +72,27 @@ def _write_declaration(
     target.mkdir(parents=True, exist_ok=True)
     path = target / (filename or f"{name}.json")
     path.write_text(json.dumps({"name": name}), encoding="utf-8")
+    return path
+
+
+def _write_companion(root: Path, name: str = "companion") -> Path:
+    target = root / "references/agent-dispatch/registrar"
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / f"{name}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": name,
+                "kind": "plugin-companion",
+                "spec": {
+                    "command": ["bin/serve"],
+                    "stop_command": ["bin/stop"],
+                    "health_probe": ["bin/health"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     return path
 
 
@@ -182,6 +203,50 @@ def test_registrar_accepts_any_authoritative_live_root(tmp_path):
     )
 
     assert [entry.declaration.name for entry in report.declarations] == ["valid"]
+
+
+def test_attributed_plugin_companion_carries_authoritative_provenance(tmp_path):
+    root = _plugin_root(tmp_path)
+    declaration_path = _write_companion(root)
+    registry = tmp_path / "registrar.d"
+    _write_manifest(registry, root)
+
+    report = scan_registrar_registry(
+        registry,
+        activation_report=_activation({SOURCE: root}),
+    )
+
+    declaration = report.declarations[0].declaration
+    assert declaration.kind == "plugin-companion"
+    assert declaration.owner == SOURCE
+    assert declaration.plugin_root == str(root.resolve())
+    assert declaration.source_path == str(declaration_path.resolve())
+    assert declaration.plugin_version == "1.2.3"
+    assert declaration.activation_scopes == ("global",)
+
+
+def test_plugin_companion_activation_uncertainty_retains_prior_only(tmp_path):
+    root = _plugin_root(tmp_path)
+    _write_companion(root)
+    registry = tmp_path / "registrar.d"
+    _write_manifest(registry, root)
+    first = scan_registrar_registry(
+        registry,
+        activation_report=_activation({SOURCE: root}),
+    )
+
+    retained = scan_registrar_registry(
+        registry,
+        previous=first.entries,
+        activation_report=_activation(authority=ScanAuthority.INDETERMINATE),
+    )
+    fresh = scan_registrar_registry(
+        registry,
+        activation_report=_activation(authority=ScanAuthority.INDETERMINATE),
+    )
+
+    assert retained.declarations == first.declarations
+    assert fresh.declarations == ()
 
 
 def test_disabled_plugin_withdraws_previous_declarations(tmp_path):

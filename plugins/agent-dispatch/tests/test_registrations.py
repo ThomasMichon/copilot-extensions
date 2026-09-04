@@ -15,6 +15,7 @@ Three surfaces are covered:
 
 from __future__ import annotations
 
+import math
 import threading
 
 import pytest
@@ -27,6 +28,8 @@ from agent_dispatch.registrations import (
     RegistrationKind,
     RegistrationStatus,
     derive_registration_id,
+    validate_companion_config_result,
+    validate_companion_health_result,
     validate_registration,
 )
 from tests._helpers import OTHER_REPO, TEST_REPO
@@ -70,6 +73,16 @@ def test_validate_accepts_each_kind():
     validate_registration(
         RegistrationKind.EVALUATOR, {"evaluator": "eval.json", "repo": TEST_REPO}
     )
+    validate_registration(
+        RegistrationKind.PLUGIN_COMPANION,
+        {
+            "command": ["bin/serve", "--foreground"],
+            "stop_command": ["bin/stop"],
+            "health_probe": ["bin/health", "--json"],
+            "config_provider": ["bin/config"],
+            "health_timeout_seconds": 5,
+        },
+    )
 
 
 @pytest.mark.parametrize(
@@ -92,6 +105,56 @@ def test_validate_accepts_each_kind():
         (RegistrationKind.EVALUATOR, {"evaluator": "e.json"}, "needs a 'repo'"),
         (RegistrationKind.EVALUATOR, {"evaluator_spec": "not-a-dict", "all_repos": True},
          "must be a JSON object"),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {"stop_command": ["bin/stop"], "health_probe": ["bin/health"]},
+            "command",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["/bin/serve"],
+                "stop_command": ["bin/stop"],
+                "health_probe": ["bin/health"],
+            },
+            "plugin-relative",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["../serve"],
+                "stop_command": ["bin/stop"],
+                "health_probe": ["bin/health"],
+            },
+            "contained relative",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["C:../serve.exe"],
+                "stop_command": ["bin/stop"],
+                "health_probe": ["bin/health"],
+            },
+            "plugin-relative",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "health_timeout_seconds": math.nan,
+            },
+            "> 0 and <= 3600",
+        ),
+        (
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "stop_command": ["bin/stop"],
+                "health_probe": ["bin/health"],
+                "surprise": True,
+            },
+            "unknown fields",
+        ),
         (RegistrationKind.SCHEDULE, {"schedules": "nope", "id": "x", "repo": "r"},
          "non-empty list of objects"),
         (RegistrationKind.SCHEDULE, {"schedules": [], "id": "x", "repo": "r"},
@@ -138,6 +201,30 @@ def test_derive_id_is_deterministic_and_scope_sensitive():
     )
 
 
+def test_companion_provider_result_contracts_are_versioned_and_strict():
+    validate_companion_config_result(
+        {
+            "schema_version": 1,
+            "active": True,
+            "arguments": ["--config", "config.json"],
+            "environment": {"MODE": "service"},
+        }
+    )
+    validate_companion_health_result(
+        {"schema_version": 1, "healthy": True, "detail": "ready"}
+    )
+    with pytest.raises(RegistrationError, match="schema_version 1"):
+        validate_companion_config_result({"schema_version": 2, "active": True})
+    with pytest.raises(RegistrationError, match="schema_version 1"):
+        validate_companion_config_result({"schema_version": True, "active": True})
+    with pytest.raises(RegistrationError, match="schema_version 1"):
+        validate_companion_health_result({"schema_version": 1.0, "healthy": True})
+    with pytest.raises(RegistrationError, match="unknown fields"):
+        validate_companion_health_result(
+            {"schema_version": 1, "healthy": True, "extra": "nope"}
+        )
+
+
 # -- store: queue-level semantics --------------------------------------------
 
 
@@ -176,6 +263,18 @@ def test_register_validates_eagerly(q):
     with pytest.raises(TaskError) as exc:
         q.register_registration("supervised-lane", {}, reg_id="x")
     assert "repo" in str(exc.value)
+
+
+def test_direct_registration_rejects_plugin_companion(q):
+    with pytest.raises(TaskError, match="not available through direct registration"):
+        q.register_registration(
+            RegistrationKind.PLUGIN_COMPANION,
+            {
+                "command": ["bin/serve"],
+                "stop_command": ["bin/stop"],
+                "health_probe": ["bin/health"],
+            },
+        )
 
 
 def test_register_rejects_non_serializable_spec(q):
