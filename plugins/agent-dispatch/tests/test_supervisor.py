@@ -734,6 +734,98 @@ def test_cold_resume_missing_worktree_release_failure_backs_off(
     assert q.get(blocked.id).status == Status.SUSPENDED
 
 
+def test_release_requested_legacy_missing_worktree_recovers_from_held_conclusion(
+    q, client, tmp_path
+):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:blocked-session",
+        worktree="removed-review-worktree",
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.release_suspended(
+        blocked.id,
+        "headless-owner",
+        reason="recorded worktree is missing",
+    )
+    q.record_spawn_conclusion(
+        reservation.key,
+        conclusion_state="held",
+        conclusion_detail=json.dumps(
+            {"action": "skipped", "reason": "allocation-ownership-unknown"}
+        ),
+    )
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_target_dir_fn=lambda _sid: str(tmp_path / "missing"),
+        local_body_verdict_fn=lambda _sid: "gone",
+    )
+
+    assert sup.release_requested_bodies() == 1
+    settled = q.get_reservation(reservation.key)
+    assert settled.state == SpawnState.SETTLED
+    assert settled.conclusion_state == "complete"
+    assert "recorded-target-directory-missing" in (
+        settled.conclusion_detail or ""
+    )
+
+    assert sup.poll_once() == [blocked.id]
+    assert spawn.calls == [blocked.id]
+
+
+def test_release_requested_rechecks_target_after_live_body_teardown(
+    q, client, tmp_path
+):
+    target_dir = tmp_path / "recreated-worktree"
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:blocked-session",
+        worktree="recreated-worktree",
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+    q.release_suspended(
+        blocked.id,
+        "headless-owner",
+        reason="recorded worktree is missing",
+    )
+
+    def end_and_recreate(_session_id):
+        target_dir.mkdir()
+        return True
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_target_dir_fn=lambda _sid: str(target_dir),
+        local_body_verdict_fn=lambda _sid: "live",
+        local_end_fn=end_and_recreate,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    held = q.get_reservation(reservation.key)
+    assert held.state == SpawnState.COLD
+    assert held.conclusion_state == "held"
+    assert "allocation-ownership-unknown" in (
+        held.conclusion_detail or ""
+    )
+
+
 def test_cold_resume_does_not_start_process_before_reservation_transition(
     q, client, monkeypatch
 ):
