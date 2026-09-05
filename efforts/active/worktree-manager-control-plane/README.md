@@ -363,9 +363,12 @@ its issues; the public artifacts stay self-contained and general-purpose.
   read-time function that translates a legacy AHP `session_backend` binding
   into the generic shape without storing or serializing anything new. Nothing
   writes `execution_leg:` yet, so on-disk output for every existing worktree
-  is byte-identical; 14 new tests plus the existing 285-test agent-worktrees
-  suite (including all `ahp`/`tracking`/`finalize` tests) pass unmodified.
-  agent-worktrees bumped to `1.5.5-dev15`.
+  is byte-identical; 15 new tests (including a non-mapping-`blob` opaque-
+  preservation case caught by PR review) plus the existing 285-test
+  agent-worktrees suite (including all `ahp`/`tracking`/`finalize` tests)
+  pass unmodified. agent-worktrees bumped to `1.5.5-dev17` (two concurrent
+  drivers took `dev15`/`dev16` on `main` first; rebased and re-bumped each
+  time per the repo's serial-merge norm).
 - **2026-09-04** — Wrote the reviewed, ordered migration plan for Phase 3b
   Slice 2 (Mux): [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md).
   Full current-state inventory (launcher/wrapper script sizes, `cmd_remux`,
