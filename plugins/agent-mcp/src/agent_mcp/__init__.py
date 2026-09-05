@@ -11,7 +11,7 @@ defer, code-mode, storage). One config file describes one bridge: an upstream
 from __future__ import annotations
 
 # Fallback only for running from a source tree with no installed distribution.
-_FALLBACK_VERSION = "0.2.0-dev94"
+_FALLBACK_VERSION = "0.2.0-dev95"
 
 
 def _resolve_version() -> str:

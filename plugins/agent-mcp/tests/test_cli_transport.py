@@ -197,3 +197,4 @@ def test_cli_bridge_injects_auth_into_tool_env(tmp_path):
     by_id = {m.get("id"): m for m in out if "id" in m}
     assert by_id[1]["result"]["isError"] is False, proc.stderr
     assert by_id[1]["result"]["content"][0]["text"] == "sekret-123", proc.stderr
+
