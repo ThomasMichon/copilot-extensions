@@ -149,3 +149,29 @@ def test_missing_provider_is_preserved_opaquely(tmp_path: Path):
     loaded = tracking.load_record(path)
     assert loaded.execution_leg is None
     assert loaded.execution_leg_opaque is True
+
+
+def test_non_mapping_blob_is_preserved_opaquely(tmp_path: Path):
+    """A non-mapping blob is never silently coerced/discarded (data loss);
+    the whole entry is preserved opaquely instead, like an unrecognized
+    schema."""
+    path = tmp_path / "record.yaml"
+    original = record(tmp_path)
+    tracking.save_record(original, path)
+    data = yaml.safe_load(path.read_text())
+    data["execution_leg"] = {
+        "version": 1,
+        "provider": "ahp",
+        "state": "active",
+        "binding_revision": 1,
+        "blob": "not-a-mapping",
+    }
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    loaded = tracking.load_record(path)
+    assert loaded.execution_leg is None
+    assert loaded.execution_leg_opaque is True
+    tracking.save_record(loaded, path)
+    assert yaml.safe_load(path.read_text())["execution_leg"] == data[
+        "execution_leg"
+    ]

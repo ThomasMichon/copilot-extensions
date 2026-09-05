@@ -2083,13 +2083,15 @@ def load_record(path: Path) -> WorktreeRecord:
             pass
         else:
             provider = raw_execution_leg.get("provider")
-            if isinstance(provider, str) and provider:
+            blob = raw_execution_leg.get("blob", {})
+            if (
+                isinstance(provider, str)
+                and provider
+                and isinstance(blob, dict)
+            ):
                 state = str(raw_execution_leg.get("state", "active"))
                 if state not in {"active", "disposed", "unknown"}:
                     state = "unknown"
-                blob = raw_execution_leg.get("blob", {})
-                if not isinstance(blob, dict):
-                    blob = {}
                 execution_leg = ExecutionLegBinding(
                     provider=provider,
                     state=state,
