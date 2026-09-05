@@ -557,6 +557,17 @@ def test_malformed_selected_snapshot_is_not_executable(harness):
         h.controller.selected_managed(h.rid)
 
 
+@pytest.mark.parametrize("plugin", [None, {}, {"root": 1, "source_path": 2}])
+def test_rollback_eligibility_rejects_malformed_plugin_authority(harness, plugin):
+    h = harness
+    h.daemon.reconcile_once()
+    snapshot = h.unit.companion_resolution.managed_snapshot
+    registration = copy.deepcopy(h.registration)
+    registration["plugin"] = plugin
+
+    assert not h.daemon._rollback_allowed(snapshot, registration)
+
+
 def test_materialization_remains_nonblocking(harness, monkeypatch):
     h = harness
     started, release = threading.Event(), threading.Event()

@@ -851,12 +851,24 @@ class SupervisorDaemon:
         keys = ("id", "kind", "source", "owner", "machine", "env")
         if any(previous.get(key) != registration.get(key) for key in keys):
             return False
-        old_plugin, new_plugin = previous["plugin"], registration["plugin"]
+        old_plugin = previous.get("plugin")
+        new_plugin = registration.get("plugin")
+        if not isinstance(old_plugin, Mapping) or not isinstance(new_plugin, Mapping):
+            return False
         if old_plugin.get("activation_scopes") != new_plugin.get("activation_scopes"):
             return False
         try:
-            old_source = Path(old_plugin["source_path"]).relative_to(old_plugin["root"])
-            new_source = Path(new_plugin["source_path"]).relative_to(new_plugin["root"])
+            old_source_path = old_plugin["source_path"]
+            old_root = old_plugin["root"]
+            new_source_path = new_plugin["source_path"]
+            new_root = new_plugin["root"]
+            if not all(
+                isinstance(value, str)
+                for value in (old_source_path, old_root, new_source_path, new_root)
+            ):
+                return False
+            old_source = Path(old_source_path).relative_to(old_root)
+            new_source = Path(new_source_path).relative_to(new_root)
         except (KeyError, ValueError):
             return False
         return old_source == new_source
