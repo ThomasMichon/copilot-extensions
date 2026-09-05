@@ -5255,6 +5255,21 @@ class TaskQueue:
                 if prior is not None:
                     carried_worktree = prior["worktree"]
                     carried_session = prior["session_handle"]
+                    if carried_session is not None:
+                        # A later failed attempt may have copied this handle
+                        # before the retiring settlement was understood.
+                        retired = conn.execute(
+                            "SELECT 1 FROM spawn_reservations "
+                            "WHERE exclusive_key = ? AND session_handle = ? "
+                            "AND release_requested = 1 AND state = ? LIMIT 1",
+                            (
+                                task.exclusive_key,
+                                carried_session,
+                                SpawnState.SETTLED,
+                            ),
+                        ).fetchone()
+                        if retired is not None:
+                            carried_session = None
                     worktree_ownership = "reused"
             conn.execute(
                 "INSERT INTO spawn_reservations "
