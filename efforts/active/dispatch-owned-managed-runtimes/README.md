@@ -282,7 +282,7 @@ provisioning and cutover code is not a candidate for wholesale reuse.
   `JSON document changed while it was being read`. That library is unchanged.
   Container clean-room scenarios were unavailable because Docker was absent;
   this run provides native Windows evidence, not a native Linux execution.
-- Agent-dispatch advances to **0.1.2-dev24**, beyond the concurrently published
+- Agent-dispatch advances to **0.1.2-dev25**, beyond the concurrently published
   version. Its Python `__version__` already derives from package/build metadata
   and needs no duplicate constant.
 - Slice 3D is code-complete locally; publication remains intentionally deferred.

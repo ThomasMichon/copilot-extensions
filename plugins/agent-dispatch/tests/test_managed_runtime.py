@@ -17,6 +17,7 @@ from agent_dispatch.managed_runtime import (
     ManagedRuntimeError,
     ManagedRuntimeMaterializer,
     ManagedRuntimePolicy,
+    _is_reparse,
     _python_path,
     _subprocess_environment,
 )
@@ -153,6 +154,18 @@ def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
         environment={"PATH": str(tools), "PYTHONNOUSERSITE": "1"},
         base_runtime_paths=runtime_paths,
     )
+
+
+def test_reparse_probe_fails_closed_when_metadata_is_unavailable(tmp_path, monkeypatch):
+    path = tmp_path / "python.exe"
+    path.write_bytes(b"python")
+
+    def unavailable(_path):
+        raise OSError("metadata unavailable")
+
+    monkeypatch.setattr(Path, "lstat", unavailable)
+
+    assert _is_reparse(path)
 
 
 def test_materializes_snapshot_and_reuses_valid_cell(tmp_path):

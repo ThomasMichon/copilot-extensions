@@ -247,7 +247,10 @@ def _authenticode_valid(path: Path) -> bool:
 
 
 def _is_reparse(path: Path) -> bool:
-    info = path.lstat()
+    try:
+        info = path.lstat()
+    except OSError:
+        return True
     return bool(
         getattr(info, "st_file_attributes", 0) & _WINDOWS_REPARSE_POINT
         or getattr(info, "st_reparse_tag", 0)
