@@ -332,6 +332,377 @@ def test_session_start_enriches_payload_with_session_environment(
     assert metadata["environment"]["CUSTOM_SESSION_VALUE"] == "current-session"
 
 
+def test_session_start_writes_combined_session_guidance(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
+    monkeypatch.setattr(
+        hook_client,
+        "_command_catalog_context",
+        lambda: "## command catalog\n\ncatalog",
+    )
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(tmp_path),
+        "source": "new",
+        "timestamp": 1_000,
+    }
+    enriched = hook_client._enrich_session_payload(payload)
+    launch_key = hook_client._session_launch_key(enriched)
+    snapshots = tmp_path / ".agent-worktrees" / ".session-context"
+    snapshots.mkdir(parents=True)
+    (snapshots / f"register-session-{launch_key}.json").write_text(
+        json.dumps({
+            "launchKey": launch_key,
+            "output": json.dumps({
+                "additionalContext": "[agent-worktrees] binding"
+            }),
+        }),
+        encoding="utf-8",
+    )
+
+    assert hook_client._write_session_guidance(payload, home=tmp_path)
+    target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-1"
+        / "instructions"
+        / "agent-worktrees"
+        / "session-guidance.instructions.md"
+    )
+    assert target.read_text(encoding="utf-8") == (
+        "# Agent Worktrees session guidance\n\n"
+        "## command catalog\n\ncatalog\n\n"
+        "[agent-worktrees] binding\n"
+    )
+
+
+def test_session_start_reuses_registration_with_command_catalog(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        hook_client,
+        "_registration_context",
+        lambda payload, home: (
+            "## agent-worktrees session command catalog\n\n"
+            "catalog\n\n[agent-worktrees] binding"
+        ),
+    )
+    monkeypatch.setattr(
+        hook_client,
+        "_command_catalog_context",
+        lambda: pytest.fail("merged registration must avoid a subprocess"),
+    )
+
+    assert hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-1"
+        / "instructions"
+        / "agent-worktrees"
+        / "session-guidance.instructions.md"
+    )
+    assert target.read_text(encoding="utf-8").endswith(
+        "catalog\n\n[agent-worktrees] binding\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("registration", "catalog", "expected"),
+    (
+        (
+            "",
+            "",
+            "No current agent-worktrees session guidance was available.",
+        ),
+        (
+            "x" * 4096,
+            "",
+            "Current agent-worktrees session guidance was omitted because",
+        ),
+    ),
+)
+def test_session_start_replaces_stale_guidance_on_logical_failure(
+    monkeypatch, tmp_path, registration, catalog, expected
+):
+    monkeypatch.setattr(
+        hook_client,
+        "_registration_context",
+        lambda payload, home: registration,
+    )
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: catalog
+    )
+    target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-1"
+        / "instructions"
+        / "agent-worktrees"
+        / "session-guidance.instructions.md"
+    )
+    target.parent.mkdir(parents=True)
+    target.write_text("stale guidance", encoding="utf-8")
+
+    assert hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    content = target.read_text(encoding="utf-8")
+    assert "stale guidance" not in content
+    assert expected in content
+
+
+def test_session_guidance_declared_inputs_fit_file_budget():
+    declaration = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "session-context.json"
+        ).read_text(encoding="utf-8")
+    )
+    contributor_bytes = sum(
+        int(contributor["maxBytes"])
+        for contributor in declaration["contributors"]
+    )
+    framing_bytes = len(
+        "# Agent Worktrees session guidance\n\n\n\n\n".encode("utf-8")
+    )
+    assert (
+        contributor_bytes + framing_bytes
+        <= hook_client._SESSION_GUIDANCE_MAX_BYTES
+    )
+
+
+def test_session_start_guidance_overwrites_on_resume(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-1"
+        / "instructions"
+        / "agent-worktrees"
+        / "session-guidance.instructions.md"
+    )
+    for timestamp, binding in ((1_000, "first"), (1_001, "second")):
+        payload = {
+            "sessionId": "session-1",
+            "cwd": str(tmp_path),
+            "source": "resume",
+            "timestamp": timestamp,
+        }
+        enriched = hook_client._enrich_session_payload(payload)
+        launch_key = hook_client._session_launch_key(enriched)
+        snapshots = tmp_path / ".agent-worktrees" / ".session-context"
+        snapshots.mkdir(parents=True, exist_ok=True)
+        (snapshots / f"register-session-{launch_key}.json").write_text(
+            json.dumps({
+                "launchKey": launch_key,
+                "output": json.dumps({"additionalContext": binding}),
+            }),
+            encoding="utf-8",
+        )
+        assert hook_client._write_session_guidance(payload, home=tmp_path)
+
+    assert target.read_text(encoding="utf-8").endswith(
+        "catalog\n\nsecond\n"
+    )
+
+
+@pytest.mark.parametrize("suffix", (".json", ""))
+def test_registration_context_rejects_oversized_snapshots(
+    monkeypatch, tmp_path, suffix
+):
+    monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(tmp_path),
+        "source": "new",
+        "timestamp": 1_000,
+    }
+    enriched = hook_client._enrich_session_payload(payload)
+    launch_key = hook_client._session_launch_key(enriched)
+    snapshots = tmp_path / ".agent-worktrees" / ".session-context"
+    snapshots.mkdir(parents=True)
+    snapshot = snapshots / f"register-session-{launch_key}{suffix}"
+    snapshot.write_bytes(b"x" * (hook_client._MAX_RESPONSE + 1))
+
+    assert hook_client._registration_context(enriched, tmp_path) == ""
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    ("", "../escape", "slash/value", "a" * 129),
+)
+def test_session_start_guidance_rejects_unsafe_session_ids(
+    monkeypatch, tmp_path, session_id
+):
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    assert not hook_client._write_session_guidance(
+        {"sessionId": session_id}, home=tmp_path
+    )
+    assert not (tmp_path / ".copilot").exists()
+
+
+def test_session_start_guidance_rejects_instruction_directory_escape(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    session_root = (
+        tmp_path / ".copilot" / "session-state" / "session-1"
+    )
+    session_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (session_root / "instructions").symlink_to(
+            outside, target_is_directory=True
+        )
+    except OSError:
+        pytest.skip("directory symlinks are not available")
+
+    assert not hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    assert not (outside / "agent-worktrees").exists()
+
+
+def test_session_start_guidance_rejects_session_root_escape(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    state_root = tmp_path / ".copilot" / "session-state"
+    state_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (state_root / "session-1").symlink_to(
+            outside, target_is_directory=True
+        )
+    except OSError:
+        pytest.skip("directory symlinks are not available")
+
+    assert not hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    assert not (outside / "instructions").exists()
+
+
+@pytest.mark.parametrize("component", (".copilot", "session-state"))
+def test_session_start_guidance_rejects_state_root_escape(
+    monkeypatch, tmp_path, component
+):
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if component == ".copilot":
+        link = tmp_path / ".copilot"
+    else:
+        copilot_root = tmp_path / ".copilot"
+        copilot_root.mkdir()
+        link = copilot_root / "session-state"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are not available")
+
+    assert not hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    assert not (outside / "session-1").exists()
+
+
+def test_reparse_detection_does_not_require_creating_a_link():
+    path = SimpleNamespace(
+        lstat=lambda: SimpleNamespace(
+            st_mode=hook_client.stat.S_IFDIR,
+            st_file_attributes=hook_client.stat.FILE_ATTRIBUTE_REPARSE_POINT,
+        )
+    )
+    assert hook_client._is_link_or_reparse(path)
+
+
+def test_session_start_guidance_fails_open_on_resolve_loop(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        hook_client, "_registration_context", lambda payload, home: ""
+    )
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    original_resolve = Path.resolve
+
+    def resolve(path, *args, **kwargs):
+        if path.name == "session-state":
+            raise RuntimeError("symlink loop")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert not hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+
+
+def test_session_start_main_writes_guidance_before_emitting_result(
+    monkeypatch, capsys
+):
+    payload = {"sessionId": "session-1", "cwd": str(Path.cwd())}
+    enriched = {
+        **payload,
+        "_agentWorktrees": {
+            "pluginVersion": "1.2.3-dev4",
+            "environment": {},
+        },
+    }
+    seen = {"enrichment_calls": 0}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    def enrich(value):
+        seen["enrichment_calls"] += 1
+        return enriched
+
+    monkeypatch.setattr(hook_client, "_enrich_session_payload", enrich)
+    monkeypatch.setattr(
+        hook_client,
+        "decide",
+        lambda kind, value: (
+            seen.update(decide_payload=value)
+            or {"additionalContext": "supplement"}
+        ),
+    )
+    monkeypatch.setattr(
+        hook_client,
+        "_write_session_guidance",
+        lambda value: seen.update(guidance_payload=value) or True,
+    )
+
+    assert hook_client.main(["sessionStart"]) == 0
+    assert seen["enrichment_calls"] == 1
+    assert seen["decide_payload"] is enriched
+    assert seen["guidance_payload"] is enriched
+    assert json.loads(capsys.readouterr().out) == {
+        "additionalContext": "supplement"
+    }
+
+
 def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
     monkeypatch.setattr(
         hook_client.subprocess,

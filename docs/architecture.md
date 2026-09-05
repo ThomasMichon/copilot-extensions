@@ -67,11 +67,13 @@ or launch that host. Namespaced host integration is not yet supported.
 
 Every runtime `agent-*` plugin also carries `payload-invocation.json`, generated
 POSIX/PowerShell/CMD shims under its payload `bin/` or manifest `outputDir`, and
-an `emit-command-catalog` pure contributor. Its authority-aware `sessionStart`
-wrapper emits the catalog directly before aggregate-authority proof and `{}` after
-proof; the selected `context-injection` authority then emits the deterministic
-aggregate. Agent-facing skills resolve logical commands through that
-attributable session glossary rather than ambient `PATH`.
+an `emit-command-catalog` pure contributor. `agent-worktrees` is the first
+[`session-scoped-dynamic-guidance`](patterns/session-scoped-dynamic-guidance.md)
+exemplar: its payload-local `sessionStart` hook writes the attributable command
+catalog and current binding to the exact session's instruction folder, while
+its existing authority-aware contributor remains a best-effort supplementary
+channel. Agent-facing skills resolve logical commands through that attributable
+session glossary rather than ambient `PATH`.
 `~/.local/bin/agent-*` remains a legacy management compatibility surface while
 runtime roots are still unqualified; repo/project binstubs remain the intended
 machine-global command surface.
