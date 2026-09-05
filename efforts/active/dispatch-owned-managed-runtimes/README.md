@@ -8,7 +8,7 @@
 - **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
   [agent-index/`lightweight-client-and-declared-host-service`](../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
 - **Umbrella issue:** #2007
-- **Sub-issues:** #2010, #2013, #2081
+- **Sub-issues:** #2010, #2013, #2081, #2103
 
 ## Guiding Intent
 
@@ -124,11 +124,11 @@ prepare-before-stop and rollback to the prior published runtime.
 
 ### Slice 3D — Retention
 
-- [ ] Protect active and rollback generations with identity-bound leases that
+- [x] Protect active and rollback generations with identity-bound leases that
   remain legible across supervisor environments.
-- [ ] Reclaim only cells that are unreferenced, unleased, ownership-valid, and
+- [x] Reclaim only cells that are unreferenced, unleased, ownership-valid, and
   outside bounded retention.
-- [ ] Preserve foreign live leases and fail closed on ambiguous ownership,
+- [x] Preserve foreign live leases and fail closed on ambiguous ownership,
   linked roots, malformed receipts, or unverifiable process identity.
 
 **Completion gate:** bounded garbage collection cannot remove a live or
@@ -156,7 +156,7 @@ provisioning, while every non-host path stays lightweight and inert.
 - [x] Cutover tests cover first launch, prepare-before-stop, readiness failure,
   rollback, provider uncertainty, contributor disablement, and supervisor
   restart.
-- [ ] Retention tests cover active and foreign leases, stale leases, rollback
+- [x] Retention tests cover active and foreign leases, stale leases, rollback
   protection, bounded retention, root-lock serialization, and linked or
   mismatched cells.
 - [ ] Integration tests prove missing runtime triggers dispatch provisioning
@@ -242,3 +242,50 @@ provisioning and cutover code is not a candidate for wholesale reuse.
 - Local implementation is ready for its publication/review phase. Retention,
   specific-plugin integration, independent engine lifecycle, and multi-host
   failover remain outside this slice.
+
+### 2026-09-05 — Retention implemented
+
+- Implemented #2103, closing the retention portion of
+  `plugin-services/delegated-heavy-companion-runtime` without extending its
+  intent. Version-2 ownership receipts bind exact cells and roots to complete
+  declaration authority. Version-1 generations remain recoverable and are never
+  automatically reclaimed; invalid existing cells are preserved in place.
+- Root-visible preparation and child-process leases reuse OS process-start
+  receipts, bind the PID authority and launch/cell identity, and precede
+  predecessor retirement and child gate release. Persistent selected and
+  prior-ready rollback pins survive supervisor restart and interrupted
+  publication. A gated first-launch receipt retains its discovery lease until
+  recovery settles it.
+- Cleanup runs off the supervision thread under the materializer's root-wide
+  interprocess lock. It preflights all metadata and descendants before removing
+  exact, receipt-valid, unreferenced cells beyond the bounded age/count policy.
+  Foreign domains, uncertain or reused PIDs, malformed metadata, and
+  linked/reparse paths never authorize deletion.
+- Independent review identified peer-lease corruption affecting preparation
+  release and unmanaged successors blocking stale-lease cleanup. Both findings
+  are fixed with focused regressions. Preparation release now addresses only
+  its exact lease; a redundant-pin release failure preserves the ready process
+  and emits a warning.
+- Targeted managed-runtime coverage passed: **127 passed, 1 skipped**. The
+  full agent-dispatch suite passed: **2,028 passed, 4 skipped**, across four
+  contained sub-suites. An earlier full run stopped after **681 passed,
+  2 skipped** because the host-state guard observed persistent Windows
+  `User:Path` drift; no host state was rolled back, and the unmodified rerun
+  passed. Coverage includes actual cross-process materialization/cleanup
+  locking and a native Windows junction.
+- Lint, install contract, version consistency, headless-launch, documentation
+  consistency/references, vendored-library sync, generated payload, and
+  installation-context synchronization gates passed. Marketplace isolation
+  remains report-only at **725 findings**.
+- Installer-readiness fixtures reproduced the separately confirmed Windows
+  baseline: **41 passed, 6 failed**, all six reporting
+  `JSON document changed while it was being read`. That library is unchanged.
+  Container clean-room scenarios were unavailable because Docker was absent;
+  this run provides native Windows evidence, not a native Linux execution.
+- Agent-dispatch advances to **0.1.2-dev24**, beyond the concurrently published
+  version. Its Python `__version__` already derives from package/build metadata
+  and needs no duplicate constant.
+- Slice 3D is code-complete locally; publication remains intentionally deferred.
+  No PR, issue closure, dispatch completion, or worktree finalization is part
+  of this phase. Specific-plugin integration, independent engine lifecycle,
+  host placement, and failover remain outside this slice.
