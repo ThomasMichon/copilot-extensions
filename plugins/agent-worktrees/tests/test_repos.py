@@ -500,3 +500,48 @@ def test_sync_repo_skips_detached_head(home: Path, tmp_path: Path):
     assert state == "skipped"
     assert "detached" in detail
     assert before == after  # HEAD was not moved
+
+
+def test_sync_repo_fetches_and_fast_forwards_via_git_ops(home: Path, tmp_path: Path):
+    """``sync_repo`` must route its fetch through ``git_ops.fetch`` (not a bare,
+    unauthenticated ``git fetch``) so a cross-account remote gets the same
+    credential resolution every other agent-worktrees git flow uses
+    (dotfiles#2069). A local remote can't exercise the credential-injection
+    branch itself (non-GitHub), but it proves the new call path still performs
+    a real fetch + fast-forward end to end.
+    """
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", str(upstream), str(clone)],
+                    check=True, capture_output=True, text=True)
+
+    # Advance the upstream past the clone so the fetch has real work to do.
+    (upstream / "NEW.md").write_text("more\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "second")
+
+    e = repos.RepoEntry(name="repo-c", repo_class="singleton",
+                        default_branch="main",
+                        paths={"windows": str(clone)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    assert state == "synced"
+    assert detail == "main"
+    head = subprocess.run(["git", "-C", str(clone), "log", "-1", "--format=%s"],
+                          capture_output=True, text=True).stdout.strip()
+    assert head == "second"
+
+
+def test_sync_repo_surfaces_git_ops_fetch_error(home: Path, tmp_path: Path):
+    """A fetch failure raised as ``git_ops.GitError`` must still be reported as
+    an ``"error"`` state with readable detail, not propagate uncaught."""
+    work = tmp_path / "repo-d"
+    _init_repo(work, branch="main")
+    _git(work, "remote", "add", "origin", str(tmp_path / "does-not-exist"))
+    e = repos.RepoEntry(name="repo-d", repo_class="singleton",
+                        default_branch="main",
+                        paths={"windows": str(work)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    assert state == "error"
+    assert detail
