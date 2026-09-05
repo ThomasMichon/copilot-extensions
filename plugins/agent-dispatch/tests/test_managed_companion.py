@@ -21,6 +21,7 @@ from agent_dispatch.companion import (
     DefaultCompanionController,
 )
 from agent_dispatch.managed_runtime import ManagedRuntimeError, ManagedRuntimeMaterializer
+from agent_dispatch.managed_retention import ManagedRuntimeRetention
 from agent_dispatch.supervisor_daemon import SupervisorDaemon
 from tests.test_managed_runtime import FakeRunner, _policy, _project, _registration
 
@@ -109,6 +110,8 @@ class Harness:
         self.daemon = self.make_daemon()
 
     def token(self, pid):
+        if pid == os.getpid():
+            return "supervisor-token"
         return (
             f"token-{pid}"
             if any(process.pid == pid and process.poll() is None for process in self.processes)
@@ -134,6 +137,12 @@ class Harness:
             token_source=self.token,
             monotonic=lambda: self.time,
             sleeper=self.advance,
+            retention=ManagedRuntimeRetention(
+                self.materializer.policy.root,
+                token_source=self.token,
+                process_exists=lambda pid: self.token(pid) is not None,
+                group_exists=lambda pid: False,
+            ),
         )
 
     def make_daemon(self):
@@ -716,8 +725,10 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
     marker = tmp_path / "process.json"
     monkeypatch.setenv("EXAMPLE_STATE", str(marker))
     monkeypatch.setenv("MODE", "old")
-    controller = DefaultCompanionController(tmp_path / "state")
     materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=FakeRunner())
+    controller = DefaultCompanionController(
+        tmp_path / "state", retention=ManagedRuntimeRetention(materializer.policy.root)
+    )
 
     class Client:
         def list_registrations(self, **kwargs):

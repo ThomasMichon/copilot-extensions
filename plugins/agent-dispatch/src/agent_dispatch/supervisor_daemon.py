@@ -560,6 +560,8 @@ class SupervisorDaemon:
             str, tuple[str, Future[tuple[MaterializedRuntime, ...]]]
         ] = {}
         self._managed_runtime_failures: dict[str, tuple[str, float, int]] = {}
+        self._managed_cleanup_future: Future | None = None
+        self._managed_cleanup_after = 0.0
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
@@ -770,6 +772,23 @@ class SupervisorDaemon:
             )
         return self._runtime_executor
 
+    def _cleanup_managed_runtimes(self) -> None:
+        """Keep root-lock waits and filesystem scans off the supervision thread."""
+        future = self._managed_cleanup_future
+        if future is not None:
+            if not future.done():
+                return
+            self._managed_cleanup_future = None
+            try:
+                future.result()
+            except (OSError, RuntimeError, ValueError) as exc:
+                log.error("managed runtime retention preserved data: %s", exc)
+        if self._runtime_materializer is not None and self.clock() >= self._managed_cleanup_after:
+            self._managed_cleanup_after = self.clock() + 300.0
+            self._managed_cleanup_future = self._runtime_pool().submit(
+                self._companion().cleanup_managed
+            )
+
     def _harvest_managed_runtime_futures(self) -> None:
         for rid, (authority, future) in list(self._managed_runtime_futures.items()):
             if not future.done():
@@ -877,6 +896,7 @@ class SupervisorDaemon:
         self, snapshot: ManagedLaunchSnapshot, summary: ReconcileSummary, *, bucket: str
     ) -> None:
         resolution = snapshot.resolution()
+        self._companion().prepare_managed(snapshot)
         self._managed_runtime().validate(resolution.registration, snapshot.runtimes)
         launched = self._companion().launch(resolution, fingerprint=snapshot.fingerprint)
         rid = resolution.registration["id"]
@@ -992,6 +1012,7 @@ class SupervisorDaemon:
                             continue
 
                 # Both validation and immutable snapshot construction precede retirement.
+                self._companion().prepare_managed(snapshot)
                 self._managed_runtime().validate(snapshot.resolution().registration, snapshot.runtimes)
                 crashed = (
                     unit is not None and unit.proc is None
@@ -1169,6 +1190,7 @@ class SupervisorDaemon:
 
         # 2. restart units whose definition changed
         managed = self._reconcile_managed(desired, summary)
+        self._cleanup_managed_runtimes()
         for rid, reg in desired.items():
             if rid in managed:
                 continue

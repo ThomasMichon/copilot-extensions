@@ -6,6 +6,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -24,7 +25,13 @@ from typing import Protocol
 from agent_procutil import contained_test_mode, detached_kwargs, no_window_kwargs
 from plugin_activation import read_json_object, write_json_object_atomic
 
-from .managed_runtime import MaterializedRuntime
+from .managed_runtime import (
+    MaterializedRuntime,
+    ManagedRuntimeError,
+    ManagedRuntimeLockTimeout,
+    _read_metadata,
+)
+from .managed_retention import ManagedRuntimeRetention
 from .registrations import (
     RegistrationError,
     RegistrationKind,
@@ -275,6 +282,10 @@ class CompanionController(Protocol):
     def recover_live(self, snapshot: ManagedLaunchSnapshot) -> CompanionLaunch | None: ...
 
     def retire_managed(self, registration_id: str) -> None: ...
+
+    def prepare_managed(self, snapshot: ManagedLaunchSnapshot) -> None: ...
+
+    def cleanup_managed(self) -> None: ...
 
 
 def companion_authority_fingerprint(registration: dict) -> str:
@@ -551,6 +562,12 @@ def resolve_companion(
 
 def _safe_slug(value: str) -> str:
     return "".join(char if char.isalnum() or char in "._-" else "-" for char in value)
+
+
+def companion_receipt_path(receipt_dir: Path, registration_id: str) -> Path:
+    """Canonical process-receipt location shared with root-wide retention."""
+    digest = hashlib.sha256(registration_id.encode()).hexdigest()[:16]
+    return receipt_dir / f"{_safe_slug(registration_id)}-{digest}.companion.json"
 
 
 def _command_digest(command: tuple[str, ...]) -> str:
@@ -941,6 +958,7 @@ class DefaultCompanionController:
         token_source: Callable[[int], str | None] = process_start_token,
         sleeper: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        retention: ManagedRuntimeRetention | None = None,
     ):
         self.receipt_dir = Path(receipt_dir)
         self.resolver = resolver
@@ -948,6 +966,31 @@ class DefaultCompanionController:
         self.token_source = token_source
         self.sleeper = sleeper
         self.monotonic = monotonic
+        self._retention = retention
+
+    def _managed_retention(self) -> ManagedRuntimeRetention:
+        if self._retention is None:
+            self._retention = ManagedRuntimeRetention(token_source=self.token_source)
+        return self._retention
+
+    def prepare_managed(self, snapshot: ManagedLaunchSnapshot) -> None:
+        self._managed_retention().prepare(snapshot, self.receipt_dir)
+
+    def cleanup_managed(self) -> None:
+        result = self._managed_retention().cleanup()
+        if result.deleted or result.stale_leases:
+            logging.getLogger("agent-dispatch.companion").info(
+                "managed retention reclaimed %d cells and %d stale leases",
+                len(result.deleted), result.stale_leases,
+            )
+
+    def _release_managed_preparation(self, snapshot: ManagedLaunchSnapshot) -> None:
+        try:
+            self._managed_retention().release_preparation(snapshot, self.receipt_dir)
+        except (ManagedRuntimeError, OSError) as exc:
+            logging.getLogger("agent-dispatch.companion").warning(
+                "preserving redundant managed preparation lease: %s", exc
+            )
 
     def resolve(
         self, registration: dict, *, machine: str | None, env: str
@@ -955,8 +998,7 @@ class DefaultCompanionController:
         return self.resolver(registration, machine=machine, env=env, runner=self.runner)
 
     def _receipt_path(self, registration_id: str) -> Path:
-        digest = hashlib.sha256(registration_id.encode()).hexdigest()[:16]
-        return self.receipt_dir / (f"{_safe_slug(registration_id)}-{digest}.companion.json")
+        return companion_receipt_path(self.receipt_dir, registration_id)
 
     def _read_receipt(self, registration_id: str) -> dict | None:
         path = self._receipt_path(registration_id)
@@ -980,12 +1022,16 @@ class DefaultCompanionController:
     def selected_managed(self, registration_id: str) -> ManagedLaunchSnapshot | None:
         """Read last-ready state, or the gated receipt of an interrupted first launch."""
         path = self._selection_path(registration_id)
-        if path.exists():
-            _, record = read_json_object(path)
+        if path.exists() or path.is_symlink():
+            record = _read_metadata(self.receipt_dir.absolute(), path.absolute())
             if "managed_snapshot" not in record:
                 raise CompanionError("selected managed launch snapshot is missing")
         else:
-            record = self._read_receipt(registration_id)
+            receipt_path = self._receipt_path(registration_id)
+            record = (
+                _read_metadata(self.receipt_dir.absolute(), receipt_path.absolute())
+                if receipt_path.exists() or receipt_path.is_symlink() else None
+            )
         if record is None or "managed_snapshot" not in record:
             return None
         snapshot = ManagedLaunchSnapshot.from_dict(record["managed_snapshot"])
@@ -1000,11 +1046,17 @@ class DefaultCompanionController:
 
     def forget_managed(self, registration_id: str) -> None:
         """Withdraw selection, not its published runtime cells."""
-        self._selection_path(registration_id).unlink(missing_ok=True)
+        with self._managed_retention().withdraw_selection(registration_id, self.receipt_dir):
+            self.selected_managed(registration_id)
+            self._selection_path(registration_id).unlink(missing_ok=True)
 
     def retire_managed(self, registration_id: str) -> None:
         """Retire a revoked receipt even when no in-memory unit was adopted."""
-        receipt = self._read_receipt(registration_id)
+        path = self._receipt_path(registration_id)
+        receipt = (
+            _read_metadata(self.receipt_dir.absolute(), path.absolute())
+            if path.exists() or path.is_symlink() else None
+        )
         if receipt is not None:
             self._retire_receipt(receipt, confirm_exit=True)
             self._delete_receipt(registration_id)
@@ -1019,14 +1071,29 @@ class DefaultCompanionController:
         if os.name == "nt":
             # A restarted supervisor cannot reacquire the predecessor's Job handle.
             return None
+        self.prepare_managed(snapshot)
         process = self._recover(resolution, snapshot.fingerprint)
         if process is None:
             return None
         self._wait_ready(resolution, process)
+        self._managed_retention().launched(
+            snapshot, self.receipt_dir, process.pid, self.token_source(process.pid) or ""
+        )
+        self._publish_selection(snapshot)
+        self._release_managed_preparation(snapshot)
         return CompanionLaunch(process, recovered=True)
 
     def _publish_selection(self, snapshot: ManagedLaunchSnapshot) -> None:
         registration_id = snapshot.to_dict()["registration"]["id"]
+        try:
+            self._managed_retention().select(snapshot, self.receipt_dir)
+        except (ManagedRuntimeLockTimeout, OSError) as exc:
+            # The gated process receipt and lease already protect this ready launch.
+            # Keep last-ready recovery current even when the redundant root pin lags.
+            logging.getLogger("agent-dispatch.companion").warning(
+                "incomplete redundant managed selection pin for %s; "
+                "preserving ready process and its lease: %s", registration_id, exc,
+            )
         write_json_object_atomic(
             self._selection_path(registration_id),
             {
@@ -1071,7 +1138,7 @@ class DefaultCompanionController:
                     raise CompanionError("managed launch selection identity is invalid")
                 if registration_id not in adopted_registration_ids:
                     self.forget_managed(registration_id)
-            except (CompanionError, OSError, ValueError) as exc:
+            except (CompanionError, ManagedRuntimeError, OSError, ValueError) as exc:
                 failures.append(f"{path.name}: {exc}")
         if failures:
             raise CompanionIndeterminate(
@@ -1111,7 +1178,12 @@ class DefaultCompanionController:
     def _recover(
         self, resolution: CompanionResolution, fingerprint: str
     ) -> CompanionProcess | None:
-        receipt = self._read_receipt(resolution.registration["id"])
+        path = self._receipt_path(resolution.registration["id"])
+        receipt = (
+            _read_metadata(self.receipt_dir.absolute(), path.absolute())
+            if resolution.managed_snapshot is not None and (path.exists() or path.is_symlink())
+            else self._read_receipt(resolution.registration["id"])
+        )
         if receipt is None:
             return None
         if receipt.get("schema_version") != _RECEIPT_VERSION:
@@ -1156,13 +1228,18 @@ class DefaultCompanionController:
             resolution = snapshot.resolution()
             if fingerprint != snapshot.fingerprint:
                 raise CompanionError("managed launch fingerprint does not match its snapshot")
+            self.prepare_managed(snapshot)
         recovered = self._recover(resolution, fingerprint)
         if recovered is not None:
             if snapshot is not None:
                 try:
                     self._wait_ready(resolution, recovered)
+                    self._managed_retention().launched(
+                        snapshot, self.receipt_dir, recovered.pid, self.token_source(recovered.pid) or ""
+                    )
                     self._publish_selection(snapshot)
-                except (CompanionError, CompanionIndeterminate, OSError):
+                    self._release_managed_preparation(snapshot)
+                except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError):
                     _force_retire(recovered, strict=True)
                     self._delete_receipt(resolution.registration["id"])
                     raise
@@ -1189,6 +1266,8 @@ class DefaultCompanionController:
             receipt["managed_snapshot"] = snapshot.to_dict()
         try:
             write_json_object_atomic(self._receipt_path(resolution.registration["id"]), receipt)
+            if snapshot is not None:
+                self._managed_retention().launched(snapshot, self.receipt_dir, process.pid, token)
             process.release()
         except Exception as exc:
             _force_retire(process, strict=snapshot is not None)
@@ -1198,9 +1277,12 @@ class DefaultCompanionController:
             self._wait_ready(resolution, process)
             if snapshot is not None:
                 self._publish_selection(snapshot)
-        except (CompanionError, CompanionIndeterminate, OSError):
+                self._release_managed_preparation(snapshot)
+        except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError):
             _force_retire(process, strict=resolution.managed_snapshot is not None)
             self._delete_receipt(resolution.registration["id"])
+            if snapshot is not None:
+                self._release_managed_preparation(snapshot)
             raise
         return CompanionLaunch(process)
 
