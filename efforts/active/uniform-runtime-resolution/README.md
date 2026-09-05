@@ -105,7 +105,7 @@ separate, intentional runtime and keeps its explicit venv.
 ## Journal
 
 ### 2026-08-19 - Kickoff (Phase 1)
-- Audited every Python-spawn site across the 11 runtime plugins; mapped the four
+- Audited every Python-spawn site across the then-current runtime plugins; mapped the four
   divergent methods above. Confirmed the install-contract states a dual model
   (Windows marker / POSIX `.venv` symlink) that `agent-worktrees` already
   superseded with marker-only (#1106), and that a few genuinely-bad fallbacks

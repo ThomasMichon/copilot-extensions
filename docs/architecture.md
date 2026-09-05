@@ -1,11 +1,12 @@
 # Architecture Overview
 
-How the 21 copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Eleven ship a runtime** (currently
-a `uv`-built venv under legacy `~/.agent-*`, deployed by the plugin's own
-installer) plus generated payload-local agent commands and session command
-glossaries; compatibility management wrappers remain in `~/.local/bin` during
-the installation-cell migration. **Ten are payload-only** — `efforts` (skills), `visions`
+How the 22 copilot-extensions plugins fit together — install topology,
+runtimes, ports, and the credential relay. **Twelve ship a runtime** (currently
+a `uv`-built venv under a plugin-owned root such as `~/.agent-*` or
+`~/.budget-guidance`, deployed by the plugin's own installer) plus generated
+payload-local agent commands and session command glossaries; compatibility
+management wrappers remain in `~/.local/bin` during the installation-cell
+migration. **Ten are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
 (skills), `copilot-extensions-harness` (skills + contribution-boundary hook),
 `wsl-setup` (skills), and
@@ -32,6 +33,7 @@ section.
 | [agent-index](../plugins/agent-index/) | Lightweight retrieval CLI + managed host companion | `~/.agent-index/` (client and durable data); dispatch-owned host generations | `~/.local/bin/agent-index` | Explicit configured host service supervised and provisioned only by running agent-dispatch; independent warm engine unchanged |
 | [agent-machines](../plugins/agent-machines/) | Machine-state reconciler CLI | `~/.agent-machines/` | `~/.local/bin/agent-machines` | On-demand CLI (no daemon); reconciled at session launch on its gated machines |
 | [agent-vault](../plugins/agent-vault/) | Local secret store: CLI + vault service | `~/.agent-vault/` | `~/.local/bin/agent-vault` | On-demand CLI + a persistent vault daemon (Windows scheduled task / Linux systemd user unit); ships a `vault-askpass` SUDO_ASKPASS helper |
+| [budget-guidance](../plugins/budget-guidance/) | Current budget-posture CLI | `~/.budget-guidance/` | `~/.local/bin/budget-guidance` | On-demand CLI; static configuration is offline and default-off |
 
 ### Payload-only plugins (no installer, no runtime)
 

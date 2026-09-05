@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice worktrees and pull requests
 - **Created:** 2026-09-05
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [`visions/harness-guidance`](../../../visions/harness-guidance/README.md)
   - `budget-aware-model-routing`
   - `adapter-based-budget-posture`
@@ -87,26 +87,26 @@ attribution.
 - [x] Assign ownership: `budget-guidance` owns posture; `delegation-guidance`
   owns eligibility and routing policy; `context-injection` owns composition;
   external accounting owns longitudinal history.
-- [ ] Land this vision and effort through the repository review gate before
+- [x] Land this vision and effort through the repository review gate before
   plugin implementation.
 
 ### Phase 1 - Budget posture contract and arithmetic
 
-- [ ] Define a versioned inert configuration and reading contract for allowance,
+- [x] Define a versioned inert configuration and reading contract for allowance,
   consumption, reset instant, capture time, source, freshness, optional trailing
   rates, and explicit availability/error state.
-- [ ] Define field-level source precedence so partial allowance and usage
+- [x] Define field-level source precedence so partial allowance and usage
   readings can compose without silently replacing one another.
-- [ ] Calculate remaining allowance, overspend, time remaining, sustainable
+- [x] Calculate remaining allowance, overspend, time remaining, sustainable
   daily rate, effective configured ceiling, projected position at reset, and
   warning bands.
-- [ ] Handle partial days, reset boundaries, zero time remaining, stale
+- [x] Handle partial days, reset boundaries, zero time remaining, stale
   readings, contradictory readings, and consumption beyond allowance.
-- [ ] Keep configuration inert, strictly parsed, and default-off.
+- [x] Keep configuration inert, strictly parsed, and default-off.
 
 ### Phase 2 - Portable adapters
 
-- [ ] Add a manual/static adapter that can provide a complete posture without
+- [x] Add a manual/static adapter that can provide a complete posture without
   network access or another service.
 - [ ] Add a provider API adapter for available personal or organization
   AI-usage reports, preserving empty, unauthorized, and unsupported results.
@@ -118,15 +118,15 @@ attribution.
 
 ### Phase 3 - Plugin, status, and context delivery
 
-- [ ] Add the independently installable `budget-guidance` plugin using the
+- [x] Add the independently installable `budget-guidance` plugin using the
   repository's runtime-plugin and configuration patterns.
-- [ ] Expose one machine-readable status result for hooks, dashboards, scripts,
+- [x] Expose one machine-readable status result for hooks, dashboards, scripts,
   and routing consumers.
 - [ ] Contribute a concise, attributable session-start cue through the existing
   context-injection contract and its static fallback pattern.
 - [ ] Keep injected output inside a declared byte/token budget and avoid loading
   the detailed adapter/config reference into every session.
-- [ ] Preserve source, capture time, freshness, projection, and error status in
+- [x] Preserve source, capture time, freshness, projection, and error status in
   both human and machine-readable output.
 
 ### Phase 4 - Routing composition
@@ -154,16 +154,16 @@ attribution.
 
 ## Validation Plan
 
-- [ ] The posture contract is provider-neutral and contains no real account,
+- [x] The posture contract is provider-neutral and contains no real account,
   allowance, organization, host, or private service.
-- [ ] Manual/static configuration works with no network or external service.
+- [x] Manual/static configuration works with no network or external service.
 - [ ] Provider and external adapters retain source, capture time, freshness, and
   explicit availability/error status.
 - [ ] Missing, stale, unauthorized, empty, or contradictory readings are never
   represented as zero consumption or full remaining allowance.
-- [ ] Arithmetic handles partial days, reset boundaries, overspend, and zero
+- [x] Arithmetic handles partial days, reset boundaries, overspend, and zero
   remaining time deterministically.
-- [ ] Field-level precedence composes partial sources without allowing a lower
+- [x] Field-level precedence composes partial sources without allowing a lower
   authority to overwrite a higher-authority field silently.
 - [ ] Machine-readable status and injected guidance derive from the same
   resolved posture.
@@ -173,9 +173,9 @@ attribution.
   trial, or override an explicit operator choice.
 - [ ] Product correctness, safety, review, publication, and deployment gates
   remain unchanged.
-- [ ] The plugin has no dependency on a private hostname, service, account, or
+- [x] The plugin has no dependency on a private hostname, service, account, or
   downstream repository.
-- [ ] Detailed longitudinal accounting and billing-event storage remain outside
+- [x] Detailed longitudinal accounting and billing-event storage remain outside
   the plugin.
 - [ ] Focused plugin tests, guards, docs consistency, install contracts, and
   cross-platform behavior pass without requiring the repository-wide exhaustive
@@ -212,3 +212,81 @@ promotion authority, task queue, or dashboard.
 - The architecture selects a new independently usable `budget-guidance` plugin
   and composes it with existing delegation-guidance and context-injection
   ownership instead of duplicating either.
+
+### 2026-09-05 - First runtime and posture slice
+
+- Added the independently installable `budget-guidance` runtime CLI with
+  generated payload-local invocation, versioned installers, bootstrap
+  reconciliation, and a static command catalog. Context contribution remains
+  deferred.
+- Added strict version 1 configuration, reading, and posture schemas; inert
+  static adapters; deterministic field authority; attributable contradictions;
+  and explicit unavailable, error, stale, and contradictory states.
+- Added pure balance, horizon, sustainable-rate, daily-ceiling, projection, and
+  warning-band calculations plus JSON and human status from one posture.
+- Generalized payload-invocation owner validation to support lowercase runtime
+  plugin ids outside the core `agent-*` installation-cell family.
+- Focused tests and repository contract guards pass for this slice. Provider,
+  external-command, context-delivery, and routing-composition work remains open.
+
+### 2026-09-05 - Independent review corrections
+
+- Anchored reset horizon and projection to posture evaluation time rather than
+  the newest source capture time, and made an elapsed budget period stale until
+  a future rollover contract supplies the next period.
+- Replaced expiry-instant addition with age comparison so arbitrarily large
+  validated freshness durations and near-maximum timestamps cannot overflow.
+- Added posture and CLI regressions for elapsed reset periods, huge freshness,
+  and near-maximum timestamps.
+
+### 2026-09-05 - Numeric and bootstrap hardening
+
+- Bounded budget quantities to a provider-neutral `1e18` domain so extreme
+  JSON exponents are rejected before Decimal arithmetic.
+- Converted timezone-normalization overflow at datetime boundaries into strict
+  modeled configuration errors.
+- Made both installers acquire or resolve standalone uv before requiring an
+  ambient Python, request an explicit compatible interpreter from uv, and use
+  system Python only as fallback.
+
+### 2026-09-05 - Release-candidate hardening
+
+- Bounded freshness and authority integers before conversion so extreme JSON
+  exponents fail quickly as modeled configuration errors.
+- Replaced float timestamp sorting with stable direct datetime ordering,
+  preserving microsecond recency through year 9999.
+- Added a shell-native generated command-catalog mode and Python-independent
+  POSIX first-session stamp path, while retaining PowerShell catalog parity.
+
+### 2026-09-05 - Installation contract closure
+
+- Made POSIX stamp copy the exact owning payload into the same per-version
+  snapshot model as PowerShell and removed cross-marketplace wildcard fallback.
+- Made the Windows compatibility wrapper serialize first-use provisioning on
+  the runtime-root lock and re-resolve after lock acquisition, preventing
+  duplicate concurrent installs.
+
+### 2026-09-05 - Python-less update reconciliation
+
+- Made POSIX session bootstrap compare deployed and payload versions with
+  bounded shell-native parsing, so an older valid runtime is reconciled even
+  when no ambient Python command exists.
+- Added a dev4-to-dev5 Python-less update regression and confirmed the
+  PowerShell bootstrap already performs native JSON version comparison.
+
+### 2026-09-05 - POSIX self-stage option parity
+
+- Preserved parsed action, custom install root, and force state across POSIX
+  self-staging through dedicated environment values without command evaluation.
+- Added installed-payload regressions proving a custom root is retained and a
+  forwarded force request rebuilds only that root; confirmed PowerShell already
+  forwards its bound parameters safely.
+
+### 2026-09-05 - PowerShell self-stage quoting
+
+- Wrapped staged PowerShell `-File` launches in an encoded invocation with
+  literal script and argument values, avoiding `Start-Process -ArgumentList`
+  re-tokenization for paths containing spaces.
+- Added an executable installed-payload regression with spaced profile,
+  marketplace, and custom runtime paths, covering stamp, normal install, and
+  force forwarding.

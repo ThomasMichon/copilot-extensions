@@ -55,6 +55,8 @@ FAMILIES: dict[str, list[str]] = {
         "agent-mcp",
         "agent-vault",
     ],
+    # budget-guidance can stamp its payload-local command before Python exists.
+    "versioned-venv/pythonless-budget-guidance": ["budget-guidance"],
     # Agent Index keeps the shared versioned-venv model but is the
     # service-bearing installation-cell exemplar. Its bootstrap can inspect an
     # explicitly selected, validated context without making that root operative.
