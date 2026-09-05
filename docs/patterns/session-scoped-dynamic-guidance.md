@@ -1,7 +1,7 @@
 # Session-Scoped Dynamic Guidance
 
-**Serves:** Vision `harness-guidance` (features `concise-context-kernel`,
-`resilient-safety-boundary`; behavior `ambient-delivery-fails-open`).
+**Serves:** Vision `harness-guidance` (feature `concise-context-kernel`;
+behaviors `resilient-safety-boundary`, `ambient-delivery-fails-open`).
 
 ## Problem
 
@@ -137,8 +137,9 @@ paths and some low-stakes advisory content may still benefit from a best-effort
 `additionalContext` attempt. But it must not be treated as the **primary or
 sole** delivery channel for guidance a harness actually depends on. Until
 upstream Copilot CLI lands a fix for `sessionStart` `additionalContext`
-composition (`#3589` and the complete-loss mode this document adds evidence
-for) and that fix reaches the supported version floor, **every plugin
+composition ([github/copilot-cli#3589](https://github.com/github/copilot-cli/issues/3589)
+and the complete-loss mode this document adds evidence for) and that fix
+reaches the supported version floor, **every plugin
 delivering guidance a harness depends on must implement the static-pointer +
 session-folder-file pattern above**, independent of whatever `additionalContext`
 contribution it also attempts.
