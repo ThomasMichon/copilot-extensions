@@ -217,6 +217,28 @@ def test_changed_content_publishes_a_new_digest_cell(tmp_path):
     assert runner.install_count == 2
 
 
+def test_identity_paths_decouple_digest_from_unrelated_plugin_changes(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    first = materializer.materialize(registration)[0]
+
+    (plugin / "pyproject.toml").write_text(
+        "[project]\nname='example-service'\nversion='9.9.9'\n",
+        encoding="utf-8",
+    )
+    (plugin / "README.md").write_text("service-only change\n", encoding="utf-8")
+    second = materializer.materialize(registration)[0]
+
+    assert second == first
+    assert runner.install_count == 1
+
+
 def test_empty_directory_changes_snapshot_digest(tmp_path):
     plugin = _project(tmp_path)
     runner = FakeRunner()

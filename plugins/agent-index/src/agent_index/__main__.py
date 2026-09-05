@@ -76,6 +76,16 @@ def _expected_installation_id() -> str:
     return os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
 
 
+def _selected_interpreter_matches(environment_name: str) -> bool:
+    selected = os.environ.get(environment_name, "")
+    if not selected:
+        return False
+    try:
+        return os.path.samefile(selected, sys.executable)
+    except OSError:
+        return False
+
+
 def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     value: dict[str, Any] = {}
     for key, item in pairs:
@@ -581,16 +591,9 @@ def cmd_managed_start(args: argparse.Namespace) -> int:
     """Run an already-selected interpreter without any provisioning fallback."""
     from . import transport
 
-    selected = os.environ.get("AGENT_INDEX_MANAGED_PYTHON", "")
-    try:
-        selected_matches = bool(selected) and os.path.samefile(
-            selected, sys.executable
-        )
-    except OSError:
-        selected_matches = False
     role, indexer = transport.plan_route()
     if (
-        not selected_matches
+        not _selected_interpreter_matches("AGENT_INDEX_MANAGED_PYTHON")
         or _expected_installation_id()
         or os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
         or role != "host"
@@ -605,6 +608,145 @@ def cmd_managed_start(args: argparse.Namespace) -> int:
         return 2
     serve(_config_from_args(args), passive=False)
     return 0
+
+
+def cmd_managed_engine_start(args: argparse.Namespace) -> int:
+    """Run the durable engine from the dispatch-selected interpreter only."""
+    from . import transport
+    from .engine.app import run_engine
+    from .engine.daemon import engine_endpoint
+
+    role, indexer = transport.plan_route()
+    if (
+        not _selected_interpreter_matches("AGENT_INDEX_ENGINE_MANAGED_PYTHON")
+        or _expected_installation_id()
+        or os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+        or role != "host"
+        or not indexer
+    ):
+        print(
+            "agent-index: managed engine launch requires the dispatch-selected "
+            "interpreter and an effective host configuration in a supported "
+            "installation context.",
+            file=sys.stderr,
+        )
+        return 2
+    host, port = engine_endpoint()
+    if getattr(args, "host", None):
+        host = str(args.host)
+    if getattr(args, "port", None) is not None:
+        port = int(args.port)
+    run_engine(host=host, port=port)
+    return 0
+
+
+def cmd_managed_engine_health(_args: argparse.Namespace) -> int:
+    """Probe engine readiness against generation, interpreter, and deps."""
+    from . import transport
+    from .engine.generation import current_engine_generation
+    from .index_config import IndexConfig
+    import httpx
+
+    role, indexer = transport.plan_route()
+    if role != "host" or not indexer:
+        return _emit(
+            {
+                "schema_version": 1,
+                "healthy": False,
+                "detail": "agent-index engine host configuration is inactive",
+            }
+        )
+    if _expected_installation_id() or os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
+        return _emit(
+            {
+                "schema_version": 1,
+                "healthy": False,
+                "detail": "agent-index engine health requires the host companion context",
+            }
+        )
+    if not _selected_interpreter_matches("AGENT_INDEX_ENGINE_MANAGED_PYTHON"):
+        return _emit(
+            {
+                "schema_version": 1,
+                "healthy": False,
+                "detail": "agent-index engine is not using the dispatch-selected interpreter",
+            }
+        )
+    config = IndexConfig()
+    profile = next(iter(config.model_profiles.values()))
+    try:
+        response = httpx.get(
+            f"{profile.engine_url.rstrip('/')}/health",
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("engine health payload is not an object")
+    except (httpx.HTTPError, ValueError):
+        payload = {
+            "status": "unreachable",
+            "detail": f"agent-index engine is unreachable at {profile.engine_url}",
+        }
+    observed_generation = payload.get("generation")
+    if payload.get("status") == "unreachable":
+        detail = payload.get("detail") or "agent-index engine is unreachable"
+        return _emit({"schema_version": 1, "healthy": False, "detail": detail})
+    if observed_generation != current_engine_generation():
+        return _emit(
+            {
+                "schema_version": 1,
+                "healthy": False,
+                "detail": (
+                    "agent-index engine generation mismatch: "
+                    f"expected {current_engine_generation()}, got {observed_generation}"
+                ),
+            }
+        )
+    python_executable = payload.get("python_executable")
+    try:
+        interpreter_matches = isinstance(python_executable, str) and os.path.samefile(
+            python_executable, sys.executable
+        )
+    except OSError:
+        interpreter_matches = False
+    if not interpreter_matches:
+        return _emit(
+            {
+                "schema_version": 1,
+                "healthy": False,
+                "detail": "agent-index engine is running under a different interpreter",
+            }
+        )
+    if payload.get("gpu_deps_installed") is not True:
+        return _emit(
+            {
+                "schema_version": 1,
+                "healthy": False,
+                "detail": payload.get("detail")
+                or "agent-index engine dependencies are not installed",
+            }
+        )
+    device = str(config.device).strip().lower()
+    if device.startswith("cuda") and payload.get("cuda_available") is not True:
+        return _emit(
+            {
+                "schema_version": 1,
+                "healthy": False,
+                "detail": payload.get("detail")
+                or "agent-index engine CUDA is unavailable for the configured device",
+            }
+        )
+    return _emit(
+        {
+            "schema_version": 1,
+            "healthy": True,
+            "detail": (
+                f"agent-index engine generation {current_engine_generation()} "
+                "is reachable with healthy dependencies"
+            ),
+        }
+    )
 
 
 def cmd_cell_start(args: argparse.Namespace) -> int:
@@ -1601,6 +1743,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_managed = sub.add_parser("__managed-start", help=argparse.SUPPRESS)
     add_start_args(p_managed)
     p_managed.set_defaults(func=cmd_managed_start)
+    p_managed_engine = sub.add_parser(
+        "__managed-engine-start", help=argparse.SUPPRESS
+    )
+    add_start_args(p_managed_engine)
+    p_managed_engine.set_defaults(func=cmd_managed_engine_start)
+    p_managed_engine_health = sub.add_parser(
+        "__managed-engine-health", help=argparse.SUPPRESS
+    )
+    p_managed_engine_health.set_defaults(func=cmd_managed_engine_health)
     p_cell_start = sub.add_parser("__cell-start", help=argparse.SUPPRESS)
     add_start_args(p_cell_start)
     p_cell_start.set_defaults(func=cmd_start)

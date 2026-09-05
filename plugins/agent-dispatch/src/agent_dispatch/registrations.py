@@ -208,6 +208,15 @@ def _validate_managed_runtime(value: object) -> None:
         "profile",
         "python_env",
         "projects",
+        "identity_paths",
+        "imports",
+    }
+    required_runtime_keys = {
+        "name",
+        "version",
+        "profile",
+        "python_env",
+        "projects",
         "imports",
     }
     for index, runtime in enumerate(runtimes):
@@ -221,7 +230,7 @@ def _validate_managed_runtime(value: object) -> None:
                 f"plugin-companion managed runtime '{prefix}' has unknown fields: "
                 + ", ".join(unknown)
             )
-        missing = sorted(runtime_keys - set(runtime))
+        missing = sorted(required_runtime_keys - set(runtime))
         if missing:
             raise RegistrationError(
                 f"plugin-companion managed runtime '{prefix}' is missing required "
@@ -309,6 +318,30 @@ def _validate_managed_runtime(value: object) -> None:
                     f"plugin-companion managed runtime '{project_prefix}.extras' "
                     "must contain 1 to 32 unique portable names"
                 )
+        identity_paths = runtime.get("identity_paths")
+        if identity_paths is not None:
+            if (
+                not isinstance(identity_paths, list)
+                or not identity_paths
+                or len(identity_paths) > 64
+            ):
+                raise RegistrationError(
+                    f"plugin-companion managed runtime '{prefix}.identity_paths' "
+                    "must contain 1 to 64 paths"
+                )
+            seen_identity_paths: set[str] = set()
+            for identity_index, identity_path in enumerate(identity_paths):
+                normalized_identity_path = _validate_project_path(
+                    identity_path,
+                    field=f"{prefix}.identity_paths[{identity_index}]",
+                )
+                canonical_identity_path = normalized_identity_path.casefold()
+                if canonical_identity_path in seen_identity_paths:
+                    raise RegistrationError(
+                        f"plugin-companion managed runtime '{prefix}' has duplicate "
+                        f"identity path: {normalized_identity_path}"
+                    )
+                seen_identity_paths.add(canonical_identity_path)
 
         imports = runtime["imports"]
         if (

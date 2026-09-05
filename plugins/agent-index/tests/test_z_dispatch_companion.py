@@ -17,7 +17,11 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 PROVIDER = PLUGIN / "scripts" / "companion-provider.py"
 SERVICE = PLUGIN / "scripts" / "companion-service.py"
+ENGINE_SERVICE = PLUGIN / "scripts" / "companion-engine.py"
 REGISTER = PLUGIN / "scripts" / "register-dispatch-companion.py"
+ENGINE_DECLARATION = (
+    PLUGIN / "references" / "agent-dispatch" / "registrar" / "agent-index-engine.json"
+)
 
 
 @pytest.fixture
@@ -106,6 +110,27 @@ def test_provider_activates_only_the_configured_host(tmp_path: Path, monkeypatch
         "AGENT_INDEX_NO_SELFPROVISION": "1",
         "AGENT_INDEX_REPO": str(repo.resolve()),
     }
+
+
+def test_provider_stamps_engine_generation_for_engine_companion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _module(PROVIDER, "companion_provider_engine")
+    home = tmp_path / "home"
+    repo = _repo(tmp_path / "repo", "primary")
+    _registry(home, "harness", repo)
+    monkeypatch.setattr(module.Path, "home", lambda: home)
+    monkeypatch.setattr(module, "_supports_companion_mode", lambda _env: True)
+
+    environment = module._active_environment(
+        {
+            **_request("harness"),
+            "registration_id": "declared:plugin-companion@example:agent-index-engine",
+        }
+    )
+
+    assert environment is not None
+    assert environment["AGENT_INDEX_ENGINE_GENERATION"] == "engine-v1"
 
 
 def test_provider_is_inactive_for_client_or_missing_config(tmp_path: Path, monkeypatch) -> None:
@@ -265,6 +290,34 @@ def test_service_adapter_scrubs_inherited_runtime_authority(monkeypatch) -> None
     assert "PYTHONPATH" not in environment
 
 
+def test_engine_adapter_scrubs_inherited_runtime_authority(monkeypatch) -> None:
+    module = _module(ENGINE_SERVICE, "companion_engine_environment")
+    monkeypatch.setenv("AGENT_INDEX_HOME", "wrong-home")
+    monkeypatch.setenv("AGENT_INDEX_EFFECTIVE_CONFIG", "approved-config")
+    monkeypatch.setenv("AGENT_INDEX_REPO", "approved-repo")
+    monkeypatch.setenv("AGENT_INDEX_MACHINE", "approved-machine")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_GENERATION", "engine-v1")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_HOST", "127.0.0.9")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_PORT", "8427")
+    monkeypatch.setenv("PIP_EXTRA_INDEX_URL", "https://example.invalid")
+    monkeypatch.setenv("PYTHONPATH", "untrusted")
+
+    environment = module._runtime_environment()
+
+    assert "AGENT_INDEX_HOME" not in environment
+    assert environment["AGENT_INDEX_EFFECTIVE_CONFIG"] == "approved-config"
+    assert environment["AGENT_INDEX_REPO"] == "approved-repo"
+    assert environment["AGENT_INDEX_MACHINE"] == "approved-machine"
+    assert environment["AGENT_INDEX_ENGINE_GENERATION"] == "engine-v1"
+    assert environment["AGENT_INDEX_ENGINE_HOST"] == "127.0.0.9"
+    assert environment["AGENT_INDEX_ENGINE_MANAGED_PYTHON"] == sys.executable
+    assert environment["AGENT_INDEX_ENGINE_PORT"] == "8427"
+    assert environment["AGENT_INDEX_NO_SELFPROVISION"] == "1"
+    assert "PIP_EXTRA_INDEX_URL" not in environment
+    assert "PYTHONPATH" not in environment
+
+
 def test_service_adapter_does_not_stop_unsupported_installation(
     monkeypatch,
 ) -> None:
@@ -395,6 +448,7 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
             PLUGIN / "references" / "agent-dispatch" / "registrar" / "agent-index-service.json"
         ).read_text(encoding="utf-8")
     )
+    engine_declaration = json.loads(ENGINE_DECLARATION.read_text(encoding="utf-8"))
     assert declaration["kind"] == "plugin-companion"
     assert declaration["spec"]["command"] == [
         "scripts/companion-service.py",
@@ -407,6 +461,24 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
     assert runtime["profile"] == "host"
     assert runtime["projects"][-1] == {"path": ".", "extras": ["store"]}
     assert "engine" not in json.dumps(runtime)
+    engine_runtime, = engine_declaration["spec"]["managed_runtime"]["runtimes"]
+    assert engine_declaration["runtime_generation"] == "engine-v1"
+    assert engine_declaration["spec"]["command"] == [
+        "scripts/companion-engine.py",
+        "start",
+    ]
+    assert engine_runtime["python_env"] == "AGENT_INDEX_ENGINE_MANAGED_PYTHON"
+    assert engine_runtime["version"] == "engine-v1"
+    assert engine_runtime["projects"] == [{"path": ".", "extras": ["engine"]}]
+    assert engine_runtime["identity_paths"] == [
+        "src/agent_index/__init__.py",
+        "src/agent_index/__main__.py",
+        "src/agent_index/config.py",
+        "src/agent_index/index_config.py",
+        "src/agent_index/embedding",
+        "src/agent_index/engine",
+    ]
+    assert "install" not in json.dumps(engine_declaration)
 
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_start = hooks["hooks"]["sessionStart"]
@@ -418,6 +490,16 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
         encoding="utf-8"
     )
     assert "Get-Command python" not in powershell_writer
+
+
+def test_engine_declaration_generation_is_independent_from_plugin_version() -> None:
+    declaration = json.loads(ENGINE_DECLARATION.read_text(encoding="utf-8"))
+    manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
+
+    assert declaration["runtime_generation"] == "engine-v1"
+    assert declaration["runtime_generation"] != manifest["version"]
+    runtime, = declaration["spec"]["managed_runtime"]["runtimes"]
+    assert runtime["version"] == declaration["runtime_generation"]
 
 
 @pytest.mark.parametrize("action", ["start", "stop", "health"])
@@ -445,6 +527,25 @@ def test_selected_interpreter_is_the_only_lifecycle_target(monkeypatch) -> None:
     for action in ("status", "stop"):
         assert module._runtime_gate(action)[-1] == action
     monkeypatch.setenv("AGENT_INDEX_MANAGED_PYTHON", "python")
+    with pytest.raises(RuntimeError, match="dispatch-selected"):
+        module._runtime_gate("start")
+
+
+def test_selected_engine_interpreter_is_the_only_lifecycle_target(monkeypatch) -> None:
+    module = _module(ENGINE_SERVICE, "companion_engine_selected")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    assert module._runtime_gate("start") == [
+        sys.executable,
+        "-I",
+        "-B",
+        "-X",
+        "utf8",
+        "-m",
+        "agent_index",
+        "__managed-engine-start",
+    ]
+    assert module._runtime_gate("health")[-1] == "__managed-engine-health"
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", "python")
     with pytest.raises(RuntimeError, match="dispatch-selected"):
         module._runtime_gate("start")
 

@@ -376,7 +376,9 @@ def _classify_declaration(
             )
             if not isinstance(plugin_data, dict):
                 raise ValueError("plugin.json must contain an object")
-            plugin_version = plugin_data.get("version")
+            plugin_version = (
+                declaration.runtime_generation or plugin_data.get("version")
+            )
         except OSError as exc:
             return EntryDecision.indeterminate(
                 _finding(
@@ -402,7 +404,10 @@ def _classify_declaration(
                     path,
                     "invalid-entry",
                     owner=manifest.plugin,
-                    detail="plugin companion requires plugin.json version",
+                    detail=(
+                        "plugin companion requires plugin.json version or an explicit "
+                        "runtime_generation"
+                    ),
                 )
             )
         scopes = tuple(

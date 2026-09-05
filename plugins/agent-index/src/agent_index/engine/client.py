@@ -165,11 +165,13 @@ class EngineClient:
         except httpx.ConnectError:
             return {
                 "status": "unreachable",
+                "generation": None,
                 "gpu_deps_installed": False,
                 "model_loaded": False,
                 "model_name": None,
                 "device": None,
                 "cuda_available": None,
+                "python_executable": None,
                 "detail": f"Engine not reachable at {self._base_url}",
             }
 

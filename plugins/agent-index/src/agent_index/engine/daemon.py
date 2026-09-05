@@ -25,6 +25,8 @@ from pathlib import Path
 
 from agent_procutil import windowless_daemon_kwargs
 
+from .generation import current_engine_generation
+
 
 def engine_home() -> Path:
     """Durable engine root (holds the heavy venv), outside the versioned runtime."""
@@ -61,6 +63,31 @@ def is_healthy(host: str, port: int, *, timeout: float = 3.0) -> bool:
         return resp.status_code == 200
     except (httpx.HTTPError, OSError):
         return False
+
+
+def health(host: str, port: int, *, timeout: float = 3.0) -> dict:
+    """Return the engine health payload, or a normalized unreachable result."""
+    import httpx
+
+    try:
+        resp = httpx.get(f"http://{host}:{port}/health", timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+        if isinstance(payload, dict):
+            return payload
+    except (httpx.HTTPError, OSError, ValueError):
+        pass
+    return {
+        "status": "unreachable",
+        "generation": None,
+        "gpu_deps_installed": False,
+        "model_loaded": False,
+        "model_name": None,
+        "device": None,
+        "cuda_available": None,
+        "python_executable": None,
+        "detail": f"Engine not reachable at http://{host}:{port}",
+    }
 
 
 def _write_pid(pid: int, home: Path | None = None) -> None:
@@ -183,8 +210,9 @@ def status(home: Path | None = None) -> dict:
     home = home or engine_home()
     host, port = engine_endpoint()
     pid = _read_pid(home)
+    observed = health(host, port)
     return {
-        "healthy": is_healthy(host, port),
+        "healthy": observed.get("status") != "unreachable",
         "host": host,
         "port": port,
         "pid": pid,
@@ -192,6 +220,13 @@ def status(home: Path | None = None) -> dict:
         "engine_home": str(home),
         "venv_python": str(engine_venv_python(home)),
         "provisioned": engine_venv_python(home).exists(),
+        "generation": current_engine_generation(),
+        "observed_generation": observed.get("generation"),
+        "gpu_deps_installed": observed.get("gpu_deps_installed"),
+        "model_loaded": observed.get("model_loaded"),
+        "cuda_available": observed.get("cuda_available"),
+        "python_executable": observed.get("python_executable"),
+        "detail": observed.get("detail"),
     }
 
 

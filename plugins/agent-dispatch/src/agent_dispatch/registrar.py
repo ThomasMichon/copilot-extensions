@@ -50,6 +50,7 @@ _KNOWN_KEYS = frozenset(
         "evaluator",
         "owner",
         "description",
+        "runtime_generation",
         "kind",
         "spec",
     }
@@ -193,6 +194,7 @@ class ProfileDeclaration:
     evaluator: str | None = None
     owner: str | None = None  # provenance: which system declared this
     description: str | None = None
+    runtime_generation: str | None = None
     plugin_root: str | None = None
     source_path: str | None = None
     plugin_version: str | None = None
@@ -531,11 +533,31 @@ def load_declaration(
                 "plugin-companion declarations require attributed plugin discovery"
             )
 
-        allowed = {"name", "kind", "spec", "filters", "owner", "description"}
+        allowed = {
+            "name",
+            "kind",
+            "spec",
+            "filters",
+            "owner",
+            "description",
+            "runtime_generation",
+        }
         extras = sorted(set(data) - allowed)
         if extras:
             raise RegistrarError(
                 f"declaration kind {kind!r} does not accept lane fields: {extras}"
+            )
+        runtime_generation = data.get("runtime_generation")
+        if runtime_generation is not None and kind != RegistrationKind.PLUGIN_COMPANION:
+            raise RegistrarError(
+                "runtime_generation: only plugin-companion declarations may set it"
+            )
+        if runtime_generation is not None and (
+            not isinstance(runtime_generation, str)
+            or not runtime_generation
+        ):
+            raise RegistrarError(
+                "runtime_generation: plugin-companion declarations require a non-empty string"
             )
         spec = data.get("spec")
         if not isinstance(spec, Mapping):
@@ -553,6 +575,12 @@ def load_declaration(
             filters=_load_filters(data.get("filters")),
             owner=data.get("owner"),
             description=data.get("description"),
+            runtime_generation=runtime_generation,
+        )
+
+    if data.get("runtime_generation") is not None:
+        raise RegistrarError(
+            "runtime_generation: only plugin-companion declarations may set it"
         )
 
     legacy_concurrency = data.get("concurrency")

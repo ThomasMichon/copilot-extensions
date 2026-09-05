@@ -81,6 +81,26 @@ def test_is_healthy_false_on_error(monkeypatch):
     assert daemon.is_healthy("127.0.0.1", 8421) is False
 
 
+def test_health_reports_unreachable_details(monkeypatch):
+    import httpx
+
+    def boom(*_a, **_k):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr("httpx.get", boom)
+    assert daemon.health("127.0.0.1", 8421) == {
+        "status": "unreachable",
+        "generation": None,
+        "gpu_deps_installed": False,
+        "model_loaded": False,
+        "model_name": None,
+        "device": None,
+        "cuda_available": None,
+        "python_executable": None,
+        "detail": "Engine not reachable at http://127.0.0.1:8421",
+    }
+
+
 # -- start / stop / status ---------------------------------------------------
 
 
@@ -166,13 +186,31 @@ def test_stop_terminates(monkeypatch, tmp_path):
 
 
 def test_status_shape(monkeypatch, tmp_path):
-    monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
+    monkeypatch.setattr(
+        daemon,
+        "health",
+        lambda *a, **k: {
+            "status": "ok",
+            "generation": "engine-v1",
+            "gpu_deps_installed": True,
+            "model_loaded": False,
+            "model_name": "example-model",
+            "device": "cpu",
+            "cuda_available": False,
+            "python_executable": "python",
+            "detail": None,
+        },
+    )
     st = daemon.status(tmp_path)
     assert set(st) == {
         "healthy", "host", "port", "pid", "pid_alive",
-        "engine_home", "venv_python", "provisioned",
+        "engine_home", "venv_python", "provisioned", "generation",
+        "observed_generation", "gpu_deps_installed", "model_loaded",
+        "cuda_available", "python_executable", "detail",
     }
     assert st["provisioned"] is False
+    assert st["healthy"] is True
+    assert st["observed_generation"] == "engine-v1"
 
 
 # -- CLI ---------------------------------------------------------------------
