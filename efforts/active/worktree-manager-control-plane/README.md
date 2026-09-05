@@ -182,16 +182,26 @@ realized in `main`; unchecked items are the remaining delta.
       *behavior* in the wrong *location*; this item is the architecture
       correction, not new capability. Reviewed, ordered plan:
       [`phase-3b-ahp-relocation.md`](phase-3b-ahp-relocation.md).
+      - [x] Step 1: additive generic `execution_leg`/`ExecutionLegBinding`
+            read path + `derive_execution_leg()` compatibility view in
+            `tracking.py`. No behavior change: nothing writes `execution_leg:`
+            yet, existing `session_backend:` output stays byte-identical.
+      - [ ] Steps 2-6 (generic `execution-leg` CLI verbs; relocate
+            `ahp_backend.py` + config + `websocket-client` dependency to
+            Worktree Manager; cut launch/resume/create over; delete
+            `cmd_session_backend`/`ahp_backend.py` from agent-worktrees;
+            update tests) per the linked plan.
 - [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
-      (`launch-session.{sh,ps1,cmd}`, `cmd_remux`) from `agent-worktrees` to the
-      Worktree Manager, consistent with the same vision. agent-worktrees keeps
-      only a bounded, provider-id-plus-opaque-blob execution-leg record; it
-      never owns a typed union with one field set per hosting technology.
-      Reuses the #1478/#1491 remux design's safety invariants (refuse an
-      existing live mux or ambiguous owner) under the new ownership boundary.
-      Deliberately sequenced after Slice 1 proves the generic execution-leg
-      record and CLI verbs; its own reviewed plan is written once Slice 1
-      lands.
+      (`launch-session.{sh,ps1,cmd}`, `pane-wrapper.{sh,ps1}`, `cmd_remux`)
+      from `agent-worktrees` to the Worktree Manager, consistent with the same
+      vision. agent-worktrees keeps mux **liveness observation**
+      (`sessions.has_mux_session`, `LiveVerdict`, `verify_worktree_active`) —
+      that is legitimate provider-observation ingestion per the vision, not
+      launch/reattach mechanics — while the launcher scripts and the
+      restore/reattach *action* move. Reuses the #1478/#1491 remux design's
+      safety invariants (refuse an existing live mux or ambiguous owner) under
+      the new ownership boundary. Reviewed, ordered plan:
+      [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md).
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
       assuming exactly one of them.
@@ -344,3 +354,29 @@ its issues; the public artifacts stay self-contained and general-purpose.
   live violation of the Picker vision's process-boundary-only Non-Goal; Slice
   1 replaces that boundary only for the AHP call path, not for the rest of
   the interactive Picker's engine usage.
+- **2026-09-04** — Landed Phase 3b Slice 1 Step 1 (`tracking.py` additive
+  groundwork): added `ExecutionLegBinding` (generic `provider`/`state`/
+  `binding_revision`/opaque `blob`), the matching `WorktreeRecord` fields
+  (`execution_leg`/`execution_leg_opaque`/`execution_leg_raw`), a generic
+  `execution_leg:` read/reconcile/serialize path mirroring the existing
+  `session_backend:` handling exactly, and `derive_execution_leg()` — a pure,
+  read-time function that translates a legacy AHP `session_backend` binding
+  into the generic shape without storing or serializing anything new. Nothing
+  writes `execution_leg:` yet, so on-disk output for every existing worktree
+  is byte-identical; 14 new tests plus the existing 285-test agent-worktrees
+  suite (including all `ahp`/`tracking`/`finalize` tests) pass unmodified.
+  agent-worktrees bumped to `1.5.5-dev15`.
+- **2026-09-04** — Wrote the reviewed, ordered migration plan for Phase 3b
+  Slice 2 (Mux): [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md).
+  Full current-state inventory (launcher/wrapper script sizes, `cmd_remux`,
+  `reclaim.py`, `sessions.py`'s liveness observation) established a key
+  difference from AHP: Mux liveness is **observed live** against the mux
+  server, never persisted as a binding, so this slice needs no
+  `execution_leg` writer. Recommends **not** attempting the relocation in one
+  slice given the launcher scripts' combined size (~3,500 lines across three
+  platforms); proposes Sub-slice 2a (move the already-externally-invoked
+  launcher/wrapper scripts + repoint `cmd_launch`'s path resolution, zero
+  logic change) and Sub-slice 2b (split `cmd_remux` into a detection query
+  that stays in agent-worktrees and a relaunch action that moves). Explicitly
+  keeps `sessions.py`'s liveness reducers, `reclaim.py`, and `reclaim_one` in
+  agent-worktrees as legitimate observation/generic-termination tooling.

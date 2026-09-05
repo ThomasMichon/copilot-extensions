@@ -259,6 +259,35 @@ class SessionBackendBinding:
 
 
 @dataclass
+class ExecutionLegBinding:
+    """Generic, provider-neutral externally hosted execution leg.
+
+    Per ``visions/session-hosting`` §Concepts/*Host-owned execution identity*:
+    agent-worktrees interprets only ``provider``, ``state``, and
+    ``binding_revision``. ``blob`` is opaque, provider-owned payload -- never
+    inspected, validated, or given typed fields here. This is the generic
+    successor to :class:`SessionBackendBinding`, which is AHP-shaped (see
+    ``efforts/active/worktree-manager-control-plane/phase-3b-ahp-relocation.md``).
+    Nothing writes this field yet; this dataclass and its read path are
+    additive-only groundwork for Phase 3b Slice 1 Step 1.
+    """
+
+    provider: str
+    state: str = "active"
+    binding_revision: int = 1
+    blob: dict[str, object] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "version": 1,
+            "provider": self.provider,
+            "state": self.state,
+            "binding_revision": self.binding_revision,
+            "blob": dict(self.blob),
+        }
+
+
+@dataclass
 class HeadTransition:
     """A monotonic, replayable change to a worktree's current session."""
 
@@ -559,6 +588,18 @@ class WorktreeRecord:
         default=False, repr=False, compare=False
     )
     session_backend_raw: object = field(
+        default=None, repr=False, compare=False
+    )
+    # Generic, provider-neutral successor to ``session_backend`` (see
+    # ``ExecutionLegBinding``). Parsed only from an actual on-disk
+    # ``execution_leg:`` key -- never derived from a legacy ``session_backend``
+    # record here (that translation is a pure, on-demand read via
+    # ``derive_execution_leg()`` so nothing here changes what gets written).
+    execution_leg: ExecutionLegBinding | None = None
+    execution_leg_opaque: bool = field(
+        default=False, repr=False, compare=False
+    )
+    execution_leg_raw: object = field(
         default=None, repr=False, compare=False
     )
     # PR records (PR mode).  A worktree can track multiple PRs -- serially
@@ -1796,6 +1837,41 @@ def _claim_to_yaml_dict(claim: ResourceClaim) -> dict[str, object]:
     return d
 
 
+def derive_execution_leg(record: WorktreeRecord) -> ExecutionLegBinding | None:
+    """Compute the generic execution-leg view for one worktree record.
+
+    Prefers an actual on-disk ``execution_leg:`` when present. Otherwise
+    translates a legacy AHP ``session_backend`` binding into the generic
+    provider-id-plus-opaque-blob shape on demand -- a pure, read-time
+    compatibility view, never stored back to the record or serialized.
+    Returns ``None`` when the record's ``session_backend`` is an opaque
+    (unrecognized) shape, since agent-worktrees cannot honestly name a
+    provider for it. See
+    ``efforts/active/worktree-manager-control-plane/phase-3b-ahp-relocation.md``
+    (Phase 3b Slice 1) for the migration this groundwork serves.
+    """
+    if record.execution_leg is not None:
+        return record.execution_leg
+    if record.execution_leg_opaque:
+        return None
+    backend = record.session_backend
+    if backend is None or record.session_backend_opaque:
+        return None
+    return ExecutionLegBinding(
+        provider=backend.kind,
+        state=backend.state,
+        binding_revision=backend.binding_revision,
+        blob={
+            "endpoint_url": backend.endpoint_url,
+            "session_id": backend.session_id,
+            "protocol_version": backend.protocol_version,
+            "auth_account": backend.auth_account,
+            "created_at": backend.created_at,
+            "last_seen_at": backend.last_seen_at,
+        },
+    )
+
+
 def load_record(path: Path) -> WorktreeRecord:
     """Load a worktree tracking record from a YAML file."""
     raw = _read_text_with_retry(path)
@@ -1991,6 +2067,39 @@ def load_record(path: Path) -> WorktreeRecord:
                     ),
                 )
                 session_backend_opaque = False
+
+    # Generic ``execution_leg:`` parsing (session-hosting vision). Parsed
+    # independently of ``session_backend`` above -- this key is not written by
+    # any shipping code yet, so this block only guards against a future
+    # writer's shape. agent-worktrees interprets only ``provider``, ``state``,
+    # and ``binding_revision``; ``blob`` is never inspected.
+    raw_execution_leg = data.get("execution_leg")
+    execution_leg: ExecutionLegBinding | None = None
+    execution_leg_opaque = False
+    if raw_execution_leg is not None:
+        execution_leg_opaque = True
+    if isinstance(raw_execution_leg, dict):
+        if raw_execution_leg.get("version", 1) != 1:
+            pass
+        else:
+            provider = raw_execution_leg.get("provider")
+            if isinstance(provider, str) and provider:
+                state = str(raw_execution_leg.get("state", "active"))
+                if state not in {"active", "disposed", "unknown"}:
+                    state = "unknown"
+                blob = raw_execution_leg.get("blob", {})
+                if not isinstance(blob, dict):
+                    blob = {}
+                execution_leg = ExecutionLegBinding(
+                    provider=provider,
+                    state=state,
+                    binding_revision=_bounded_nonnegative_int(
+                        raw_execution_leg.get("binding_revision", 1),
+                        field="execution leg binding_revision",
+                    ),
+                    blob=dict(blob),
+                )
+                execution_leg_opaque = False
 
     # Parse PR records -- the multi-PR ``prs:`` list (preferred) or a legacy
     # single ``pr:`` mapping (loaded as a one-element list).  Absent in
@@ -2296,6 +2405,9 @@ def load_record(path: Path) -> WorktreeRecord:
         session_backend=session_backend,
         session_backend_opaque=session_backend_opaque,
         session_backend_raw=raw_session_backend,
+        execution_leg=execution_leg,
+        execution_leg_opaque=execution_leg_opaque,
+        execution_leg_raw=raw_execution_leg,
         prs=prs_list,
         kind=kind_val,
         owner=str(owner_raw) if owner_raw else None,
@@ -2460,6 +2572,22 @@ def _save_record_unlocked(
             record.session_backend = current_backend
             record.session_backend_opaque = False
             record.session_backend_raw = None
+        current_leg = current.execution_leg
+        record_leg = record.execution_leg
+        if current.execution_leg_opaque:
+            record.execution_leg = None
+            record.execution_leg_opaque = True
+            record.execution_leg_raw = current.execution_leg_raw
+        elif (
+            current_leg is not None
+            and (
+                record_leg is None
+                or current_leg.binding_revision > record_leg.binding_revision
+            )
+        ):
+            record.execution_leg = current_leg
+            record.execution_leg_opaque = False
+            record.execution_leg_raw = None
         if (
             current.profile_assignment_revision
             > record.profile_assignment_revision
@@ -2605,6 +2733,18 @@ def _save_record_unlocked(
     elif record.session_backend is not None:
         content += yaml.safe_dump(
             {"session_backend": record.session_backend.to_dict()},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    if record.execution_leg_opaque:
+        content += yaml.safe_dump(
+            {"execution_leg": record.execution_leg_raw},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    elif record.execution_leg is not None:
+        content += yaml.safe_dump(
+            {"execution_leg": record.execution_leg.to_dict()},
             default_flow_style=False,
             sort_keys=False,
         )
