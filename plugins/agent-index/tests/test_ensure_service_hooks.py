@@ -11,7 +11,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def test_session_start_python_probes_are_isolated_and_origin_checked() -> None:
+def test_legacy_session_entrypoints_do_not_execute_python() -> None:
     bootstrap_sh = (PLUGIN / "scripts" / "bootstrap-check.sh").read_text(
         encoding="utf-8"
     )
@@ -25,15 +25,10 @@ def test_session_start_python_probes_are_isolated_and_origin_checked() -> None:
         encoding="utf-8"
     )
 
-    assert "agent_index.__file__" in bootstrap_sh
-    assert "agent_index.__file__" in bootstrap_ps
-    assert '"$python" -I -X utf8 -c' in bootstrap_sh
-    assert "& $Python -I -X utf8 -c" in bootstrap_ps
-    assert '"$py" -I -X utf8 "$script_dir/resolve-activation-role.py"' in ensure_sh
-    assert '"$probe_python" -I -X utf8 -' in ensure_sh
-    assert "& $python.Source -I -X utf8 $resolver" in ensure_ps
-    assert "-E -X utf8" not in ensure_sh
-    assert "-E -X utf8" not in ensure_ps
+    for source in (bootstrap_sh, bootstrap_ps, ensure_sh, ensure_ps):
+        assert source.rstrip().endswith("exit 0")
+        assert "runtime-gate" not in source
+        assert "install." not in source
 
 
 def _shell_command(shell: str, script: Path) -> list[str]:
@@ -142,7 +137,7 @@ def test_repo_admission_precedes_namespaced_service_ensure(
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-def test_designated_host_session_may_kick_namespaced_service_ensure(
+def test_designated_host_session_never_kicks_service_ensure(
     tmp_path: Path,
     shell: str,
 ) -> None:
@@ -161,4 +156,4 @@ def test_designated_host_session_may_kick_namespaced_service_ensure(
     )
 
     assert result.returncode == 0, result.stderr
-    assert Path(environment["HOOK_MARKER"]).read_text(encoding="utf-8") == "called"
+    assert not Path(environment["HOOK_MARKER"]).exists()

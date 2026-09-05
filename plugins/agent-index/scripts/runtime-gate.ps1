@@ -45,6 +45,8 @@ $Root = $LegacyRoot
 $Resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
 $InvocationArgs = @($args)
 $Command = if ($InvocationArgs.Count -gt 0) { [string]$InvocationArgs[0] } else { 'status' }
+# Retained hook entry points are inert even when invoked directly.
+if ($Command -in @('__cell-bootstrap', '__cell-service-ensure')) { exit 0 }
 $VersionLine = Select-String -LiteralPath (Join-Path $PluginDir 'pyproject.toml') -Pattern '^\s*version\s*=' | Select-Object -First 1
 $PackageVersion = if ($VersionLine) { $VersionLine.Line -replace '.*=\s*"([^"]+)".*', '$1' } else { '' }
 $GatePython = Get-Command python -ErrorAction SilentlyContinue
@@ -399,62 +401,12 @@ if (
     exit 2
 }
 
-if (
-    $ActualMode -ceq 'namespaced' -and
-    $Command -in @('start', 'serve')
-) {
+if ($Command -in @('start', 'serve', 'restart', 'deploy', '__managed-start', '__cell-start')) {
     [Console]::Error.WriteLine(
-        '[agent-index] public start/serve is unavailable for an active ' +
-        'namespaced installation.'
+        '[agent-index] host service lifecycle is managed by an already-running ' +
+        'agent-dispatch supervisor; this command cannot provision or launch it.'
     )
     exit 126
-}
-
-if (
-    $ActualMode -ceq 'namespaced' -and
-    $Command -ceq 'deploy' -and
-    (
-        -not $env:AGENT_INDEX_CELL_TRANSACTION -or
-        -not $env:AGENT_INDEX_CELL_TRANSACTION_TOKEN -or
-        -not $env:AGENT_INDEX_CELL_TRANSACTION_ID
-    )
-) {
-    [Console]::Error.WriteLine(
-        '[agent-index] namespaced deploy/recovery requires the owning cell transaction.'
-    )
-    exit 126
-}
-
-if ($Command -in @('__cell-bootstrap', '__cell-service-ensure')) {
-    if ($ActualMode -cne 'namespaced') { exit 10 }
-    if (
-        $ResolutionStatus -cne 'ready' -or
-        $ResolutionReason -cne 'namespaced-active'
-    ) {
-        exit 0
-    }
-    $cellRuntime = Join-Path $PayloadRoot 'scripts\cell-runtime.py'
-    if (-not (Test-Path -LiteralPath $cellRuntime -PathType Leaf)) { exit 126 }
-    $cellPython = Get-ManagementPython
-    if (-not $cellPython) { exit 126 }
-    if ($Command -eq '__cell-bootstrap') {
-        $arguments = @(
-            "`"$cellRuntime`"", 'bootstrap',
-            '--context', "`"$Context`"",
-            '--expected-marketplace-id', "`"$MarketplaceId`"",
-            '--durable-home', "`"$contextDurableHome`""
-        )
-        Start-Process -FilePath $cellPython `
-            -WorkingDirectory $PayloadRoot `
-            -ArgumentList (@('-I', '-X', 'utf8') + $arguments) `
-            -WindowStyle Hidden | Out-Null
-        exit 0
-    }
-    & $cellPython -I -X utf8 $cellRuntime service-ensure-kick `
-        --context $Context `
-        --expected-marketplace-id $MarketplaceId `
-        --durable-home $contextDurableHome
-    exit $LASTEXITCODE
 }
 
 function Get-ConfiguredRole {
@@ -737,26 +689,18 @@ function Get-SetupRole {
 
 $script:SnapshotInstaller = ''
 function Select-SnapshotInstaller {
-    $snapshot = ''
-    try { $snapshot = ([IO.File]::ReadAllText((Join-Path $Root 'payload-dir'))).Trim() } catch {}
-    $script:SnapshotInstaller = if ($snapshot) { Join-Path $snapshot 'scripts\install.ps1' } else { '' }
-    if ($script:SnapshotInstaller -and (Test-Path -LiteralPath $script:SnapshotInstaller -PathType Leaf)) {
-        return $true
-    }
-    $installer = Join-Path $PluginDir 'scripts\install.ps1'
-    if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { return $false }
-    $hostCommand = Get-Command pwsh -ErrorAction SilentlyContinue
-    $hostExe = if ($hostCommand) { $hostCommand.Source } else { 'powershell.exe' }
-    & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer stamp 2>&1 |
-        ForEach-Object { [Console]::Error.WriteLine($_) }
-    if ($LASTEXITCODE -ne 0) { return $false }
-    try { $snapshot = ([IO.File]::ReadAllText((Join-Path $Root 'payload-dir'))).Trim() } catch { $snapshot = '' }
-    $script:SnapshotInstaller = if ($snapshot) { Join-Path $snapshot 'scripts\install.ps1' } else { '' }
-    return [bool]($script:SnapshotInstaller -and (Test-Path -LiteralPath $script:SnapshotInstaller -PathType Leaf))
+    # A historical payload-dir may name an installer with host-install authority.
+    $script:SnapshotInstaller = Join-Path $PluginDir 'scripts\install.ps1'
+    return Test-Path -LiteralPath $script:SnapshotInstaller -PathType Leaf
 }
 
 function Invoke-RuntimeProvision([string]$SetupRole) {
     if ($ActualMode -ceq 'namespaced') {
+        $provisionRole = if ($SetupRole) { $SetupRole } else { Get-ConfiguredRole }
+        if ($provisionRole -eq 'host') {
+            [Console]::Error.WriteLine('[agent-index] host service is dispatch-managed; namespaced host provisioning is unavailable.')
+            return 126
+        }
         if (
             $ResolutionStatus -cne 'ready' -or
             $ResolutionReason -cne 'namespaced-active'
@@ -846,9 +790,8 @@ function Invoke-RuntimeProvision([string]$SetupRole) {
         if (-not (Select-SnapshotInstaller)) { return 127 }
         $hadRole = Test-Path Env:AGENT_INDEX_ROLE
         $priorRole = $env:AGENT_INDEX_ROLE
-        $provisionRole = if ($SetupRole) { $SetupRole } else { Get-ConfiguredRole }
-        $env:AGENT_INDEX_ROLE = if ($provisionRole) { $provisionRole } else { 'client' }
-        [Console]::Error.WriteLine('[agent-index] provisioning the runtime after explicit setup/configuration.')
+        $env:AGENT_INDEX_ROLE = 'client'
+        [Console]::Error.WriteLine('[agent-index] provisioning only the lightweight client runtime after explicit setup/configuration.')
         [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-index eta_seconds=120 reason=setup')
         $hostCommand = Get-Command pwsh -ErrorAction SilentlyContinue
         $hostExe = if ($hostCommand) { $hostCommand.Source } else { 'powershell.exe' }
@@ -884,7 +827,6 @@ function Restore-PlannedSetupRole {
 $Python = Resolve-ReadyRuntime
 $Role = Get-ConfiguredRole
 $RuntimeState = Get-RuntimeState $Python
-$SetupProvisioned = $false
 
 switch ($Command) {
     '--version' {
@@ -950,13 +892,14 @@ if (-not $Python) {
         [Console]::Error.WriteLine('[agent-index] runtime is not ready and self-provisioning is disabled.')
         exit 1
     }
+    if ($Command -notin @('setup', 'search', 'similar', 'clusters', 'index', 'mcp', 'capability', 'engine')) {
+        [Console]::Error.WriteLine('[agent-index] this command cannot provision a runtime.')
+        exit 2
+    }
     $rc = Invoke-RuntimeProvision $PlannedSetupRole
     if ($rc -ne 0) {
         Restore-PlannedSetupRole
         exit $rc
-    }
-    if ($Command -eq 'setup' -and $PlannedSetupRole) {
-        $SetupProvisioned = $true
     }
     $Python = Resolve-ReadyRuntime
     if (-not $Python) {
@@ -972,21 +915,6 @@ if ($Command -eq 'setup') {
     Restore-PlannedSetupRole
     if ($setupOutput) { Write-Output $setupOutput.TrimEnd() }
     if ($setupRc -ne 0) { exit $setupRc }
-    $configuredSetupRole = Get-ConfiguredRole
-    if (
-        -not $SetupProvisioned -or
-        ($PlannedSetupRole -and $configuredSetupRole -ne $PlannedSetupRole)
-    ) {
-        $previousRebuild = $env:AGENT_INDEX_REBUILD_CURRENT
-        $env:AGENT_INDEX_REBUILD_CURRENT = '1'
-        try {
-            $rebuildRc = Invoke-RuntimeProvision $configuredSetupRole
-        } finally {
-            if ($null -eq $previousRebuild) { Remove-Item Env:AGENT_INDEX_REBUILD_CURRENT -ErrorAction SilentlyContinue }
-            else { $env:AGENT_INDEX_REBUILD_CURRENT = $previousRebuild }
-        }
-        exit $rebuildRc
-    }
     exit 0
 }
 
