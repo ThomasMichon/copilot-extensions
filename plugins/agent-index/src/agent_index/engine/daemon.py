@@ -23,7 +23,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from agent_procutil import windowless_daemon_kwargs
+from agent_procutil import windowless_daemon_kwargs, windowless_python
 
 from .generation import current_engine_generation
 
@@ -133,11 +133,19 @@ def _spawn(cmd: list[str]) -> subprocess.Popen:
 
 
 def engine_command(home: Path | None = None) -> list[str]:
-    """The argv that launches the engine from the durable venv (host/port bound)."""
+    """The argv that launches the engine from the durable venv (host/port bound).
+
+    Uses the venv's ``pythonw.exe`` sibling on Windows: the console-subsystem
+    ``python.exe`` launcher re-execs the base interpreter as a child even under
+    ``CREATE_NO_WINDOW``, and that child allocates its own visible console (a
+    single long-lived server, so there is no recurring-console-descendant need
+    for a console interpreter here -- unlike the Docker daemon-with-recurring-
+    children case).
+    """
     host, port = engine_endpoint()
     py = engine_venv_python(home)
     return [
-        str(py),
+        windowless_python(str(py)),
         "-m",
         "agent_index.engine.app",
         "--host",
