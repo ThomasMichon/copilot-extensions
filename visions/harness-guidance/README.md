@@ -3,8 +3,8 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-09-04
-- **Reality docs:** `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
+- **Last revised:** 2026-09-05
+- **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
 
@@ -59,9 +59,18 @@ detailed procedures should live in skills.
 
 Plugin-owned ambient policy should reach every applicable session as a concise
 kernel containing only what must remain active, with detailed mechanics
-available on demand. When the host cannot compose independent hook outputs,
-one attributable authority should compute the kernel and every proven producer
-should return the same bytes, so host result selection cannot discard guidance.
+available on demand. **`sessionStart` `additionalContext` composition across
+multiple hooks is empirically unreliable** — observed sessions deliver no
+contributor's output at all, not merely a last-writer-wins loss. Guidance a
+harness genuinely depends on should therefore reach the agent through a
+checked-in static pointer instruction plus a hook-written session-scoped file
+the agent is directed to read (see
+`docs/patterns/session-scoped-dynamic-guidance.md`), not through
+`additionalContext` aggregation alone. When the host cannot compose
+independent hook outputs, one attributable authority should compute the kernel
+and every proven producer should return the same bytes, so host result
+selection cannot discard guidance — but this composition is a best-effort
+supplement, not the sole channel, until upstream delivery is proven reliable.
 When repeating the complete aggregate through every hook would exceed a host
 budget, those identical bytes should instead be a compact critical kernel plus
 an exact session-scoped pointer to the full attributable context.
@@ -181,7 +190,10 @@ a contributor is inapplicable, unavailable, or malformed. That delivery
 failure must remain attributable and diagnosable rather than being mistaken for
 successful policy application. Fail-closed behavior belongs at authorization,
 trust, and model-eligibility boundaries, not in the mechanism that lets an
-otherwise-usable session start.
+otherwise-usable session start. A session-scoped dynamic guidance file that has
+not yet been written (or whose owning hook could not run, e.g. an untrusted
+repository-level hook path) is an explicit no-op for the reader, never a
+blocker.
 
 ### recovery-revalidates-authority
 
@@ -311,4 +323,4 @@ policy, availability, or routing choices.
 
 - Parent vision: none
 - Child visions: none (leaf)
-- Reality docs: `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
+- Reality docs: `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
