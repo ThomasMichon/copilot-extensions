@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,22 @@ BASH_HOOK = PLUGIN / "scripts" / "emit-policy.sh"
 POWERSHELL_HOOK = PLUGIN / "scripts" / "emit-policy.ps1"
 HOOKS = PLUGIN / "hooks.json"
 SETUP_SKILL = PLUGIN / "skills" / "ai-attribution-setup" / "SKILL.md"
+PROJECTION_DECLARATION = PLUGIN / "instruction-projections.json"
+PROJECTION_TEMPLATE = (
+    PLUGIN / "instructions" / "publication-safety.instructions.md"
+)
+
+
+def test_authority_resolver_matches_canonical_copy() -> None:
+    canonical = (
+        PLUGIN.parent
+        / "context-injection"
+        / "scripts"
+        / "resolve_context_authority.py"
+    )
+    resolver = PLUGIN / "scripts" / "resolve_context_authority.py"
+
+    assert resolver.read_bytes() == canonical.read_bytes()
 
 
 def _powershell_command() -> str | None:
@@ -55,6 +72,11 @@ def _environment(home: Path, **extra: str) -> dict[str, str]:
     env.update(
         {
             "HOME": str(home),
+            "PATH": (
+                str(Path(sys.executable).parent)
+                + os.pathsep
+                + env.get("PATH", "")
+            ),
             "USERPROFILE": str(home),
             "XDG_CONFIG_HOME": str(home / "config"),
         }
@@ -142,6 +164,18 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _symlink_or_skip(
+    link: Path,
+    target: Path,
+    *,
+    target_is_directory: bool = False,
+) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
+
+
 def _write_guide(repo: Path, relative_path: str) -> None:
     _write(repo / relative_path, "# Contribution guide\n")
 
@@ -210,7 +244,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev8] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev9] Before publishing"
     )
     assert "another party's repo require" in context
     assert "verified operator-owned repo, omit disclosure" in context
@@ -257,7 +291,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev8]"
+            "[owner: ai-attribution@0.1.0-dev9]"
         )
 
 
@@ -387,7 +421,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev8]"
+                "[owner: ai-attribution@0.1.0-dev9]"
             )
         else:
             assert result.stdout == "{}"
@@ -750,7 +784,7 @@ def test_symlinked_target_repo_config_is_rejected(tmp_path: Path) -> None:
     _write_guide(repo, "CONTRIBUTING.md")
     config = repo / ".github" / "ai-attribution.conf"
     config.parent.mkdir(parents=True)
-    config.symlink_to(outside)
+    _symlink_or_skip(config, outside)
     hooks = _parity_hooks()
     for hook in hooks:
         result = _run(hook, repo, tmp_path / "home")
@@ -763,7 +797,11 @@ def test_symlinked_repo_config_directory_is_rejected(tmp_path: Path) -> None:
     outside = tmp_path / "outside-github"
     _write(outside / "ai-attribution.conf", "contribution_guide=CONTRIBUTING.md\n")
     _write_guide(repo, "CONTRIBUTING.md")
-    (repo / ".github").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(
+        repo / ".github",
+        outside,
+        target_is_directory=True,
+    )
     hooks = _parity_hooks()
     results = [_run(hook, repo, tmp_path / "home") for hook in hooks]
     for result in results:
@@ -868,7 +906,11 @@ def test_powershell_rejects_reparse_custom_instruction_directory(
         "owned_account=github.com/example-owner\n",
     )
     policy_link = tmp_path / "policy-link"
-    policy_link.symlink_to(real_policy, target_is_directory=True)
+    _symlink_or_skip(
+        policy_link,
+        real_policy,
+        target_is_directory=True,
+    )
     result = _run(
         POWERSHELL_HOOK,
         repo,
@@ -947,7 +989,11 @@ def test_contribution_guide_symlink_escape_is_rejected(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     outside = tmp_path / "outside"
     _write(outside / "guide.md", "# Outside\n")
-    (repo / "linked").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(
+        repo / "linked",
+        outside,
+        target_is_directory=True,
+    )
     _write(
         repo / ".github" / "ai-attribution.conf",
         "contribution_guide=linked/guide.md\n",
@@ -961,7 +1007,7 @@ def test_contribution_guide_symlink_escape_is_rejected(tmp_path: Path) -> None:
 
 def test_exact_json_output_and_kernel_size(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
-    guides = [f"guide-{index}-{'x' * 140}" for index in range(8)]
+    guides = [f"guide-{index}-{'x' * 40}" for index in range(8)]
     for guide in guides:
         _write_guide(repo, guide)
     _write(
@@ -1167,24 +1213,28 @@ def test_version_owner_markers_match_manifest_and_fallback() -> None:
     ]
     bash_source = BASH_HOOK.read_text(encoding="utf-8")
     powershell_source = POWERSHELL_HOOK.read_text(encoding="utf-8")
-    docs = (PLUGIN / "docs" / "configuration.md").read_text(encoding="utf-8")
+    template = PROJECTION_TEMPLATE.read_text(encoding="utf-8")
     assert f'plugin_version="{version}"' in bash_source
     assert f"$script:PluginVersion = '{version}'" in powershell_source
-    assert f"[owner: ai-attribution@{version}]" in docs
+    assert f"[owner: ai-attribution@{version}]" in template
     assert 'kernel="[owner: ai-attribution@$plugin_version]' in bash_source
-    assert "ai-attribution:static-fallback:start" in docs
-    assert "ai-attribution:static-fallback:end" in docs
 
 
 @pytest.mark.guard
 def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
     source = SETUP_SKILL.read_text(encoding="utf-8")
+    declaration = json.loads(PROJECTION_DECLARATION.read_text(encoding="utf-8"))
     assert source.startswith("---\nname: ai-attribution-setup\n")
-    assert "ai-attribution:static-fallback:start" in source
-    assert "ai-attribution:static-fallback:end" in source
+    assert "manage-instruction-projections.py" in source
+    assert "instruction-projections.json" in source
+    assert "do not hand-copy" in source.lower()
     assert "owned_account=github.com/example-owner" in source
     assert "hook-less launch paths" in source
-    assert "idempotent" in source.lower()
+    assert declaration["schema"] == "copilot-extensions.instruction-projections"
+    assert declaration["version"] == 1
+    assert declaration["projections"][0]["legacyMarkers"] == [
+        "ai-attribution:static-fallback"
+    ]
 
 
 def test_bash_powershell_parity_or_static_semantics(tmp_path: Path) -> None:

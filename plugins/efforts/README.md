@@ -37,9 +37,10 @@ An adopting repository commits
 ```
 
 That file, not directory presence or a repository name, declares support and
-required use. `efforts-setup` also reconciles a small owner-marked fallback into
-the repository's existing agent instructions so the active effort remains the
-completion gate when extension hooks are unavailable.
+required use. The canonical hook-less completion fallback is
+`instructions/completion-gate.instructions.md`, declared by
+`instruction-projections.json`; `efforts-setup` routes adopters through the
+projection manager rather than duplicating that policy in repository prose.
 
 For cross-repository placement, the same strict validator exposes a read-only
 target capability probe. Resolve an authoritative local checkout or worktree
@@ -124,7 +125,7 @@ the normal Copilot CLI plugin configuration/marketplace flow for your harness;
 because this is payload-only, that makes the skills and policy assets available.
 
 Then run the **efforts-setup** skill in a repo to create the exact adoption
-config, effort tree/addendum, and static completion-gate fallback.
+config, effort tree/addendum, and static completion-gate projection.
 
 ## See also
 

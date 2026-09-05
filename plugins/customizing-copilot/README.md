@@ -75,8 +75,9 @@ Extensions API is not yet fully replaceable.
 
 Provides:
 
-- Eight skills, the bundled `reviewing-customizations` scanner, and the
-  cross-platform `installing-plugins/scripts/plugin-activation.py` state helper.
+- Eight skills, the bundled `reviewing-customizations` scanner and instruction
+  projection manager, and the cross-platform
+  `installing-plugins/scripts/plugin-activation.py` state helper.
 - Source-aware agent validation: editable project, `.ai`, and suite agents are
   enforced locally; enabled external plugin agents produce actionable advisory
   findings without editing installed payloads, while editable suite source

@@ -23,7 +23,7 @@ For day-to-day work (start/plan/resume/archive an effort), see the
 `planning-efforts` skill. The canonical pattern lives in that skill and its
 [reference guide](../planning-efforts/references/efforts.md); this skill wires a
 repo into it. The plugin itself has no runtime setup; this skill only scaffolds
-repo-local effort state, adoption policy, and the minimal always-on fallback.
+repo-local effort state, adoption policy, and the minimal always-on projection.
 The payload also ships cross-platform policy producers, but issue #1234
 currently prevents Copilot CLI from deterministically joining multiple plugins'
 `sessionStart` context. Until that runtime defect is fixed, the marked fallback
@@ -131,29 +131,25 @@ So efforts are actually used, add to the repo's agent instructions
   the effort under `efforts/active/<slug>/`.*
 - If the repo had a legacy `plans/` (or similar), mark it superseded and treat
   existing plans as a backlog of efforts-in-waiting.
-- **Install the minimal completion-gate fallback.** Reconcile this exact owner
-  region into the repository's existing always-on agent instructions. Replace
-  the one existing region in place, append it once when absent, and stop if only
-  one marker exists; never duplicate it or edit neighboring repository-owned
-  prose.
+- **Install the minimal completion-gate projection.** Its canonical source is
+  `instructions/completion-gate.instructions.md`, declared by
+  `instruction-projections.json`. Do not copy its prose into `AGENTS.md`.
+  Run the manager shipped by
+  `customizing-copilot:reviewing-customizations`:
 
-  ```markdown
-  <!-- efforts:static-fallback:start -->
-  **Fallback policy `[owner: efforts@0.1.0-dev17]`:** This repository requires
-  efforts for substantial multi-step work. Create or resume the canonical effort
-  with `planning-efforts`; the rightful head must not declare the worktree complete
-  until the effort is explicitly Done and every Plan and Validation Plan item is
-  resolved or transferred to a named tracked objective. A completed phase, PR,
-  handoff, or session is not completion.
-  <!-- efforts:static-fallback:end -->
+  ```bash
+  python3 <reviewing-customizations-skill-dir>/scripts/manage-instruction-projections.py \
+    sync <repo-root>
   ```
 
-  This is deliberately smaller than the full policy producer. It preserves only
-  effort discovery and the false-completion guard on launch paths where hooks do
-  not run, and while issue #1234 causes valid hook outputs to be discarded.
-  After the runtime joins multiple `additionalContext` results reliably, the
-  plugin may register `scripts/emit-policy.sh` / `emit-policy.ps1`; the fallback
-  still remains for genuinely hook-less paths.
+  The manager creates only the declared
+  `.github/instructions/efforts/completion-gate.instructions.md` destination,
+  maintains `.github/copilot/context-projections.json`, refuses ambiguous or
+  locally modified ownership, and never deletes files. Review and commit the
+  diff. If the manager is not installed, efforts remains independently usable,
+  but this reference hook-less projection workflow is unavailable; enable the
+  manager or use another implementation of the same inert contract rather than
+  hand-copying the template.
 - **A persistent cross-repo sequencing rule — keep the compatibility/fallback
   rule until plugin injection exists.** This plugin currently ships only
   on-demand skills, so setup must still add a concise rule to the adopting
@@ -195,9 +191,17 @@ So efforts are actually used, add to the repo's agent instructions
 - `efforts/TEMPLATE.md` matches the addendum's section set.
 - `efforts/active/` exists and is tracked.
 - The repo's agent instructions route planning to efforts.
-- The repo's agent instructions contain exactly one complete
-  `efforts:static-fallback` region whose owner version matches the enabled
-  efforts plugin.
+- Projection sync is clean and the lock owns exactly one current
+  `.github/instructions/efforts/completion-gate.instructions.md` file.
+- Projection scan succeeds without blocking findings:
+
+  ```bash
+  python3 <reviewing-customizations-skill-dir>/scripts/manage-instruction-projections.py \
+    scan <repo-root> --from-settings
+  ```
+
+- Any old `efforts:static-fallback` region is reported as a legacy migration
+  finding and remains untouched until a reviewer removes it manually.
 - The repo's **compatibility/fallback always-on** instructions carry the
   cross-repo sequencing rule in the stable `efforts` owner region
   (effort-update PR before an unreviewed direct push; only completion markers

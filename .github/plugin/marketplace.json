@@ -60,7 +60,7 @@
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev17",
+      "version": "0.1.0-dev18",
       "source": "plugins/efforts"
     },
     {
@@ -72,7 +72,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships eight focused skills",
-      "version": "0.1.0-dev60",
+      "version": "0.1.0-dev61",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -120,7 +120,7 @@
     {
       "name": "ai-attribution",
       "description": "Ambient publication and AI-attribution safety for git repositories, with portable operator policy, host-qualified local remote hints, an idempotent setup skill, and an on-demand publication workflow. Payload-only: dependency-free Bash and PowerShell session-start hooks plus skills.",
-      "version": "0.1.0-dev8",
+      "version": "0.1.0-dev9",
       "source": "plugins/ai-attribution"
     },
     {
