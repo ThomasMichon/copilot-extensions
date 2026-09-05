@@ -599,8 +599,19 @@ function Start-HostLauncher {
         -ArgumentList (@('--headless', 'pwsh') + $args) `
         -WorkingDirectory $InstallDir `
         -WindowStyle Hidden
-    Start-Sleep -Seconds 8
-    if (Get-HostProcess) { Write-Host "dtssh host started for $Alias on port $Port" } else { Write-Warning "dtssh host did not stay running; check $InstallDir\dtssh-host.log" }
+    # Poll instead of a single fixed-delay check: a binary that `Install-Dtssh`
+    # just downloaded/replaced, or a cold tunnel negotiation, can take longer
+    # than a blind 8s wait to report a running host process -- which produced a
+    # false "did not stay running" warning even though the host (or its
+    # independent watchdog) came up moments later (dotfiles#2070). Poll every 2s
+    # up to 40s total and return as soon as the process is observed; only warn
+    # once that whole window is exhausted.
+    $deadline = (Get-Date).AddSeconds(40)
+    do {
+        if (Get-HostProcess) { Write-Host "dtssh host started for $Alias on port $Port"; return }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    Write-Warning "dtssh host did not stay running; check $InstallDir\dtssh-host.log"
 }
 
 function Stop-HostLauncher {

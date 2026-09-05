@@ -424,6 +424,10 @@ def _cmd_restore(args: argparse.Namespace) -> int:
         label = f"{r.type}:{r.id}"
         if r.status == "error":
             print(f"  resource {label}: ERROR {r.detail}", file=sys.stderr)
+        elif r.blocked_reason:
+            print(f"  resource {label}: BLOCKED ({r.blocked_reason})", file=sys.stderr)
+            if r.detail:
+                print(f"      {r.detail}", file=sys.stderr)
         elif r.deferred_reason:
             print(f"  resource {label}: deferred ({r.deferred_reason})")
             if r.detail:

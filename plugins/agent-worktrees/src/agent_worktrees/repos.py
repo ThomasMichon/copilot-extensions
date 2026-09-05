@@ -31,7 +31,7 @@ from pathlib import Path
 
 import yaml
 
-from . import output
+from . import git_ops, output
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -926,15 +926,21 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
         if branch and current != branch:
             return ("skipped", f"on '{current}', not '{branch}'")
         target = branch or current
-        fetch = _git(path, "fetch", "origin", timeout=180)
-        if fetch.returncode != 0:
-            return ("error", fetch.stderr.strip() or "fetch failed")
+        # Use git_ops.fetch (not the plain local _git helper) so a cross-account
+        # remote authenticates the same way every other agent-worktrees git flow
+        # does -- resolving the repo's configured account and injecting a scoped
+        # credential override when it differs from the active `gh` account.
+        # `sync_repo`'s ambient-credential fetch previously bypassed that,
+        # failing private repos owned by a non-active account (dotfiles#2069).
+        git_ops.fetch("origin", cwd=path, timeout=180)
         if not target:
             return ("skipped", "no branch to fast-forward")
         ff = _git(path, "merge", "--ff-only", f"origin/{target}")
         if ff.returncode != 0:
             return ("skipped", "not fast-forwardable (diverged)")
         return ("synced", target)
+    except git_ops.GitError as e:
+        return ("error", e.stderr or str(e))
     except Exception as e:
         return ("error", str(e))
 

@@ -1,7 +1,7 @@
 {
   "name": "agent-machines",
   "description": "Portable machine setup and restore for Copilot CLI. Derives setup from topology, enabled capabilities, and in-repo requirement packages, then converges the current machine -- Copilot settings first, followed by applications, services, and custom modules. The engine and conductor are generic; sensitive OS-mutating modules, organization policy, and per-machine data stay in each harness repo.",
-  "version": "0.1.0-dev92",
+  "version": "0.1.0-dev93",
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
   "hooks": "hooks.json",

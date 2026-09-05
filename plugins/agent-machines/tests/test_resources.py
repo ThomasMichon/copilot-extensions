@@ -744,6 +744,69 @@ def test_file_apply_dry_run_does_not_write(tmp_path):
     assert not (tmp_path / ".psmux.conf").exists()
 
 
+def test_file_apply_enforce_marker_blocks_unmanaged_existing_file(tmp_path):
+    """A whole-file `enforce` with `marker` must never clobber a pre-existing
+    file that lacks the marker -- it reports `blocked` (not ok) instead
+    (dotfiles#2071)."""
+    target = tmp_path / "uv.toml"
+    target.write_text("# hand-authored, not ours\n", encoding="utf-8")
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "file", "path": "$HOME/uv.toml", "strategy": "enforce",
+                 "marker": "# Managed by acme.",
+                 "content": "# Managed by acme.\n[[index]]\n"}])
+    results = apply_resources([pkg], "box-1", "windows",
+                              _ctx(tmp_path, FakeRunner()), dry_run=False)
+    res = next(r for r in results if r.type == "file")
+    assert res.status == "blocked"
+    assert not res.ok
+    assert not res.changed
+    assert target.read_text(encoding="utf-8") == "# hand-authored, not ours\n"
+
+
+def test_file_apply_enforce_marker_dry_run_also_blocks(tmp_path):
+    target = tmp_path / "uv.toml"
+    target.write_text("# hand-authored, not ours\n", encoding="utf-8")
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "file", "path": "$HOME/uv.toml", "strategy": "enforce",
+                 "marker": "# Managed by acme.",
+                 "content": "# Managed by acme.\n[[index]]\n"}])
+    results = apply_resources([pkg], "box-1", "windows",
+                              _ctx(tmp_path, FakeRunner()), dry_run=True)
+    res = next(r for r in results if r.type == "file")
+    assert res.status == "blocked"
+    assert not res.ok
+
+
+def test_file_apply_enforce_marker_converges_when_owned(tmp_path):
+    """An existing file that already carries the marker is our own prior
+    write, so `enforce` still converges/updates it normally."""
+    target = tmp_path / "uv.toml"
+    target.write_text("# Managed by acme.\nstale\n", encoding="utf-8")
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "file", "path": "$HOME/uv.toml", "strategy": "enforce",
+                 "marker": "# Managed by acme.",
+                 "content": "# Managed by acme.\nfresh\n"}])
+    results = apply_resources([pkg], "box-1", "windows",
+                              _ctx(tmp_path, FakeRunner()), dry_run=False)
+    res = next(r for r in results if r.type == "file")
+    assert res.ok and res.changed
+    assert target.read_text(encoding="utf-8") == "# Managed by acme.\nfresh\n"
+    assert res.backup_path
+
+
+def test_file_apply_enforce_marker_writes_when_absent(tmp_path):
+    """No existing file at all: `marker` is irrelevant, just write it."""
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "file", "path": "$HOME/uv.toml", "strategy": "enforce",
+                 "marker": "# Managed by acme.",
+                 "content": "# Managed by acme.\n[[index]]\n"}])
+    results = apply_resources([pkg], "box-1", "windows",
+                              _ctx(tmp_path, FakeRunner()), dry_run=False)
+    res = next(r for r in results if r.type == "file")
+    assert res.ok and res.changed
+    assert (tmp_path / "uv.toml").read_text(encoding="utf-8") == "# Managed by acme.\n[[index]]\n"
+
+
 def test_file_apply_json_enforce_deep_merges(tmp_path):
     target = tmp_path / "cfg.json"
     target.write_text('{"a": 1, "keep": true}', encoding="utf-8")
