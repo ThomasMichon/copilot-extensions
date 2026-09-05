@@ -597,21 +597,39 @@ def test_session_start_main_writes_guidance_before_emitting_result(
     monkeypatch, capsys
 ):
     payload = {"sessionId": "session-1", "cwd": str(Path.cwd())}
-    seen = {}
+    enriched = {
+        **payload,
+        "_agentWorktrees": {
+            "pluginVersion": "1.2.3-dev4",
+            "environment": {},
+        },
+    }
+    seen = {"enrichment_calls": 0}
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    def enrich(value):
+        seen["enrichment_calls"] += 1
+        return enriched
+
+    monkeypatch.setattr(hook_client, "_enrich_session_payload", enrich)
     monkeypatch.setattr(
         hook_client,
         "decide",
-        lambda kind, value: {"additionalContext": "supplement"},
+        lambda kind, value: (
+            seen.update(decide_payload=value)
+            or {"additionalContext": "supplement"}
+        ),
     )
     monkeypatch.setattr(
         hook_client,
         "_write_session_guidance",
-        lambda value: seen.update(value) or True,
+        lambda value: seen.update(guidance_payload=value) or True,
     )
 
     assert hook_client.main(["sessionStart"]) == 0
-    assert seen == payload
+    assert seen["enrichment_calls"] == 1
+    assert seen["decide_payload"] is enriched
+    assert seen["guidance_payload"] is enriched
     assert json.loads(capsys.readouterr().out) == {
         "additionalContext": "supplement"
     }

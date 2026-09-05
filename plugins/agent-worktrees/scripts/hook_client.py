@@ -724,7 +724,10 @@ def _fallback_post(payload: dict, home: Path) -> dict:
 
 def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
     home = home or Path.home()
-    if kind == "sessionStart":
+    if (
+        kind == "sessionStart"
+        and not isinstance(payload.get("_agentWorktrees"), dict)
+    ):
         payload = _enrich_session_payload(payload)
     remote = _request(kind, payload, home)
     if remote is not None:
@@ -750,6 +753,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
             payload = {}
+        if kind == "sessionStart":
+            payload = _enrich_session_payload(payload)
         result = decide(kind, payload)
         if kind == "sessionStart":
             _write_session_guidance(payload)
