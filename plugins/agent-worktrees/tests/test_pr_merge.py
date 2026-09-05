@@ -117,6 +117,24 @@ class TestMergeOne:
         assert row["action"] == "skip"
         assert row["reason"] == "not yet approved"
 
+    def test_policy_permitted_stale_approval_applies(self):
+        prov = _FakeProvider(_snap(
+            head_sha="new",
+            reviews=(pc.Review(1, "APPROVED", "bob", commit_id="old"),),
+        ))
+        row = pm.merge_one(
+            _prcfg(allow_stale_approval=True),
+            "o/r",
+            7,
+            token="t",
+            apply=True,
+            default_branch="master",
+            provider=prov,
+        )
+        assert row["action"] == "apply"
+        assert "policy permits" in row["reason"]
+        assert prov.added == [("o/r", 7, "auto-merge")]
+
     def test_base_branch_mismatch_skips(self):
         prov = _FakeProvider(_snap(base_ref="release-1.x"))
         row = pm.merge_one(_prcfg(), "o/r", 7, token="t", apply=True,

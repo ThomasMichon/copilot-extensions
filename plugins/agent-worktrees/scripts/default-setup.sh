@@ -125,10 +125,10 @@ if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
         say "  Setup:    $SETUP_HOOK"
         if $STDIO; then
             # Keep the hook's stdout off the ACP channel.
-            if ! bash "$SETUP_HOOK" --machine "$MACHINE" >&2; then
+            if ! "$BASH" "$SETUP_HOOK" --machine "$MACHINE" >&2; then
                 echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
             fi
-        elif ! bash "$SETUP_HOOK" --machine "$MACHINE"; then
+        elif ! "$BASH" "$SETUP_HOOK" --machine "$MACHINE"; then
             echo "  WARN: setup hook exited non-zero; continuing to launch." >&2
         fi
     else

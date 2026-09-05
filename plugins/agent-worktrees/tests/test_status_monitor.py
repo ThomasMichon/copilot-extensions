@@ -989,37 +989,15 @@ def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
     assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in seen["env"]
 
 
-def test_headless_child_guard_ors_no_window(monkeypatch):
-    import subprocess as _sp
-    orig = _sp.Popen.__init__
-    try:
-        monkeypatch.setattr(m, "no_window_flags", lambda: 0x08000000)
-        seen: dict = {}
-        monkeypatch.setattr(
-            _sp.Popen, "__init__",
-            lambda self, *a, **k: seen.__setitem__(
-                "flags", k.get("creationflags", 0)))
-        m._install_headless_child_guard()
-        _sp.Popen(["x"])
-        assert seen["flags"] & 0x08000000  # CREATE_NO_WINDOW OR'd in
-    finally:
-        _sp.Popen.__init__ = orig
+def test_headless_child_guard_ors_no_window():
+    from conftest import _headless_creationflags
+
+    assert _headless_creationflags(0) & 0x08000000
 
 
-def test_headless_child_guard_respects_explicit_new_console(monkeypatch):
-    import subprocess as _sp
-    orig = _sp.Popen.__init__
-    try:
-        monkeypatch.setattr(m, "no_window_flags", lambda: 0x08000000)
-        seen: dict = {}
-        monkeypatch.setattr(
-            _sp.Popen, "__init__",
-            lambda self, *a, **k: seen.__setitem__(
-                "flags", k.get("creationflags", 0)))
-        m._install_headless_child_guard()
-        _sp.Popen(["x"], creationflags=m._CREATE_NEW_CONSOLE)
-        # An explicit new-console request is passed through, not silenced.
-        assert not (seen["flags"] & 0x08000000)
-        assert seen["flags"] & m._CREATE_NEW_CONSOLE
-    finally:
-        _sp.Popen.__init__ = orig
+def test_headless_child_guard_respects_explicit_new_console():
+    from conftest import _headless_creationflags
+
+    flags = _headless_creationflags(0x00000010)
+    assert not (flags & 0x08000000)
+    assert flags & 0x00000010

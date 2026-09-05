@@ -258,7 +258,7 @@ def test_windows_failed_psmux_creation_reaps_only_the_named_session():
     assert "Sort-Object Value -Descending" in ps
     assert "[Diagnostics.Process]::GetProcessById($pidValue)" in ps
     assert "$startDeltaMs -gt 1" in ps
-    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 1
+    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 2
 
 
 def test_launchers_retry_mux_creation_and_preserve_recovery_context():

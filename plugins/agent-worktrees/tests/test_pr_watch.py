@@ -186,7 +186,8 @@ class TestDecorateEvents:
             # Additive merge-readiness block. No consent label bound here, so it
             # degrades to a verdict/merge-state readout with no action to take.
             "merge": {
-                "verdict": "APPROVED", "merge_state": "clean", "conflict": False,
+                "verdict": "APPROVED", "approval_stale": False,
+                "merge_state": "clean", "conflict": False,
                 "mergeable": True, "consent_present": False,
                 "consent_action": "skip", "consent_label": "", "eligible": False,
                 "needs_consent": False, "clear_to_merge": False, "held": [],
@@ -253,6 +254,31 @@ class TestDecorateEvents:
         )
         assert res.matched
         assert res.payload["merge"]["needs_consent"] is True
+        assert res.payload["merge"]["consent_action"] == "apply"
+
+    def test_run_wait_forwards_stale_approval_policy(self):
+        snap = _snap(
+            pr_state="open",
+            mergeable=True,
+            head_sha="new",
+            reviews=(pc.Review(3, "APPROVED", "bob", commit_id="old"),),
+        )
+        clock = _Clock()
+        res = prw.run_wait(
+            repo="o/r",
+            pr=1,
+            until=["approved"],
+            baseline=pc.Baseline.from_cursor("r0"),
+            fetch=lambda: snap,
+            timeout=100.0,
+            interval=1.0,
+            automerge_label="auto-merge",
+            allow_stale_approval=True,
+            now=clock.now,
+            sleep=lambda s: None,
+        )
+        assert res.matched
+        assert res.payload["merge"]["approval_stale"] is True
         assert res.payload["merge"]["consent_action"] == "apply"
 
 

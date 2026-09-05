@@ -82,6 +82,10 @@ So an **ADO repo** (e.g. `example-marketplace`) binds `automerge_label: auto-com
 - `approval_required: false` -- **self-complete**: eligible when simply *not*
   changes-requested (we own the merge; no approval vote needed). A
   `CHANGES_REQUESTED` review still blocks -- address it, then re-run.
+- `allow_stale_approval: true` -- preserve an approval as merge authority after
+  the head moves when repository policy explicitly permits it. `pr-status` and
+  `pr-watch` expose `approval_stale: true`; mergeability, holds, WIP state, and
+  changes-requested verdicts still block.
 - `bypass_policy: true` -- complete **past** a branch policy that never
   auto-satisfies for our own PRs (e.g. a central governance status policy);
   otherwise ADO auto-complete would wait forever.
