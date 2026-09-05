@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 from pathlib import Path
 
 __all__ = [
+    "copilot_relaunch_path",
     "process_executable_path",
     "processes_with_cwd_under",
     "terminate_processes_under",
@@ -256,6 +258,54 @@ def process_executable_path(pid: int) -> str | None:
         if path.endswith(" (deleted)"):
             path = str(proc_link) if os.access(proc_link, os.X_OK) else ""
     return path if path and os.path.isabs(path) else None
+
+
+def copilot_relaunch_path(
+    process_path: str | None,
+    *,
+    timeout: float = 5.0,
+) -> str | None:
+    """Return a predecessor-derived executable that identifies as Copilot.
+
+    Package managers may rename an in-use Windows executable to
+    ``copilot.exe.old-*`` while the predecessor keeps running from that image.
+    Such retained images can exist and report valid file metadata yet silently
+    exit when relaunched. Prefer the canonical sibling for that replacement
+    shape, then require a bounded ``--version`` probe before trusting either
+    path as a handoff launch authority.
+    """
+    if not process_path or not os.path.isabs(process_path):
+        return None
+    original = Path(process_path)
+    candidates: list[Path] = []
+    name = original.name.lower()
+    if platform.system() == "Windows" and name.startswith("copilot.exe.old"):
+        candidates.append(original.with_name("copilot.exe"))
+    candidates.append(original)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        try:
+            if not candidate.is_file():
+                continue
+            probe = subprocess.run(
+                [str(candidate), "--version"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        output = f"{probe.stdout}\n{probe.stderr}".lower()
+        if probe.returncode == 0 and "github copilot cli" in output:
+            return str(candidate)
+    return None
 
 
 def _terminate_windows(k32, pid: int) -> bool:

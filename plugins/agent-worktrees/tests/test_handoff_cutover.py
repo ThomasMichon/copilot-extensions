@@ -548,6 +548,31 @@ def _ns(**kw):
 
 
 class TestCmdHandoffCutover:
+    def test_wait_for_handoff_candidate_observes_session_start(
+        self, monkeypatch, tmp_path,
+    ):
+        handoff = type("_Handoff", (), {
+            "token": "task-123",
+            "candidate": "successor-session",
+        })()
+        record = type("_Record", (), {"handoffs": [handoff]})()
+        monkeypatch.setattr(m.tracking, "load_record", lambda path: record)
+
+        assert m._wait_for_handoff_candidate(
+            tmp_path / "wt.yaml", "task-123", "%5", timeout=0.1,
+        ) == ("successor-session", "session-associated")
+
+    def test_wait_for_handoff_candidate_rejects_exited_pane(
+        self, monkeypatch, tmp_path,
+    ):
+        record = type("_Record", (), {"handoffs": []})()
+        monkeypatch.setattr(m.tracking, "load_record", lambda path: record)
+        monkeypatch.setattr(sessions, "_mux_bin", lambda: "psmux")
+        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a: False)
+
+        assert m._wait_for_handoff_candidate(
+            tmp_path / "wt.yaml", "task-123", "%5", timeout=0.1,
+        ) == (None, "pane-exited-before-session")
     @pytest.fixture(autouse=True)
     def _use_local_session_backend(self, monkeypatch):
         monkeypatch.setattr(
@@ -1105,6 +1130,11 @@ class TestCmdHandoffCutover:
             }
 
         monkeypatch.setattr(sessions, "mux_new_window", _fake_new_window)
+        monkeypatch.setattr(
+            m,
+            "_wait_for_handoff_candidate",
+            lambda *a, **k: ("successor-session", "session-associated"),
+        )
         rc = m.cmd_handoff_cutover(_ns(
             seed="resume the multi word work",
             old_pane="%2",
@@ -1155,7 +1185,12 @@ class TestCmdHandoffCutover:
         monkeypatch.setattr(
             procs,
             "process_executable_path",
-            lambda pid: r"C:\Programs\Copilot\copilot.exe",
+            lambda pid: r"C:\Programs\Copilot\copilot.exe.old-123",
+        )
+        monkeypatch.setattr(
+            procs,
+            "copilot_relaunch_path",
+            lambda path: r"C:\Programs\Copilot\copilot.exe",
         )
         monkeypatch.setattr(
             locks, "process_start_time", lambda pid: "created-1"
@@ -1220,6 +1255,9 @@ class TestCmdHandoffCutover:
             procs, "process_executable_path", lambda pid: "/opt/copilot"
         )
         monkeypatch.setattr(
+            procs, "copilot_relaunch_path", lambda path: path
+        )
+        monkeypatch.setattr(
             locks, "process_start_time", lambda pid: "created-2"
         )
         captured = {}
@@ -1248,6 +1286,110 @@ class TestCmdHandoffCutover:
         assert rc == 0
         assert captured["fallback_copilot_path"] is None
         capfd.readouterr()
+
+    def test_token_launch_requires_associated_successor_session(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        record_path = tmp_path / "wtZ.yaml"
+        record_path.write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight()
+        )
+        monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+            },
+        )
+        monkeypatch.setattr(
+            m,
+            "_wait_for_handoff_candidate",
+            lambda *a, **k: (None, "pane-exited-before-session"),
+        )
+        monkeypatch.setattr(
+            sessions, "_mux_pane_process_tree", lambda pane: {100, 101}
+        )
+        monkeypatch.setattr(
+            sessions,
+            "_retire_failed_successor",
+            lambda pane, tree: {"ok": True, "pane": pane, "tree": sorted(tree)},
+        )
+
+        rc = m.cmd_handoff_cutover(
+            _ns(
+                seed="continue",
+                session_id="session-1",
+                handoff_token="task-123",
+            )
+        )
+
+        assert rc == 4
+        out = json.loads(capfd.readouterr().out)
+        assert out["ok"] is False
+        assert out["candidate_status"] == "pane-exited-before-session"
+        assert out["cleanup"]["tree"] == [100, 101]
+
+    def test_token_launch_returns_associated_successor_session(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        record_path = tmp_path / "wtZ.yaml"
+        record_path.write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight()
+        )
+        monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+            },
+        )
+        monkeypatch.setattr(
+            m,
+            "_wait_for_handoff_candidate",
+            lambda *a, **k: ("successor-session", "session-associated"),
+        )
+
+        rc = m.cmd_handoff_cutover(
+            _ns(
+                seed="continue",
+                session_id="session-1",
+                handoff_token="task-123",
+            )
+        )
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["candidate_session"] == "successor-session"
 
     def test_spawn_failure_preserves_prompt_receipt_details(
         self, monkeypatch, capfd, tmp_path,
