@@ -10,9 +10,22 @@ from __future__ import annotations
 from agent_worktrees import pr_contract as pc
 
 
-def _rev(rid, state, user="reviewer", commit_id="head", dismissed=False):
-    return pc.Review(id=rid, state=state, user=user, commit_id=commit_id,
-                     dismissed=dismissed)
+def _rev(
+    rid,
+    state,
+    user="reviewer",
+    commit_id="head",
+    dismissed=False,
+    submitted_at="",
+):
+    return pc.Review(
+        id=rid,
+        state=state,
+        user=user,
+        commit_id=commit_id,
+        dismissed=dismissed,
+        submitted_at=submitted_at,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -192,13 +205,58 @@ class TestEffectiveVerdict:
         assert pc.effective_verdict(reviews, "new", "author") == ""
 
     def test_stale_approval_can_be_retained_by_policy(self):
-        reviews = (_rev(1, "APPROVED", commit_id="old"),)
+        reviews = (
+            _rev(
+                1,
+                "APPROVED",
+                commit_id="old",
+                submitted_at="2026-01-01T00:02:00Z",
+            ),
+        )
         assert pc.effective_verdict(
             reviews,
             "new",
             "author",
             allow_stale_approval=True,
+            stale_approval_head_sha="new",
+            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
         ) == "APPROVED"
+
+    def test_stale_approval_before_current_head_is_not_retained(self):
+        reviews = (
+            _rev(
+                1,
+                "APPROVED",
+                commit_id="old",
+                submitted_at="2026-01-01T00:01:00Z",
+            ),
+        )
+        assert pc.effective_verdict(
+            reviews,
+            "new",
+            "author",
+            allow_stale_approval=True,
+            stale_approval_head_sha="new",
+            stale_approval_head_pushed_at="2026-01-01T00:02:00Z",
+        ) == ""
+
+    def test_stale_approval_without_matching_publication_evidence_is_not_retained(self):
+        reviews = (
+            _rev(
+                1,
+                "APPROVED",
+                commit_id="old",
+                submitted_at="2026-01-01T00:02:00Z",
+            ),
+        )
+        assert pc.effective_verdict(
+            reviews,
+            "new",
+            "author",
+            allow_stale_approval=True,
+            stale_approval_head_sha="different",
+            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
+        ) == ""
 
     def test_approval_at_current_head_counts(self):
         reviews = (_rev(1, "APPROVED", commit_id="head"),)
@@ -802,18 +860,54 @@ class TestApprovalRequired:
             pr_state="open",
             mergeable=True,
             head_sha="new",
-            reviews=(_rev(1, "APPROVED", commit_id="old"),),
+            reviews=(
+                _rev(
+                    1,
+                    "APPROVED",
+                    commit_id="old",
+                    submitted_at="2026-01-01T00:02:00Z",
+                ),
+            ),
         )
         readiness = pc.merge_readiness(
             snap,
             automerge_label="auto-complete",
             allow_stale_approval=True,
+            stale_approval_head_sha="new",
+            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
         )
         assert readiness["verdict"] == "APPROVED"
         assert readiness["approval_stale"] is True
+        assert readiness["approval_stale_authorized"] is True
         assert readiness["consent_action"] == "apply"
         assert readiness["clear_to_merge"] is True
-        assert "policy permits" in readiness["reason"]
+        assert "after current head" in readiness["reason"]
+
+    def test_post_approval_push_remains_unapproved(self):
+        snap = pc.PRSnapshot(
+            pr_state="open",
+            mergeable=True,
+            head_sha="new",
+            reviews=(
+                _rev(
+                    1,
+                    "APPROVED",
+                    commit_id="old",
+                    submitted_at="2026-01-01T00:01:00Z",
+                ),
+            ),
+        )
+        readiness = pc.merge_readiness(
+            snap,
+            automerge_label="auto-complete",
+            allow_stale_approval=True,
+            stale_approval_head_sha="new",
+            stale_approval_head_pushed_at="2026-01-01T00:02:00Z",
+        )
+        assert readiness["verdict"] == ""
+        assert readiness["approval_stale"] is True
+        assert readiness["approval_stale_authorized"] is False
+        assert readiness["consent_action"] == "skip"
 
 
 class TestThreadTypes:

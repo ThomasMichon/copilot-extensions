@@ -120,7 +120,15 @@ class TestMergeOne:
     def test_policy_permitted_stale_approval_applies(self):
         prov = _FakeProvider(_snap(
             head_sha="new",
-            reviews=(pc.Review(1, "APPROVED", "bob", commit_id="old"),),
+            reviews=(
+                pc.Review(
+                    1,
+                    "APPROVED",
+                    "bob",
+                    submitted_at="2026-01-01T00:02:00Z",
+                    commit_id="old",
+                ),
+            ),
         ))
         row = pm.merge_one(
             _prcfg(allow_stale_approval=True),
@@ -129,11 +137,42 @@ class TestMergeOne:
             token="t",
             apply=True,
             default_branch="master",
+            tracked_head_sha="new",
+            head_pushed_at="2026-01-01T00:01:00Z",
             provider=prov,
         )
         assert row["action"] == "apply"
-        assert "policy permits" in row["reason"]
+        assert row["approval_stale_authorized"] is True
+        assert "after current head" in row["reason"]
         assert prov.added == [("o/r", 7, "auto-merge")]
+
+    def test_post_approval_push_does_not_inherit_approval(self):
+        prov = _FakeProvider(_snap(
+            head_sha="new",
+            reviews=(
+                pc.Review(
+                    1,
+                    "APPROVED",
+                    "bob",
+                    submitted_at="2026-01-01T00:01:00Z",
+                    commit_id="old",
+                ),
+            ),
+        ))
+        row = pm.merge_one(
+            _prcfg(allow_stale_approval=True),
+            "o/r",
+            7,
+            token="t",
+            apply=True,
+            default_branch="master",
+            tracked_head_sha="new",
+            head_pushed_at="2026-01-01T00:02:00Z",
+            provider=prov,
+        )
+        assert row["action"] == "skip"
+        assert row["approval_stale_authorized"] is False
+        assert prov.added == []
 
     def test_base_branch_mismatch_skips(self):
         prov = _FakeProvider(_snap(base_ref="release-1.x"))

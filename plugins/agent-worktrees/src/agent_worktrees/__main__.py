@@ -24477,6 +24477,28 @@ def _infer_active_repo_slug(config: cfg.Config) -> str | None:
     return git_ops.slug_from_url(remote)
 
 
+def _tracked_pr_head_evidence(
+    config: cfg.Config,
+    repo: str,
+    number: int,
+) -> tuple[str, str]:
+    """Return locally recorded publication evidence for one PR's current head."""
+    worktree_id = _infer_worktree_id_from_cwd(config)
+    if not worktree_id:
+        return "", ""
+    try:
+        record = tracking.load_record(
+            cfg.tracking_dir() / f"{_resolve_worktree_id(worktree_id)}.yaml"
+        )
+    except Exception:
+        return "", ""
+    for pr in record.prs:
+        target_repo = pr.repo or record.repo
+        if pr.number == number and target_repo == repo:
+            return pr.head_sha, pr.head_pushed_at
+    return "", ""
+
+
 def _classify_pr_operands(operands: list[str]) -> tuple[str | None, int | None]:
     """Split free-form pr-merge operands into ``(repo_slug, pr_number)``.
 
@@ -24588,6 +24610,9 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             return 0
 
         baseline = pc.Baseline.from_cursor(args.since) if args.since else None
+        tracked_head_sha, head_pushed_at = _tracked_pr_head_evidence(
+            config, args.repo, args.pr
+        )
         if not args.json:
             mode = f"since {args.since}" if args.since else "auto-baseline"
             print(f"pr-watch: watching {args.repo}#{args.pr} for [{', '.join(until)}] "
@@ -24603,6 +24628,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             allow_stale_approval=bool(
                 getattr(prcfg, "allow_stale_approval", False)
             ),
+            stale_approval_head_sha=tracked_head_sha,
+            stale_approval_head_pushed_at=head_pushed_at,
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}",
                                      file=sys.stderr),
         )
@@ -25063,9 +25090,14 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                 default_branch=default_branch,
             )
         else:
+            tracked_head_sha, head_pushed_at = _tracked_pr_head_evidence(
+                config, args.repo, args.pr
+            )
             row = pm.merge_one(
                 prcfg, args.repo, args.pr, api_base=args.host, token=args.token,
                 apply=apply, default_branch=default_branch,
+                tracked_head_sha=tracked_head_sha,
+                head_pushed_at=head_pushed_at,
             )
             eligible = 1 if row["action"] == "apply" else 0
             applied = 1 if row.get("applied") else 0
