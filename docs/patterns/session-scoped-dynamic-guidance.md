@@ -156,9 +156,12 @@ review mechanism is needed -- only a documented content convention.
 
 ## Exemplars
 
-None yet -- this pattern is newly proven and not yet adopted by a shipped
-plugin. The first migrating plugin becomes the reference exemplar; update this
-section when one lands.
+- [`agent-worktrees`](../../plugins/agent-worktrees/) projects
+  `instructions/session-guidance.instructions.md` and writes the matching
+  session-scoped file from its payload-local `sessionStart` hook client. The
+  file combines the attributable command catalog with the current worktree
+  binding while the existing `session-context.json` contributors remain as a
+  best-effort supplementary channel.
 
 ## See Also
 
