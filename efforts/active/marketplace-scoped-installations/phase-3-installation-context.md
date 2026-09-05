@@ -27,8 +27,9 @@ the remaining Agent Machines repair/release and uninstall implementation.
   remote execution, and uninstall.
 - Make a missing or conflicting context fail closed instead of selecting a
   legacy root or same-named command.
-- Prove the contract with two simultaneous cells containing the same plugin name
-  and version on Windows and Linux/WSL.
+- Prove the contract with two simultaneous Linux/WSL cells containing the same
+  plugin name and version, and preserve deterministic PowerShell parity for the
+  waived Windows clean-room arm.
 
 ## Non-goals
 
