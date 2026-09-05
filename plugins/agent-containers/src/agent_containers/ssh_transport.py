@@ -318,6 +318,7 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
             ])
         lines.extend([
             f"    User {user}",
+            f'    IdentityFile "{_config_path(private_key)}"',
             "    IdentitiesOnly yes",
             "    BatchMode yes",
             "    StrictHostKeyChecking accept-new",
@@ -333,6 +334,17 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
             "",
         ])
         content = "\n".join(lines)
+        # Defensive read-back (#2042): a rendered profile missing IdentityFile
+        # silently falls back to ssh's default key discovery, which may pick
+        # the wrong key (or none) for an external consumer that connects via
+        # this config file directly rather than through the in-process
+        # SSHConfig.identity_file this function also returns. Catch that class
+        # of regression at render time rather than only at connect time.
+        if f'IdentityFile "{_config_path(private_key)}"' not in content:
+            raise RuntimeError(
+                f"Rendered SSH profile for '{alias}' is missing its "
+                "IdentityFile entry -- refusing to write an unusable profile"
+            )
         try:
             current = config_file.read_text(encoding="utf-8")
         except OSError:

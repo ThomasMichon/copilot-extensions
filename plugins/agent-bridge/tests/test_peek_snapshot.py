@@ -119,3 +119,48 @@ def test_target_kind_and_name():
 def test_exec_bash_on_target_unsupported_transport():
     with pytest.raises(tx.TargetExecError):
         tx.exec_bash_on_target({"target_type": "ssh"}, "echo hi", timeout=5)
+
+
+def test_cmd_peek_container_target_fails_closed_instead_of_reading_local(
+    monkeypatch,
+):
+    """A container (or any non-local, non-codespace) target must never fall
+    back to reading THIS host's local events.jsonl -- that transcript lives on
+    the remote target, not here. It must fail closed via TargetExecError
+    instead of silently returning a wrong-filesystem snapshot.
+    """
+    import argparse
+
+    from agent_bridge import __main__ as main_mod
+
+    session = {
+        "session_id": "s1",
+        "agent_name": "container:odsp-web-1",
+        "target_type": "container",
+        "acp_session_id": _ACP,
+    }
+
+    class FakeClient:
+        def get_session(self, _target):
+            return session
+
+        def list_sessions(self):
+            return [session]
+
+    monkeypatch.setattr(main_mod, "_get_client", lambda: FakeClient())
+
+    def _forbidden_snapshot_local(*_args, **_kwargs):
+        raise AssertionError(
+            "snapshot_local must not be used for a non-local target"
+        )
+
+    monkeypatch.setattr(ps, "snapshot_local", _forbidden_snapshot_local)
+
+    args = argparse.Namespace(
+        target="s1", tail=400, recent=8, message_chars=400,
+        timeout=90.0, stale_hours=6.0, json=False,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_mod._cmd_peek(args)
+    assert exc_info.value.code == 1

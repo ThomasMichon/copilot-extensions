@@ -2712,18 +2712,30 @@ def _cmd_peek(args: argparse.Namespace) -> None:
         return
 
     try:
-        if tx.target_kind(session) == "codespace":
+        kind = tx.target_kind(session)
+        if kind == "local":
+            snap = ps.snapshot_local(
+                acp, tail_lines=args.tail, recent_messages=args.recent,
+                message_chars=args.message_chars,
+            )
+        else:
+            # Any non-local kind -- "codespace", "container", or a future/legacy
+            # provider identified only via ``target.venue``/``target_type`` --
+            # must go over that target's own transport. Silently falling back to
+            # ``snapshot_local`` here would read THIS host's filesystem for a
+            # transcript that actually lives on the remote target, producing a
+            # wrong (and misleadingly confident) peek result. ``exec_bash_on_target``
+            # already fails closed with ``TargetExecError`` for any kind it does
+            # not implement (currently only "codespace" is wired up), so routing
+            # every non-local kind through it -- rather than only "codespace" --
+            # turns an unrecognized/unsupported provider into an explicit error
+            # instead of a silent wrong-filesystem read.
             cmd = ps.build_peek_command(
                 acp, tail_lines=args.tail, recent_messages=args.recent,
                 message_chars=args.message_chars,
             )
             out = tx.exec_bash_on_target(session, cmd, timeout=float(args.timeout))
             snap = ps.parse_peek_result(out)
-        else:
-            snap = ps.snapshot_local(
-                acp, tail_lines=args.tail, recent_messages=args.recent,
-                message_chars=args.message_chars,
-            )
     except tx.TargetExecError as exc:
         print(f"[FAIL] peek transport error: {exc}", file=sys.stderr)
         sys.exit(1)

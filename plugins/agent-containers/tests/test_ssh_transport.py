@@ -63,6 +63,7 @@ def test_prepare_ssh_config_uses_docker_directly_off_windows(monkeypatch, tmp_pa
         "/usr/sbin/sshd -i -e -o GatewayPorts=no"
     ) in text
     assert "StrictHostKeyChecking accept-new" in text
+    assert f'IdentityFile "{transport._config_path(Path(config.identity_file))}"' in text
     assert config.host_alias.endswith("-" + ("a" * 12))
     assert config.user == "vscode"
 
@@ -86,6 +87,7 @@ def test_prepare_ssh_config_uses_windowless_broker_on_windows(monkeypatch, tmp_p
     assert "Port 54321" in text
     assert "HostKeyAlias agent-container-repo-1-aaaaaaaaaaaa" in text
     assert "ProxyCommand docker exec" not in text
+    assert f'IdentityFile "{transport._config_path(Path(config.identity_file))}"' in text
 
 
 def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):

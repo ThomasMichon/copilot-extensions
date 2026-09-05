@@ -186,6 +186,29 @@ def relay_forwards_from_endpoint(
     )
 
 
+def build_relay_ping_probe_command(relay_port: int) -> str:
+    """Build the remote command proving ``relay_port`` is a LIVE credential
+    relay, not merely a port that accepts a TCP connection.
+
+    A bare TCP-accept probe can pass while nothing valid is actually listening
+    end-to-end -- e.g. a stale, half-closed, or misrouted listener may still
+    complete a TCP handshake without ever answering the relay's own wire
+    protocol. This performs one real round-trip of that protocol: sends the
+    relay's built-in ``ping`` action (a lightweight, side-effect-free action
+    handled directly by ``CredentialRelayServer._handle_client`` before any
+    policy/token/source routing) and requires the exact ``pong`` reply the
+    relay sends back. Only that full protocol round-trip proves credentials
+    can actually be served through this forward.
+    """
+    script = (
+        f"exec 3<>/dev/tcp/127.0.0.1/{relay_port} && "
+        'printf "ping\\n\\n" >&3 && '
+        "IFS= read -r -t 3 reply <&3 && "
+        '[ "$reply" = "pong" ]'
+    )
+    return f"timeout 3 bash -c {shlex.quote(script)} && echo OK"
+
+
 def endpoint_serving_probe_factory(
     endpoint: dict[str, Any],
     *,
@@ -193,26 +216,25 @@ def endpoint_serving_probe_factory(
 ) -> Callable[[int], Callable[[], Awaitable[bool]]]:
     """Build a ``serving_probe_for_port`` factory for a persisted endpoint.
 
-    Each probe execs a one-shot far-side TCP-accept check on the CodeSpace-side
-    relay listen port over a **fresh** SSH connection (no live transport is
-    available on the daemon-restart reconstruction path). A ``False`` result
-    means the ``-R`` process is alive but the far side is not accepting -- e.g.
-    a remote bind that **silently failed** because a stale listener from the
-    pre-restart ``-R`` had not been released yet -- so the relay supervisor
-    re-establishes until the rebind takes (dotfiles #855). Transport failures
-    return ``True`` (a health hint, never a reason to churn a possibly-fine
-    relay on a transient SSH failure). Set ``fail_open=False`` for a launch or
-    resume readiness gate where an inconclusive probe must block ACP delivery.
-    Mirrors
+    Each probe execs a one-shot far-side relay-protocol round-trip check (see
+    :func:`build_relay_ping_probe_command`) on the CodeSpace-side relay listen
+    port over a **fresh** SSH connection (no live transport is available on the
+    daemon-restart reconstruction path). A ``False`` result means the ``-R``
+    process is alive but the far side is not actually answering as a live
+    relay -- e.g. a remote bind that **silently failed** because a stale
+    listener from the pre-restart ``-R`` had not been released yet (dotfiles
+    #855), or a listener that accepts but never speaks the relay protocol -- so
+    the relay supervisor re-establishes until a genuinely live relay answers.
+    Transport failures return ``True`` (a health hint, never a reason to churn
+    a possibly-fine relay on a transient SSH failure). Set ``fail_open=False``
+    for a launch or resume readiness gate where an inconclusive probe must
+    block ACP delivery. Mirrors
     ``spawner._serving_probe_for_port`` for the restart path.
     """
     config = ssh_config_from_endpoint(endpoint)
 
     def _for_port(relay_port: int) -> Callable[[], Awaitable[bool]]:
-        probe = (
-            f'timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/{relay_port}" '
-            "&& echo OK"
-        )
+        probe = build_relay_ping_probe_command(relay_port)
         argv = build_remote_exec_args(config, f"bash -lc {shlex.quote(probe)}")
 
         async def _probe() -> bool:

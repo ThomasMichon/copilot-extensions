@@ -6,49 +6,49 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev20"
+    "version": "1.7.7-dev21"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.5-dev20",
+      "version": "1.5.5-dev21",
       "source": "plugins/agent-worktrees"
     },
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev437",
+      "version": "0.4.0-dev441",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev114",
+      "version": "0.4.0-dev115",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev122",
+      "version": "0.1.2-dev123",
       "source": "plugins/agent-containers"
     },
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.0-dev93",
+      "version": "0.2.0-dev94",
       "source": "plugins/agent-mcp"
     },
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev78",
+      "version": "0.1.0-dev79",
       "source": "plugins/agent-ssh"
     },
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev91",
+      "version": "0.1.1-dev92",
       "source": "plugins/agent-logger"
     },
     {
@@ -78,13 +78,13 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev23",
+      "version": "0.1.2-dev24",
       "source": "plugins/agent-dispatch"
     },
     {
       "name": "agent-vault",
       "description": "Local KeePassXC-backed secret store for Copilot CLI agents. A machine-local service caches the KeePass master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and account credentials on demand and manages entries (get/has/search/list/show/add/set-password/set-username/remove/move/import-key/export-key) without hardcoding, committing, or exporting them. Destructive edits are scoped to the configured vault group unless forced. Includes a SUDO_ASKPASS helper for sudo -A, a git-credential helper that delegates allowlisted HTTPS hosts to Git Credential Manager, an envelope-KEK seal/unseal facility (DPAPI-wrapped on Windows) for encrypting a consumer's own token cache at rest, and an opt-in encrypted persistent cache that serves reads across restarts and while the vault is locked.",
-      "version": "0.1.0-dev85",
+      "version": "0.1.0-dev86",
       "source": "plugins/agent-vault"
     },
     {
