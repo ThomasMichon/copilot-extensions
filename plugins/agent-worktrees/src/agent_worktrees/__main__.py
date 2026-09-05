@@ -24459,6 +24459,9 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
             wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
             approval_required=bool(getattr(prcfg, "approval_required", True)),
+            allow_stale_approval=bool(
+                getattr(prcfg, "allow_stale_approval", False)
+            ),
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}",
                                      file=sys.stderr),
         )

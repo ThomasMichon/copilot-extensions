@@ -208,11 +208,15 @@ class PRConfig:
     #   completion? True (default) preserves the review-gated shape. False suits
     #   a self-complete repo (we own the merge): eligible when simply not
     #   changes-requested (no approval vote needed).
+    # - ``allow_stale_approval`` -- may an approval submitted against an older
+    #   head still authorize completion when the live PR is otherwise mergeable?
+    #   False by default; enable only where repository policy permits it.
     # - ``squash`` / ``delete_source_branch`` -- ADO auto-complete options.
     # - ``bypass_policy`` / ``bypass_reason`` -- complete PAST branch policies
     #   (for a default branch whose policy never auto-satisfies for our own PRs,
     #   e.g. a central governance status policy). ADO-only; ignored elsewhere.
     approval_required: bool = True
+    allow_stale_approval: bool = False
     squash: bool = True
     delete_source_branch: bool = True
     bypass_policy: bool = False
@@ -1653,6 +1657,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         hold_labels=_str_tuple(raw.get("hold_labels", ())),
         wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),
         approval_required=bool(raw.get("approval_required", True)),
+        allow_stale_approval=bool(raw.get("allow_stale_approval", False)),
         squash=bool(raw.get("squash", True)),
         delete_source_branch=bool(raw.get("delete_source_branch", True)),
         bypass_policy=bool(raw.get("bypass_policy", False)),

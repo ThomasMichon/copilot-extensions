@@ -463,7 +463,7 @@ def test_default_setup_sh_supports_hook_and_session_path():
     assert 'exec "$COPILOT_PATH_OVERRIDE"' in text
     # --stdio (ACP) mode keeps human output off the JSON-RPC channel
     assert "STDIO=true" in text
-    assert 'bash "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
+    assert '"$BASH" "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
 
 
 def test_default_setup_ps1_supports_hook_and_session_path():
