@@ -107,6 +107,26 @@ def test_out_of_session_boundaries_remain_explicit() -> None:
     assert "`agent-bridge send <reply-to>" not in extension
 
 
+def test_list_command_docs_place_global_json_before_subcommand() -> None:
+    skill = (
+        PLUGIN / "skills" / "agent-bridge" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    cli_reference = (
+        PLUGIN
+        / "skills"
+        / "agent-bridge"
+        / "references"
+        / "cli-commands.md"
+    ).read_text(encoding="utf-8")
+    combined = skill + "\n" + cli_reference
+
+    for command in ("agents", "machines", "sessions"):
+        assert f"<agent-bridge catalog argv[0]> --json {command}" in combined
+        assert f"<agent-bridge catalog argv[0]> {command} --json" not in combined
+    assert "<agent-bridge catalog argv[0]> --json config show" in combined
+    assert "<agent-bridge catalog argv[0]> config show --json" not in combined
+
+
 @pytest.mark.asyncio
 async def test_session_host_strips_parent_payload_context(monkeypatch) -> None:
     captured: dict[str, object] = {}

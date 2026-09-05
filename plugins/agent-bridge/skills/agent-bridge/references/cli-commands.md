@@ -32,7 +32,7 @@ be running (the `start` management operation) for client commands to work.
 
 ```bash
 <agent-bridge catalog argv[0]> agents
-<agent-bridge catalog argv[0]> agents --json
+<agent-bridge catalog argv[0]> --json agents
 <agent-bridge catalog argv[0]> --project <repo> agents
 <agent-bridge catalog argv[0]> agents --all-projects
 ```
@@ -44,7 +44,7 @@ spawnable status).
 
 ```bash
 <agent-bridge catalog argv[0]> machines
-<agent-bridge catalog argv[0]> machines --json
+<agent-bridge catalog argv[0]> --json machines
 <agent-bridge catalog argv[0]> --project <repo> machines
 <agent-bridge catalog argv[0]> machines --all-projects
 ```
@@ -408,7 +408,7 @@ published state into `~/.agent-bridge/config.yaml`.
 ```bash
 # Show current config
 <agent-bridge catalog argv[0]> config show
-<agent-bridge catalog argv[0]> config show --json
+<agent-bridge catalog argv[0]> --json config show
 
 # Add/update a topology profile for a repo
 <agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile multi-machine system
