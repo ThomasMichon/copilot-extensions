@@ -114,6 +114,14 @@ def test_target_kind_and_name():
     assert tx.codespace_name(cs) == "my-cs"
     assert tx.target_kind({"agent_name": "local-agent", "target_type": "local"}) == "local"
     assert tx.target_kind({"target_type": "command"}) == "local"
+    # A real container session persists target_type: "command" (the generic
+    # provider-driven type) -- only its agent_name prefix distinguishes it.
+    # Without checking that prefix, this fell through to "local" (#2042
+    # follow-up), defeating any non-local-kind gate regardless of what it
+    # checks.
+    assert tx.target_kind({
+        "agent_name": "container:my-container", "target_type": "command",
+    }) == "container"
 
 
 def test_exec_bash_on_target_unsupported_transport():
@@ -136,7 +144,12 @@ def test_cmd_peek_container_target_fails_closed_instead_of_reading_local(
     session = {
         "session_id": "s1",
         "agent_name": "container:odsp-web-1",
-        "target_type": "container",
+        # A real container session persists target_type: "command" (the
+        # generic provider-driven type) -- the container/codespace distinction
+        # lives only in the agent_name prefix. Using "command" here (not the
+        # unrealistic "container") is what actually exercises target_kind()'s
+        # prefix check end-to-end.
+        "target_type": "command",
         "acp_session_id": _ACP,
     }
 
