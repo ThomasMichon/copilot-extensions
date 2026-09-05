@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import stat
@@ -30,6 +31,8 @@ _LOCK_POLL_SECONDS = 0.1
 _WINDOWS_REPARSE_POINT = 0x400
 _COMMAND_TIMEOUT_SECONDS = 600.0
 _TRUST_TIMEOUT_SECONDS = 30.0
+
+log = logging.getLogger("agent-dispatch.managed-runtime")
 
 
 class ManagedRuntimeError(RuntimeError):
@@ -281,6 +284,14 @@ def _safe_directory(root: Path, *components: str) -> Path:
         _reject_link(candidate, description="managed runtime directory")
         current = candidate
     return current
+
+
+def _quarantine_cell(root: Path, cell: Path) -> Path:
+    _assert_safe_descendant(root, cell, description="managed runtime cell")
+    failed_root = _safe_directory(root, ".failed")
+    target = failed_root / uuid.uuid4().hex
+    os.replace(cell, target)
+    return target
 
 
 class _RootLock:
@@ -921,12 +932,14 @@ class ManagedRuntimeMaterializer:
                 "snapshot": snapshot,
             }
             if cell.exists():
-                ready = self._ready(cell, expected, root=root, policy=policy)
-                if ready is None:
-                    raise ManagedRuntimeError(
-                        f"managed runtime cell is incomplete or invalid: {cell}"
-                    )
-                return ready
+                try:
+                    ready = self._ready(cell, expected, root=root, policy=policy)
+                except ManagedRuntimeError:
+                    _quarantine_cell(root, cell)
+                else:
+                    if ready is not None:
+                        return ready
+                    _quarantine_cell(root, cell)
 
             runtime_root = staging / "runtime"
             if policy.windows:
@@ -1021,20 +1034,33 @@ class ManagedRuntimeMaterializer:
                     f"managed runtime publication destination already exists: {cell}"
                 )
             os.replace(staging, cell)
-            ready = self._ready(cell, expected, root=root, policy=policy)
+            try:
+                ready = self._ready(cell, expected, root=root, policy=policy)
+            except ManagedRuntimeError:
+                _quarantine_cell(root, cell)
+                raise
             if ready is None:
+                _quarantine_cell(root, cell)
                 raise ManagedRuntimeError(
                     "managed runtime publication failed post-publish validation"
                 )
             return ready
         finally:
             if staging.exists():
+                primary_error = sys.exc_info()[0] is not None
                 try:
                     shutil.rmtree(staging)
                 except OSError as exc:
-                    raise ManagedRuntimeError(
-                        f"failed to clean managed runtime staging directory: {exc}"
-                    ) from exc
+                    if primary_error:
+                        log.error(
+                            "failed to clean managed runtime staging directory: %s",
+                            exc,
+                            exc_info=True,
+                        )
+                    else:
+                        raise ManagedRuntimeError(
+                            f"failed to clean managed runtime staging directory: {exc}"
+                        ) from exc
 
     def materialize(
         self, registration: Mapping[str, Any]

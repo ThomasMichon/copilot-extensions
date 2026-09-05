@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -86,6 +87,8 @@ class FakeRunner:
         self.after_install = None
         self.mutate_install_source = False
         self.mutate_validation = False
+        self.validation_count = 0
+        self.fail_validation_at: int | None = None
 
     def __call__(self, argv, cwd, environment):
         args = list(argv)
@@ -113,8 +116,12 @@ class FakeRunner:
             if self.after_install is not None:
                 self.after_install(Path(args[args.index("--python") + 1]).parent)
             return
-        if args[1:4] == ["-I", "-B", "-c"] and self.mutate_validation:
-            Path(args[0]).write_bytes(b"mutated by import")
+        if args[1:4] == ["-I", "-B", "-c"]:
+            self.validation_count += 1
+            if self.fail_validation_at == self.validation_count:
+                raise ManagedRuntimeError("validation failed")
+            if self.mutate_validation:
+                Path(args[0]).write_bytes(b"mutated by import")
 
 
 def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
@@ -283,6 +290,26 @@ def test_failed_install_preserves_published_cell_and_cleans_staging(tmp_path):
     assert list((tmp_path / "runtimes" / ".staging").iterdir()) == []
 
 
+def test_cleanup_failure_does_not_mask_install_failure(
+    tmp_path, monkeypatch, caplog
+):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    runner.fail_install = True
+
+    def fail_cleanup(_path):
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(shutil, "rmtree", fail_cleanup)
+
+    with pytest.raises(ManagedRuntimeError, match="install failed"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path), runner=runner
+        ).materialize(_registration(plugin))
+
+    assert "failed to clean managed runtime staging directory" in caplog.text
+
+
 def test_installer_mutation_is_confined_to_disposable_working_copy(tmp_path):
     plugin = _project(tmp_path)
     runner = FakeRunner()
@@ -321,17 +348,35 @@ def test_import_validation_disables_bytecode_writes(tmp_path):
     assert all("-B" in args for args in validation_calls)
 
 
-def test_incomplete_existing_cell_is_never_repaired_in_place(tmp_path):
+def test_incomplete_existing_cell_is_quarantined_and_rebuilt(tmp_path):
     plugin = _project(tmp_path)
     runner = FakeRunner()
-    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    policy = _policy(tmp_path)
+    materializer = ManagedRuntimeMaterializer(policy, runner=runner)
     published = materializer.materialize(_registration(plugin))[0]
     published.receipt.unlink()
 
-    with pytest.raises(ManagedRuntimeError, match="incomplete or invalid"):
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+
+    assert rebuilt.cell == published.cell
+    assert runner.install_count == 2
+    assert len(list((policy.root / ".failed").iterdir())) == 1
+
+
+def test_failed_post_publish_validation_does_not_poison_cell_key(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    runner = FakeRunner()
+    runner.fail_validation_at = 2
+    materializer = ManagedRuntimeMaterializer(policy, runner=runner)
+
+    with pytest.raises(ManagedRuntimeError, match="validation failed"):
         materializer.materialize(_registration(plugin))
 
-    assert runner.install_count == 1
+    assert len(list((policy.root / ".failed").iterdir())) == 1
+    runner.fail_validation_at = None
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+    assert rebuilt.cell.is_dir()
 
 
 def test_rejects_unattributed_or_inconsistent_registration_before_writes(tmp_path):
@@ -399,7 +444,7 @@ def test_rejects_linked_publication_descendant(tmp_path):
     assert list(external.iterdir()) == []
 
 
-def test_rejects_linked_python_inside_reused_cell(tmp_path):
+def test_quarantines_linked_python_inside_reused_cell(tmp_path):
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
@@ -412,19 +457,24 @@ def test_rejects_linked_python_inside_reused_cell(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("file links are unavailable")
 
-    with pytest.raises(ManagedRuntimeError, match="link or reparse point"):
-        materializer.materialize(_registration(plugin))
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+
+    assert rebuilt.python.is_file()
+    assert not rebuilt.python.is_symlink()
+    assert len(list((policy.root / ".failed").iterdir())) == 1
 
 
-def test_rejects_modified_regular_file_inside_reused_cell(tmp_path):
+def test_quarantines_modified_regular_file_inside_reused_cell(tmp_path):
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
     published = materializer.materialize(_registration(plugin))[0]
     published.python.write_bytes(b"modified")
 
-    with pytest.raises(ManagedRuntimeError, match="incomplete or invalid"):
-        materializer.materialize(_registration(plugin))
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+
+    assert rebuilt.python.read_bytes() == b"python"
+    assert len(list((policy.root / ".failed").iterdir())) == 1
 
 
 def test_cell_layout_stays_shallow_for_windows_paths(tmp_path):
