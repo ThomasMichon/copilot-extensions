@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import BinaryIO
 
-from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
+from agent_procutil import no_window_kwargs, windowless_daemon_kwargs
 
 _IDLE_EXIT_SECONDS = 120.0
 
@@ -253,7 +253,7 @@ def ensure_broker(
 
     process = subprocess.Popen(
         [
-            windowless_python(sys.executable),
+            sys.executable,
             "-m",
             "agent_containers.docker_proxy",
             "serve",
@@ -264,7 +264,7 @@ def ensure_broker(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        **detached_kwargs(breakaway=True),
+        **windowless_daemon_kwargs(breakaway=True),
     )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
