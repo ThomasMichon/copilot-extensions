@@ -1,0 +1,23 @@
+{
+  "name": "budget-guidance",
+  "description": "Provider-neutral current budget posture: strict static readings, deterministic source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
+  "version": "0.1.0-dev10",
+  "runtimeScope": "universal",
+  "hooks": "hooks.json",
+  "sessionContext": "session-context.json",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "budget",
+    "usage",
+    "routing",
+    "guidance"
+  ],
+  "skills": [
+    "skills/"
+  ]
+}

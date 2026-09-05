@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; $s = (Join-Path $r 'scripts\\bootstrap-check.ps1'); if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; s=\"$r/scripts/bootstrap-check.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
+        "timeoutSec": 15
+      },
+      {
+        "type": "command",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if ($r) { try { [IO.Directory]::SetCurrentDirectory($env:USERPROFILE) } catch {}; $w = Join-Path (Join-Path $r 'scripts') 'invoke-context-contributor.ps1'; if (Test-Path -LiteralPath $w -PathType Leaf) { & $w 'budget-guidance@copilot-extensions' 'command-catalog' 'scripts/emit-command-catalog.ps1' } else { [Console]::Out.Write('{}') } } else { [Console]::Out.Write('{}') }",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}\"; w=\"$r/scripts/invoke-context-contributor.sh\"; if [ -n \"$r\" ] && [ -f \"$w\" ]; then bash \"$w\" budget-guidance@copilot-extensions command-catalog scripts/emit-command-catalog.sh; else printf '{}'; fi",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

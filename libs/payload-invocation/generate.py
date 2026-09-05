@@ -16,7 +16,7 @@ SCHEMA = "copilot-extensions.payload-invocation"
 LEGACY_VERSION = 1
 VERSION = 2
 
-_PLUGIN = re.compile(r"^agent-[a-z0-9-]+$")
+_PLUGIN = re.compile(r"^[a-z][a-z0-9-]*$")
 _COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
 _MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _RUNTIME_ROOT = re.compile(r"^\.[a-z0-9-]+$")
@@ -26,6 +26,7 @@ _OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
 _INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
 _DISPATCHER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
 _WINDOWS_CATALOG_SHIMS = {"powershell", "cmd"}
+_POSIX_CATALOG_MODES = {"python", "shell"}
 _PROVISION_MODES = {"snapshot", "direct"}
 _INSTALLATION_CONTEXT_MODES = {"legacy", "required"}
 
@@ -160,6 +161,13 @@ def load_manifest(path: Path) -> dict[str, object]:
         raise ValueError(
             f"{path}: invalid windowsCatalogShim: {windows_catalog_shim!r}"
         )
+    posix_catalog_mode = data.get("posixCatalogMode", "python")
+    if posix_catalog_mode not in _POSIX_CATALOG_MODES:
+        raise ValueError(
+            f"{path}: invalid posixCatalogMode: {posix_catalog_mode!r}"
+        )
+    if posix_catalog_mode == "shell" and raw_commands is not None:
+        raise ValueError(f"{path}: shell posixCatalogMode supports one command")
     provision_mode = data.get("provisionMode", "snapshot")
     if provision_mode not in _PROVISION_MODES:
         raise ValueError(f"{path}: invalid provisionMode: {provision_mode!r}")
@@ -229,6 +237,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["outputDir"] = output_dir
     data["installer"] = installer
     data["windowsCatalogShim"] = windows_catalog_shim
+    data["posixCatalogMode"] = posix_catalog_mode
     data["provisionMode"] = provision_mode
     data["sessionStartBootstrap"] = session_start_bootstrap
     data["payloadRootEnv"] = payload_root_env
@@ -511,10 +520,15 @@ def expected_files(manifest: Path) -> dict[Path, str]:
                 command=command,
             )
     catalog_prefix = "catalog-multi" if data["multiCommandManifest"] else "catalog"
+    posix_catalog_template = (
+        "catalog-posix-shell.tmpl"
+        if data["posixCatalogMode"] == "shell"
+        else f"{catalog_prefix}-posix.tmpl"
+    )
     catalog_outputs = (
         (
             manifest.parent / "scripts" / "emit-command-catalog.sh",
-            f"{catalog_prefix}-posix.tmpl",
+            posix_catalog_template,
         ),
         (
             manifest.parent / "scripts" / "emit-command-catalog.ps1",
