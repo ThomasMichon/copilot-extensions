@@ -10,7 +10,8 @@ The current plugin includes:
 
 - a Python package and `agent-index` CLI;
 - a loopback FastAPI service with zdd routing and legacy rendezvous discovery;
-- versioned service runtime slots under `~/.agent-index/versions/<version>`;
+- lightweight client runtime slots under `~/.agent-index/versions/<version>`;
+- immutable host `[store]` generations materialized and selected by dispatch;
 - durable service data under `~/.agent-index/data/`;
 - a durable embedding-engine venv/daemon under `~/.agent-index/engine`;
 - source connectors for local git, GitHub issues/PRs, and Azure DevOps work
@@ -18,7 +19,8 @@ items/PRs;
 - chunkers for code, Markdown, YAML, and fallback text;
 - LanceDB content/vector stores, path state, task queue, GC/repair, and
 similarity-cluster artifacts;
-- CLI (the agent-facing surface), HTTP, and direct MCP query surfaces;
+- CLI (the agent-facing surface), HTTP, and an optional stdio MCP adapter
+requiring the host dependency profile (unavailable in the base-only client);
 - host/client role routing for read commands over SSH.
 
 That means the old "Phase 1 service shell only" description is stale. Future
@@ -47,8 +49,9 @@ stays on the host and is resolved there.
 | Area | Location | Owner |
 |------|----------|-------|
 | Runtime root | `~/.agent-index` | plugin installer |
-| Versioned service slots | `~/.agent-index/versions/<payload-version>+<profile>` | immutable role-qualified service runtime |
-| Active service marker | `~/.agent-index/current-version` | atomic runtime selection |
+| Client slots | Legacy `~/.agent-index/versions/<payload-version>`; namespaced profile-qualified slots | client installer |
+| Client runtime marker | `~/.agent-index/current-version` | client installer selection only |
+| Host runtime generations | physical root chosen by dispatch policy | dispatch materialization, selection, rollback, retention |
 | zdd routing table | `~/.agent-index/active.json` | active service endpoint |
 | Legacy rendezvous | `~/.agent-index/run/endpoint.json` | fallback diagnostics |
 | Durable index/task data | `~/.agent-index/data/` | shared across service versions |
@@ -56,9 +59,11 @@ stays on the host and is resolved there.
 | Machine config | `~/.agent-index/config.yaml` or `AGENT_INDEX_CONFIG` | role, device, client endpoints |
 | Repo config | `<repo>/.agent-index/config.yaml` | indexer designation and corpus scopes |
 
-The installer follows the repo's durable-vs-versioned runtime pattern: service
-code is versioned and swappable; index data and queued work are durable and
-shared. See `../../../docs/patterns/durable-vs-versioned-runtime.md`.
+Host generations follow `../../../docs/patterns/managed-companion-runtime.md`.
+Plugin installers never install `[store]`, even with a host role override.
+Index data and queued work remain durable and outside managed runtime cells.
+The independent embedding engine is neither provisioned nor restarted during
+client updates or host replacement.
 
 ## Activation, lifecycle, and supervision
 
@@ -77,42 +82,44 @@ provision a runtime and never start a service.
 selection, runtime provisioning, or transport routing. `status` reports
 structured `inactive` outside an opted-in repository; other commands are
 refused.
-4. In an active repository, explicit setup or first operational use may
-provision the runtime. Setup writes the selected role, then
-reconciles the role-specific runtime and service. Noninteractive setup requires
-an explicit role flag. `host` and `client` use distinct immutable slots even
-when the plugin payload version is unchanged; `.agent-index-runtime-profile.json`
-strictly binds the slot to its role and installed extras.
+4. In an active repository, admitted explicit commands may provision only the
+base/client runtime. Setup writes the selected role without a second
+role-specific install or service reconcile. Noninteractive setup requires an
+explicit role flag. The gate never executes a historical `payload-dir` installer
+as a fallback, because that installer may retain obsolete host-install authority.
 5. The installer-readiness probe is deliberately configuration-empty at session
 start, including for opted-in repositories, so generic launch reconciliation
 does not download packages or start services. Existing explicit installer and
 runtime commands remain available.
-6. `install update` performs an active/passive zdd service cutover when a live
-service is healthy. A passive generation publishes an instance-specific receipt
-only; it neither starts the shared task runner nor publishes `endpoint.json` or
-`running-version.json` before an ownership-checked promotion. After passive
-health succeeds, governance is rechecked, promotion makes the target read-ready,
-and only then is the zdd route published; maintenance or deactivation retires
-the passive target without draining, rerouting, or stopping the old service.
-7. Namespaced marker CAS, deploy-manifest publication, and service
-reconciliation are one durable installation transaction. Retry/bootstrap
-finishes a validated target or restores the prior marker and manifest.
-`cell-recover` resumes interrupted selection/cutover work and reaps only exact,
-ownership-attested passive or demoted instances. Legacy
-`agent-index deploy --recover` remains compatible; namespaced direct
-deploy/recovery requires the live cell transaction receipt.
+6. The attributed host companion declares its dependencies. Only the
+already-running dispatch service can build, select, readiness-gate, replace,
+roll back, or retain that runtime. Its adapter uses
+`AGENT_INDEX_MANAGED_PYTHON` and the non-installing `__managed-start` CLI seam.
+It forces external engine mode and disables worker-owned engine startup/stop;
+service readiness is not a claim that an embedding engine is available.
+Managed indexing workers stay in the supervisor's containment boundary and use
+explicit `-B` even with isolated `-I`, so they cannot write bytecode into a
+receipt-hashed generation or survive beyond its process lease.
+Public `start`, `serve`, `restart`, `deploy`, and the historical payload
+`__cell-start` entry point cannot launch a host, even if that variable is set.
+7. Namespaced client marker CAS, deploy-manifest publication, profile receipts,
+and transaction recovery retain existing installation governance. Namespaced
+host provisioning and lifecycle are unsupported and fail closed. Compatibility
+bootstrap/ensure hooks are inert in every mode. Previously completed host
+receipts remain diagnostic/ownership evidence, never permission to build or
+start a replacement.
 
-Every launch path requires the canonical exact four-field
+Client runtime selection requires the canonical exact four-field
 `.install-complete.json`, the strict role/extras profile receipt, a valid
 `pyvenv.cfg`, and a successful `import agent_index` from beneath the selected
 slot. POSIX permits only the standard `bin/python` venv symlink after validating
 its owned parent slot and resolved executable; all other linked/reparse runtime
 artifacts remain rejected. A partial or corrupt slot is never dispatched.
 
-Scheduled tasks/systemd units are not the default persistence mechanism. They are
-an opt-in advanced tier via the installer `register-tasks` action. This follows
-`../../../docs/patterns/service-lifecycle-supervision.md` and
-`../../../docs/patterns/graceful-daemon-cutover.md`.
+Host service scheduled tasks/systemd units are no longer installed or started
+by plugin commands. `register-tasks` refuses rather than establishing a second
+host lifecycle owner. Explicit independent engine commands retain their
+existing lifecycle, outside this integration.
 
 ## Service HTTP surface
 
@@ -139,8 +146,8 @@ See `../../../docs/patterns/local-endpoint-discovery.md`.
 
 Public CLI verbs are implemented in `src/agent_index/__main__.py`:
 
-- `start` / `serve`, `stop`, `status`, `version`
-- `deploy [--recover]` for active/passive cutover
+- `stop`, `status`, `version`
+- `start` / `serve`, `restart`, `deploy [--recover]` report dispatch ownership
 - `index [--source S] [--full]`
 - `search <query> [--source S] [--language L] [--repo R] [--limit N] [--json]`
 - `similar <chunk_id> [--limit N] [--source S]`
@@ -150,6 +157,10 @@ Public CLI verbs are implemented in `src/agent_index/__main__.py`:
 - `setup`, `role`, and `capability`
 
 `index-worker` is an internal subprocess entry point used by the task runner.
+`__managed-start` runs only an already-selected interpreter for a configured
+host and contains no package-manager or runtime-builder fallback. The
+interpreter binding is a dispatch adapter contract, not a security boundary
+against arbitrary Python code run by the same filesystem owner.
 
 ## Indexing pipeline
 

@@ -29,7 +29,7 @@ section.
 | [agent-ssh](../plugins/agent-ssh/) | SSH profile emitter + verifier | `~/.agent-ssh/` | `~/.local/bin/agent-ssh` | On-demand CLI; owns the transport-provider contract for SSH profile modules |
 | [agent-logger](../plugins/agent-logger/) | Session-logging CLI + writer agent + local/rescue sync sources | `~/.agent-logger/` | `~/.local/bin/agent-logger` | On-demand CLI + a scheduled `session-sync` (Windows task / Linux systemd timer) |
 | [agent-dispatch](../plugins/agent-dispatch/) | Task-queue engine + per-host coordinator + CLI/MCP | `~/.agent-dispatch/` | `~/.local/bin/agent-dispatch` | On-demand CLI + optional always-on coordinator and label-gated embody supervisor(s) (Windows tasks / Linux systemd units) |
-| [agent-index](../plugins/agent-index/) | Indexing/search service shell | `~/.agent-index/` | `~/.local/bin/agent-index` | Phase 1 always-on service shell (Windows task / Linux systemd user unit); indexing engine arrives in later slices |
+| [agent-index](../plugins/agent-index/) | Lightweight retrieval CLI + managed host companion | `~/.agent-index/` (client and durable data); dispatch-owned host generations | `~/.local/bin/agent-index` | Explicit configured host service supervised and provisioned only by running agent-dispatch; independent warm engine unchanged |
 | [agent-machines](../plugins/agent-machines/) | Machine-state reconciler CLI | `~/.agent-machines/` | `~/.local/bin/agent-machines` | On-demand CLI (no daemon); reconciled at session launch on its gated machines |
 | [agent-vault](../plugins/agent-vault/) | Local secret store: CLI + vault service | `~/.agent-vault/` | `~/.local/bin/agent-vault` | On-demand CLI + a persistent vault daemon (Windows scheduled task / Linux systemd user unit); ships a `vault-askpass` SUDO_ASKPASS helper |
 
@@ -57,6 +57,13 @@ payload-local agent shims move with the payload itself. The repo uses
 **`uv`/`uv pip`** throughout
 — not `uvx`, `uv tool install`, or `pipx`. The full payload-vs-runtime contract
 lives in [install-contract.md](install-contract.md).
+
+Agent Index's optional host `[store]` footprint is the narrow
+[managed companion](patterns/managed-companion-runtime.md) exception: its own
+installer provisions only the lightweight base/client package. The running
+dispatch supervisor consumes an attributed declaration to build and select
+immutable host generations; plugin commands and session hooks cannot install
+or launch that host. Namespaced host integration is not yet supported.
 
 Every runtime `agent-*` plugin also carries `payload-invocation.json`, generated
 POSIX/PowerShell/CMD shims under its payload `bin/` or manifest `outputDir`, and

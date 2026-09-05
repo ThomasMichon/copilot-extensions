@@ -8,7 +8,7 @@
 - **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
   [agent-index/`lightweight-client-and-declared-host-service`](../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
 - **Umbrella issue:** #2007
-- **Sub-issues:** #2010, #2013, #2081, #2103
+- **Sub-issues:** #2010, #2013, #2081, #2103, #2116
 
 ## Guiding Intent
 
@@ -136,11 +136,11 @@ rollback-required runtime generation.
 
 ### Slice 3E — First plugin integration
 
-- [ ] Move one configured host companion from legacy installed-runtime
+- [x] Move one configured host companion from legacy installed-runtime
   supervision to the generic managed-runtime contract.
-- [ ] Keep unconfigured repositories, client roles, missing dispatch, and
+- [x] Keep unconfigured repositories, client roles, missing dispatch, and
   unsupported installation contexts inert.
-- [ ] Prove that plugin commands and direct CLI calls cannot trigger companion
+- [x] Prove that plugin commands and direct CLI calls cannot trigger companion
   package installation.
 
 **Completion gate:** an opted-in host is turn-key through dispatch-owned
@@ -159,7 +159,7 @@ provisioning, while every non-host path stays lightweight and inert.
 - [x] Retention tests cover active and foreign leases, stale leases, rollback
   protection, bounded retention, root-lock serialization, and linked or
   mismatched cells.
-- [ ] Integration tests prove missing runtime triggers dispatch provisioning
+- [x] Integration tests prove missing runtime triggers dispatch provisioning
   only, while plugin-side self-provision paths remain disabled.
 - [ ] Run the agent-dispatch and integrated plugin suites, repository guards,
   install-contract checks, and the applicable clean-room provisioning scenario
@@ -289,3 +289,53 @@ provisioning and cutover code is not a candidate for wholesale reuse.
   No PR, issue closure, dispatch completion, or worktree finalization is part
   of this phase. Specific-plugin integration, independent engine lifecycle,
   host placement, and failover remain outside this slice.
+
+### 2026-09-05 — Agent Index host integration implemented
+
+- Implemented #2116, closing the first-integration portion of
+  `agent-index/lightweight-client-and-declared-host-service` and
+  `plugin-services/delegated-heavy-companion-runtime` without changing their
+  intent. The attributed registrar declaration names one payload-versioned
+  `service` / `host` runtime: the plugin's vendored helpers and `[store]`, never
+  the independent engine/model extra.
+- The provider resolves a configured project host without an installed runtime
+  and uses its own read-only installation-context resolver. Non-project,
+  unconfigured, client, unattributed, requested, namespaced, and blocked contexts
+  do not authorize materialization or launch. Missing dispatch has no fallback.
+- Lifecycle adapters consume only the dispatch-selected interpreter and never
+  enter the legacy selector or an installer. Public host start/restart/deploy
+  refuse. Explicit setup/install/update remain base/client-only, namespaced
+  host provisioning is refused before building, and compatibility bootstrap
+  and ensure hooks are inert. Client installation governance is preserved.
+- Service/worker launches cannot provision, start, or stop the independent
+  embedding engine. Managed workers remain within supervisor containment and
+  explicitly pass `-B` with `-I`; full-text subprocesses also suppress bytecode,
+  preserving receipt-hashed generations. An independent review identified the
+  isolated-worker bytecode hazard and the base-only CLI's missing optional MCP
+  dependency. The latter now reports unavailable without installing anything;
+  the read CLI and hosted HTTP surface remain supported.
+- The full Agent Index suite passed: **506 passed, 61 skipped**. It includes a
+  real service launch from a windowless Python parent, two health cycles with
+  no owned visible/foreground windows observed on native Windows, exact stop,
+  and absence of plugin runtime selection or an engine footprint.
+- The full Agent Dispatch suite passed: **2,079 passed, 5 skipped**, including
+  the shipped declaration/provider through attributed discovery,
+  materialization, readiness, recovery authority, and inertness tests.
+  The initial run exposed new test-fixture environment restoration removing an
+  empty Git config value on Windows; the fixture now leaves unchanged environment
+  entries untouched, and the complete rerun passed.
+- Ruff, install contract, version consistency, headless launch, documentation
+  consistency/references, generated payload, and vendored installation-context
+  and shared-library synchronization gates passed. Marketplace isolation
+  remains report-only (**728 findings**).
+- The unchanged installer-readiness gate reproduced its known Windows
+  JSON-stat baseline: **41 passed, 6 failed** with
+  `JSON document changed while it was being read`. Docker is unavailable, so
+  container clean-room scenarios were not run; this is native Windows evidence,
+  not a native Linux or fresh-container installation claim.
+- Agent Index advances to **0.1.0-dev135**, including its source fallback and
+  declaration version; Agent Dispatch advances to **0.1.2-dev26**. Both exceed
+  current `main`. Slice 3E is code-complete locally; no PR publication, issue/task
+  closure, or worktree finalization is part of this phase. Namespaced host
+  migration, independent warm-engine lifecycle, and multi-host policy remain
+  outside this integration.

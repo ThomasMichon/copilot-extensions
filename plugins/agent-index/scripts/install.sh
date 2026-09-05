@@ -62,6 +62,12 @@ fi
 
 # Status and dependency-light cell-slot actions do not enter the self-stage
 # block that creates and reaps legacy staging directories.
+case "$__legacy_action" in
+    start|ensure)
+        _skip 'Host service lifecycle is managed by an already-running agent-dispatch supervisor; this installer cannot launch it'
+        [[ "$__legacy_action" == ensure ]] && exit 0
+        exit 2 ;;
+esac
 __skip_self_stage=0
 if [[ "$__legacy_action" == cell-provision ||
       "$__legacy_action" == cell-recover ||
@@ -1140,12 +1146,9 @@ _ensure_runtime() {
     fi
 
     _pip_install() {
-        # A client delegates over SSH and runs NO local store/engine, so it
-        # installs only the light base package; the host adds the [store] extra
-        # (lancedb/pyarrow/tree-sitter/numpy) it needs to read/write the index.
-        # Those have no Windows-ARM64 wheels and are unneeded on a client.
+        # This installer owns only the lightweight base/client footprint.
         local pkg="$PLUGIN_DIR"
-        [[ "$(_install_role)" == "host" ]] && pkg="$PLUGIN_DIR[store]"
+        # Dispatch alone installs host dependencies; every plugin-side build is base-only.
         if [[ "$have_uv" -eq 1 ]]; then
             uv pip install --python "$VENV_PYTHON" "$pkg"
         else
@@ -1278,15 +1281,6 @@ _activation_role() {
     [[ -n "$py" ]] || { printf 'unconfigured'; return 0; }
     role="$("$py" "$SCRIPT_DIR/resolve-activation-role.py" --config "$repo_cfg" --machine "$me" 2>/dev/null || true)"
     case "$role" in host|client) printf '%s' "$role" ;; *) printf 'unconfigured' ;; esac
-}
-
-_install_role() {
-    # Preserve host/store dependencies whenever this machine explicitly owns a
-    # host runtime, even if invoked from a client/unconfigured repository.
-    local machine_role
-    machine_role="$(_machine_role)"
-    if [[ "$machine_role" == "host" ]]; then printf 'host'; return 0; fi
-    _activation_role
 }
 
 _install_engine() {
@@ -1678,43 +1672,18 @@ _service_cutover() {
 case "$ACTION" in
     install)
         _ensure_runtime
-        _role="$(_activation_role)"
-        if [[ "$_role" == "host" ]]; then
-            _install_service
-            _install_engine || true
-            _register_engine_daemon
-        else
-            _skip "Service install skipped (role: $_role) -- no configured host activation"
-            _skip "Engine runtime skipped (role: $_role) -- set 'role: host' in $INSTALL_DIR/config.yaml or AGENT_INDEX_ROLE=host to host the durable engine"
-        fi
+        _skip 'Host service is dispatch-managed; independent embedding engine unchanged'
         ;;
     update)                                                         # Thread B: installer-driven graceful zdd cutover (a version update must never kill in-flight work)
         _downgrade_guard
         _ensure_runtime
-        # Engine: warm-preserving OUTLIVE -- leave a serving engine untouched
-        # (fixed port 8421); only start one if it is down (host only), so the
-        # service cutover always has a reconnect target.
-        if [[ "$(_activation_role)" == "host" ]]; then _ensure_engine_running; fi
-        # Service: move a live (even healthy) routed service to the new slot via
-        # the zdd flip rather than leaving stale code serving; else fall back to
-        # _install_service's SIGTERM-graceful `systemctl restart`.
-        if _service_cutover; then
-            _install_service --no-restart
-        elif [[ "$(_activation_role)" == "host" ]]; then
-            _install_service
-        else
-            _skip "Service install skipped (role: $(_activation_role)) -- no configured host activation"
-        fi
+        _skip 'Host service is dispatch-managed; independent embedding engine unchanged'
         ;;
     ensure) _ensure_running ;;  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
     stamp) do_stamp ;;
     provision)
         _ensure_runtime
-        if [[ "$(_activation_role)" == "host" ]]; then
-            _install_service
-        else
-            _skip "Service install skipped (role: $(_activation_role)) -- no configured host activation"
-        fi
+        _skip 'Only the lightweight client runtime was provisioned; host service is dispatch-managed'
         ;;
     engine) _install_engine || true; _register_engine_daemon ;;     # explicit host-side provisioning (role-independent)
     engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)

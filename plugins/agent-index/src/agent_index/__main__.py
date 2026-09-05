@@ -567,14 +567,43 @@ def _config_from_args(args: argparse.Namespace) -> Config:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    if _expected_installation_id():
+    """Public commands never launch or provision the optional host service."""
+    print(
+        "agent-index: the host service is managed by agent-dispatch. "
+        "An already-running dispatch supervisor must provision and start it; "
+        "this command cannot start, restart, deploy, or install the host runtime.",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def cmd_managed_start(args: argparse.Namespace) -> int:
+    """Run an already-selected interpreter without any provisioning fallback."""
+    from . import transport
+
+    selected = os.environ.get("AGENT_INDEX_MANAGED_PYTHON", "")
+    try:
+        selected_matches = bool(selected) and os.path.samefile(
+            selected, sys.executable
+        )
+    except OSError:
+        selected_matches = False
+    role, indexer = transport.plan_route()
+    if (
+        not selected_matches
+        or _expected_installation_id()
+        or os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+        or role != "host"
+        or not indexer
+    ):
         print(
-            "agent-index: public start/serve is unavailable for an active "
-            "namespaced installation",
+            "agent-index: managed host launch requires the dispatch-selected "
+            "interpreter and an effective host configuration in a supported "
+            "installation context.",
             file=sys.stderr,
         )
         return 2
-    serve(_config_from_args(args), passive=bool(getattr(args, "passive", False)))
+    serve(_config_from_args(args), passive=False)
     return 0
 
 
@@ -625,6 +654,16 @@ def cmd_version(_args: argparse.Namespace) -> int:
 
 
 def cmd_mcp(_args: argparse.Namespace) -> int:
+    import importlib.util
+
+    if importlib.util.find_spec("mcp") is None:
+        print(
+            "agent-index: the optional stdio MCP dependencies are unavailable "
+            "in the lightweight client runtime. Use the read CLI or the hosted "
+            "HTTP service; this command will not install host dependencies.",
+            file=sys.stderr,
+        )
+        return 2
     from agent_index.mcp_app import serve_stdio
 
     serve_stdio()
@@ -703,6 +742,12 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
         "ssh_targets": ssh_targets,
         "repo": str(root) if root else None,
         "written": {"machine_config": str(role_path)},
+        "service": {
+            "manager": "agent-dispatch" if role == "host" else None,
+            "state": "dispatch-managed" if role == "host" else "not-required",
+            "started_by_setup": False,
+            "provisioned_by_setup": False,
+        },
     }
     if getattr(args, "json", False):
         return _emit(result)
@@ -720,8 +765,9 @@ def _setup_multi(cfg, args, this: str, root, indexers: list[dict]) -> int:
         else:
             print("  routing endpoints: (unset) -- add endpoints to the repo's indexers list")
     else:
-        print("  next: run the installer here to provision the service + engine daemon "
-              "(agent-index-install install)")
+        print("  host service: managed by an already-running agent-dispatch "
+              "supervisor; setup does not provision or start it. "
+              "The independent embedding engine is unchanged.")
     print(f"  machine config: {role_path}")
     return 0
 
@@ -834,6 +880,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
         "endpoint": endpoint,
         "repo": str(root) if root else None,
         "written": written,
+        "service": {
+            "manager": "agent-dispatch" if role == "host" else None,
+            "state": "dispatch-managed" if role == "host" else "not-required",
+            "started_by_setup": False,
+            "provisioned_by_setup": False,
+        },
     }
     if getattr(args, "json", False):
         return _emit(result)
@@ -855,10 +907,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print(f"  repo config:    {written.get('repo_config')}")
     print(f"  machine config: {written['machine_config']}")
     if role == "host":
-        print("  next: run the installer here to provision the service + engine daemon "
-              "(agent-index-install install)")
+        print("  host service: managed by an already-running agent-dispatch "
+              "supervisor; setup does not provision or start it. "
+              "The independent embedding engine is unchanged.")
     else:
-        print("  next: run the installer here for the client (service/CLI, no model stack).")
+        print("  next: use the lightweight client CLI; no local host service is installed.")
         if ssh and endpoint:
             print(f"        establish the trusted transport, e.g. an SSH port-forward via '{ssh}' "
                   f"so {endpoint} reaches the indexer '{designated}'.")
@@ -1540,12 +1593,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_start = sub.add_parser("start", help="run the local service shell")
     add_start_args(p_start)
     p_start.set_defaults(func=cmd_start)
+    p_restart = sub.add_parser("restart", help="report dispatch-owned host lifecycle")
+    p_restart.set_defaults(func=cmd_start)
     p_serve = sub.add_parser("serve", help="alias for start")
     add_start_args(p_serve)
     p_serve.set_defaults(func=cmd_start)
+    p_managed = sub.add_parser("__managed-start", help=argparse.SUPPRESS)
+    add_start_args(p_managed)
+    p_managed.set_defaults(func=cmd_managed_start)
     p_cell_start = sub.add_parser("__cell-start", help=argparse.SUPPRESS)
     add_start_args(p_cell_start)
-    p_cell_start.set_defaults(func=cmd_cell_start)
+    p_cell_start.set_defaults(func=cmd_start)
     p_status = sub.add_parser("status", help="print service status as JSON")
     p_status.set_defaults(func=cmd_status)
     p_readiness = sub.add_parser(
@@ -1566,7 +1624,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_deploy.add_argument("--force", action="store_true")
     p_deploy.add_argument("--recover", action="store_true")
     p_deploy.add_argument("--json", action="store_true")
-    p_deploy.set_defaults(func=cmd_deploy)
+    p_deploy.set_defaults(func=cmd_start)
 
     p_index = sub.add_parser("index", help="populate or refresh the durable index")
     p_index.add_argument("--source", help="source name to index instead of configured defaults")

@@ -26,6 +26,8 @@ JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 LEGACY_ROOT="${AGENT_INDEX_HOME:-$HOME/.agent-index}"
 RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
 COMMAND="${1:-status}"
+# Retained hook entry points never bootstrap or start a runtime.
+case "$COMMAND" in __cell-bootstrap|__cell-service-ensure) exit 0 ;; esac
 PY_GATE="$(command -v python3 || command -v python || true)"
 EFFECTIVE_RESOLVER="$SCRIPT_DIR/resolve_effective_config.py"
 
@@ -314,47 +316,11 @@ if [ "$ACTUAL_MODE" = namespaced ] &&
     exit 2
 fi
 
-if [ "$ACTUAL_MODE" = namespaced ] &&
-   { [ "$COMMAND" = start ] || [ "$COMMAND" = serve ]; }; then
-    printf '%s\n' '[agent-index] public start/serve is unavailable for an active namespaced installation.' >&2
-    exit 126
-fi
-
-if [ "$ACTUAL_MODE" = namespaced ] && [ "$COMMAND" = deploy ]; then
-    if [ -z "${AGENT_INDEX_CELL_TRANSACTION:-}" ] ||
-       [ -z "${AGENT_INDEX_CELL_TRANSACTION_TOKEN:-}" ] ||
-       [ -z "${AGENT_INDEX_CELL_TRANSACTION_ID:-}" ]; then
-        printf '%s\n' '[agent-index] namespaced deploy/recovery requires the owning cell transaction.' >&2
-        exit 126
-    fi
-fi
-
-if [ "$COMMAND" = "__cell-bootstrap" ] ||
-   [ "$COMMAND" = "__cell-service-ensure" ]; then
-    if [ "$ACTUAL_MODE" != namespaced ]; then
-        exit 10
-    fi
-    if [ "$RESOLUTION_STATUS" != ready ] ||
-       [ "$RESOLUTION_REASON" != namespaced-active ]; then
-        exit 0
-    fi
-    CELL_RUNTIME="$PAYLOAD_ROOT/scripts/cell-runtime.py"
-    [ -f "$CELL_RUNTIME" ] || exit 126
-    CELL_PYTHON="$(_find_management_python 2>/dev/null || true)"
-    [ -n "$CELL_PYTHON" ] || exit 126
-    if [ "$COMMAND" = "__cell-bootstrap" ]; then
-        nohup "$CELL_PYTHON" -I -X utf8 "$CELL_RUNTIME" bootstrap \
-            --context "$CONTEXT" \
-            --expected-marketplace-id "$MARKETPLACE_ID" \
-            --durable-home "$CONTEXT_DURABLE_HOME" >/dev/null 2>&1 &
-        exit 0
-    fi
-    "$CELL_PYTHON" -I -X utf8 "$CELL_RUNTIME" service-ensure-kick \
-        --context "$CONTEXT" \
-        --expected-marketplace-id "$MARKETPLACE_ID" \
-        --durable-home "$CONTEXT_DURABLE_HOME"
-    exit $?
-fi
+case "$COMMAND" in
+    start|serve|restart|deploy|__managed-start|__cell-start)
+        printf '%s\n' '[agent-index] host service lifecycle is managed by an already-running agent-dispatch supervisor; this command cannot provision or launch it.' >&2
+        exit 126 ;;
+esac
 
 _configured_role() {
     local role=""
@@ -553,15 +519,8 @@ _setup_role() {
 
 SNAPSHOT_INSTALLER=""
 _select_snapshot_installer() {
-    local marker="$ROOT/payload-dir" snapshot=""
-    [ -f "$marker" ] && snapshot="$(cat "$marker" 2>/dev/null || true)"
-    SNAPSHOT_INSTALLER="$snapshot/scripts/install.sh"
-    if [ -f "$SNAPSHOT_INSTALLER" ]; then return 0; fi
-    local installer="$PLUGIN_DIR/scripts/install.sh"
-    [ -f "$installer" ] || return 127
-    bash "$installer" stamp >&2 || return $?
-    snapshot="$(cat "$marker" 2>/dev/null || true)"
-    SNAPSHOT_INSTALLER="$snapshot/scripts/install.sh"
+    # Historical payload-dir installers may still carry host-install authority.
+    SNAPSHOT_INSTALLER="$PLUGIN_DIR/scripts/install.sh"
     [ -f "$SNAPSHOT_INSTALLER" ] || return 127
 }
 
@@ -599,6 +558,11 @@ _release_provision_lock() {
 
 _provision_runtime() {
     if [ "$ACTUAL_MODE" = namespaced ]; then
+        local provision_role="${SETUP_ROLE:-$(_configured_role 2>/dev/null || true)}"
+        if [ "$provision_role" = host ]; then
+            printf '%s\n' '[agent-index] host service is dispatch-managed; namespaced host provisioning is unavailable.' >&2
+            return 126
+        fi
         if [ "$RESOLUTION_STATUS" != ready ] ||
            [ "$RESOLUTION_REASON" != namespaced-active ]; then
             printf '%s\n' '[agent-index] deactivation-pending installation cannot provision a new runtime.' >&2
@@ -646,9 +610,8 @@ _provision_runtime() {
     }
     local prior_role="${AGENT_INDEX_ROLE-}" had_role=0
     [ -n "${AGENT_INDEX_ROLE+x}" ] && had_role=1
-    local provision_role="${SETUP_ROLE:-$(_configured_role 2>/dev/null || true)}"
-    export AGENT_INDEX_ROLE="${provision_role:-client}"
-    printf '%s\n' '[agent-index] provisioning the runtime after explicit setup/configuration.' >&2
+    export AGENT_INDEX_ROLE=client
+    printf '%s\n' '[agent-index] provisioning only the lightweight client runtime after explicit setup/configuration.' >&2
     printf '%s\n' '::agent-provisioning:: plugin=agent-index eta_seconds=120 reason=setup' >&2
     bash "$SNAPSHOT_INSTALLER" provision >&2
     local rc=$?
@@ -665,7 +628,6 @@ _provision_runtime() {
 }
 
 SETUP_ROLE=""
-SETUP_PROVISIONED=0
 SETUP_ROLE_TEMPORARY=0
 SETUP_ROLE_HAD_ENV=0
 SETUP_ROLE_PRIOR="${AGENT_INDEX_ROLE-}"
@@ -751,12 +713,15 @@ if [ -z "${AGENT_RT_PY:-}" ]; then
         printf '%s\n' '[agent-index] runtime is not ready and self-provisioning is disabled.' >&2
         exit 1
     fi
+    case "$COMMAND" in
+        setup|search|similar|clusters|index|mcp|capability|engine) ;;
+        *) printf '%s\n' '[agent-index] this command cannot provision a runtime.' >&2; exit 2 ;;
+    esac
     _provision_runtime || {
         provision_rc=$?
         _restore_setup_role
         exit "$provision_rc"
     }
-    [ "$COMMAND" = setup ] && [ -n "$SETUP_ROLE" ] && SETUP_PROVISIONED=1
 fi
 
 if [ "$COMMAND" = setup ]; then
@@ -765,12 +730,6 @@ if [ "$COMMAND" = setup ]; then
     _restore_setup_role
     [ -n "$SETUP_OUTPUT" ] && printf '%s\n' "$SETUP_OUTPUT"
     [ "$SETUP_RC" -eq 0 ] || exit "$SETUP_RC"
-    CONFIGURED_SETUP_ROLE="$(_configured_role 2>/dev/null || true)"
-    if [ "$SETUP_PROVISIONED" -eq 0 ] ||
-       { [ -n "$SETUP_ROLE" ] && [ "$CONFIGURED_SETUP_ROLE" != "$SETUP_ROLE" ]; }; then
-        SETUP_ROLE="$CONFIGURED_SETUP_ROLE"
-        AGENT_INDEX_REBUILD_CURRENT=1 _provision_runtime || exit $?
-    fi
     exit 0
 fi
 

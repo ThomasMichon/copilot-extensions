@@ -154,7 +154,7 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
 
     monkeypatch.setattr(__main__.subprocess, "Popen", popen)
 
-    rc = __main__.main([
+    rc = __main__.cmd_deploy(__main__.build_parser().parse_args([
         "deploy",
         "--json",
         "--health-timeout",
@@ -162,7 +162,7 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
         "--drain-timeout",
         "11",
         "--force",
-    ])
+    ]))
 
     assert rc == 0
     assert captured["config_dir"] == tmp_path / "home"
@@ -642,7 +642,7 @@ def test_deploy_refuses_foreign_active_endpoint(monkeypatch, tmp_path, capsys) -
         ),
     )
 
-    rc = __main__.main(["deploy", "--json"])
+    rc = __main__.cmd_deploy(__main__.build_parser().parse_args(["deploy", "--json"]))
 
     assert rc == 1
     payload = json.loads(capsys.readouterr().out)
@@ -659,7 +659,9 @@ def test_namespaced_deploy_requires_cell_transaction(
     monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
     monkeypatch.setenv("AGENT_INDEX_INSTALLATION_ID", "cell-a/agent-index")
 
-    rc = __main__.main(["deploy", "--recover", "--json"])
+    rc = __main__.cmd_deploy(
+        __main__.build_parser().parse_args(["deploy", "--recover", "--json"])
+    )
 
     assert rc == 1
     payload = json.loads(capsys.readouterr().out)

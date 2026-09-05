@@ -614,7 +614,7 @@ class ContentStore:
             "t.create_fts_index('content', replace=True)\n"
         )
         proc = subprocess.run(
-            [sys.executable, "-c", code, self._db_path, self._table_name],
+            [sys.executable, "-B", "-c", code, self._db_path, self._table_name],
             capture_output=True,
             text=True,
             timeout=timeout,

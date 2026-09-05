@@ -193,7 +193,9 @@ def evaluate(
         return _result(
             "failed",
             "The agent-index service is unavailable: "
-            f"{detail}. Re-run the installer and inspect `agent-index status`.",
+            f"{detail}. Inspect the already-running agent-dispatch supervisor "
+            "and `agent-index status`; plugin installers cannot provision or "
+            "start the managed host.",
         )
     index = status.get("index")
     if not isinstance(index, Mapping) or index.get("chunks") is None:

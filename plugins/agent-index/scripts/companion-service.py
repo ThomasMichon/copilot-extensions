@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Drive an already-installed agent-index runtime without provisioning it."""
+"""Drive only the host interpreter selected by the dispatch supervisor."""
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from companion_context import installation_mode
 
 _PROVIDER_ENVIRONMENT = {
     "AGENT_INDEX_EFFECTIVE_CONFIG",
     "AGENT_INDEX_MACHINE",
     "AGENT_INDEX_NO_SELFPROVISION",
     "AGENT_INDEX_REPO",
+    "AGENT_INDEX_MANAGED_PYTHON",
 }
 _SESSION_CONTEXT_ENVIRONMENT = {
     "CLAUDE_PLUGIN_ROOT",
@@ -25,24 +31,14 @@ _SESSION_CONTEXT_ENVIRONMENT = {
 
 
 def _runtime_gate(action: str) -> list[str]:
-    scripts = Path(__file__).resolve().parent
-    if os.name == "nt":
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        if shell is None:
-            raise RuntimeError("PowerShell is unavailable")
-        return [
-            shell,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(scripts / "runtime-gate.ps1"),
-            action,
-        ]
-    shell = shutil.which("bash")
-    if shell is None:
-        raise RuntimeError("bash is unavailable")
-    return [shell, str(scripts / "runtime-gate.sh"), action]
+    value = os.environ.get("AGENT_INDEX_MANAGED_PYTHON", "")
+    python = Path(value)
+    if not value or not python.is_absolute() or not python.is_file():
+        raise RuntimeError("agent-index requires a dispatch-selected host interpreter")
+    return [
+        str(python), "-I", "-B", "-X", "utf8", "-m", "agent_index",
+        "__managed-start" if action == "start" else action,
+    ]
 
 
 def _runtime_environment() -> dict[str, str]:
@@ -52,10 +48,15 @@ def _runtime_environment() -> dict[str, str]:
     environment = {
         key: value
         for key, value in os.environ.items()
-        if not key.upper().startswith("AGENT_INDEX_") and key not in _SESSION_CONTEXT_ENVIRONMENT
+        if not key.upper().startswith(("AGENT_INDEX_", "PIP_", "UV_", "PYTHON"))
+        and key.upper() not in _SESSION_CONTEXT_ENVIRONMENT
     }
     environment.update(approved)
     environment["AGENT_INDEX_NO_SELFPROVISION"] = "1"
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONNOUSERSITE"] = "1"
+    environment["AGENT_INDEX_ENGINE_MODE"] = "external"
+    environment["AGENT_INDEX_INDEX_ENSURE_ENGINES"] = "0"
     return environment
 
 
@@ -69,6 +70,7 @@ def _run(action: str, *, capture: bool = False) -> subprocess.CompletedProcess[s
         encoding="utf-8",
         errors="replace",
         check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
@@ -102,16 +104,7 @@ def _health() -> int:
 
 
 def _companion_mode_supported() -> bool:
-    readiness = _run("__dispatch-companion-mode", capture=True)
-    if readiness.returncode != 0:
-        if readiness.stderr:
-            print(readiness.stderr.strip(), file=sys.stderr)
-        return False
-    try:
-        mode = json.loads(readiness.stdout)
-    except (TypeError, ValueError) as exc:
-        print(f"agent-index companion mode is malformed: {exc}", file=sys.stderr)
-        return False
+    mode = installation_mode()
     if mode.get("schema_version") != 1 or mode.get("supported") is not True:
         print(
             "agent-index companion lifecycle is unavailable for installation "
@@ -123,15 +116,12 @@ def _companion_mode_supported() -> bool:
 
 
 def _mode() -> int:
-    result = _run("__dispatch-companion-mode", capture=True)
-    if result.stdout:
-        print(result.stdout.strip())
-    if result.returncode != 0 and result.stderr:
-        print(result.stderr.strip(), file=sys.stderr)
-    return result.returncode
+    print(json.dumps(installation_mode(), separators=(",", ":"), sort_keys=True))
+    return 0
 
 
 def _start() -> int:
+    _runtime_gate("start")
     if not _companion_mode_supported():
         return 1
 
@@ -171,19 +161,15 @@ def main() -> int:
         print("usage: companion-service.py {start|stop|health|mode}", file=sys.stderr)
         return 2
     action = sys.argv[1]
-    if action == "health":
-        return _health()
-    if action == "mode":
-        return _mode()
-    if action == "start":
-        try:
-            return _start()
-        except (OSError, RuntimeError) as exc:
-            print(f"agent-index companion start failed: {exc}", file=sys.stderr)
-            return 1
     try:
+        if action == "health":
+            return _health()
+        if action == "mode":
+            return _mode()
+        if action == "start":
+            return _start()
         return _stop()
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         print(f"agent-index companion {action} failed: {exc}", file=sys.stderr)
         return 1
 

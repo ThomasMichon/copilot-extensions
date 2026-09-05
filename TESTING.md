@@ -161,7 +161,10 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   process-cwd isolation, and live platform-aware Bash/PowerShell parity).
 - **agent-index:** fail-closed effective repository/required-state-root
   activation, gated command/scope contribution, non-mutating CLI admission,
-  explicit first-use provisioning, and ordered direct-SSH routing parity.
+  base-only explicit first-use provisioning, attributed dispatch-managed host
+  declaration and interpreter-only launch, unsupported/missing-supervisor
+  inertness, and ordered direct-SSH routing parity. Agent-dispatch also consumes
+  the shipped declaration/provider in its materialization and launch tests.
 - **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
 - **agent-containers:** config, lifecycle, the lease broker, and the resolver.
 - **agent-mcp:** config loading, auth injectors, transports, bridge framing, the

@@ -1086,8 +1086,12 @@ def _runtime_module_path(
 
 
 def _runtime_install_target(snapshot_root: Path, role: str | None) -> str:
-    suffix = "[store]" if role == "host" else ""
-    return f"{snapshot_root}{suffix}"
+    if role == "host":
+        raise CellError(
+            "host dependencies are dispatch-managed; namespaced host "
+            "provisioning is unavailable"
+        )
+    return str(snapshot_root)
 
 
 def _build_runtime(
@@ -1098,6 +1102,8 @@ def _build_runtime(
     runtime_version: str,
     role: str | None,
 ) -> Path:
+    # Reject before even a smoke build can create an environment.
+    _runtime_install_target(snapshot_root, role)
     _assert_directory(snapshot_root, "payload snapshot")
     _assert_path_chain(slot, slot.parent.parent, "runtime slot")
     _assert_not_reparse(slot, "runtime slot")
@@ -4130,6 +4136,10 @@ def _provision_locked(
     lock_token: str,
 ) -> dict[str, Any]:
     plugin_root = Path(str(validated["pluginRoot"]))
+    environment = _cell_environment(validated, context, marketplace_id)
+    role = _configured_role(environment)
+    if role == "host":
+        raise CellError("host provisioning is dispatch-managed")
     pending = _load_selection_transaction(plugin_root, context, marketplace_id)
     if pending is not None:
         return _resume_selection_transaction(
@@ -4149,8 +4159,6 @@ def _provision_locked(
         durable_home,
         validated,
     )
-    environment = _cell_environment(validated, context, marketplace_id)
-    role = _configured_role(environment)
     runtime_version = _profile_runtime_version(version, role)
     _run_context(
         management_payload_root,
@@ -5097,6 +5105,30 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     payload_root = _absolute_path(Path(__file__).parent.parent)
     try:
+        if args.action in {"bootstrap", "service-ensure-kick", "service-ensure-worker"}:
+            print(json.dumps({"status": "dispatch-managed", "started": False}))
+            return 0
+        if args.action in {
+            "cell-provision", "slot-cutover", "cell-recover", "service-ensure"
+        }:
+            context = _absolute_path(args.context)
+            validated = _validate_context(
+                payload_root,
+                context,
+                args.expected_marketplace_id,
+                _durable_home(context, args.durable_home),
+                expected_payload_root=_absolute_path(
+                    getattr(args, "origin_payload_root", None) or payload_root
+                ),
+            )
+            environment = _cell_environment(
+                validated, context, args.expected_marketplace_id
+            )
+            if _configured_role(environment) == "host":
+                raise CellError(
+                    "host service lifecycle is dispatch-managed; this "
+                    "namespaced installation context does not support managed hosts"
+                )
         if args.action == "cell-provision":
             value = provision(args, payload_root)
         elif args.action == "slot-cutover":

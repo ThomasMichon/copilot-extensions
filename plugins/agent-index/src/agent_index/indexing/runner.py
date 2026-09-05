@@ -20,7 +20,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from agent_procutil import detached_kwargs, windowless_python
+from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 from agent_index.indexing.task_store import TERMINAL, TaskStatus
 
@@ -405,7 +405,8 @@ class TaskRunner:
 
         Launched with THIS service's ``sys.executable`` — the active versioned
         slot's python — so the worker runs from its own immutable version folder
-        and survives a later cutover of the service (near-ZDD).
+        and survives a legacy cutover. Managed workers stay in the supervisor's
+        containment boundary so their runtime generation cannot outlive its lease.
         """
         log_path = self.store.data_dir / "worker.log"
         # Workers run one-at-a-time (no interleaving), but bound the shared log so
@@ -420,6 +421,7 @@ class TaskRunner:
             cmd = [
                 windowless_python(sys.executable),
                 "-I",
+                "-B",
                 "-X",
                 "utf8",
                 "-m",
@@ -439,7 +441,11 @@ class TaskRunner:
                 "stderr": logf,
                 "stdin": subprocess.DEVNULL,
             }
-            kwargs.update(detached_kwargs())
+            kwargs.update(
+                no_window_kwargs()
+                if os.environ.get("AGENT_INDEX_MANAGED_PYTHON")
+                else detached_kwargs()
+            )
             return subprocess.Popen(cmd, **kwargs)  # noqa: S603
         finally:
             with suppress(Exception):

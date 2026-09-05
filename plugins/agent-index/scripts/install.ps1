@@ -91,6 +91,10 @@ if ($Action -notin @(
 
 # Status and dependency-light cell-slot actions do not enter the self-stage
 # block that creates and reaps legacy staging directories.
+if ($Action -in @('start', 'ensure', 'register-tasks')) {
+    Write-Host '[agent-index] Host service lifecycle is managed by an already-running agent-dispatch supervisor; this installer cannot launch or register it.'
+    exit $(if ($Action -eq 'ensure') { 0 } else { 2 })
+}
 $cellSlotAction = $Action -in @(
     'cell-provision',
     'cell-recover',
@@ -1382,13 +1386,8 @@ function Install-Runtime {
         exit 1
     }
     Remove-ConsoleTrampolines -VenvDir $VenvDir
-    # A client delegates read commands to the indexer host over SSH and runs NO
-    # local store/engine, so it installs only the light base package (CLI +
-    # transport + service shell). The host adds the [store] extra
-    # (lancedb/pyarrow/tree-sitter/numpy) it needs to read/write the index --
-    # those have no Windows-ARM64 wheels and are unneeded (and unbuildable) on a
-    # client, so gating keeps an ARM64 client provisionable.
-    $pkgSpec = if ((Get-InstallRole) -eq 'host') { "$PluginDir[store]" } else { "$PluginDir" }
+    # Host dependencies belong exclusively to dispatch-owned managed cells.
+    $pkgSpec = "$PluginDir"
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $out = & uv pip install --python $VenvPython $pkgSpec 2>&1 | Out-String
     } else {
@@ -1541,15 +1540,6 @@ function Get-ActivationRole {
         Select-Object -Last 1)
     $role = ("$role").Trim().ToLower()
     return $(if ($role -in @('host', 'client')) { $role } else { 'unconfigured' })
-}
-
-function Get-InstallRole {
-    # Preserve host/store dependencies whenever this machine explicitly owns a
-    # host runtime, even if the update was invoked from a client/unconfigured
-    # repository. This keeps a permitted cutover from activating a light slot.
-    $machineRole = Get-MachineRole
-    if ($machineRole -eq 'host') { return 'host' }
-    return Get-ActivationRole
 }
 
 function Test-EnginePort {
@@ -2156,27 +2146,12 @@ function Invoke-Uninstall {
 switch ($Action) {
     'install' {
         Install-Runtime
-        $role = Get-ActivationRole
-        if ($role -eq 'host') {
-            Install-Engine | Out-Null
-        } else {
-            Write-Skip "Engine runtime skipped (role: $role) -- set 'role: host' in $InstallDir\config.yaml or AGENT_INDEX_ROLE=host to host the durable engine"
-        }
-        Ensure-Running   # DEFAULT user-mode start (no scheduled task, no elevation)
+        Write-Skip 'Host service is dispatch-managed; independent embedding engine unchanged'
     }
     'update' {
         Invoke-DowngradeGuard
         Install-Runtime
-        # Engine daemon: warm-preserving OUTLIVE + reconnect guarantee (Thread B;
-        # durable-vs-versioned-runtime). The heavy embedding engine runs in its own
-        # durable venv on a FIXED endpoint (127.0.0.1:8421); a service update never
-        # rebuilds or restarts it, and the new service reconnects to the same warm
-        # engine. Ensure-EngineRunning leaves a serving engine untouched and only
-        # starts one if it is down, so the cutover always has a reconnect target.
-        if ((Get-ActivationRole) -eq 'host') { Ensure-EngineRunning }
-        # Service: installer-driven zdd cutover -- move a live (even healthy) service
-        # to the new slot, rather than leaving stale code serving.
-        Invoke-ServiceCutover
+        Write-Skip 'Host service is dispatch-managed; independent embedding engine unchanged'
     }
     'ensure' { Ensure-Running }  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
     'register-tasks' { Invoke-RegisterTasks }  # OPT-IN advanced tier (scheduled tasks) -- the sole action that may (opt-in) self-elevate that ONE step
@@ -2187,5 +2162,8 @@ switch ($Action) {
     'stop' { Invoke-Stop }
     'uninstall' { Invoke-Uninstall }
     'stamp' { Invoke-Stamp }
-    'provision' { Install-Runtime; Ensure-Running }
+    'provision' {
+        Install-Runtime
+        Write-Skip 'Only the lightweight client runtime was provisioned; host service is dispatch-managed'
+    }
 }
