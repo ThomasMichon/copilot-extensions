@@ -1106,6 +1106,53 @@ async def test_stalled_carrier_restart_returns_structured_504(
 
 
 @pytest.mark.asyncio
+async def test_carrier_request_timeout_returns_structured_504(
+    monkeypatch,
+) -> None:
+    class _Carrier:
+        async def request(self, *_args, **_kwargs):
+            raise TimeoutError("request timed out")
+
+    class _Lease:
+        def __init__(self) -> None:
+            self.carrier = _Carrier()
+            self.released = False
+
+        async def release(self):
+            self.released = True
+
+    class _Resolver:
+        def resolve_ssh_environment(self, _host):
+            return object(), SimpleNamespace(
+                alias="example-host",
+                user=None,
+                port=22,
+                shell="bash",
+                name="linux",
+            )
+
+    lease = _Lease()
+
+    async def acquire(*_args, **_kwargs):
+        return lease
+
+    monkeypatch.setattr(
+        "agent_bridge.carrier.acquire_remote_carrier", acquire
+    )
+    service = RemoteOperationService(_Resolver(), request_timeout=1.0)
+
+    with pytest.raises(RemoteBridgeError) as exc:
+        await service.session_status(
+            "example-host", "session-a", caller_id="consumer-a"
+        )
+
+    assert exc.value.status == 504
+    assert exc.value.code == "remote_operation_timeout"
+    assert exc.value.reconnectable is True
+    assert lease.released is True
+
+
+@pytest.mark.asyncio
 async def test_multi_environment_machine_key_requires_exact_alias() -> None:
     windows = SimpleNamespace(
         alias="host-win",

@@ -27,6 +27,32 @@ class _RawResponse(_Response):
         return self._payload
 
 
+def test_open_sends_configured_bearer_token(monkeypatch):
+    captured = {}
+
+    def urlopen(request, *, timeout):
+        captured["authorization"] = request.get_header("Authorization")
+        captured["timeout"] = timeout
+        return _Response({})
+
+    monkeypatch.setattr(
+        "agent_dispatch.bridge_remote.urllib.request.urlopen",
+        urlopen,
+    )
+
+    response = LocalBridgeRemoteClient._open(
+        "http://127.0.0.1:8080/health",
+        "test-token",
+        timeout=2.0,
+    )
+    response.close()
+
+    assert captured == {
+        "authorization": "Bearer " + "test-token",
+        "timeout": 2.0,
+    }
+
+
 def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch):
     calls = []
 
