@@ -55,7 +55,7 @@ store = [
     "tree-sitter-python>=0.25.0,<1.0",
     "tree-sitter-javascript>=0.25.0,<1.0",
     "tree-sitter-typescript>=0.23.2,<1.0",
-    "tree-sitter-bash>=0.23,<1.0",
+    "tree-sitter-bash>=0.25.1,<1.0",
     # The legacy `agent-index mcp` stdio MCP server (mcp_app). HOST-side and
     # lazily imported (cmd_mcp) -- a client reaches tools through the agent-mcp
     # `cli` bridge (which spawns `agent-index <sub>`), never `agent-index mcp`.
