@@ -64,20 +64,20 @@ def test_read_and_mutating_operations_use_distinct_http_generations(monkeypatch)
     client = LocalBridgeRemoteClient()
 
     client.session_status(
-        "host-a",
+        "  HOST-A  ",
         "session-a",
         caller_id="agent-dispatch-fleet",
         timeout=8.0,
     )
-    client.resolve_live_session("host-a", "worktree-a", timeout=6.0)
+    client.resolve_live_session("  HOST-A  ", "worktree-a", timeout=6.0)
     client.create_session(
-        "host-a",
+        "  HOST-A  ",
         agent="task-worker",
         prompt="work",
         caller_id="fleet-task-a",
         timeout=120.0,
     )
-    client.end_session("host-a", "session-a", timeout=20.0)
+    client.end_session("  HOST-A  ", "session-a", timeout=20.0)
 
     assert calls[0][2]["required_protocol"] == 11
     assert calls[1][2]["required_protocol"] == 11

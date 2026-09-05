@@ -381,7 +381,7 @@ def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
     monkeypatch.setattr(bridge, "run_ssh_command", fake_run)
 
     assert bridge.resume_steered_owner(
-        "Worker-Host/worktree-1",
+        "  Worker-Host  /worktree-1",
         "task-42",
         "resume now",
         owner_session_id="session-42",
@@ -426,14 +426,14 @@ def test_resume_steered_owner_uses_carrier_without_ssh(monkeypatch):
     )
 
     assert bridge.resume_steered_owner(
-        "Worker-Host/worktree-1",
+        "  Worker-Host  /worktree-1",
         "task-42",
         "resume now",
         owner_session_id="session-42",
         idempotency_key="wake:task-42:1:2",
     )
     assert calls == {
-        "host": "Worker-Host",
+        "host": "worker-host",
         "target": "worktree-1",
         "sender": "agent-dispatch-steer",
         "message": "resume now",

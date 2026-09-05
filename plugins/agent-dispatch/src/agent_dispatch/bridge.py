@@ -342,16 +342,24 @@ def redrive_embodied_worker(
         "--prompt-file",
         "-",
     ]
+    normalized_machine = (
+        bridge_remote.normalize_host(machine) if machine is not None else None
+    )
     local_machine = remote_dispatch.local_machine()
+    normalized_local_machine = (
+        bridge_remote.normalize_host(local_machine)
+        if local_machine is not None
+        else None
+    )
     is_remote = (
-        machine is not None
-        and local_machine is not None
-        and machine.casefold() != local_machine.casefold()
+        normalized_machine is not None
+        and normalized_local_machine is not None
+        and normalized_machine != normalized_local_machine
     )
     if is_remote:
         try:
             bridge_remote.LocalBridgeRemoteClient().send_live_message(
-                machine,
+                normalized_machine,
                 worktree,
                 sender=sender,
                 message=prompt,
@@ -375,7 +383,7 @@ def redrive_embodied_worker(
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=3",
-            machine.lower(),
+            normalized_machine,
             remote_cmd,
         ]
     else:
@@ -432,6 +440,7 @@ def resume_steered_owner(
     )
     if not separator or not machine or not worktree:
         return resume_worker(owner_session_id, prompt, timeout=timeout)
+    machine = bridge_remote.normalize_host(machine)
     bridge_argv = [
         "agent-bridge",
         "send",
@@ -455,7 +464,7 @@ def resume_steered_owner(
     local_machine = remote_dispatch.local_machine()
     is_remote = (
         local_machine is not None
-        and machine.casefold() != local_machine.casefold()
+        and machine != bridge_remote.normalize_host(local_machine)
     )
     if is_remote:
         try:

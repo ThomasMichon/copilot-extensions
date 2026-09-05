@@ -826,6 +826,7 @@ def spawn_fleet_headless_worker(
     :class:`EmbodyUnavailable`; a fallback host lacking ``agent-bridge`` surfaces
     as a non-zero exit (the caller fails the reservation).
     """
+    host = bridge_remote.normalize_host(host)
     seed = fleet_autopilot_worker_prompt(
         task_id,
         origin=origin,
@@ -1007,6 +1008,7 @@ def fleet_body_verdict(
 
     if not host or not session_id:
         return tracking.UNKNOWN
+    host = bridge_remote.normalize_host(host)
     effective_timeout = timeout if timeout is not None else 8.0
     try:
         status = bridge_remote.LocalBridgeRemoteClient().session_status(
@@ -1051,6 +1053,7 @@ def stop_fleet_body(
     host: str, session_id: str, *, timeout: float | None = 20.0
 ) -> bool:
     """End one remote fleet body so its process is fully reclaimed."""
+    host = bridge_remote.normalize_host(host)
     effective_timeout = timeout if timeout is not None else 20.0
     try:
         bridge_remote.LocalBridgeRemoteClient().end_session(
@@ -1093,6 +1096,7 @@ def fleet_body_activity(
 
     if not host or not session_id:
         return None
+    host = bridge_remote.normalize_host(host)
     effective_timeout = timeout if timeout is not None else 8.0
     try:
         session = bridge_remote.LocalBridgeRemoteClient().session_status(

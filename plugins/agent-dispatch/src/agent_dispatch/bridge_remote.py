@@ -30,6 +30,11 @@ class RemoteBridgeOperationError(RuntimeError):
         super().__init__(message)
 
 
+def normalize_host(host: str) -> str:
+    """Return the canonical SSH alias used by remote Bridge operations."""
+    return host.strip().lower()
+
+
 class LocalBridgeRemoteClient:
     """Call the local Agent Bridge daemon without importing its runtime."""
 
@@ -233,7 +238,7 @@ class LocalBridgeRemoteClient:
     def _host_path(host: str, suffix: str) -> str:
         return (
             "/api/v1/remote/"
-            + urllib.parse.quote(host, safe="")
+            + urllib.parse.quote(normalize_host(host), safe="")
             + suffix
         )
 
