@@ -6,6 +6,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -17,16 +18,19 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Protocol
 
 from agent_procutil import contained_test_mode, detached_kwargs, no_window_kwargs
 from plugin_activation import read_json_object, write_json_object_atomic
 
+from .managed_runtime import MaterializedRuntime
 from .registrations import (
     RegistrationError,
     RegistrationKind,
     validate_companion_config_result,
     validate_companion_health_result,
+    validate_registration,
 )
 
 _REPARSE_POINT = 0x400
@@ -55,6 +59,176 @@ class CompanionResolution:
     startup_timeout: float
     stop_timeout: float
     health_timeout: float
+    managed_snapshot: ManagedLaunchSnapshot | None = None
+
+
+@dataclass(frozen=True)
+class ManagedLaunchSnapshot:
+    """Immutable launch data; never aliases a provider, declaration, or result map."""
+
+    _json: str
+
+    @classmethod
+    def capture(
+        cls, resolution: CompanionResolution, runtimes: tuple[MaterializedRuntime, ...]
+    ) -> ManagedLaunchSnapshot:
+        registration = resolution.registration
+        declared = registration["spec"]["managed_runtime"]["runtimes"]
+        if len(declared) != len(runtimes) or any(
+            (runtime.name, runtime.version, runtime.profile)
+            != (item["name"], item["version"], item["profile"])
+            for runtime, item in zip(runtimes, declared)
+        ):
+            raise CompanionError("managed launch runtime set does not match its declaration")
+        bindings = {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
+        for item, runtime in zip(declared, runtimes):
+            name = item["python_env"]
+            if name.upper().startswith(("AGENT_DISPATCH_", "COPILOT_COMPANION_")):
+                raise CompanionError("managed Python binding uses a reserved environment name")
+            bindings[name] = str(runtime.python)
+        replaced = {name.casefold() for name in bindings}
+        environment = {
+            key: value for key, value in resolution.environment.items()
+            if key.casefold() not in replaced
+        }
+        environment.update(bindings)
+        return cls.from_dict(
+            {
+                "schema_version": 1,
+                "registration": registration,
+                "command": list(resolution.command),
+                "stop_command": list(resolution.stop_command) if resolution.stop_command else None,
+                "health_probe": list(resolution.health_probe) if resolution.health_probe else None,
+                "cwd": resolution.cwd,
+                "environment": environment,
+                "startup_timeout": resolution.startup_timeout,
+                "stop_timeout": resolution.stop_timeout,
+                "health_timeout": resolution.health_timeout,
+                "runtimes": [
+                    {
+                        "name": runtime.name,
+                        "version": runtime.version,
+                        "profile": runtime.profile,
+                        "content_digest": runtime.content_digest,
+                        "cell": str(runtime.cell),
+                        "python": str(runtime.python),
+                        "receipt": str(runtime.receipt),
+                    }
+                    for runtime in runtimes
+                ],
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, value: object) -> ManagedLaunchSnapshot:
+        """Validate persisted data before it can select a process or cell."""
+        keys = {
+            "schema_version", "registration", "command", "stop_command", "health_probe",
+            "cwd", "environment", "startup_timeout", "stop_timeout", "health_timeout", "runtimes",
+        }
+        if not isinstance(value, dict) or set(value) != keys or value["schema_version"] != 1:
+            raise CompanionError("managed launch snapshot has an invalid schema")
+        registration = value["registration"]
+        if (
+            not isinstance(registration, dict)
+            or not isinstance(registration.get("id"), str)
+            or registration.get("kind") != RegistrationKind.PLUGIN_COMPANION
+            or registration.get("source") != "declared"
+            or not isinstance(registration.get("spec"), dict)
+            or not registration["spec"].get("managed_runtime")
+        ):
+            raise CompanionError("managed launch snapshot lacks declaration authority")
+        try:
+            validate_registration(registration["kind"], registration["spec"])
+        except RegistrationError as exc:
+            raise CompanionError("managed launch snapshot declaration is invalid") from exc
+        for key in ("command", "stop_command", "health_probe"):
+            argv = value[key]
+            if key == "stop_command" and argv is None:
+                continue
+            if (
+                not isinstance(argv, list) or not argv
+                or not all(isinstance(part, str) and part and "\0" not in part for part in argv)
+                or not Path(argv[0]).is_absolute()
+            ):
+                raise CompanionError(f"managed launch snapshot requires exact {key} argv")
+        if not isinstance(value["cwd"], str) or not Path(value["cwd"]).is_absolute():
+            raise CompanionError("managed launch snapshot cwd must be absolute")
+        environment = value["environment"]
+        if not isinstance(environment, dict) or not all(
+            isinstance(key, str) and key and "=" not in key and "\0" not in key
+            and isinstance(item, str) and "\0" not in item
+            for key, item in environment.items()
+        ):
+            raise CompanionError("managed launch snapshot environment is invalid")
+        for key in ("startup_timeout", "stop_timeout", "health_timeout"):
+            timeout = value[key]
+            if (
+                isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                or not math.isfinite(timeout) or not 0 < timeout <= 3600
+            ):
+                raise CompanionError("managed launch snapshot timeout is invalid")
+        runtimes = value["runtimes"]
+        declared = registration["spec"]["managed_runtime"]["runtimes"]
+        if not isinstance(runtimes, list) or len(runtimes) != len(declared):
+            raise CompanionError("managed launch snapshot runtime set is incomplete")
+        for runtime, item in zip(runtimes, declared):
+            if (
+                not isinstance(runtime, dict)
+                or set(runtime) != {
+                    "name", "version", "profile", "content_digest", "cell", "python", "receipt"
+                }
+                or not all(isinstance(part, str) and part for part in runtime.values())
+                or any(runtime[key] != item[key] for key in ("name", "version", "profile"))
+                or not re.fullmatch(r"[0-9a-f]{64}", runtime["content_digest"])
+                or any(not Path(runtime[key]).is_absolute() for key in ("cell", "python", "receipt"))
+                or environment.get(item["python_env"]) != runtime["python"]
+            ):
+                raise CompanionError("managed launch snapshot runtime binding is inconsistent")
+        return cls(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+    def to_dict(self) -> dict:
+        return json.loads(self._json)
+
+    @property
+    def authority(self) -> str:
+        return companion_authority_fingerprint(self.to_dict()["registration"])
+
+    @property
+    def fingerprint(self) -> str:
+        value = self.to_dict()
+        value["registration"] = self.authority
+        return hashlib.sha256(
+            json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    @property
+    def runtimes(self) -> tuple[MaterializedRuntime, ...]:
+        return tuple(
+            MaterializedRuntime(
+                name=runtime["name"], version=runtime["version"], profile=runtime["profile"],
+                content_digest=runtime["content_digest"], cell=Path(runtime["cell"]),
+                python=Path(runtime["python"]), receipt=Path(runtime["receipt"]),
+            )
+            for runtime in self.to_dict()["runtimes"]
+        )
+
+    def resolution(self) -> CompanionResolution:
+        value = self.to_dict()
+        registration = value["registration"]
+        registration["managed_launch_digest"] = self.fingerprint
+        return CompanionResolution(
+            registration=registration,
+            command=tuple(value["command"]),
+            stop_command=tuple(value["stop_command"]) if value["stop_command"] else None,
+            health_probe=tuple(value["health_probe"]),
+            cwd=value["cwd"],
+            environment=MappingProxyType(value["environment"]),
+            startup_timeout=value["startup_timeout"],
+            stop_timeout=value["stop_timeout"],
+            health_timeout=value["health_timeout"],
+            managed_snapshot=self,
+        )
 
 
 @dataclass(frozen=True)
@@ -94,6 +268,14 @@ class CompanionController(Protocol):
 
     def reconcile_receipts(self, adopted_registration_ids: set[str]) -> None: ...
 
+    def selected_managed(self, registration_id: str) -> ManagedLaunchSnapshot | None: ...
+
+    def forget_managed(self, registration_id: str) -> None: ...
+
+    def recover_live(self, snapshot: ManagedLaunchSnapshot) -> CompanionLaunch | None: ...
+
+    def retire_managed(self, registration_id: str) -> None: ...
+
 
 def companion_authority_fingerprint(registration: dict) -> str:
     """Identity that authorizes retention of a prior provider result."""
@@ -101,6 +283,7 @@ def companion_authority_fingerprint(registration: dict) -> str:
         {
             "id": registration.get("id"),
             "kind": registration.get("kind"),
+            "source": registration.get("source"),
             "owner": registration.get("owner"),
             "plugin": registration.get("plugin"),
             "runtime_revision": registration.get("runtime_revision"),
@@ -735,8 +918,13 @@ def _terminate_windows_tree(pid: int) -> None:
     )
 
 
-def _force_retire(process: CompanionProcess) -> None:
+def _force_retire(process: CompanionProcess, *, strict: bool = False) -> None:
     process.terminate()
+    if strict:
+        process.wait(timeout=5)
+        if process.poll() is None:
+            raise CompanionIndeterminate("managed companion retirement is not confirmed")
+        return
     with contextlib.suppress(Exception):
         process.wait(timeout=5)
 
@@ -786,6 +974,69 @@ class DefaultCompanionController:
         with contextlib.suppress(OSError):
             self._receipt_path(registration_id).unlink()
 
+    def _selection_path(self, registration_id: str) -> Path:
+        return self._receipt_path(registration_id).with_suffix(".managed-launch.json")
+
+    def selected_managed(self, registration_id: str) -> ManagedLaunchSnapshot | None:
+        """Read last-ready state, or the gated receipt of an interrupted first launch."""
+        path = self._selection_path(registration_id)
+        if path.exists():
+            _, record = read_json_object(path)
+            if "managed_snapshot" not in record:
+                raise CompanionError("selected managed launch snapshot is missing")
+        else:
+            record = self._read_receipt(registration_id)
+        if record is None or "managed_snapshot" not in record:
+            return None
+        snapshot = ManagedLaunchSnapshot.from_dict(record["managed_snapshot"])
+        if (
+            record.get("schema_version") != _RECEIPT_VERSION
+            or record.get("registration_id") != registration_id
+            or snapshot.to_dict()["registration"]["id"] != registration_id
+            or record.get("fingerprint") != snapshot.fingerprint
+        ):
+            raise CompanionError("selected managed launch identity is inconsistent")
+        return snapshot
+
+    def forget_managed(self, registration_id: str) -> None:
+        """Withdraw selection, not its published runtime cells."""
+        self._selection_path(registration_id).unlink(missing_ok=True)
+
+    def retire_managed(self, registration_id: str) -> None:
+        """Retire a revoked receipt even when no in-memory unit was adopted."""
+        receipt = self._read_receipt(registration_id)
+        if receipt is not None:
+            self._retire_receipt(receipt, confirm_exit=True)
+            self._delete_receipt(registration_id)
+        self.forget_managed(registration_id)
+
+    def recover_live(self, snapshot: ManagedLaunchSnapshot) -> CompanionLaunch | None:
+        """Adopt only an exact live POSIX receipt; uncertainty never starts a process."""
+        resolution = snapshot.resolution()
+        receipt = self._read_receipt(resolution.registration["id"])
+        if receipt is None or receipt.get("fingerprint") != snapshot.fingerprint:
+            return None
+        if os.name == "nt":
+            # A restarted supervisor cannot reacquire the predecessor's Job handle.
+            return None
+        process = self._recover(resolution, snapshot.fingerprint)
+        if process is None:
+            return None
+        self._wait_ready(resolution, process)
+        return CompanionLaunch(process, recovered=True)
+
+    def _publish_selection(self, snapshot: ManagedLaunchSnapshot) -> None:
+        registration_id = snapshot.to_dict()["registration"]["id"]
+        write_json_object_atomic(
+            self._selection_path(registration_id),
+            {
+                "schema_version": _RECEIPT_VERSION,
+                "registration_id": registration_id,
+                "fingerprint": snapshot.fingerprint,
+                "managed_snapshot": snapshot.to_dict(),
+            },
+        )
+
     def reconcile_receipts(self, adopted_registration_ids: set[str]) -> None:
         """Retire identity-confirmed companions no longer in desired state."""
         if not self.receipt_dir.exists():
@@ -805,16 +1056,29 @@ class DefaultCompanionController:
                     )
                 if registration_id in adopted_registration_ids:
                     continue
-                self._retire_receipt(receipt)
+                self._retire_receipt(receipt, confirm_exit="managed_snapshot" in receipt)
                 path.unlink(missing_ok=True)
             except (CompanionError, CompanionIndeterminate, OSError) as exc:
+                failures.append(f"{path.name}: {exc}")
+        for path in self.receipt_dir.glob("*.managed-launch.json"):
+            try:
+                _, record = read_json_object(path)
+                registration_id = record.get("registration_id")
+                if (
+                    not isinstance(registration_id, str)
+                    or path != self._selection_path(registration_id)
+                ):
+                    raise CompanionError("managed launch selection identity is invalid")
+                if registration_id not in adopted_registration_ids:
+                    self.forget_managed(registration_id)
+            except (CompanionError, OSError, ValueError) as exc:
                 failures.append(f"{path.name}: {exc}")
         if failures:
             raise CompanionIndeterminate(
                 "could not reconcile companion receipts: " + "; ".join(failures)
             )
 
-    def _retire_receipt(self, receipt: dict) -> None:
+    def _retire_receipt(self, receipt: dict, *, confirm_exit: bool = False) -> None:
         pid = receipt.get("pid")
         token = receipt.get("start_token")
         if not isinstance(pid, int) or not isinstance(token, str):
@@ -832,6 +1096,17 @@ class DefaultCompanionController:
             _terminate_windows_tree(pid)
         else:
             _terminate_posix_group(pid)
+        if confirm_exit:
+            deadline = self.monotonic() + 5.0
+            while True:
+                current = self.token_source(pid)
+                if current != token and not (
+                    current is None and (_process_exists(pid) or _process_group_exists(pid))
+                ):
+                    break
+                if self.monotonic() >= deadline:
+                    raise CompanionIndeterminate("prior managed companion retirement is not confirmed")
+                self.sleeper(0.05)
 
     def _recover(
         self, resolution: CompanionResolution, fingerprint: str
@@ -841,8 +1116,15 @@ class DefaultCompanionController:
             return None
         if receipt.get("schema_version") != _RECEIPT_VERSION:
             raise CompanionIndeterminate("companion receipt version is unsupported")
+        if resolution.managed_snapshot is not None:
+            if receipt.get("registration_id") != resolution.registration["id"]:
+                raise CompanionIndeterminate("managed companion receipt identity is inconsistent")
+            if "managed_snapshot" in receipt:
+                recorded = ManagedLaunchSnapshot.from_dict(receipt["managed_snapshot"])
+                if recorded.fingerprint != receipt.get("fingerprint"):
+                    raise CompanionIndeterminate("managed companion receipt snapshot is inconsistent")
         if receipt.get("fingerprint") != fingerprint:
-            self._retire_receipt(receipt)
+            self._retire_receipt(receipt, confirm_exit=resolution.managed_snapshot is not None)
             self._delete_receipt(resolution.registration["id"])
             return None
         if receipt.get("command_digest") != _command_digest(resolution.command):
@@ -863,14 +1145,27 @@ class DefaultCompanionController:
             self._delete_receipt(resolution.registration["id"])
             return None
         if os.name == "nt":
-            self._retire_receipt(receipt)
+            self._retire_receipt(receipt, confirm_exit=resolution.managed_snapshot is not None)
             self._delete_receipt(resolution.registration["id"])
             return None
         return _IdentityProcess(pid, token, self.token_source)
 
     def launch(self, resolution: CompanionResolution, *, fingerprint: str) -> CompanionLaunch:
+        snapshot = resolution.managed_snapshot
+        if snapshot is not None:
+            resolution = snapshot.resolution()
+            if fingerprint != snapshot.fingerprint:
+                raise CompanionError("managed launch fingerprint does not match its snapshot")
         recovered = self._recover(resolution, fingerprint)
         if recovered is not None:
+            if snapshot is not None:
+                try:
+                    self._wait_ready(resolution, recovered)
+                    self._publish_selection(snapshot)
+                except (CompanionError, CompanionIndeterminate, OSError):
+                    _force_retire(recovered, strict=True)
+                    self._delete_receipt(resolution.registration["id"])
+                    raise
             return CompanionLaunch(recovered, recovered=True)
         self.receipt_dir.mkdir(parents=True, exist_ok=True)
         process = _launch_gated(resolution)
@@ -890,40 +1185,46 @@ class DefaultCompanionController:
             "runtime_revision": resolution.registration.get("runtime_revision"),
             "containment": ("windows-job" if os.name == "nt" else "posix-process-group"),
         }
+        if snapshot is not None:
+            receipt["managed_snapshot"] = snapshot.to_dict()
         try:
             write_json_object_atomic(self._receipt_path(resolution.registration["id"]), receipt)
             process.release()
         except Exception as exc:
-            process.terminate()
+            _force_retire(process, strict=snapshot is not None)
             self._delete_receipt(resolution.registration["id"])
             raise CompanionIndeterminate(f"companion receipt/release failed: {exc}") from exc
+        try:
+            self._wait_ready(resolution, process)
+            if snapshot is not None:
+                self._publish_selection(snapshot)
+        except (CompanionError, CompanionIndeterminate, OSError):
+            _force_retire(process, strict=resolution.managed_snapshot is not None)
+            self._delete_receipt(resolution.registration["id"])
+            raise
+        return CompanionLaunch(process)
+
+    def _wait_ready(self, resolution: CompanionResolution, process: CompanionProcess) -> None:
         if resolution.health_probe is not None:
             deadline = self.monotonic() + resolution.startup_timeout
             confirmed_unhealthy = False
             while True:
                 if process.poll() is not None:
-                    _force_retire(process)
-                    self._delete_receipt(resolution.registration["id"])
                     raise CompanionError("companion exited before becoming ready")
                 try:
                     result = self.health(resolution)
                 except CompanionIndeterminate:
                     result = None
-                if result is True:
+                if result is True and process.poll() is None:
                     break
                 if result is False:
                     confirmed_unhealthy = True
                 if self.monotonic() >= deadline:
-                    _force_retire(process)
-                    self._delete_receipt(resolution.registration["id"])
                     error = CompanionError if confirmed_unhealthy else CompanionIndeterminate
                     raise error("companion did not become ready before its startup timeout")
                 self.sleeper(min(0.25, max(0.0, deadline - self.monotonic())))
         elif process.poll() is not None:
-            _force_retire(process)
-            self._delete_receipt(resolution.registration["id"])
             raise CompanionError("companion exited during startup")
-        return CompanionLaunch(process)
 
     def health(self, resolution: CompanionResolution) -> bool | None:
         if resolution.health_probe is None:
@@ -964,9 +1265,9 @@ class DefaultCompanionController:
                 )
             with contextlib.suppress(Exception):
                 process.wait(timeout=resolution.stop_timeout)
-        _force_retire(process)
+        _force_retire(process, strict=resolution.managed_snapshot is not None)
         self._delete_receipt(resolution.registration["id"])
 
     def retire_crashed(self, resolution: CompanionResolution, process: CompanionProcess) -> None:
-        _force_retire(process)
+        _force_retire(process, strict=resolution.managed_snapshot is not None)
         self._delete_receipt(resolution.registration["id"])

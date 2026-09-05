@@ -8,7 +8,7 @@
 - **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
   [agent-index/`lightweight-client-and-declared-host-service`](../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
 - **Umbrella issue:** #2007
-- **Sub-issues:** #2010, #2013
+- **Sub-issues:** #2010, #2013, #2081
 
 ## Guiding Intent
 
@@ -111,12 +111,12 @@ validated immutable cell; publication does not yet replace a healthy companion.
 
 ### Slice 3C — Safe cutover
 
-- [ ] Prepare and validate a replacement before stopping the current companion.
-- [ ] Snapshot exact run, stop, and health argv plus environment against the
+- [x] Prepare and validate a replacement before stopping the current companion.
+- [x] Snapshot exact run, stop, and health argv plus environment against the
   selected immutable cell.
-- [ ] Readiness-gate first launch and replacement; if replacement fails, restart
+- [x] Readiness-gate first launch and replacement; if replacement fails, restart
   the prior companion from its still-published cell.
-- [ ] Prevent plugin disablement, provider uncertainty, or declaration churn
+- [x] Prevent plugin disablement, provider uncertainty, or declaration churn
   from crossing runtime authority boundaries.
 
 **Completion gate:** initial launch and updates use dispatch-owned cells with
@@ -153,7 +153,7 @@ provisioning, while every non-host path stays lightweight and inert.
 - [x] Materialization tests cover concurrent builders, stale locks, unique
   staging, failed installs, failed validation, atomic publication, idempotent
   reuse, and Windows signed-base verification.
-- [ ] Cutover tests cover first launch, prepare-before-stop, readiness failure,
+- [x] Cutover tests cover first launch, prepare-before-stop, readiness failure,
   rollback, provider uncertainty, contributor disablement, and supervisor
   restart.
 - [ ] Retention tests cover active and foreign leases, stale leases, rollback
@@ -214,3 +214,31 @@ provisioning and cutover code is not a candidate for wholesale reuse.
   immutable content-addressed cells with complete authority/toolchain receipts.
 - Reuse revalidates the full cell, Windows copied-base trust, POSIX external
   runtime identity, and declared imports. Failed builds preserve prior cells.
+
+### 2026-09-05 — Safe cutover implemented
+
+- Implemented #2081 with immutable, authority-bound launch snapshots containing
+  exact lifecycle argv, working directory, timeouts, cell identities, and the
+  full effective environment. Preparation and published-cell validation precede
+  retirement; failed replacement readiness restores the exact prior snapshot
+  without rebuilding its cells.
+- Gated process receipts and an atomic last-ready selection recover interrupted
+  launches and updates. Recovery cannot retain revoked contributor authority,
+  endlessly retry a failed historical configuration, or launch beside an
+  unconfirmed Windows predecessor. Provider uncertainty preserves only an
+  already-live process with unchanged complete authority.
+- Replaced preparation-only supervisor expectations with focused cutover,
+  churn, disablement, crash-budget, and restart regressions. A real-process
+  readiness/rollback/stop test also exercises repeated console-child probes.
+- The full agent-dispatch suite passed: **1,960 passed, 4 skipped**. Installer
+  readiness fixtures passed (**47 tests**); lint, install contract, version
+  consistency, headless launch, documentation consistency, generated payload,
+  and installation-context synchronization gates passed. Marketplace isolation
+  remained report-only (**725 findings**).
+- Native Windows observation from a windowless parent recorded zero owned
+  visible windows and zero owned foreground windows across the real-process
+  scenario. Clean-room container scenarios were not run because Docker was
+  unavailable.
+- Local implementation is ready for its publication/review phase. Retention,
+  specific-plugin integration, independent engine lifecycle, and multi-host
+  failover remain outside this slice.

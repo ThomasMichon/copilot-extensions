@@ -95,14 +95,57 @@ environment are not inherited by build subprocesses.
 
 Materialization is preparation only. It does not inject the selected Python into
 a companion environment, stop or replace a process, publish a current pointer,
-lease a generation, or delete a cell.
+lease a generation, or delete a cell. Live selection belongs to the supervisor's
+separate cutover path.
+
+## Safe cutover
+
+The supervisor captures one immutable launch snapshot containing complete
+declaration authority, exact resolved run/stop/health argv, working directory,
+timeouts, selected cell identities, and the **full effective environment**.
+Declared Python bindings replace conflicting provider or inherited values
+case-insensitively. Managed launches disable Python bytecode writes and user-site
+imports; a managed declaration must provide a health probe before it can launch.
+Provider results, subsequent declarations, and later materialization results
+cannot mutate a captured snapshot.
+
+An update prepares and validates its cells and constructs the replacement
+snapshot **before** stopping a healthy predecessor. Run and readiness probes use
+the replacement snapshot; stop uses the predecessor's snapshot. A replacement
+that cannot become ready is retired before the prior still-published cells are
+revalidated and restarted with their exact prior snapshot. Recovery validation
+does not recopy the current payload, rebuild a runtime, or quarantine a cell.
+Failed launches and builds back off rather than repeatedly stopping a rollback.
+
+The existing process receipt records the launch snapshot before the containment
+gate opens. A separate atomically written last-ready selection survives process
+retirement. After a supervisor restart, an unchanged selected authority is
+recovered before newer provider environment or materialization results are
+considered. An interrupted first launch can recover from its gated process
+receipt. Recovery is readiness-gated; failed recovery cannot permanently block a
+prepared current configuration. POSIX adoption requires the exact process-start
+identity. Windows retires the identified predecessor and reacquires Job
+containment by launching again; unconfirmed retirement preserves its receipt and
+blocks another launch.
+
+Provider uncertainty permits only an existing live process under **unchanged
+complete authority**. It does not authorize building, restarting a dead process,
+applying a newer cached provider result, or selecting a different cell.
+Disablement withdraws both live supervision and saved selection. A source,
+owner, activation-scope, or supervision-scope change cannot inherit rollback
+authority merely by retaining the same registration ID. Async work withdrawn or
+superseded during preparation cannot reenter live desired state when it finishes.
+
+Launch snapshots freeze invocation data, not arbitrary files named in argv.
+Lifecycle adapters remain attributed plugin commands; their referenced payload
+files must remain available for those commands to execute. Runtime package inputs
+and selected interpreters, by contrast, belong to the validated immutable cells.
 
 ## Increment boundary
 
-The declaration-contract increment is deliberately non-operative. Validation
-and provenance propagation do not create directories, invoke an environment
-builder or package manager, select a runtime, or change live companion launch.
-Safe cutover and retention remain separate reviewed increments.
+Unmanaged plugin companions retain their existing lifecycle. This increment
+adds no generation leases, retention/garbage collection, specific-plugin
+integration, independent engine lifecycle, or multi-host failover.
 
 ## See Also
 

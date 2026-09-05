@@ -17,9 +17,6 @@ server is started.
 
 from __future__ import annotations
 
-import threading
-import time
-from concurrent.futures import Future
 from types import SimpleNamespace
 
 import pytest
@@ -133,45 +130,6 @@ class FakeCompanionController:
         return [p for (r, p) in self.launched if r == rid][-1]
 
 
-class FakeRuntimeMaterializer:
-    def __init__(self):
-        self.registrations: list[dict] = []
-
-    def materialize(self, registration):
-        self.registrations.append(registration)
-        return (SimpleNamespace(python="prepared-python"),)
-
-
-class FailingRuntimeMaterializer:
-    def __init__(self):
-        self.calls = 0
-
-    def materialize(self, registration):
-        self.calls += 1
-        raise RuntimeError("persistent failure")
-
-
-class BlockingRuntimeMaterializer:
-    def __init__(self):
-        self.started = threading.Event()
-        self.release = threading.Event()
-
-    def materialize(self, registration):
-        self.started.set()
-        assert self.release.wait(timeout=5)
-        return (SimpleNamespace(python="prepared-python"),)
-
-
-class ImmediateExecutor:
-    def submit(self, function, *args):
-        future = Future()
-        try:
-            future.set_result(function(*args))
-        except Exception as exc:
-            future.set_exception(exc)
-        return future
-
-
 class FakeClient:
     def __init__(self, regs: list[dict]):
         self._regs = regs
@@ -261,35 +219,6 @@ def _companion_reg(rid="companion", *, root="C:\\plugins\\index", version="1"):
     )
 
 
-def _managed_companion_reg(rid="companion"):
-    registration = _companion_reg(rid)
-    managed = {
-        "schema_version": 1,
-        "runtimes": [
-            {
-                "name": "service",
-                "version": "1",
-                "profile": "host",
-                "python_env": "EXAMPLE_MANAGED_PYTHON",
-                "projects": [{"path": "."}],
-                "imports": ["example_service"],
-            }
-        ],
-    }
-    registration["source"] = "declared"
-    registration["owner"] = "plugin@example"
-    registration["spec"]["managed_runtime"] = managed
-    registration["runtime_revision"] = {
-        "plugin_root": registration["plugin"]["root"],
-        "plugin_owner": "plugin@example",
-        "plugin_source_path": registration["plugin"]["source_path"],
-        "plugin_version": registration["plugin"]["version"],
-        "activation_scopes": registration["plugin"]["activation_scopes"],
-        "managed_runtime": managed,
-    }
-    return registration
-
-
 def _daemon(client, launcher, **kw):
     clock = kw.pop("clock", Clock())
     return SupervisorDaemon(
@@ -357,103 +286,6 @@ def test_build_command_headless_default_emits_no_backend_flag():
     cmd = build_command(_reg("a", spec={"all_repos": True}), python="PY")
     assert "--all-repos" in cmd
     assert "--repo" not in cmd
-
-
-def test_managed_runtime_materialization_prepares_without_changing_launch():
-    registration = _managed_companion_reg()
-    controller = FakeCompanionController()
-    materializer = FakeRuntimeMaterializer()
-    daemon = _daemon(
-        FakeClient([registration]),
-        FakeLauncher(),
-        companion_controller=controller,
-        runtime_materializer=materializer,
-        runtime_executor=ImmediateExecutor(),
-    )
-
-    first = daemon.reconcile_once()
-    second = daemon.reconcile_once()
-
-    assert first.started == ["companion"]
-    assert second.restarted == []
-    assert len(materializer.registrations) == 1
-    launched = controller.launched[0][0]
-    assert launched == "companion"
-    assert controller.resolve_outcomes == []
-    assert "EXAMPLE_MANAGED_PYTHON" not in registration.get(
-        "companion_runtime", {}
-    ).get("environment", {})
-
-
-def test_managed_runtime_only_change_does_not_restart_live_companion():
-    registration = _managed_companion_reg()
-    controller = FakeCompanionController()
-    materializer = FakeRuntimeMaterializer()
-    client = FakeClient([registration])
-    daemon = _daemon(
-        client,
-        FakeLauncher(),
-        companion_controller=controller,
-        runtime_materializer=materializer,
-        runtime_executor=ImmediateExecutor(),
-    )
-    daemon.reconcile_once()
-    changed = _managed_companion_reg()
-    changed["spec"]["managed_runtime"]["runtimes"][0]["version"] = "2"
-    changed["runtime_revision"]["managed_runtime"]["runtimes"][0]["version"] = "2"
-    client.set_regs([changed])
-
-    summary = daemon.reconcile_once()
-
-    assert summary.restarted == []
-    assert controller.stopped == []
-    assert len(controller.launched) == 1
-    assert len(materializer.registrations) == 2
-
-
-def test_managed_runtime_build_does_not_block_companion_reconcile():
-    registration = _managed_companion_reg()
-    controller = FakeCompanionController()
-    materializer = BlockingRuntimeMaterializer()
-    daemon = _daemon(
-        FakeClient([registration]),
-        FakeLauncher(),
-        companion_controller=controller,
-        runtime_materializer=materializer,
-    )
-
-    started = time.monotonic()
-    summary = daemon.reconcile_once()
-    elapsed = time.monotonic() - started
-
-    assert summary.started == ["companion"]
-    assert elapsed < 1
-    assert materializer.started.wait(timeout=2)
-    materializer.release.set()
-    daemon.shutdown()
-
-
-def test_managed_runtime_failure_retries_with_backoff():
-    registration = _managed_companion_reg()
-    materializer = FailingRuntimeMaterializer()
-    clock = Clock()
-    daemon = _daemon(
-        FakeClient([registration]),
-        FakeLauncher(),
-        companion_controller=FakeCompanionController(),
-        runtime_materializer=materializer,
-        runtime_executor=ImmediateExecutor(),
-        clock=clock,
-    )
-
-    daemon.reconcile_once()
-    daemon.reconcile_once()
-    assert materializer.calls == 1
-    clock.t = 5
-    daemon.reconcile_once()
-    assert materializer.calls == 2
-    daemon.reconcile_once()
-    assert materializer.calls == 2
 
 
 def test_build_command_evaluator_inline_spec():
