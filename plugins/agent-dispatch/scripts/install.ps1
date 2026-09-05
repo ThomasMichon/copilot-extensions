@@ -745,8 +745,10 @@ setlocal
 set "PYTHONUTF8=1"
 set "_PS1=%USERPROFILE%\.local\bin\agent-dispatch.ps1"
 if not exist "%_PS1%" (echo [agent-dispatch] binstub not found: %_PS1%>&2 & exit /b 127)
-where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*)
+set "_PSHOST="
+for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
+if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
