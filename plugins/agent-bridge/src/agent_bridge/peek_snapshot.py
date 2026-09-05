@@ -26,6 +26,8 @@ import base64
 import json
 import shlex
 
+from agent_procutil import no_window_kwargs
+
 # Marker the remote driver prefixes its single JSON result line with, so the
 # caller can extract it from surrounding login-shell / hook noise.
 RESULT_MARKER = "PEEK_JSON:"
@@ -260,6 +262,7 @@ def snapshot_local(
             [sys.executable, "-", session_dir, str(int(tail_lines)),
              str(int(recent_messages)), str(int(message_chars))],
             input=_DRIVER, capture_output=True, text=True, timeout=30,
+            **no_window_kwargs(),
         )
     except Exception as exc:  # pragma: no cover - defensive
         return {"ok": False, "reason": f"local driver failed: {exc}"}

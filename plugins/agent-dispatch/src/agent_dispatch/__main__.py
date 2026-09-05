@@ -3651,9 +3651,9 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     single-instance election stands it down cleanly (pin-not-failover), so a double
     launch is self-correcting. Returns whether the spawn was issued.
     """
-    from .procutil import detached_kwargs, runtime_root, windowless_python
+    from .procutil import runtime_root, windowless_daemon_kwargs
 
-    argv = [windowless_python(sys.executable), "-m", "agent_dispatch", "supervise", "serve"]
+    argv = [sys.executable, "-m", "agent_dispatch", "supervise", "serve"]
     if machine:
         argv += ["--machine", machine]
     if env:
@@ -3666,7 +3666,7 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
             stderr=subprocess.DEVNULL,
             # Launch from the runtime root, never an inherited (possibly payload) CWD.
             cwd=str(runtime_root()),
-            **detached_kwargs(),
+            **windowless_daemon_kwargs(),
         )
         return True
     except OSError as exc:  # pragma: no cover -- launch failure is environmental
