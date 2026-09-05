@@ -1,9 +1,10 @@
 """Declarative static instruction projection management.
 
-Plugins may ship ``instruction-projections.json`` beside ``plugin.json``. This
-module validates those inert declarations, renders provenance-marked repository
-instruction files, and maintains the checked-in projection lock. It never
-executes plugin code and never removes repository files.
+Plugins may ship ``instruction-projections.json`` at the payload root beside a
+supported plugin manifest. This module validates those inert declarations,
+renders provenance-marked repository instruction files, and maintains the
+checked-in projection lock. It never executes plugin code and never removes
+repository files.
 """
 
 from __future__ import annotations
@@ -508,7 +509,8 @@ def _load_specs(
                 str(exc),
             )
             continue
-        available_manifest = False
+        manifest_path: Path | None = None
+        manifest: object = None
         for manifest_relative in (
             PurePosixPath("plugin.json"),
             PurePosixPath(".claude-plugin/plugin.json"),
@@ -533,9 +535,10 @@ def _load_specs(
                 and isinstance(candidate_manifest.get("version"), str)
                 and candidate_manifest["version"]
             ):
-                available_manifest = True
+                manifest_path = candidate
+                manifest = candidate_manifest
                 break
-        if not available_manifest:
+        if manifest_path is None:
             result.add(
                 BLOCKING,
                 "projection-source-unavailable",
@@ -563,12 +566,6 @@ def _load_specs(
                 declaration_path, MAX_DECLARATION_BYTES
             )
             declaration = _load_json_bytes(declaration_raw)
-            manifest_path = _safe_existing_file(
-                payload_root, PurePosixPath("plugin.json")
-            )
-            manifest = _load_json_bytes(
-                _read_bounded_regular(manifest_path, 4096)
-            )
         except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
             result.add(
                 BLOCKING,

@@ -255,8 +255,9 @@ plugin-attributable through its stable owner marker.
 #### Project plugin-owned static fail-safes declaratively
 
 When a plugin owns that minimal fallback, it may ship one bounded
-`instruction-projections.json` declaration beside `plugin.json`. The declaration
-is inert versioned data: each entry names a stable source id, a canonical
+`instruction-projections.json` declaration at the payload root beside a
+supported plugin manifest. The declaration is inert versioned data: each entry
+names a stable source id, a canonical
 payload-relative `.instructions.md` template, one repository-relative
 destination under `.github/instructions/<plugin>/`, the customization kind,
 `applyTo`, and any legacy owner markers used for migration. Templates carry

@@ -352,6 +352,24 @@ def test_nonparticipating_available_plugin_is_not_projection_validated(
     assert result.changed == []
 
 
+def test_projection_participant_supports_legacy_manifest_layout(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin, source = _write_plugin(tmp_path, "market", "policy")
+    root_manifest = plugin / "plugin.json"
+    legacy_manifest = plugin / ".claude-plugin" / "plugin.json"
+    legacy_manifest.parent.mkdir()
+    root_manifest.replace(legacy_manifest)
+
+    result = projections.sync_repository(repo, [source])
+
+    assert result.blocking == 0
+    assert result.declared == 1
+    assert _projection(repo).is_file()
+
+
 def test_sync_refuses_symlinked_repository_root(tmp_path: Path) -> None:
     real_repo = tmp_path / "real-repo"
     real_repo.mkdir()
