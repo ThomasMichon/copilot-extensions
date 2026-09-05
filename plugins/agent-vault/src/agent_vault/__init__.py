@@ -12,4 +12,4 @@ try:
     # hardcoded-version foot-gun that left __version__ lagging the triplet.
     __version__ = _pkg_version("agent-vault")
 except PackageNotFoundError:  # running from source without an install
-    __version__ = "0.1.0-dev85"
+    __version__ = "0.1.0-dev86"

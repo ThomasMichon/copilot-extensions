@@ -960,17 +960,19 @@ print("__REAPED__")
         """Build a best-effort far-side relay-serving probe for Session-Host use.
 
         A false result means the SSH process is alive but the CodeSpace-side
-        loopback relay port is not accepting connections, so the relay supervisor
-        should re-establish. Probe transport failures return True: the probe is a
-        health hint, not a reason to churn an otherwise live relay during a
-        transient command-channel failure.
+        relay listener at ``relay_port`` did not answer a real relay-protocol
+        round-trip (see :func:`build_relay_ping_probe_command`) -- e.g. it is
+        not accepting connections, or something is accepting but not actually
+        speaking the relay protocol (a stale/misrouted listener) -- so the
+        relay supervisor should re-establish. Probe transport failures return
+        True: the probe is a health hint, not a reason to churn an otherwise
+        live relay during a transient command-channel failure.
         """
 
         async def _probe() -> bool:
-            probe = (
-                f'timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/{relay_port}" '
-                "&& echo OK"
-            )
+            from .endpoints import build_relay_ping_probe_command
+
+            probe = build_relay_ping_probe_command(relay_port)
             try:
                 rc, out, _err = await self._transport.run(
                     f"bash -lc {shlex.quote(probe)}",

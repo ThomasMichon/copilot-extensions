@@ -11,6 +11,11 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import socket
+import subprocess
+import sys
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -657,7 +662,12 @@ async def test_relay_serving_probe_checks_far_side_port(monkeypatch):
     )
 
     assert await _FakeRelay.instances[0].serving_probe() is True
-    assert any("/dev/tcp/127.0.0.1/9857" in command for command in t.runs)
+    ran = next(c for c in t.runs if "/dev/tcp/127.0.0.1/9857" in c)
+    # Same relay-protocol round-trip requirement as the endpoint-descriptor
+    # probe (test_endpoint_serving_probe_serves): a bare TCP-accept check is
+    # not sufficient.
+    assert "ping" in ran
+    assert "pong" in ran
 
 
 @pytest.mark.asyncio
@@ -815,8 +825,13 @@ async def test_endpoint_serving_probe_serves(monkeypatch):
     )
     probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
     assert await probe() is True
-    # the probe execs a /dev/tcp accept check against the CS-side listen port
-    assert any("/dev/tcp/127.0.0.1/50629" in str(a) for a in seen["argv"])
+    # The probe connects to the CS-side listen port AND performs a real
+    # relay-protocol round-trip (send "ping", require "pong" back) -- a bare
+    # TCP-accept check is not enough to prove a live relay is answering.
+    argv_text = " ".join(str(a) for a in seen["argv"])
+    assert "/dev/tcp/127.0.0.1/50629" in argv_text
+    assert "ping" in argv_text
+    assert "pong" in argv_text
 
 
 @pytest.mark.asyncio
@@ -844,6 +859,66 @@ async def test_endpoint_serving_probe_transport_error_is_healthy(monkeypatch):
     probe = endpoints_mod.endpoint_serving_probe_factory(_relay_endpoint())(50629)
     # a transport failure is a health hint, never a reason to churn the relay
     assert await probe() is True
+
+
+@pytest.mark.skipif(
+    shutil.which("bash") is None or sys.platform == "win32",
+    reason="requires a native POSIX bash sharing the test process's network "
+           "namespace (a Windows bash.exe wrapper delegates to WSL, which "
+           "cannot reach a socket bound by this process)",
+)
+def test_relay_ping_probe_command_round_trips_against_real_listener():
+    """End-to-end proof (real bash, no fakes) that the probe script only
+    passes when the far side actually speaks the relay protocol -- a bare
+    TCP-accept is not sufficient. Mirrors the exact bug this probe exists to
+    catch (dotfiles #855): a listener that accepts a connection but never
+    answers.
+    """
+    from agent_bridge.session_host.endpoints import build_relay_ping_probe_command
+
+    def _run_probe(port: int) -> subprocess.CompletedProcess:
+        command = build_relay_ping_probe_command(port)
+        return subprocess.run(
+            ["bash", "-lc", command],
+            capture_output=True, text=True, timeout=10,
+        )
+
+    def _serve_ping_pong(port: int) -> None:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", port))
+        srv.listen(1)
+        conn, _ = srv.accept()
+        conn.recv(4096)
+        conn.sendall(b"pong\n\n")
+        conn.close()
+        srv.close()
+
+    def _serve_accept_only(port: int) -> None:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", port))
+        srv.listen(1)
+        conn, _ = srv.accept()
+        conn.recv(4096)
+        conn.close()  # accepts the TCP connection but never answers
+        srv.close()
+
+    live_port, stale_port = 50711, 50712
+
+    live_thread = threading.Thread(target=_serve_ping_pong, args=(live_port,))
+    live_thread.start()
+    live_result = _run_probe(live_port)
+    live_thread.join(timeout=5)
+    assert live_result.returncode == 0
+    assert "OK" in live_result.stdout
+
+    stale_thread = threading.Thread(target=_serve_accept_only, args=(stale_port,))
+    stale_thread.start()
+    stale_result = _run_probe(stale_port)
+    stale_thread.join(timeout=5)
+    assert stale_result.returncode != 0
+    assert "OK" not in stale_result.stdout
 
 
 # -- dispatch-path auth-helper (re)deploy (dotfiles #733 T2) ---------------
