@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,20 @@ PLUGIN = Path(__file__).resolve().parents[1]
 PROVIDER = PLUGIN / "scripts" / "companion-provider.py"
 SERVICE = PLUGIN / "scripts" / "companion-service.py"
 REGISTER = PLUGIN / "scripts" / "register-dispatch-companion.py"
+
+
+@pytest.fixture
+def companion_profile(tmp_path: Path, monkeypatch) -> Path:
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    if os.name != "nt":
+        import pwd
+
+        # Governance uses the passwd account home on POSIX, not HOME/Path.home().
+        monkeypatch.setattr(pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_dir=str(profile)))
+    return profile
 
 
 def _module(path: Path, name: str):
@@ -108,7 +123,10 @@ def test_provider_is_inactive_for_client_or_missing_config(tmp_path: Path, monke
         encoding="utf-8",
     )
     monkeypatch.setattr(module.Path, "home", lambda: home)
-    monkeypatch.setattr(module, "_supports_companion_mode", lambda _env: True)
+    monkeypatch.setattr(
+        module, "_supports_companion_mode",
+        lambda _env: pytest.fail("installation inspected without a host"),
+    )
 
     assert module._active_environment(_request("harness", "client")) is None
     assert module._active_environment(_request("empty")) is None
@@ -440,33 +458,66 @@ def test_non_project_activation_scopes_are_inert(monkeypatch, scopes) -> None:
     assert module._active_environment({"machine": "primary", "activation_scopes": scopes}) is None
 
 
+@pytest.mark.parametrize("redirect_home", [False, True], ids=["profile-home", "redirected-home"])
 def test_companion_mode_uses_attributed_payload_without_a_runtime(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, companion_profile, redirect_home
 ) -> None:
     module = _module(PLUGIN / "scripts" / "companion_context.py", "companion_context_test")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    if redirect_home:
+        redirected = tmp_path / "redirected-home"
+        other_policy = redirected / ".copilot-extensions" / "installation-mode.json"
+        other_policy.parent.mkdir(parents=True)
+        other_policy.write_text(
+            json.dumps({
+                "schema": "copilot-extensions.installation-mode",
+                "version": 1,
+                "installationMode": {"enabled": True},
+            }),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("HOME", str(redirected))
+        if os.name != "nt":
+            monkeypatch.setenv("USERPROFILE", str(redirected))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "sibling-install.json")
     monkeypatch.setenv("AGENT_INDEX_PAYLOAD_ROOT", "unattributed-payload")
     monkeypatch.setenv("COPILOT_PLUGIN_STAGED_FROM", "unattributed-origin")
     mode = module.installation_mode()
     assert mode["supported"] is True
     assert mode["mode"] == "legacy"
-    assert list(tmp_path.iterdir()) == []
-    policy = tmp_path / ".copilot-extensions" / "installation-mode.json"
+    assert list(companion_profile.iterdir()) == []
+    policy = companion_profile / ".copilot-extensions" / "installation-mode.json"
     policy.parent.mkdir()
     policy.write_text(
         json.dumps({"version": 1, "installationMode": {"enabled": True}}),
         encoding="utf-8",
     )
-    assert module.installation_mode()["supported"] is False
-    assert not (tmp_path / ".agent-index").exists()
+    mode = module.installation_mode()
+    assert mode["supported"] is False
+    assert mode["status"] == "invalid"
     policy.write_text("{", encoding="utf-8")
-    assert module.installation_mode()["supported"] is False
+    mode = module.installation_mode()
+    assert mode["supported"] is False
+    assert mode["status"] == "invalid"
+    for enabled in (True, False):
+        policy.write_text(
+            json.dumps({
+                "schema": "copilot-extensions.installation-mode",
+                "version": 1,
+                "installationMode": {"enabled": enabled},
+            }),
+            encoding="utf-8",
+        )
+        mode = module.installation_mode()
+        assert mode["supported"] is (not enabled)
+        assert mode["status"] == ("migration-required" if enabled else "ready")
+    assert set(companion_profile.rglob("*")) == {policy.parent, policy}
+    if redirect_home:
+        assert set(redirected.rglob("*")) == {other_policy.parent, other_policy}
 
 
-def test_unattributed_payload_cannot_fall_back_to_legacy_host(tmp_path, monkeypatch) -> None:
+def test_unattributed_payload_cannot_fall_back_to_legacy_host(
+    tmp_path, monkeypatch, companion_profile
+) -> None:
     payload = tmp_path / "unattributed" / "agent-index"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
@@ -475,13 +526,10 @@ def test_unattributed_payload_cannot_fall_back_to_legacy_host(tmp_path, monkeypa
     shutil.copytree(PLUGIN / "scripts" / "installation-context", scripts / "installation-context")
     module = _module(PLUGIN / "scripts" / "companion_context.py", "companion_unattributed")
     monkeypatch.setattr(module, "__file__", str(scripts / "companion_context.py"))
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
     mode = module.installation_mode()
     assert mode["supported"] is False
     assert mode["status"] == "provenance-blocked"
-    assert not (tmp_path / ".agent-index").exists()
+    assert list(companion_profile.iterdir()) == []
 
 
 def _assert_no_owned_windows(pids: set[int]) -> None:
