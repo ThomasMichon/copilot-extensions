@@ -988,10 +988,10 @@ class SupervisorDaemon:
         members = tuple(sorted(selected))
         if not members:
             raise CompanionError("managed transition group must contain members")
-        for field, snapshots in (("rollback", rollback), ("pending", pending)):
+        for record_field, snapshots in (("rollback", rollback), ("pending", pending)):
             if snapshots is not None and set(snapshots) != set(members):
                 raise CompanionError(
-                    f"managed transition group {field} members do not match selection"
+                    f"managed transition group {record_field} members do not match selection"
                 )
         path = self._transition_group_path(group_id)
         path.parent.mkdir(parents=True, exist_ok=True)

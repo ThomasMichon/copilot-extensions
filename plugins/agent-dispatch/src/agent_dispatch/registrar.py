@@ -594,10 +594,10 @@ def load_declaration(
             transition_group=transition_group,
         )
 
-    for field in ("runtime_generation", "transition_group"):
-        if data.get(field) is not None:
+    for plugin_only_field in ("runtime_generation", "transition_group"):
+        if data.get(plugin_only_field) is not None:
             raise RegistrarError(
-                f"{field}: only plugin-companion declarations may set it"
+                f"{plugin_only_field}: only plugin-companion declarations may set it"
             )
 
     legacy_concurrency = data.get("concurrency")
