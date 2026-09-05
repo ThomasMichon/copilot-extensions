@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import os
@@ -1185,6 +1186,303 @@ def test_cell_launchers_are_installation_local_and_context_validating(
     assert command_launcher.is_file()
 
 
+def test_parent_lock_reenters_through_generated_launcher_for_recovery(
+    tmp_path: Path,
+) -> None:
+    validated = _roots(tmp_path)
+    plugin_root = Path(validated["pluginRoot"])
+    plugin_root.mkdir(parents=True)
+    context = plugin_root / "install.json"
+    context.write_text("{}\n", encoding="utf-8")
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    context_scripts = scripts / "installation-context"
+    context_scripts.mkdir(parents=True)
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        shutil.copy2(
+            PLUGIN / "scripts" / "runtime-gate.ps1",
+            scripts / "runtime-gate.ps1",
+        )
+        shutil.copy2(
+            PLUGIN / "scripts" / "resolve_effective_config.py",
+            scripts / "resolve_effective_config.py",
+        )
+        (scripts / "resolve-runtime.ps1").write_text(
+            "$AgentRtPy = $null\n",
+            encoding="utf-8",
+        )
+        (context_scripts / "installation-context.ps1").write_text(
+            "$ErrorActionPreference = 'Stop'\n"
+            "if ($args[0] -eq 'status') {\n"
+            "  Write-Output $env:TEST_INSTALLATION_STATUS\n"
+            "  exit 0\n"
+            "}\n"
+            "$root = $env:TEST_CELL_ROOT\n"
+            "[ordered]@{\n"
+            "  pluginRoot = $root\n"
+            "  versionsRoot = Join-Path $root 'versions'\n"
+            "  snapshotsRoot = Join-Path $root 'snapshots'\n"
+            "  stateRoot = Join-Path $root 'state'\n"
+            "  runRoot = Join-Path $root 'run'\n"
+            "  logsRoot = Join-Path $root 'logs'\n"
+            "  cacheRoot = Join-Path $root 'cache'\n"
+            "  namespaceGeneration = 2\n"
+            "  generation = 3\n"
+            "} | ConvertTo-Json -Compress\n",
+            encoding="utf-8",
+        )
+    else:
+        shutil.copy2(
+            PLUGIN / "scripts" / "runtime-gate.sh",
+            scripts / "runtime-gate.sh",
+        )
+        shutil.copy2(
+            PLUGIN / "scripts" / "resolve_effective_config.py",
+            scripts / "resolve_effective_config.py",
+        )
+        shutil.copy2(
+            PLUGIN / "scripts" / "installation-context" / "json-query.awk",
+            context_scripts / "json-query.awk",
+        )
+        (scripts / "resolve-runtime.sh").write_text(
+            'AGENT_RT_PY=""\n',
+            encoding="utf-8",
+        )
+        (context_scripts / "installation-context.sh").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            'if [ "$1" = status ]; then\n'
+            "  printf '%s\\n' \"$TEST_INSTALLATION_STATUS\"\n"
+            "  exit 0\n"
+            "fi\n"
+            'root="${TEST_CELL_ROOT:?}"\n'
+            "printf '{\"pluginRoot\":\"%s\",\"versionsRoot\":\"%s/versions\","
+            "\"snapshotsRoot\":\"%s/snapshots\",\"stateRoot\":\"%s/state\","
+            "\"runRoot\":\"%s/run\",\"logsRoot\":\"%s/logs\","
+            "\"cacheRoot\":\"%s/cache\",\"namespaceGeneration\":2,"
+            "\"generation\":3}\\n' "
+            '"$root" "$root" "$root" "$root" "$root" "$root" "$root"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    runtime_version = "9.9.9+host"
+    slot = plugin_root / "versions" / runtime_version
+    interpreter = CELL._venv_python(slot)
+    venv.EnvBuilder(with_pip=False).create(slot)
+    site_result = subprocess.run(
+        [
+            str(interpreter),
+            "-I",
+            "-X",
+            "utf8",
+            "-c",
+            (
+                "import site; print(next(p for p in site.getsitepackages() "
+                "if p.endswith(('site-packages','dist-packages'))))"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    package = Path(site_result.stdout.strip()) / "agent_index"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "keys = (\n"
+        "    'AGENT_INDEX_CELL_LOCK_TOKEN',\n"
+        "    'AGENT_INDEX_CELL_LOCK_ROOT',\n"
+        "    'AGENT_INDEX_CELL_START_TOKEN',\n"
+        "    'AGENT_INDEX_CELL_TRANSACTION',\n"
+        "    'AGENT_INDEX_CELL_TRANSACTION_TOKEN',\n"
+        "    'AGENT_INDEX_CELL_TRANSACTION_ID',\n"
+        ")\n"
+        "Path(os.environ['TEST_CAPTURE']).write_text(\n"
+        "    json.dumps({'argv': sys.argv[1:], "
+        "'environment': {key: os.environ.get(key) for key in keys}}),\n"
+        "    encoding='utf-8',\n"
+        ")\n"
+        "print(json.dumps({'ok': True}))\n",
+        encoding="utf-8",
+    )
+    _write_runtime_slot_evidence(
+        slot,
+        runtime_version=runtime_version,
+        role="host",
+    )
+
+    wrapper = (
+        "import importlib.util\n"
+        "from pathlib import Path\n"
+        f"_path = Path({str(SCRIPT)!r})\n"
+        "_spec = importlib.util.spec_from_file_location('cell_runtime_real', _path)\n"
+        "_module = importlib.util.module_from_spec(_spec)\n"
+        "_spec.loader.exec_module(_module)\n"
+        "_module.__file__ = str(Path(__file__).resolve())\n"
+        "_module.LOCK_TIMEOUT_SECONDS = 0.2\n"
+        f"_validated = {validated!r}\n"
+        f"_interpreter = Path({str(interpreter)!r})\n"
+        "_module._validate_context = lambda *_args, **_kwargs: _validated\n"
+        "_module._installation_status = lambda *_args, **_kwargs: {\n"
+        "    'status': 'ready',\n"
+        "    'reason': 'namespaced-active',\n"
+        "    'actualMode': 'namespaced',\n"
+        "}\n"
+        "_module._governance_mode = lambda *_args, **_kwargs: 'namespaced'\n"
+        "_module._selected_runtime = lambda *_args, **_kwargs: (\n"
+        f"    {{'runtime': {{'version': {runtime_version!r}}}}}, _interpreter\n"
+        ")\n"
+        "_module._validate_launcher_artifacts = lambda *_args, **_kwargs: None\n"
+        "raise SystemExit(_module.main())\n"
+    )
+    (scripts / "cell-runtime.py").write_text(wrapper, encoding="utf-8")
+    capture = tmp_path / "runtime-environment.json"
+    service_launcher, command_launcher = CELL._write_launchers(
+        validated,
+        context,
+        "example--1234",
+        payload,
+        "9.9.9",
+        runtime_version,
+    )
+    transaction = CELL._prepare_selection_transaction(
+        plugin_root,
+        context,
+        "example--1234",
+        payload,
+        "9.9.9",
+        payload,
+        "9.9.9",
+        "9.9.9",
+        runtime_version,
+        str(validated["namespaceGeneration"]),
+        str(validated["generation"]),
+        validated,
+        preserve_source=False,
+    )
+    transaction = CELL._write_selection_transaction(
+        plugin_root,
+        transaction,
+        state="reconciling",
+    )
+    (plugin_root / "current-version").write_text(
+        runtime_version + "\n",
+        encoding="utf-8",
+    )
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    inline_config = base64.urlsafe_b64encode(
+        json.dumps({"indexer": {"machine": "test-host"}}).encode("utf-8")
+    ).decode("ascii")
+    environment = os.environ.copy()
+    environment.update(
+        CELL._transaction_environment(
+            CELL._cell_environment(
+                validated,
+                context,
+                "example--1234",
+                runtime_version,
+            ),
+            plugin_root,
+            transaction,
+        )
+    )
+    environment.update(
+        {
+            "HOME": str(profile),
+            "USERPROFILE": str(profile),
+            "AGENT_INDEX_ROLE": "host",
+            "AGENT_INDEX_CONFIG_DATA_B64": inline_config,
+            "TEST_CAPTURE": str(capture),
+            "TEST_CELL_ROOT": str(plugin_root),
+            "TEST_INSTALLATION_STATUS": json.dumps(
+                {
+                    "status": "ready",
+                    "reason": "namespaced-active",
+                    "actualMode": "namespaced",
+                    "desiredMode": "namespaced",
+                    "context": str(context),
+                    "marketplaceId": "example--1234",
+                    "policy": {"state": "valid", "enabled": True},
+                }
+            ),
+        }
+    )
+    if os.name != "nt":
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        getent = fake_bin / "getent"
+        getent.write_text(
+            "#!/bin/sh\n"
+            'printf "tester:x:%s:%s::%s:/bin/sh\\n" '
+            '"$2" "$2" "$TEST_PROFILE_HOME"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        getent.chmod(0o700)
+        environment["TEST_PROFILE_HOME"] = str(profile)
+        environment["PATH"] = (
+            f"{fake_bin}{os.pathsep}{environment.get('PATH', '')}"
+        )
+
+    with CELL._installation_lock(plugin_root) as lock_token:
+        environment[CELL.LOCK_TOKEN_ENV] = lock_token
+        environment[CELL.LOCK_ROOT_ENV] = str(plugin_root)
+        environment[CELL.CELL_START_TOKEN_ENV] = lock_token
+        CELL._run_cell_deploy(
+            command_launcher,
+            environment,
+            recover=True,
+        )
+
+    captured = json.loads(capture.read_text(encoding="utf-8"))
+    assert captured["argv"] == [
+        "deploy",
+        "--json",
+        "--health-timeout",
+        "30",
+        "--drain-timeout",
+        "30",
+        "--recover",
+    ]
+    assert captured["environment"] == {
+        CELL.LOCK_TOKEN_ENV: lock_token,
+        CELL.LOCK_ROOT_ENV: str(plugin_root),
+        CELL.CELL_START_TOKEN_ENV: lock_token,
+        CELL.TRANSACTION_PATH_ENV: str(
+            plugin_root / CELL.TRANSACTION_FILE
+        ),
+        CELL.TRANSACTION_TOKEN_ENV: transaction["token"],
+        CELL.TRANSACTION_ID_ENV: transaction["id"],
+    }
+    assert service_launcher.is_file()
+
+    capture.unlink()
+    with CELL._installation_lock(plugin_root) as lock_token:
+        environment[CELL.LOCK_TOKEN_ENV] = lock_token
+        environment[CELL.LOCK_ROOT_ENV] = str(plugin_root)
+        environment[CELL.CELL_START_TOKEN_ENV] = lock_token
+        environment[CELL.TRANSACTION_TOKEN_ENV] = "f" * 64
+        with pytest.raises(
+            CELL.CellError,
+            match="transaction reentry ownership does not match",
+        ):
+            CELL._run_cell_deploy(
+                command_launcher,
+                environment,
+                recover=True,
+            )
+    assert not capture.exists()
+
+
 def test_windows_launcher_source_is_bom_safe_for_unicode_paths(
     tmp_path: Path,
 ) -> None:
@@ -1238,6 +1536,66 @@ def test_cell_provision_lock_serializes_one_installation(tmp_path: Path) -> None
     second.join()
 
     assert events == ["start-one", "end-one", "start-two", "end-two"]
+
+
+def test_reentrant_lock_propagates_body_cell_error(tmp_path: Path) -> None:
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+
+    with CELL._installation_lock(plugin_root) as token:
+        with pytest.raises(CELL.CellError, match="body failure"):
+            with CELL._installation_lock(
+                plugin_root,
+                reentry_token=token,
+            ):
+                raise CELL.CellError("body failure")
+
+
+def test_internal_start_lock_reentry_requires_explicit_start_authority(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    context = plugin_root / "install.json"
+    context.write_text("{}\n", encoding="utf-8")
+
+    with CELL._installation_lock(plugin_root) as token:
+        monkeypatch.setenv(CELL.LOCK_TOKEN_ENV, token)
+        monkeypatch.setenv(CELL.LOCK_ROOT_ENV, str(plugin_root))
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(context))
+        monkeypatch.setenv(
+            "AGENT_INDEX_INSTALLATION_ID",
+            "example--1234/agent-index",
+        )
+        monkeypatch.setenv(CELL.CELL_START_TOKEN_ENV, "not-the-lock-token")
+        with pytest.raises(
+            CELL.CellError,
+            match="start token does not authorize lock reentry",
+        ):
+            CELL._internal_lock_reentry(
+                PLUGIN,
+                plugin_root,
+                context,
+                "example--1234",
+                "__cell-start",
+            )
+
+        monkeypatch.setenv(CELL.CELL_START_TOKEN_ENV, token)
+        assert CELL._internal_lock_reentry(
+            PLUGIN,
+            plugin_root,
+            context,
+            "example--1234",
+            "__cell-start",
+        ) == (token, "start", None)
+        assert CELL._internal_lock_reentry(
+            PLUGIN,
+            plugin_root,
+            context,
+            "example--1234",
+            "status",
+        ) == (None, None, None)
 
 
 def test_lock_publication_never_exposes_ownerless_destination(
@@ -2656,6 +3014,74 @@ def test_owned_instance_reconciliation_reaps_only_attested_orphans(
     assert plugin_root.is_dir()
 
 
+def test_reconcile_owned_instances_allows_already_stopping_service_to_exit(
+    monkeypatch, tmp_path: Path
+) -> None:
+    validated = _roots(tmp_path)
+    instances = Path(validated["runRoot"]) / "instances"
+    instances.mkdir(parents=True)
+    installation_id = "example--1234/agent-index"
+    for pid, version, token, port in (
+        (101, "1.0.0", "active-token", 4101),
+        (202, "0.9.0", "old-token", 4202),
+    ):
+        (instances / f"{pid}.json").write_text(
+            json.dumps(
+                {
+                    "schema": CELL.INSTANCE_SCHEMA,
+                    "version": 1,
+                    "installationId": installation_id,
+                    "runtimeVersion": version,
+                    "pid": pid,
+                    "instanceToken": token,
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "state": "active",
+                    "transactionId": "tx",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    old_checks = iter((True, True, False, False))
+
+    def alive(pid: int) -> bool:
+        return True if pid == 101 else next(old_checks, False)
+
+    def status(port: int):
+        if port == 4101:
+            return {
+                "installationId": installation_id,
+                "version": "1.0.0",
+                "pid": 101,
+                "instanceToken": "active-token",
+                "promoted": True,
+            }
+        return None
+
+    monkeypatch.setattr(CELL, "_pid_alive", alive)
+    monkeypatch.setattr(CELL, "_service_status", status)
+    monkeypatch.setattr(CELL.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        CELL,
+        "_shutdown_owned_instance",
+        lambda *_args: pytest.fail("already-stopping service was shut down again"),
+    )
+
+    CELL._reconcile_owned_instances(
+        validated,
+        {
+            "installationId": installation_id,
+            "pid": 101,
+            "instanceToken": "active-token",
+        },
+    )
+
+    assert [path.name for path, _record in CELL._instance_records(validated)] == [
+        "101.json"
+    ]
+
+
 def test_deactivation_required_never_restarts_or_provisions(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -4041,6 +4467,51 @@ def test_cross_platform_sources_keep_legacy_and_cell_lifecycle_separate() -> Non
     assert 'encoding="utf-8-sig"' in coordinator
 
 
+def test_posix_zombie_is_not_treated_as_alive(monkeypatch) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX process-state test")
+
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda _self, **_kwargs: "123 (agent-index) Z 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20",
+    )
+    monkeypatch.setattr(
+        CELL.os,
+        "kill",
+        lambda *_args: pytest.fail("zombie liveness must not fall through to os.kill"),
+    )
+
+    assert CELL._pid_alive(123) is False
+
+
+def test_posix_zombie_has_no_process_birth_identity(monkeypatch) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX process-state test")
+
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda _self, **_kwargs: "123 (agent-index) Z 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20",
+    )
+
+    assert CELL._process_birth_identity(123) is None
+
+
+def test_clean_room_cleanup_treats_posix_zombies_as_exited() -> None:
+    scenario_root = (
+        PLUGIN.parents[1]
+        / "tools"
+        / "clean-room"
+        / "scenarios"
+        / "agent-index-installation-cells"
+    )
+    driver = (scenario_root / "scenario.py").read_text(encoding="utf-8")
+
+    assert 'if tail and tail[0] == "Z":' in driver
+    assert "return None" in driver
+
+
 def test_clean_room_acceptance_defaults_full_and_smoke_is_diagnostic_only() -> None:
     scenario_root = (
         PLUGIN.parents[1]
@@ -4069,6 +4540,7 @@ def test_clean_room_acceptance_defaults_full_and_smoke_is_diagnostic_only() -> N
     assert "smoke mode completed as a diagnostic" in powershell
     assert "exercise_minimal_store" in driver
     assert "service-ensure-completion" in driver
+    assert "timeout=180" in driver
     assert "trap on_exit EXIT" in posix
     assert "finally {" in powershell
 
@@ -4097,6 +4569,7 @@ def test_clean_room_crash_matrix_uses_phase_specific_durable_evidence() -> None:
     assert "cutover-crash-evidence.json" in driver
     assert "cutover-crash-evidence.json" in runtime
     assert "selection-transaction.json" in driver
+    assert "validate_cli=False" in driver
     assert "assert_one_owned_instance(cell_b" in driver
     assert '"instances": instance_inventory(cell)' in driver
     assert "governance-blocked-after-reconcile" not in driver

@@ -591,7 +591,8 @@ function Resolve-ReadyRuntime {
             )
             exit 126
         }
-        if (-not $env:AGENT_INDEX_CELL_START_TOKEN) {
+        $lockReentry = [string]$validation.lockReentry
+        if ($lockReentry -notin @('start', 'transaction')) {
             Remove-Item Env:AGENT_INDEX_CELL_LOCK_TOKEN -ErrorAction SilentlyContinue
             Remove-Item Env:AGENT_INDEX_CELL_LOCK_ROOT -ErrorAction SilentlyContinue
         }

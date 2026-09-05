@@ -390,6 +390,13 @@ def _pid_alive(pid: int) -> bool:
         finally:
             ctypes.windll.kernel32.CloseHandle(handle)
     try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        tail = raw.rsplit(")", 1)[1].split()
+        if tail and tail[0] == "Z":
+            return False
+    except (IndexError, OSError, UnicodeError):
+        pass
+    try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
@@ -437,6 +444,8 @@ def _process_birth_identity(pid: int) -> str | None:
     try:
         raw = proc_stat.read_text(encoding="ascii")
         tail = raw.rsplit(")", 1)[1].split()
+        if tail and tail[0] == "Z":
+            return None
         return f"proc-start:{tail[19]}"
     except (IndexError, OSError, UnicodeError):
         pass
@@ -473,6 +482,23 @@ def _lock_owner_observation(
     if type(pid) is not int or not isinstance(token, str) or not token:
         return None, None, raw
     return pid, token, raw
+
+
+def _live_lock_owner_matches(plugin_root: Path, token: str) -> bool:
+    owner = plugin_root / ".payload-provision.lock.d" / "owner.json"
+    try:
+        incumbent = _read_json(owner)
+    except CellError:
+        return False
+    pid = incumbent.get("pid")
+    return (
+        incumbent.get("schema")
+        == "copilot-extensions.agent-index.cell-lock"
+        and incumbent.get("version") == 1
+        and incumbent.get("token") == token
+        and type(pid) is int
+        and _pid_alive(pid)
+    )
 
 
 def _restore_moved_lock(lock: Path, tombstone: Path) -> bool:
@@ -550,25 +576,20 @@ def _publish_owned_lock(lock: Path, receipt: dict[str, Any]) -> None:
 
 
 @contextmanager
-def _installation_lock(plugin_root: Path) -> Iterator[str]:
+def _installation_lock(
+    plugin_root: Path,
+    *,
+    reentry_token: str | None = None,
+) -> Iterator[str]:
     plugin_root = _absolute_path(plugin_root)
     _assert_directory(plugin_root, "plugin installation root")
     lock = plugin_root / ".payload-provision.lock.d"
     owner = lock / "owner.json"
-    inherited_token = os.environ.get(LOCK_TOKEN_ENV, "")
-    inherited_root = os.environ.get(LOCK_ROOT_ENV, "")
-    if inherited_token and inherited_root and _paths_equal(inherited_root, plugin_root):
-        try:
-            incumbent = _read_json(owner)
-            if (
-                incumbent.get("token") == inherited_token
-                and type(incumbent.get("pid")) is int
-                and _pid_alive(incumbent["pid"])
-            ):
-                yield inherited_token
-                return
-        except CellError:
-            pass
+    if reentry_token is not None:
+        if not _live_lock_owner_matches(plugin_root, reentry_token):
+            raise CellError("installation lock reentry owner is not live")
+        yield reentry_token
+        return
     token = uuid.uuid4().hex
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
     while True:
@@ -1865,6 +1886,108 @@ def _transaction_environment(
     return value
 
 
+def _validated_transaction_reentry(
+    payload_root: Path,
+    plugin_root: Path,
+    context: Path,
+    marketplace_id: str,
+) -> dict[str, Any]:
+    transaction_path = os.environ.get(TRANSACTION_PATH_ENV, "")
+    transaction_token = os.environ.get(TRANSACTION_TOKEN_ENV, "")
+    transaction_id = os.environ.get(TRANSACTION_ID_ENV, "")
+    expected_path = _selection_transaction_path(plugin_root)
+    if (
+        not transaction_path
+        or not transaction_token
+        or not transaction_id
+        or re.fullmatch(r"[0-9a-f]{64}", transaction_token) is None
+        or re.fullmatch(r"[0-9a-f]{32}", transaction_id) is None
+    ):
+        raise CellError("installation transaction reentry credentials are invalid")
+    if not _paths_equal(transaction_path, expected_path):
+        raise CellError(
+            "installation transaction reentry receipt belongs to another cell"
+        )
+    transaction = _load_selection_transaction(
+        plugin_root,
+        context,
+        marketplace_id,
+    )
+    management = transaction.get("management") if transaction is not None else None
+    if (
+        transaction is None
+        or transaction.get("id") != transaction_id
+        or transaction.get("token") != transaction_token
+    ):
+        raise CellError("installation transaction reentry ownership does not match")
+    if transaction.get("state") != "reconciling":
+        raise CellError("installation transaction is not reconciling")
+    if not isinstance(management, dict):
+        raise CellError(
+            "installation transaction reentry management identity does not match"
+        )
+    if not _paths_equal(management.get("path", ""), payload_root):
+        raise CellError(
+            "installation transaction reentry management path does not match"
+        )
+    if management.get("version") != _plugin_version(payload_root):
+        raise CellError(
+            "installation transaction reentry management version does not match"
+        )
+    return transaction
+
+
+def _internal_lock_reentry(
+    payload_root: Path,
+    plugin_root: Path,
+    context: Path,
+    marketplace_id: str,
+    command: str,
+) -> tuple[str | None, str | None, str | None]:
+    if command not in {"deploy", "__cell-start"}:
+        return None, None, None
+    token = os.environ.get(LOCK_TOKEN_ENV, "")
+    lock_root = os.environ.get(LOCK_ROOT_ENV, "")
+    selected_context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
+    expected_context = plugin_root / "install.json"
+    if (
+        re.fullmatch(r"[0-9a-f]{32}", token) is None
+        or not lock_root
+        or not _paths_equal(lock_root, plugin_root)
+        or not _paths_equal(context, expected_context)
+        or not selected_context
+        or not _paths_equal(selected_context, context)
+        or installation_id != f"{marketplace_id}/{PLUGIN_ID}"
+        or not _live_lock_owner_matches(plugin_root, token)
+    ):
+        raise CellError("installation lock does not authorize internal reentry")
+    if command == "deploy":
+        transaction = _validated_transaction_reentry(
+            payload_root,
+            plugin_root,
+            context,
+            marketplace_id,
+        )
+        return token, "transaction", str(transaction["id"])
+    if os.environ.get(CELL_START_TOKEN_ENV, "") != token:
+        raise CellError("installation start token does not authorize lock reentry")
+    transaction_values = (
+        os.environ.get(TRANSACTION_PATH_ENV, ""),
+        os.environ.get(TRANSACTION_TOKEN_ENV, ""),
+        os.environ.get(TRANSACTION_ID_ENV, ""),
+    )
+    if any(transaction_values):
+        transaction = _validated_transaction_reentry(
+            payload_root,
+            plugin_root,
+            context,
+            marketplace_id,
+        )
+        return token, "start", str(transaction["id"])
+    return token, "start", None
+
+
 def _inject_selection_failure(phase: str) -> None:
     requested = os.environ.get(
         "AGENT_INDEX_TEST_SELECTION_FAILURE", ""
@@ -2940,6 +3063,16 @@ def _reconcile_owned_instances(
             except OSError:
                 pass
             continue
+        if _service_status(int(record["port"])) is None:
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and _pid_alive(pid):
+                time.sleep(0.1)
+            if not _pid_alive(pid):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                continue
         _shutdown_owned_instance(record, installation_id)
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline and _pid_alive(pid):
@@ -4844,7 +4977,14 @@ def launch_validate(args: argparse.Namespace, payload_root: Path) -> dict[str, A
         expected_payload_root=payload_root,
     )
     plugin_root = Path(str(validated["pluginRoot"]))
-    with _installation_lock(plugin_root):
+    reentry_token, lock_reentry, transaction_id = _internal_lock_reentry(
+        payload_root,
+        plugin_root,
+        context,
+        args.expected_marketplace_id,
+        args.command,
+    )
+    with _installation_lock(plugin_root, reentry_token=reentry_token):
         status = _installation_status(
             payload_root,
             payload_root,
@@ -4869,7 +5009,7 @@ def launch_validate(args: argparse.Namespace, payload_root: Path) -> dict[str, A
             context,
             args.expected_marketplace_id,
         )
-        if pending is not None:
+        if pending is not None and pending.get("id") != transaction_id:
             raise CellError(
                 "selection transaction is pending; runtime dispatch is blocked "
                 "until service reconciliation completes"
@@ -4886,6 +5026,7 @@ def launch_validate(args: argparse.Namespace, payload_root: Path) -> dict[str, A
                 "status": "absent",
                 "governance": mode,
                 "interpreter": None,
+                "lockReentry": lock_reentry,
             }
         runtime_version = str(manifest["runtime"]["version"])
         _validate_launcher_artifacts(
@@ -4909,6 +5050,7 @@ def launch_validate(args: argparse.Namespace, payload_root: Path) -> dict[str, A
             "governance": mode,
             "runtimeVersion": runtime_version,
             "interpreter": str(interpreter),
+            "lockReentry": lock_reentry,
         }
 
 
