@@ -367,7 +367,7 @@ def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
             temporary.chmod(0o600)
         os.replace(temporary, target)
         return True
-    except (OSError, ValueError):
+    except (OSError, RuntimeError, ValueError):
         try:
             temporary.unlink()
         except (OSError, UnboundLocalError):

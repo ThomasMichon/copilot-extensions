@@ -639,6 +639,28 @@ def test_reparse_detection_does_not_require_creating_a_link():
     assert hook_client._is_link_or_reparse(path)
 
 
+def test_session_start_guidance_fails_open_on_resolve_loop(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        hook_client, "_registration_context", lambda payload, home: ""
+    )
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    original_resolve = Path.resolve
+
+    def resolve(path, *args, **kwargs):
+        if path.name == "session-state":
+            raise RuntimeError("symlink loop")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert not hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+
+
 def test_session_start_main_writes_guidance_before_emitting_result(
     monkeypatch, capsys
 ):
