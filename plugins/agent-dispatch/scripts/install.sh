@@ -1088,7 +1088,7 @@ extra="\${AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS:-}"
 # no label opt-in to be safe.
 mode="\${AGENT_DISPATCH_SUPERVISE_MODE:-}"
 if [[ "\$mode" == "serve" ]]; then
-    serve_args=(supervise serve --legacy-env)
+    serve_args=(supervise serve --legacy-env --interval "\$interval")
     # Explicit machine scope (recommended for a service context, where CWD-based
     # identity resolution can fail and leave the daemon unable to scope
     # machine-pinned declarations -- aperture-labs #5001). Falls back to the host
