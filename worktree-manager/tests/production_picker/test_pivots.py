@@ -93,6 +93,101 @@ def test_parse_full_manifest(tmp_path):
     assert p.actions[0].internal is None
 
 
+def test_state_root_file_visibility_is_lazy_and_configuration_gated(
+    tmp_path,
+    monkeypatch,
+):
+    manifests = tmp_path / "pivots"
+    manifests.mkdir()
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    _write(manifests, "always", {"label": "Always", "list": ["always"]})
+    _write(
+        manifests,
+        "configured",
+        {
+            "label": "Configured",
+            "list": ["configured"],
+            "visible_when": {"state_root_file": "workflows/sources.json"},
+        },
+    )
+    calls = []
+    monkeypatch.setattr(
+        pivots,
+        "_resolve_state_root_path",
+        lambda: calls.append(True) or state_root,
+    )
+
+    assert [pivot.label for pivot in pivots.discover_pivots(manifests)] == ["Always"]
+    assert len(calls) == 1
+
+    sources = state_root / "workflows" / "sources.json"
+    sources.parent.mkdir()
+    sources.write_text("{}", encoding="utf-8")
+    assert [pivot.label for pivot in pivots.discover_pivots(manifests)] == [
+        "Always",
+        "Configured",
+    ]
+    assert len(calls) == 2
+
+
+def test_ungated_pivots_do_not_resolve_state_root(tmp_path, monkeypatch):
+    _write(tmp_path, "always", {"label": "Always", "list": ["always"]})
+    monkeypatch.setattr(
+        pivots,
+        "_resolve_state_root_path",
+        lambda: pytest.fail("ungated discovery must not resolve the state root"),
+    )
+
+    assert [pivot.label for pivot in pivots.discover_pivots(tmp_path)] == ["Always"]
+
+
+def test_unbound_state_root_is_resolved_once_for_all_gated_pivots(
+    tmp_path,
+    monkeypatch,
+):
+    for name in ("first", "second"):
+        _write(
+            tmp_path,
+            name,
+            {
+                "label": name.title(),
+                "list": [name],
+                "visible_when": {"state_root_file": f"{name}.json"},
+            },
+        )
+    calls = []
+    monkeypatch.setattr(
+        pivots,
+        "_resolve_state_root_path",
+        lambda: calls.append(True) or None,
+    )
+
+    assert pivots.discover_pivots(tmp_path) == []
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "state_root_file",
+    ["/absolute.json", "../escape.json", "C:/escape.json", ""],
+)
+def test_state_root_file_visibility_rejects_unsafe_paths(
+    tmp_path,
+    state_root_file,
+):
+    _write(
+        tmp_path,
+        "unsafe",
+        {
+            "label": "Unsafe",
+            "list": ["unsafe"],
+            "visible_when": {"state_root_file": state_root_file},
+        },
+    )
+
+    assert pivots.discover_pivots(tmp_path) == []
+
+
 def test_parse_internal_action(tmp_path):
     # #1425: an internal (picker-navigation) action carries a verb, not a CLI.
     _write(

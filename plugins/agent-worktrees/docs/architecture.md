@@ -929,6 +929,13 @@ does.
   pulls id/title/subtitle/badges out of each. This is graceful-capability-scaling
   in practice: adopt more of the fabric, get more pivots; adopt less, and the
   picker is never burdened by a pivot for a layer you don't have.
+- **Configuration-gated visibility.** A list pivot may declare
+  `visible_when.state_root_file` with a safe relative path. The host resolves the
+  state root at most once per discovery pass, performs only a local file
+  existence check, and omits the pivot until that file exists. Ungated pivots do
+  not resolve the state root at all. This lets a plugin stay installed and
+  enabled while its specialized UI remains absent for operators who have not
+  configured it, without executing providers during tab discovery.
 - **Data + actions** (`picker_tui/tasks.py`): the validated `list` command is run
   as a **subprocess** on a background thread, cached per
   machine, and expected to print a JSON array. `actions` argv templates are run
