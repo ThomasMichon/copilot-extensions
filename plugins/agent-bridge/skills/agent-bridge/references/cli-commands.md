@@ -32,7 +32,7 @@ be running (the `start` management operation) for client commands to work.
 
 ```bash
 <agent-bridge catalog argv[0]> agents
-<agent-bridge catalog argv[0]> agents --json
+<agent-bridge catalog argv[0]> --json agents
 <agent-bridge catalog argv[0]> --project <repo> agents
 <agent-bridge catalog argv[0]> agents --all-projects
 ```
@@ -44,7 +44,7 @@ spawnable status).
 
 ```bash
 <agent-bridge catalog argv[0]> machines
-<agent-bridge catalog argv[0]> machines --json
+<agent-bridge catalog argv[0]> --json machines
 <agent-bridge catalog argv[0]> --project <repo> machines
 <agent-bridge catalog argv[0]> machines --all-projects
 ```

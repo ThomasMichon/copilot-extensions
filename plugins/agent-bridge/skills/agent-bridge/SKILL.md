@@ -256,7 +256,7 @@ configuration, see `plugins/agent-bridge/docs/machine-config.md`.
 <agent-bridge catalog argv[0]> sessions
 
 # Get JSON for programmatic use
-<agent-bridge catalog argv[0]> sessions --json
+<agent-bridge catalog argv[0]> --json sessions
 ```
 
 ### Reading liveness -- `stalled` is usually deep thinking, NOT a wedge
