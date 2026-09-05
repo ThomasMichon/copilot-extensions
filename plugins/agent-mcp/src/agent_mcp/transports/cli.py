@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from .. import __version__
 from .. import protocol as proto
@@ -37,6 +38,18 @@ _CAPABILITIES = {"tools": {"listChanged": False}}
 # JSON-RPC error codes we return for local failures.
 _METHOD_NOT_FOUND = proto.METHOD_NOT_FOUND
 _INTERNAL_ERROR = proto.INTERNAL_ERROR
+
+
+def _resolve_sidecar_command(tool: CliTool, argv: list[str]) -> list[str]:
+    """Resolve path-qualified commands relative to the declaring sidecar."""
+    if not argv or tool.source is None:
+        return argv
+    command = Path(argv[0])
+    if command.is_absolute() or not command.parent.parts:
+        return argv
+    resolved = list(argv)
+    resolved[0] = str((tool.source.parent / command).resolve())
+    return resolved
 
 
 def _result(request: dict, result: object) -> dict:
@@ -169,7 +182,8 @@ class CliTransport(Transport):
             return _result(msg, _error_content(
                 f"unknown tool: {name!r} (not advertised on this host)"))
         try:
-            argv = resolve_spawn(build_argv(tool, arguments))
+            argv = build_argv(tool, arguments)
+            argv = resolve_spawn(_resolve_sidecar_command(tool, argv))
         except CliToolError as exc:
             return _result(msg, _error_content(f"invalid arguments: {exc}"))
 
