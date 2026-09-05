@@ -419,6 +419,27 @@ def test_session_start_guidance_overwrites_on_resume(
     )
 
 
+@pytest.mark.parametrize("suffix", (".json", ""))
+def test_registration_context_rejects_oversized_snapshots(
+    monkeypatch, tmp_path, suffix
+):
+    monkeypatch.setattr(hook_client, "_plugin_version", lambda: "1.2.3-dev4")
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(tmp_path),
+        "source": "new",
+        "timestamp": 1_000,
+    }
+    enriched = hook_client._enrich_session_payload(payload)
+    launch_key = hook_client._session_launch_key(enriched)
+    snapshots = tmp_path / ".agent-worktrees" / ".session-context"
+    snapshots.mkdir(parents=True)
+    snapshot = snapshots / f"register-session-{launch_key}{suffix}"
+    snapshot.write_bytes(b"x" * (hook_client._MAX_RESPONSE + 1))
+
+    assert hook_client._registration_context(enriched, tmp_path) == ""
+
+
 @pytest.mark.parametrize(
     "session_id",
     ("", "../escape", "slash/value", "a" * 129),
@@ -458,6 +479,39 @@ def test_session_start_guidance_rejects_instruction_directory_escape(
         {"sessionId": "session-1"}, home=tmp_path
     )
     assert not (outside / "agent-worktrees").exists()
+
+
+def test_session_start_guidance_rejects_session_root_escape(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    state_root = tmp_path / ".copilot" / "session-state"
+    state_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (state_root / "session-1").symlink_to(
+            outside, target_is_directory=True
+        )
+    except OSError:
+        pytest.skip("directory symlinks are not available")
+
+    assert not hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    assert not (outside / "instructions").exists()
+
+
+def test_reparse_detection_does_not_require_creating_a_link():
+    path = SimpleNamespace(
+        lstat=lambda: SimpleNamespace(
+            st_mode=hook_client.stat.S_IFDIR,
+            st_file_attributes=hook_client.stat.FILE_ATTRIBUTE_REPARSE_POINT,
+        )
+    )
+    assert hook_client._is_link_or_reparse(path)
 
 
 def test_session_start_main_writes_guidance_before_emitting_result(

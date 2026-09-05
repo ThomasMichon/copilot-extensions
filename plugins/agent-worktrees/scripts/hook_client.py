@@ -193,6 +193,27 @@ def _additional_context(raw: str) -> str:
     return context.strip() if isinstance(context, str) else ""
 
 
+def _read_bounded_text(path: Path, limit: int = _MAX_RESPONSE) -> str | None:
+    try:
+        metadata = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size > limit
+            or _is_link_or_reparse(path)
+        ):
+            return None
+        with path.open("rb") as handle:
+            raw = handle.read(limit + 1)
+    except OSError:
+        return None
+    if len(raw) > limit:
+        return None
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeError:
+        return None
+
+
 def _registration_context(payload: dict, home: Path) -> str:
     launch_key = _session_launch_key(payload)
     if not launch_key:
@@ -200,7 +221,8 @@ def _registration_context(payload: dict, home: Path) -> str:
     root = home / ".agent-worktrees" / ".session-context"
     json_path = root / f"register-session-{launch_key}.json"
     try:
-        state = json.loads(json_path.read_text(encoding="utf-8-sig"))
+        raw = _read_bounded_text(json_path)
+        state = json.loads(raw) if raw is not None else None
         if (
             isinstance(state, dict)
             and state.get("launchKey") == launch_key
@@ -211,12 +233,10 @@ def _registration_context(payload: dict, home: Path) -> str:
         pass
 
     legacy_path = root / f"register-session-{launch_key}"
-    try:
-        stored_key, separator, output = legacy_path.read_text(
-            encoding="utf-8"
-        ).partition("\n")
-    except (OSError, UnicodeError):
+    raw = _read_bounded_text(legacy_path)
+    if raw is None:
         return ""
+    stored_key, separator, output = raw.partition("\n")
     return (
         _additional_context(output)
         if separator and stored_key == launch_key
@@ -303,11 +323,12 @@ def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
 
     try:
         state_root = (home / ".copilot" / "session-state").resolve()
-        session_root = (state_root / session_id).resolve()
-        session_root.relative_to(state_root)
-        session_root.mkdir(parents=True, exist_ok=True)
-        if _is_link_or_reparse(session_root):
+        unresolved_session_root = state_root / session_id
+        unresolved_session_root.mkdir(parents=True, exist_ok=True)
+        if _is_link_or_reparse(unresolved_session_root):
             return False
+        session_root = unresolved_session_root.resolve()
+        session_root.relative_to(state_root)
         instructions_dir = session_root / "instructions"
         instructions_dir.mkdir(exist_ok=True)
         if _is_link_or_reparse(instructions_dir):
