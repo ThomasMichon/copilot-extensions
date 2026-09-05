@@ -300,6 +300,58 @@ def test_ambiguous_plugin_bridge_raises(tmp_path, monkeypatch):
     assert "ambiguous" in str(exc.value).lower()
 
 
+def test_live_directory_marketplace_wins_over_stale_installed_copy(
+        tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    live = workspace / ".ai"
+    current = _make_plugin_bridge(
+        live.parent, ".ai", "ado-data", "ado-review.mcp.yaml"
+    )
+    settings = workspace / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "local": {"source": {"source": "directory", "path": "./.ai"}}
+        }
+    }), encoding="utf-8")
+
+    copilot_home = tmp_path / "copilot-home"
+    stale = copilot_home / "installed-plugins"
+    _make_plugin_bridge(
+        stale, "local", "ado-data", "ado-review.mcp.yaml",
+        {"server": {"type": "http", "url": "https://stale.example"}},
+    )
+    monkeypatch.delenv("AGENT_MCP_PLUGIN_ROOTS", raising=False)
+    monkeypatch.setenv("COPILOT_HOME", str(copilot_home))
+    nested = workspace / "src" / "package"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    assert resolve_config_path("ado-review") == current
+
+
+def test_ambiguous_live_directory_marketplaces_raise(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    for marketplace in (".ai-a", ".ai-b"):
+        _make_plugin_bridge(
+            workspace, marketplace, "ado-data", "dup.mcp.yaml"
+        )
+    settings = workspace / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "a": {"source": {"source": "directory", "path": "./.ai-a"}},
+            "b": {"source": {"source": "directory", "path": "./.ai-b"}},
+        }
+    }), encoding="utf-8")
+    monkeypatch.delenv("AGENT_MCP_PLUGIN_ROOTS", raising=False)
+    monkeypatch.chdir(workspace)
+
+    with pytest.raises(ConfigError) as exc:
+        resolve_config_path("dup")
+    assert "ambiguous" in str(exc.value).lower()
+
+
 def test_discover_plugin_bridges(tmp_path, monkeypatch):
     from agent_mcp.config import discover_plugin_bridges
     monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
