@@ -780,6 +780,31 @@ sibling plugins or modules.
 
 Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`.
 
+### Optional Machine Settings Reconciliation
+
+Before a fresh Copilot process starts, the launch wrapper opportunistically
+resolves the public `agent-machines` command. When available, it runs:
+
+```text
+agent-machines restore --all-projects --only copilot.settings --apply --json
+```
+
+This restores the machine-wide union of adopted Copilot settings immediately
+before Copilot reads them, including model, effort, and context preferences
+that the CLI may periodically clear. The sibling plugin remains optional:
+launch proceeds unchanged when `agent-machines` is not installed. A present
+provider that fails aborts launch rather than silently starting with drifted
+settings.
+
+Every resolved command is prefixed by an installed pre-exec wrapper, so
+explicit templates, legacy setup scripts, normalized launches, interactive
+sessions, and direct agent-bridge launches share the same seam. The normalized
+default setup also sources the helper for callers that invoke it directly. A
+process-scoped marker inherited by child processes prevents duplicate
+reconciliation. Reattaching to an existing mux session does not execute the
+command and therefore does not reconcile. Recovery mode bypasses
+reconciliation so a broken sibling provider cannot lock out repair sessions.
+
 During an interactive launch the join + apply prints a **status line at each
 waiting step** (joining the background download — the up-to-90s step most
 likely to look "stuck" — inline re-download, installer, bootstrap-service

@@ -413,16 +413,23 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
             shutil.copy2(frag, conduct_dst / frag.name)
             output.ok(f"Conduct: {conduct_dst / frag.name}")
 
-    # Deploy default setup scripts (used when repos lack their own)
+    # Deploy normalized setup and optional machine-settings reconciliation.
     sd = install_dir() / "scripts"
     sd.mkdir(parents=True, exist_ok=True)
-    for name in ("default-setup.ps1", "default-setup.sh"):
+    for name in (
+        "default-setup.ps1",
+        "default-setup.sh",
+        "launch-command.ps1",
+        "launch-command.sh",
+        "reconcile-machine-settings.ps1",
+        "reconcile-machine-settings.sh",
+    ):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, sd / name)
             if platform.system() != "Windows" and name.endswith(".sh"):
                 (sd / name).chmod(0o755)
-            output.ok(f"Default setup: {sd / name}")
+            output.ok(f"Session script: {sd / name}")
 
     return True
 

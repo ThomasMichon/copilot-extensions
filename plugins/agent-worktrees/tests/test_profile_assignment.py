@@ -30,6 +30,11 @@ def _profiles(count: int = 6) -> list[cfg.CopilotProfile]:
     ]
 
 
+def _inner_command(command: list[str]) -> list[str]:
+    delimiter = command.index("--")
+    return command[delimiter + 1 :]
+
+
 def _policy(
     profiles: list[cfg.CopilotProfile],
     *,
@@ -801,7 +806,11 @@ def test_armed_picker_base_repo_keeps_default_profile_args_and_env(
     )
 
     assert m._resolve_base_repo(config, args, profile=selected) == 0
-    assert plans[-1]["cmd"][:3] == ["copilot", "--model", "model-0"]
+    assert _inner_command(plans[-1]["cmd"])[:3] == [
+        "copilot",
+        "--model",
+        "model-0",
+    ]
     assert plans[-1]["env"]["PROFILE_ENV"] == "0"
 
 
@@ -1500,7 +1509,11 @@ def test_new_worktree_survives_optional_assignment_state_failure(
     )
 
     assert Path(result["worktree"]["path"]).exists()
-    assert result["launch"]["cmd"][:3] == ["copilot", "--model", "model-0"]
+    assert _inner_command(result["launch"]["cmd"])[:3] == [
+        "copilot",
+        "--model",
+        "model-0",
+    ]
     assert result["launch"]["env"]["PROFILE_ENV"] == "0"
     assert "profile_assignment" not in result["launch"]
 
@@ -2089,5 +2102,6 @@ def test_selected_profile_remains_an_ordinary_launch_profile():
         "/worktrees/wt",
         profile=profile,
     )
-    assert command[:1] == ["copilot"]
-    assert profile.copilot_args == command[1:-1]
+    inner = _inner_command(command)
+    assert inner[:1] == ["copilot"]
+    assert profile.copilot_args == inner[1:-1]
