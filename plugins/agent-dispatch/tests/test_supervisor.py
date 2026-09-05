@@ -95,6 +95,9 @@ class QueueBackedClient:
     def fail_spawn(self, key, *, detail=None):
         return asdict(self._q.fail_spawn(key, detail=detail))
 
+    def defer_spawn(self, key, *, detail=None):
+        return asdict(self._q.defer_spawn(key, detail=detail))
+
     def request_spawn_release(
         self, key, *, detail=None, disposition="failed"
     ):
@@ -2274,6 +2277,31 @@ def test_dead_letter_after_max_attempts(q, client):
     assert q.latest_reservation(t.id).attempt == 3  # still only 3 attempts made
 
 
+def test_deferred_spawn_never_dead_letters(q, client):
+    """A carried session that is confirmed live/busy (not gone) declines the
+    spawn -- that's a legitimate deferral, not a failure. Unlike an ordinary
+    spawn failure, it must never count toward dead-lettering (#2056): the same
+    exclusive-key task should be able to re-check liveness indefinitely while
+    its predecessor is genuinely still working, without ever being starved by
+    a bound meant for real failures."""
+    t = q.create("work")
+
+    def always_busy(task):
+        return False, {"error": "carried session remains live", "deferred": True}
+
+    sup = Supervisor(
+        client, spawn_fn=always_busy, repo=TEST_REPO, max_concurrent=5, max_attempts=3
+    )
+    # Many more cycles than the failure bound: none of them may dead-letter,
+    # because none of them actually failed.
+    for _ in range(10):
+        assert sup.poll_once() == []
+    assert len(q.list_reservations(task_id=t.id, state="failed")) == 0
+    assert len(q.list_reservations(task_id=t.id, state="deferred")) == 10
+    # A fresh attempt is still reserved every cycle (never dead-lettered).
+    assert q.latest_reservation(t.id).attempt == 10
+
+
 def test_dead_letter_summary_is_compact_and_only_repeats_on_change(
     q, client, caplog
 ):
@@ -2762,6 +2790,7 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
 
     assert ok is False
     assert "remains live" in handle["error"]
+    assert handle.get("deferred") is True
     assert created == []
 
 
