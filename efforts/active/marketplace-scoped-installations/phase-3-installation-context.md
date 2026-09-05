@@ -612,8 +612,12 @@ uninstall behavior.
   same `install.json` and compare-and-swaps from the observed current version.
   After selection, both runtime markers name that rollback target.
 - Interrupted runtime reservations become releasable only through a new
-  `.runtime-slot-reservation.json` receipt published atomically before the
-  final slot becomes visible. The receipt mirrors the immutable ownership
+  `.runtime-slot-reservation.json` receipt. Python and PowerShell publish it in
+  the hidden sibling before the no-replace rename; Bash publishes it as the
+  first entry immediately after the final-slot `mkdir` reservation. The Bash
+  directory may therefore be filesystem-visible briefly, but it remains inert
+  and ineligible for attributable enumeration or reconciliation until the
+  receipt is durably published. The receipt mirrors the immutable ownership
   identity: marketplace/plugin/source identity, canonical runtime root/version,
   snapshot id/root/provenance digest, canonical namespace/install receipt paths
   and generations, a non-negative reservation generation, and an RFC3339 UTC
@@ -623,10 +627,11 @@ uninstall behavior.
   reservations remain protected: absence of the reservation receipt is never
   proof of ownership or permission to delete.
 - The shared Python, dependency-light Bash, and PowerShell primitives expose
-  `slot-release`. It requires explicit context, marketplace/plugin ids, runtime
-  version, reservation generation, current namespace/install generations, and
-  durable home. Under the marketplace genesis lock and plugin install lock it
-  revalidates the receipt and target immediately before deletion.
+  `slot-release` (the release half of the repair/release lifecycle). It requires
+  explicit context, marketplace/plugin ids, runtime version, reservation
+  generation, current namespace/install generations, and durable home. Under
+  the marketplace genesis lock and plugin install lock it revalidates the
+  receipt and target immediately before deletion.
 - `slot-release` removes only a slot containing the exact matching reservation
   receipt and no other entries. It refuses completed, selected, last-known-good,
   non-empty, markerless, malformed, linked/reparse, foreign, generation-drifted,
