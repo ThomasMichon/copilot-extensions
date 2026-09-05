@@ -212,6 +212,16 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
                 "activation_scopes",
                 "managed_runtime",
             }
+            and set(authority)
+            != {
+                "plugin_root",
+                "plugin_owner",
+                "plugin_source_path",
+                "plugin_version",
+                "activation_scopes",
+                "managed_runtime",
+                "transition_group",
+            }
             or any(
                 not isinstance(authority[key], str) or not authority[key]
                 for key in ("plugin_root", "plugin_owner", "plugin_source_path", "plugin_version")
@@ -663,6 +673,63 @@ class ManagedRuntimeRetention:
             protected.update(Path(item["cell"]) for item in reference["cells"])
         return protected, preservation_roots
 
+    def _transition_group_state(self, receipt_dir: Path) -> tuple[set[Path], set[Path]]:
+        from .companion import ManagedLaunchSnapshot, transition_group_receipt_path
+
+        protected: set[Path] = set()
+        preservation_roots: set[Path] = set()
+        if not receipt_dir.exists():
+            return protected, preservation_roots
+        for path in sorted(receipt_dir.glob("*.managed-transition-group.json")):
+            _assert_safe_descendant(
+                receipt_dir, path, description="managed transition group state"
+            )
+            record = _read_metadata(receipt_dir, path)
+            if (
+                type(record.get("schema_version")) is not int
+                or record["schema_version"] != 1
+                or not isinstance(record.get("group_id"), str)
+                or not record["group_id"]
+                or path != transition_group_receipt_path(receipt_dir, record["group_id"])
+                or not isinstance(record.get("members"), list)
+                or sorted(record["members"]) != record["members"]
+                or not all(isinstance(member, str) and member for member in record["members"])
+                or not isinstance(record.get("selected"), dict)
+                or set(record["selected"]) != set(record["members"])
+            ):
+                raise ManagedRuntimeError("managed transition group receipt is malformed")
+            for field in ("selected", "rollback", "pending"):
+                value = record.get(field)
+                if value is None and field != "selected":
+                    continue
+                if not isinstance(value, dict) or set(value) != set(record["members"]):
+                    raise ManagedRuntimeError(
+                        "managed transition group snapshot membership is inconsistent"
+                    )
+                for registration_id, raw_snapshot in value.items():
+                    snapshot = ManagedLaunchSnapshot.from_dict(raw_snapshot)
+                    if snapshot.to_dict()["registration"]["id"] != registration_id:
+                        raise ManagedRuntimeError(
+                            "managed transition group snapshot identity is inconsistent"
+                        )
+                    try:
+                        reference = self._reference(snapshot)
+                    except (ManagedRuntimeError, OSError) as exc:
+                        preservation_roots.update(
+                            self._preservation_roots(
+                                {"cells": snapshot.to_dict()["runtimes"]}
+                            )
+                        )
+                        logging.getLogger("agent-dispatch.companion").warning(
+                            "preserving managed transition group receipt with invalid "
+                            "reference %s: %s",
+                            path,
+                            exc,
+                        )
+                        continue
+                    protected.update(Path(item["cell"]) for item in reference["cells"])
+        return protected, preservation_roots
+
     def cleanup(self) -> CleanupResult:
         """Reclaim only fully attested, unreferenced cells after a complete preflight."""
         if not self.root.exists():
@@ -704,6 +771,11 @@ class ManagedRuntimeRetention:
                         selected_scopes.add(scope_key)
             interrupted_scopes: set[str] = set()
             preservation_roots: set[Path] = set()
+            receipt_dirs = {
+                Path(scope["receipt_dir"])
+                for scope in scopes.values()
+                if isinstance(scope.get("receipt_dir"), str)
+            }
             for scope_key, scope in scopes.items():
                 if scope["domain"] == domain:
                     launch_cells, launch_roots = self._launch_state(scope)
@@ -711,6 +783,10 @@ class ManagedRuntimeRetention:
                     preservation_roots.update(launch_roots)
                     if launch_roots or (launch_cells and scope_key not in selected_scopes):
                         interrupted_scopes.add(scope_key)
+            for receipt_dir in sorted(receipt_dirs):
+                group_cells, group_roots = self._transition_group_state(receipt_dir)
+                protected.update(group_cells)
+                preservation_roots.update(group_roots)
             # A gated first-launch receipt is selected state too. Keep its discovery
             # lease until recovery retires it or publishes a durable selection.
             stale_paths: list[Path] = []

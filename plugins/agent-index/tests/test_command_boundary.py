@@ -225,6 +225,21 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
         assert "_ensure_engine" not in sh_branch
 
 
+def test_installers_preserve_two_step_cuda_engine_swap():
+    ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    assert 'AGENT_INDEX_TORCH_INDEX' in ps
+    assert '--no-deps --reinstall-package torch torch' in ps
+    assert '"$PluginDir[store,engine]"' in ps
+    assert "'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }" in ps
+
+    assert 'AGENT_INDEX_TORCH_INDEX' in sh
+    assert '--no-deps --reinstall-package torch torch' in sh
+    assert '"$PLUGIN_DIR[store,engine]"' in sh
+    assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
+
+
 def test_cell_host_build_refuses_before_creating_any_environment(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location(
         "index_boundary_cell", PLUGIN / "scripts" / "cell-runtime.py"

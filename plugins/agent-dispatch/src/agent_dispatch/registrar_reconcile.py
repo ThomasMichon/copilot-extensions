@@ -113,6 +113,8 @@ def declaration_to_registration(
         "owner": decl.owner,
     }
     if decl.kind == RegistrationKind.PLUGIN_COMPANION:
+        if decl.transition_group:
+            registration["transition_group"] = decl.transition_group
         registration["plugin"] = {
             "root": decl.plugin_root,
             "source_path": decl.source_path,
@@ -126,6 +128,8 @@ def declaration_to_registration(
             "plugin_version": decl.plugin_version,
             "activation_scopes": list(decl.activation_scopes),
         }
+        if decl.transition_group:
+            registration["runtime_revision"]["transition_group"] = decl.transition_group
         if managed_runtime := decl.spec.get("managed_runtime"):
             registration["runtime_revision"]["managed_runtime"] = managed_runtime
     return registration

@@ -455,6 +455,8 @@ def _authority(
         "activation_scopes": plugin.get("activation_scopes"),
         "managed_runtime": managed,
     }
+    if registration.get("transition_group") is not None:
+        expected["transition_group"] = registration.get("transition_group")
     if revision != expected:
         raise ManagedRuntimeError("managed runtime provenance does not match its declaration")
     plugin_root_raw = plugin.get("root")

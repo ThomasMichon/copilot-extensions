@@ -35,7 +35,7 @@ from agent_dispatch.managed_runtime import (
     _RootLock,
 )
 from agent_dispatch.procutil import no_window_kwargs
-from tests.test_managed_companion import Harness
+from tests.test_managed_companion import Harness, TransitionGroupHarness
 from tests.test_managed_runtime import FakeRunner, _policy, _project, _registration
 
 
@@ -899,6 +899,43 @@ def test_managed_retention_pin_contention_does_not_strand_recovered_process(
     assert h.controller._receipt_path(h.rid).exists()
     assert h.controller.selected_managed(h.rid) == snapshot
     assert "incomplete redundant managed selection pin" in caplog.text
+
+
+def test_managed_retention_preserves_pending_transition_group_cells(
+    tmp_path, monkeypatch
+):
+    h = TransitionGroupHarness(tmp_path, monkeypatch)
+    assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    h.daemon.reconcile_once()
+    selected, rollback, _pending = h.daemon._read_transition_group(h.group_id)
+    h.change(
+        service_version="3.0.0",
+        service_mode="service-new",
+        engine_version="engine-v2",
+        engine_mode="engine-new",
+    )
+    desired = h.daemon._desired()
+    target = {
+        rid: h.daemon._desired_managed_snapshot(rid, desired[rid])
+        for rid in (h.engine_id, h.service_id)
+    }
+    assert all(snapshot is not None for snapshot in target.values())
+    pending = {rid: snapshot for rid, snapshot in target.items() if snapshot is not None}
+    h.daemon._write_transition_group(
+        h.group_id,
+        selected=selected,
+        rollback=rollback,
+        pending=pending,
+    )
+    retention = h.controller._managed_retention()
+    retention.policy = RetentionPolicy(0, 0)
+
+    result = retention.cleanup()
+
+    target_cells = {snapshot.runtimes[0].cell for snapshot in pending.values()}
+    assert target_cells
+    assert target_cells.isdisjoint(set(result.deleted))
+    assert target_cells.issubset(set(result.preserved))
 
 
 def test_managed_retention_process_lease_failure_still_blocks_gate(tmp_path, monkeypatch):

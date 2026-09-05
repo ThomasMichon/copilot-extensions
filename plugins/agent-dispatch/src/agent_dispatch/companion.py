@@ -300,6 +300,7 @@ def companion_authority_fingerprint(registration: dict) -> str:
             "runtime_revision": registration.get("runtime_revision"),
             "machine": registration.get("machine"),
             "env": registration.get("env"),
+            "transition_group": registration.get("transition_group"),
             "spec": registration.get("spec"),
         },
         sort_keys=True,
@@ -568,6 +569,12 @@ def companion_receipt_path(receipt_dir: Path, registration_id: str) -> Path:
     """Canonical process-receipt location shared with root-wide retention."""
     digest = hashlib.sha256(registration_id.encode()).hexdigest()[:16]
     return receipt_dir / f"{_safe_slug(registration_id)}-{digest}.companion.json"
+
+
+def transition_group_receipt_path(receipt_dir: Path, group_id: str) -> Path:
+    """Canonical grouped-selection receipt shared by transition-aware companions."""
+    digest = hashlib.sha256(group_id.encode()).hexdigest()[:16]
+    return receipt_dir / f"{_safe_slug(group_id)}-{digest}.managed-transition-group.json"
 
 
 def _command_digest(command: tuple[str, ...]) -> str:
@@ -1019,8 +1026,52 @@ class DefaultCompanionController:
     def _selection_path(self, registration_id: str) -> Path:
         return self._receipt_path(registration_id).with_suffix(".managed-launch.json")
 
+    def _group_selected_managed(
+        self, registration_id: str
+    ) -> ManagedLaunchSnapshot | None:
+        if not self.receipt_dir.exists():
+            return None
+        for path in sorted(self.receipt_dir.glob("*.managed-transition-group.json")):
+            record = _read_metadata(self.receipt_dir.absolute(), path.absolute())
+            if (
+                record.get("schema_version") != 1
+                or not isinstance(record.get("group_id"), str)
+                or not isinstance(record.get("selected"), dict)
+                or not isinstance(record.get("members"), list)
+            ):
+                raise CompanionError("managed transition group receipt is malformed")
+            members = record["members"]
+            if (
+                not members
+                or sorted(members) != members
+                or not all(isinstance(member, str) and member for member in members)
+            ):
+                raise CompanionError("managed transition group members are malformed")
+            if registration_id not in members:
+                continue
+            selected = record["selected"]
+            rollback = record.get("rollback")
+            pending = record.get("pending")
+            if set(selected) != set(members):
+                raise CompanionError("managed transition group selected set is incomplete")
+            for value in (selected, rollback, pending):
+                if value is not None and (
+                    not isinstance(value, dict) or set(value) != set(members)
+                ):
+                    raise CompanionError("managed transition group snapshot set is inconsistent")
+            snapshot = ManagedLaunchSnapshot.from_dict(selected[registration_id])
+            if snapshot.to_dict()["registration"]["id"] != registration_id:
+                raise CompanionError("managed transition group selected identity is inconsistent")
+            if path != transition_group_receipt_path(self.receipt_dir, record["group_id"]):
+                raise CompanionError("managed transition group receipt path is mismatched")
+            return snapshot
+        return None
+
     def selected_managed(self, registration_id: str) -> ManagedLaunchSnapshot | None:
         """Read last-ready state, or the gated receipt of an interrupted first launch."""
+        grouped = self._group_selected_managed(registration_id)
+        if grouped is not None:
+            return grouped
         path = self._selection_path(registration_id)
         if path.exists() or path.is_symlink():
             record = _read_metadata(self.receipt_dir.absolute(), path.absolute())

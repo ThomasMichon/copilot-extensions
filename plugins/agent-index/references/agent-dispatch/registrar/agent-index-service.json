@@ -1,13 +1,14 @@
 {
   "name": "agent-index-service",
   "kind": "plugin-companion",
+  "transition_group": "agent-index-host-runtime",
   "spec": {
     "managed_runtime": {
       "schema_version": 1,
       "runtimes": [
         {
           "name": "service",
-          "version": "0.1.0-dev137",
+          "version": "0.1.0-dev138",
           "profile": "host",
           "python_env": "AGENT_INDEX_MANAGED_PYTHON",
           "projects": [

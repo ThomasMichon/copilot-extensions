@@ -19,10 +19,11 @@ from agent_dispatch.companion import (
     CompanionError,
     CompanionIndeterminate,
     DefaultCompanionController,
+    transition_group_receipt_path,
 )
 from agent_dispatch.managed_runtime import ManagedRuntimeError, ManagedRuntimeMaterializer
 from agent_dispatch.managed_retention import ManagedRuntimeRetention
-from agent_dispatch.supervisor_daemon import SupervisorDaemon
+from agent_dispatch.supervisor_daemon import ReconcileSummary, SupervisorDaemon
 from tests.test_managed_runtime import FakeRunner, _policy, _project, _registration
 
 
@@ -205,6 +206,119 @@ class Harness:
 @pytest.fixture
 def harness(tmp_path, monkeypatch):
     return Harness(tmp_path, monkeypatch)
+
+
+class TransitionGroupHarness(Harness):
+    group_id = "agent-index-host-runtime"
+
+    def __init__(self, tmp_path, monkeypatch):
+        super().__init__(tmp_path, monkeypatch)
+        service = copy.deepcopy(self.registration)
+        service["id"] = "declared:plugin@example:agent-index-service"
+        service["logical_id"] = "agent-index-service"
+        service["transition_group"] = self.group_id
+        service["runtime_revision"]["transition_group"] = self.group_id
+        service["plugin"]["source_path"] = str(self.plugin / "registrar" / "service.json")
+        service["runtime_revision"]["plugin_source_path"] = service["plugin"]["source_path"]
+        engine = copy.deepcopy(service)
+        engine["id"] = "declared:plugin@example:agent-index-engine"
+        engine["logical_id"] = "agent-index-engine"
+        engine["plugin"]["source_path"] = str(self.plugin / "registrar" / "engine.json")
+        engine["runtime_revision"]["plugin_source_path"] = engine["plugin"]["source_path"]
+        engine["spec"]["managed_runtime"]["runtimes"][0].update(
+            name="engine",
+            version="engine-v1",
+            python_env="EXAMPLE_ENGINE_MANAGED_PYTHON",
+            projects=[{"path": ".", "extras": ["engine"]}],
+            imports=["example_service"],
+        )
+        engine["runtime_revision"]["managed_runtime"] = engine["spec"]["managed_runtime"]
+        self.service_id = service["id"]
+        self.engine_id = engine["id"]
+        self.registrations = [engine, service]
+        self.registration = service
+        self.providers = {
+            self.engine_id: {
+                "schema_version": 1,
+                "active": True,
+                "arguments": ["--mode", "engine-old"],
+                "environment": {"MODE": "engine-old"},
+            },
+            self.service_id: {
+                "schema_version": 1,
+                "active": True,
+                "arguments": ["--mode", "service-old"],
+                "environment": {"MODE": "service-old"},
+            },
+        }
+
+    def group_record(self) -> dict:
+        return json.loads(
+            transition_group_receipt_path(self.state, self.group_id).read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def install_count(self, extra: str) -> int:
+        return sum(
+            1
+            for argv, _cwd, _environment in self.builder.calls
+            if argv[1:3] == ["pip", "install"]
+            and any(f"[{extra}]" in part for part in argv)
+        )
+
+    def run(self, argv, **kwargs):
+        if Path(argv[1]).name == "config.py":
+            request = json.loads(kwargs["input_text"])
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                json.dumps(self.providers[request["registration_id"]]),
+                "",
+            )
+        return super().run(argv, **kwargs)
+
+    def change(
+        self,
+        *,
+        service_version: str | None = None,
+        service_mode: str | None = None,
+        engine_version: str | None = None,
+        engine_mode: str | None = None,
+    ) -> None:
+        updated = []
+        for registration in self.registrations:
+            clone = copy.deepcopy(registration)
+            runtime = clone["spec"]["managed_runtime"]["runtimes"][0]
+            if clone["id"] == self.service_id:
+                if service_version is not None:
+                    runtime["version"] = service_version
+                updated.append(clone)
+                if service_mode is not None:
+                    self.providers[self.service_id] = {
+                        "schema_version": 1,
+                        "active": True,
+                        "arguments": ["--mode", service_mode],
+                        "environment": {"MODE": service_mode},
+                    }
+            else:
+                if engine_version is not None:
+                    runtime["version"] = engine_version
+                updated.append(clone)
+                if engine_mode is not None:
+                    self.providers[self.engine_id] = {
+                        "schema_version": 1,
+                        "active": True,
+                        "arguments": ["--mode", engine_mode],
+                        "environment": {"MODE": engine_mode},
+                    }
+            clone["runtime_revision"]["managed_runtime"] = clone["spec"]["managed_runtime"]
+        self.registrations = updated
+
+
+@pytest.fixture
+def transition_group_harness(tmp_path, monkeypatch):
+    return TransitionGroupHarness(tmp_path, monkeypatch)
 
 
 def test_first_launch_waits_for_materialization_and_records_ready_snapshot(harness):
@@ -685,6 +799,100 @@ def test_uncertain_restart_adopts_exact_live_posix_process(harness):
     assert summary.recovered == [h.rid]
     assert h.unit.proc.pid == pid
     assert len(h.processes) == 1
+
+
+def test_transition_group_service_only_release_keeps_warm_engine(
+    transition_group_harness,
+):
+    h = transition_group_harness
+    assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    h.daemon.reconcile_once()
+    engine_process = h.daemon._units[h.engine_id].proc
+    engine_installs = h.install_count("engine")
+
+    h.change(service_version="3.0.0", service_mode="service-new")
+    summary = h.daemon.reconcile_once()
+
+    assert summary.restarted == [h.service_id]
+    assert summary.started == summary.revived == []
+    assert h.daemon._units[h.engine_id].proc is engine_process
+    assert engine_process.poll() is None
+    assert h.install_count("engine") == engine_installs
+    record = h.group_record()
+    assert record["pending"] is None
+    assert record["selected"][h.engine_id]["runtimes"][0]["version"] == "engine-v1"
+    assert record["selected"][h.service_id]["runtimes"][0]["version"] == "3.0.0"
+
+
+def test_transition_group_revalidates_full_closure_before_cutover(
+    transition_group_harness,
+):
+    h = transition_group_harness
+    assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    h.daemon.reconcile_once()
+    engine_process = h.daemon._units[h.engine_id].proc
+    service_process = h.daemon._units[h.service_id].proc
+    group_path = transition_group_receipt_path(h.state, h.group_id)
+
+    h.change(
+        service_version="3.0.0",
+        service_mode="service-new",
+        engine_version="engine-v2",
+        engine_mode="engine-new",
+    )
+    h.builder.fail_validation_at = h.builder.validation_count + 1
+    summary = h.daemon.reconcile_once()
+
+    assert summary.started == summary.restarted == summary.revived == []
+    assert h.daemon._units[h.engine_id].proc is engine_process
+    assert h.daemon._units[h.service_id].proc is service_process
+    assert engine_process.poll() is None
+    assert service_process.poll() is None
+    assert group_path.exists()
+    assert h.group_record()["selected"][h.service_id]["runtimes"][0]["version"] == "2.0.0"
+    assert h.group_record()["pending"] is None
+
+
+def test_transition_group_restart_mid_cutover_rolls_back_pair_atomically(
+    transition_group_harness,
+):
+    h = transition_group_harness
+    assert set(h.daemon.reconcile_once().started) == {h.engine_id, h.service_id}
+    h.daemon.reconcile_once()
+    selected, rollback, _pending = h.daemon._read_transition_group(h.group_id)
+
+    h.change(
+        service_version="3.0.0",
+        service_mode="service-new",
+        engine_version="engine-v2",
+        engine_mode="engine-new",
+    )
+    desired = h.daemon._desired()
+    target = {
+        rid: h.daemon._desired_managed_snapshot(rid, desired[rid])
+        for rid in (h.engine_id, h.service_id)
+    }
+    assert all(snapshot is not None for snapshot in target.values())
+    target = {rid: snapshot for rid, snapshot in target.items() if snapshot is not None}
+    h.daemon._write_transition_group(
+        h.group_id,
+        selected=selected,
+        rollback=rollback,
+        pending=target,
+    )
+    assert h.daemon._stop(h.engine_id)
+    h.daemon._launch_managed(target[h.engine_id], ReconcileSummary(), bucket="restarted")
+
+    h.controller = h.make_controller()
+    h.daemon = h.make_daemon()
+    h.daemon.reconcile_once()
+
+    record = h.group_record()
+    assert record["pending"] is None
+    assert record["selected"][h.engine_id]["runtimes"][0]["version"] == "engine-v1"
+    assert record["selected"][h.service_id]["runtimes"][0]["version"] == "2.0.0"
+    assert h.daemon._units[h.engine_id].companion_resolution.managed_snapshot.runtimes[0].version == "engine-v1"
+    assert h.daemon._units[h.service_id].companion_resolution.managed_snapshot.runtimes[0].version == "2.0.0"
 
 
 def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatch):

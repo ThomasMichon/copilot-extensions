@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from plugin_activation import read_json_object, write_json_object_atomic
+
 from .companion import (
     CompanionController,
     CompanionError,
@@ -50,6 +52,7 @@ from .companion import (
     DefaultCompanionController,
     ManagedLaunchSnapshot,
     companion_authority_fingerprint,
+    transition_group_receipt_path,
 )
 from .managed_runtime import (
     ManagedRuntimeError,
@@ -892,6 +895,207 @@ class SupervisorDaemon:
             return False
         return old_source == new_source
 
+    @staticmethod
+    def _transition_group(registration: Mapping[str, Any]) -> str | None:
+        value = registration.get("transition_group")
+        return value if isinstance(value, str) and value else None
+
+    @staticmethod
+    def _managed_transition_key(registration: Mapping[str, Any]) -> str:
+        value = {
+            "id": registration.get("id"),
+            "owner": registration.get("owner"),
+            "machine": registration.get("machine"),
+            "env": registration.get("env"),
+            "transition_group": registration.get("transition_group"),
+            "spec": registration.get("spec"),
+            "runtime_revision": registration.get("runtime_revision"),
+            "companion_runtime": registration.get("companion_runtime"),
+        }
+        return json.dumps(value, sort_keys=True, default=str)
+
+    def _transition_group_receipt_dir(self) -> Path:
+        receipt_dir = getattr(self._companion(), "receipt_dir", None)
+        return Path(receipt_dir) if receipt_dir is not None else self._spec_dir() / "companions"
+
+    def _transition_group_path(self, group_id: str) -> Path:
+        return transition_group_receipt_path(self._transition_group_receipt_dir(), group_id)
+
+    def _transition_group_snapshots(
+        self, value: object, *, members: tuple[str, ...], field: str
+    ) -> dict[str, ManagedLaunchSnapshot] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict) or set(value) != set(members):
+            raise CompanionError(
+                f"managed transition group {field} set is inconsistent"
+            )
+        snapshots: dict[str, ManagedLaunchSnapshot] = {}
+        for registration_id in members:
+            snapshot = ManagedLaunchSnapshot.from_dict(value[registration_id])
+            if snapshot.to_dict()["registration"]["id"] != registration_id:
+                raise CompanionError(
+                    f"managed transition group {field} identity is inconsistent"
+                )
+            snapshots[registration_id] = snapshot
+        return snapshots
+
+    def _read_transition_group(
+        self, group_id: str
+    ) -> tuple[
+        dict[str, ManagedLaunchSnapshot],
+        dict[str, ManagedLaunchSnapshot] | None,
+        dict[str, ManagedLaunchSnapshot] | None,
+    ] | None:
+        path = self._transition_group_path(group_id)
+        if not (path.exists() or path.is_symlink()):
+            return None
+        _, record = read_json_object(path)
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"schema_version", "group_id", "members", "selected", "rollback", "pending"}
+            or record.get("schema_version") != 1
+            or record.get("group_id") != group_id
+            or not isinstance(record.get("members"), list)
+        ):
+            raise CompanionError("managed transition group receipt is malformed")
+        members = tuple(record["members"])
+        if members != tuple(sorted(members)) or not all(
+            isinstance(member, str) and member for member in members
+        ):
+            raise CompanionError("managed transition group members are malformed")
+        selected = self._transition_group_snapshots(
+            record["selected"], members=members, field="selected"
+        )
+        if selected is None:
+            raise CompanionError("managed transition group selected set is missing")
+        rollback = self._transition_group_snapshots(
+            record.get("rollback"), members=members, field="rollback"
+        )
+        pending = self._transition_group_snapshots(
+            record.get("pending"), members=members, field="pending"
+        )
+        return selected, rollback, pending
+
+    def _write_transition_group(
+        self,
+        group_id: str,
+        *,
+        selected: Mapping[str, ManagedLaunchSnapshot],
+        rollback: Mapping[str, ManagedLaunchSnapshot] | None,
+        pending: Mapping[str, ManagedLaunchSnapshot] | None,
+    ) -> None:
+        members = tuple(sorted(selected))
+        if not members:
+            raise CompanionError("managed transition group must contain members")
+        for record_field, snapshots in (("rollback", rollback), ("pending", pending)):
+            if snapshots is not None and set(snapshots) != set(members):
+                raise CompanionError(
+                    f"managed transition group {record_field} members do not match selection"
+                )
+        path = self._transition_group_path(group_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json_object_atomic(
+            path,
+            {
+                "schema_version": 1,
+                "group_id": group_id,
+                "members": list(members),
+                "selected": {
+                    registration_id: selected[registration_id].to_dict()
+                    for registration_id in members
+                },
+                "rollback": (
+                    {
+                        registration_id: rollback[registration_id].to_dict()
+                        for registration_id in members
+                    }
+                    if rollback is not None
+                    else None
+                ),
+                "pending": (
+                    {
+                        registration_id: pending[registration_id].to_dict()
+                        for registration_id in members
+                    }
+                    if pending is not None
+                    else None
+                ),
+            },
+        )
+
+    def _desired_managed_snapshot(
+        self, rid: str, registration: dict
+    ) -> ManagedLaunchSnapshot | None:
+        if rid in self._managed_uncertain:
+            return None
+        authority = companion_authority_fingerprint(registration)
+        if self._managed_runtime_authorities.get(rid) != authority:
+            return None
+        return ManagedLaunchSnapshot.capture(
+            self._companion_resolutions[rid], self._managed_runtime_results[rid]
+        )
+
+    def _selected_group_snapshots(
+        self, group_id: str, rids: tuple[str, ...]
+    ) -> tuple[
+        dict[str, ManagedLaunchSnapshot],
+        dict[str, ManagedLaunchSnapshot] | None,
+        dict[str, ManagedLaunchSnapshot] | None,
+    ] | None:
+        record = self._read_transition_group(group_id)
+        if record is not None:
+            selected, rollback, pending = record
+            if set(selected) == set(rids):
+                return selected, rollback, pending
+            raise CompanionError("managed transition group membership changed")
+        selected: dict[str, ManagedLaunchSnapshot] = {}
+        for rid in rids:
+            unit = self._units.get(rid)
+            snapshot = (
+                unit.companion_resolution.managed_snapshot
+                if unit is not None
+                and unit.companion_resolution is not None
+                and unit.companion_resolution.managed_snapshot is not None
+                else self._companion().selected_managed(rid)
+            )
+            if snapshot is None:
+                return None
+            selected[rid] = snapshot
+        self._write_transition_group(group_id, selected=selected, rollback=None, pending=None)
+        return selected, None, None
+
+    def _restore_transition_group(
+        self,
+        group_id: str,
+        selected: Mapping[str, ManagedLaunchSnapshot],
+        rollback: Mapping[str, ManagedLaunchSnapshot] | None,
+        summary: ReconcileSummary,
+    ) -> bool:
+        restored: dict[str, ManagedLaunchSnapshot] = dict(selected)
+        for rid, snapshot in restored.items():
+            unit = self._units.get(rid)
+            current = (
+                unit.companion_resolution.managed_snapshot
+                if unit is not None and unit.companion_resolution is not None
+                else None
+            )
+            if (
+                unit is not None
+                and current is not None
+                and current.fingerprint == snapshot.fingerprint
+                and unit.proc is not None
+                and unit.proc.poll() is None
+            ):
+                continue
+            if unit is not None and not self._stop(rid):
+                return False
+            self._launch_managed(snapshot, summary, bucket="revived")
+        self._write_transition_group(
+            group_id, selected=restored, rollback=rollback, pending=None
+        )
+        return True
+
     def _launch_managed(
         self, snapshot: ManagedLaunchSnapshot, summary: ReconcileSummary, *, bucket: str
     ) -> None:
@@ -911,12 +1115,173 @@ class SupervisorDaemon:
         )
         getattr(summary, "recovered" if launched.recovered else bucket).append(rid)
 
-    def _reconcile_managed(self, desired: dict[str, dict], summary: ReconcileSummary) -> set[str]:
+    def _reconcile_transition_groups(
+        self, desired: dict[str, dict], summary: ReconcileSummary
+    ) -> set[str]:
+        grouped: dict[str, list[str]] = {}
+        for rid, registration in desired.items():
+            if (
+                registration.get("kind") == RegistrationKind.PLUGIN_COMPANION
+                and registration.get("spec", {}).get("managed_runtime")
+                and self._transition_group(registration) is not None
+            ):
+                grouped.setdefault(self._transition_group(registration) or "", []).append(rid)
+        handled: set[str] = set()
+        for group_id, members in sorted(grouped.items()):
+            rids = tuple(sorted(members))
+            try:
+                current = self._selected_group_snapshots(group_id, rids)
+                if current is None:
+                    continue
+                selected, rollback, pending = current
+                desired_snapshots = {
+                    rid: self._desired_managed_snapshot(rid, desired[rid]) for rid in rids
+                }
+                wants_transition = any(
+                    self._managed_transition_key(
+                        (
+                            self._companion_resolutions[rid].registration
+                            if rid in self._companion_resolutions
+                            else desired[rid]
+                        )
+                    )
+                    != self._managed_transition_key(selected[rid].resolution().registration)
+                    for rid in rids
+                )
+                if pending is None:
+                    if (
+                        not wants_transition
+                        and all(snapshot is not None for snapshot in desired_snapshots.values())
+                        and not any(
+                            desired_snapshots[rid].fingerprint != selected[rid].fingerprint
+                            for rid in rids
+                        )
+                    ):
+                        continue
+                    handled.update(rids)
+                    if not all(snapshot is not None for snapshot in desired_snapshots.values()):
+                        continue
+                    target = {
+                        rid: desired_snapshots[rid]  # type: ignore[index]
+                        for rid in rids
+                    }
+                else:
+                    target = pending
+                    handled.update(rids)
+                if pending is not None:
+                    if not self._restore_transition_group(group_id, selected, rollback, summary):
+                        summary.skipped.extend(rids)
+                    continue
+                blocked = False
+                for rid in rids:
+                    failure = self._managed_launch_failures.get(rid)
+                    if (
+                        failure is not None
+                        and failure[0] == target[rid].fingerprint
+                        and self.clock() < failure[1]
+                    ):
+                        blocked = True
+                        break
+                if blocked:
+                    continue
+                for rid in rids:
+                    if not self._rollback_allowed(selected[rid], desired[rid]):
+                        raise CompanionError(
+                            "managed transition group rollback authority changed"
+                        )
+                    self._managed_runtime().validate(
+                        target[rid].resolution().registration, target[rid].runtimes
+                    )
+                next_rollback = (
+                    dict(selected)
+                    if any(
+                        target[rid].fingerprint != selected[rid].fingerprint
+                        for rid in rids
+                    )
+                    else rollback
+                )
+                self._write_transition_group(
+                    group_id,
+                    selected=selected,
+                    rollback=rollback,
+                    pending=target,
+                )
+                try:
+                    for rid in rids:
+                        if target[rid].fingerprint == selected[rid].fingerprint:
+                            continue
+                        unit = self._units.get(rid)
+                        crashed = (
+                            unit is not None
+                            and unit.proc is None
+                            and unit.fingerprint == target[rid].fingerprint
+                        )
+                        if unit is not None and not self._stop(rid):
+                            raise CompanionIndeterminate(
+                                f"managed transition group member {rid} could not stop"
+                            )
+                        self._launch_managed(
+                            target[rid],
+                            summary,
+                            bucket=(
+                                "revived"
+                                if crashed
+                                else "restarted" if unit is not None else "started"
+                            ),
+                        )
+                except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
+                    delay = max(self.restart_backoff, self.poll_interval)
+                    for rid in rids:
+                        self._managed_launch_failures[rid] = (
+                            target[rid].fingerprint,
+                            self.clock() + delay,
+                        )
+                    log.error(
+                        "managed transition group %s launch failed: %s", group_id, exc
+                    )
+                    if not self._restore_transition_group(
+                        group_id, selected, rollback, summary
+                    ):
+                        summary.skipped.extend(rids)
+                    continue
+                self._write_transition_group(
+                    group_id,
+                    selected=target,
+                    rollback=next_rollback,
+                    pending=None,
+                )
+                for rid in rids:
+                    self._managed_launch_failures.pop(rid, None)
+            except (
+                CompanionError,
+                CompanionIndeterminate,
+                ManagedRuntimeError,
+                OSError,
+                ValueError,
+                subprocess.SubprocessError,
+            ) as exc:
+                log.error(
+                    "managed transition group %s cannot safely reconcile: %s",
+                    group_id,
+                    exc,
+                )
+                handled.update(rids)
+                summary.skipped.extend(rids)
+        return handled
+
+    def _reconcile_managed(
+        self,
+        desired: dict[str, dict],
+        summary: ReconcileSummary,
+        *,
+        skip: set[str] | None = None,
+    ) -> set[str]:
         """Keep prior launch authority separate from each prepared replacement."""
         managed = {
             rid for rid, reg in desired.items()
             if reg.get("kind") == RegistrationKind.PLUGIN_COMPANION
             and reg.get("spec", {}).get("managed_runtime")
+            and rid not in (skip or set())
         }
         for rid in set(self._managed_launch_failures) - managed:
             self._managed_launch_failures.pop(rid, None)
@@ -1189,10 +1554,11 @@ class SupervisorDaemon:
                         self._companion().forget_managed(rid)
 
         # 2. restart units whose definition changed
-        managed = self._reconcile_managed(desired, summary)
+        grouped = self._reconcile_transition_groups(desired, summary)
+        managed = self._reconcile_managed(desired, summary, skip=grouped)
         self._cleanup_managed_runtimes()
         for rid, reg in desired.items():
-            if rid in managed:
+            if rid in managed or rid in grouped:
                 continue
             unit = self._units.get(rid)
             if unit is not None and _spec_fingerprint(reg) != unit.fingerprint:
@@ -1204,7 +1570,7 @@ class SupervisorDaemon:
         # 3. revive crashed units (backoff-gated, cap-bounded)
         now = self.clock()
         for rid, reg in desired.items():
-            if rid in managed:
+            if rid in managed or rid in grouped:
                 continue
             unit = self._units.get(rid)
             if unit is None or unit.proc is None:
@@ -1276,7 +1642,7 @@ class SupervisorDaemon:
 
         # 4. start newly-registered units
         for rid, reg in desired.items():
-            if rid in managed:
+            if rid in managed or rid in grouped:
                 continue
             if rid not in self._units:
                 self._start(reg, summary, bucket="started")

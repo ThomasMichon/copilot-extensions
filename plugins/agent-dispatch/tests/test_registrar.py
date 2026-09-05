@@ -82,6 +82,7 @@ def test_plugin_companion_accepts_runtime_generation_override():
             "name": "engine",
             "kind": "plugin-companion",
             "runtime_generation": "engine-v1",
+            "transition_group": "engine-runtime",
             "spec": {
                 "command": ["bin/serve"],
                 "managed_runtime": {
@@ -103,15 +104,17 @@ def test_plugin_companion_accepts_runtime_generation_override():
         allow_plugin_companion=True,
     )
     assert declaration.runtime_generation == "engine-v1"
+    assert declaration.transition_group == "engine-runtime"
 
 
-def test_runtime_generation_is_rejected_outside_plugin_companions():
-    with pytest.raises(RegistrarError, match="runtime_generation"):
+@pytest.mark.parametrize("field", ["runtime_generation", "transition_group"])
+def test_plugin_companion_only_fields_are_rejected_outside_plugin_companions(field):
+    with pytest.raises(RegistrarError, match=field):
         load_declaration(
             {
                 "name": "general",
                 "kind": "emitter",
-                "runtime_generation": "engine-v1",
+                field: "engine-v1",
                 "spec": {
                     "id": "review-inbox",
                     "command": ["review-emitter", "tick"],
