@@ -243,6 +243,42 @@ def test_explicit_launch_remains_authoritative_over_copilot_path(monkeypatch):
     assert "--copilot-path" not in cmd
 
 
+def test_predecessor_copilot_path_falls_back_for_default_launch(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cmd = m._build_launch_cmd(
+        _hook_config(),
+        _args([]),
+        "/w/wt",
+        fallback_copilot_path="/opt/copilot/current/copilot",
+    )
+    assert cmd[cmd.index("--copilot-path") + 1] == (
+        "/opt/copilot/current/copilot"
+    )
+
+
+def test_configured_copilot_path_wins_over_predecessor_fallback(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cmd = m._build_launch_cmd(
+        _hook_config(copilot_path={"linux": "/opt/copilot/configured"}),
+        _args([]),
+        "/w/wt",
+        fallback_copilot_path="/opt/copilot/predecessor",
+    )
+    assert cmd[cmd.index("--copilot-path") + 1] == "/opt/copilot/configured"
+
+
+def test_explicit_launch_ignores_predecessor_copilot_path(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cmd = m._build_launch_cmd(
+        _hook_config(legacy_launch=True),
+        _args([]),
+        "/w/wt",
+        fallback_copilot_path="/opt/copilot/predecessor",
+    )
+    assert cmd[0] == "copilot"
+    assert "--copilot-path" not in cmd
+
+
 def test_legacy_setup_uses_path_resolved_shell(monkeypatch, tmp_path):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     setup = tmp_path / "tools" / "setup" / "setup.sh"
@@ -256,6 +292,27 @@ def test_legacy_setup_uses_path_resolved_shell(monkeypatch, tmp_path):
         cfg_,
         _args([]),
         str(tmp_path),
+    )
+
+    assert cmd[0] == "bash"
+    assert cmd[1] == str(setup)
+    assert "--copilot-path" not in cmd
+
+
+def test_legacy_setup_ignores_predecessor_copilot_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    setup = tmp_path / "tools" / "setup" / "setup.sh"
+    setup.parent.mkdir(parents=True)
+    setup.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    cfg_ = _hook_config()
+    repo = dataclasses.replace(cfg_.default_repo, anchor=str(tmp_path))
+    cfg_ = dataclasses.replace(cfg_, repos={"ext": repo})
+
+    cmd = m._build_launch_cmd(
+        cfg_,
+        _args([]),
+        str(tmp_path),
+        fallback_copilot_path="/opt/copilot/predecessor",
     )
 
     assert cmd[0] == "bash"

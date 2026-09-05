@@ -1822,6 +1822,7 @@ def _build_launch_cmd(
     profile: cfg.CopilotProfile | None = None,
     *,
     preflight: LaunchPreflight | None = None,
+    fallback_copilot_path: str | None = None,
 ) -> list[str]:
     """Build the launch command from config or fallback convention.
 
@@ -1831,7 +1832,10 @@ def _build_launch_cmd(
     selects the
     **normalized** launch (the default-setup launcher runs the repo hook, then
     execs Copilot); else a legacy ``tools/setup/setup.{ps1,sh}`` is run as the
-    session command; else the plugin's ``default-setup.{ps1,sh}``.
+    session command; else the plugin's ``default-setup.{ps1,sh}``. A verified
+    predecessor executable may be supplied as a final Copilot-path fallback for
+    handoff launches only; explicit launch templates, configured
+    ``copilot_path``, and legacy setup scripts remain authoritative.
     """
     recovery = getattr(args, "recovery", False)
     repo = config.default_repo
@@ -1888,8 +1892,11 @@ def _build_launch_cmd(
             if not os.path.isabs(resolved_env_script):
                 resolved_env_script = str(Path(anchor) / resolved_env_script)
         copilot_path = repo.copilot_path.get(plat_key)
-        resolved_copilot_path = (
+        configured_copilot_path = (
             copilot_path.format(**variables) if copilot_path else ""
+        )
+        resolved_copilot_path = (
+            configured_copilot_path or fallback_copilot_path or ""
         )
         is_windows = platform.system() == "Windows"
 
@@ -1943,7 +1950,7 @@ def _build_launch_cmd(
             legacy = (
                 Path(setup_path).is_file()
                 and not resolved_env_script
-                and not resolved_copilot_path
+                and not configured_copilot_path
             )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
@@ -1967,7 +1974,7 @@ def _build_launch_cmd(
             legacy = (
                 Path(setup_path).is_file()
                 and not resolved_env_script
-                and not resolved_copilot_path
+                and not configured_copilot_path
             )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
@@ -2329,12 +2336,27 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         and predecessor_binding.get("session_name") != expected_mux_session
     ):
         predecessor_binding = None
+    predecessor_copilot_path = None
+    if predecessor_binding:
+        predecessor_pid = predecessor_binding.get("copilot_pid")
+        predecessor_start = predecessor_binding.get("copilot_start_time")
+        if predecessor_pid and predecessor_start:
+            predecessor_copilot_path = procs.process_executable_path(
+                predecessor_pid
+            )
+            if (
+                not predecessor_copilot_path
+                or locks.process_start_time(predecessor_pid)
+                != str(predecessor_start)
+            ):
+                predecessor_copilot_path = None
     launch_cmd = _build_launch_cmd(
         config,
         args,
         work_dir,
         profile=selection.profile,
         preflight=launch_preflight,
+        fallback_copilot_path=predecessor_copilot_path,
     )
     env = _apply_assignment_env(
         _build_env(
