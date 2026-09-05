@@ -1,7 +1,7 @@
 {
   "name": "agent-bridge",
   "description": "Live cross-boundary inter-agent communication service -- one instance per machine, serving Copilot CLI sessions with conversation transport, session management, event streaming, and agent spawning",
-  "version": "0.4.0-dev436",
+  "version": "0.4.0-dev437",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",
   "runtimeScope": "machine-gated",
