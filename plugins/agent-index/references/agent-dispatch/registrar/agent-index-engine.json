@@ -1,0 +1,49 @@
+{
+  "name": "agent-index-engine",
+  "kind": "plugin-companion",
+  "runtime_generation": "engine-v1",
+  "spec": {
+    "managed_runtime": {
+      "schema_version": 1,
+      "runtimes": [
+        {
+          "name": "engine",
+          "version": "engine-v1",
+          "profile": "host",
+          "python_env": "AGENT_INDEX_ENGINE_MANAGED_PYTHON",
+          "projects": [
+            {
+              "path": ".",
+              "extras": [
+                "engine"
+              ]
+            }
+          ],
+          "imports": [
+            "agent_index.engine.app",
+            "fastapi",
+            "httpx",
+            "pydantic",
+            "sentence_transformers",
+            "torch",
+            "uvicorn"
+          ]
+        }
+      ]
+    },
+    "command": [
+      "scripts/companion-engine.py",
+      "start"
+    ],
+    "config_provider": [
+      "scripts/companion-provider.py"
+    ],
+    "health_probe": [
+      "scripts/companion-engine.py",
+      "health"
+    ],
+    "config_timeout_seconds": 45,
+    "health_timeout_seconds": 10,
+    "startup_timeout_seconds": 30
+  }
+}

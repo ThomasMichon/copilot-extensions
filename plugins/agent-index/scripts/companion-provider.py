@@ -13,9 +13,13 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+SRC_DIR = SCRIPT_DIR.parent / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from resolve_effective_config import _load_yaml_mapping, resolve
 from companion_context import installation_mode
+from agent_index.engine.generation import current_engine_generation
 
 
 def _platform_key() -> str:
@@ -71,6 +75,16 @@ def _request() -> dict[str, Any]:
     return value
 
 
+def _augment_environment(
+    request: dict[str, Any], environment: dict[str, str]
+) -> dict[str, str]:
+    registration_id = str(request.get("registration_id") or "")
+    if registration_id.endswith(":agent-index-engine"):
+        environment = dict(environment)
+        environment["AGENT_INDEX_ENGINE_GENERATION"] = current_engine_generation()
+    return environment
+
+
 def _supports_companion_mode(environment: dict[str, str]) -> bool:
     return installation_mode()["supported"]
 
@@ -116,7 +130,7 @@ def _active_environment(request: dict[str, Any]) -> dict[str, str] | None:
             "AGENT_INDEX_NO_SELFPROVISION": "1",
             "AGENT_INDEX_REPO": repo_root,
         }
-        active[(config, repo_root)] = environment
+        active[(config, repo_root)] = _augment_environment(request, environment)
 
     if not active:
         return None

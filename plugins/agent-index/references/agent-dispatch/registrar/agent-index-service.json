@@ -7,7 +7,7 @@
       "runtimes": [
         {
           "name": "service",
-          "version": "0.1.0-dev136",
+          "version": "0.1.0-dev137",
           "profile": "host",
           "python_env": "AGENT_INDEX_MANAGED_PYTHON",
           "projects": [
