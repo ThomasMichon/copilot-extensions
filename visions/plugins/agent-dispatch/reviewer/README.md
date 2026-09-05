@@ -197,7 +197,10 @@ reviving a released lineage.
 - [agent-bridge vision](../../agent-bridge/README.md)
 - Realization:
   [`efforts/active/review-automation-reliability/`](../../../../efforts/active/review-automation-reliability/)
-  owns the remaining lifecycle and reliability delta; archived
+  owns the remaining lifecycle and reliability delta;
+  [`efforts/active/declarative-dispatch-engine-generalization/`](../../../../efforts/active/declarative-dispatch-engine-generalization/)
+  owns the declarative-worker-identity structural-guard question raised below;
+  archived
   [`turnkey-reviewer-loops`](../../../../efforts/2026/09/03%20turnkey-reviewer-loops/)
   records the proven turn-key composition.
 
