@@ -223,7 +223,7 @@ lookup differs):
 |------|-----------|----------|---------|
 | **In-repo `--config`** (preferred) | `bridge --config <path>` | the repo (e.g. `.github/agents/<name>.mcp.yaml`) | **repo-scoped agents** — version-controlled, travels with the repo, no deploy |
 | **Named bridge** | `bridge <name>` | `~/.agent-mcp/bridges/<name>.{yaml,yml,json}` | **personal / cross-repo** MCPs not tied to one checkout |
-| **Plugin-shipped** | `bridge <name>` | `<plugin>/agents/<name>.mcp.yaml` (installed under `~/.copilot/installed-plugins/*/*/`) | **a plugin that ships its own sub-agent + MCP** — no user-space copy needed |
+| **Plugin-shipped** | `bridge <name>` | `<plugin>/agents/<name>.mcp.yaml` (live directory marketplace or copied under `~/.copilot/installed-plugins/*/*/`) | **a plugin that ships its own sub-agent + MCP** — no user-space copy needed |
 
 Prefer the in-repo `--config` form for any agent that ships inside a repo;
 reserve named bridges for MCPs you use across many repos.
@@ -231,8 +231,11 @@ reserve named bridges for MCPs you use across many repos.
 **Plugin-shipped bridges (no install step).** A Copilot CLI plugin can ship its
 bridge config *inside the plugin* at `agents/<name>.mcp.yaml` (or `mcp/…`) and its
 sub-agent just runs `agent-mcp bridge <name>`. A bare name resolves in order:
-(1) `~/.agent-mcp/bridges/<name>.…` (user-space override wins), then (2) the
-installed-plugins tree `*/*/{agents,mcp}/<name>[.mcp].{yaml,yml,json}`. The spawned
+(1) `~/.agent-mcp/bridges/<name>.…` (user-space override wins), (2) directory
+marketplaces declared by the nearest workspace's
+`.github/copilot/settings.json`, then (3) the installed-plugins tree
+`*/*/{agents,mcp}/<name>[.mcp].{yaml,yml,json}`. Live directory matches take
+precedence over stale copied payloads. The spawned
 MCP's cwd is the session repo (not the plugin), so a plugin-relative `--config`
 path can't work — the named-bridge search is what makes a plugin's MCP resolve
 with **zero** setup. Override the search roots with `AGENT_MCP_PLUGIN_ROOTS`
