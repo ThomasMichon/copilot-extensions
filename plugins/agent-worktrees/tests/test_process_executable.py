@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 from agent_worktrees import procs
@@ -56,3 +57,74 @@ def test_process_executable_path_retains_live_deleted_proc_link(
     )
 
     assert procs.process_executable_path(42) == str(proc_link)
+
+
+def test_copilot_relaunch_path_accepts_identified_executable(
+    monkeypatch, tmp_path,
+) -> None:
+    executable = tmp_path / "copilot"
+    executable.write_text("", encoding="utf-8")
+    monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        procs.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, "GitHub Copilot CLI 1.2.3\n", "",
+        ),
+    )
+
+    assert procs.copilot_relaunch_path(str(executable)) == str(executable)
+
+
+def test_copilot_relaunch_path_prefers_canonical_windows_replacement(
+    monkeypatch, tmp_path,
+) -> None:
+    retained = tmp_path / "copilot.exe.old-123"
+    canonical = tmp_path / "copilot.exe"
+    retained.write_text("", encoding="utf-8")
+    canonical.write_text("", encoding="utf-8")
+    called = []
+    monkeypatch.setattr(procs.platform, "system", lambda: "Windows")
+
+    def _run(argv, **kwargs):
+        called.append(argv[0])
+        return subprocess.CompletedProcess(
+            argv, 0, "GitHub Copilot CLI 1.2.4\n", "",
+        )
+
+    monkeypatch.setattr(procs.subprocess, "run", _run)
+
+    assert procs.copilot_relaunch_path(str(retained)) == str(canonical)
+    assert called == [str(canonical)]
+
+
+def test_copilot_relaunch_path_rejects_silent_success(
+    monkeypatch, tmp_path,
+) -> None:
+    retained = tmp_path / "copilot.exe.old-123"
+    retained.write_text("", encoding="utf-8")
+    monkeypatch.setattr(procs.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        procs.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, "", "",
+        ),
+    )
+
+    assert procs.copilot_relaunch_path(str(retained)) is None
+
+
+def test_copilot_relaunch_path_rejects_probe_timeout(
+    monkeypatch, tmp_path,
+) -> None:
+    executable = tmp_path / "copilot"
+    executable.write_text("", encoding="utf-8")
+    monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(procs.subprocess, "run", _timeout)
+
+    assert procs.copilot_relaunch_path(str(executable)) is None
