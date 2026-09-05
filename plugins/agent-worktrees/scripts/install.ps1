@@ -1737,20 +1737,23 @@ function Deploy-Wrappers {
         }
     }
 
-    # Deploy default setup scripts to ~/.agent-worktrees/scripts/ (used when a
-    # repo lacks its own tools/setup/setup.ps1). The agent-bridge launch plan
-    # invokes ~/.agent-worktrees/scripts/default-setup.ps1, so these MUST be
-    # deployed here to keep the install flow and that launch instruction in
-    # sync -- otherwise spawning a worktree agent fails at LAUNCH_ACP because
-    # the setup script is missing. Mirrors installer.py deploy_wrappers().
+    # Deploy normalized setup and optional machine-settings reconciliation.
+    # Mirrors installer.py deploy_wrappers().
     $ScriptsDir = Join-Path $InstallDir 'scripts'
     Ensure-InstallDir $ScriptsDir
-    foreach ($setup in @('default-setup.ps1', 'default-setup.sh')) {
+    foreach ($setup in @(
+        'default-setup.ps1',
+        'default-setup.sh',
+        'launch-command.ps1',
+        'launch-command.sh',
+        'reconcile-machine-settings.ps1',
+        'reconcile-machine-settings.sh'
+    )) {
         $src = Join-Path $ScriptDir $setup
         $dst = Join-Path $ScriptsDir $setup
         if (Test-Path $src) {
             Copy-Item $src $dst -Force
-            Write-ServiceOk "Default setup: $setup"
+            Write-ServiceOk "Session script: $setup"
         }
     }
 

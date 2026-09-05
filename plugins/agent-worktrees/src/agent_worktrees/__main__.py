@@ -1841,6 +1841,7 @@ def _build_launch_cmd(
     repo = config.default_repo
     plat = config.platform  # "windows", "wsl", or "linux"
     plat_key = plat if plat != "wsl" else "linux"
+    is_windows = platform.system() == "Windows"
     preflight = preflight or _preflight_launch(config, args, work_dir)
     if preflight.error:
         raise LaunchPreflightError(preflight.error)
@@ -1898,8 +1899,6 @@ def _build_launch_cmd(
         resolved_copilot_path = (
             configured_copilot_path or fallback_copilot_path or ""
         )
-        is_windows = platform.system() == "Windows"
-
         if hook_path:
             # (1) Normalized launch via the default-setup launcher + repo hook.
             resolved_hook = hook_path.format(**variables)
@@ -2010,7 +2009,19 @@ def _build_launch_cmd(
     ):
         cmd.append("--allow-all")
 
-    return cmd
+    # Every resolved session command passes through one installed wrapper.
+    # This gives optional sibling integrations a single pre-exec seam even for
+    # explicit and legacy launch templates, while recovery remains available.
+    if is_windows:
+        wrapper = str(inst.install_dir() / "scripts" / "launch-command.ps1")
+        prefix = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", wrapper]
+    else:
+        wrapper = str(inst.install_dir() / "scripts" / "launch-command.sh")
+        prefix = ["bash", wrapper]
+    if recovery:
+        prefix.append("--recovery")
+    prefix.append("--")
+    return prefix + cmd
 
 
 def _emit_parent_context_hint(record, *, to_stderr: bool = False) -> None:

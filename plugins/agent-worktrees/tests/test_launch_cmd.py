@@ -30,6 +30,12 @@ def _args(copilot_args: list[str]) -> argparse.Namespace:
     return argparse.Namespace(copilot_args=copilot_args, recovery=False)
 
 
+def _inner_command(cmd: list[str]) -> list[str]:
+    """Return the command executed by the installed launch wrapper."""
+    delimiter = cmd.index("--")
+    return cmd[delimiter + 1 :]
+
+
 def test_plain_launch_appends_allow_all():
     cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
     assert cmd[-1] == "--allow-all"
@@ -101,12 +107,14 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cfg_ = _hook_config(setup_hook={"linux": "tools/setup/session-setup.sh"})
     cmd = m._build_launch_cmd(cfg_, _args([]), "/w/wt")
+    inner = _inner_command(cmd)
 
     assert cmd[0] == "bash"
-    assert "default-setup.sh" in cmd[1]
-    assert "--machine" in cmd and cmd[cmd.index("--machine") + 1] == "dev6"
-    assert "--setup-hook" in cmd
-    hook_arg = cmd[cmd.index("--setup-hook") + 1]
+    assert "launch-command.sh" in cmd[1]
+    assert "default-setup.sh" in inner[1]
+    assert "--machine" in inner and inner[inner.index("--machine") + 1] == "dev6"
+    assert "--setup-hook" in inner
+    hook_arg = inner[inner.index("--setup-hook") + 1]
     assert hook_arg.endswith("session-setup.sh")
     # relative hook path is resolved against the anchor
     assert "tools" in hook_arg and "setup" in hook_arg
@@ -141,9 +149,11 @@ def test_no_hook_uses_default_setup_without_hook_arg(monkeypatch):
     """No setup_hook and no legacy setup.sh -> plain default-setup, no hook arg."""
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cmd = m._build_launch_cmd(_hook_config(), _args([]), "/w/wt")
+    inner = _inner_command(cmd)
     assert cmd[0] == "bash"
-    assert "default-setup.sh" in cmd[1]
-    assert "--setup-hook" not in cmd
+    assert "launch-command.sh" in cmd[1]
+    assert "default-setup.sh" in inner[1]
+    assert "--setup-hook" not in inner
 
 
 def test_setup_hook_recovery_passes_recovery_and_hook(monkeypatch):
@@ -196,7 +206,8 @@ def test_copilot_path_linux_uses_normalized_launcher(monkeypatch):
         copilot_path={"linux": "{home}/src/runtime/dist-bin/linux-arm64/copilot"},
     )
     cmd = m._build_launch_cmd(cfg_, _args(["--version"]), "/w/wt")
-    assert "default-setup.sh" in cmd[1]
+    inner = _inner_command(cmd)
+    assert "default-setup.sh" in inner[1]
     assert "--copilot-path" in cmd
     selected = cmd[cmd.index("--copilot-path") + 1]
     assert selected.endswith("/src/runtime/dist-bin/linux-arm64/copilot")
@@ -239,8 +250,9 @@ def test_explicit_launch_remains_authoritative_over_copilot_path(monkeypatch):
         ),
     )
     cmd = m._build_launch_cmd(cfg_, _args([]), "/w/wt")
-    assert cmd[0] == "copilot"
-    assert "--copilot-path" not in cmd
+    inner = _inner_command(cmd)
+    assert inner[0] == "copilot"
+    assert "--copilot-path" not in inner
 
 
 def test_predecessor_copilot_path_falls_back_for_default_launch(monkeypatch):
@@ -275,8 +287,9 @@ def test_explicit_launch_ignores_predecessor_copilot_path(monkeypatch):
         "/w/wt",
         fallback_copilot_path="/opt/copilot/predecessor",
     )
-    assert cmd[0] == "copilot"
-    assert "--copilot-path" not in cmd
+    inner = _inner_command(cmd)
+    assert inner[0] == "copilot"
+    assert "--copilot-path" not in inner
 
 
 def test_legacy_setup_uses_path_resolved_shell(monkeypatch, tmp_path):
@@ -294,9 +307,10 @@ def test_legacy_setup_uses_path_resolved_shell(monkeypatch, tmp_path):
         str(tmp_path),
     )
 
+    inner = _inner_command(cmd)
     assert cmd[0] == "bash"
-    assert cmd[1] == str(setup)
-    assert "--copilot-path" not in cmd
+    assert inner[:2] == ["bash", str(setup)]
+    assert "--copilot-path" not in inner
 
 
 def test_legacy_setup_ignores_predecessor_copilot_path(monkeypatch, tmp_path):
@@ -315,9 +329,10 @@ def test_legacy_setup_ignores_predecessor_copilot_path(monkeypatch, tmp_path):
         fallback_copilot_path="/opt/copilot/predecessor",
     )
 
+    inner = _inner_command(cmd)
     assert cmd[0] == "bash"
-    assert cmd[1] == str(setup)
-    assert "--copilot-path" not in cmd
+    assert inner[:2] == ["bash", str(setup)]
+    assert "--copilot-path" not in inner
 
 
 def test_windows_normalized_launch_uses_path_resolved_shell(monkeypatch):
@@ -461,8 +476,9 @@ def test_env_script_linux_builds_default_setup_with_flag(monkeypatch):
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     cfg_ = _env_config(env_script={"linux": "tools/prime.sh"}, platform_name="linux")
     cmd = m._build_launch_cmd(cfg_, _args([]), "/a")
+    inner = _inner_command(cmd)
     assert cmd[0] == "bash"
-    assert "default-setup.sh" in cmd[1]
+    assert "default-setup.sh" in inner[1]
     assert "--env-script" in cmd
     assert cmd[cmd.index("--env-script") + 1].endswith("prime.sh")
 
