@@ -2463,9 +2463,11 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         cmd = [sys.executable, "-m", "agent_bridge", "start",
                "--port", str(port), "--passive"]
         kwargs: dict = {}
+        opened_streams = []
         if sys.platform == "win32":
             log_out = open(config_dir() / "agent-bridge.log", "ab")
             log_err = open(config_dir() / "agent-bridge-err.log", "ab")
+            opened_streams.extend((log_out, log_err))
             kwargs["stdout"] = log_out
             kwargs["stderr"] = log_err
             kwargs["stdin"] = subprocess.DEVNULL
@@ -2473,7 +2475,11 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         else:
             kwargs["start_new_session"] = True
         try:
-            return subprocess.Popen(cmd, **kwargs)
+            try:
+                return subprocess.Popen(cmd, **kwargs)
+            finally:
+                for stream in opened_streams:
+                    stream.close()
         except OSError:
             if sys.platform != "win32":
                 raise
