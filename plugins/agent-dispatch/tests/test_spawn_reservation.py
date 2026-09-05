@@ -229,6 +229,56 @@ def test_exclusive_key_reuses_prior_worktree_after_settle(q):
     assert r2.exclusive_key == "review:repo:42"
 
 
+def test_exclusive_key_reuses_worktree_without_retired_session(q):
+    t1 = q.create("review old", exclusive_key="review:repo:42")
+    r1, _ = q.reserve_spawn(t1.id)
+    q.record_spawn(
+        r1.key,
+        session_handle="local-body:session-retired",
+        worktree="wt-reviewer",
+    )
+    q.request_spawn_release(r1.key)
+    q.settle_spawn(r1.key)
+
+    t2 = q.create("review new", exclusive_key="review:repo:42")
+    r2, ok2 = q.reserve_spawn(t2.id)
+
+    assert ok2 is True
+    assert r2.worktree == "wt-reviewer"
+    assert r2.worktree_ownership == "reused"
+    assert r2.session_handle is None
+    assert r2.exclusive_key == "review:repo:42"
+
+
+def test_retired_session_is_not_recarried_from_legacy_failed_attempt(q):
+    task = q.create("review", exclusive_key="review:repo:42")
+    retired, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        retired.key,
+        session_handle="local-body:session-retired",
+        worktree="wt-reviewer",
+    )
+    q.request_spawn_release(retired.key)
+    q.settle_spawn(retired.key)
+
+    legacy, _ = q.reserve_spawn(task.id)
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET session_handle = ? WHERE key = ?",
+            ("local-body:session-retired", legacy.key),
+        )
+    q.fail_spawn(legacy.key, detail="could not determine carried session liveness")
+
+    fresh, reserved = q.reserve_spawn(task.id)
+
+    assert reserved is True
+    assert fresh.attempt == 3
+    assert fresh.worktree == "wt-reviewer"
+    assert fresh.worktree_ownership == "reused"
+    assert fresh.session_handle is None
+    assert fresh.exclusive_key == "review:repo:42"
+
+
 def test_exclusive_key_can_take_affinity_as_initial_resume_target(q):
     t = q.create(
         "review new",
