@@ -73,9 +73,10 @@ BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
 
 # Plugin-shipped bridge configs. A Copilot CLI plugin may ship its bridge config
 # *inside the plugin* (``<plugin>/agents/<name>.mcp.yaml``) instead of requiring a
-# copy under ``~/.agent-mcp/bridges/``. Plugins install to the deterministic tree
-# ``<copilot-home>/installed-plugins/<marketplace>/<plugin>/``, so a bare bridge
-# name resolves against ``.../installed-plugins/*/*/{agents,mcp}/<name>.{yaml,yml,json}``.
+# copy under ``~/.agent-mcp/bridges/``. Copied plugins resolve from
+# ``<copilot-home>/installed-plugins/<marketplace>/<plugin>/``. Directory
+# marketplaces declared by the nearest workspace are searched first because
+# Copilot loads those plugins live and never copies them into installed-plugins.
 # This lets a plugin-shipped sub-agent run ``agent-mcp bridge <name>`` with **no**
 # user-space install step (the spawned MCP's cwd is the session repo, not the
 # plugin, so a plugin-relative ``--config`` path can't work). The user-space
@@ -91,6 +92,33 @@ def _plugin_roots() -> list[Path]:
         return [Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip()]
     home = Path(os.environ.get("COPILOT_HOME", Path.home() / ".copilot"))
     return [home / "installed-plugins"]
+
+
+def _live_marketplace_roots() -> list[Path]:
+    """Return directory marketplace roots declared by the nearest workspace."""
+    for root in (Path.cwd(), *Path.cwd().parents):
+        settings = root / ".github" / "copilot" / "settings.json"
+        if not settings.is_file():
+            continue
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        marketplaces = data.get("extraKnownMarketplaces")
+        if not isinstance(marketplaces, dict):
+            return []
+        found: list[Path] = []
+        for entry in marketplaces.values():
+            source = entry.get("source") if isinstance(entry, dict) else None
+            if not isinstance(source, dict) or source.get("source") != "directory":
+                continue
+            raw_path = source.get("path")
+            if not isinstance(raw_path, str) or not raw_path:
+                continue
+            path = Path(raw_path).expanduser()
+            found.append((root / path).resolve() if not path.is_absolute() else path)
+        return found
+    return []
 
 # Machine-local config overlays. A bridge config keyed ``id`` (or, absent that,
 # its filename stem with a trailing ``.mcp`` stripped) may be overridden per-host
@@ -321,12 +349,24 @@ def _read_file(path: Path) -> dict[str, Any]:
 def _find_plugin_bridge(name: str) -> Path | None:
     """Find a plugin-shipped bridge config named ``name``.
 
-    Searches every plugin root (see ``_plugin_roots``) for
-    ``<marketplace>/<plugin>/{agents,mcp}/<name>.{yaml,yml,json}``. Returns the
-    single match, or ``None`` if there is none. Raises ``ConfigError`` if two or
-    more **distinct** files match (ambiguous bridge name across plugins) so the
-    collision surfaces instead of silently picking one.
+    Searches live directory marketplaces from the nearest workspace first, then
+    every copied plugin root (see ``_plugin_roots``). Returns the single match,
+    or ``None`` if there is none. Raises ``ConfigError`` if two or more
+    **distinct** files match within the selected source tier.
     """
+    live_matches: list[Path] = []
+    for root in _live_marketplace_roots():
+        if not root.is_dir():
+            continue
+        for sub in ("agents", "mcp"):
+            for ext in (".yaml", ".yml", ".json"):
+                live_matches.extend(sorted(root.glob(f"*/{sub}/{name}{ext}")))
+                live_matches.extend(sorted(root.glob(f"*/{sub}/{name}.mcp{ext}")))
+
+    live_unique = _unique_paths(live_matches)
+    if live_unique:
+        return _single_plugin_bridge(name, live_unique)
+
     matches: list[Path] = []
     for root in _plugin_roots():
         if not root.is_dir():
@@ -338,11 +378,20 @@ def _find_plugin_bridge(name: str) -> Path | None:
                 # bridge name ``ado``).
                 matches.extend(sorted(root.glob(f"*/*/{sub}/{name}{ext}")))
                 matches.extend(sorted(root.glob(f"*/*/{sub}/{name}.mcp{ext}")))
-    # De-duplicate by resolved path (a root may be listed twice, symlinks, etc.).
+    return _single_plugin_bridge(name, _unique_paths(matches))
+
+
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    """De-duplicate paths while preserving discovery order."""
     seen: dict[Path, Path] = {}
-    for p in matches:
+    for p in paths:
         seen.setdefault(p.resolve(), p)
-    uniq = list(seen.values())
+    return list(seen.values())
+
+
+def _single_plugin_bridge(name: str, matches: list[Path]) -> Path | None:
+    """Return one bridge match or surface an ambiguous live/plugin catalog."""
+    uniq = _unique_paths(matches)
     if not uniq:
         return None
     if len(uniq) > 1:
