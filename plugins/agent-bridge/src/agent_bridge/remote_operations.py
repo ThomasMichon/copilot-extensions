@@ -135,16 +135,16 @@ def _validate_id(value: Any, *, field: str, maximum: int) -> str:
     return normalized
 
 
-def validate_caller_id(value: Any) -> str:
+def validate_caller_id(value: Any, *, field: str = "caller_id") -> str:
     """Validate a stable, caller-supplied consumer identity."""
     if isinstance(value, str) and value.strip() == "__default__":
         raise RemoteBridgeError(
             400,
             "invalid_request",
-            "caller_id is reserved for legacy anonymous delivery",
+            f"{field} is reserved for legacy anonymous delivery",
         )
     caller_id = _validate_id(
-        value, field="caller_id", maximum=MAX_CALLER_ID_LENGTH
+        value, field=field, maximum=MAX_CALLER_ID_LENGTH
     )
     return caller_id
 
@@ -153,9 +153,9 @@ def validate_host(value: Any) -> str:
     return _validate_id(value, field="host", maximum=MAX_HOST_LENGTH)
 
 
-def validate_session_id(value: Any) -> str:
+def validate_session_id(value: Any, *, field: str = "session_id") -> str:
     return _validate_id(
-        value, field="session_id", maximum=MAX_SESSION_ID_LENGTH
+        value, field=field, maximum=MAX_SESSION_ID_LENGTH
     )
 
 
@@ -428,8 +428,12 @@ class CarrierRequestRouter:
                 )
             if operation == "live_session.send":
                 client = self._client()
-                target = validate_session_id(payload.get("target"))
-                sender = validate_caller_id(payload.get("sender"))
+                target = validate_session_id(
+                    payload.get("target"), field="target"
+                )
+                sender = validate_caller_id(
+                    payload.get("sender"), field="sender"
+                )
                 message = validate_message(payload.get("message"), field="message")
                 idempotency_key = validate_optional_id(
                     payload.get("idempotency_key"),
@@ -1021,7 +1025,7 @@ class RemoteOperationService:
             host,
             {
                 "operation": "live_session.resolve",
-                "session_id": validate_session_id(target),
+                "session_id": validate_session_id(target, field="target"),
             },
         )
         result = response.get("result")
@@ -1105,8 +1109,8 @@ class RemoteOperationService:
             host,
             {
                 "operation": "live_session.send",
-                "target": validate_session_id(target),
-                "sender": validate_caller_id(sender),
+                "target": validate_session_id(target, field="target"),
+                "sender": validate_caller_id(sender, field="sender"),
                 "message": validate_message(message, field="message"),
                 "kind": kind,
                 "expected_session_id": validate_optional_id(

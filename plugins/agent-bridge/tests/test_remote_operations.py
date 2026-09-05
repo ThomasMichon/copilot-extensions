@@ -374,6 +374,40 @@ async def test_mutating_operations_reject_malformed_options(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("target", ""),
+        ("sender", "__default__"),
+    ],
+)
+async def test_live_message_validation_names_request_field(
+    field: str, value: object
+) -> None:
+    payload = {
+        "operation": "live_session.send",
+        "version": 2,
+        "target": "worktree-a",
+        "sender": "agent-dispatch-steer",
+        "message": "resume",
+        "kind": "prompt",
+        field: value,
+    }
+
+    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id=f"live-message-{field}",
+            payload=payload,
+        )
+    )
+
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "invalid_request"
+    assert field in response.payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_cancelled_create_reclaims_late_session() -> None:
     started = threading.Event()
     release = threading.Event()
@@ -498,6 +532,22 @@ async def test_cancelled_create_tolerates_repeated_cancellation_during_cleanup()
 async def test_remote_client_validates_live_message_guards() -> None:
     client = RemoteOperationService(SimpleNamespace())
 
+    with pytest.raises(RemoteBridgeError, match="target must"):
+        await client.send_live_message(
+            "host-a",
+            "",
+            sender="agent-dispatch-steer",
+            message="continue",
+            kind="steer",
+        )
+    with pytest.raises(RemoteBridgeError, match="sender is reserved"):
+        await client.send_live_message(
+            "host-a",
+            "worktree-a",
+            sender="__default__",
+            message="continue",
+            kind="steer",
+        )
     with pytest.raises(RemoteBridgeError, match="expected_session_id"):
         await client.send_live_message(
             "host-a",
@@ -507,6 +557,14 @@ async def test_remote_client_validates_live_message_guards() -> None:
             kind="prompt",
             expected_session_id="not safe",
         )
+
+
+@pytest.mark.asyncio
+async def test_resolve_live_session_validation_names_target() -> None:
+    client = RemoteOperationService(SimpleNamespace())
+
+    with pytest.raises(RemoteBridgeError, match="target must"):
+        await client.resolve_live_session("host-a", "")
 
 
 @pytest.mark.asyncio
