@@ -245,7 +245,7 @@ def _ensure_safe_root(root: Path) -> Path:
             break
         existing = existing.parent
     for path in reversed(missing):
-        path.mkdir()
+        path.mkdir(exist_ok=True)
         _reject_link(path, description="managed runtime root")
     if not root.is_dir():
         raise ManagedRuntimeError("managed runtime root must be a directory")

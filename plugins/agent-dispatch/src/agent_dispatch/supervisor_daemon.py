@@ -548,6 +548,7 @@ class SupervisorDaemon:
         self._managed_runtime_authorities: dict[str, str] = {}
         self._managed_runtime_results: dict[str, tuple[Any, ...]] = {}
         self._managed_runtime_futures: dict[str, tuple[str, Future[Any]]] = {}
+        self._managed_runtime_failures: dict[str, tuple[str, float, int]] = {}
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
@@ -737,9 +738,25 @@ class SupervisorDaemon:
                 result = tuple(future.result())
             except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                 log.error("failed to materialize companion runtime %s: %s", rid, exc)
+                previous = self._managed_runtime_failures.get(rid)
+                attempts = (
+                    previous[2] + 1
+                    if previous is not None and previous[0] == authority
+                    else 1
+                )
+                delay = min(
+                    300.0,
+                    max(self.poll_interval, 5.0) * (2 ** min(attempts - 1, 6)),
+                )
+                self._managed_runtime_failures[rid] = (
+                    authority,
+                    self.clock() + delay,
+                    attempts,
+                )
                 continue
             self._managed_runtime_authorities[rid] = authority
             self._managed_runtime_results[rid] = result
+            self._managed_runtime_failures.pop(rid, None)
 
     def _materialize_managed_runtime_desired(
         self, desired: Mapping[str, dict]
@@ -756,6 +773,8 @@ class SupervisorDaemon:
         for rid in set(self._managed_runtime_authorities) - present:
             self._managed_runtime_authorities.pop(rid, None)
             self._managed_runtime_results.pop(rid, None)
+        for rid in set(self._managed_runtime_failures) - present:
+            self._managed_runtime_failures.pop(rid, None)
         for rid, (_authority, future) in list(self._managed_runtime_futures.items()):
             if rid not in present and future.cancel():
                 self._managed_runtime_futures.pop(rid, None)
@@ -764,6 +783,12 @@ class SupervisorDaemon:
             authority = companion_authority_fingerprint(registration)
             if self._managed_runtime_authorities.get(rid) == authority:
                 continue
+            failure = self._managed_runtime_failures.get(rid)
+            if failure is not None:
+                if failure[0] != authority:
+                    self._managed_runtime_failures.pop(rid, None)
+                elif self.clock() < failure[1]:
+                    continue
             pending = self._managed_runtime_futures.get(rid)
             if pending is not None:
                 continue

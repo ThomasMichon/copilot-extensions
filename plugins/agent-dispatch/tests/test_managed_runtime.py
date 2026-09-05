@@ -459,6 +459,34 @@ def test_stale_lock_file_does_not_block_materialization(tmp_path):
     assert result.cell.is_dir()
 
 
+def test_concurrent_root_creation_is_idempotent(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    runner = FakeRunner()
+    runner.install_started = threading.Event()
+    runner.install_release = threading.Event()
+    results = []
+
+    def materialize():
+        results.append(
+            ManagedRuntimeMaterializer(policy, runner=runner).materialize(
+                _registration(plugin)
+            )[0]
+        )
+
+    first = threading.Thread(target=materialize)
+    second = threading.Thread(target=materialize)
+    first.start()
+    second.start()
+    assert runner.install_started.wait(timeout=5)
+    runner.install_release.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert len(results) == 2
+    assert results[0].cell == results[1].cell
+
+
 def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch):
     monkeypatch.setenv("PIP_INDEX_URL", "https://secret.example")
     monkeypatch.setenv("UV_INDEX_URL", "https://secret.example")

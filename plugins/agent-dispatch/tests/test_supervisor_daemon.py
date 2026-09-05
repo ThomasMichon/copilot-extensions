@@ -142,6 +142,15 @@ class FakeRuntimeMaterializer:
         return (SimpleNamespace(python="prepared-python"),)
 
 
+class FailingRuntimeMaterializer:
+    def __init__(self):
+        self.calls = 0
+
+    def materialize(self, registration):
+        self.calls += 1
+        raise RuntimeError("persistent failure")
+
+
 class BlockingRuntimeMaterializer:
     def __init__(self):
         self.started = threading.Event()
@@ -282,9 +291,10 @@ def _managed_companion_reg(rid="companion"):
 
 
 def _daemon(client, launcher, **kw):
+    clock = kw.pop("clock", Clock())
     return SupervisorDaemon(
         client, "anomalous-potato", "default",
-        launcher=launcher, sleep=lambda _s: None, **kw,
+        launcher=launcher, sleep=lambda _s: None, clock=clock, **kw,
     )
 
 
@@ -421,6 +431,29 @@ def test_managed_runtime_build_does_not_block_companion_reconcile():
     assert materializer.started.wait(timeout=2)
     materializer.release.set()
     daemon.shutdown()
+
+
+def test_managed_runtime_failure_retries_with_backoff():
+    registration = _managed_companion_reg()
+    materializer = FailingRuntimeMaterializer()
+    clock = Clock()
+    daemon = _daemon(
+        FakeClient([registration]),
+        FakeLauncher(),
+        companion_controller=FakeCompanionController(),
+        runtime_materializer=materializer,
+        runtime_executor=ImmediateExecutor(),
+        clock=clock,
+    )
+
+    daemon.reconcile_once()
+    daemon.reconcile_once()
+    assert materializer.calls == 1
+    clock.t = 5
+    daemon.reconcile_once()
+    assert materializer.calls == 2
+    daemon.reconcile_once()
+    assert materializer.calls == 2
 
 
 def test_build_command_evaluator_inline_spec():
