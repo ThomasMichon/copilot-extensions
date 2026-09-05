@@ -408,7 +408,7 @@ published state into `~/.agent-bridge/config.yaml`.
 ```bash
 # Show current config
 <agent-bridge catalog argv[0]> config show
-<agent-bridge catalog argv[0]> config show --json
+<agent-bridge catalog argv[0]> --json config show
 
 # Add/update a topology profile for a repo
 <agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile multi-machine system

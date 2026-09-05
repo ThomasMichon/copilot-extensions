@@ -123,6 +123,8 @@ def test_list_command_docs_place_global_json_before_subcommand() -> None:
     for command in ("agents", "machines", "sessions"):
         assert f"<agent-bridge catalog argv[0]> --json {command}" in combined
         assert f"<agent-bridge catalog argv[0]> {command} --json" not in combined
+    assert "<agent-bridge catalog argv[0]> --json config show" in combined
+    assert "<agent-bridge catalog argv[0]> config show --json" not in combined
 
 
 @pytest.mark.asyncio
