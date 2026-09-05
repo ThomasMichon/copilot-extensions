@@ -169,24 +169,29 @@ realized in `main`; unchecked items are the remaining delta.
       §`programmatic-parity`.
 
 ### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (Planned — #2062)
-- [ ] Move the AHP session backend (`agent_worktrees/ahp_backend.py`, the
-      `session_backend`/`is_ahp` config schema, and the branches it threads
-      through `__main__.py`, `tracking.py`, `finalize.py`, and
-      `config_dropins.py`) out of the `agent-worktrees` plugin. Per the
-      corrected [`session-hosting`](../../../visions/session-hosting/README.md)
-      vision, AHP is a near-term concern of the **Worktree Manager**
-      control-plane app, not a config mode of agent-worktrees and not a
-      permanent alternative to Mux — an AHP-hosted session may still be
-      Mux-wrapped for terminal presentation. The #1657/#1998 slice shipped the
-      right *behavior* in the wrong *location*; this item is the architecture
-      correction, not new capability.
-- [ ] Relocate Mux launch/reattach/remux mechanics
+- [ ] **Slice 1 (AHP):** move the AHP session backend
+      (`agent_worktrees/ahp_backend.py`, the `session_backend`/`is_ahp` config
+      schema, and the branches it threads through `__main__.py`,
+      `tracking.py`, `finalize.py`, and `config_dropins.py`) out of the
+      `agent-worktrees` plugin. Per the corrected
+      [`session-hosting`](../../../visions/session-hosting/README.md) vision,
+      AHP is a near-term concern of the **Worktree Manager** control-plane
+      app, not a config mode of agent-worktrees and not a permanent
+      alternative to Mux — an AHP-hosted session may still be Mux-wrapped for
+      terminal presentation. The #1657/#1998 slice shipped the right
+      *behavior* in the wrong *location*; this item is the architecture
+      correction, not new capability. Reviewed, ordered plan:
+      [`phase-3b-ahp-relocation.md`](phase-3b-ahp-relocation.md).
+- [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
       (`launch-session.{sh,ps1,cmd}`, `cmd_remux`) from `agent-worktrees` to the
       Worktree Manager, consistent with the same vision. agent-worktrees keeps
       only a bounded, provider-id-plus-opaque-blob execution-leg record; it
       never owns a typed union with one field set per hosting technology.
       Reuses the #1478/#1491 remux design's safety invariants (refuse an
       existing live mux or ambiguous owner) under the new ownership boundary.
+      Deliberately sequenced after Slice 1 proves the generic execution-leg
+      record and CLI verbs; its own reviewed plan is written once Slice 1
+      lands.
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
       assuming exactly one of them.
@@ -322,3 +327,20 @@ its issues; the public artifacts stay self-contained and general-purpose.
   agent-worktrees and not to a brand-new fourth plugin. Added Phase 3b to track
   the physical relocation as an architecture correction (same behavior,
   corrected ownership), filed as #2062.
+- **2026-09-04** — Wrote the reviewed, ordered migration plan for Phase 3b
+  Slice 1 (AHP only): [`phase-3b-ahp-relocation.md`](phase-3b-ahp-relocation.md).
+  Full current-state inventory with exact file/line evidence; target shape
+  (`session_backend` → generic `execution_leg` with an opaque provider blob,
+  a new `execution-leg set/get/clear` CLI verb replacing `session-backend`);
+  reader-side back-compat for existing on-disk `session_backend:` records; six
+  ordered, independently-landable implementation steps, each its own
+  version-bumped PR. Deliberately scoped AHP-only — Mux relocation (Slice 2)
+  is more deeply coupled to agent-worktrees' liveness reducers and three
+  platform launcher scripts, so it is sequenced after Slice 1 proves the
+  pattern. Also noted, out of scope for this plan: `worktree-manager`'s
+  `runner.py` reaches the engine for launch/mutate actions through an
+  in-process `sys.path` import of `agent_worktrees` internals
+  (`_engine_runtime.py`, its own docstring calls it "temporary"), which is a
+  live violation of the Picker vision's process-boundary-only Non-Goal; Slice
+  1 replaces that boundary only for the AHP call path, not for the rest of
+  the interactive Picker's engine usage.
