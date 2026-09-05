@@ -163,6 +163,14 @@ if ($agentWorktreesCmd) {
 if (-not $project) { $project = Split-Path -Leaf $PWD }
 $env:WORKTREE_MACHINE = $Machine
 
+# Direct agent-bridge launches may enter through this setup script without the
+# outer launch-session wrapper. Source the same optional reconciliation helper.
+$machineSettingsHelper = Join-Path $PSScriptRoot 'reconcile-machine-settings.ps1'
+if (Test-Path -LiteralPath $machineSettingsHelper) {
+    . $machineSettingsHelper -Recovery:$Recovery
+}
+Remove-Item Env:AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED -ErrorAction SilentlyContinue
+
 # ── Repo setup hook (vault / MCP; repo-specific) ─────────────────────────
 # Runs before launch, context passed by argument. Skipped in recovery so a
 # broken hook can never lock the operator out of a recovery session. A

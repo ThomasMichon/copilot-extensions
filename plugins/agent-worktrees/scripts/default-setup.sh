@@ -115,6 +115,18 @@ fi
 [[ -z "$PROJECT" ]] && PROJECT="${PWD##*/}"
 export WORKTREE_MACHINE="$MACHINE"
 
+# Direct agent-bridge launches may enter through this setup script without the
+# outer launch-session wrapper. Source the same optional reconciliation helper.
+_MACHINE_SETTINGS_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile-machine-settings.sh"
+if [[ -f "$_MACHINE_SETTINGS_HELPER" ]]; then
+    _MACHINE_SETTINGS_ARGS=()
+    [[ "$RECOVERY" == true ]] && _MACHINE_SETTINGS_ARGS+=(--recovery)
+    # shellcheck disable=SC1090
+    . "$_MACHINE_SETTINGS_HELPER" "${_MACHINE_SETTINGS_ARGS[@]}" || exit $?
+    unset _MACHINE_SETTINGS_ARGS
+fi
+unset AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED
+
 # -- Repo setup hook (vault / MCP; repo-specific) -------------------------
 # Runs before launch, context passed by argument. Skipped in recovery so a
 # broken hook can never lock the operator out of a recovery session. A
