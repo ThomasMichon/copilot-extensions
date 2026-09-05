@@ -99,6 +99,7 @@ _CONCLUSION_MAX_ATTEMPTS = 12
 _CONCLUSION_RETRY_BASE_SECONDS = 30
 _CONCLUSION_PER_CYCLE = 10
 _COLD_RESUME_RETRY_SECONDS = 300
+_MIN_RESERVING_TIMEOUT_SECONDS = 600
 
 
 def _default_liveness(worktree: str, machine: str | None) -> dict | None:
@@ -708,6 +709,7 @@ class Supervisor:
         evaluator_ref: str | None = None,
         evaluate_limit: int = 100,
         event_wake: SupervisorEventWake | None = None,
+        reserving_timeout: float = _MIN_RESERVING_TIMEOUT_SECONDS,
     ):
         self.client = client
         self.spawn_fn = spawn_fn
@@ -817,6 +819,11 @@ class Supervisor:
         self.event_wake = event_wake or (
             SupervisorEventWake() if self.reactive else None
         )
+        #: Maximum age of this supervisor's own handle-less ``reserving`` row.
+        #: Spawn is synchronous, so reconciliation cannot observe a live local
+        #: allocation from the same process; after restart, a row older than this
+        #: bound has no allocator left that can attach durable identity.
+        self.reserving_timeout = max(0.0, float(reserving_timeout))
         #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
         #: live worker is nudged at most once per stall window, not every cycle).
         self._last_nudge: dict[str, float] = {}
@@ -1343,7 +1350,9 @@ class Supervisor:
         worktree id is recorded before launch. Confirmed-live worktrees are
         promoted to ``spawned`` with their observed session; confirmed-gone
         worktrees fail for a fresh attempt; unknown state remains reserved.
-        Reservations without a durable handle remain untouched.
+        A handle-less reservation remains untouched during its launch window.
+        After that bound, this same stable supervisor identity may fail its own
+        orphaned reservation so the queued task can receive a fresh attempt.
         """
         reconciled = 0
         for res in self._pool_reservations(state=SpawnState.RESERVING):
@@ -1416,6 +1425,30 @@ class Supervisor:
 
             worktree = _worktree_from_reservation(res, task.get("owner"))
             if not worktree:
+                try:
+                    age = time.time() - float(res.get("reserved_at") or 0)
+                except (TypeError, ValueError):
+                    age = 0.0
+                if (
+                    self.reserving_timeout <= 0
+                    or res.get("reserved_by") != self.supervisor_id
+                    or age < self.reserving_timeout
+                ):
+                    continue
+                try:
+                    self.client.fail_spawn(
+                        res["key"],
+                        detail=(
+                            "orphaned reserving allocation has no durable "
+                            f"handle after {age:.0f}s"
+                        ),
+                    )
+                    reconciled += 1
+                except DispatchError:
+                    log.exception(
+                        "failed to release orphaned reserving allocation %s",
+                        res["key"],
+                    )
                 continue
             try:
                 verdict = self.verdict_fn(

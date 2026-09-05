@@ -9,6 +9,7 @@ double-spawned.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict
 
 import pytest
@@ -3728,13 +3729,14 @@ def test_reconcile_reserving_rearms_idle_carried_local_session(q, client):
     assert fresh.session_handle == "local-body:session-idle"
 
 
-def test_reconcile_reserving_without_durable_handle_stays_reserved(q, client):
+def test_reconcile_recent_reserving_without_durable_handle_stays_reserved(q, client):
     task = q.create("ordinary")
-    reservation, _ = q.reserve_spawn(task.id)
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
+        supervisor_id="supervisor-test",
         verdict_fn=lambda *_args: pytest.fail(
             "unbound reservation cannot be classified"
         ),
@@ -3743,6 +3745,79 @@ def test_reconcile_reserving_without_durable_handle_stays_reserved(q, client):
 
     assert sup.reconcile_reserving() == 0
     assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_stale_own_reserving_without_durable_handle_fails(q, client):
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(
+        task.id,
+        reserved_by="supervisor-test",
+        now=time.time() - 601,
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 1
+    failed = q.get_reservation(reservation.key)
+    assert failed.state == SpawnState.FAILED
+    assert "no durable handle" in failed.detail
+
+
+def test_reconcile_stale_foreign_reserving_without_durable_handle_stays_reserved(
+    q, client
+):
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(
+        task.id,
+        reserved_by="supervisor-other",
+        now=time.time() - 601,
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_stale_handleless_reservation_is_idempotent(q, client):
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(
+        task.id,
+        reserved_by="supervisor-test",
+        now=time.time() - 601,
+    )
+    first = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        reserving_timeout=600,
+        nudge=False,
+    )
+    second = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert first.reconcile_reserving() == 1
+    assert second.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
 
 
 @pytest.mark.parametrize(
