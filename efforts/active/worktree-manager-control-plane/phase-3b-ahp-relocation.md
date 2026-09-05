@@ -130,6 +130,23 @@ all move to `worktree-manager/`. Worktree Manager:
    from the corrected vision (Mux presentation wraps the AHP backend) and is
    unaffected by this slice.
 
+### AHP remains explicitly opt-in (operator invariant, 2026-09-05)
+
+Unlike Mux — which becomes the default, transparent interactive experience
+once Worktree Manager is present — **AHP is never auto-selected**. Today's
+config gate (`session_backend.kind` defaults to `"direct"`; a worktree only
+gets an AHP-hosted session when a user explicitly sets `kind: "ahp"` plus its
+endpoint/account config) is a **behavior this relocation must preserve
+exactly**, not merely as an implementation detail carried over by accident:
+
+- Relocating AHP config into Worktree Manager must keep the same default-off,
+  explicit-opt-in shape — no new code path may select AHP based on
+  Worktree Manager merely being installed, a capability probe succeeding, or
+  any other implicit signal.
+- The relocated `execution-leg set --provider ahp` call only ever happens
+  because the *user* configured AHP for that launch — Worktree Manager does
+  not decide to "upgrade" a direct-mux launch to AHP on its own.
+
 ## Back-compat: existing persisted records
 
 Worktrees created before this slice ships have `session_backend:` (not
@@ -187,6 +204,10 @@ single-writer" merge norm for this public repo.
 - Worktree Manager test proving the relocated AHP provider talks to
   agent-worktrees only through the pinned `--json` subprocess boundary (no
   `_engine_runtime.py` in-process import for this path).
+- **Opt-in invariant test:** a launch/resume/create action with no explicit
+  `session_backend`/AHP config present never calls the AHP provider or
+  `execution-leg set --provider ahp`, regardless of whether Worktree Manager
+  or a reachable AHP endpoint is present.
 - `test_ahp_launcher_contract.py` continues to pass unmodified in spirit
   (mux still hard-binds to whatever session the provider established),
   confirming the Mux/AHP composability boundary is unaffected.
