@@ -646,6 +646,10 @@ def create_pr(
             if not target_pr.provider:
                 target_pr.provider = prcfg.provider
             if target_repo:
+                if target_repo != target_pr.repo:
+                    target_pr.attribution_head = ""
+                    target_pr.head_observed_at = ""
+                    target_pr.head_observed_api_base = ""
                 target_pr.repo = target_repo
             if not target_pr.opened_at:
                 target_pr.opened_at = tracking._now_iso()
@@ -780,7 +784,8 @@ def create_pr(
         target_pr.branch = feature_branch
         target_pr.base_sha = base_sha
         target_pr.head_sha = head_sha
-        target_pr.head_pushed_at = tracking._now_iso()
+        target_pr.head_observed_at = ""
+        target_pr.head_observed_api_base = ""
         target_pr.patch_id = patch_id
         if not target_pr.provider:
             target_pr.provider = prcfg.provider
@@ -817,6 +822,11 @@ def create_pr(
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
         draft=want_draft, attribution=attribution,
     )
+    observation_error = refresh_head_observation(
+        config, record, target_pr, head_sha
+    )
+    if observation_error:
+        result["pr_head_observation_error"] = observation_error
 
     return result
 
@@ -950,6 +960,93 @@ def refresh_source_attribution(
         return error
     except (providers.ProviderError, OSError, ValueError) as exc:
         return str(exc)
+
+
+def refresh_head_observation(
+    config: Config,
+    record: tracking.WorktreeRecord | None,
+    target_pr: PRRecord | None,
+    head_sha: str,
+) -> str:
+    """Record provider-clock evidence that the exact pushed head is live."""
+    if record is None or target_pr is None:
+        return "worktree has no tracked PR record"
+    if target_pr.number is None or not target_pr.repo:
+        return "active PR has no provider repo/number"
+
+    from . import providers
+
+    prcfg = config.default_repo.pr
+    provider_name = target_pr.provider or prcfg.provider
+    if provider_name != prcfg.provider:
+        return (
+            f"tracked PR provider {provider_name!r} differs from configured "
+            f"provider {prcfg.provider!r}; credentials cannot be resolved safely"
+        )
+    identity = (
+        provider_name,
+        target_pr.repo,
+        int(target_pr.number),
+        target_pr.branch,
+    )
+    observed_api_base = ""
+    yaml_path = record.yaml_path
+
+    def _matching_pr(current: tracking.WorktreeRecord) -> PRRecord | None:
+        for candidate in current.prs:
+            candidate_provider = candidate.provider or prcfg.provider
+            if (
+                candidate_provider,
+                candidate.repo,
+                candidate.number,
+                candidate.branch,
+            ) == identity:
+                return candidate
+        return None
+
+    with tracking._RecordLock(yaml_path):
+        current = tracking.load_record(yaml_path)
+        current_pr = _matching_pr(current)
+        if current_pr is None:
+            return "tracked PR identity changed before provider observation"
+        current_pr.head_sha = head_sha
+        current_pr.head_observed_at = ""
+        current_pr.head_observed_api_base = ""
+        tracking.save_record(current)
+    target_pr.head_sha = head_sha
+    target_pr.head_observed_at = ""
+    target_pr.head_observed_api_base = ""
+
+    try:
+        provider = providers.get_provider(provider_name)
+        observed_api_base = provider.authority_endpoint(prcfg.api_base)
+        token = providers.account_token_for_slug(target_pr.repo, prcfg)
+        observed = provider.observe_head(
+            target_pr.repo,
+            int(target_pr.number),
+            api_base=prcfg.api_base,
+            token=token,
+        )
+    except (providers.ProviderError, OSError, ValueError, AttributeError) as exc:
+        return str(exc)
+    if observed.head_sha != head_sha:
+        return (
+            f"provider observed head {observed.head_sha or '(missing)'} instead "
+            f"of pushed head {head_sha}"
+        )
+    if not observed.observed_at:
+        return "provider observation had no server timestamp"
+    with tracking._RecordLock(yaml_path):
+        current = tracking.load_record(yaml_path)
+        current_pr = _matching_pr(current)
+        if current_pr is None or current_pr.head_sha != head_sha:
+            return "tracked PR identity or head changed during provider observation"
+        current_pr.head_observed_at = observed.observed_at
+        current_pr.head_observed_api_base = observed_api_base
+        tracking.save_record(current)
+    target_pr.head_observed_at = observed.observed_at
+    target_pr.head_observed_api_base = observed_api_base
+    return ""
 
 
 def _finish_auto_open(
@@ -1138,6 +1235,9 @@ def _live_pr_state(
         from . import providers
 
         provider = providers.get_provider(provider_name)
+        authority_endpoint = provider.authority_endpoint(
+            getattr(prcfg, "api_base", "") or ""
+        )
         token = providers.account_token_for_slug(target_repo, prcfg)
         snap = provider.get_snapshot(
             target_repo, active.number,
@@ -1147,6 +1247,9 @@ def _live_pr_state(
         # Provider unconfigured/unreachable/unsupported -- omit the live block
         # rather than guessing; the tracked state is still reported.
         return None
+    evidence_matches_endpoint = (
+        active.head_observed_api_base == authority_endpoint
+    )
     st = pc.classify_state(
         snap,
         automerge_label=getattr(prcfg, "automerge_label", "") or "",
@@ -1154,8 +1257,12 @@ def _live_pr_state(
         wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
         approval_required=bool(getattr(prcfg, "approval_required", True)),
         allow_stale_approval=bool(getattr(prcfg, "allow_stale_approval", False)),
-        stale_approval_head_sha=active.head_sha,
-        stale_approval_head_pushed_at=active.head_pushed_at,
+        stale_approval_head_sha=(
+            active.head_sha if evidence_matches_endpoint else ""
+        ),
+        stale_approval_head_observed_at=(
+            active.head_observed_at if evidence_matches_endpoint else ""
+        ),
     )
     return {
         "live": {
@@ -1285,6 +1392,8 @@ def _set_pr_locked(
         pr.provider = provider
     if identity_changed:
         pr.attribution_head = ""
+        pr.head_observed_at = ""
+        pr.head_observed_api_base = ""
     if branch is not None:
         pr.branch = branch
     if state is not None:
@@ -1677,7 +1786,8 @@ def _push_existing_feature(
         # target is always non-terminal here (a live match or a fresh record).
         target.state = "open"
         target.head_sha = head_sha
-        target.head_pushed_at = tracking._now_iso()
+        target.head_observed_at = ""
+        target.head_observed_api_base = ""
         # Refresh the squash-invariant patch-id after the re-squash (#898).
         target.patch_id = _patch_id(
             target.base_sha, feature_branch, cwd=worktree_path)
@@ -1700,4 +1810,7 @@ def _push_existing_feature(
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
         draft=draft, attribution=attribution,
     )
+    observation_error = refresh_head_observation(config, record, target, head_sha)
+    if observation_error:
+        result["pr_head_observation_error"] = observation_error
     return result

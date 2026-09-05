@@ -90,6 +90,7 @@ from . import (
     profile_assignment,
     pr_ops,
     procs,
+    providers,
     prune,
     reclaim,
     reciprocal_presentation,
@@ -5973,6 +5974,32 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         select_number=getattr(args, "pr", None),
         select_branch=getattr(args, "select_branch", None),
     )
+    if (
+        result.get("success")
+        and result.get("state") == "open"
+        and result.get("number") is not None
+        and result.get("head_sha")
+    ):
+        try:
+            record = tracking.load_record(
+                cfg.tracking_dir() / f"{worktree_id}.yaml"
+            )
+            target_pr = next(
+                (
+                    pr for pr in record.prs
+                    if pr.number == result.get("number")
+                    and pr.branch == result.get("branch")
+                    and pr.repo == result.get("repo")
+                ),
+                None,
+            )
+            observation_error = pr_ops.refresh_head_observation(
+                config, record, target_pr, str(result["head_sha"])
+            )
+            if observation_error:
+                result["head_observation_error"] = observation_error
+        except (OSError, ValueError) as exc:
+            result["head_observation_error"] = str(exc)
     if use_json:
         _json_output(result)
     elif result.get("success"):
@@ -5980,6 +6007,11 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
             f"Recorded PR for {worktree_id}: "
             f"#{result.get('number')} ({result.get('state')}) {result.get('url')}"
         )
+        if result.get("head_observation_error"):
+            output.warn(
+                "PR metadata was recorded, but authoritative head observation "
+                f"failed: {result['head_observation_error']}"
+            )
     else:
         output.err(result.get("error", "set-pr failed."))
     return 0 if result.get("success") else 1
@@ -24552,8 +24584,16 @@ def _tracked_pr_head_evidence(
     config: cfg.Config,
     repo: str,
     number: int,
+    provider: str,
+    api_base: str,
 ) -> tuple[str, str]:
     """Return locally recorded publication evidence for one PR's current head."""
+    try:
+        authority_endpoint = providers.get_provider(
+            provider
+        ).authority_endpoint(api_base)
+    except (providers.ProviderError, ValueError, AttributeError):
+        return "", ""
     worktree_id = _infer_worktree_id_from_cwd(config)
     if not worktree_id:
         return "", ""
@@ -24565,8 +24605,13 @@ def _tracked_pr_head_evidence(
         return "", ""
     for pr in record.prs:
         target_repo = pr.repo or record.repo
-        if pr.number == number and target_repo == repo:
-            return pr.head_sha, pr.head_pushed_at
+        if (
+            pr.number == number
+            and target_repo == repo
+            and (pr.provider or provider) == provider
+            and pr.head_observed_api_base == authority_endpoint
+        ):
+            return pr.head_sha, pr.head_observed_at
     return "", ""
 
 
@@ -24681,8 +24726,12 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             return 0
 
         baseline = pc.Baseline.from_cursor(args.since) if args.since else None
-        tracked_head_sha, head_pushed_at = _tracked_pr_head_evidence(
-            config, args.repo, args.pr
+        tracked_head_sha, head_observed_at = _tracked_pr_head_evidence(
+            config,
+            args.repo,
+            args.pr,
+            prcfg.provider,
+            args.host or prcfg.api_base,
         )
         if not args.json:
             mode = f"since {args.since}" if args.since else "auto-baseline"
@@ -24700,7 +24749,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                 getattr(prcfg, "allow_stale_approval", False)
             ),
             stale_approval_head_sha=tracked_head_sha,
-            stale_approval_head_pushed_at=head_pushed_at,
+            stale_approval_head_observed_at=head_observed_at,
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}",
                                      file=sys.stderr),
         )
@@ -25161,14 +25210,18 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                 default_branch=default_branch,
             )
         else:
-            tracked_head_sha, head_pushed_at = _tracked_pr_head_evidence(
-                config, args.repo, args.pr
+            tracked_head_sha, head_observed_at = _tracked_pr_head_evidence(
+                config,
+                args.repo,
+                args.pr,
+                prcfg.provider,
+                args.host or prcfg.api_base,
             )
             row = pm.merge_one(
                 prcfg, args.repo, args.pr, api_base=args.host, token=args.token,
                 apply=apply, default_branch=default_branch,
                 tracked_head_sha=tracked_head_sha,
-                head_pushed_at=head_pushed_at,
+                head_observed_at=head_observed_at,
             )
             eligible = 1 if row["action"] == "apply" else 0
             applied = 1 if row.get("applied") else 0

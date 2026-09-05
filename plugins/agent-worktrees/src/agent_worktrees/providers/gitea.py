@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from email.utils import parsedate_to_datetime
 
 from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, run_cli
@@ -41,6 +42,9 @@ class GiteaProvider:
     """Open + query pull requests on a Gitea instance via curl."""
 
     name = "gitea"
+
+    def authority_endpoint(self, api_base: str = "") -> str:
+        return (api_base or "").rstrip("/")
 
     def _api(self, api_base: str, path: str) -> str:
         base = (api_base or "").rstrip("/")
@@ -406,6 +410,49 @@ class GiteaProvider:
             base_ref=str((data.get("base") or {}).get("ref", "")),
         )
 
+    def observe_head(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PullResult:
+        """Read the exact head and the Gitea server's HTTP ``Date`` together."""
+        if not token:
+            raise ProviderError("Gitea provider needs a token to observe a PR head.")
+        url = self._api(api_base, f"/repos/{repo}/pulls/{number}")
+        proc = run_cli([
+            "curl", "-sS", "-X", "GET", url,
+            "-H", f"Authorization: token {token}",
+            "-H", "Accept: application/json",
+            "-w", "\n%header{date}\n%{http_code}",
+        ])
+        if proc.returncode != 0:
+            raise ProviderError(
+                f"curl failed observing Gitea PR #{number}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        parts = proc.stdout.rsplit("\n", 2)
+        if len(parts) != 3:
+            raise ProviderError(f"Gitea PR #{number} observation was malformed.")
+        body, date_header, status_text = parts
+        try:
+            status = int(status_text.strip())
+        except ValueError as exc:
+            raise ProviderError(
+                f"Gitea PR #{number} observation had no HTTP status."
+            ) from exc
+        if status != 200:
+            raise ProviderError(f"Gitea PR #{number} lookup failed (HTTP {status}).")
+        try:
+            data = json.loads(body)
+            observed_at = parsedate_to_datetime(date_header.strip()).isoformat()
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ProviderError(
+                f"Gitea PR #{number} observation lacked valid server evidence."
+            ) from exc
+        return PullResult(
+            number=int(data.get("number", number)),
+            head_sha=str((data.get("head") or {}).get("sha", "")),
+            observed_at=observed_at,
+        )
+
     def publish_source_marker(
         self,
         repo: str,
@@ -505,6 +552,7 @@ class GiteaProvider:
             merged=bool(pr.get("merged", False)),
             head_sha=str((pr.get("head") or {}).get("sha", "")),
             base_ref=str((pr.get("base") or {}).get("ref", "")),
+            updated_at=str(pr.get("updated_at", "") or ""),
             reviews=self._all_review_objs(repo, number, api_base, token),
             author=str((pr.get("user") or {}).get("login", "")),
             mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,

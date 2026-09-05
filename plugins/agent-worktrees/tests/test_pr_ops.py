@@ -609,6 +609,22 @@ class TestSetPRAndStatus:
         assert res["head_sha"] == created["head_sha"]
         assert res["number"] == 9
 
+    def test_set_pr_identity_change_clears_head_observation(self, pr_repo):
+        _config, wid, _wt_path, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, provider="gitea")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "same-head"
+        rec.active_pr().head_observed_at = "2026-09-05T06:01:02+00:00"
+        tracking.save_record(rec)
+
+        res = pr_ops.set_pr(wid, number=8)
+
+        assert res["head_sha"] == "same-head"
+        persisted = tracking.load_record(
+            cfg.tracking_dir() / f"{wid}.yaml"
+        ).active_pr()
+        assert persisted.head_observed_at == ""
+
     def test_set_pr_invalid_state(self, pr_repo):
         _config, wid, _wt_path, _ = pr_repo
         res = pr_ops.set_pr(wid, state="bogus")
@@ -792,6 +808,133 @@ class TestReconcileActivePrSelfHeal:
         self._patch(monkeypatch, fake)
         pr_ops._reconcile_active_pr(rec, self._config(), best_effort=True)
         assert tracking.load_record(rec.yaml_path).active_pr().state == "merged"
+
+
+class TestRefreshHeadObservation:
+    def _config(self):
+        return cfg.Config(
+            srcroot="/s", machine="m", platform="linux", repo_name="ext",
+            repos={"ext": cfg.RepoConfig(
+                anchor="/a", worktree_root="/w",
+                pr=cfg.PRConfig(
+                    enabled=True,
+                    provider="gitea",
+                    api_base="https://gitea.example",
+                ),
+            )},
+        )
+
+    def _record(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        rec = tracking.WorktreeRecord(
+            worktree_id="wt-z", branch="worktree/wt-z",
+            worktree_path=str(tmp_path / "wt"), repo="o/r", machine="m",
+            platform="linux", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=None,
+        )
+        rec.pr = tracking.PRRecord(
+            state="open", number=7, branch="pr/x", provider="gitea", repo="o/r"
+        )
+        tracking.save_record(rec)
+        return rec
+
+    def test_records_matching_provider_clock_observation(self, tmp_path, monkeypatch):
+        from agent_worktrees.providers import PullResult
+        import agent_worktrees.providers as providers
+
+        rec = self._record(tmp_path, monkeypatch)
+
+        class _Provider:
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
+
+            def observe_head(self, repo, number, *, api_base="", token=None):
+                return PullResult(
+                    number=number,
+                    head_sha="abc",
+                    observed_at="2026-09-05T06:01:02+00:00",
+                )
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Provider())
+        monkeypatch.setattr(
+            providers, "account_token_for_slug", lambda slug, prcfg: "tok"
+        )
+
+        assert pr_ops.refresh_head_observation(
+            self._config(), rec, rec.active_pr(), "abc"
+        ) == ""
+        persisted = tracking.load_record(rec.yaml_path).active_pr()
+        assert persisted.head_sha == "abc"
+        assert persisted.head_observed_at == "2026-09-05T06:01:02+00:00"
+        assert persisted.head_observed_api_base == "https://gitea.example"
+
+    def test_mismatched_observation_fails_closed(self, tmp_path, monkeypatch):
+        from agent_worktrees.providers import PullResult
+        import agent_worktrees.providers as providers
+
+        rec = self._record(tmp_path, monkeypatch)
+        rec.active_pr().head_observed_at = "old-evidence"
+
+        class _Provider:
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
+
+            def observe_head(self, repo, number, *, api_base="", token=None):
+                return PullResult(
+                    number=number,
+                    head_sha="different",
+                    observed_at="2026-09-05T06:01:02+00:00",
+                )
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Provider())
+        monkeypatch.setattr(
+            providers, "account_token_for_slug", lambda slug, prcfg: "tok"
+        )
+
+        error = pr_ops.refresh_head_observation(
+            self._config(), rec, rec.active_pr(), "abc"
+        )
+        assert "instead of pushed head abc" in error
+        persisted = tracking.load_record(rec.yaml_path).active_pr()
+        assert persisted.head_sha == "abc"
+        assert persisted.head_observed_at == ""
+        assert persisted.head_observed_api_base == ""
+
+    def test_concurrent_reassociation_rejects_returned_observation(
+        self, tmp_path, monkeypatch
+    ):
+        from agent_worktrees.providers import PullResult
+        import agent_worktrees.providers as providers
+
+        rec = self._record(tmp_path, monkeypatch)
+
+        class _Provider:
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
+
+            def observe_head(self, repo, number, *, api_base="", token=None):
+                pr_ops.set_pr("wt-z", number=8)
+                return PullResult(
+                    number=number,
+                    head_sha="abc",
+                    observed_at="2026-09-05T06:01:02+00:00",
+                )
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Provider())
+        monkeypatch.setattr(
+            providers, "account_token_for_slug", lambda slug, prcfg: "tok"
+        )
+
+        error = pr_ops.refresh_head_observation(
+            self._config(), rec, rec.active_pr(), "abc"
+        )
+
+        assert "changed during provider observation" in error
+        persisted = tracking.load_record(rec.yaml_path).active_pr()
+        assert persisted.number == 8
+        assert persisted.head_observed_at == ""
+        assert persisted.head_observed_api_base == ""
 
 
 class TestPRFinalizeAndPush:
@@ -1380,6 +1523,7 @@ class TestPRStatusLive:
             head_scheme="snapshot", auto_open=False,
             api_base="https://h/gitea",
             automerge_label="auto-merge",
+            allow_stale_approval=True,
             hold_labels=("do-not-merge", "needs-rebase", "wip"),
             wip_title_prefixes=("wip:",),
         )
@@ -1398,6 +1542,9 @@ class TestPRStatusLive:
 
         class _Prov:
             name = "gitea"
+
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
 
             def get_snapshot(self, repo, number, *, api_base="", token=None):
                 return snap
@@ -1422,6 +1569,70 @@ class TestPRStatusLive:
         assert res["live"]["merge_state"] == "clean"
         assert res["live"]["eligible"] is True
         assert res["live"]["reviews"] == 1
+
+    def test_cli_evidence_lookup_uses_configured_provider_for_manual_pr(
+        self, pr_repo, monkeypatch
+    ):
+        from agent_worktrees import __main__ as main
+        from agent_worktrees import providers
+
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        tracked = rec.active_pr()
+        tracked.head_sha = "head"
+        tracked.head_observed_at = "2026-01-01T00:01:00Z"
+        tracked.head_observed_api_base = "https://h/gitea"
+        tracking.save_record(rec)
+
+        class _Prov:
+            def authority_endpoint(self, api_base=""):
+                return api_base.rstrip("/")
+
+        monkeypatch.setattr(main, "_infer_worktree_id_from_cwd", lambda config: wid)
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Prov())
+
+        assert main._tracked_pr_head_evidence(
+            config,
+            rec.repo,
+            7,
+            "gitea",
+            "https://h/gitea",
+        ) == ("head", "2026-01-01T00:01:00Z")
+
+    def test_live_block_rejects_observation_from_other_endpoint(
+        self, pr_repo, monkeypatch
+    ):
+        from agent_worktrees import pr_contract as pc
+
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config)
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "new"
+        rec.active_pr().head_observed_at = "2026-01-01T00:01:00Z"
+        rec.active_pr().head_observed_api_base = "https://other/gitea"
+        tracking.save_record(rec)
+        snap = pc.PRSnapshot(
+            pr_state="open", merged=False, head_sha="new", base_ref="master",
+            author="alice", mergeable=True, title="Feature",
+            reviews=(
+                pc.Review(
+                    1,
+                    "APPROVED",
+                    "bob",
+                    submitted_at="2026-01-01T00:02:00Z",
+                    commit_id="old",
+                ),
+            ),
+        )
+        self._mock_provider(monkeypatch, snap)
+
+        live = pr_ops.pr_status(wid, config=config)["live"]
+
+        assert live["approval_stale"] is True
+        assert live["approval_stale_authorized"] is False
+        assert live["verdict"] == ""
 
     def test_live_disabled_skips_provider(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo

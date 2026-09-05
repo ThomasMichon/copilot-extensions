@@ -43,7 +43,7 @@ def decorate_events(
     approval_required: bool = True,
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
-    stale_approval_head_pushed_at: str = "",
+    stale_approval_head_observed_at: str = "",
 ) -> dict:
     """Wrap the raw transition list into the final result payload.
 
@@ -79,7 +79,7 @@ def decorate_events(
         approval_required=approval_required,
         allow_stale_approval=allow_stale_approval,
         stale_approval_head_sha=stale_approval_head_sha,
-        stale_approval_head_pushed_at=stale_approval_head_pushed_at,
+        stale_approval_head_observed_at=stale_approval_head_observed_at,
     )
     return payload
 
@@ -99,7 +99,7 @@ def run_wait(
     approval_required: bool = True,
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
-    stale_approval_head_pushed_at: str = "",
+    stale_approval_head_observed_at: str = "",
     now: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
     on_poll: Callable[[pc.PRSnapshot], None] | None = None,
@@ -135,7 +135,7 @@ def run_wait(
             approval_required=approval_required,
             allow_stale_approval=allow_stale_approval,
             stale_approval_head_sha=stale_approval_head_sha,
-            stale_approval_head_pushed_at=stale_approval_head_pushed_at,
+            stale_approval_head_observed_at=stale_approval_head_observed_at,
         )
 
     deadline = now() + timeout if timeout > 0 else None
