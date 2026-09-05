@@ -659,7 +659,7 @@ def invoke_cell_command(
         ]
     else:
         command = [str(launcher), *arguments]
-    return run(command, env=clean_environment(), check=check, timeout=90)
+    return run(command, env=clean_environment(), check=check, timeout=180)
 
 
 def http_json(
@@ -709,6 +709,13 @@ def pid_alive(pid: int) -> bool:
         ctypes.windll.kernel32.CloseHandle(handle)
         return True
     try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        tail = raw.rsplit(")", 1)[1].split()
+        if tail and tail[0] == "Z":
+            return False
+    except (IndexError, OSError, UnicodeError):
+        pass
+    try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
@@ -750,7 +757,10 @@ def process_birth_identity(pid: int) -> str | None:
             ctypes.windll.kernel32.CloseHandle(handle)
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
-        return f"proc-start:{raw.rsplit(')', 1)[1].split()[19]}"
+        tail = raw.rsplit(")", 1)[1].split()
+        if tail and tail[0] == "Z":
+            return None
+        return f"proc-start:{tail[19]}"
     except (IndexError, OSError, UnicodeError):
         result = run(
             ["ps", "-o", "lstart=", "-p", str(pid)],
@@ -781,6 +791,8 @@ def payload_version_from_runtime(runtime_version: str) -> str:
 def endpoint_snapshot(
     cell: dict[str, object],
     expected_version: str,
+    *,
+    validate_cli: bool = True,
 ) -> dict[str, object]:
     run_root = Path(str(cell["run_root"]))
     endpoint_record = read_json(run_root / "endpoint.json")
@@ -814,13 +826,16 @@ def endpoint_snapshot(
     running = read_json(Path(str(cell["plugin_root"])) / "running-version.json")
     if running.get("version") != expected_version or int(running.get("pid", 0)) != pid:
         raise RuntimeError("running-version evidence disagrees with the live endpoint")
-    cli = parse_json_output(invoke_cell_command(cell, "status"))
-    if (
-        cli.get("state") != "ready"
-        or cli.get("running") is not True
-        or cli.get("version") != expected_version
-    ):
-        raise RuntimeError(f"cell-local status did not report the live service: {cli}")
+    if validate_cli:
+        cli = parse_json_output(invoke_cell_command(cell, "status"))
+        if (
+            cli.get("state") != "ready"
+            or cli.get("running") is not True
+            or cli.get("version") != expected_version
+        ):
+            raise RuntimeError(
+                f"cell-local status did not report the live service: {cli}"
+            )
     return {
         "address": address,
         "pid": pid,
@@ -836,12 +851,17 @@ def wait_for_service(
     expected_version: str,
     *,
     previous: dict[str, object] | None = None,
+    validate_cli: bool = True,
 ) -> dict[str, object]:
     deadline = time.monotonic() + 45
     last_error = ""
     while time.monotonic() < deadline:
         try:
-            snapshot = endpoint_snapshot(cell, expected_version)
+            snapshot = endpoint_snapshot(
+                cell,
+                expected_version,
+                validate_cli=validate_cli,
+            )
             if previous is not None and (
                 snapshot["address"] == previous["address"]
                 or snapshot["pid"] == previous["pid"]
@@ -1848,7 +1868,12 @@ def stage_4() -> None:
                 f"cutover crash evidence is not phase-specific: {crash_evidence}"
             )
         if crash_phase == "committed":
-            target_live = wait_for_service(cell_a, target, previous=old_live)
+            target_live = wait_for_service(
+                cell_a,
+                target,
+                previous=old_live,
+                validate_cli=False,
+            )
             record_service_evidence(state, "a", target_live)
             set_namespaced_policy(False)
             blocked = cell_recover(

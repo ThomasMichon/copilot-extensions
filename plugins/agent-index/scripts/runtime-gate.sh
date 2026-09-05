@@ -431,15 +431,17 @@ _resolve_ready_runtime() {
             --context "$CONTEXT" \
             --expected-marketplace-id "$MARKETPLACE_ID" \
             --durable-home "$CONTEXT_DURABLE_HOME" \
-            --command "$COMMAND" 2>/dev/null)" || {
+            --command "$COMMAND")" || {
                 printf '%s\n' '[agent-index] selected installation runtime failed operative validation.' >&2
                 exit 126
             }
         AGENT_RT_PY="$(_json_get "$validation" "$(_json_path interpreter)" 2>/dev/null || true)"
         AGENT_RT_VERSION="$(_json_get "$validation" "$(_json_path runtimeVersion)" 2>/dev/null || true)"
-        if [ -z "${AGENT_INDEX_CELL_START_TOKEN:-}" ]; then
-            unset AGENT_INDEX_CELL_LOCK_TOKEN AGENT_INDEX_CELL_LOCK_ROOT
-        fi
+        AGENT_RT_LOCK_REENTRY="$(_json_get "$validation" "$(_json_path lockReentry)" 2>/dev/null || true)"
+        case "$AGENT_RT_LOCK_REENTRY" in
+            start|transaction) ;;
+            *) unset AGENT_INDEX_CELL_LOCK_TOKEN AGENT_INDEX_CELL_LOCK_ROOT ;;
+        esac
         if [ -n "${AGENT_RT_PY:-}" ] &&
            _runtime_origin_ok "$AGENT_RT_PY" "$ROOT/versions"; then
             if [ -n "$AGENT_RT_VERSION" ]; then

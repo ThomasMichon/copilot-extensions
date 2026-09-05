@@ -75,6 +75,19 @@ def test_posix_runtime_gate_supports_stock_macos_bash() -> None:
     assert "while IFS= read -r field; do" in posix
 
 
+def test_runtime_gates_use_validated_lock_reentry() -> None:
+    posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "runtime-gate.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "lockReentry" in posix
+    assert "lockReentry" in powershell
+    assert "AGENT_INDEX_CELL_TRANSACTION_TOKEN:-" not in posix.split(
+        "AGENT_RT_LOCK_REENTRY=", 1
+    )[1].split("_runtime_state()", 1)[0]
+
+
 def test_namespaced_session_ensure_is_background_coalesced() -> None:
     posix_gate = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(
         encoding="utf-8"
