@@ -8,6 +8,7 @@ Verbs:
 * ``plan``     -- read-only restore plan (managed surfaces + drift key)
 * ``validate`` -- run the conflict validator over the package union
 * ``restore``  -- converge the machine (``--dry-run`` prints the plan; apply lands in #4006)
+* ``provision-playwright-cli`` -- converge the machine-local Playwright CLI workspace
 * ``capture`` / ``prune`` -- harvest / GC verbs (issue #4006)
 """
 
@@ -22,6 +23,7 @@ from . import __version__
 from . import discover as _discover
 from . import identity as _identity
 from . import layout as _layout
+from . import playwright_cli as _playwright_cli
 from . import reconcile as _reconcile
 from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
@@ -473,6 +475,35 @@ def _cmd_todo(args: argparse.Namespace) -> int:
     return 2
 
 
+def _cmd_provision_playwright_cli(args: argparse.Namespace) -> int:
+    result = _playwright_cli.provision_playwright_cli(apply=args.apply)
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0 if result.ok else 2
+
+    label = "APPLY" if args.apply else "DRY-RUN"
+    print(f"provision-playwright-cli [{label}] in {result.home}")
+    for action in result.actions:
+        print(f"  {action.status}: {' '.join(action.argv)}")
+    if not result.actions and result.ok:
+        print("  up-to-date")
+    if result.error is not None:
+        print(f"provision-playwright-cli failed: {result.error}", file=sys.stderr)
+        for command in result.commands:
+            print(
+                f"  command (exit {command.returncode}): {' '.join(command.argv)}",
+                file=sys.stderr,
+            )
+            if command.stdout_tail:
+                print("  stdout:", file=sys.stderr)
+                print(command.stdout_tail, file=sys.stderr)
+            if command.stderr_tail:
+                print("  stderr:", file=sys.stderr)
+                print(command.stderr_tail, file=sys.stderr)
+        return 2
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-machines", description=__doc__)
     parser.add_argument("--version", action="version", version=f"agent-machines {__version__}")
@@ -533,6 +564,21 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="restrict to named surfaces/modules (repeatable)")
     restore.add_argument("--verbose", "-v", action="store_true",
                          help="show each module's captured output (shown by default in a dry-run)")
+    playwright = sub.add_parser("provision-playwright-cli")
+    playwright.add_argument("--json", action="store_true", help="emit JSON")
+    playwright_mode = playwright.add_mutually_exclusive_group()
+    playwright_mode.add_argument(
+        "--dry-run",
+        dest="apply",
+        action="store_false",
+        help="query registry latest and preview required package or skill changes (default)",
+    )
+    playwright_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="converge the latest package and bundled skill tree",
+    )
+    playwright.set_defaults(func=_cmd_provision_playwright_cli, apply=False)
     for verb in ("capture", "prune"):
         p = add(verb, _cmd_todo)
         p.set_defaults(verb=verb)

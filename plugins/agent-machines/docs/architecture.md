@@ -180,6 +180,87 @@ Module authority is reporting-only and uses the explicit
 `authority_mode: opaque-additive`: all applicable modules remain additive,
 including same-named modules from different packages.
 
+## Machine-local Playwright CLI provisioning
+
+`src\agent_machines\playwright_cli.py` owns a focused,
+source-neutral user-home provisioner. The directly callable
+`agent-machines provision-playwright-cli` subcommand is also available through
+the plugin's existing payload command, so a requirement package can use an
+`invocation` module without introducing a second PATH command.
+
+The provisioner resolves `node` and `npm`, then accepts npm's JavaScript CLI
+entry point only from a standard package layout physically contained by the
+resolved Node installation prefix. This trust rule intentionally does not
+require npm itself to live under the user home: npm is part of the detected
+runtime prerequisite, while the state it manages is separately constrained to
+the selected user prefix. The common POSIX npm command symlink is accepted only
+when it resolves to that trusted layout; a symlinked or reparse-point package
+root is rejected. All npm operations execute as a direct Node argv; no shell or
+batch shim is involved.
+
+The provisioner queries `npm prefix -g`, normalizes the result, and accepts it
+only when it is contained by the requested user home. Otherwise it selects
+`~/AppData/Roaming/npm` on Windows or `~/.local` on POSIX/WSL without mutating
+npm's global configuration, then resolves and revalidates that fallback against
+the resolved home. Every subsequent npm operation uses that same explicit
+prefix: registry latest lookup, installed package query, install, and
+global-root discovery. Dry-run therefore performs a required network read;
+inability to obtain registry `latest` is a failure.
+
+A missing package or an installed version different from registry `latest`
+plans or applies the prefix-scoped `@latest` install. Apply re-queries the
+installed package and requires an exact match to the version observed before
+mutation. The expected installed command may be reported from the selected
+prefix when it resolves within the prefix and home, but command shims are
+informational only and never executed.
+
+The npm-reported package root must remain within both the selected prefix and
+user home. It locates the canonical Playwright JavaScript entry point at
+`@playwright/cli/playwright-cli.js` and the bundled skill at
+`@playwright/cli/skills/playwright-cli`; both are resolved and validated within
+that package tree. Before planning or applying registration, every existing
+component beneath the resolved home in `~/.agents`, the target skill path,
+`~/.playwright`, and the config path is inspected without traversing links;
+symlinks, junctions, and other reparse points fail both dry-run and apply.
+Skill traversal applies the same rule to every directory and file, and the
+bundled tree must remain contained by the validated Playwright package, npm
+root, selected prefix, and home. The skill must contain a non-empty `SKILL.md`.
+Health compares the complete regular-file tree against
+`~/.agents/skills/playwright-cli` by relative path and SHA-256 content, so
+missing, extra, empty, unreadable, or byte-different files are stale. Stale
+Hashing is incremental and bounded by file count, total bytes, and the shared
+provision deadline. Stale state and every package update run
+`node <playwright-cli.js> install --skills agents`, then require complete tree
+equality. The CLI-created `~/.playwright/cli.config.json` remains reported
+workspace state, but browser profiles, credentials, navigation, and product
+policy are not owned here.
+
+Default and explicit `--dry-run` modes are read-only. `--apply` verifies the
+package, JavaScript entry point, and skill postconditions; a nonzero command or
+missing postcondition is a failed result with bounded stdout/stderr evidence.
+Each command runs in its own process group/tree. A timeout terminates the
+group/tree, waits through the bounded cleanup path, preserves partial output,
+and reports exit code `124`, including cleanup errors without replacing the
+original timeout. The complete provision operation has a 1500-second deadline;
+individual commands are capped at 600 seconds with a reserved cleanup margin,
+while the module runner remains capped at 1800 seconds. On Windows a gated
+launcher is assigned to a kill-on-close Job Object before it can spawn Node, so
+root exit cannot orphan descendants; POSIX retains a new process group and
+verifies it is empty after normal or abnormal root exit, escalating from
+termination to forced cleanup within bounded waits. Any exact-PID Windows
+fallback is bounded and evidence-bearing. The stable JSON
+result is schema version 1 and reports
+prerequisites, observed prefix/root/package/CLI/skill/config state, planned or
+attempted actions, command evidence, and the literal failure.
+Unexpected subprocess I/O failures terminate the same contained tree and return
+structured exit code `126` evidence.
+
+Requirement invocations use the established exact platform keys `windows`,
+`linux`, and `wsl`. The payload shim starts from the package repository because
+that is the generic module-runner contract, but Playwright workspace
+initialization itself always receives the user home as `cwd`; no repository
+content is registered or mutated.
+
 ## Declarative resources
 
 `src\agent_machines\resources.py` sits between surfaces (which converge

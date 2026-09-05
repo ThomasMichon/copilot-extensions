@@ -121,6 +121,9 @@ agent-machines restore --repo myrepo    # another single repo
 agent-machines restore --only ssh       # preview one surface/module
 agent-machines restore --only ssh --apply
 agent-machines restore --json           # structured plan/surface/module result
+agent-machines provision-playwright-cli # preview user-home package/skill changes
+agent-machines provision-playwright-cli --apply
+agent-machines provision-playwright-cli --json
 agent-machines version
 ```
 
@@ -137,6 +140,178 @@ broadening scope.
 logical surface (`settings`, `permissions`, `trustedFolders`) or module name.
 Module stdout is shown by default in dry-runs, hidden during apply unless
 `--verbose`, and always present in `--json`.
+
+## Playwright CLI provisioning
+
+`provision-playwright-cli` converges only machine-local state for the current
+user. It detects `node` and `npm`, validates npm's JavaScript CLI entry point
+against the detected Node installation, resolves one npm prefix contained by
+the requested user home, ensures the registry's current `@playwright/cli`
+version, and initializes the Playwright CLI workspace from the user's home
+directory:
+
+- `~/.agents/skills/playwright-cli/` -- the personal Agent Skills registration
+  recognized by Copilot CLI, byte-matched to the package-bundled skill tree;
+- `~/.playwright/cli.config.json` -- Playwright CLI's user-home workspace
+  configuration.
+
+The command is a dry-run by default; `--dry-run` is the explicit equivalent and
+`--apply` performs missing or stale work. Every run queries `npm prefix -g`,
+accepts that configured prefix only when it resolves inside the requested home,
+and otherwise uses a user-scoped fallback (`~/AppData/Roaming/npm` on Windows,
+`~/.local` on POSIX/WSL). The resolved fallback is revalidated against the
+resolved home before use. It does not rewrite npm configuration. Package
+detection, registry lookup, installation, and root discovery all receive the
+same explicit `--prefix`, so a system-wide installation cannot satisfy the
+user-scoped postcondition.
+
+npm's CLI entry point is trusted as part of the detected Node/npm prerequisite,
+not because it is under the user home. The provisioner accepts only the npm
+package layout physically contained by the resolved Node installation prefix
+(including the common POSIX npm command symlink into that layout). A linked or
+reparse-point npm package root is rejected rather than trusted relative to
+itself. It invokes every npm operation as `node <npm-cli.js> ...`; shell and
+batch shims are never executed.
+
+Dry-run is read-only but necessarily contacts the npm registry through
+`npm view @playwright/cli version --json`; failure to determine `latest` is a
+structured failure rather than stale success. A missing or version-mismatched
+package plans `npm install -g @playwright/cli@latest --prefix <prefix>`.
+Apply runs it, re-queries the installed version, requires an exact match to the
+previously observed registry version, and may report `playwright-cli.cmd` from
+the Windows prefix root or `bin/playwright-cli` beneath a POSIX prefix when the
+expected command resolves inside the selected prefix and home. Those command
+shims are informational only and are never the trusted apply path.
+
+The provisioner obtains the package root with
+`npm root -g --prefix <prefix>`, validates the bundled
+`@playwright/cli/playwright-cli.js` entry point within that root, validates the
+`@playwright/cli` package's `skills` / `playwright-cli` directory and its
+non-empty `SKILL.md`, then compares every regular file in the bundled and
+registered trees by relative path and content hash.
+Missing, extra, empty, unreadable, or byte-different files make registration
+stale. Symlinks, junctions, and other Windows reparse points are rejected in
+the managed `~/.agents` and `~/.playwright` path chains and in either skill
+tree, including during dry-run. The bundled tree must remain physically inside
+the validated package, npm root, selected prefix, and home. Stale registration,
+and every package update, plans or runs the package entry point as
+`node <playwright-cli.js> install --skills agents`; apply then requires the
+complete trees to match. Skill traversal hashes files incrementally under
+file-count, byte-count, and shared deadline bounds. Every subprocess, including apply, runs with the user
+home as `cwd`; no project checkout content is registered or mutated. Commands
+share one bounded provision deadline below the module runner's outer timeout.
+Each command has a smaller cap and reserves cleanup time. Windows gates the
+launcher into a kill-on-close Job Object before Node can start; POSIX uses a
+new process group. Normal exit and every failure path verify that the complete
+group/tree is empty, escalating to forced cleanup within a bounded wait. A
+timeout only then returns partial output with exit code `124`.
+Unexpected subprocess I/O failures use the same contained cleanup path before
+returning structured exit code `126` evidence.
+
+Missing prerequisites, failed commands, malformed package-query output, and
+missing postconditions exit `2`. Human output includes bounded stdout/stderr
+evidence for every command that ran; `--json` emits the same evidence in a
+stable schema:
+
+```json
+{
+  "schema_version": 1,
+  "operation": "provision-playwright-cli",
+  "ok": true,
+  "mode": "dry-run",
+  "home": "<home>",
+  "changes_needed": false,
+  "changed": false,
+  "prerequisites": {
+    "node": {"available": true, "path": "<node>"},
+    "npm": {
+      "available": true,
+      "path": "<npm>",
+      "cli_path": "<node-install>/node_modules/npm/bin/npm-cli.js"
+    }
+  },
+  "npm": {
+    "configured_prefix": "<configured-prefix>",
+    "prefix": "<user-prefix>",
+    "prefix_source": "configured",
+    "root": "<user-prefix>/node_modules"
+  },
+  "package": {
+    "name": "@playwright/cli",
+    "installed": true,
+    "version": "<version>",
+    "latest_version": "<version>"
+  },
+  "cli": {
+    "command": "playwright-cli",
+    "available": true,
+    "path": "<playwright-cli>",
+    "entrypoint": "<user-prefix>/node_modules/@playwright/cli/playwright-cli.js"
+  },
+  "skill": {
+    "path": "<home>/.agents/skills/playwright-cli",
+    "bundle_path": "<user-prefix>/node_modules/@playwright/cli/skills/playwright-cli",
+    "bundle_valid": true,
+    "registered": true,
+    "file_count": 11
+  },
+  "workspace_config": {
+    "path": "<home>/.playwright/cli.config.json",
+    "present": true
+  },
+  "actions": [],
+  "commands": [
+    {
+      "argv": ["<node>", "<npm-cli.js>", "prefix", "-g"],
+      "cwd": "<home>",
+      "returncode": 0,
+      "stdout_tail": "<configured-prefix>",
+      "stderr_tail": ""
+    },
+    {
+      "argv": ["<node>", "<npm-cli.js>", "view", "@playwright/cli", "version", "--json", "--prefix", "<user-prefix>"],
+      "cwd": "<home>",
+      "returncode": 0,
+      "stdout_tail": "\"<version>\"",
+      "stderr_tail": ""
+    },
+    {
+      "argv": ["<node>", "<npm-cli.js>", "list", "-g", "@playwright/cli", "--depth=0", "--json", "--prefix", "<user-prefix>"],
+      "cwd": "<home>",
+      "returncode": 0,
+      "stdout_tail": "<package-json>",
+      "stderr_tail": ""
+    },
+    {
+      "argv": ["<node>", "<npm-cli.js>", "root", "-g", "--prefix", "<user-prefix>"],
+      "cwd": "<home>",
+      "returncode": 0,
+      "stdout_tail": "<user-prefix>/node_modules",
+      "stderr_tail": ""
+    }
+  ],
+  "error": null
+}
+```
+
+Requirement packages consume the subcommand through agent-machines' existing
+payload command. Invocation platforms use the engine's exact platform keys:
+`windows`, `linux`, and `wsl`.
+
+```yaml
+modules:
+  - name: playwright-cli
+    invocation:
+      plugin: agent-machines@copilot-extensions
+      command: agent-machines
+      platforms: [windows, linux, wsl]
+      arguments: [provision-playwright-cli]
+      dry_run_arguments: [--dry-run]
+      apply_arguments: [--apply]
+```
+
+The provisioner does not manage browser profiles, credentials, application
+navigation, or product-specific test policy. Those remain downstream.
 
 ## Unreachable-machine maintenance
 
