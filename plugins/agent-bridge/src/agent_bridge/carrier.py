@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 import sys
 from typing import Any
@@ -22,20 +21,15 @@ def build_remote_carrier_command(remote_platform: str) -> str:
     """Build the far-side ``agent-bridge carrier --stdio`` command.
 
     The installed binstub is addressed explicitly because non-interactive SSH
-    sessions do not reliably inherit the user's local-bin PATH. Windows uses a
-    PowerShell encoded command so cmd.exe and PowerShell SSH default shells
-    interpret the same command without POSIX quoting.
+    sessions do not reliably inherit the user's local-bin PATH. Windows invokes
+    the command shim through ``cmd.exe`` so the carrier's binary framed stdio is
+    not decoded and re-encoded by a PowerShell native-command pipeline.
     """
     platform = remote_platform.strip().lower()
     if platform in {"windows", "win", "pwsh", "powershell"}:
-        inner = (
-            '& "$env:USERPROFILE\\.local\\bin\\agent-bridge.cmd" '
-            "carrier --stdio"
-        )
-        encoded = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
         return (
-            "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden "
-            f"-EncodedCommand {encoded}"
+            'cmd.exe /d /s /c ""%USERPROFILE%\\.local\\bin\\agent-bridge.cmd" '
+            'carrier --stdio"'
         )
     if platform in {"linux", "wsl", "posix", "sh", "bash"}:
         return '"$HOME/.local/bin/agent-bridge" carrier --stdio'
