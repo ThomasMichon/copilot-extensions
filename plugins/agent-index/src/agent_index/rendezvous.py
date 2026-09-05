@@ -111,6 +111,13 @@ def pid_alive(pid: int | None) -> bool:
         finally:
             kernel32.CloseHandle(handle)
     try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        tail = raw.rsplit(")", 1)[1].split()
+        if tail and tail[0] == "Z":
+            return False
+    except (IndexError, OSError, UnicodeError):
+        pass
+    try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False

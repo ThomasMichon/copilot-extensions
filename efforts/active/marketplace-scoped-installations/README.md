@@ -232,6 +232,22 @@ because they provide tools or services.
     - [ ] Accept Agent Index as the operative service-bearing exemplar after the
       full Linux lifecycle and Windows clean-room arms pass. Smoke mode is a fast
       diagnostic only, not the acceptance lane.
+      - [x] Pass the full Linux lifecycle: two live cells, isolated update and
+        rollback, all four cutover crash-recovery phases, governance-blocked
+        restoration, foreign-control refusal, isolated shutdown, and clean
+        cleanup. The implementation landed through
+        [#1880](https://github.com/ThomasMichon/copilot-extensions/pull/1880)
+        and the first acceptance defects through
+        [#2080](https://github.com/ThomasMichon/copilot-extensions/pull/2080);
+        the committed-crash restoration defect was fixed through
+        [#2089](https://github.com/ThomasMichon/copilot-extensions/pull/2089),
+        and
+        [#2090](https://github.com/ThomasMichon/copilot-extensions/issues/2090)
+        tracks the final shutdown-liveness defect.
+      - [ ] Pass the Windows clean-room arm. The 2026-09-05 attempt on a
+        Linux-container Docker engine stopped before scenario execution because
+        the Windows Server Core base image had no matching platform; rerun on a
+        Windows-container host.
     - [ ] Run the Agent Machines scenario in disposable Linux and Windows
       clean-room arms.
 
@@ -876,3 +892,32 @@ See [`design.md`](design.md).
   implementation-ready but not yet operative. Smoke mode remains a fast
   diagnostic; full mode is the acceptance lane. The clean-room-only restriction
   is rollout policy, not a host-detection security boundary.
+
+### 2026-09-05 — Agent Index full Linux acceptance
+
+- Filed and claimed
+  [#2083](https://github.com/ThomasMichon/copilot-extensions/issues/2083) after
+  the committed cutover-crash case restored prior selection metadata but lost
+  the prior service's discovery evidence during target retirement; the fix
+  landed through
+  [#2089](https://github.com/ThomasMichon/copilot-extensions/pull/2089).
+- Extended the selection transaction snapshot to preserve the prior endpoint
+  and running-version records, so governance-blocked rollback restores their
+  exact ownership before the target exits. Added a committed-crash regression
+  proving the prior PID survives, reopens admission, and remains discoverable
+  while only the transaction target retires.
+- Filed and claimed
+  [#2090](https://github.com/ThomasMichon/copilot-extensions/issues/2090) after
+  the isolated shutdown phase exposed missing POSIX zombie handling in the
+  shared rendezvous liveness helper and a false `still-running` result. The
+  clean-room fixture also now forwards synthetic repository opt-in data through
+  every subprocess so the newer effective-config gate does not bypass the
+  installation-context assertions.
+- The full non-smoke Linux scenario passed all five phases and cleanup against
+  a caller-supplied non-public package index: concurrent cells, isolated
+  update/rollback, passive/flipped/draining/committed crash recovery,
+  governance-blocked restoration, foreign-control refusal, and isolated
+  shutdown.
+- The Windows arm was attempted but the available Docker engine was running
+  Linux containers; the Windows Server Core base image could not resolve for
+  that platform. Windows acceptance remains open for a Windows-container host.
