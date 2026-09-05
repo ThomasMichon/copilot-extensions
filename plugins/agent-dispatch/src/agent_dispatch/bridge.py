@@ -15,7 +15,7 @@ import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 
-from . import remote_dispatch
+from . import bridge_remote, remote_dispatch
 from .procutil import (
     agent_bridge_launch_prefix,
     no_window_kwargs,
@@ -342,13 +342,37 @@ def redrive_embodied_worker(
         "--prompt-file",
         "-",
     ]
+    normalized_machine = (
+        bridge_remote.normalize_host(machine) if machine is not None else None
+    )
     local_machine = remote_dispatch.local_machine()
+    normalized_local_machine = (
+        bridge_remote.normalize_host(local_machine)
+        if local_machine is not None
+        else None
+    )
     is_remote = (
-        machine is not None
-        and local_machine is not None
-        and machine.casefold() != local_machine.casefold()
+        normalized_machine is not None
+        and normalized_local_machine is not None
+        and normalized_machine != normalized_local_machine
     )
     if is_remote:
+        try:
+            bridge_remote.LocalBridgeRemoteClient().send_live_message(
+                normalized_machine,
+                worktree,
+                sender=sender,
+                message=prompt,
+                kind="prompt",
+                expected_session_id=expected_session_id,
+                idempotency_key=idempotency_key,
+                timeout=timeout if timeout is not None else 20.0,
+            )
+            return True
+        except bridge_remote.RemoteBridgeUnavailable:
+            pass
+        except bridge_remote.RemoteBridgeOperationError:
+            return False
         ssh = shutil.which("ssh")
         if ssh is None:
             return False
@@ -359,7 +383,7 @@ def redrive_embodied_worker(
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=3",
-            machine.lower(),
+            normalized_machine,
             remote_cmd,
         ]
     else:
@@ -416,6 +440,7 @@ def resume_steered_owner(
     )
     if not separator or not machine or not worktree:
         return resume_worker(owner_session_id, prompt, timeout=timeout)
+    machine = bridge_remote.normalize_host(machine)
     bridge_argv = [
         "agent-bridge",
         "send",
@@ -439,9 +464,25 @@ def resume_steered_owner(
     local_machine = remote_dispatch.local_machine()
     is_remote = (
         local_machine is not None
-        and machine.casefold() != local_machine.casefold()
+        and machine != bridge_remote.normalize_host(local_machine)
     )
     if is_remote:
+        try:
+            bridge_remote.LocalBridgeRemoteClient().send_live_message(
+                machine,
+                worktree,
+                sender="agent-dispatch-steer",
+                message=prompt,
+                kind="prompt",
+                expected_session_id=owner_session_id,
+                idempotency_key=idempotency_key,
+                timeout=timeout if timeout is not None else 20.0,
+            )
+            return True
+        except bridge_remote.RemoteBridgeUnavailable:
+            pass
+        except bridge_remote.RemoteBridgeOperationError:
+            return False
         ssh = shutil.which("ssh")
         if ssh is None:
             return False

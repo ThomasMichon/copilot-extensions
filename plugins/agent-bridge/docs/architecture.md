@@ -124,12 +124,15 @@ subscription staleness, reconnects with bounded backoff, bounds output queues,
 retires after an idle interval with no logical clients, and closes stdin before
 reaping the SSH process tree.
 
-The first operation contract proxies only exact session status, exact
-live-session resolution, and cursor-based session events. The remote carrier
-endpoint authenticates to its host-local Bridge through the existing discovered
-HTTP endpoint and bearer-token flow, then calls the same status, live-session,
-event, and cursor authorities used by direct clients. It does not import Agent
-Dispatch, copy session state, or maintain a second event log.
+The operation contract proxies exact session status, session-or-worktree live
+resolution, cursor-based events, session create/stop/end, and represented live
+message delivery. The remote carrier endpoint authenticates to its host-local
+Bridge through the existing discovered HTTP endpoint and bearer-token flow,
+then calls the same session, live-message, event, and cursor authorities used by
+direct clients. Mutating requests are version-gated separately from the original
+read/event contract and return structured results instead of CLI preambles. It
+does not import Agent Dispatch, copy session state, or maintain a second event
+log.
 
 The caller supplies a required stable `caller_id`; no anonymous/default cursor
 is used for remote subscriptions. Actual event IDs, names, payloads, and
@@ -149,6 +152,11 @@ the set means replacing this one local stream; it never creates one local HTTP
 connection per observed session. Carrier heartbeats and tool-progress envelopes
 become SSE comments so ongoing remote activity keeps the aggregate connection
 and its local consumer healthy without creating reconciliation wakes.
+Agent Dispatch uses the authenticated local remote-operation API for fleet
+create, status/activity, end, worktree resolution, and queued prompt delivery.
+A raw SSH Bridge command remains only when the local daemon or required HTTP
+generation is absent; a carrier operation failure never starts parallel direct
+outreach.
 
 ## HTTP API
 

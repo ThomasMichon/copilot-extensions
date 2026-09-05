@@ -18,7 +18,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev434",
+      "version": "0.4.0-dev435",
       "source": "plugins/agent-bridge"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev15",
+      "version": "0.1.2-dev16",
       "source": "plugins/agent-dispatch"
     },
     {

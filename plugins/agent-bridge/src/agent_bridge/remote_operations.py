@@ -29,14 +29,23 @@ from .client import (
 )
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 
-REMOTE_OPERATION_VERSION = 1
+REMOTE_OPERATION_VERSION = 2
 MAX_CALLER_ID_LENGTH = 128
 MAX_HOST_LENGTH = 128
 MAX_SESSION_ID_LENGTH = 256
 MAX_CONTINUITY_ID_LENGTH = 128
+MAX_AGENT_NAME_LENGTH = 128
+MAX_IDEMPOTENCY_KEY_LENGTH = 256
+MAX_MESSAGE_LENGTH = 1_048_576
 REMOTE_STREAM_RECONNECT_GRACE = 30.0
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]*$")
 _EOF = object()
+_BRIDGE_IO_ERRORS = (
+    BridgeClientError,
+    BridgeConnectionError,
+    TimeoutError,
+    OSError,
+)
 
 
 class RemoteBridgeError(RuntimeError):
@@ -126,16 +135,16 @@ def _validate_id(value: Any, *, field: str, maximum: int) -> str:
     return normalized
 
 
-def validate_caller_id(value: Any) -> str:
+def validate_caller_id(value: Any, *, field: str = "caller_id") -> str:
     """Validate a stable, caller-supplied consumer identity."""
     if isinstance(value, str) and value.strip() == "__default__":
         raise RemoteBridgeError(
             400,
             "invalid_request",
-            "caller_id is reserved for legacy anonymous delivery",
+            f"{field} is reserved for legacy anonymous delivery",
         )
     caller_id = _validate_id(
-        value, field="caller_id", maximum=MAX_CALLER_ID_LENGTH
+        value, field=field, maximum=MAX_CALLER_ID_LENGTH
     )
     return caller_id
 
@@ -144,10 +153,47 @@ def validate_host(value: Any) -> str:
     return _validate_id(value, field="host", maximum=MAX_HOST_LENGTH)
 
 
-def validate_session_id(value: Any) -> str:
+def validate_session_id(value: Any, *, field: str = "session_id") -> str:
     return _validate_id(
-        value, field="session_id", maximum=MAX_SESSION_ID_LENGTH
+        value, field=field, maximum=MAX_SESSION_ID_LENGTH
     )
+
+
+def validate_agent_name(value: Any) -> str:
+    return _validate_id(
+        value, field="agent", maximum=MAX_AGENT_NAME_LENGTH
+    )
+
+
+def validate_optional_id(
+    value: Any, *, field: str, maximum: int
+) -> str | None:
+    if value is None:
+        return None
+    return _validate_id(value, field=field, maximum=maximum)
+
+
+def validate_optional_bool(payload: dict[str, Any], field: str) -> bool:
+    if field not in payload:
+        return False
+    value = payload[field]
+    if not isinstance(value, bool):
+        raise RemoteBridgeError(
+            400, "invalid_request", f"{field} must be a boolean"
+        )
+    return value
+
+
+def validate_message(value: Any, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise RemoteBridgeError(400, "invalid_request", f"{field} must be a string")
+    if not value or len(value) > MAX_MESSAGE_LENGTH:
+        raise RemoteBridgeError(
+            400,
+            "invalid_request",
+            f"{field} must be 1-{MAX_MESSAGE_LENGTH} characters",
+        )
+    return value
 
 
 def validate_continuity_id(value: Any) -> str | None:
@@ -224,7 +270,11 @@ class CarrierRequestRouter:
 
     _OPERATIONS = frozenset(
         {
+            "live_session.send",
+            "session.create",
+            "session.end",
             "session.status",
+            "session.stop",
             "live_session.resolve",
             "session.events",
             "session.events.ack",
@@ -249,6 +299,81 @@ class CarrierRequestRouter:
             ) from exc
 
     @staticmethod
+    async def _cleanup_created_session(
+        client: BridgeClient, session_id: str
+    ) -> None:
+        cleanup = asyncio.create_task(
+            asyncio.to_thread(client.end_session, session_id, force=True)
+        )
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and hasattr(current, "uncancel"):
+                    current.uncancel()
+                continue
+            except _BRIDGE_IO_ERRORS:
+                return
+        try:
+            cleanup.result()
+        except _BRIDGE_IO_ERRORS:
+            pass
+
+    async def _create_session(
+        self, client: BridgeClient, payload: dict[str, Any]
+    ) -> dict[str, str]:
+        agent = validate_agent_name(payload.get("agent"))
+        prompt = validate_message(payload.get("prompt"), field="prompt")
+        caller_id = validate_caller_id(payload.get("caller_id"))
+        start = asyncio.create_task(
+            asyncio.to_thread(
+                client.start_session,
+                agent=agent,
+                caller_id=caller_id,
+                force_new=True,
+            )
+        )
+        try:
+            created = await asyncio.shield(start)
+        except asyncio.CancelledError as cancelled:
+            try:
+                created = await start
+                session_id = validate_session_id(created.get("session_id"))
+            except (
+                BridgeClientError,
+                BridgeConnectionError,
+                RemoteBridgeError,
+                TimeoutError,
+                OSError,
+            ):
+                raise cancelled
+            await self._cleanup_created_session(client, session_id)
+            raise cancelled
+        session_id = validate_session_id(created.get("session_id"))
+        submit = asyncio.create_task(
+            asyncio.to_thread(
+                client.submit_prompt,
+                session_id,
+                prompt,
+                caller_id=caller_id,
+            )
+        )
+        try:
+            await asyncio.shield(submit)
+        except asyncio.CancelledError as cancelled:
+            try:
+                await submit
+            except _BRIDGE_IO_ERRORS:
+                pass
+            await self._cleanup_created_session(client, session_id)
+            raise cancelled
+        except _BRIDGE_IO_ERRORS:
+            await self._cleanup_created_session(client, session_id)
+            raise
+        return {"session_id": session_id}
+
+    @staticmethod
     def _validate_request(envelope: Envelope) -> tuple[str, dict[str, Any]]:
         payload = envelope.payload
         operation = payload.get("operation")
@@ -262,12 +387,27 @@ class CarrierRequestRouter:
         if (
             isinstance(version, bool)
             or not isinstance(version, int)
-            or version != REMOTE_OPERATION_VERSION
+            or version not in {1, REMOTE_OPERATION_VERSION}
         ):
             raise RemoteBridgeError(
                 426,
                 "unsupported_version",
                 "remote operation version is not supported",
+                details={
+                    "supported_version": REMOTE_OPERATION_VERSION,
+                    "requested_version": version,
+                },
+            )
+        if version == 1 and operation in {
+            "live_session.send",
+            "session.create",
+            "session.end",
+            "session.stop",
+        }:
+            raise RemoteBridgeError(
+                426,
+                "unsupported_version",
+                "remote operation requires protocol version 2",
                 details={
                     "supported_version": REMOTE_OPERATION_VERSION,
                     "requested_version": version,
@@ -280,7 +420,92 @@ class CarrierRequestRouter:
     ) -> Envelope | AsyncIterator[Envelope]:
         try:
             operation, payload = self._validate_request(envelope)
-            session_id = validate_session_id(payload.get("session_id"))
+            if operation == "session.create":
+                client = self._client()
+                return Envelope(
+                    EnvelopeType.RESPONSE,
+                    payload={"result": await self._create_session(client, payload)},
+                )
+            if operation == "live_session.send":
+                client = self._client()
+                target = validate_session_id(
+                    payload.get("target"), field="target"
+                )
+                sender = validate_caller_id(
+                    payload.get("sender"), field="sender"
+                )
+                message = validate_message(payload.get("message"), field="message")
+                idempotency_key = validate_optional_id(
+                    payload.get("idempotency_key"),
+                    field="idempotency_key",
+                    maximum=MAX_IDEMPOTENCY_KEY_LENGTH,
+                )
+                expected_session_id = validate_optional_id(
+                    payload.get("expected_session_id"),
+                    field="expected_session_id",
+                    maximum=MAX_SESSION_ID_LENGTH,
+                )
+                live = await asyncio.to_thread(client.resolve_live_session, target)
+                if not live:
+                    raise RemoteBridgeError(
+                        404,
+                        "session_not_found",
+                        f"live session target {target} was not found",
+                    )
+                session_id = validate_session_id(live.get("session_id"))
+                kind = payload.get("kind") or "prompt"
+                if kind not in {"notify", "prompt", "status-check"}:
+                    raise RemoteBridgeError(
+                        400, "invalid_request", "kind is not supported"
+                    )
+                result = await asyncio.to_thread(
+                    client.send_live_message,
+                    session_id,
+                    sender=sender,
+                    body=message,
+                    kind=kind,
+                    wait=False,
+                    idempotency_key=idempotency_key,
+                    expected_session_id=expected_session_id,
+                )
+                return Envelope(
+                    EnvelopeType.RESPONSE,
+                    payload={"result": result},
+                )
+            session_id = validate_session_id(
+                payload.get("session_id"),
+                field=(
+                    "target"
+                    if operation == "live_session.resolve"
+                    else "session_id"
+                ),
+            )
+            if operation == "session.stop":
+                force = validate_optional_bool(payload, "force")
+                reap_host = validate_optional_bool(payload, "reap_host")
+                await asyncio.to_thread(
+                    self._client().stop_session,
+                    session_id,
+                    force=force,
+                    reap_host=reap_host,
+                )
+                return Envelope(
+                    EnvelopeType.RESPONSE,
+                    payload={"result": {"stopped": True}},
+                )
+            if operation == "session.end":
+                force = validate_optional_bool(payload, "force")
+                if_idle = validate_optional_bool(payload, "if_idle")
+                await asyncio.to_thread(
+                    self._client().end_session,
+                    session_id,
+                    force=force,
+                    if_idle=if_idle,
+                )
+                return Envelope(
+                    EnvelopeType.RESPONSE,
+                    payload={"result": {"ended": True}},
+                )
             if operation == "session.status":
                 caller_id = validate_caller_id(payload.get("caller_id"))
                 result = await asyncio.to_thread(
@@ -291,14 +516,14 @@ class CarrierRequestRouter:
                 return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "live_session.resolve":
                 result = await asyncio.to_thread(
-                    self._client().get_live_session,
+                    self._client().resolve_live_session,
                     session_id,
                 )
                 if not result:
                     raise RemoteBridgeError(
                         404,
                         "session_not_found",
-                        f"live session {session_id} was not found",
+                        f"live session target {session_id} was not found",
                     )
                 return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             caller_id = validate_caller_id(payload.get("caller_id"))
@@ -708,16 +933,34 @@ class RemoteOperationService:
             ) from exc
 
     async def _request(
-        self, host: str, payload: dict[str, Any]
+        self,
+        host: str,
+        payload: dict[str, Any],
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         lease = await self._lease(host)
-        deadline = time.monotonic() + self._request_timeout
+        deadline = time.monotonic() + (
+            self._request_timeout if timeout is None else timeout
+        )
         try:
             while True:
                 try:
+                    operation = payload.get("operation")
+                    version = (
+                        REMOTE_OPERATION_VERSION
+                        if operation
+                        in {
+                            "live_session.send",
+                            "session.create",
+                            "session.end",
+                            "session.stop",
+                        }
+                        else 1
+                    )
                     response = await lease.carrier.request(
                         {
-                            "version": REMOTE_OPERATION_VERSION,
+                            "version": version,
                             **payload,
                         },
                         timeout=max(0.1, deadline - time.monotonic()),
@@ -783,14 +1026,112 @@ class RemoteOperationService:
         return dict(result) if isinstance(result, dict) else {}
 
     async def resolve_live_session(
-        self, host: str, session_id: str
+        self, host: str, target: str
     ) -> dict[str, Any]:
         response = await self._request(
             host,
             {
                 "operation": "live_session.resolve",
-                "session_id": validate_session_id(session_id),
+                "session_id": validate_session_id(target, field="target"),
             },
+        )
+        result = response.get("result")
+        return dict(result) if isinstance(result, dict) else {}
+
+    async def create_session(
+        self,
+        host: str,
+        *,
+        agent: str,
+        prompt: str,
+        caller_id: str,
+        timeout: float = 120.0,
+    ) -> dict[str, Any]:
+        response = await self._request(
+            host,
+            {
+                "operation": "session.create",
+                "agent": validate_agent_name(agent),
+                "prompt": validate_message(prompt, field="prompt"),
+                "caller_id": validate_caller_id(caller_id),
+            },
+            timeout=timeout,
+        )
+        result = response.get("result")
+        return dict(result) if isinstance(result, dict) else {}
+
+    async def stop_session(
+        self,
+        host: str,
+        session_id: str,
+        *,
+        force: bool = False,
+        reap_host: bool = False,
+        timeout: float = 20.0,
+    ) -> None:
+        await self._request(
+            host,
+            {
+                "operation": "session.stop",
+                "session_id": validate_session_id(session_id),
+                "force": force,
+                "reap_host": reap_host,
+            },
+            timeout=timeout,
+        )
+
+    async def end_session(
+        self,
+        host: str,
+        session_id: str,
+        *,
+        force: bool = False,
+        if_idle: bool = False,
+        timeout: float = 20.0,
+    ) -> None:
+        await self._request(
+            host,
+            {
+                "operation": "session.end",
+                "session_id": validate_session_id(session_id),
+                "force": force,
+                "if_idle": if_idle,
+            },
+            timeout=timeout,
+        )
+
+    async def send_live_message(
+        self,
+        host: str,
+        target: str,
+        *,
+        sender: str,
+        message: str,
+        kind: str,
+        expected_session_id: str | None = None,
+        idempotency_key: str | None = None,
+        timeout: float = 20.0,
+    ) -> dict[str, Any]:
+        response = await self._request(
+            host,
+            {
+                "operation": "live_session.send",
+                "target": validate_session_id(target, field="target"),
+                "sender": validate_caller_id(sender, field="sender"),
+                "message": validate_message(message, field="message"),
+                "kind": kind,
+                "expected_session_id": validate_optional_id(
+                    expected_session_id,
+                    field="expected_session_id",
+                    maximum=MAX_SESSION_ID_LENGTH,
+                ),
+                "idempotency_key": validate_optional_id(
+                    idempotency_key,
+                    field="idempotency_key",
+                    maximum=MAX_IDEMPOTENCY_KEY_LENGTH,
+                ),
+            },
+            timeout=timeout,
         )
         result = response.get("result")
         return dict(result) if isinstance(result, dict) else {}
@@ -833,7 +1174,7 @@ class RemoteOperationService:
         try:
             subscription = await lease.carrier.subscribe(
                 {
-                    "version": REMOTE_OPERATION_VERSION,
+                    "version": 1,
                     "operation": "session.events",
                     "session_id": validate_session_id(session_id),
                     "caller_id": validate_caller_id(caller_id),

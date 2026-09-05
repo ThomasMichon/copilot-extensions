@@ -35,7 +35,7 @@ import subprocess
 import time
 from typing import Any
 
-from . import remote_dispatch
+from . import bridge_remote, remote_dispatch
 from .procutil import (
     agent_bridge_launch_prefix,
     run_agent_worktrees_capture,
@@ -131,6 +131,7 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
     ssh = shutil.which("ssh")
     if ssh is None:
         return None
+    machine = bridge_remote.normalize_host(machine)
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
     # `machine` is the SSH alias (never a raw IP). BatchMode + a short
     # ConnectTimeout so an unreachable peer fails fast instead of hanging.
@@ -149,18 +150,31 @@ def _run_capture(
 def resolve_live_session(
     worktree: str, *, machine: str | None = None, timeout: float | None = None
 ) -> dict[str, Any] | None:
-    """Resolve a worktree handle to its live session via the agent-bridge CLI.
+    """Resolve a worktree handle through Agent Bridge.
 
-    Shells ``agent-bridge --json live-sessions resolve --handle <worktree>`` --
-    the same shell-the-binstub pattern agent-dispatch uses for spawn, keeping the
-    plugin decoupled (no cross-plugin import, no bridge URL/token discovery). When
-    ``machine`` names a *remote* host, the same command runs **on that host** over
-    the SSH mesh (Phase 8 Slice 8b). All failure modes (no CLI/ssh,
-    non-zero exit, timeout, empty/invalid JSON, no live session) collapse to None
-    so the caller degrades cleanly.
+    Remote owners use the local Bridge carrier first and shell the remote
+    ``agent-bridge`` binstub over SSH only when that optional capability is
+    absent. Local owners use the local binstub directly. All failures collapse
+    to ``None`` so display-only enrichment degrades cleanly.
     """
     if not worktree:
         return None
+    if machine is not None:
+        machine = bridge_remote.normalize_host(machine)
+        effective_timeout = timeout if timeout is not None else 6.0
+        try:
+            data = bridge_remote.LocalBridgeRemoteClient().resolve_live_session(
+                machine,
+                worktree,
+                timeout=effective_timeout,
+            )
+            if not isinstance(data, dict) or not data:
+                return None
+            return data
+        except bridge_remote.RemoteBridgeUnavailable:
+            pass
+        except bridge_remote.RemoteBridgeOperationError:
+            return None
     argv = _bridge_resolve_argv(worktree, machine=machine)
     if argv is None:
         return None
@@ -380,7 +394,6 @@ def enrich_task(
     task: Any,
     *,
     bridge_ok: bool | None = None,
-    ssh_ok: bool | None = None,
     local: Any = _UNSET,
 ) -> Any:
     """Return ``task`` with an ``embodiment`` overlay when it is leased and its
@@ -388,10 +401,9 @@ def enrich_task(
 
     The overlay resolves against the *owner's* machine (Phase 8 Slice 8b): a
     local owner uses the local ``agent-bridge`` (gated on
-    :func:`bridge_available`); a remote owner resolves over the SSH mesh (gated
-    on :func:`~remote_dispatch.ssh_available`). A batch caller (``list``) hoists
-    the one-time ``bridge_available`` / ``ssh_available`` / ``local_machine``
-    probes so a lane of tasks makes at most one of each.
+    :func:`bridge_available`); a remote owner first uses the local Bridge carrier
+    and resolves SSH only if that optional capability is absent. A batch caller
+    (``list``) hoists local Bridge and machine-identity probes.
     """
     if not isinstance(task, dict) or task.get("status") not in _LEASED:
         return task
@@ -409,10 +421,6 @@ def enrich_task(
             and machine.strip().casefold() != str(local).strip().casefold()
         )
     if is_remote:
-        if ssh_ok is None:
-            ssh_ok = remote_dispatch.ssh_available()
-        if not ssh_ok:
-            return task
         session = resolve_live_session(worktree, machine=machine)
     else:
         if bridge_ok is None:
@@ -443,11 +451,8 @@ def enrich_tasks(tasks: Any) -> Any:
             isinstance(t, dict) and t.get("status") in _LEASED for t in tasks
         ):
             return tasks
-        # Hoist the environment probes once for the whole batch: the local bridge
-        # (local owners), ssh (remote owners), and this machine's identity (to
-        # tell local from remote).
+        # Hoist the local Bridge and machine-identity probes once for the batch.
         bridge_ok = bridge_available()
-        ssh_ok = remote_dispatch.ssh_available()
         local = remote_dispatch.local_machine()
         deadline = time.monotonic() + _enrich_budget()
         out = []
@@ -463,7 +468,7 @@ def enrich_tasks(tasks: Any) -> Any:
                 out.append(t)
                 continue
             out.append(
-                enrich_task(t, bridge_ok=bridge_ok, ssh_ok=ssh_ok, local=local)
+                enrich_task(t, bridge_ok=bridge_ok, local=local)
             )
         return out
     return enrich_task(tasks)
