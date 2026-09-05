@@ -177,16 +177,16 @@ The repository's ownership and independence patterns require:
 
 ### Phase 5 — Consolidate remote Bridge command traffic (#1780)
 
-- [ ] Route current remote Agent Bridge status, live-session resolve, create,
+- [x] Route current remote Agent Bridge status, live-session resolve, create,
       stop/end, and nudge operations through the local Bridge remote-operation
       contract where their semantics are supported.
-- [ ] Remove the corresponding raw `ssh` call sites from Agent Dispatch only
+- [x] Remove the corresponding raw `ssh` call sites from Agent Dispatch only
       after equivalent timeout, tri-state liveness, output, and failure behavior
       is covered.
-- [ ] Keep bounded raw SSH as the standalone compatibility path when the
+- [x] Keep bounded raw SSH as the standalone compatibility path when the
       optional local Agent Bridge capability is absent. It must never run beside
       a carrier-backed event subscription or become a short-interval fallback.
-- [ ] Keep non-Bridge arbitrary shell work outside the initial protocol; add a
+- [x] Keep non-Bridge arbitrary shell work outside the initial protocol; add a
       generic execution operation only if a concrete caller needs it and its
       authorization, cancellation, and output bounds are reviewed.
 - [ ] Prove all event and migrated command traffic to one host shares the same
@@ -231,11 +231,11 @@ The repository's ownership and independence patterns require:
 - [x] Dispatch process tests prove local subscription clients are O(supervisor
       lanes), not O(active reservations), and recover across a local Agent
       Bridge daemon cutover without stalling supervision.
-- [ ] Migration tests prove each replaced raw SSH operation retains its prior
+- [x] Migration tests prove each replaced raw SSH operation retains its prior
       timeout and tri-state safety behavior before the old path is removed.
-- [ ] Mixed-version tests cover new local/old remote, old local/new remote,
+- [x] Mixed-version tests cover new local/old remote, old local/new remote,
       unsupported operations, and reconnect during a runtime cutover.
-- [ ] `python tools/run-plugin-tests.py agent-bridge --max-processes 32
+- [x] `python tools/run-plugin-tests.py agent-bridge --max-processes 32
       --max-memory-mb 4096` and the equivalent Agent Dispatch suite pass for
       every implementation slice.
 - [x] Shared-library tests, version consistency, generated payload guards, and
@@ -297,6 +297,51 @@ end-to-end slice small enough to validate while establishing the ownership and
 transport foundation #1763 requires.
 
 ## Journal
+
+### 2026-09-04 — Remote command consolidation
+
+- Phase 4 merged through #2011 and deployed Agent Bridge `0.4.0-dev432` plus
+  Agent Dispatch `0.1.2-dev7` through the unified updater. Bridge used its
+  zero-downtime cutover and Dispatch rebuilt/re-adopted its supervisor
+  generations without stopping healthy work.
+- Began #1780 by extending the reviewed carrier operation vocabulary with
+  version-2 create, stop, end, and represented live-message requests while
+  preserving version-1 status, live-resolution, event, and acknowledgement
+  traffic during rolling upgrades.
+- Dispatch now reaches remote fleet create, status/activity, end,
+  worktree-to-live-session resolution, and queued steering/redrive through an
+  independent authenticated local HTTP adapter. Raw SSH remains only when the
+  local Bridge endpoint, authentication, or required protocol generation is
+  absent; a carrier timeout or remote rejection never starts parallel direct
+  outreach.
+- Carrier cancellation during session creation now waits for the non-cancellable
+  host-local start/submit thread and reclaims any late-created session before
+  propagating cancellation, preventing an untracked duplicate body on retry.
+  Cleanup transport failures and repeated cancellation cannot replace the
+  caller's original cancellation.
+- Follow-up review also tightened mutation validation: stop/end flags are strict
+  booleans, expected-session and idempotency guards are bounded safe identifiers,
+  and raw-SSH stop fallback failures normalize to `False` rather than escaping
+  the existing best-effort API.
+- The final complete managed portfolios pass 2,158 Agent Bridge tests with 13
+  skips and 1,843 Agent Dispatch tests with 3 skips. The focused migration sets
+  pass 57 Bridge tests and 127 Dispatch tests. Version consistency, version
+  allocation, generated payload, install-contract, contract-registry,
+  compilation, and fatal Ruff guards pass.
+- Pulled forward onto #2017 after upstream consumed the original Agent Dispatch
+  allocation. Publication then advanced again while the PR opened, so the final
+  versions are Agent Bridge `0.4.0-dev435` and Agent Dispatch `0.1.2-dev16`.
+- Provider review found two adapter boundary gaps. Malformed local Bridge auth
+  YAML now degrades as absent capability, and the health capability probe shares
+  the caller's total operation timeout instead of adding a fixed five seconds.
+- Follow-up review removed a dead batch SSH-availability probe after carrier-first
+  enrichment made it redundant. The generation-14 fixtures now cite the durable
+  public PR parent commit rather than an unreachable local checkpoint, so the
+  contract registry validates in GitHub's PR checkout.
+- Final review normalized malformed/non-object health responses through the
+  adapter's operation-error boundary and replaced the remote end
+  `DELETE`-with-body shape with an explicit `POST .../end` command endpoint.
+  Contract evidence cites the dedicated HTTP-boundary commit.
 
 ### 2026-09-04 — Agent Dispatch event wake
 

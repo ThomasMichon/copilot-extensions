@@ -50,6 +50,36 @@ class RemoteEventMultiplexRequest(BaseModel):
     )
 
 
+class RemoteSessionCreateRequest(BaseModel):
+    agent: str = Field(min_length=1, max_length=128)
+    prompt: str = Field(min_length=1, max_length=1_048_576)
+    caller_id: str = Field(min_length=1, max_length=128)
+    timeout: float = Field(default=120.0, ge=1.0, le=600.0)
+
+
+class RemoteSessionStopRequest(BaseModel):
+    force: bool = False
+    reap_host: bool = False
+    timeout: float = Field(default=20.0, ge=1.0, le=120.0)
+
+
+class RemoteSessionEndRequest(BaseModel):
+    force: bool = False
+    if_idle: bool = False
+    timeout: float = Field(default=20.0, ge=1.0, le=120.0)
+
+
+class RemoteLiveMessageRequest(BaseModel):
+    sender: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=1_048_576)
+    kind: str = Field(default="prompt")
+    expected_session_id: str | None = Field(
+        default=None, min_length=1, max_length=256
+    )
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
+    timeout: float = Field(default=20.0, ge=1.0, le=120.0)
+
+
 def _service(request: Request) -> RemoteOperationService:
     if not getattr(request.app.state, "ready", True):
         raise HTTPException(
@@ -153,6 +183,84 @@ async def remote_live_session(
 ) -> dict[str, Any]:
     try:
         return await _service(request).resolve_live_session(host, session_id)
+    except RemoteBridgeError as exc:
+        _raise(exc)
+
+
+@router.post("/{host}/sessions")
+async def remote_create_session(
+    host: str,
+    body: RemoteSessionCreateRequest,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        return await _service(request).create_session(
+            host,
+            agent=body.agent,
+            prompt=body.prompt,
+            caller_id=body.caller_id,
+            timeout=body.timeout,
+        )
+    except RemoteBridgeError as exc:
+        _raise(exc)
+
+
+@router.post("/{host}/sessions/{session_id}/stop", status_code=204)
+async def remote_stop_session(
+    host: str,
+    session_id: str,
+    body: RemoteSessionStopRequest,
+    request: Request,
+) -> None:
+    try:
+        await _service(request).stop_session(
+            host,
+            session_id,
+            force=body.force,
+            reap_host=body.reap_host,
+            timeout=body.timeout,
+        )
+    except RemoteBridgeError as exc:
+        _raise(exc)
+
+
+@router.post("/{host}/sessions/{session_id}/end", status_code=204)
+async def remote_end_session(
+    host: str,
+    session_id: str,
+    body: RemoteSessionEndRequest,
+    request: Request,
+) -> None:
+    try:
+        await _service(request).end_session(
+            host,
+            session_id,
+            force=body.force,
+            if_idle=body.if_idle,
+            timeout=body.timeout,
+        )
+    except RemoteBridgeError as exc:
+        _raise(exc)
+
+
+@router.post("/{host}/live-sessions/{target}/messages")
+async def remote_send_live_message(
+    host: str,
+    target: str,
+    body: RemoteLiveMessageRequest,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        return await _service(request).send_live_message(
+            host,
+            target,
+            sender=body.sender,
+            message=body.message,
+            kind=body.kind,
+            expected_session_id=body.expected_session_id,
+            idempotency_key=body.idempotency_key,
+            timeout=body.timeout,
+        )
     except RemoteBridgeError as exc:
         _raise(exc)
 

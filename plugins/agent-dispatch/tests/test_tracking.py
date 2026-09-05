@@ -213,7 +213,7 @@ def test_machine_from_owner_parses_and_handles_malformed():
 
 def test_remote_resolve_argv_shells_ssh_to_the_owner_machine(monkeypatch):
     monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/ssh")
-    argv = tracking._bridge_resolve_argv("wt-x", machine="emancipation-cube")
+    argv = tracking._bridge_resolve_argv("wt-x", machine="  Emancipation-Cube  ")
     assert argv is not None
     assert argv[0] == "/usr/bin/ssh"
     assert "emancipation-cube" in argv
@@ -233,6 +233,13 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            tracking.bridge_remote.RemoteBridgeUnavailable("not installed")
+        ),
+    )
 
     def fake_run(cmd, *, timeout):
         captured["cmd"] = cmd
@@ -245,11 +252,58 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
 
     monkeypatch.setattr(tracking, "run_ssh_capture", fake_run)
 
-    got = tracking.resolve_live_session("wt-x", machine="emancipation-cube")
+    got = tracking.resolve_live_session("wt-x", machine="  Emancipation-Cube  ")
     assert got == {"session_id": "s-remote", "worktree_id": "wt-x"}
     assert captured["cmd"][0] == "/usr/bin/ssh"
     assert "emancipation-cube" in captured["cmd"]
     assert captured["timeout"] == 6.0
+
+
+def test_resolve_live_session_uses_carrier_without_ssh(monkeypatch):
+    calls = {}
+
+    def resolve(_self, host, target, **kwargs):
+        calls.update(host=host, target=target, **kwargs)
+        return {"session_id": "s-remote", "worktree_id": target}
+
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        resolve,
+    )
+    monkeypatch.setattr(
+        tracking.shutil,
+        "which",
+        lambda _name: pytest.fail("carrier-backed resolve must not use ssh"),
+    )
+
+    got = tracking.resolve_live_session(
+        "wt-x", machine="  Emancipation-Cube  "
+    )
+    assert got == {"session_id": "s-remote", "worktree_id": "wt-x"}
+    assert calls == {
+        "host": "emancipation-cube",
+        "target": "wt-x",
+        "timeout": 6.0,
+    }
+
+
+@pytest.mark.parametrize("payload", [{}, []])
+def test_resolve_live_session_rejects_invalid_carrier_payload(monkeypatch, payload):
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        lambda *_args, **_kwargs: payload,
+    )
+    monkeypatch.setattr(
+        tracking.shutil,
+        "which",
+        lambda _name: pytest.fail("invalid carrier response must not use ssh"),
+    )
+
+    assert (
+        tracking.resolve_live_session("wt-x", machine="emancipation-cube") is None
+    )
 
 
 def test_enrich_task_resolves_remote_owner_over_mesh(monkeypatch):
@@ -276,9 +330,31 @@ def test_enrich_task_resolves_remote_owner_over_mesh(monkeypatch):
     assert out["embodiment"]["turn_state"] == "running"
 
 
-def test_enrich_task_remote_degrades_without_ssh(monkeypatch):
+def test_enrich_task_remote_uses_carrier_without_ssh(monkeypatch):
     monkeypatch.setattr(tracking.remote_dispatch, "local_machine", lambda: "anomalous-potato")
     monkeypatch.setattr(tracking.remote_dispatch, "ssh_available", lambda: False)
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        lambda _self, _host, target, **_kwargs: {
+            "session_id": "s-remote",
+            "worktree_id": target,
+        },
+    )
+    task = {"id": "t1", "status": "started", "owner": "emancipation-cube/wt-x"}
+    assert tracking.enrich_task(task)["embodiment"]["session_id"] == "s-remote"
+
+
+def test_enrich_task_remote_degrades_when_carrier_and_ssh_absent(monkeypatch):
+    monkeypatch.setattr(tracking.remote_dispatch, "local_machine", lambda: "anomalous-potato")
+    monkeypatch.setattr(tracking.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        tracking.bridge_remote.LocalBridgeRemoteClient,
+        "resolve_live_session",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            tracking.bridge_remote.RemoteBridgeUnavailable("not installed")
+        ),
+    )
     task = {"id": "t1", "status": "started", "owner": "emancipation-cube/wt-x"}
     assert tracking.enrich_task(task) is task
 
@@ -342,16 +418,12 @@ def test_enrich_tasks_probes_once_for_a_batch(monkeypatch):
 
 
 def test_enrich_tasks_hoists_probes_and_mixes_local_and_remote(monkeypatch):
-    # A batch with a local-owner and a remote-owner task: each probe runs once,
+    # A batch with a local-owner and a remote-owner task: shared probes run once,
     # and each task resolves against the correct machine (Phase 8 Slice 8b).
-    probes = {"bridge": 0, "ssh": 0, "local": 0}
+    probes = {"bridge": 0, "local": 0}
 
     def fake_bridge():
         probes["bridge"] += 1
-        return True
-
-    def fake_ssh():
-        probes["ssh"] += 1
         return True
 
     def fake_local():
@@ -359,7 +431,6 @@ def test_enrich_tasks_hoists_probes_and_mixes_local_and_remote(monkeypatch):
         return "anomalous-potato"
 
     monkeypatch.setattr(tracking, "bridge_available", fake_bridge)
-    monkeypatch.setattr(tracking.remote_dispatch, "ssh_available", fake_ssh)
     monkeypatch.setattr(tracking.remote_dispatch, "local_machine", fake_local)
 
     resolved = []
@@ -376,7 +447,7 @@ def test_enrich_tasks_hoists_probes_and_mixes_local_and_remote(monkeypatch):
     ]
     out = tracking.enrich_tasks(tasks)
 
-    assert probes == {"bridge": 1, "ssh": 1, "local": 1}
+    assert probes == {"bridge": 1, "local": 1}
     assert ("wt-local", None) in resolved  # local owner -> local bridge
     assert ("wt-remote", "emancipation-cube") in resolved  # remote owner -> mesh
     assert out[0]["embodiment"]["session_id"] == "s-wt-local"
