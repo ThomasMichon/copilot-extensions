@@ -213,7 +213,7 @@ def test_machine_from_owner_parses_and_handles_malformed():
 
 def test_remote_resolve_argv_shells_ssh_to_the_owner_machine(monkeypatch):
     monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/ssh")
-    argv = tracking._bridge_resolve_argv("wt-x", machine="emancipation-cube")
+    argv = tracking._bridge_resolve_argv("wt-x", machine="  Emancipation-Cube  ")
     assert argv is not None
     assert argv[0] == "/usr/bin/ssh"
     assert "emancipation-cube" in argv
@@ -252,7 +252,7 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
 
     monkeypatch.setattr(tracking, "run_ssh_capture", fake_run)
 
-    got = tracking.resolve_live_session("wt-x", machine="emancipation-cube")
+    got = tracking.resolve_live_session("wt-x", machine="  Emancipation-Cube  ")
     assert got == {"session_id": "s-remote", "worktree_id": "wt-x"}
     assert captured["cmd"][0] == "/usr/bin/ssh"
     assert "emancipation-cube" in captured["cmd"]
@@ -278,7 +278,7 @@ def test_resolve_live_session_uses_carrier_without_ssh(monkeypatch):
     )
 
     got = tracking.resolve_live_session(
-        "wt-x", machine="emancipation-cube"
+        "wt-x", machine="  Emancipation-Cube  "
     )
     assert got == {"session_id": "s-remote", "worktree_id": "wt-x"}
     assert calls == {

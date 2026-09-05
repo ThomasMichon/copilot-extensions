@@ -131,6 +131,7 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
     ssh = shutil.which("ssh")
     if ssh is None:
         return None
+    machine = bridge_remote.normalize_host(machine)
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
     # `machine` is the SSH alias (never a raw IP). BatchMode + a short
     # ConnectTimeout so an unreachable peer fails fast instead of hanging.
@@ -159,6 +160,7 @@ def resolve_live_session(
     if not worktree:
         return None
     if machine is not None:
+        machine = bridge_remote.normalize_host(machine)
         effective_timeout = timeout if timeout is not None else 6.0
         try:
             data = bridge_remote.LocalBridgeRemoteClient().resolve_live_session(
