@@ -122,7 +122,7 @@ def test_serve_mode_runs_master_daemon_and_self_gates():
     unconditionally (the daemon self-gates: only labeled declarations/profiles run)."""
     text = _text()
     # The launcher execs the master daemon in serve mode.
-    assert "supervise serve --legacy-env" in text
+    assert 'supervise serve --legacy-env --interval "\\$interval"' in text
     assert 'mode="\\${AGENT_DISPATCH_SUPERVISE_MODE:-}"' in text
     # _install_supervisor_unit enables unconditionally when MODE=serve.
     idx = text.index("_install_supervisor_unit()")
@@ -273,7 +273,10 @@ class TestWindowsSupervisorInstall:
         the task unconditionally (the daemon self-gates), and retires per-profile
         tasks -- cross-platform parity with the systemd path."""
         text = _ps1_text()
-        assert "'supervise', 'serve', '--legacy-env'" in text
+        assert (
+            "'supervise', 'serve', '--legacy-env', '--interval', `$interval"
+            in text
+        )
         assert "function Get-SupervisorMode" in text
         idx = text.index("function Install-SupervisorTaskInstance")
         body = text[idx:]

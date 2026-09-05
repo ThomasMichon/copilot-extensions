@@ -2062,7 +2062,7 @@ if (`$mode -eq 'serve') {
     # pointers) + this host's legacy env profiles (--legacy-env: supervisor.env +
     # supervisors/*.env), each in its own subprocess. It is self-gating (only
     # labeled declarations/profiles run), so it needs no label opt-in here.
-    `$argsList = @('supervise', 'serve', '--legacy-env')
+    `$argsList = @('supervise', 'serve', '--legacy-env', '--interval', `$interval)
     # Explicit machine scope (recommended for a service context, where CWD-based
     # identity resolution can fail and leave the daemon unable to scope
     # machine-pinned declarations -- aperture-labs #5001). Falls back to the host
