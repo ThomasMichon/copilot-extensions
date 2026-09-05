@@ -574,7 +574,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     $dockerStart.UseShellExecute = $false
     $dockerStart.CreateNoWindow = $true
     $dockerStart.RedirectStandardOutput = $true
-    $dockerStart.RedirectStandardError = $true
+    $dockerStart.RedirectStandardError = $false
     $dockerProcess = [Diagnostics.Process]::Start($dockerStart)
     $dockerVer = $dockerProcess.StandardOutput.ReadToEnd().Trim()
     $dockerProcess.WaitForExit()

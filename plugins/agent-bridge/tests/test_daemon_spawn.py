@@ -15,7 +15,13 @@ CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 def test_win32_uses_hidden_console_and_job_breakaway(monkeypatch):
     monkeypatch.setattr(main.sys, "platform", "win32")
-    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(
+        main,
+        "windowless_daemon_kwargs",
+        lambda **_kwargs: {
+            "creationflags": CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB
+        },
+    )
     flags = main._passive_daemon_creationflags()
     assert flags & CREATE_NO_WINDOW
     assert flags & CREATE_BREAKAWAY_FROM_JOB

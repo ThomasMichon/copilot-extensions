@@ -1531,10 +1531,10 @@ def _spawn_via_wmi_broker_pid(argv: list[str]) -> int | None:
 
     WMI Create cannot inherit/redirect stdio handles, and the daemon relies on
     its launcher to send stdout/stderr to the log files, so the process is
-    wrapped in ``cmd /c "<py> ... >> log 2>> err"``. The command is handed to
-    PowerShell via ``-EncodedCommand`` (base64 UTF-16LE) to sidestep multi-layer
-    quoting. Returns True when Create reports success (ReturnValue 0); the
-    caller's own health-wait then confirms the daemon actually came up.
+    wrapped in a headless console host around ``cmd /c``. The command is handed
+    to PowerShell via ``-EncodedCommand`` (base64 UTF-16LE) to sidestep
+    multi-layer quoting. Returns the brokered root PID when Create succeeds, or
+    ``None``; the caller's own health-wait confirms the daemon actually came up.
     """
     import base64
     import subprocess as _sp
@@ -1600,11 +1600,10 @@ class _BrokeredProcessHandle:
 def _spawn_detached_argv(argv: list[str]) -> None:
     """Spawn ``argv`` as a detached, job-surviving process.
 
-    Uses ``detached_kwargs(breakaway=True)`` so the daemon escapes the caller's
-    Windows **Job object** and outlives whoever started it -- the persistence
-    gotcha behind dotfiles#227/#1713: a daemon spawned as a plain child (or a
-    non-breakaway detached child) dies when an SSH/CLI/agent-session caller in a
-    kill-on-close job exits, leaving the bridge down with nothing to restart it.
+    Uses ``windowless_daemon_kwargs(breakaway=True)`` so the daemon hosts
+    recurring console descendants invisibly while escaping the caller's Windows
+    **Job object**. A non-breakaway child dies when an SSH/CLI/agent-session
+    caller in a kill-on-close job exits.
 
     ``CREATE_BREAKAWAY_FROM_JOB`` fails with ``OSError`` when the caller's job
     lacks ``JOB_OBJECT_LIMIT_BREAKAWAY_OK`` (a job that forbids escape). Rather
