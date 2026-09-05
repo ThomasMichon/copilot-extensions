@@ -1,7 +1,7 @@
 {
   "name": "agent-logger",
   "description": "Reusable Copilot CLI session logging -- segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and (optionally) run a scheduled orchestrator that crunches a backlog into committed logs",
-  "version": "0.1.1-dev91",
+  "version": "0.1.1-dev92",
   "runtimeScope": "universal",
   "author": {
     "name": "Thomas Michon"

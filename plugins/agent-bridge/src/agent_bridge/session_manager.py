@@ -2063,29 +2063,45 @@ class SessionManager:
                     rec.session_id,
                 )
                 continue
-            try:
-                attached = await asyncio.wait_for(
-                    self._reattach_one(
-                        rec, session, new_status=SessionStatus.IDLE,
-                        send_resume=(
-                            getattr(rec, "resume_on_reattach", False)
-                            or session.restart_status
-                            == SessionStatus.STARTING.value
-                        ),
-                        # A failed remote attach may be a transient SSH/control-plane
-                        # outage while the far-side host, child, and auth relay are
-                        # still serving tools. Retain its record and relay ownership;
-                        # only an authoritative far-side liveness probe may declare it
-                        # dead. Local PIDs remain directly authoritative.
-                        prune_on_fail=(
-                            getattr(rec, "boundary", "local") == "local"
-                            or not (getattr(rec, "extra", {}) or {}).get(
-                                "remote_authority_v2"
-                            )
-                        ),
-                    ),
-                    timeout=remaining,
+            # A request-driven resume_session() already holds this session's
+            # `_lifecycle_lock` for the exact same reattach-or-respawn decision.
+            # Racing it from this background startup pass would let both paths
+            # read/recover the far-side authority and establish competing
+            # forwards concurrently. Skip here (non-blocking check-then-acquire
+            # is safe -- no `await` happens between them) and leave the session
+            # for resume_session (or a later reconciliation pass) to finish.
+            if session._lifecycle_lock.locked():
+                self._remote_recovery_inconclusive.add(rec.session_id)
+                log.info(
+                    "Skipping startup reattach for %s: an in-flight "
+                    "resume/lifecycle operation already owns it",
+                    rec.session_id,
                 )
+                continue
+            try:
+                async with session._lifecycle_lock:
+                    attached = await asyncio.wait_for(
+                        self._reattach_one(
+                            rec, session, new_status=SessionStatus.IDLE,
+                            send_resume=(
+                                getattr(rec, "resume_on_reattach", False)
+                                or session.restart_status
+                                == SessionStatus.STARTING.value
+                            ),
+                            # A failed remote attach may be a transient SSH/control-plane
+                            # outage while the far-side host, child, and auth relay are
+                            # still serving tools. Retain its record and relay ownership;
+                            # only an authoritative far-side liveness probe may declare it
+                            # dead. Local PIDs remain directly authoritative.
+                            prune_on_fail=(
+                                getattr(rec, "boundary", "local") == "local"
+                                or not (getattr(rec, "extra", {}) or {}).get(
+                                    "remote_authority_v2"
+                                )
+                            ),
+                        ),
+                        timeout=remaining,
+                    )
             except asyncio.TimeoutError:
                 self._remote_recovery_inconclusive.add(rec.session_id)
                 log.warning(
@@ -2326,6 +2342,14 @@ class SessionManager:
                     )
                     self._remote_recovery_inconclusive.discard(session.session_id)
                     self._remote_recovery_skipped.discard(session.session_id)
+                    if existing is not None:
+                        await self._drop_forward(session.session_id)
+                        self._host_index.remove(session.session_id)
+                        log.info(
+                            "Pruned confirmed-absent remote Session Host "
+                            "authority for %s",
+                            session.session_id,
+                        )
                 elif status == "skipped":
                     self._remote_recovery_skipped.add(session.session_id)
         return recovered
@@ -3383,11 +3407,18 @@ class SessionManager:
             keep = (SessionStatus.RUNNING
                     if session.status == SessionStatus.RUNNING
                     else SessionStatus.IDLE)
-            if await self._reattach_one(
-                rec, session, new_status=keep,
-                send_resume=getattr(rec, "resume_on_reattach", False),
-            ):
-                recovered += 1
+            # Same in-flight-resume race as the startup reattach path (see
+            # reattach_session_hosts): skip this session for this pass rather
+            # than race a concurrent resume_session()/lifecycle operation that
+            # already holds the lock.
+            if session._lifecycle_lock.locked():
+                continue
+            async with session._lifecycle_lock:
+                if await self._reattach_one(
+                    rec, session, new_status=keep,
+                    send_resume=getattr(rec, "resume_on_reattach", False),
+                ):
+                    recovered += 1
         if recovered:
             log.info("Recovered %d disconnected host-backed session(s)", recovered)
         return recovered
@@ -4131,6 +4162,19 @@ class SessionManager:
                             self._session_host_unexpected_reap_seconds
                         ),
                         active_reap_seconds=self._session_host_active_reap_seconds,
+                        # Symmetric with the resume path (`_resume_via_new_
+                        # remote_host`): when this container declares a
+                        # credential-relay reverse-forward, the INITIAL launch
+                        # must also refuse to admit a prompt until that relay
+                        # actually answers -- not just resume. Without this, a
+                        # freshly launched credential-requiring container
+                        # session could silently start with no working relay
+                        # and only surface the failure later, mid-turn, when a
+                        # tool call needs it.
+                        require_relay_ready=(
+                            container_target.get("relay_remote_port")
+                            is not None
+                        ),
                     )
                     remote_cwd = (
                         prepared.get("workspace_folder")
@@ -4682,24 +4726,24 @@ class SessionManager:
                     f"Session {session_id} has no ACP session ID -- cannot resume"
                 )
 
-            container_resume = (
-                isinstance(session.target.container, dict)
-                and bool(session.target.container.get("name"))
-            )
-            if container_resume:
-                # A stopped container session must resolve the provider's
-                # current serving generation before inspecting or reattaching
-                # its far-side authority. The recovered endpoint then uses the
-                # current SSH transport, while relay replacement below resolves
-                # the daemon's current live credential-relay port.
-                await self._refresh_provider_target(session)
-
             # Prefer reattaching to a surviving Session Host (adopt the running
             # child + its in-flight turn) over a fresh child + load_session, so a
             # resume after a transport drop (laptop sleep / tunnel flap / SSH
             # sever) recovers the SAME work instead of abandoning a mid-turn tool
             # call (#145). Falls through to the fresh-child path below when no
             # live host survives (a genuinely dead child).
+            #
+            # The provider target refresh is deferred until AFTER this reattach
+            # attempt. `_try_reattach_live_host` (and the `_recover_remote_host_
+            # records` it drives) inspects and dials the far side using the
+            # target already persisted on this session, so it needs no
+            # refreshed provider data -- refreshing here provides no benefit to
+            # reattach. Refreshing eagerly used to abort resume outright (and so
+            # permanently block reattach) whenever the resolver could not yet
+            # resolve the agent -- e.g. immediately after a daemon restart before
+            # providers finish loading, or for a legacy session that predates
+            # request-override provenance -- even though a perfectly
+            # reattachable Session Host was waiting on the other end.
             if await self._try_reattach_live_host(session):
                 log.info(
                     "Session %s (%s) resumed by reattaching to its live "
@@ -4708,8 +4752,7 @@ class SessionManager:
                 session.touch()
                 return session
 
-            if not container_resume:
-                await self._refresh_provider_target(session)
+            await self._refresh_provider_target(session)
 
             session.status = SessionStatus.STARTING
             self._db.update_session_status(

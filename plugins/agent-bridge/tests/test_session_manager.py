@@ -843,6 +843,71 @@ async def test_container_state_probe_failure_retains_remote_authority(
 
 
 @pytest.mark.asyncio
+async def test_confirmed_absent_remote_host_drops_stale_authority(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    """A confirmed-absent authority file must be pruned like a dead transport.
+
+    ``recover_record`` returning ``None`` means the far side confirmed the
+    authority file does not exist (not merely unreachable). A stale HostIndex
+    record must not survive that confirmation forever -- otherwise a genuinely
+    dead Host can never fall through to fresh-spawn recovery.
+    """
+
+    class FakeSpawner:
+        boundary = "container"
+
+        async def can_inspect_without_wake(self):
+            return True
+
+        async def recover_record(self, session_id):
+            return None
+
+    class FakeIndex:
+        def __init__(self):
+            self.removed = []
+            self.existing = SimpleNamespace(
+                extra={"remote_authority_v2": True},
+                resume_on_reattach=False,
+            )
+
+        def get(self, session_id):
+            return self.existing
+
+        def remove(self, session_id):
+            self.removed.append(session_id)
+
+        def register(self, record):
+            raise AssertionError("confirmed-absent record must not be registered")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "build_container_spawner",
+        lambda *args, **kwargs: FakeSpawner(),
+    )
+    manager = SessionManager(tmp_db)
+    manager._host_index = FakeIndex()
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "odsp-web-1",
+            "ssh": {"host_alias": "agent-container-odsp-web-1-a1b2c3d4e5f6"},
+            "provider_command": ["agent-containers"],
+        },
+    )
+    session = Session("session-1", "container", target)
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+
+    recovered = await manager._recover_remote_host_records(allow_wake=True)
+
+    assert recovered == 0
+    assert manager._host_index.removed == ["session-1"]
+    assert session.session_id not in manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
 async def test_failed_handshake_rollback_removes_remote_holders(
     tmp_db,
 ) -> None:
@@ -2065,10 +2130,101 @@ async def test_startup_reattach_leaves_prior_idle_session_idle(
 
 
 @pytest.mark.asyncio
-async def test_stopped_container_resume_refreshes_provider_before_reattach(
+async def test_startup_reattach_skips_session_with_inflight_lifecycle_op(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
-    """A surviving Host is inspected through the provider's current generation."""
+    """The startup reattach pass must not race a concurrent resume_session().
+
+    resume_session() holds `session._lifecycle_lock` for its whole
+    reattach-or-respawn decision. If the background startup reattach pass
+    (reattach_session_hosts) drove the same session concurrently, both paths
+    could read/recover the same far-side authority and establish competing
+    forwards. When the lock is already held, the startup pass must skip that
+    session for this pass (leaving it to the in-flight operation) instead of
+    calling `_reattach_one` for it.
+    """
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=1,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=time.time(),
+        resume_on_reattach=False,
+        boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(manager, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", attach)
+
+    await session._lifecycle_lock.acquire()
+    try:
+        assert await manager.reattach_session_hosts(remote_recovery_timeout=1.0) == 0
+    finally:
+        session._lifecycle_lock.release()
+
+    attach.assert_not_awaited()
+    assert session.session_id in manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_recover_disconnected_hosts_skips_session_with_inflight_lifecycle_op(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """The in-session liveness reattach driver must not race resume_session()
+    either -- same lock-held check as the startup path above."""
+    from agent_bridge.session_host.protocol import PROTOCOL_VERSION
+
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "acp-1"
+    session.client = None
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=PROTOCOL_VERSION,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=time.time(),
+        resume_on_reattach=False,
+        boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", attach)
+
+    await session._lifecycle_lock.acquire()
+    try:
+        assert await manager.recover_disconnected_hosts() == 0
+    finally:
+        session._lifecycle_lock.release()
+
+    attach.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stopped_container_resume_reattaches_without_refresh(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A surviving container Host is reattached using the persisted target.
+
+    Reattach dials the far side using whatever is already persisted on the
+    session -- it needs no refreshed provider data -- so a successful reattach
+    must never require (or wait on) a provider-target refresh first. Mirrors
+    the codespace contract in
+    ``test_resume_does_not_refresh_surviving_provider_host``.
+    """
     manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
     session = Session(
         "session-1",
@@ -2077,7 +2233,7 @@ async def test_stopped_container_resume_refreshes_provider_before_reattach(
             type="command",
             container={
                 "name": "container-1",
-                "ssh": {"host_alias": "old-generation"},
+                "ssh": {"host_alias": "persisted-generation"},
             },
             venue={
                 "_agent_bridge_request_overrides": {
@@ -2094,23 +2250,66 @@ async def test_stopped_container_resume_refreshes_provider_before_reattach(
 
     class Resolver:
         async def resolve_async(self, _name):
-            return SpawnTarget(
-                type="command",
-                container={
-                    "name": "container-1",
-                    "ssh": {"host_alias": "current-generation"},
-                },
-                venue={"provider": "agent-containers"},
+            raise AssertionError(
+                "resolve_async must not be awaited when reattach succeeds"
             )
 
     manager.set_resolver(Resolver())
 
-    async def reattach(refreshed_session):
+    async def reattach(session_arg):
         assert (
-            refreshed_session.target.container["ssh"]["host_alias"]
-            == "current-generation"
+            session_arg.target.container["ssh"]["host_alias"]
+            == "persisted-generation"
         )
-        refreshed_session.status = SessionStatus.IDLE
+        session_arg.status = SessionStatus.IDLE
+        return True
+
+    monkeypatch.setattr(manager, "_try_reattach_live_host", reattach)
+
+    resumed = await manager.resume_session(session.session_id)
+
+    assert resumed is session
+    assert session.status is SessionStatus.IDLE
+
+
+@pytest.mark.asyncio
+async def test_stopped_legacy_container_resume_reattaches_despite_missing_overrides(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A legacy container session (no request-override provenance) still
+    reattaches to its surviving Host.
+
+    Regression test: resume previously called ``_refresh_provider_target``
+    unconditionally before attempting reattach for a container-backed
+    session, which raised ``ProviderTargetRefreshError`` for any session
+    predating override provenance (or when the resolver could not yet
+    resolve the agent, e.g. immediately after a daemon restart) -- aborting
+    resume outright and permanently blocking reattach even though a live
+    Session Host was reachable on the other end.
+    """
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session(
+        "session-1",
+        "agent",
+        SpawnTarget(
+            type="command",
+            container={"name": "container-1"},
+            # No `_agent_bridge_request_overrides` key -- the legacy shape.
+        ),
+        "container:container-1",
+    )
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+
+    class Resolver:
+        async def resolve_async(self, _name):
+            raise KeyError("Agent 'container:container-1' not found in registry")
+
+    manager.set_resolver(Resolver())
+
+    async def reattach(session_arg):
+        session_arg.status = SessionStatus.IDLE
         return True
 
     monkeypatch.setattr(manager, "_try_reattach_live_host", reattach)

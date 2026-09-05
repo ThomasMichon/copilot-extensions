@@ -96,8 +96,23 @@ if (-not (Test-Path -LiteralPath $_installer)) {
 
 [Console]::Error.WriteLine("[$_command] runtime not provisioned -- provisioning from the owning payload.")
 [Console]::Error.WriteLine("::agent-provisioning:: plugin=$_command eta_seconds=120 reason=first-use")
-$_host = Get-Command pwsh -ErrorAction SilentlyContinue
-$_hostExe = if ($_host) { $_host.Source } else { 'powershell.exe' }
+# Resolve pwsh/powershell by ABSOLUTE path only -- never ambient Get-Command/
+# PATH resolution, which can fail under the bridge daemon's restricted PATH
+# even when a usable host is installed (#2042). Mirrors the cmd shim's
+# %SystemRoot%\System32\where.exe lookup with the same WindowsPowerShell v1.0
+# absolute fallback, so both entry points resolve identically regardless of
+# the caller's PATH.
+$_hostExe = $null
+try {
+    $_whereExe = Join-Path $env:SystemRoot 'System32\where.exe'
+    if (Test-Path -LiteralPath $_whereExe) {
+        $_found = & $_whereExe pwsh 2>$null | Select-Object -First 1
+        if ($_found -and (Test-Path -LiteralPath $_found)) { $_hostExe = $_found }
+    }
+} catch {}
+if (-not $_hostExe) {
+    $_hostExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+}
 & $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_installer stamp 2>&1 |
     ForEach-Object { [Console]::Error.WriteLine($_) }
 $_provisionRc = $LASTEXITCODE
