@@ -119,6 +119,33 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
         ).stat().st_mode & 0o100
 
 
+def test_accepts_non_agent_runtime_plugin_identity(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["command"] = "budget-guidance"
+    data["module"] = "budget_guidance"
+    data["runtimeRoot"] = ".budget-guidance"
+    data["noSelfProvisionEnv"] = "BUDGET_GUIDANCE_NO_SELFPROVISION"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = generator.load_manifest(manifest)
+
+    assert loaded["plugin"] == "budget-guidance"
+
+
+def test_shell_catalog_mode_is_python_independent(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["posixCatalogMode"] = "shell"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    generated = generator.expected_files(manifest)
+    catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.sh"]
+
+    assert "command -v python" not in catalog
+    assert "json_escape" in catalog
+
+
 def test_payload_root_env_is_opt_in_and_preserves_defaults(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     baseline = generator.expected_files(manifest)

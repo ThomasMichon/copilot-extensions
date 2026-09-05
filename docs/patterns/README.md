@@ -155,13 +155,14 @@ core of the principles above; a reviewer checks a change against these.
   exception: enabling the lightweight plugin does not provision that heavyweight
   capability, and only its already-running trusted supervisor may do so.
 - **Every runtime command is payload-attributable.** Every runtime-bearing
-  marketplace `agent-*` plugin declares all agent-facing commands in
+  marketplace plugin declares all agent-facing commands in
   `payload-invocation.json`, commits the generated POSIX/PowerShell/CMD shims,
   and wires both-platform bootstrap and command-glossary hooks through
   `COPILOT_PLUGIN_ROOT`. Static prose names logical commands, never another
   plugin's direct path; missing or ambiguous ownership never falls through to
   `PATH`. Enforced by
-  `libs/payload-invocation/tests/test_agent_plugin_coverage.py`. See
+  Core `agent-*` runtimes additionally participate in the installation-cell
+  coverage enforced by `libs/payload-invocation/tests/test_agent_plugin_coverage.py`. See
   [`runtime-agent-plugin.md`](runtime-agent-plugin.md).
 - **Enabled machine-gated runtimes are never silently omitted.** Each enabled
   `runtimeScope: machine-gated` plugin publishes a bounded, plugin-owned

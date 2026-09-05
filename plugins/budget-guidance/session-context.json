@@ -1,0 +1,24 @@
+{
+  "schema": "copilot-extensions.session-context-contributors",
+  "version": 1,
+  "complete": true,
+  "contributors": [
+    {
+      "id": "command-catalog",
+      "pure": true,
+      "order": 400,
+      "timeoutSeconds": 1,
+      "maxBytes": 4096,
+      "bash": [
+        "scripts/emit-command-catalog.sh"
+      ],
+      "powershell": [
+        "scripts/emit-command-catalog.ps1"
+      ]
+    }
+  ],
+  "sessionStart": {
+    "sideEffects": "restart-safe-idempotent",
+    "context": "authority-aware"
+  }
+}

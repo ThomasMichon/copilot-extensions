@@ -1,4 +1,4 @@
-# Pattern: So You Want to Add an `agent-*` Plugin with Services and Tools
+# Pattern: So You Want to Add a Runtime Plugin with Services and Tools
 
 **Serves:** *Vision plugin-services* §Features/`self-contained-runtime`,
 `self-provisioning-runtime`, `uniform-deploy-contract`,
@@ -11,10 +11,15 @@ agent-codespaces / agent-containers (runtime CLI + namespace provider).
 
 ## The question
 
-You want to add an `agent-*` plugin that gives agents a command, perhaps owns a
+You want to add a runtime plugin that gives agents a command, perhaps owns a
 long-running service, and may compose with other plugins. What must it carry so
 it works alone, identifies its own installation, and never captures a same-named
 tool from another marketplace?
+
+The plugin id need not use the `agent-*` prefix. That prefix identifies the core
+agent-fabric family and its installation-cell eligibility; payload-local command
+generation and the ordinary runtime contract also support other lowercase
+plugin ids.
 
 The answer is not "add a Python package and put its command on `PATH`." A runtime
 plugin is a complete delivery unit with four distinct surfaces:

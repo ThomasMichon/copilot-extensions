@@ -70,6 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [ai-attribution](plugins/ai-attribution/) | Ambient policy + skills | Keep publication and AI-attribution safety active through a concise payload-cwd-gated session-start kernel, host-qualified operator policy, an idempotent static-fallback setup skill, and an on-demand publication workflow. Payload-only; no runtime, network call, or authentication. |
 | [delegation-guidance](plugins/delegation-guidance/) | Ambient policy + skill | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion. Payload-only; no runtime or configuration. |
 | [context-injection](plugins/context-injection/) | Context aggregation hook | On affected Copilot CLI hosts, one exact source-qualified marketplace authority resolves the active plugin stack and emits one deterministic aggregate from complete authority-aware contributors. Payload-only. |
+| [budget-guidance](plugins/budget-guidance/) | Budget posture CLI | Resolve strict offline allowance, consumption, reset, freshness, rate, and ceiling readings into one attributable posture with JSON and concise human status. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -77,7 +78,7 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-21 plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
+22 plugins, one marketplace. **Twelve ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **ten are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (hook + session extension + skill), `customizing-copilot` (skills),
@@ -218,11 +219,11 @@ copilot plugin install context-injection@copilot-extensions # optional — deter
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
-skills, hooks, extensions). The eleven runtime plugins (every plugin except the
+skills, hooks, extensions). The twelve runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
 `ai-attribution`, `delegation-guidance`, and `context-injection`) then need their runtime deployed once — that's Step 2,
-which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
+which runs each installer to build a `uv` venv under its plugin-owned home and drop a
 binstub in `~/.local/bin`.
 
 > **Recommended: register at repo scope instead of globally.** Set

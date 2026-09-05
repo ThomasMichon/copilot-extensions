@@ -826,7 +826,7 @@ Consequence — a rule for every plugin in this repo:
      agent-bridge), `agent-codespaces:codespaces-setup` (agent-codespaces), `agent-containers:containers-fleet`
      (agent-containers).
 
-  A Python `agent-*` runtime that exposes an agent-facing command additionally
+  A Python runtime that exposes an agent-facing command additionally
   ships:
   3. `payload-invocation.json` plus its generated POSIX, PowerShell, and CMD
      payload-local command shims, and

@@ -73,6 +73,7 @@ then re-run adoption when the machine-local projection needs refreshing.
 | `~/.agent-bridge/config.yaml` · `auth.yaml` | Bridge service config + bearer token (**secret**) | `install`, `agent-bridge config adopt`, and the service |
 | `~/.agent-logger/config.yaml` | Session-logging config (store dir, sync target) | `install` / you |
 | `~/.agent-mcp/bridges/<name>` | A **personal / cross-repo** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
+| `~/.budget-guidance/config.json` | Inert, per-user current budget readings and source authority | you / `budget-guidance-setup` |
 | `~/.agent-*/deploy-manifest.json`, runtime state | Per-machine runtime footprint (version, source, venv) | `install` / `update` |
 
 ### Marketplace installation cells
