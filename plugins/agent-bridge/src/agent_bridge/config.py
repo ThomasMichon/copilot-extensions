@@ -8,6 +8,7 @@ import secrets
 from pathlib import Path
 
 import yaml
+from agent_procutil import no_window_kwargs
 
 from .models import RepoBridgeConfig, ServiceConfig
 
@@ -183,6 +184,7 @@ def _state_root_machines_yaml(repo: Path) -> str | None:
         proc = subprocess.run(
             [exe, "state-root", "--json"], cwd=str(repo),
             capture_output=True, text=True, timeout=20,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -230,6 +232,7 @@ def _canonical_repo_root(repo: Path) -> Path:
         top_proc = subprocess.run(
             [git, "-C", str(repo), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
         )
         if top_proc.returncode != 0 or not (top_proc.stdout or "").strip():
             return repo
@@ -238,6 +241,7 @@ def _canonical_repo_root(repo: Path) -> Path:
         common_proc = subprocess.run(
             [git, "-C", str(repo), "rev-parse", "--git-common-dir"],
             capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return repo
@@ -258,6 +262,7 @@ def _canonical_repo_root(repo: Path) -> Path:
         root_proc = subprocess.run(
             [git, "-C", str(anchor), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return repo

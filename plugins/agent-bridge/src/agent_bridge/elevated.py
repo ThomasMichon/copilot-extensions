@@ -44,6 +44,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from agent_procutil import no_window_kwargs
 from typing import Any
 
 import yaml
@@ -217,6 +219,7 @@ def _task_registered() -> bool:
         out = subprocess.run(
             ["schtasks", "/query", "/tn", TASK_NAME],
             capture_output=True, text=True,
+            **no_window_kwargs(),
         )
         return out.returncode == 0
     except OSError:
@@ -237,6 +240,7 @@ def _task_headless() -> bool:
         out = subprocess.run(
             ["schtasks", "/query", "/tn", TASK_NAME, "/xml", "ONE"],
             capture_output=True, text=True,
+            **no_window_kwargs(),
         )
         if out.returncode != 0:
             return False
@@ -254,6 +258,7 @@ def _run_task() -> int:
     """
     out = subprocess.run(
         ["schtasks", "/run", "/tn", TASK_NAME], capture_output=True, text=True,
+        **no_window_kwargs(),
     )
     if out.returncode != 0:
         log.warning(
@@ -267,6 +272,7 @@ def _end_task() -> int:
     """Terminate the running task instance (elevated) without a UAC prompt."""
     out = subprocess.run(
         ["schtasks", "/end", "/tn", TASK_NAME], capture_output=True, text=True,
+        **no_window_kwargs(),
     )
     return out.returncode
 
@@ -281,6 +287,7 @@ def _run_elevated(script: Path) -> int:
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
         capture_output=True,
         text=True,
+        **no_window_kwargs(),
     )
     if proc.returncode != 0:
         log.warning(
@@ -529,6 +536,7 @@ def status() -> dict:
         out = subprocess.run(
             ["schtasks", "/query", "/tn", TASK_NAME, "/fo", "LIST"],
             capture_output=True, text=True,
+            **no_window_kwargs(),
         )
         info["task_registered"] = out.returncode == 0
     except OSError:

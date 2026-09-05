@@ -46,6 +46,15 @@ def test_windows_management_binstub_resolves_powershell_without_path() -> None:
     assert "else (powershell " not in powershell
 
 
+def test_windows_installer_probes_docker_without_a_console() -> None:
+    powershell = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
+
+    assert "$dockerStart.CreateNoWindow = $true" in powershell
+    assert "$dockerStart.RedirectStandardOutput = $true" in powershell
+    assert "$dockerStart.Arguments = '--version'" in powershell
+    assert "& docker --version" not in powershell
+
+
 @pytest.mark.skipif(os.name == "nt", reason="requires native POSIX bash semantics")
 def test_posix_bounded_command_survives_errexit() -> None:
     source = (PLUGIN / "scripts" / "init.sh").read_text(encoding="utf-8")

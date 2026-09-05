@@ -38,10 +38,13 @@ def _spec(**over):
     return spec
 
 
-def test_run_tick_acquires_lease_and_runs_command():
+def test_run_tick_acquires_lease_and_runs_command(monkeypatch):
     client = FakeClient()
     calls = []
     times = iter([10.0, 12.5])
+    monkeypatch.setattr(
+        emitter, "no_window_kwargs", lambda: {"creationflags": 0x08000000}
+    )
 
     def runner(command, **kwargs):
         calls.append((command, kwargs))
@@ -56,6 +59,7 @@ def test_run_tick_acquires_lease_and_runs_command():
     assert calls[0][0] == ["review-emitter", "tick"]
     assert calls[0][1]["cwd"] == "/repo"
     assert calls[0][1]["env"]["MODE"] == "test"
+    assert calls[0][1]["creationflags"] == 0x08000000
     assert result["held"] is True
     assert result["returncode"] == 0
     assert result["duration_seconds"] == 2.5

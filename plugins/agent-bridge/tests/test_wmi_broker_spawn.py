@@ -23,6 +23,7 @@ def test_wmi_broker_invokes_encoded_powershell_win32_process_create(monkeypatch,
 
     class _Out:
         returncode = 0
+        stdout = "1234\n"
 
     def _run(cmd, **kwargs):
         captured["cmd"] = cmd
@@ -40,6 +41,7 @@ def test_wmi_broker_invokes_encoded_powershell_win32_process_create(monkeypatch,
     # The daemon is created via WMI (re-parented off the caller) ...
     assert "Win32_Process" in decoded
     assert "Create" in decoded
+    assert "conhost.exe --headless cmd.exe" in decoded
     # ... and the real daemon argv + log redirection are carried through.
     assert "agent_bridge" in decoded
     assert "agent-bridge.log" in decoded
@@ -50,6 +52,7 @@ def test_wmi_broker_returns_false_on_nonzero_create(monkeypatch, tmp_path):
 
     class _Out:
         returncode = 8  # WMI Create ReturnValue != 0
+        stdout = ""
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Out())
     assert m._spawn_via_wmi_broker(["py", "-m", "agent_bridge", "start"]) is False
@@ -101,17 +104,22 @@ def test_spawn_detached_happy_path_is_breakaway(monkeypatch, tmp_path):
         return object()
 
     monkeypatch.setattr(subprocess, "Popen", _popen_ok)
+    monkeypatch.setattr(
+        m,
+        "windowless_daemon_kwargs",
+        lambda **_kwargs: {"creationflags": 0x09000000},
+    )
     monkeypatch.setattr(m, "_spawn_via_wmi_broker", lambda argv: seen.__setitem__("wmi", seen["wmi"] + 1) or True)
 
     m._spawn_detached_daemon()
     # Breakaway succeeded -> the WMI broker is never reached.
     assert seen["wmi"] == 0
+    assert seen["flags"] == 0x09000000
 
 
 def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
     captured = {}
     monkeypatch.setattr(m.sys, "executable", r"C:\venv\python.exe")
-    monkeypatch.setattr(m, "windowless_python", lambda path: path.replace("python.exe", "pythonw.exe"))
     monkeypatch.setattr(
         m, "_spawn_detached_argv", lambda argv: captured.setdefault("argv", argv)
     )
@@ -122,7 +130,7 @@ def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
     )
 
     argv = captured["argv"]
-    assert argv[0] == r"C:\venv\pythonw.exe"
+    assert argv[0] == r"C:\venv\python.exe"
     assert argv[1] == "-c"
     assert "agent_bridge" in argv[2]
     assert argv[3] == "1.5"
@@ -132,7 +140,6 @@ def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
 def test_watchdog_replacement_promotes_active_passive_generation(monkeypatch):
     captured = {}
     monkeypatch.setattr(m.sys, "executable", r"C:\venv\python.exe")
-    monkeypatch.setattr(m, "windowless_python", lambda path: path)
     monkeypatch.setattr(
         m, "_spawn_detached_argv", lambda argv: captured.setdefault("argv", argv)
     )
