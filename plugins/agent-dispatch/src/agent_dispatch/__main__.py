@@ -4086,6 +4086,10 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             evaluator=evaluator,
             redrive_fn=redrive_fn,
             evaluator_ref=getattr(args, "evaluator_ref", None),
+            reserving_timeout=max(
+                600.0,
+                float(getattr(args, "verify_timeout", 0) or 0) + 120.0,
+            ),
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
