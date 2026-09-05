@@ -439,7 +439,8 @@ def test_selected_interpreter_is_the_only_lifecycle_target(monkeypatch) -> None:
     module = _module(SERVICE, "companion_service_selected")
     monkeypatch.setenv("AGENT_INDEX_MANAGED_PYTHON", sys.executable)
     assert module._runtime_gate("start") == [
-        sys.executable, "-I", "-B", "-m", "agent_index", "__managed-start",
+        sys.executable, "-I", "-B", "-X", "utf8", "-m", "agent_index",
+        "__managed-start",
     ]
     for action in ("status", "stop"):
         assert module._runtime_gate(action)[-1] == action

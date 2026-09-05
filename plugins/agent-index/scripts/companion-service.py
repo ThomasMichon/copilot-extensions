@@ -36,7 +36,7 @@ def _runtime_gate(action: str) -> list[str]:
     if not value or not python.is_absolute() or not python.is_file():
         raise RuntimeError("agent-index requires a dispatch-selected host interpreter")
     return [
-        str(python), "-I", "-B", "-m", "agent_index",
+        str(python), "-I", "-B", "-X", "utf8", "-m", "agent_index",
         "__managed-start" if action == "start" else action,
     ]
 
