@@ -241,13 +241,15 @@ because they provide tools or services.
         [#2080](https://github.com/ThomasMichon/copilot-extensions/pull/2080);
         the committed-crash restoration defect was fixed through
         [#2089](https://github.com/ThomasMichon/copilot-extensions/pull/2089),
-        and
-        [#2090](https://github.com/ThomasMichon/copilot-extensions/issues/2090)
-        tracks the final shutdown-liveness defect.
+        and the final shutdown-liveness defect through
+        [#2100](https://github.com/ThomasMichon/copilot-extensions/pull/2100).
       - [ ] Pass the Windows clean-room arm. The 2026-09-05 attempt on a
         Linux-container Docker engine stopped before scenario execution because
-        the Windows Server Core base image had no matching platform; rerun on a
-        Windows-container host.
+        the Windows Server Core base image had no matching platform. A later
+        dispatch to a dedicated Windows-container host stopped before scenario
+        execution when the remote ACP launch connection closed; retry after
+        [#2106](https://github.com/ThomasMichon/copilot-extensions/issues/2106)
+        is resolved.
     - [ ] Run the Agent Machines scenario in disposable Linux and Windows
       clean-room arms.
 
@@ -909,7 +911,9 @@ See [`design.md`](design.md).
 - Filed and claimed
   [#2090](https://github.com/ThomasMichon/copilot-extensions/issues/2090) after
   the isolated shutdown phase exposed missing POSIX zombie handling in the
-  shared rendezvous liveness helper and a false `still-running` result. The
+  shared rendezvous liveness helper and a false `still-running` result; the fix
+  landed through
+  [#2100](https://github.com/ThomasMichon/copilot-extensions/pull/2100). The
   clean-room fixture also now forwards synthetic repository opt-in data through
   every subprocess so the newer effective-config gate does not bypass the
   installation-context assertions.
@@ -920,4 +924,8 @@ See [`design.md`](design.md).
   shutdown.
 - The Windows arm was attempted but the available Docker engine was running
   Linux containers; the Windows Server Core base image could not resolve for
-  that platform. Windows acceptance remains open for a Windows-container host.
+  that platform. A second attempt dispatched the run to a dedicated
+  Windows-container host, but the remote agent connection closed during ACP
+  launch before the scenario started. The transport failure is tracked by
+  [#2106](https://github.com/ThomasMichon/copilot-extensions/issues/2106);
+  Windows acceptance remains open.
