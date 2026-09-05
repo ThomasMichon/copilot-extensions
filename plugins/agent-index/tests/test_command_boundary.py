@@ -149,6 +149,31 @@ def test_managed_engine_health_requires_generation_and_dependency_match(
     assert "not installed" in second["detail"]
 
 
+def test_managed_engine_health_treats_non_object_payload_as_unhealthy(
+    monkeypatch, capsys
+):
+    monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setattr(
+        transport, "plan_route", lambda: ("host", {"machine": "example-host"})
+    )
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return ["not-an-object"]
+
+    monkeypatch.setattr("httpx.get", lambda *_a, **_k: Response())
+
+    assert cli.main(["__managed-engine-health"]) == 0
+    assert json.loads(capsys.readouterr().out)["healthy"] is False
+
+
 def test_managed_engine_health_accepts_cpu_dependency_state(monkeypatch, capsys):
     monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)

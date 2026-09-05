@@ -681,6 +681,8 @@ def cmd_managed_engine_health(_args: argparse.Namespace) -> int:
         )
         response.raise_for_status()
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("engine health payload is not an object")
     except (httpx.HTTPError, ValueError):
         payload = {
             "status": "unreachable",

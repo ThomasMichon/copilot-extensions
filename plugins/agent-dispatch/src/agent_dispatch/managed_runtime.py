@@ -468,7 +468,12 @@ def _authority(
     return expected, plugin_root
 
 
-def _contained_path(plugin_root: Path, relative: str) -> Path:
+def _contained_path(
+    plugin_root: Path,
+    relative: str,
+    *,
+    description: str = "managed runtime project path",
+) -> Path:
     if (
         not relative
         or "\\" in relative
@@ -482,15 +487,15 @@ def _contained_path(plugin_root: Path, relative: str) -> Path:
     current = plugin_root
     for component in (() if relative == "." else relative.split("/")):
         current = current / component
-        _reject_link(current, description="managed runtime project path")
+        _reject_link(current, description=description)
     try:
         target.relative_to(plugin_root)
     except ValueError as exc:
         raise ManagedRuntimeError(
-            "managed runtime project escapes the attributed plugin root"
+            f"{description} escapes the attributed plugin root"
         ) from exc
     if not target.exists():
-        raise ManagedRuntimeError("managed runtime project path is unavailable")
+        raise ManagedRuntimeError(f"{description} is unavailable")
     return target
 
 
@@ -993,7 +998,11 @@ class ManagedRuntimeMaterializer:
                 identity_root.mkdir(parents=True, exist_ok=True)
                 for index, identity_path in enumerate(identity_paths):
                     relative = str(identity_path)
-                    source = _contained_path(plugin_root, relative)
+                    source = _contained_path(
+                        plugin_root,
+                        relative,
+                        description="managed runtime identity path",
+                    )
                     destination = identity_root / f"{index:03d}"
                     prefix = f"identity/{index:03d}"
                     if source.is_dir():

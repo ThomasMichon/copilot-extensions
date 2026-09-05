@@ -548,9 +548,12 @@ def load_declaration(
                 f"declaration kind {kind!r} does not accept lane fields: {extras}"
             )
         runtime_generation = data.get("runtime_generation")
+        if runtime_generation is not None and kind != RegistrationKind.PLUGIN_COMPANION:
+            raise RegistrarError(
+                "runtime_generation: only plugin-companion declarations may set it"
+            )
         if runtime_generation is not None and (
-            kind != RegistrationKind.PLUGIN_COMPANION
-            or not isinstance(runtime_generation, str)
+            not isinstance(runtime_generation, str)
             or not runtime_generation
         ):
             raise RegistrarError(
@@ -577,7 +580,7 @@ def load_declaration(
 
     if data.get("runtime_generation") is not None:
         raise RegistrarError(
-            "runtime_generation: plugin-companion declarations require a non-empty string"
+            "runtime_generation: only plugin-companion declarations may set it"
         )
 
     legacy_concurrency = data.get("concurrency")
