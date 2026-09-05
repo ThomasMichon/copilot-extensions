@@ -8,7 +8,7 @@
 - **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
   [agent-index/`lightweight-client-and-declared-host-service`](../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
 - **Umbrella issue:** #2007
-- **Sub-issues:** #2010
+- **Sub-issues:** #2010, #2013
 
 ## Guiding Intent
 
@@ -93,17 +93,17 @@ no package manager, environment builder, or live companion path consumes it.
 
 ### Slice 3B — Immutable materialization
 
-- [ ] Carve and claim a materialization sub-issue only after Slice 3A lands.
-- [ ] Resolve the physical runtime root and toolchain from dispatch-owned policy,
+- [x] Carve and claim a materialization sub-issue only after Slice 3A lands.
+- [x] Resolve the physical runtime root and toolchain from dispatch-owned policy,
   never plugin-provided executable authority.
-- [ ] Serialize every runtime root with a crash-safe interprocess lock shared
+- [x] Serialize every runtime root with a crash-safe interprocess lock shared
   across supervisor environments.
-- [ ] Copy declared plugin-relative inputs into a root-contained immutable
+- [x] Copy declared plugin-relative inputs into a root-contained immutable
   snapshot, build in unique staging, validate imports, and atomically publish a
   version/profile/content-digest cell.
-- [ ] On Windows, select a trusted signed base Python, copy only the required
+- [x] On Windows, select a trusted signed base Python, copy only the required
   runtime files, and verify executable trust before package installation.
-- [ ] Reuse an already-valid published cell and preserve an existing cell when
+- [x] Reuse an already-valid published cell and preserve an existing cell when
   staging, installation, or validation fails.
 
 **Completion gate:** only the running dispatch service can build or reuse a
@@ -150,7 +150,7 @@ provisioning, while every non-host path stays lightweight and inert.
 
 - [ ] Contract tests cover unknown fields, unsafe components, plugin-root
   escapes, provenance loss, direct registration, and non-execution in Slice 3A.
-- [ ] Materialization tests cover concurrent builders, stale locks, unique
+- [x] Materialization tests cover concurrent builders, stale locks, unique
   staging, failed installs, failed validation, atomic publication, idempotent
   reuse, and Windows signed-base verification.
 - [ ] Cutover tests cover first launch, prepare-before-stop, readiness failure,
@@ -203,3 +203,14 @@ provisioning and cutover code is not a candidate for wholesale reuse.
   launch.
 - Added the reusable managed-companion-runtime pattern and its narrow,
   explicit exceptions to ordinary standalone self-provisioning invariants.
+
+### 2026-09-04 — Immutable materialization implemented
+
+- The singleton supervisor now prepares attributed managed-runtime declarations
+  asynchronously without changing live companion launch state.
+- Dispatch-owned policy selects the physical root, package manager, and base
+  Python runtime. Root-wide crash-safe locking, root-contained snapshots,
+  disposable install inputs, import validation, and atomic publication produce
+  immutable content-addressed cells with complete authority/toolchain receipts.
+- Reuse revalidates the full cell, Windows copied-base trust, POSIX external
+  runtime identity, and declared imports. Failed builds preserve prior cells.

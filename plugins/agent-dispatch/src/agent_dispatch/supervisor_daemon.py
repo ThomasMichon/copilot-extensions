@@ -29,12 +29,14 @@ See ``visions/plugins/agent-dispatch`` -- Concept *the supervisor*, Feature
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import logging
 import platform
 import subprocess
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,11 +95,16 @@ def _spec_fingerprint(reg: dict) -> str:
     spec = dict(reg.get("spec") or {})
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
+    spec.pop("managed_runtime", None)
+    runtime_revision = reg.get("runtime_revision")
+    if isinstance(runtime_revision, dict):
+        runtime_revision = dict(runtime_revision)
+        runtime_revision.pop("managed_runtime", None)
     return json.dumps(
         {
             "kind": reg.get("kind"),
             "spec": spec,
-            "runtime_revision": reg.get("runtime_revision"),
+            "runtime_revision": runtime_revision,
             "companion_runtime": reg.get("companion_runtime"),
         },
         sort_keys=True,
@@ -487,6 +494,8 @@ class SupervisorDaemon:
         overrides_source: Callable[[], Mapping[str, dict]] | None = None,
         client_factory: Callable[[], Any] | None = None,
         companion_controller: Any | None = None,
+        runtime_materializer: Any | None = None,
+        runtime_executor: Any | None = None,
     ):
         self.client = client
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
@@ -531,8 +540,14 @@ class SupervisorDaemon:
         self._last_declared: list[dict] = []
         self._last_merge_diagnostics: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
         self._companion_controller = companion_controller
+        self._runtime_materializer = runtime_materializer
+        self._runtime_executor = runtime_executor
+        self._owns_runtime_executor = runtime_executor is None
         self._last_companion_desired: dict[str, tuple[str, Any | None]] = {}
         self._companion_resolutions: dict[str, Any] = {}
+        self._managed_runtime_authorities: dict[str, str] = {}
+        self._managed_runtime_results: dict[str, tuple[Any, ...]] = {}
+        self._managed_runtime_futures: dict[str, tuple[str, Future[Any]]] = {}
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
@@ -625,6 +640,7 @@ class SupervisorDaemon:
             if registration_override_ids(registration) & overridden:
                 desired.pop(rid, None)
         self._resolve_companion_desired(desired)
+        self._materialize_managed_runtime_desired(desired)
         self._deduplicated = merged.deduplicated
         self._conflicts = merged.conflicts
         return desired
@@ -696,6 +712,67 @@ class SupervisorDaemon:
         except (CompanionError, CompanionIndeterminate, OSError) as exc:
             log.warning("companion receipt reconciliation is incomplete: %s", exc)
         self._companion_resolutions = current
+
+    def _managed_runtime(self) -> Any:
+        if self._runtime_materializer is None:
+            from .managed_runtime import ManagedRuntimeMaterializer
+
+            self._runtime_materializer = ManagedRuntimeMaterializer()
+        return self._runtime_materializer
+
+    def _runtime_pool(self) -> Any:
+        if self._runtime_executor is None:
+            self._runtime_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="agent-dispatch-runtime",
+            )
+        return self._runtime_executor
+
+    def _harvest_managed_runtime_futures(self) -> None:
+        for rid, (authority, future) in list(self._managed_runtime_futures.items()):
+            if not future.done():
+                continue
+            self._managed_runtime_futures.pop(rid, None)
+            try:
+                result = tuple(future.result())
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                log.error("failed to materialize companion runtime %s: %s", rid, exc)
+                continue
+            self._managed_runtime_authorities[rid] = authority
+            self._managed_runtime_results[rid] = result
+
+    def _materialize_managed_runtime_desired(
+        self, desired: Mapping[str, dict]
+    ) -> None:
+        """Prepare declared runtime cells without changing companion launch state."""
+        self._harvest_managed_runtime_futures()
+        present = {
+            rid
+            for rid, registration in desired.items()
+            if registration.get("kind") == RegistrationKind.PLUGIN_COMPANION
+            and isinstance(registration.get("spec"), dict)
+            and registration["spec"].get("managed_runtime")
+        }
+        for rid in set(self._managed_runtime_authorities) - present:
+            self._managed_runtime_authorities.pop(rid, None)
+            self._managed_runtime_results.pop(rid, None)
+        for rid, (_authority, future) in list(self._managed_runtime_futures.items()):
+            if rid not in present and future.cancel():
+                self._managed_runtime_futures.pop(rid, None)
+        for rid in present:
+            registration = desired[rid]
+            authority = companion_authority_fingerprint(registration)
+            if self._managed_runtime_authorities.get(rid) == authority:
+                continue
+            pending = self._managed_runtime_futures.get(rid)
+            if pending is not None:
+                continue
+            future = self._runtime_pool().submit(
+                self._managed_runtime().materialize,
+                copy.deepcopy(registration),
+            )
+            self._managed_runtime_futures[rid] = (authority, future)
+        self._harvest_managed_runtime_futures()
 
     # -- unit lifecycle ------------------------------------------------------
 
@@ -949,6 +1026,8 @@ class SupervisorDaemon:
         """Wind down every running unit (best-effort)."""
         for rid in list(self._units):
             self._stop(rid)
+        if self._runtime_executor is not None and self._owns_runtime_executor:
+            self._runtime_executor.shutdown(wait=False, cancel_futures=True)
 
     def _reconnect(self) -> bool:
         """Rebuild the coordinator client by re-resolving its endpoint.
