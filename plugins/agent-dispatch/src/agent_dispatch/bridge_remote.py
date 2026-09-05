@@ -61,7 +61,7 @@ class LocalBridgeRemoteClient:
             or parsed.path not in {"", "/"}
         ):
             raise RemoteBridgeUnavailable(
-                "Agent Bridge explicit endpoint must be a loopback HTTP URL"
+                "Agent Bridge explicit endpoint must be a loopback HTTP or HTTPS URL"
             )
         normalized_host = host.rstrip(".").casefold()
         if normalized_host != "localhost":
@@ -71,7 +71,7 @@ class LocalBridgeRemoteClient:
                 is_loopback = False
             if not is_loopback:
                 raise RemoteBridgeUnavailable(
-                    "Agent Bridge explicit endpoint must be a loopback HTTP URL"
+                    "Agent Bridge explicit endpoint must be a loopback HTTP or HTTPS URL"
                 )
         return value.rstrip("/")
 

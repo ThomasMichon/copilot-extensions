@@ -137,7 +137,7 @@ def test_explicit_base_url_must_be_loopback_http(
     (tmp_path / "auth.yaml").write_text("token: secret", encoding="utf-8")
     monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", base_url)
 
-    with pytest.raises(RemoteBridgeUnavailable, match="loopback HTTP"):
+    with pytest.raises(RemoteBridgeUnavailable, match="loopback HTTP or HTTPS"):
         LocalBridgeRemoteClient(config_dir=tmp_path)._connection()
 
 
