@@ -3,14 +3,16 @@
 
 from __future__ import annotations
 
-import ctypes
-import json
-import os
-import re
-import shutil
-import subprocess
-import sys
-from pathlib import Path
+try:
+    import json
+    import os
+    import re
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+except (AssertionError, ImportError, RuntimeError):
+    raise SystemExit(0)
 
 
 AUTHORITY_SOURCE = "context-injection@copilot-extensions"
@@ -231,6 +233,10 @@ def _directory_authority(
 
 def _windows_argv(command_line: str) -> tuple[str, ...] | None:
     if os.name != "nt":
+        return None
+    try:
+        import ctypes
+    except ImportError:
         return None
     argument_count = ctypes.c_int()
     parser = ctypes.windll.shell32.CommandLineToArgvW

@@ -126,15 +126,6 @@ a standalone plan document. GitHub issues remain the discrete tracking and
 coordination tokens; the effort connects those issues to phased implementation,
 participants, validation, and an append-only journal.
 
-<!-- efforts:static-fallback:start -->
-**Fallback policy `[owner: efforts@0.1.0-dev17]`:** This repository requires
-efforts for substantial multi-step work. Create or resume the canonical effort
-with `planning-efforts`; the rightful head must not declare the worktree complete
-until the effort is explicitly Done and every Plan and Validation Plan item is
-resolved or transferred to a named tracked objective. A completed phase, PR,
-handoff, or session is not completion.
-<!-- efforts:static-fallback:end -->
-
 ### Architecture patterns — how we build it
 
 Between the vision (*what should be*) and the code (*what is*) sits the

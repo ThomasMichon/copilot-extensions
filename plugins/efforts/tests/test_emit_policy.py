@@ -15,6 +15,8 @@ BASH_PRODUCER = PLUGIN / "scripts" / "emit-policy.sh"
 POWERSHELL_PRODUCER = PLUGIN / "scripts" / "emit-policy.ps1"
 PLUGIN_MANIFEST = PLUGIN / "plugin.json"
 SETUP_SKILL = PLUGIN / "skills" / "efforts-setup" / "SKILL.md"
+PROJECTION_DECLARATION = PLUGIN / "instruction-projections.json"
+PROJECTION_TEMPLATE = PLUGIN / "instructions" / "completion-gate.instructions.md"
 PLANNING_SKILL = PLUGIN / "skills" / "planning-efforts" / "SKILL.md"
 PLANNING_REFERENCE = (
     PLUGIN / "skills" / "planning-efforts" / "references" / "efforts.md"
@@ -22,6 +24,13 @@ PLANNING_REFERENCE = (
 README = PLUGIN / "README.md"
 ROOT = PLUGIN.parents[1]
 ROOT_INSTRUCTIONS = ROOT / "AGENTS.md"
+ROOT_PROJECTION = (
+    ROOT
+    / ".github"
+    / "instructions"
+    / "efforts"
+    / "completion-gate.instructions.md"
+)
 WORKING_CROSS_REPO = (
     ROOT / "plugins" / "agent-worktrees" / "skills" / "working-cross-repo" / "SKILL.md"
 )
@@ -546,6 +555,7 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(
         b'{"cwd":"/path/to/repo"}\x00',
         b'{"cwd":"/path/to/repo"}\xff',
     ],
+    ids=lambda payload: f"{type(payload).__name__}-{len(payload)}",
 )
 def test_malformed_payload_fails_open_once(
     tmp_path: Path,
@@ -728,21 +738,30 @@ def test_powershell_parity_lane_is_explicit() -> None:
         pytest.skip("PowerShell unavailable; live producer parity unverified")
 
 
-def test_setup_contract_matches_manifest_and_defers_hook_registration() -> None:
+def test_setup_contract_projects_fallback_and_defers_hook_registration() -> None:
     version = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))["version"]
     setup = SETUP_SKILL.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
     root_instructions = ROOT_INSTRUCTIONS.read_text(encoding="utf-8")
+    root_projection = ROOT_PROJECTION.read_text(encoding="utf-8")
+    template = PROJECTION_TEMPLATE.read_text(encoding="utf-8")
+    declaration = json.loads(PROJECTION_DECLARATION.read_text(encoding="utf-8"))
     manifest = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
-    assert f"[owner: efforts@{version}]" in setup
+    assert f"[owner: efforts@{version}]" in template
     assert '{"version": 1, "enforcement": "required"}' in setup
-    assert setup.count("<!-- efforts:static-fallback:start -->") == 1
-    assert setup.count("<!-- efforts:static-fallback:end -->") == 1
-    assert "not declare the worktree complete" in setup
+    assert "manage-instruction-projections.py" in setup
+    assert "instruction-projections.json" in setup
+    assert "hand-copying the template" in setup
+    assert declaration["schema"] == "copilot-extensions.instruction-projections"
+    assert declaration["version"] == 1
+    assert declaration["projections"][0]["legacyMarkers"] == [
+        "efforts:static-fallback"
+    ]
     assert "issue #1234" in setup
-    assert root_instructions.count("<!-- efforts:static-fallback:start -->") == 1
-    assert root_instructions.count("<!-- efforts:static-fallback:end -->") == 1
-    assert f"[owner: efforts@{version}]" in root_instructions
+    assert "efforts:static-fallback:start" not in root_instructions
+    assert "efforts:static-fallback:end" not in root_instructions
+    assert f"[owner: efforts@{version}]" in root_projection
+    assert "copilot-extension-instruction-projection" in root_projection
     assert "hooks" not in manifest
     assert "#1234" in readme
 

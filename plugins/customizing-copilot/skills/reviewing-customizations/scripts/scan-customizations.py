@@ -32,6 +32,10 @@ Checks (all stdlib, no dependencies):
                             are classified by declared aggregation role; unsafe
                             multi-output stacks and order-dependent aggregate
                             authorities are rejected statically.
+  9. static projections  -- validate deterministic provenance-marked fallback
+                            instructions and their lock offline; with
+                            `--from-settings`, compare enabled plugin declarations
+                            and report source updates or migration work.
 
 Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
@@ -67,6 +71,11 @@ import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+import instruction_projections
 
 BLOCKING = "blocking"
 WARNING = "warning"
@@ -416,6 +425,8 @@ def _merged_settings(
     home: Path | None = None,
     *,
     require_trust: bool = False,
+    include_user: bool = True,
+    include_local: bool = True,
 ) -> tuple[dict[str, bool], dict[str, tuple[dict, Path]]]:
     """Merge the settings that decide a repo's *loaded* plugin set.
 
@@ -426,19 +437,27 @@ def _merged_settings(
     booleans use last-layer-wins semantics, including explicit ``false``.
     """
     selected_home = home or Path.home()
-    layers = [(selected_home / ".copilot" / "settings.json", selected_home)]
+    layers = (
+        [(selected_home / ".copilot" / "settings.json", selected_home)]
+        if include_user
+        else []
+    )
     if not require_trust or _repo_is_trusted(repo_root, selected_home):
-        layers.extend(
-            (
-                (repo_root / ".claude" / "settings.json", repo_root),
-                (repo_root / ".claude" / "settings.local.json", repo_root),
-                (repo_root / ".github" / "copilot" / "settings.json", repo_root),
+        layers.append((repo_root / ".claude" / "settings.json", repo_root))
+        if include_local:
+            layers.append(
+                (repo_root / ".claude" / "settings.local.json", repo_root)
+            )
+        layers.append(
+            (repo_root / ".github" / "copilot" / "settings.json", repo_root)
+        )
+        if include_local:
+            layers.append(
                 (
                     repo_root / ".github" / "copilot" / "settings.local.json",
                     repo_root,
-                ),
+                )
             )
-        )
     enabled: dict[str, bool] = {}
     marketplaces: dict[str, tuple[dict, Path]] = {}
     for p, base in layers:                 # later layers win (repo over user)
@@ -613,6 +632,8 @@ def assemble_enabled_plugins(
     *,
     home: Path | None = None,
     require_trust: bool = False,
+    include_user: bool = True,
+    include_local: bool = True,
 ) -> list[PluginSource]:
     """Assemble the plugin set *actually loaded for this repo* into review scope.
 
@@ -632,6 +653,8 @@ def assemble_enabled_plugins(
         repo_root,
         home,
         require_trust=require_trust,
+        include_user=include_user,
+        include_local=include_local,
     )
     out: list[PluginSource] = []
     for key in sorted(enabled):
@@ -680,6 +703,7 @@ def assemble_enabled_plugins(
 @dataclass
 class Report:
     findings: list[Finding] = field(default_factory=list)
+    instruction_projections: dict | None = None
 
     def add(self, severity: str, check: str, path: Path | str, message: str) -> None:
         self.findings.append(Finding(severity, check, str(path), message))
@@ -1826,11 +1850,36 @@ def run(
     root: Path,
     plugin_sources: list[PluginSource] | None = None,
     owned_agent_roots: tuple[Path, ...] = (),
+    *,
+    projection_sources: list[PluginSource] | None | object = ...,
+    projection_root: Path | None = None,
+    projection_settings_error: str | None = None,
 ) -> Report:
     report = Report()
     scan_skills(root, report, plugin_sources)
     scan_agents(root, report, plugin_sources, owned_agent_roots)
     scan_text_files(root, report, plugin_sources)
+    selected_projection_sources = (
+        plugin_sources if projection_sources is ... else projection_sources
+    )
+    projection_result = instruction_projections.scan_repository(
+        projection_root or root, selected_projection_sources
+    )
+    if projection_settings_error is not None:
+        projection_result.add(
+            BLOCKING,
+            "projection-settings",
+            projection_root or root,
+            projection_settings_error,
+        )
+    for finding in projection_result.findings:
+        report.add(
+            finding.severity,
+            finding.check,
+            finding.path,
+            finding.message,
+        )
+    report.instruction_projections = projection_result.to_dict()
     return report
 
 
@@ -2282,10 +2331,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    root = Path(args.root).resolve()
-    if not root.is_dir():
-        print(f"error: {root} is not a directory", file=sys.stderr)
+    input_root = Path(args.root).expanduser()
+    if not input_root.is_dir():
+        print(f"error: {input_root} is not a directory", file=sys.stderr)
         return 2
+    root = input_root.resolve()
     try:
         owned_agent_roots = resolve_owned_agent_roots(
             root, args.owned_agent_root,
@@ -2296,11 +2346,25 @@ def main(argv: list[str] | None = None) -> int:
 
     sources: list[PluginSource] = []
     enabled_settings: dict[str, bool] = {}
+    projection_settings_error = None
     if args.from_settings:
         enabled_settings, _marketplaces = _merged_settings(
             root, require_trust=True,
         )
         sources += assemble_enabled_plugins(root, require_trust=True)
+        try:
+            instruction_projections.validate_committed_settings(root)
+            repository_projection_sources = assemble_enabled_plugins(
+                root,
+                require_trust=False,
+                include_user=False,
+                include_local=False,
+            )
+        except ValueError as exc:
+            repository_projection_sources = []
+            projection_settings_error = str(exc)
+    else:
+        repository_projection_sources = None
 
     plugin_dirs = list(args.include_plugins)
     if args.include_installed:
@@ -2313,7 +2377,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"warning: --include-plugins {p} is not a directory (skipped)",
                   file=sys.stderr)
 
-    report = run(root, sources, owned_agent_roots)
+    report = run(
+        root,
+        sources,
+        owned_agent_roots,
+        projection_sources=repository_projection_sources,
+        projection_root=input_root,
+        projection_settings_error=projection_settings_error,
+    )
     if args.from_settings:
         scan_installed_mcp_bridge_collisions(
             Path.home() / ".copilot" / "installed-plugins",
@@ -2344,6 +2415,8 @@ def main(argv: list[str] | None = None) -> int:
         }
         if session_context is not None:
             payload["session_context"] = session_context
+        if report.instruction_projections is not None:
+            payload["instruction_projections"] = report.instruction_projections
         if budget is not None:
             payload["context_budget"] = budget
         print(json.dumps(payload, indent=2))
