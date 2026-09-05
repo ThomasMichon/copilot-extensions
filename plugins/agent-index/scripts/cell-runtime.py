@@ -1694,6 +1694,8 @@ def _transaction_artifact_paths(plugin_root: Path) -> tuple[Path, ...]:
         service_launcher,
         command_launcher,
         plugin_root / "run" / "service-identity.json",
+        plugin_root / "run" / "endpoint.json",
+        plugin_root / "running-version.json",
     )
 
 

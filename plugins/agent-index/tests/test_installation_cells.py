@@ -1067,9 +1067,7 @@ def test_governance_block_during_passive_prepare_restores_selection_untouched(
         "example--1234",
     ) == prior_manifest
     assert [path.read_bytes() for path in artifact_paths] == [
-        b"prior-0",
-        b"prior-1",
-        b"prior-2",
+        f"prior-{index}".encode() for index in range(len(artifact_paths))
     ]
     assert published == []
     assert stopped == []
@@ -1080,6 +1078,203 @@ def test_governance_block_during_passive_prepare_restores_selection_untouched(
         (plugin_root / CELL.TRANSACTION_RECEIPT_FILE).read_text(encoding="utf-8")
     )
     assert receipt["outcome"] == "governance-blocked-before-commit"
+
+
+def test_governance_block_after_committed_crash_restores_prior_service_evidence(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    validated, plugin_root, context, _target, prior_manifest, transaction = (
+        _selection_fixture(
+            tmp_path,
+            prior_version="1.0.0",
+            target_version="2.0.0",
+        )
+    )
+    installation_id = "example--1234/agent-index"
+    prior_record = {
+        "schema": CELL.INSTANCE_SCHEMA,
+        "version": 1,
+        "installationId": installation_id,
+        "runtimeVersion": "1.0.0",
+        "pid": 101,
+        "instanceToken": "prior-token",
+        "host": "127.0.0.1",
+        "port": 4101,
+        "state": "active",
+        "transactionId": None,
+    }
+    target_record = {
+        "schema": CELL.INSTANCE_SCHEMA,
+        "version": 1,
+        "installationId": installation_id,
+        "runtimeVersion": "2.0.0",
+        "pid": 202,
+        "instanceToken": "target-token",
+        "host": "127.0.0.1",
+        "port": 4202,
+        "state": "active",
+        "transactionId": transaction["id"],
+    }
+    transaction["prior"]["instances"] = [prior_record]
+    transaction["prior"]["activeService"] = {
+        **prior_record,
+        "draining": False,
+    }
+    run_root = Path(validated["runRoot"])
+    instances = run_root / "instances"
+    instances.mkdir(parents=True)
+    CELL._atomic_json(instances / "101.json", prior_record)
+    CELL._atomic_json(instances / "202.json", target_record)
+    endpoint = run_root / "endpoint.json"
+    running = plugin_root / "running-version.json"
+    CELL._atomic_json(
+        endpoint,
+        {
+            "schema": 1,
+            "transport": "tcp",
+            "endpoint": "127.0.0.1:4101",
+            "pid": 101,
+            "started_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    CELL._atomic_json(
+        running,
+        {
+            "version": "1.0.0",
+            "pid": 101,
+            "started_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    transaction["prior"]["artifacts"] = CELL._capture_transaction_artifacts(
+        plugin_root
+    )
+    CELL._atomic_json(plugin_root / CELL.TRANSACTION_FILE, transaction)
+    (plugin_root / "current-version").write_text("2.0.0\n", encoding="utf-8")
+    (plugin_root / "last-known-good").write_text("2.0.0\n", encoding="utf-8")
+    CELL._atomic_json(
+        plugin_root / "deploy-manifest.json",
+        transaction["target"]["manifest"],
+    )
+    CELL._atomic_json(
+        endpoint,
+        {
+            "schema": 1,
+            "transport": "tcp",
+            "endpoint": "127.0.0.1:4202",
+            "pid": 202,
+            "started_at": "2026-01-02T00:00:00Z",
+        },
+    )
+    CELL._atomic_json(
+        running,
+        {
+            "version": "2.0.0",
+            "pid": 202,
+            "started_at": "2026-01-02T00:00:00Z",
+        },
+    )
+    from zdd import routing
+
+    routing.publish_active(
+        run_root / "zdd",
+        bind="127.0.0.1",
+        port=4101,
+        pid=101,
+        version="1.0.0",
+    )
+    routing.publish_active(
+        run_root / "zdd",
+        bind="127.0.0.1",
+        port=4202,
+        pid=202,
+        version="2.0.0",
+        demote_existing=True,
+    )
+    live = {101, 202}
+    draining = {101}
+    stopped: list[int] = []
+    _patch_selection_runtime(
+        monkeypatch,
+        plugin_root,
+        governance=[
+            (
+                False,
+                {
+                    "status": "deactivation-required",
+                    "reason": "deactivation-required",
+                    "actualMode": "namespaced",
+                },
+            )
+        ],
+    )
+
+    def status(port: int):
+        record = prior_record if port == 4101 else target_record
+        pid = int(record["pid"])
+        if pid not in live:
+            return None
+        return {
+            "status": "draining" if pid in draining else "ok",
+            "plugin": "agent-index",
+            "installationId": installation_id,
+            "version": record["runtimeVersion"],
+            "pid": pid,
+            "instanceToken": record["instanceToken"],
+            "promoted": True,
+        }
+
+    def undrain(active, _installation):
+        draining.discard(int(active["pid"]))
+        return {**active, "draining": False}
+
+    def shutdown(record, _installation):
+        pid = int(record["pid"])
+        stopped.append(pid)
+        live.discard(pid)
+        (instances / f"{pid}.json").unlink()
+        for path in (endpoint, running):
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if value.get("pid") == pid:
+                path.unlink()
+
+    monkeypatch.setattr(CELL, "_service_status", status)
+    monkeypatch.setattr(CELL, "_pid_alive", lambda pid: pid in live)
+    monkeypatch.setattr(CELL, "_undrain_owned_instance", undrain)
+    monkeypatch.setattr(CELL, "_shutdown_owned_instance", shutdown)
+
+    result = CELL._resume_selection_transaction(
+        PLUGIN,
+        context,
+        "example--1234",
+        tmp_path,
+        validated,
+        "lock-token",
+        transaction,
+    )
+
+    assert result["status"] == "governance-blocked"
+    assert CELL._marker_version(plugin_root) == "1.0.0"
+    assert CELL._load_manifest(
+        plugin_root / "deploy-manifest.json",
+        plugin_root,
+        context,
+        "example--1234",
+    ) == prior_manifest
+    assert stopped == [202]
+    assert live == {101}
+    assert draining == set()
+    assert json.loads(endpoint.read_text(encoding="utf-8"))["pid"] == 101
+    assert json.loads(running.read_text(encoding="utf-8")) == {
+        "version": "1.0.0",
+        "pid": 101,
+        "started_at": "2026-01-01T00:00:00Z",
+    }
+    table = routing.read_table(run_root / "zdd") or {}
+    assert table["active"]["pid"] == 101
+    assert "previous" not in table
+    assert (instances / "101.json").exists()
+    assert not (instances / "202.json").exists()
 
 
 def test_governance_block_before_marker_keeps_completed_target_inert(

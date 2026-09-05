@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -372,10 +373,14 @@ def clean_environment() -> dict[str, str]:
         "AGENT_INDEX_CELL_NO_START",
         "AGENT_INDEX_REBUILD_CURRENT",
         "AGENT_INDEX_TEST_CUTOVER_CRASH_PHASE",
+        "AGENT_INDEX_CONFIG_DATA_B64",
         "PYTHONPATH",
         "PYTHONHOME",
     ):
         environment.pop(name, None)
+    environment["AGENT_INDEX_CONFIG_DATA_B64"] = base64.b64encode(
+        json.dumps({"indexer": {"machine": "clean-room"}}).encode("utf-8")
+    ).decode("ascii")
     return environment
 
 
