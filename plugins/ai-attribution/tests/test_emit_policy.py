@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,18 @@ PROJECTION_DECLARATION = PLUGIN / "instruction-projections.json"
 PROJECTION_TEMPLATE = (
     PLUGIN / "instructions" / "publication-safety.instructions.md"
 )
+
+
+def test_authority_resolver_matches_canonical_copy() -> None:
+    canonical = (
+        PLUGIN.parent
+        / "context-injection"
+        / "scripts"
+        / "resolve_context_authority.py"
+    )
+    resolver = PLUGIN / "scripts" / "resolve_context_authority.py"
+
+    assert resolver.read_bytes() == canonical.read_bytes()
 
 
 def _powershell_command() -> str | None:
@@ -59,6 +72,11 @@ def _environment(home: Path, **extra: str) -> dict[str, str]:
     env.update(
         {
             "HOME": str(home),
+            "PATH": (
+                str(Path(sys.executable).parent)
+                + os.pathsep
+                + env.get("PATH", "")
+            ),
             "USERPROFILE": str(home),
             "XDG_CONFIG_HOME": str(home / "config"),
         }

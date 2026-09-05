@@ -826,6 +826,31 @@ def test_legacy_managed_region_is_actionable_but_not_deleted(
     assert (repo / "AGENTS.md").read_text(encoding="utf-8") == legacy
 
 
+def test_legacy_scan_prunes_dependency_and_build_trees(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    legacy = (
+        "<!-- policy:static-fallback:start -->\n"
+        "Vendored fallback.\n"
+        "<!-- policy:static-fallback:end -->\n"
+    )
+    for directory in ("node_modules", "vendor", "build", ".test-venvs"):
+        agents = repo / directory / "package" / "AGENTS.md"
+        agents.parent.mkdir(parents=True)
+        agents.write_text(legacy, encoding="utf-8")
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    result = projections.sync_repository(repo, [source])
+
+    assert result.blocking == 0
+    assert not any(
+        finding.check == "projection-legacy-region"
+        for finding in result.findings
+    )
+
+
 def test_existing_scanner_includes_projection_findings_and_inventory(
     tmp_path: Path,
 ) -> None:

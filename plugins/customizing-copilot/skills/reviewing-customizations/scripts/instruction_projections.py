@@ -95,6 +95,18 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"lpt{index}" for index in range(1, 10)),
 }
 _WINDOWS_INVALID_CHARS = frozenset('<>:"|?*')
+_LEGACY_SCAN_EXCLUDED_DIRS = {
+    ".git",
+    ".test-venvs",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "vendor",
+    "vendors",
+}
 
 
 @dataclass(frozen=True)
@@ -1106,7 +1118,19 @@ def _scan_legacy_regions(
     }
     if not marker_owners:
         return
-    candidates = list(repo_root.glob("**/AGENTS.md"))
+    candidates: list[Path] = []
+    for current, directories, filenames in os.walk(
+        repo_root, topdown=True, followlinks=False
+    ):
+        current_path = Path(current)
+        directories[:] = [
+            directory
+            for directory in directories
+            if directory.casefold() not in _LEGACY_SCAN_EXCLUDED_DIRS
+            and not _is_indirection(current_path / directory)
+        ]
+        if "AGENTS.md" in filenames:
+            candidates.append(current_path / "AGENTS.md")
     candidates.append(repo_root / ".github" / "copilot-instructions.md")
     for path in sorted(set(candidates)):
         if not path.is_file():
@@ -1116,8 +1140,6 @@ def _scan_legacy_regions(
                 repo_root.resolve(strict=True)
             )
         except (OSError, ValueError):
-            continue
-        if any(part in {".git", "node_modules", ".venv", "dist", "build"} for part in relative.parts):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for marker, destination in sorted(marker_owners.items()):
