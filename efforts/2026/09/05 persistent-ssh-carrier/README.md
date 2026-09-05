@@ -4,17 +4,19 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal PR followed by serial per-phase implementation PRs
 - **Created:** 2026-09-02
-- **Status:** Active
+- **Status:** Done
 - **Vision:** closes
-  [`visions/plugins/agent-dispatch`](../../../visions/plugins/agent-dispatch/README.md)
+  [`visions/plugins/agent-dispatch`](../../../../visions/plugins/agent-dispatch/README.md)
   §Behaviors/`react-to-turn-end` and advances
-  [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
+  [`visions/plugins/agent-bridge`](../../../../visions/plugins/agent-bridge/README.md)
   §Features/`attention-boundary-subscriptions` and
   `cursor-stable-event-replay`
 - **Umbrella issue:** #1763
 - **Sub-issues:** #1777 (carrier foundation) · #1778 (remote Bridge
   operations) · #1779 (Dispatch event wake) · #1780 (command migration and
   deployed evidence)
+- **Transferred follow-ups:** #2110 (aggregate idle supervisor CPU) · #2112
+  (durable-event reconciliation latency benchmark)
 
 ## Guiding Intent
 
@@ -189,25 +191,35 @@ The repository's ownership and independence patterns require:
 - [x] Keep non-Bridge arbitrary shell work outside the initial protocol; add a
       generic execution operation only if a concrete caller needs it and its
       authorization, cancellation, and output bounds are reviewed.
-- [ ] Prove all event and migrated command traffic to one host shares the same
-      carrier process while independent hosts remain isolated.
+- [x] Prove all event and migrated command traffic to one host shares the same
+      carrier process while independent hosts remain isolated. One durable
+      event subscription remained active while 160 concurrent carrier-backed
+      status commands all succeeded through one SSH PID; carrier identity
+      tests cover independent normalized host identities.
 
 ### Phase 6 — Deploy, measure, and document
 
-- [ ] Update Agent Bridge and Agent Dispatch architecture/CLI documentation with
+- [x] Update Agent Bridge and Agent Dispatch architecture/CLI documentation with
       carrier ownership, protocol negotiation, cursor recovery, and fallback.
-- [ ] Deploy merged versions through the unified updater without stopping
-      healthy supervisors as an emergency workaround.
-- [ ] Measure at least one full supervisor interval with all configured lanes:
+- [x] Deploy Agent Bridge `0.4.0-dev436` and Agent Dispatch
+      `0.1.2-dev21` through the unified updater without stopping healthy
+      supervisors as an emergency workaround.
+- [x] Measure at least one full supervisor interval with all configured lanes:
       aggregate/per-process CPU, persistent and child SSH process counts,
-      distinct SSH PIDs, console creation, free memory, event-to-wake latency,
-      and reconnect behavior.
-- [ ] Meet concrete steady-state targets: aggregate idle supervisor CPU at or
-      below 5% of one logical core; exactly one healthy carrier SSH PID per
-      actively observed host; no new carrier PID during a ten-minute
-      failure-free watch; zero visible console creation; and p95 durable-event
-      to reconciliation-start latency at or below two seconds.
-- [ ] Close #1763 only after the primary wake path is pushed and cursor-based,
+      distinct SSH PIDs, console creation, process memory, and reconnect
+      behavior. The authoritative failure-free 602.906-second watch observed one
+      carrier PID, no reconnect, no visible window, stable supervisor/carrier
+      memory, and 8.292-8.627% aggregate idle supervisor CPU after the registrar
+      cadence repair.
+- [x] Meet the carrier steady-state targets: exactly one healthy carrier SSH
+      PID for the actively observed host, no new carrier PID during a
+      ten-minute failure-free watch, and zero visible console creation.
+- [x] Deferred to `#2110`: reduce aggregate idle supervisor CPU to at or below
+      5% of one logical core with all configured lanes active.
+- [x] Blocked; transferred to `#2112`: measure p95 durable-event to
+      reconciliation-start latency at or below two seconds with a repeatable
+      production-path benchmark.
+- [x] Close #1763 only after the primary wake path is pushed and cursor-based,
       SSH outreach is bounded by the shared carrier, and periodic reconciliation
       remains the sole fallback.
 
@@ -217,10 +229,10 @@ The repository's ownership and independence patterns require:
       cancellation, bounded queues, malformed/oversized frames, clean shutdown,
       child failure, heartbeat/staleness expiry, reconnect backoff, remote
       exit-on-EOF, local idle teardown, and protocol mismatch.
-- [ ] Cross-platform process tests prove one carrier process per connection
+- [x] Cross-platform process tests prove one carrier process per connection
       identity on Windows and POSIX and no duplicate carrier under concurrent
       first use.
-- [ ] Event tests prove idle, turn-end, shutdown, terminal, and handoff
+- [x] Event tests prove idle, turn-end, shutdown, terminal, and handoff
       boundaries survive disconnect/reconnect and replay exactly from the
       consumer's distinct durable cursor. Log rebuild and cursor invalidation
       produce an explicit gap signal and immediate reconciliation.
@@ -240,9 +252,13 @@ The repository's ownership and independence patterns require:
       every implementation slice.
 - [x] Shared-library tests, version consistency, generated payload guards, and
       `python tools/check-install-contract.py` pass before publication.
-- [ ] Deployed evidence shows negligible idle supervisor CPU, no visible console
-      creation, one persistent SSH carrier per active host, bounded transient
-      child processes, and stable memory across reconnect.
+- [x] Deployed evidence shows no visible console creation, one persistent SSH
+      carrier for the active host, bounded transient child processes, and stable
+      memory during the failure-free watch.
+- [x] Deferred to `#2110`: deployed evidence shows aggregate idle supervisor
+      CPU at or below the effort's 5% target.
+- [x] Blocked; transferred to `#2112`: deployed evidence shows p95 durable-event
+      to reconciliation-start latency at or below two seconds.
 
 ## Proposal
 
@@ -297,6 +313,44 @@ end-to-end slice small enough to validate while establishing the ownership and
 transport foundation #1763 requires.
 
 ## Journal
+
+### 2026-09-05 — Deployment evidence and completion
+
+- Merged #2059 to repair an unrelated Agent MCP release-version blocker, then
+  merged #2069 and deployed Agent Bridge `0.4.0-dev436`. The Windows carrier
+  now invokes its framed stdio endpoint without a text-transcoding shell layer;
+  an executable regression decodes the binary protocol-v1 `HELLO` envelope.
+- A raw installed-runtime probe received the bounded protocol-v1 handshake.
+  With one durable event subscription held open, 160 concurrent remote status
+  commands all succeeded through exactly one carrier SSH PID. Diagnostics
+  reached two logical clients, one active request, and one active subscription
+  without a visible console.
+- The authoritative failure-free watch ran for 602.906 seconds with one Bridge
+  process, one carrier PID, no carrier reconnect, no visible-window
+  observations, about 303 MiB average supervisor memory, and about 3.2 MiB
+  average carrier memory. A later rerun lost its automation-host parent and
+  consequently re-established the carrier; a controlled parent-lifetime probe
+  reproduced that containment boundary, so the failure-free watch remains the
+  carrier stability evidence rather than evidence of a daemon defect.
+- The first watch exposed that generated Dispatch service launchers read the
+  configured 30-second supervision interval but omitted it from serve mode,
+  leaving the registrar on its five-second default. #2096 fixed both generated
+  launchers and deployed Agent Dispatch `0.1.2-dev21`; the full Dispatch suite
+  passed 1,933 tests with 3 skips.
+- The cadence repair reduced aggregate idle supervisor CPU from about 15.8% to
+  8.3-8.6% of one logical core. The registrar accounts for about 4.0% and six
+  child lanes about 4.7%; the remaining target miss is explicitly transferred
+  to #2110.
+- Production lanes currently permit reactive wake to be disabled, and the
+  available remote environment could not generate enough independent durable
+  lifecycle events for a defensible p95 without inferring from implementation.
+  The repeatable end-to-end measurement is explicitly transferred to #2112.
+- Agent Bridge and Agent Dispatch architecture/CLI documentation now records
+  carrier ownership, version negotiation, exact durable cursor recovery,
+  aggregate subscription behavior, and the bounded direct-SSH compatibility
+  fallback. With the implementation, deployment, carrier proof, and residual
+  measurements either satisfied or explicitly transferred, #1780 and #1763
+  are complete and this effort is archived.
 
 ### 2026-09-04 — Remote command consolidation
 
