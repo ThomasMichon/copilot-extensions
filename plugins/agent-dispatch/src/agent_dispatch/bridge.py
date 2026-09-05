@@ -29,6 +29,20 @@ class BridgeUnavailable(RuntimeError):
     """Raised when the agent-bridge CLI is not available on this host."""
 
 
+class BridgeCarriedSessionBusy(BridgeUnavailable):
+    """Raised when a carried session (same exclusive key, prior attempt) is
+    confirmed still live/busy -- not gone -- and declines a resume.
+
+    This is a **legitimate deferral**, not a spawn failure: the prior body is
+    genuinely still doing work. Callers must not treat it like an ordinary
+    :class:`BridgeUnavailable` (which the supervisor fails the reservation
+    for, burning a dead-letter-counted attempt); they should instead defer the
+    reservation (see :meth:`agent_dispatch.queue.TaskQueue.defer_spawn`) so a
+    fresh attempt re-checks liveness next cycle without being counted as a
+    failure.
+    """
+
+
 def _agent_bridge_launch_prefix() -> list[str] | None:
     """Resolve an argv prefix that runs the ``agent-bridge`` CLI **without**
     routing through a Windows ``.cmd``/``.bat`` shim.
@@ -192,7 +206,7 @@ def spawn_or_resume_worker(
                 stderr="",
             )
         if verdict != "gone":
-            raise BridgeUnavailable(
+            raise BridgeCarriedSessionBusy(
                 f"carried session remains live and cannot accept work: "
                 f"{prior_session_id}"
             )

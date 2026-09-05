@@ -111,6 +111,23 @@ def test_fail_releases_for_a_fresh_attempt(q):
     assert r2.attempt == 2
 
 
+def test_defer_releases_for_a_fresh_attempt_without_counting_as_failed(q):
+    """Deferring (a carried session confirmed live/busy, #2056) releases the
+    task for a fresh attempt exactly like `fail_spawn`, but the reservation
+    lands `deferred`, not `failed` -- so it is invisible to any dead-letter
+    count keyed on FAILED."""
+    t = q.create("work")
+    r1, _ = q.reserve_spawn(t.id)
+    deferred = q.defer_spawn(r1.key, detail="carried session remains live")
+    assert deferred.state == SpawnState.DEFERRED
+    assert deferred.detail == "carried session remains live"
+
+    r2, ok = q.reserve_spawn(t.id)
+    assert ok is True
+    assert r2.attempt == 2
+    assert q.list_reservations(task_id=t.id, state=SpawnState.FAILED) == []
+
+
 def test_bad_transitions_raise(q):
     t = q.create("work")
     r1, _ = q.reserve_spawn(t.id)
@@ -118,6 +135,9 @@ def test_bad_transitions_raise(q):
     # settled is terminal -- cannot fail it again
     with pytest.raises(TaskError):
         q.fail_spawn(r1.key)
+    # nor deferred
+    with pytest.raises(TaskError):
+        q.defer_spawn(r1.key)
     # unknown key
     with pytest.raises(TaskError):
         q.record_spawn("dispatch-task:nope:1")
@@ -642,6 +662,27 @@ def test_http_bad_transition_409(api):
     assert r.status_code == 409
 
 
+def test_http_defer(api):
+    """The `/defer` route mirrors `/fail`'s shape but lands `deferred`, not
+    `failed` -- a carried session confirmed live/busy (#2056) is a legitimate
+    deferral, not a spawn failure."""
+    task_id = _create_task(api)
+    key = api.post("/spawn-reservations", json={"task_id": task_id}).json()["reservation"]["key"]
+    r = api.post(
+        f"/spawn-reservations/{key}/defer", json={"detail": "carried session busy"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "deferred"
+    assert body["detail"] == "carried session busy"
+
+    # deferred is terminal too -- cannot defer (or fail) it again
+    r2 = api.post(f"/spawn-reservations/{key}/defer", json={})
+    assert r2.status_code == 409
+    r3 = api.post(f"/spawn-reservations/{key}/fail", json={})
+    assert r3.status_code == 409
+
+
 def test_http_record_missing_404(api):
     r = api.post("/spawn-reservations/dispatch-task:nope:1/spawned", json={})
     assert r.status_code == 404
@@ -749,6 +790,11 @@ class _QueueBackedClient:
         from dataclasses import asdict
 
         return asdict(self._q.fail_spawn(key, detail=detail))
+
+    def defer_spawn(self, key, *, detail=None):
+        from dataclasses import asdict
+
+        return asdict(self._q.defer_spawn(key, detail=detail))
 
     def request_spawn_release(
         self, key, *, detail=None, disposition="failed"
