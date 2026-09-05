@@ -2,6 +2,20 @@
 
 **Serves:** Vision harness-guidance.
 
+> **Status update (2026-09-05): known-fragile, not the primary delivery
+> channel.** Real-world and clean-room testing found `sessionStart`
+> `additionalContext` composition across multiple hooks unreliable -- observed
+> sessions where **no** contributor's `additionalContext` reached the model at
+> all, beyond the previously tracked last-writer-wins defect
+> ([github/copilot-cli#3589](https://github.com/github/copilot-cli/issues/3589)).
+> **Use [`session-scoped-dynamic-guidance.md`](session-scoped-dynamic-guidance.md)
+> as the primary delivery path for guidance a harness depends on.** This
+> document's aggregation engine remains a documented, tested mechanism and its
+> static-fail-safe-projection section (below) is still current and reused by
+> that pattern, but its `additionalContext` composition machinery is now
+> best-effort/supplementary only until an upstream Copilot CLI fix lands and
+> reaches the supported version floor.
+
 ## Problem
 
 An agent needs ambient policy throughout a session, but the policy can be owned
@@ -350,6 +364,8 @@ plugin's full policy.
 
 ## See Also
 
+- **[`session-scoped-dynamic-guidance.md`](session-scoped-dynamic-guidance.md)
+  -- the primary delivery pattern for guidance a harness depends on.**
 - Vision: `visions/harness-guidance/README.md`
 - Harness adoption: `docs/harness-runbook.md`
 - Hook authoring: `plugins/customizing-copilot/skills/authoring-skills/SKILL.md`

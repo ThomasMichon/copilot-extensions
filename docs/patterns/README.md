@@ -268,6 +268,20 @@ core of the principles above; a reviewer checks a change against these.
   §Features/self-auditing-drop-in-composition* and
   §Behaviors/stale-drop-ins-are-inert-and-legible*; see
   [`drop-in-registry-hygiene.md`](drop-in-registry-hygiene.md).)
+- **Depended-on guidance never relies solely on `sessionStart`
+  `additionalContext` composition.** Multi-hook `additionalContext` aggregation
+  is empirically unreliable -- sessions have been observed where no
+  contributor's output reached the model at all, not just a last-writer-wins
+  loss. Guidance a harness genuinely depends on must be delivered through a
+  checked-in static pointer projection plus a `sessionStart` hook side effect
+  that writes session-scoped content to
+  `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`,
+  which the pointer instructs the agent to read. An `additionalContext`
+  contribution may still be attempted as a redundant best-effort supplement,
+  but every dependent path must work correctly with it entirely absent. (Serves
+  *Vision harness-guidance §Features/concise-context-kernel*,
+  *§Behaviors/ambient-delivery-fails-open*; see
+  [`session-scoped-dynamic-guidance.md`](session-scoped-dynamic-guidance.md).)
 
 ## Patterns
 
@@ -277,7 +291,8 @@ the exemplars, and the vision it serves):
 | Pattern | Concern |
 |---------|---------|
 | [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
-| [context-injection](context-injection.md) | How repositories, plugins, skills, and operator policy retain clear ownership while plugin-owned ambient guidance is injected as a concise, gated `sessionStart` context kernel with fail-open behavior, static safety fallback, cross-platform parity, and non-executing budget inventory |
+| [context-injection](context-injection.md) | How repositories, plugins, skills, and operator policy retain clear ownership while plugin-owned ambient guidance is injected as a concise, gated `sessionStart` context kernel with fail-open behavior, static safety fallback, cross-platform parity, and non-executing budget inventory. **Known-fragile as a primary channel** -- see the next pattern. |
+| [session-scoped-dynamic-guidance](session-scoped-dynamic-guidance.md) | The primary delivery path for guidance a harness depends on: a checked-in static pointer projection plus a `sessionStart` hook side effect that writes per-session dynamic content to `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`, avoiding unreliable `additionalContext` aggregation entirely |
 | [context-handoff-lifecycle](context-handoff-lifecycle.md) | How a stored continuation becomes a successor-owned session without losing prompt fidelity, moving the head early, trusting a reused PID, depending on effort/knowledge state, or crossing an ambient/lossy command boundary |
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
