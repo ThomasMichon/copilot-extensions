@@ -210,8 +210,10 @@ def test_shipped_index_declaration_preserves_version_and_source_authority(index_
         ],
     }
     assert declaration["kind"] == "plugin-companion"
+    assert declaration["transition_group"] == "agent-index-host-runtime"
     assert declaration["spec"]["managed_runtime"] == managed
     assert h.registration["spec"] == declaration["spec"]
+    assert h.registration["transition_group"] == declaration["transition_group"]
     assert h.registration["owner"] == SOURCE
     assert h.registration["source"] == "declared"
     assert h.registration["plugin"] == {
@@ -226,6 +228,7 @@ def test_shipped_index_declaration_preserves_version_and_source_authority(index_
         "plugin_source_path": str(DECLARATION.resolve()),
         "plugin_version": version,
         "activation_scopes": list(SCOPES),
+        "transition_group": "agent-index-host-runtime",
         "managed_runtime": managed,
     }
     assert h.builder.calls == h.processes == h.provider_requests == []
