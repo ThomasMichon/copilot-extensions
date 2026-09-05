@@ -52,6 +52,40 @@ def _hooks(event: str) -> list[dict[str, object]]:
     return hooks["hooks"][event]
 
 
+def test_session_guidance_projection_points_to_hook_written_file():
+    projections = json.loads(
+        (_PLUGIN / "instruction-projections.json").read_text(encoding="utf-8")
+    )
+    assert projections == {
+        "schema": "copilot-extensions.instruction-projections",
+        "version": 1,
+        "projections": [
+            {
+                "id": "session-guidance",
+                "template": "instructions/session-guidance.instructions.md",
+                "destination": (
+                    ".github/instructions/agent-worktrees/"
+                    "session-guidance.instructions.md"
+                ),
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+            }
+        ],
+    }
+    template = (
+        _PLUGIN / "instructions" / "session-guidance.instructions.md"
+    ).read_text(encoding="utf-8")
+    assert "applyTo: \"**\"" in template
+    assert "COPILOT_AGENT_SESSION_ID" in template
+    assert "~/.copilot/session-state" not in template
+    assert (
+        "instructions/agent-worktrees/session-guidance.instructions.md"
+        in template
+    )
+    assert "its absence is not an error" in template
+
+
 def _run(command: str, shell: str, home: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     for key in (

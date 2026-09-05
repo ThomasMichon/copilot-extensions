@@ -1,0 +1,14 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "session-guidance",
+      "template": "instructions/session-guidance.instructions.md",
+      "destination": ".github/instructions/agent-worktrees/session-guidance.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    }
+  ]
+}

@@ -13,12 +13,15 @@ import hashlib
 import json
 import math
 import os
+import re
 import signal
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from functools import cache
 from pathlib import Path
@@ -28,6 +31,12 @@ _SESSION_START_TIMEOUT_S = 12.0
 _SESSION_START_DECISION_S = 10.0
 _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
+_SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
+_SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
+_COMMAND_CATALOG_HEADING = "## agent-worktrees session command catalog"
+_GUIDANCE_HEADER = "# Agent Worktrees session guidance\n\n"
+
+
 def _read_json(path: Path) -> dict | None:
     try:
         value = json.loads(path.read_text("utf-8"))
@@ -175,6 +184,195 @@ def _session_launch_key(payload: dict) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(identity).hexdigest()
+
+
+def _additional_context(raw: str) -> str:
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return ""
+    context = value.get("additionalContext") if isinstance(value, dict) else None
+    return context.strip() if isinstance(context, str) else ""
+
+
+def _read_bounded_text(path: Path, limit: int = _MAX_RESPONSE) -> str | None:
+    try:
+        metadata = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size > limit
+            or _is_link_or_reparse(path)
+        ):
+            return None
+        with path.open("rb") as handle:
+            raw = handle.read(limit + 1)
+    except OSError:
+        return None
+    if len(raw) > limit:
+        return None
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeError:
+        return None
+
+
+def _registration_context(payload: dict, home: Path) -> str:
+    launch_key = _session_launch_key(payload)
+    if not launch_key:
+        return ""
+    root = home / ".agent-worktrees" / ".session-context"
+    json_path = root / f"register-session-{launch_key}.json"
+    try:
+        raw = _read_bounded_text(json_path)
+        state = json.loads(raw) if raw is not None else None
+        if (
+            isinstance(state, dict)
+            and state.get("launchKey") == launch_key
+            and isinstance(state.get("output"), str)
+        ):
+            return _additional_context(state["output"])
+    except (OSError, UnicodeError, ValueError, TypeError):
+        pass
+
+    legacy_path = root / f"register-session-{launch_key}"
+    raw = _read_bounded_text(legacy_path)
+    if raw is None:
+        return ""
+    stored_key, separator, output = raw.partition("\n")
+    return (
+        _additional_context(output)
+        if separator and stored_key == launch_key
+        else ""
+    )
+
+
+def _command_catalog_context() -> str:
+    scripts = Path(__file__).resolve().parent
+    if os.name == "nt":
+        script = scripts / "emit-command-catalog.ps1"
+        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        argv = (
+            [shell, "-NoLogo", "-NoProfile", "-File", str(script)]
+            if shell else []
+        )
+    else:
+        script = scripts / "emit-command-catalog.sh"
+        shell = shutil.which("bash")
+        argv = [shell, str(script)] if shell else []
+    if not argv or not script.is_file():
+        return ""
+    try:
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+            env={**os.environ, "PYTHONPATH": ""},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (
+        _additional_context(completed.stdout)
+        if completed.returncode == 0 else ""
+    )
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return True
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
+    home = home or Path.home()
+    session_id = payload.get("sessionId")
+    if (
+        not isinstance(session_id, str)
+        or not _SESSION_IDENTIFIER.fullmatch(session_id)
+    ):
+        return False
+
+    enriched = (
+        payload
+        if isinstance(payload.get("_agentWorktrees"), dict)
+        else _enrich_session_payload(payload)
+    )
+    registration = _registration_context(enriched, home)
+    contexts = []
+    if registration.startswith(_COMMAND_CATALOG_HEADING):
+        contexts.append(registration)
+    else:
+        catalog = _command_catalog_context()
+        for context in (catalog, registration):
+            if context and context not in contexts:
+                contexts.append(context)
+    content = _GUIDANCE_HEADER + "\n\n".join(contexts) + "\n"
+    if len(content.encode("utf-8")) > _SESSION_GUIDANCE_MAX_BYTES:
+        content = (
+            _GUIDANCE_HEADER
+            + "Current agent-worktrees session guidance was omitted because "
+            "it exceeded the bounded file budget. Treat guidance as "
+            "unavailable for this session-start invocation.\n"
+        )
+    elif not contexts:
+        content = (
+            _GUIDANCE_HEADER
+            + "No current agent-worktrees session guidance was available. "
+            "Treat guidance as unavailable for this session-start invocation.\n"
+        )
+
+    try:
+        copilot_root = home / ".copilot"
+        copilot_root.mkdir(exist_ok=True)
+        if _is_link_or_reparse(copilot_root):
+            return False
+        unresolved_state_root = copilot_root / "session-state"
+        unresolved_state_root.mkdir(exist_ok=True)
+        if _is_link_or_reparse(unresolved_state_root):
+            return False
+        state_root = unresolved_state_root.resolve()
+        unresolved_session_root = state_root / session_id
+        unresolved_session_root.mkdir(exist_ok=True)
+        if _is_link_or_reparse(unresolved_session_root):
+            return False
+        session_root = unresolved_session_root.resolve()
+        session_root.relative_to(state_root)
+        instructions_dir = session_root / "instructions"
+        instructions_dir.mkdir(exist_ok=True)
+        if _is_link_or_reparse(instructions_dir):
+            return False
+        target_dir = instructions_dir / "agent-worktrees"
+        target_dir.mkdir(exist_ok=True)
+        if _is_link_or_reparse(target_dir):
+            return False
+        target = target_dir / "session-guidance.instructions.md"
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=target_dir,
+            prefix=".session-guidance.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+        if os.name != "nt":
+            temporary.chmod(0o600)
+        os.replace(temporary, target)
+        return True
+    except (OSError, RuntimeError, ValueError):
+        try:
+            temporary.unlink()
+        except (OSError, UnboundLocalError):
+            pass
+        return False
 
 
 def _resident_started(payload: dict, home: Path) -> bool:
@@ -531,7 +729,10 @@ def _fallback_post(payload: dict, home: Path) -> dict:
 
 def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
     home = home or Path.home()
-    if kind == "sessionStart":
+    if (
+        kind == "sessionStart"
+        and not isinstance(payload.get("_agentWorktrees"), dict)
+    ):
         payload = _enrich_session_payload(payload)
     remote = _request(kind, payload, home)
     if remote is not None:
@@ -557,7 +758,11 @@ def main(argv: list[str] | None = None) -> int:
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
             payload = {}
+        if kind == "sessionStart":
+            payload = _enrich_session_payload(payload)
         result = decide(kind, payload)
+        if kind == "sessionStart":
+            _write_session_guidance(payload)
         diagnostic = result.pop("_stderr", None)
         if diagnostic:
             sys.stderr.write(str(diagnostic))

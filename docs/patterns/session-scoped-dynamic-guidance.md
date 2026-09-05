@@ -68,10 +68,9 @@ non-interpolated pointer:
 applyTo: "**"
 ---
 
-At the start of this session, resolve your current session-state folder (for
-example via the `COPILOT_AGENT_SESSION_ID` environment variable combined with
-the `~/.copilot/session-state/<id>/` convention, or any equivalent mechanism
-available to you) and read the file at
+At the start of this session, resolve your current Copilot session-state folder
+using the session identifier exposed as `COPILOT_AGENT_SESSION_ID`, or any
+equivalent mechanism available to you, and read the file at
 `instructions/<plugin>/<topic>.instructions.md` inside that folder, if it
 exists. Treat its contents as authoritative for this session. If the file does
 not exist, proceed without it -- do not treat its absence as an error.
@@ -156,9 +155,12 @@ review mechanism is needed -- only a documented content convention.
 
 ## Exemplars
 
-None yet -- this pattern is newly proven and not yet adopted by a shipped
-plugin. The first migrating plugin becomes the reference exemplar; update this
-section when one lands.
+- [`agent-worktrees`](../../plugins/agent-worktrees/) projects
+  `instructions/session-guidance.instructions.md` and writes the matching
+  session-scoped file from its payload-local `sessionStart` hook client. The
+  file combines the attributable command catalog with the current worktree
+  binding while the existing `session-context.json` contributors remain as a
+  best-effort supplementary channel.
 
 ## See Also
 
