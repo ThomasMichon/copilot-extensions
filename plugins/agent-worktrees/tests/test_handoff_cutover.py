@@ -988,7 +988,7 @@ class TestCmdHandoffCutover:
             "session_name": "caller-session",
             "initial_prompt": "continue",
         }
-        assert "fallback_copilot_path" not in launch
+        assert launch["fallback_copilot_path"] is None
 
     def test_spawn_dry_run_reports_plan_and_old_pane(
         self, monkeypatch, capfd, tmp_path,
@@ -1125,6 +1125,129 @@ class TestCmdHandoffCutover:
         )
         assert captured["env"]["AGENT_WORKTREES_HANDOFF_TOKEN"] == "task-123"
         assert out["seed_method"] == "interactive-argv"
+
+    def test_spawn_threads_verified_predecessor_executable(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight()
+        )
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid: {
+                "session_name": "wt-wtZ",
+                "pane_id": "%2",
+                "copilot_pid": 4242,
+                "copilot_start_time": "created-1",
+            },
+        )
+        monkeypatch.setattr(
+            procs,
+            "process_executable_path",
+            lambda pid: r"C:\Programs\Copilot\copilot.exe",
+        )
+        monkeypatch.setattr(
+            locks, "process_start_time", lambda pid: "created-1"
+        )
+        captured = {}
+
+        def _build(config, args, work_dir, **kwargs):
+            captured.update(kwargs)
+            return ["copilot"]
+
+        monkeypatch.setattr(m, "_build_launch_cmd", _build)
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(
+            _ns(seed="continue", session_id="session-1")
+        )
+
+        assert rc == 0
+        assert captured["fallback_copilot_path"] == (
+            r"C:\Programs\Copilot\copilot.exe"
+        )
+        assert json.loads(capfd.readouterr().out)["old_pane"] == "%2"
+
+    def test_spawn_drops_executable_when_process_identity_changes(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: "wtZ")
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_active_pane", lambda w: "%2")
+        (tmp_path / "wtZ.yaml").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+
+        class _Rec:
+            worktree_path = str(tmp_path / "w")
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight()
+        )
+        monkeypatch.setattr(
+            sessions,
+            "mux_binding_for_session",
+            lambda sid: {
+                "session_name": "wt-wtZ",
+                "pane_id": "%2",
+                "copilot_pid": 4242,
+                "copilot_start_time": "created-1",
+            },
+        )
+        monkeypatch.setattr(
+            procs, "process_executable_path", lambda pid: "/opt/copilot"
+        )
+        monkeypatch.setattr(
+            locks, "process_start_time", lambda pid: "created-2"
+        )
+        captured = {}
+
+        def _build(config, args, work_dir, **kwargs):
+            captured.update(kwargs)
+            return ["copilot"]
+
+        monkeypatch.setattr(m, "_build_launch_cmd", _build)
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        monkeypatch.setattr(
+            sessions,
+            "mux_new_window",
+            lambda *a, **k: {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(
+            _ns(seed="continue", session_id="session-1")
+        )
+
+        assert rc == 0
+        assert captured["fallback_copilot_path"] is None
+        capfd.readouterr()
 
     def test_spawn_failure_preserves_prompt_receipt_details(
         self, monkeypatch, capfd, tmp_path,
