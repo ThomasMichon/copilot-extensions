@@ -36,11 +36,11 @@ import platform
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
-from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from .companion import (
     CompanionError,

@@ -52,7 +52,7 @@ class ManagedRuntimePolicy:
     base_runtime_paths: tuple[Path, ...] = ()
 
     @classmethod
-    def resolve(cls) -> "ManagedRuntimePolicy":
+    def resolve(cls) -> ManagedRuntimePolicy:
         """Resolve the default policy from the running dispatch installation."""
         root = Path(
             os.environ.get(MANAGED_RUNTIME_ROOT_ENV)
@@ -297,7 +297,7 @@ class _RootLock:
         self._sleep = sleep
         self._timeout = timeout
 
-    def __enter__(self) -> "_RootLock":
+    def __enter__(self) -> _RootLock:
         deadline = self._clock() + self._timeout
         while not self._lock.acquire():
             if self._clock() >= deadline:
@@ -333,7 +333,11 @@ def _authority(registration: Mapping[str, Any]) -> tuple[dict[str, Any], Path]:
     plugin = registration.get("plugin")
     revision = registration.get("runtime_revision")
     spec = registration.get("spec")
-    if not isinstance(plugin, dict) or not isinstance(revision, dict) or not isinstance(spec, dict):
+    if (
+        not isinstance(plugin, dict)
+        or not isinstance(revision, dict)
+        or not isinstance(spec, dict)
+    ):
         raise ManagedRuntimeError("managed runtime registration provenance is incomplete")
     managed = spec.get("managed_runtime")
     if not isinstance(managed, dict) or managed != revision.get("managed_runtime"):
@@ -359,6 +363,15 @@ def _authority(registration: Mapping[str, Any]) -> tuple[dict[str, Any], Path]:
 
 
 def _contained_project(plugin_root: Path, relative: str) -> Path:
+    if (
+        not relative
+        or "\\" in relative
+        or Path(relative).is_absolute()
+        or (relative != "." and any(part in {"", ".", ".."} for part in relative.split("/")))
+    ):
+        raise ManagedRuntimeError(
+            "managed runtime project must be a contained plugin-relative path"
+        )
     target = plugin_root if relative == "." else plugin_root.joinpath(*relative.split("/"))
     current = plugin_root
     for component in (() if relative == "." else relative.split("/")):
@@ -401,6 +414,7 @@ def _copy_file(source: Path, destination: Path) -> tuple[int, str]:
         or after.st_ino != before.st_ino
         or after.st_size != before.st_size
         or after.st_mtime_ns != before.st_mtime_ns
+        or stat.S_IMODE(after.st_mode) != stat.S_IMODE(before.st_mode)
     ):
         raise ManagedRuntimeError("managed runtime source changed during snapshot")
     return before.st_size, digest.hexdigest()
@@ -666,7 +680,7 @@ def _tree_digest(root: Path, *, excluded: frozenset[str] = frozenset()) -> str:
                 )
             relative = child.relative_to(root).as_posix()
             mode = stat.S_IMODE(child.stat(follow_symlinks=False).st_mode)
-            digest.update(f"D\0{relative}\0{mode:o}\0".encode("utf-8"))
+            digest.update(f"D\0{relative}\0{mode:o}\0".encode())
         for name in files:
             child = current_path / name
             relative = child.relative_to(root).as_posix()
@@ -768,7 +782,7 @@ class ManagedRuntimeMaterializer:
             f"names={json.dumps(list(imports), ensure_ascii=True)}\n"
             "for name in names: importlib.import_module(name)\n"
         )
-        self.runner([str(python), "-I", "-c", code], cwd, environment)
+        self.runner([str(python), "-I", "-B", "-c", code], cwd, environment)
 
     def _ready(
         self,

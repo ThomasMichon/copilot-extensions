@@ -113,7 +113,7 @@ class FakeRunner:
             if self.after_install is not None:
                 self.after_install(Path(args[args.index("--python") + 1]).parent)
             return
-        if args[1:3] == ["-I", "-c"] and self.mutate_validation:
+        if args[1:4] == ["-I", "-B", "-c"] and self.mutate_validation:
             Path(args[0]).write_bytes(b"mutated by import")
 
 
@@ -306,6 +306,21 @@ def test_import_validation_must_not_modify_staged_cell(tmp_path):
         ).materialize(_registration(plugin))
 
 
+def test_import_validation_disables_bytecode_writes(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+
+    ManagedRuntimeMaterializer(
+        _policy(tmp_path), runner=runner
+    ).materialize(_registration(plugin))
+
+    validation_calls = [
+        args for args, _cwd, _environment in runner.calls if "-c" in args
+    ]
+    assert validation_calls
+    assert all("-B" in args for args in validation_calls)
+
+
 def test_incomplete_existing_cell_is_never_repaired_in_place(tmp_path):
     plugin = _project(tmp_path)
     runner = FakeRunner()
@@ -334,6 +349,19 @@ def test_rejects_unattributed_or_inconsistent_registration_before_writes(tmp_pat
         ManagedRuntimeMaterializer(policy, runner=FakeRunner()).materialize(registration)
 
     assert not policy.root.exists()
+
+
+def test_materializer_defensively_rejects_project_traversal(tmp_path):
+    plugin = _project(tmp_path)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["projects"] = [
+        {"path": "../outside"}
+    ]
+
+    with pytest.raises(ManagedRuntimeError, match="contained plugin-relative"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path), runner=FakeRunner()
+        ).materialize(registration)
 
 
 def test_rejects_linked_project_content(tmp_path):
