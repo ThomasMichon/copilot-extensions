@@ -121,9 +121,19 @@ equally forbidden outcome. Landed as a non-goal addition in
 [`visions/plugins/agent-dispatch/reviewer/README.md`](../../../visions/plugins/agent-dispatch/reviewer/README.md)
 (2026-09-05 provenance entry) plus a sharpened, private per-repository
 `worker_guidance` clause (`odsp-web-harness-issue-loop.json`, dotfiles) adding
-the required fallback: leave review feedback and record a
-`blocked-on-external-pr` outcome/steering card, never land a replacement.
+the required fallback: leave review feedback, then **durably declare the
+dependency** rather than record a vague outcome -- apply a `blocked-on-external-pr`
+label to the issue (created on gim-home/odsp-web-harness) plus a comment
+naming the exact blocking PR and head SHA, and add that label to the loop's
+`exclude_labels` so a labeled issue is never re-queued while the block stands.
+This closes the original ask precisely: tagging + a durable label-based
+relationship, not just prose, is what keeps a future occurrence from
+re-queuing (or re-superseding) the same blocked issue.
 
+- [x] Land the concrete tag-and-exclude mechanism in the private declaration
+  (`blocked-on-external-pr` label + `exclude_labels` entry + worker_guidance
+  instructing the exact `issue edit --add-label` / cross-reference-comment
+  steps).
 - [ ] Confirm no other declared repository-issue-loop or reviewer-loop
   registration (across dotfiles) permits or has exhibited the same
   supersession pattern; add the same guard where missing.
@@ -132,6 +142,12 @@ the required fallback: leave review feedback and record a
   against a PR whose author differs from the acting identity, as a structural
   guard rather than relying on prose alone -- prose guidance was already
   explicit here and was still violated.
+- [ ] The label is currently maintainer-removed only (manual unblock). Add an
+  automatic recheck: a lightweight periodic pass over
+  `blocked-on-external-pr`-labeled issues that reads back the referenced PR
+  and removes the label (re-enabling normal triage next occurrence) once that
+  PR merges or closes -- so the block clears itself instead of silently
+  persisting after the dependency resolves.
 
 ## Validation Plan
 
