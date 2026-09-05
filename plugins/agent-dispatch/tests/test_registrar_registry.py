@@ -225,6 +225,37 @@ def test_attributed_plugin_companion_carries_authoritative_provenance(tmp_path):
     assert declaration.activation_scopes == ("global",)
 
 
+def test_plugin_companion_runtime_generation_overrides_plugin_version(tmp_path):
+    root = _plugin_root(tmp_path)
+    declaration_path = _write_companion(root)
+    declaration_path.write_text(
+        json.dumps(
+            {
+                "name": "companion",
+                "kind": "plugin-companion",
+                "runtime_generation": "engine-v1",
+                "spec": {
+                    "command": ["bin/serve"],
+                    "health_probe": ["bin/health"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    registry = tmp_path / "registrar.d"
+    _write_manifest(registry, root)
+
+    report = scan_registrar_registry(
+        registry,
+        activation_report=_activation({SOURCE: root}),
+    )
+
+    declaration = report.declarations[0].declaration
+    assert declaration.kind == "plugin-companion"
+    assert declaration.plugin_version == "engine-v1"
+    assert declaration.source_path == str(declaration_path.resolve())
+
+
 def test_plugin_companion_activation_uncertainty_retains_prior_only(tmp_path):
     root = _plugin_root(tmp_path)
     _write_companion(root)

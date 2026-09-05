@@ -76,6 +76,51 @@ def test_periodic_emitter_declaration():
     assert "--spec" in args
 
 
+def test_plugin_companion_accepts_runtime_generation_override():
+    declaration = load_declaration(
+        {
+            "name": "engine",
+            "kind": "plugin-companion",
+            "runtime_generation": "engine-v1",
+            "spec": {
+                "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "engine",
+                            "version": "engine-v1",
+                            "profile": "host",
+                            "python_env": "ENGINE_PYTHON",
+                            "projects": [{"path": ".", "extras": ["engine"]}],
+                            "identity_paths": ["src/engine"],
+                            "imports": ["example.engine"],
+                        }
+                    ],
+                },
+            },
+        },
+        allow_plugin_companion=True,
+    )
+    assert declaration.runtime_generation == "engine-v1"
+
+
+def test_runtime_generation_is_rejected_outside_plugin_companions():
+    with pytest.raises(RegistrarError, match="runtime_generation"):
+        load_declaration(
+            {
+                "name": "general",
+                "kind": "emitter",
+                "runtime_generation": "engine-v1",
+                "spec": {
+                    "id": "review-inbox",
+                    "command": ["review-emitter", "tick"],
+                    "interval_seconds": 3600,
+                },
+            }
+        )
+
+
 def test_non_lane_declaration_rejects_lane_fields():
     with pytest.raises(RegistrarError, match="does not accept lane fields"):
         load_declaration(

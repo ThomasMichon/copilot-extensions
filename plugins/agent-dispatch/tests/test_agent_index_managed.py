@@ -90,9 +90,13 @@ class IndexHarness(Harness):
             self.registry,
             activation_report=activation if activation is not None else _activation(),
         )
-        self.registrations = declared_registrations(
-            [entry.declaration for entry in report.declarations], machine="machine-a"
-        )
+        self.registrations = [
+            registration
+            for registration in declared_registrations(
+                [entry.declaration for entry in report.declarations], machine="machine-a"
+            )
+            if registration.get("logical_id") == "agent-index-service"
+        ]
         if self.registrations:
             self.registration = self.registrations[0]
         return report

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import importlib.util
 import sys
 from pathlib import Path
@@ -48,6 +49,159 @@ def test_managed_start_requires_selected_python_and_host_scope(monkeypatch, role
     assert calls == ([True] if role == "host" else [])
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "install.json")
     assert cli.main(["__managed-start"]) == 2
+
+
+@pytest.mark.parametrize("role", ["host", "client", "unconfigured"])
+def test_managed_engine_start_requires_selected_python_and_host_scope(monkeypatch, role):
+    from agent_index.engine import app as engine_app
+
+    monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(
+        transport, "plan_route", lambda: (role, {"machine": "example-host"})
+    )
+    calls = []
+    monkeypatch.setattr(engine_app, "run_engine", lambda *_a, **_k: calls.append(True))
+    monkeypatch.delenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", raising=False)
+    assert cli.main(["__managed-engine-start"]) == 2
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    assert cli.main(["__managed-engine-start"]) == (0 if role == "host" else 2)
+    assert calls == ([True] if role == "host" else [])
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "install.json")
+    assert cli.main(["__managed-engine-start"]) == 2
+
+
+def test_managed_engine_start_uses_engine_endpoint_not_service_port(monkeypatch):
+    from agent_index.engine import app as engine_app
+
+    monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setenv("AGENT_INDEX_HOST", "127.0.0.1")
+    monkeypatch.setenv("AGENT_INDEX_PORT", "0")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_HOST", "127.0.0.9")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_PORT", "8427")
+    monkeypatch.setattr(
+        transport, "plan_route", lambda: ("host", {"machine": "example-host"})
+    )
+    calls = []
+    monkeypatch.setattr(
+        engine_app,
+        "run_engine",
+        lambda *, host, port: calls.append((host, port)),
+    )
+
+    assert cli.main(["__managed-engine-start"]) == 0
+    assert calls == [("127.0.0.9", 8427)]
+
+
+def test_managed_engine_health_requires_generation_and_dependency_match(
+    monkeypatch, capsys
+):
+    monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setattr(
+        transport, "plan_route", lambda: ("host", {"machine": "example-host"})
+    )
+
+    class Response:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    monkeypatch.setattr(
+        "httpx.get",
+        lambda *_a, **_k: Response(
+            {
+                "status": "ok",
+                "generation": "wrong-generation",
+                "gpu_deps_installed": True,
+                "cuda_available": True,
+                "python_executable": sys.executable,
+            }
+        ),
+    )
+    assert cli.main(["__managed-engine-health"]) == 0
+    assert json.loads(capsys.readouterr().out)["healthy"] is False
+
+    monkeypatch.setattr(
+        "httpx.get",
+        lambda *_a, **_k: Response(
+            {
+                "status": "ok",
+                "generation": "engine-v1",
+                "gpu_deps_installed": False,
+                "cuda_available": False,
+                "python_executable": sys.executable,
+                "detail": "GPU runtime not installed. Run: agent-index bootstrap",
+            }
+        ),
+    )
+    assert cli.main(["__managed-engine-health"]) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert second["healthy"] is False
+    assert "not installed" in second["detail"]
+
+
+def test_managed_engine_health_treats_non_object_payload_as_unhealthy(
+    monkeypatch, capsys
+):
+    monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setattr(
+        transport, "plan_route", lambda: ("host", {"machine": "example-host"})
+    )
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return ["not-an-object"]
+
+    monkeypatch.setattr("httpx.get", lambda *_a, **_k: Response())
+
+    assert cli.main(["__managed-engine-health"]) == 0
+    assert json.loads(capsys.readouterr().out)["healthy"] is False
+
+
+def test_managed_engine_health_accepts_cpu_dependency_state(monkeypatch, capsys):
+    monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setenv("AGENT_INDEX_DEVICE", "cpu")
+    monkeypatch.setattr(
+        transport, "plan_route", lambda: ("host", {"machine": "example-host"})
+    )
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "status": "ok",
+                "generation": "engine-v1",
+                "gpu_deps_installed": True,
+                "cuda_available": False,
+                "python_executable": sys.executable,
+            }
+
+    monkeypatch.setattr("httpx.get", lambda *_a, **_k: Response())
+
+    assert cli.main(["__managed-engine-health"]) == 0
+    assert json.loads(capsys.readouterr().out)["healthy"] is True
 
 
 def test_installers_are_base_only_and_never_implicitly_start_engine():

@@ -21,11 +21,14 @@ import os
 import signal
 import threading
 import time
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+from agent_index.engine.generation import current_engine_generation
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +60,13 @@ class BatchEmbedResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    generation: str
     gpu_deps_installed: bool
     model_loaded: bool
     model_name: str | None
     device: str | None
     cuda_available: bool | None
+    python_executable: str
     detail: str | None = None
 
 
@@ -236,11 +241,13 @@ async def health() -> HealthResponse:
 
     return HealthResponse(
         status="ok" if gpu_ok else "degraded",
+        generation=current_engine_generation(),
         gpu_deps_installed=gpu_ok,
         model_loaded=model_loaded,
         model_name=_config.model_name if _config else None,
         device=_config.device if _config else None,
         cuda_available=cuda_available,
+        python_executable=sys.executable,
         detail=detail,
     )
 
