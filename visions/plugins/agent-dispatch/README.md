@@ -171,6 +171,12 @@ backend, the actual machine and account names. Three archetypes are first-class:
    (fix a bug, document a package, reconcile a plan), stay within the goal's
    bounds and drive it through one or more pull requests — handling conflicts and
    review feedback — until the goal is met or abandoned.
+4. **repository-issue-loop** — a goal-driven specialization for an entire
+   backlog rather than one target: triage and drive a bounded, quiet batch of
+   a backlog's items to durable resolution per occurrence, over any backlog
+   reachable through a provider-neutral list/reserve/claim/release surface.
+   Its deeper contract lives in the
+   [repository-issue-loop child vision](repository-issue-loop/README.md).
 
 A consumer **selects and parameterizes** a recipe rather than hand-rolling a loop,
 and may **extend** one where its domain needs more. An instantiated pair knows how
@@ -336,6 +342,29 @@ fixes the suspend/resume rhythm and the resolution target for its class of work.
 Extension is expected where a domain needs more, but the default is **reuse**: the
 same template is the engine behind a standing automated service and an on-demand
 instance alike.
+
+### concise-event-then-charter-pull
+The seed handed to a freshly embodied worker is a **short, event-classified
+notification**, not an inlined instructional essay. A recipe already knows the
+shape of the event it just produced a task for — new work assigned, a submitter
+update landed, a steer answer arrived — and states exactly that ("New bug work
+assigned.", "Assigned PR has updates from the submitter.") plus **one command**
+that resolves the worker's **full charter**: the task's goal, payload, policy,
+and behavioral contract, fetched on demand rather than paid for on every
+embodiment regardless of whether the worker ever needs all of it. This keeps the
+per-embodiment token cost proportional to the event, while the charter command
+itself remains the single, authoritative source the worker actually reads from.
+
+### preloaded-dispatch-supplement
+A worker's declared identity (*declarative-worker-identity*, repository-issue-loop
+child vision) carries the generic "how to behave as a dispatch worker"
+instruction supplement **by reference**, already loaded when the identity is
+selected — claim/evaluate/complete mechanics, decline/exclusion conventions,
+suspend-and-resume discipline. A worker never spends a tool call rediscovering
+this supplement per task; it is preloaded exactly once, by identity, and only
+the event-specific charter is fetched per embodiment (*concise-event-then-charter-pull*).
+Domain-specific policy still lives in the identity's own instructions, layered
+on top of the shared supplement rather than duplicating it.
 
 ### side-load-through-an-emitter
 A **registered emitter can be triggered on demand**, not only by its native event
@@ -770,6 +799,9 @@ does **not** quietly undo it.
   *agent-dispatch — the delegation layer*.
 - Child leaf: [reviewer loops](reviewer/README.md) — the cooperative reviewer
   archetype's identity, verdict, reuse, and reliability contract.
+- Child leaf: [repository-issue-loops](repository-issue-loop/README.md) — the
+  backlog-batch archetype's declarative adoption, provider-neutral capability,
+  and declarative worker-identity contract.
 - Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer this
   layer's cross-machine reach rides on.
 - Consumer: [agent-logger](../agent-logger/README.md) — the **chronicler**, a
@@ -777,9 +809,21 @@ does **not** quietly undo it.
   tasks on this layer's mesh.
 - Reality docs: [`docs/architecture.md`](../../../docs/architecture.md) · the
   `plugins/agent-dispatch/` skills (`agent-dispatch`, `pick-and-claim`).
+- Realization effort:
+  [`efforts/active/declarative-dispatch-engine-generalization/`](../../../efforts/active/declarative-dispatch-engine-generalization/)
+  owns *concise-event-then-charter-pull* and *preloaded-dispatch-supplement*.
 
 ## Provenance
 
+- **2026-09-05** — Extracted the repository-issue-loop archetype's declarative
+  adoption, provider-neutral capability, and declarative worker-identity intent
+  into its own child vision, as a fourth named archetype alongside reviewer,
+  conflict-resolution, and goal-driven. Also added *concise-event-then-charter-pull*
+  and *preloaded-dispatch-supplement*: the per-embodiment seed should be a
+  short event notification plus a charter-pull command, not an inlined
+  instructional essay, and the generic "how to behave as a dispatch worker"
+  supplement belongs on the worker identity, loaded once, not rediscovered
+  per task.
 - **2026-09-02** — Promoted this vision from leaf to branch and moved the
   reviewer archetype's cooperative identity, session-reuse, verdict, declarative
   adoption, and bounded-reliability intent into the reviewer child vision.
