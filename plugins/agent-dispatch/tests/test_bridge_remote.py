@@ -105,6 +105,24 @@ def test_undecodable_auth_degrades_as_unavailable(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "contents",
+    [
+        "- not-a-mapping\n",
+        "token: [not-a-string]\n",
+        "token: '   '\n",
+    ],
+)
+def test_invalid_auth_shape_degrades_as_unavailable(
+    tmp_path, monkeypatch, contents
+):
+    (tmp_path / "auth.yaml").write_text(contents, encoding="utf-8")
+    monkeypatch.setenv("AGENT_BRIDGE_BASE_URL", "http://127.0.0.1:1")
+
+    with pytest.raises(RemoteBridgeUnavailable, match="authentication"):
+        LocalBridgeRemoteClient(config_dir=tmp_path)._connection()
+
+
+@pytest.mark.parametrize(
     "base_url",
     [
         "http://example.com:8080",

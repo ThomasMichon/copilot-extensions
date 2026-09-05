@@ -95,12 +95,16 @@ class LocalBridgeRemoteClient:
             auth = yaml.safe_load(
                 (config_dir / "auth.yaml").read_text(encoding="utf-8")
             ) or {}
-            token = str(auth.get("token") or "")
         except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
             raise RemoteBridgeUnavailable(
                 "Agent Bridge authentication is unavailable"
             ) from exc
-        if not token:
+        if not isinstance(auth, dict):
+            raise RemoteBridgeUnavailable(
+                "Agent Bridge authentication is unavailable"
+            )
+        token = auth.get("token")
+        if not isinstance(token, str) or not token.strip():
             raise RemoteBridgeUnavailable(
                 "Agent Bridge authentication is unavailable"
             )
