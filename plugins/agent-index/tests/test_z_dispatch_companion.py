@@ -297,7 +297,9 @@ def test_engine_adapter_scrubs_inherited_runtime_authority(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_INDEX_REPO", "approved-repo")
     monkeypatch.setenv("AGENT_INDEX_MACHINE", "approved-machine")
     monkeypatch.setenv("AGENT_INDEX_ENGINE_GENERATION", "engine-v1")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_HOST", "127.0.0.9")
     monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_PORT", "8427")
     monkeypatch.setenv("PIP_EXTRA_INDEX_URL", "https://example.invalid")
     monkeypatch.setenv("PYTHONPATH", "untrusted")
 
@@ -308,7 +310,9 @@ def test_engine_adapter_scrubs_inherited_runtime_authority(monkeypatch) -> None:
     assert environment["AGENT_INDEX_REPO"] == "approved-repo"
     assert environment["AGENT_INDEX_MACHINE"] == "approved-machine"
     assert environment["AGENT_INDEX_ENGINE_GENERATION"] == "engine-v1"
+    assert environment["AGENT_INDEX_ENGINE_HOST"] == "127.0.0.9"
     assert environment["AGENT_INDEX_ENGINE_MANAGED_PYTHON"] == sys.executable
+    assert environment["AGENT_INDEX_ENGINE_PORT"] == "8427"
     assert environment["AGENT_INDEX_NO_SELFPROVISION"] == "1"
     assert "PIP_EXTRA_INDEX_URL" not in environment
     assert "PYTHONPATH" not in environment
@@ -466,6 +470,14 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
     assert engine_runtime["python_env"] == "AGENT_INDEX_ENGINE_MANAGED_PYTHON"
     assert engine_runtime["version"] == "engine-v1"
     assert engine_runtime["projects"] == [{"path": ".", "extras": ["engine"]}]
+    assert engine_runtime["identity_paths"] == [
+        "src/agent_index/__init__.py",
+        "src/agent_index/__main__.py",
+        "src/agent_index/config.py",
+        "src/agent_index/index_config.py",
+        "src/agent_index/embedding",
+        "src/agent_index/engine",
+    ]
     assert "install" not in json.dumps(engine_declaration)
 
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))

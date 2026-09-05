@@ -468,7 +468,7 @@ def _authority(
     return expected, plugin_root
 
 
-def _contained_project(plugin_root: Path, relative: str) -> Path:
+def _contained_path(plugin_root: Path, relative: str) -> Path:
     if (
         not relative
         or "\\" in relative
@@ -489,6 +489,13 @@ def _contained_project(plugin_root: Path, relative: str) -> Path:
         raise ManagedRuntimeError(
             "managed runtime project escapes the attributed plugin root"
         ) from exc
+    if not target.exists():
+        raise ManagedRuntimeError("managed runtime project path is unavailable")
+    return target
+
+
+def _contained_project(plugin_root: Path, relative: str) -> Path:
+    target = _contained_path(plugin_root, relative)
     if not target.is_dir():
         raise ManagedRuntimeError("managed runtime project must be a directory")
     return target
@@ -968,26 +975,64 @@ class ManagedRuntimeMaterializer:
             projects_root = snapshot_root / "projects"
             projects_root.mkdir(parents=True)
             manifest: list[dict[str, Any]] = []
+            project_manifest: list[dict[str, Any]] = []
             project_receipts: list[dict[str, Any]] = []
             for index, project in enumerate(runtime["projects"]):
                 project_path = str(project["path"])
                 source = _contained_project(plugin_root, project_path)
                 destination = projects_root / f"{index:03d}"
-                manifest.extend(
+                project_manifest.extend(
                     _copy_project(source, destination, prefix=f"projects/{index:03d}")
                 )
                 extras = list(project.get("extras") or [])
                 project_receipts.append({"path": project_path, "extras": extras})
+            identity_paths = runtime.get("identity_paths")
+            if identity_paths:
+                identity_receipts: list[str] = []
+                identity_root = snapshot_root / "identity"
+                identity_root.mkdir(parents=True, exist_ok=True)
+                for index, identity_path in enumerate(identity_paths):
+                    relative = str(identity_path)
+                    source = _contained_path(plugin_root, relative)
+                    destination = identity_root / f"{index:03d}"
+                    prefix = f"identity/{index:03d}"
+                    if source.is_dir():
+                        manifest.extend(_copy_project(source, destination, prefix=prefix))
+                    else:
+                        destination.mkdir(parents=True, exist_ok=True)
+                        size, digest = _copy_file(source, destination / source.name)
+                        manifest.append(
+                            {
+                                "path": f"{prefix}/{source.name}",
+                                "type": "file",
+                                "mode": stat.S_IMODE(
+                                    source.stat(follow_symlinks=False).st_mode
+                                ),
+                                "size": size,
+                                "sha256": digest,
+                            }
+                        )
+                    identity_receipts.append(relative)
+            else:
+                manifest = project_manifest
             manifest.sort(key=lambda entry: entry["path"])
             snapshot = {
                 "projects": project_receipts,
                 "files": manifest,
             }
+            if identity_paths:
+                snapshot["identity_paths"] = identity_receipts
             content_digest = _canonical_digest(
                 {
                     "runtime": {
                         key: runtime[key]
-                        for key in ("name", "version", "profile", "projects", "imports")
+                        for key in (
+                            "name",
+                            "version",
+                            "profile",
+                            "projects",
+                            "imports",
+                        )
                     },
                     "snapshot": snapshot,
                 }

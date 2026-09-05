@@ -614,6 +614,7 @@ def cmd_managed_engine_start(args: argparse.Namespace) -> int:
     """Run the durable engine from the dispatch-selected interpreter only."""
     from . import transport
     from .engine.app import run_engine
+    from .engine.daemon import engine_endpoint
 
     role, indexer = transport.plan_route()
     if (
@@ -630,8 +631,12 @@ def cmd_managed_engine_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    cfg = _config_from_args(args)
-    run_engine(host=cfg.host, port=cfg.port)
+    host, port = engine_endpoint()
+    if getattr(args, "host", None):
+        host = str(args.host)
+    if getattr(args, "port", None) is not None:
+        port = int(args.port)
+    run_engine(host=host, port=port)
     return 0
 
 

@@ -19,6 +19,14 @@
               ]
             }
           ],
+          "identity_paths": [
+            "src/agent_index/__init__.py",
+            "src/agent_index/__main__.py",
+            "src/agent_index/config.py",
+            "src/agent_index/index_config.py",
+            "src/agent_index/embedding",
+            "src/agent_index/engine"
+          ],
           "imports": [
             "agent_index.engine.app",
             "fastapi",

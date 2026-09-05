@@ -71,6 +71,30 @@ def test_managed_engine_start_requires_selected_python_and_host_scope(monkeypatc
     assert cli.main(["__managed-engine-start"]) == 2
 
 
+def test_managed_engine_start_uses_engine_endpoint_not_service_port(monkeypatch):
+    from agent_index.engine import app as engine_app
+
+    monkeypatch.delenv("AGENT_INDEX_INSTALLATION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setenv("AGENT_INDEX_HOST", "127.0.0.1")
+    monkeypatch.setenv("AGENT_INDEX_PORT", "0")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_HOST", "127.0.0.9")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_PORT", "8427")
+    monkeypatch.setattr(
+        transport, "plan_route", lambda: ("host", {"machine": "example-host"})
+    )
+    calls = []
+    monkeypatch.setattr(
+        engine_app,
+        "run_engine",
+        lambda *, host, port: calls.append((host, port)),
+    )
+
+    assert cli.main(["__managed-engine-start"]) == 0
+    assert calls == [("127.0.0.9", 8427)]
+
+
 def test_managed_engine_health_requires_generation_and_dependency_match(
     monkeypatch, capsys
 ):

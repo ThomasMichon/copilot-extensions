@@ -84,6 +84,20 @@ def test_plugin_companion_accepts_runtime_generation_override():
             "runtime_generation": "engine-v1",
             "spec": {
                 "command": ["bin/serve"],
+                "managed_runtime": {
+                    "schema_version": 1,
+                    "runtimes": [
+                        {
+                            "name": "engine",
+                            "version": "engine-v1",
+                            "profile": "host",
+                            "python_env": "ENGINE_PYTHON",
+                            "projects": [{"path": ".", "extras": ["engine"]}],
+                            "identity_paths": ["src/engine"],
+                            "imports": ["example.engine"],
+                        }
+                    ],
+                },
             },
         },
         allow_plugin_companion=True,
