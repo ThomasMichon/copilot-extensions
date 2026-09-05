@@ -69,6 +69,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
                 ),
                 "customizationKind": "instructions",
                 "applyTo": "**",
+                "legacyMarkers": [],
             }
         ],
     }
@@ -77,6 +78,7 @@ def test_session_guidance_projection_points_to_hook_written_file():
     ).read_text(encoding="utf-8")
     assert "applyTo: \"**\"" in template
     assert "COPILOT_AGENT_SESSION_ID" in template
+    assert "~/.copilot/session-state" not in template
     assert (
         "instructions/agent-worktrees/session-guidance.instructions.md"
         in template

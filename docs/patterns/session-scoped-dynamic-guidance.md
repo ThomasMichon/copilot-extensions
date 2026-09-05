@@ -68,10 +68,9 @@ non-interpolated pointer:
 applyTo: "**"
 ---
 
-At the start of this session, resolve your current session-state folder (for
-example via the `COPILOT_AGENT_SESSION_ID` environment variable combined with
-the `~/.copilot/session-state/<id>/` convention, or any equivalent mechanism
-available to you) and read the file at
+At the start of this session, resolve your current Copilot session-state folder
+using the session identifier exposed as `COPILOT_AGENT_SESSION_ID`, or any
+equivalent mechanism available to you, and read the file at
 `instructions/<plugin>/<topic>.instructions.md` inside that folder, if it
 exists. Treat its contents as authoritative for this session. If the file does
 not exist, proceed without it -- do not treat its absence as an error.

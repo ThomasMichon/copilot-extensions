@@ -7,7 +7,8 @@
       "template": "instructions/session-guidance.instructions.md",
       "destination": ".github/instructions/agent-worktrees/session-guidance.instructions.md",
       "customizationKind": "instructions",
-      "applyTo": "**"
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }

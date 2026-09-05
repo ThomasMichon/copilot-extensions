@@ -32,7 +32,7 @@ _SESSION_START_DECISION_S = 10.0
 _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
-_SESSION_GUIDANCE_MAX_BYTES = 8 * 1024
+_SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
 
 
 def _read_json(path: Path) -> dict | None:
