@@ -241,7 +241,7 @@ because they provide tools or services.
         [#2080](https://github.com/ThomasMichon/copilot-extensions/pull/2080);
         the committed-crash restoration defect was fixed through
         [#2089](https://github.com/ThomasMichon/copilot-extensions/pull/2089),
-        and the final shutdown-liveness defect through
+        and the final shutdown-liveness defect was fixed through
         [#2100](https://github.com/ThomasMichon/copilot-extensions/pull/2100).
       - [ ] Pass the Windows clean-room arm. The 2026-09-05 attempt on a
         Linux-container Docker engine stopped before scenario execution because
