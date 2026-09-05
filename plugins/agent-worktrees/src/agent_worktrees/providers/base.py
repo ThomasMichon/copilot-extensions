@@ -74,6 +74,8 @@ class PullResult:
     open-but-merged PR, #1375/#1703)."""
     base_ref: str = ""
     """The PR base (target) branch ref, e.g. ``master``."""
+    observed_at: str = ""
+    """Provider-server timestamp captured while observing ``head_sha``."""
     label_error: str = ""
     """Non-empty when the PR opened but one or more configured labels could not
     be applied (lookup/attach failure, or a label absent from the repo).
@@ -97,6 +99,16 @@ class PRProvider(Protocol):
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:
         """Look up an existing PR by number (best-effort; may be unsupported)."""
+        ...
+
+    def observe_head(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PullResult:
+        """Observe the exact PR head with a timestamp from the provider clock."""
+        ...
+
+    def authority_endpoint(self, api_base: str = "") -> str:
+        """Canonical provider endpoint that scopes review authority."""
         ...
 
     def publish_source_marker(

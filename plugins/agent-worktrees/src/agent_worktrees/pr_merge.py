@@ -43,14 +43,14 @@ def classify_pr(
     prcfg,
     *,
     tracked_head_sha: str = "",
-    head_pushed_at: str = "",
+    head_observed_at: str = "",
 ) -> pc.PRState:
     """Classify a snapshot against the repo's merge-consent binding."""
     return pc.classify_state(
         snap,
         **_binding(prcfg),
         stale_approval_head_sha=tracked_head_sha,
-        stale_approval_head_pushed_at=head_pushed_at,
+        stale_approval_head_observed_at=head_observed_at,
     )
 
 
@@ -60,7 +60,7 @@ def _decide(
     *,
     default_branch: str = "",
     tracked_head_sha: str = "",
-    head_pushed_at: str = "",
+    head_observed_at: str = "",
 ) -> tuple[pc.PRState, str, str]:
     """Return ``(state, action, reason)`` incl. the default-branch guard.
 
@@ -72,7 +72,7 @@ def _decide(
         snap,
         prcfg,
         tracked_head_sha=tracked_head_sha,
-        head_pushed_at=head_pushed_at,
+        head_observed_at=head_observed_at,
     )
     if default_branch and snap.base_ref and snap.base_ref != default_branch:
         return state, "skip", f"base {snap.base_ref!r} != {default_branch!r}"
@@ -89,7 +89,7 @@ def merge_one(
     apply: bool = False,
     default_branch: str = "",
     tracked_head_sha: str = "",
-    head_pushed_at: str = "",
+    head_observed_at: str = "",
     provider=None,
 ) -> dict:
     """Classify PR ``number`` and, if eligible and ``apply``, apply the label.
@@ -109,7 +109,7 @@ def merge_one(
         prcfg,
         default_branch=default_branch,
         tracked_head_sha=tracked_head_sha,
-        head_pushed_at=head_pushed_at,
+        head_observed_at=head_observed_at,
     )
     row: dict = {
         "pr": number, "action": action, "reason": reason, "title": snap.title,
@@ -118,6 +118,41 @@ def merge_one(
         "approval_stale_authorized": state.approval_stale_authorized,
     }
     if action == "apply" and apply:
+        confirm = provider.get_snapshot(repo, number, api_base=base, token=tok)
+        confirmed_state, confirmed_action, confirmed_reason = _decide(
+            confirm,
+            prcfg,
+            default_branch=default_branch,
+            tracked_head_sha=tracked_head_sha,
+            head_observed_at=head_observed_at,
+        )
+        if (
+            confirm.head_sha != snap.head_sha
+            or confirm.updated_at != snap.updated_at
+        ):
+            row.update(
+                action="skip",
+                reason="PR changed while merge consent was being prepared; retry",
+                verdict=confirmed_state.verdict,
+                merge_state=confirmed_state.merge_state,
+                approval_stale=confirmed_state.approval_stale,
+                approval_stale_authorized=(
+                    confirmed_state.approval_stale_authorized
+                ),
+            )
+            return row
+        if confirmed_action != "apply":
+            row.update(
+                action=confirmed_action,
+                reason=confirmed_reason,
+                verdict=confirmed_state.verdict,
+                merge_state=confirmed_state.merge_state,
+                approval_stale=confirmed_state.approval_stale,
+                approval_stale_authorized=(
+                    confirmed_state.approval_stale_authorized
+                ),
+            )
+            return row
         # "Request auto-complete" is the first-class concept; the provider
         # decides how (gitea/github apply the automerge_label; ADO sets native
         # auto-complete). Applying the label is an implementation detail here.

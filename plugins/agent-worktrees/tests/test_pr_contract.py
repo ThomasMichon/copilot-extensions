@@ -219,7 +219,7 @@ class TestEffectiveVerdict:
             "author",
             allow_stale_approval=True,
             stale_approval_head_sha="new",
-            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
+            stale_approval_head_observed_at="2026-01-01T00:01:00Z",
         ) == "APPROVED"
 
     def test_stale_approval_before_current_head_is_not_retained(self):
@@ -237,7 +237,43 @@ class TestEffectiveVerdict:
             "author",
             allow_stale_approval=True,
             stale_approval_head_sha="new",
-            stale_approval_head_pushed_at="2026-01-01T00:02:00Z",
+            stale_approval_head_observed_at="2026-01-01T00:02:00Z",
+        ) == ""
+
+    def test_same_second_observation_fails_closed(self):
+        reviews = (
+            _rev(
+                1,
+                "APPROVED",
+                commit_id="old",
+                submitted_at="2026-01-01T00:01:00Z",
+            ),
+        )
+        assert pc.effective_verdict(
+            reviews,
+            "new",
+            "author",
+            allow_stale_approval=True,
+            stale_approval_head_sha="new",
+            stale_approval_head_observed_at="2026-01-01T00:01:00Z",
+        ) == ""
+
+    def test_fractional_same_second_observation_fails_closed(self):
+        reviews = (
+            _rev(
+                1,
+                "APPROVED",
+                commit_id="old",
+                submitted_at="2026-01-01T00:01:00.500Z",
+            ),
+        )
+        assert pc.effective_verdict(
+            reviews,
+            "new",
+            "author",
+            allow_stale_approval=True,
+            stale_approval_head_sha="new",
+            stale_approval_head_observed_at="2026-01-01T00:01:00Z",
         ) == ""
 
     def test_stale_approval_without_matching_publication_evidence_is_not_retained(self):
@@ -255,7 +291,7 @@ class TestEffectiveVerdict:
             "author",
             allow_stale_approval=True,
             stale_approval_head_sha="different",
-            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
+            stale_approval_head_observed_at="2026-01-01T00:01:00Z",
         ) == ""
 
     def test_approval_at_current_head_counts(self):
@@ -848,6 +884,7 @@ class TestApprovalRequired:
             pr_state="open",
             mergeable=True,
             head_sha="new",
+            updated_at="2026-01-01T00:01:59Z",
             reviews=(_rev(1, "APPROVED", commit_id="old"),),
         )
         st = pc.classify_state(snap, automerge_label="auto-complete")
@@ -860,6 +897,7 @@ class TestApprovalRequired:
             pr_state="open",
             mergeable=True,
             head_sha="new",
+            updated_at="2026-01-01T00:01:59Z",
             reviews=(
                 _rev(
                     1,
@@ -874,7 +912,7 @@ class TestApprovalRequired:
             automerge_label="auto-complete",
             allow_stale_approval=True,
             stale_approval_head_sha="new",
-            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
+            stale_approval_head_observed_at="2026-01-01T00:01:00Z",
         )
         assert readiness["verdict"] == "APPROVED"
         assert readiness["approval_stale"] is True
@@ -902,7 +940,7 @@ class TestApprovalRequired:
             automerge_label="auto-complete",
             allow_stale_approval=True,
             stale_approval_head_sha="new",
-            stale_approval_head_pushed_at="2026-01-01T00:02:00Z",
+            stale_approval_head_observed_at="2026-01-01T00:02:00Z",
         )
         assert readiness["verdict"] == ""
         assert readiness["approval_stale"] is True
