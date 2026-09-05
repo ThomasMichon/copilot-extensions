@@ -569,6 +569,8 @@ def make_headless_spawn(
                 wait=False,
                 json_output=True,
             )
+        except bridge.BridgeCarriedSessionBusy as exc:
+            return False, {"error": str(exc), "deferred": True}
         except bridge.BridgeUnavailable as exc:
             return False, {"error": str(exc)}
         if result.returncode != 0:
@@ -3279,7 +3281,14 @@ class Supervisor:
                     log.info("spawned embody for task %s (%s)", task["id"], key)
                 else:
                     detail = handle.get("error", "spawn failed")
-                    if (
+                    if handle.get("deferred"):
+                        self.client.defer_spawn(key, detail=detail)
+                        log.info(
+                            "spawn deferred (carried session busy) for task "
+                            "%s (%s): %s",
+                            task["id"], key, handle.get("error"),
+                        )
+                    elif (
                         spawn_task.get("spawn_worktree_ownership") == "created"
                     ):
                         self.client.request_spawn_release(
@@ -3287,12 +3296,16 @@ class Supervisor:
                             detail=detail,
                             disposition="failed",
                         )
+                        log.warning(
+                            "spawn failed for task %s (%s): %s",
+                            task["id"], key, handle.get("error"),
+                        )
                     else:
                         self.client.fail_spawn(key, detail=detail)
-                    log.warning(
-                        "spawn failed for task %s (%s): %s",
-                        task["id"], key, handle.get("error"),
-                    )
+                        log.warning(
+                            "spawn failed for task %s (%s): %s",
+                            task["id"], key, handle.get("error"),
+                        )
             except DispatchError:
                 log.exception("bookkeeping failed for reservation %s", key)
         if self.event_wake is not None:

@@ -1735,6 +1735,12 @@ def create_app(
         bus.publish({"type": "spawn.failed", "reservation": result})
         return result
 
+    @app.post("/spawn-reservations/{key}/defer")
+    def defer_spawn(key: str, body: ReservationDetailBody) -> dict:
+        result = _reservation_guard(lambda: queue.defer_spawn(key, detail=body.detail))
+        bus.publish({"type": "spawn.deferred", "reservation": result})
+        return result
+
     @app.post("/spawn-reservations/{key}/cold")
     def record_cold(key: str) -> dict:
         result = _reservation_guard(lambda: queue.record_cold(key))

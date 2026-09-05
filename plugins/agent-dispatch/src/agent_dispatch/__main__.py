@@ -4116,6 +4116,8 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
             return _emit(rows)
         if args.reservations_command == "fail":
             return _emit(c.fail_spawn(args.key, detail=args.detail))
+        if args.reservations_command == "defer":
+            return _emit(c.defer_spawn(args.key, detail=args.detail))
         if args.reservations_command == "settle":
             return _emit(c.settle_spawn(args.key, detail=args.detail))
         if args.reservations_command == "rearm":
@@ -5975,6 +5977,17 @@ def build_parser() -> argparse.ArgumentParser:
     rp.set_defaults(func=_cmd_reservations)
     rp = res_sub.add_parser(
         "fail", help="mark a reservation failed (releases the task for a fresh attempt)"
+    )
+    rp.add_argument("key")
+    rp.add_argument("--detail")
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "defer",
+        help=(
+            "mark a reservation deferred: a carried session was confirmed "
+            "still live/busy, not a failure (releases the task for a fresh "
+            "attempt without counting toward dead-lettering)"
+        ),
     )
     rp.add_argument("key")
     rp.add_argument("--detail")

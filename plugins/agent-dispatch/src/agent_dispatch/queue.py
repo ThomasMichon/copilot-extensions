@@ -369,12 +369,22 @@ class SpawnState:
     #: A failed attempt was explicitly retired by an operator rearm. The row
     #: remains queryable for audit, but no longer counts toward dead-lettering.
     REARMED = "rearmed"
+    #: The spawn did not fail -- it declined because a carried session from a
+    #: prior attempt (same exclusive key) was confirmed still live/busy, not
+    #: gone. This is a legitimate "not yet safe to touch" answer, never an
+    #: error: a fresh attempt is immediately eligible next cycle, and (unlike
+    #: FAILED) it never counts toward dead-lettering (see
+    #: :meth:`Supervisor._failed_spawn_counts`). Distinguishing this from
+    #: FAILED is what lets a busy carried session's owner keep working while
+    #: the next attempt safely re-checks liveness, instead of the task being
+    #: dead-lettered by attempts it never actually failed.
+    DEFERRED = "deferred"
 
     #: States in which a reservation still "owns" the task's spawn -- no new
     #: attempt may be reserved while one of these is outstanding.
     ACTIVE = frozenset({RESERVING, SPAWNED, COLD, RELEASING})
     #: States a reservation may be released from (a new attempt is allowed).
-    RELEASABLE = frozenset({SETTLED, FAILED, REARMED})
+    RELEASABLE = frozenset({SETTLED, FAILED, REARMED, DEFERRED})
 
 
 def spawn_key(task_id: str, attempt: int) -> str:
@@ -5898,6 +5908,22 @@ class TaskQueue:
         return self._update_reservation(
             key,
             to_state=SpawnState.FAILED,
+            allowed_from=SpawnState.ACTIVE,
+            detail=detail,
+            now=now,
+        )
+
+    def defer_spawn(
+        self, key: str, *, detail: str | None = None, now: float | None = None
+    ) -> SpawnReservation:
+        """Mark a reservation ``deferred``: the spawn declined, not failed,
+        because a carried session (same exclusive key) was confirmed still
+        live/busy. Releases the task so a fresh attempt may be reserved
+        immediately, but -- unlike :meth:`fail_spawn` -- never counts toward
+        dead-lettering, since no attempt actually failed."""
+        return self._update_reservation(
+            key,
+            to_state=SpawnState.DEFERRED,
             allowed_from=SpawnState.ACTIVE,
             detail=detail,
             now=now,

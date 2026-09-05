@@ -681,6 +681,11 @@ class DispatchClient:
             self._http.post(f"/spawn-reservations/{key}/fail", json={"detail": detail})
         )
 
+    def defer_spawn(self, key: str, *, detail: str | None = None) -> dict:
+        return self._unwrap(
+            self._http.post(f"/spawn-reservations/{key}/defer", json={"detail": detail})
+        )
+
     def request_spawn_release(
         self,
         key: str,
