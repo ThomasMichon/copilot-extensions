@@ -29,8 +29,10 @@ performed only a file-write side effect. Across repeated runs:
 - The file-write side effect **always** completed successfully once the
   repository was trusted, proven by inspecting the hook's own stdin payload
   and the file it produced.
-- The confirmed `sessionStart` hook input shape is
-  `{"sessionId", "timestamp", "cwd", "source", "initialPrompt"}`.
+- The observed `sessionStart` hook input included at least
+  `{"sessionId", "timestamp", "cwd", "source", "initialPrompt"}` in this test;
+  treat this as a lower bound, not an exhaustive or closed schema -- future or
+  other launch paths may add fields.
 - **Repository-level (non-plugin) `.github/hooks/*.json` hooks silently do not
   run at all** in a non-interactive launch (`-p`) against an untrusted folder --
   no error, no diagnostic, just complete absence. This is a sharper trust gate
@@ -93,8 +95,10 @@ a **pure side effect** -- never through `additionalContext` -- to:
 using the `sessionId` supplied in the hook's own stdin payload. The write:
 
 - is atomic (write to a temp file in the same directory, then rename);
-- validates `sessionId` against the documented UUID shape and rejects a
-  missing or malformed value rather than guessing;
+- validates `sessionId` against the same general safe-identifier pattern the
+  shipped `context-injection` engine already uses (non-empty, restricted to
+  `[A-Za-z0-9._-]`, bounded length -- not UUID-only) and rejects a missing or
+  malformed value rather than guessing;
 - is contained beneath the exact session's `session-state` root -- no
   symlink/reparse escape, no path outside `instructions/<plugin>/`;
 - uses the plugin's own topic-scoped subpath so two plugins never collide;
