@@ -237,7 +237,7 @@ because they provide tools or services.
         restoration, foreign-control refusal, isolated shutdown, and clean
         cleanup. The implementation landed through
         [#1880](https://github.com/ThomasMichon/copilot-extensions/pull/1880)
-        and the first acceptance defects through
+        and the first acceptance defects were fixed through
         [#2080](https://github.com/ThomasMichon/copilot-extensions/pull/2080);
         the committed-crash restoration defect was fixed through
         [#2089](https://github.com/ThomasMichon/copilot-extensions/pull/2089),
