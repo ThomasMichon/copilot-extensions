@@ -23,6 +23,16 @@ A requirement package declares resources under a top-level ``resources:`` list::
         strategy: ensure-present    # enforce | ensure-present
         content: |
           set -g mouse on
+      - type: file
+        id: uv-feed
+        path: "$HOME/AppData/Roaming/uv/uv.toml"
+        strategy: enforce
+        marker: "# Managed by <package>."   # ownership guard (enforce only)
+        content: |
+          # Managed by <package>.
+          [[index]]
+          url = "https://example.invalid/pypi/simple/"
+          default = true
 
 Five kinds are fully handled: ``package`` (winget/apt/pipx/uv-tool/pip),
 ``file`` (whole-file *enforce*/*ensure-present* plus a *managed-block* strategy
@@ -33,6 +43,15 @@ that owns only a marked block inside an otherwise user-owned file),
 power-scheme AC/DC values via ``powercfg``). Adding a type is a new
 ``ResourceHandler`` subclass registered in :data:`HANDLERS` -- nothing else in
 the engine changes.
+
+A whole-file ``enforce`` declaration may set ``marker``: a substring that must
+appear in an *existing* file's content for that file to be recognized as owned
+by this package. When the marker is absent from an existing file, the file is
+never overwritten -- it is reported as ``blocked`` (not ``ok``), so genuine
+non-convergence against a hand-authored or externally-managed file stays
+visible in ``restore`` instead of silently succeeding. Without ``marker``, a
+plain ``enforce`` keeps its historical behavior: always converge to
+``content`` (backing up whatever was there).
 
 **Collision handling is field-local.** When two packages target the same resource
 identity -- ``(manager, id)`` for a package; ``(path, block)`` for a file (the
@@ -147,10 +166,11 @@ class ResourceResult:
     id: str
     changed: bool
     dry_run: bool
-    action: str  # install | pin | write | uninstall | none | skip
+    action: str  # install | pin | write | uninstall | none | skip | blocked
     detail: str = ""
     skipped_reason: str | None = None
     deferred_reason: str | None = None
+    blocked_reason: str | None = None
     backup_path: str | None = None
     commands: list[list[str]] = field(default_factory=list)
 
@@ -159,6 +179,8 @@ class ResourceResult:
         """Stable machine-readable outcome independent of display wording."""
         if self.action == "error":
             return "error"
+        if self.blocked_reason is not None:
+            return "blocked"
         if self.deferred_reason is not None:
             return "deferred"
         if self.skipped_reason is not None:
@@ -167,7 +189,14 @@ class ResourceResult:
 
     @property
     def ok(self) -> bool:
-        return self.status != "error"
+        # "blocked" is distinct from "skipped": a skip means the resource
+        # correctly opted out (wrong platform, unresolved anchor, nothing to
+        # do); a block means the declared state genuinely cannot converge
+        # because of a real precondition outside this run (e.g. a whole-file
+        # `enforce` target already exists and isn't owned by any declared
+        # marker) -- that must flip overall convergence to not-ok instead of
+        # silently reporting success (agent-machines#uv-feed / dotfiles#2071).
+        return self.status not in ("error", "blocked")
 
 
 @dataclass
@@ -723,7 +752,29 @@ class FileResourceHandler(ResourceHandler):
                     f"enforce content wins.",
                 ))
             strategy = "enforce"
+            # `marker`: an optional ownership guard for whole-file `enforce`.
+            # When set, an *existing* file lacking the marker is treated as
+            # hand-authored/owned-elsewhere and is never overwritten (see
+            # `_apply_text`) -- distinct from a bare `enforce`, which always
+            # converges to `content` regardless of what is already there.
+            marker, selected, _, conflict, decision, info = _select_field(
+                enforce,
+                ident,
+                "marker",
+                lambda member: member.declaration.get("marker"),
+            )
+            if conflict:
+                findings.append(ResourceFinding(
+                    "error", "resource-conflict",
+                    f"file '{path}' is declared with conflicting ownership markers "
+                    f"across packages: "
+                    f"{', '.join(sorted(member.owner for member in selected))}.",
+                ))
+            if decision:
+                decisions.append(decision)
+                findings.append(info)
         else:
+            marker = None
             format_members = floor
             fmt, selected, _, conflict, decision, info = _select_field(
                 format_members,
@@ -764,6 +815,8 @@ class FileResourceHandler(ResourceHandler):
 
         desired = {"path": path, "format": fmt, "strategy": strategy,
                    "content": content}
+        if marker:
+            desired["marker"] = marker
         return desired, findings, decisions
 
     def _merge_managed_block(
@@ -885,6 +938,7 @@ class FileResourceHandler(ResourceHandler):
     def _apply_text(self, resolved, target: Path, exists: bool, strategy: str,
                     dry_run: bool) -> ResourceResult:
         desired = str(resolved.desired.get("content", ""))
+        marker = resolved.desired.get("marker")
         current = target.read_text(encoding="utf-8") if exists else None
         if strategy == "ensure-present":
             if exists:
@@ -892,6 +946,19 @@ class FileResourceHandler(ResourceHandler):
                                       detail="present (ensure-present, left as-is)")
             action = "write"
         else:  # enforce
+            if exists and marker and marker not in (current or ""):
+                # An unrecognized existing file: never clobber hand-authored
+                # or externally-managed content. Report as `blocked` (not
+                # `ok`) so a real, indefinite non-convergence is visible
+                # instead of silently reporting success (dotfiles#2071).
+                return ResourceResult(
+                    self.TYPE, resolved.id, False, dry_run, "blocked",
+                    blocked_reason="exists and is not managed by this package "
+                                   "(missing ownership marker)",
+                    detail=f"{target} exists and is not managed; leaving it "
+                           "untouched. Add the desired content manually, or "
+                           "remove the file to let restore manage it.",
+                )
             if current == desired:
                 return ResourceResult(self.TYPE, resolved.id, False, dry_run, "none",
                                       detail="up-to-date")
