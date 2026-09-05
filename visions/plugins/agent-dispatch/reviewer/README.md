@@ -195,8 +195,11 @@ reviving a released lineage.
 - [agent-dispatch vision](../README.md)
 - [agent-worktrees vision](../../agent-worktrees/README.md)
 - [agent-bridge vision](../../agent-bridge/README.md)
-- Realization effort:
+- Realization:
   [`efforts/active/review-automation-reliability/`](../../../../efforts/active/review-automation-reliability/)
+  owns the remaining lifecycle and reliability delta; archived
+  [`turnkey-reviewer-loops`](../../../../efforts/2026/09/03%20turnkey-reviewer-loops/)
+  records the proven turn-key composition.
 
 ## Provenance
 
