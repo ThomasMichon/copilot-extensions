@@ -51,6 +51,7 @@ _KNOWN_KEYS = frozenset(
         "owner",
         "description",
         "runtime_generation",
+        "transition_group",
         "kind",
         "spec",
     }
@@ -195,6 +196,7 @@ class ProfileDeclaration:
     owner: str | None = None  # provenance: which system declared this
     description: str | None = None
     runtime_generation: str | None = None
+    transition_group: str | None = None
     plugin_root: str | None = None
     source_path: str | None = None
     plugin_version: str | None = None
@@ -541,6 +543,7 @@ def load_declaration(
             "owner",
             "description",
             "runtime_generation",
+            "transition_group",
         }
         extras = sorted(set(data) - allowed)
         if extras:
@@ -559,6 +562,18 @@ def load_declaration(
             raise RegistrarError(
                 "runtime_generation: plugin-companion declarations require a non-empty string"
             )
+        transition_group = data.get("transition_group")
+        if transition_group is not None and kind != RegistrationKind.PLUGIN_COMPANION:
+            raise RegistrarError(
+                "transition_group: only plugin-companion declarations may set it"
+            )
+        if transition_group is not None and (
+            not isinstance(transition_group, str)
+            or not transition_group.strip()
+        ):
+            raise RegistrarError(
+                "transition_group: plugin-companion declarations require a non-empty string"
+            )
         spec = data.get("spec")
         if not isinstance(spec, Mapping):
             raise RegistrarError(
@@ -576,12 +591,14 @@ def load_declaration(
             owner=data.get("owner"),
             description=data.get("description"),
             runtime_generation=runtime_generation,
+            transition_group=transition_group,
         )
 
-    if data.get("runtime_generation") is not None:
-        raise RegistrarError(
-            "runtime_generation: only plugin-companion declarations may set it"
-        )
+    for field in ("runtime_generation", "transition_group"):
+        if data.get(field) is not None:
+            raise RegistrarError(
+                f"{field}: only plugin-companion declarations may set it"
+            )
 
     legacy_concurrency = data.get("concurrency")
     process_cap = data.get(

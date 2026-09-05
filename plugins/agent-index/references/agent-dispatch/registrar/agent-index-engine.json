@@ -2,6 +2,7 @@
   "name": "agent-index-engine",
   "kind": "plugin-companion",
   "runtime_generation": "engine-v1",
+  "transition_group": "agent-index-host-runtime",
   "spec": {
     "managed_runtime": {
       "schema_version": 1,

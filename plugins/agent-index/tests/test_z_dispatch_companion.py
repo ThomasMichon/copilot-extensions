@@ -463,6 +463,8 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
     assert "engine" not in json.dumps(runtime)
     engine_runtime, = engine_declaration["spec"]["managed_runtime"]["runtimes"]
     assert engine_declaration["runtime_generation"] == "engine-v1"
+    assert declaration["transition_group"] == "agent-index-host-runtime"
+    assert engine_declaration["transition_group"] == declaration["transition_group"]
     assert engine_declaration["spec"]["command"] == [
         "scripts/companion-engine.py",
         "start",
