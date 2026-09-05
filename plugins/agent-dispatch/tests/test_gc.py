@@ -112,6 +112,49 @@ def test_verdict_unknown_on_empty_worktree_handle():
     assert tracking.liveness_verdict(None, owner_session_id="S1") == tracking.UNKNOWN
 
 
+def test_verdict_uses_local_bridge_when_machine_is_this_machine(monkeypatch):
+    # Regression: every claimed/started task's stored owner is
+    # "<machine>/<worktree>", so `machine` is non-empty for *every* task, local
+    # or remote. Without gating it through `is_peer_machine`, a local task's
+    # liveness probe would shell an unnecessary self-SSH loopback (a visible
+    # OpenSSH window flash on every GC pass) instead of the direct local
+    # `agent-bridge` call every other caller in this module already takes.
+    _bridge_ok(monkeypatch)
+    monkeypatch.setattr(tracking.remote_dispatch, "is_peer_machine", lambda _m: False)
+
+    def local_only(*_a, **_k):
+        return _Proc(0, '{"session_id": "S1"}')
+
+    def ssh_forbidden(*_a, **_k):
+        raise AssertionError("must not shell SSH for this machine's own owner")
+
+    monkeypatch.setattr(tracking, "run_background_capture", local_only)
+    monkeypatch.setattr(tracking, "run_ssh_capture", ssh_forbidden)
+    assert (
+        tracking.liveness_verdict(
+            "wt", machine="tmichon-cloud1", owner_session_id="S1"
+        )
+        == tracking.LIVE
+    )
+
+
+def test_verdict_still_uses_ssh_for_a_genuine_peer_machine(monkeypatch):
+    monkeypatch.setattr(tracking.remote_dispatch, "is_peer_machine", lambda _m: True)
+
+    def local_forbidden(*_a, **_k):
+        raise AssertionError("must not use the local bridge for a genuine peer")
+
+    def ssh_only(*_a, **_k):
+        return _Proc(0, '{"session_id": "S1"}')
+
+    monkeypatch.setattr(tracking, "run_background_capture", local_forbidden)
+    monkeypatch.setattr(tracking, "run_ssh_capture", ssh_only)
+    assert (
+        tracking.liveness_verdict("wt", machine="peer-box", owner_session_id="S1")
+        == tracking.LIVE
+    )
+
+
 # -- reconcile_liveness: fenced, identity-keyed GC ---------------------------
 
 

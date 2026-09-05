@@ -323,6 +323,14 @@ def liveness_verdict(
     """
     if not worktree:
         return UNKNOWN
+    # An owner's ``machine`` is populated from the stored ``"<machine>/<worktree>"``
+    # owner string, which is non-empty for *every* claimed/started task -- local or
+    # remote. Without this gate, every local task's liveness probe would shell an
+    # unnecessary self-SSH loopback (visible OpenSSH window flash) instead of the
+    # direct local ``agent-bridge`` call every other caller in this module already
+    # takes.
+    if machine is not None and not remote_dispatch.is_peer_machine(machine):
+        machine = None
     argv = _bridge_resolve_argv(worktree, machine=machine)
     if argv is None:
         return UNKNOWN
