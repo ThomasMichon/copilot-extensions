@@ -28,6 +28,7 @@ from agent_procutil import no_window_flags
 log = logging.getLogger("agent-bridge")
 
 _CODESPACE_PREFIX = "codespace:"
+_CONTAINER_PREFIX = "container:"
 
 # Suppress a flashing console window when spawning the transport subprocess on a
 # Windows host (parity with the retired session_manager shell-out, which set this
@@ -40,10 +41,23 @@ class TargetExecError(RuntimeError):
 
 
 def target_kind(session: dict) -> str:
-    """``codespace`` | ``local`` | ``<target_type>`` for a session dict."""
+    """``codespace`` | ``container`` | ``local`` | ``<target_type>`` for a
+    session dict.
+
+    A container-backed session's ``agent_name`` is ``container:<name>`` (see
+    session_manager's container branch), the same way a CodeSpace session's is
+    ``codespace:<name>`` -- but unlike codespace, container sessions persist
+    ``target_type: "command"`` (the generic provider-driven type), which this
+    function otherwise treats as local. Without this explicit prefix check, a
+    container session's kind silently resolved to "local", defeating any
+    non-local-kind gate (e.g. the peek CLI's fail-closed routing) regardless of
+    what it checks -- the bug is here, not downstream (#2042 follow-up).
+    """
     agent = str(session.get("agent_name") or "")
     if agent.startswith(_CODESPACE_PREFIX):
         return "codespace"
+    if agent.startswith(_CONTAINER_PREFIX):
+        return "container"
     tt = str(session.get("target_type") or "local")
     return "local" if tt in ("local", "command") else tt
 
