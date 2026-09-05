@@ -890,6 +890,7 @@ def _push_changes_pr(
         ).stdout.strip()
         if pushed_pr is not None:
             pushed_pr.head_sha = head_sha
+            pushed_pr.head_pushed_at = tracking._now_iso()
             if pushed_pr.state in ("", "creating"):
                 pushed_pr.state = "open"
         tracking.save_record(record)
@@ -1012,6 +1013,7 @@ def _push_changes_pr_refspec(
         ).stdout.strip()
         if pushed_pr is not None:
             pushed_pr.head_sha = head_sha
+            pushed_pr.head_pushed_at = tracking._now_iso()
             if pushed_pr.state in ("", "creating"):
                 pushed_pr.state = "open"
         tracking.save_record(record)

@@ -316,6 +316,7 @@ class PRRecord:
     branch: str = ""
     base_sha: str = ""
     head_sha: str = ""
+    head_pushed_at: str = ""  # ISO timestamp when this exact head was published
     attribution_head: str = ""
     patch_id: str = ""       # squash-invariant patch-id of base..head (#898)
     url: str = ""
@@ -1723,6 +1724,7 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         branch=str(raw.get("branch", "")),
         base_sha=str(raw.get("base_sha", "")),
         head_sha=str(raw.get("head_sha", "")),
+        head_pushed_at=str(raw.get("head_pushed_at", "")),
         attribution_head=str(raw.get("attribution_head", "")),
         patch_id=str(raw.get("patch_id", "")),
         url=str(raw.get("url", "")),
@@ -1744,6 +1746,8 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
         "head_sha": pr.head_sha,
         "url": pr.url,
     }
+    if pr.head_pushed_at:
+        d["head_pushed_at"] = pr.head_pushed_at
     if pr.patch_id:
         d["patch_id"] = pr.patch_id
     if pr.attribution_head:
