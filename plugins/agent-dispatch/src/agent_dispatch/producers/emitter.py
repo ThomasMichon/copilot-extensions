@@ -16,6 +16,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from ..client import DispatchClient
 
 
@@ -206,6 +208,7 @@ def run_side_load(
         check=False,
         capture_output=True,
         text=True,
+        **no_window_kwargs(),
     )
     if int(completed.returncode) != 0:
         raise EmitterError(
@@ -277,6 +280,7 @@ def run_tick(
             check=False,
             capture_output=spec.get("task_output") == "json",
             text=spec.get("task_output") == "json",
+            **no_window_kwargs(),
         )
         returncode = int(completed.returncode)
         error = None

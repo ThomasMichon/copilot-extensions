@@ -931,6 +931,30 @@ def test_cli_register_ensure_flag():
     assert b.ensure is False
 
 
+def test_supervisor_daemon_root_hosts_recurring_children_windowlessly(
+    monkeypatch,
+):
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import procutil
+
+    observed = {}
+    monkeypatch.setattr(cli.sys, "executable", "python.exe")
+    monkeypatch.setattr(
+        procutil,
+        "windowless_daemon_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda argv, **kwargs: observed.update(argv=argv, kwargs=kwargs),
+    )
+
+    assert cli._spawn_supervisor_daemon_detached("host-a", "default")
+    assert observed["argv"][0] == "python.exe"
+    assert observed["kwargs"]["creationflags"] == 0x08000000
+
+
 def test_cli_build_spec_evaluator_convenience():
     from agent_dispatch.__main__ import _build_registration_spec
 

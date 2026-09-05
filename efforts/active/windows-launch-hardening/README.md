@@ -10,7 +10,7 @@
   surfaced real console windows (`python.exe`/`pwsh.exe`/`cmd.exe` with `.agent-`
   paths) because they relied on `-WindowStyle Hidden` alone or spawned without
   window-suppression flags.
-- **Umbrella issue:** #786 (supersedes #775, the headless sub-thread — Phases 1-2 landed).
+- **Umbrella issue:** #786 (supersedes #775, the headless sub-thread — Phases 1-2 landed); current regression: #2037.
 
 ## Guiding Intent
 
@@ -77,6 +77,10 @@ kind:
    console-subsystem Python root under `CREATE_NO_WINDOW`, so repeated `psmux`
    probes inherit one hidden console instead of allocating a new console host
    per refresh.
+10. **Recurring service-descendant containment** — #2037. Run agent-bridge,
+    agent-dispatch supervision, and the container Docker broker from a hidden
+    console root; suppress every short-lived captured child; and migrate
+    installer probes away from direct console launches.
 
 ## Deferred Backlog Intake
 
@@ -214,3 +218,15 @@ against real behavior.
 - The reusable Windows launch pattern now distinguishes fully detached
   `pythonw` daemons from daemons with recurring console descendants that need
   one inherited hidden console.
+
+### 2026-09-04 - recurring service descendants
+- Live process inspection found an agent-bridge-owned `ssh.exe` tree whose
+  stale container `ProxyCommand` launched `docker.exe` directly, plus recurring
+  agent-dispatch Python children rooted beneath consoleless daemons.
+- #2028 introduced the container loopback broker, but deployment and follow-up
+  validation exposed the same root-launch mistake in the broker, bridge daemon,
+  and dispatch supervisor: recurring console descendants were still parented by
+  detached `pythonw.exe`.
+- #2037 carries the coordinated correction: hidden-console daemon roots,
+  explicit no-window flags on captured children, and a headless Docker installer
+  probe, followed by multi-cycle Windows validation.

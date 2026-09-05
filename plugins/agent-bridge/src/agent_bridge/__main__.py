@@ -19,7 +19,10 @@ import urllib.error
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
+from agent_procutil import (
+    no_window_kwargs,
+    windowless_daemon_kwargs,
+)
 
 from . import __version__
 from .parity_harness import (
@@ -1498,7 +1501,7 @@ def _daemon_launch_argv() -> list[str]:
     ``agent-bridge`` binstub on PATH (POSIX shims are plain exec scripts and are
     unaffected). Falls back to the bare name only when nothing else resolves."""
     if sys.executable:
-        return [windowless_python(sys.executable), "-m", "agent_bridge", "start"]
+        return [sys.executable, "-m", "agent_bridge", "start"]
     venv = os.path.join(_INSTALL_DIR, "venv")
     py = (
         os.path.join(venv, "Scripts", "python.exe")
@@ -1506,14 +1509,14 @@ def _daemon_launch_argv() -> list[str]:
         else os.path.join(venv, "bin", "python")
     )
     if os.path.isfile(py):
-        return [windowless_python(py), "-m", "agent_bridge", "start"]
+        return [py, "-m", "agent_bridge", "start"]
     exe = shutil.which("agent-bridge")  # marketplace-isolation: allow self-bootstrap
     if exe:
         return [exe, "start"]
     return ["agent-bridge", "start"]
 
 
-def _spawn_via_wmi_broker(argv: list[str]) -> bool:
+def _spawn_via_wmi_broker_pid(argv: list[str]) -> int | None:
     """Launch the daemon through WMI ``Win32_Process.Create`` so it is owned by
     the WMI provider host (``WmiPrvSE``) -- fully OUTSIDE the caller's Job object
     and login/SSH session, hence never reaped when the CLI call or host SSH
@@ -1539,14 +1542,17 @@ def _spawn_via_wmi_broker(argv: list[str]) -> bool:
     log = os.path.join(_INSTALL_DIR, "agent-bridge.log")
     err = os.path.join(_INSTALL_DIR, "agent-bridge-err.log")
     inner = " ".join(f'"{a}"' for a in argv) + f' >> "{log}" 2>> "{err}"'
-    cmdline = f'cmd.exe /c "{inner}"'
+    cmdline = f'conhost.exe --headless cmd.exe /c "{inner}"'
     # Single-quote for the PowerShell string literal (double any embedded quote).
     ps_cmdline = cmdline.replace("'", "''")
     ps_cwd = _INSTALL_DIR.replace("'", "''")
     ps = (
         "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
         f"-Arguments @{{ CommandLine = '{ps_cmdline}'; "
-        f"CurrentDirectory = '{ps_cwd}' }}; exit [int]$r.ReturnValue"
+        f"CurrentDirectory = '{ps_cwd}' }}; "
+        "if ($r.ReturnValue -eq 0) { "
+        "[Console]::Out.WriteLine([int]$r.ProcessId) }; "
+        "exit [int]$r.ReturnValue"
     )
     encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
     try:
@@ -1556,9 +1562,39 @@ def _spawn_via_wmi_broker(argv: list[str]) -> bool:
             capture_output=True, text=True, timeout=30,
             **no_window_kwargs(),
         )
-        return out.returncode == 0
+        if out.returncode != 0:
+            return None
+        try:
+            pid = int((out.stdout or "").strip())
+        except (TypeError, ValueError):
+            return None
+        return pid if pid > 0 else None
     except (OSError, _sp.TimeoutExpired):
-        return False
+        return None
+
+
+def _spawn_via_wmi_broker(argv: list[str]) -> bool:
+    return _spawn_via_wmi_broker_pid(argv) is not None
+
+
+class _BrokeredProcessHandle:
+    def __init__(self, pid: int):
+        self.pid = pid
+
+    def poll(self) -> int | None:
+        from .session_host.osutil import pid_alive
+
+        return None if pid_alive(self.pid) else 0
+
+    def terminate(self) -> None:
+        subprocess.run(
+            ["taskkill", "/PID", str(self.pid), "/T", "/F"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            **no_window_kwargs(),
+        )
 
 
 def _spawn_detached_argv(argv: list[str]) -> None:
@@ -1586,7 +1622,7 @@ def _spawn_detached_argv(argv: list[str]) -> None:
         errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
         _sp.Popen(
             argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
-            **detached_kwargs(breakaway=True),
+            **windowless_daemon_kwargs(breakaway=True),
         )
         return
     except OSError:
@@ -1600,7 +1636,7 @@ def _spawn_detached_argv(argv: list[str]) -> None:
         errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
         _sp.Popen(
             argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
-            **detached_kwargs(),
+            **windowless_daemon_kwargs(),
         )
 
 
@@ -1637,7 +1673,7 @@ def _spawn_watchdog_replacement(
         if serving_port == active_port:
             original_args.remove("--passive")
     argv = [
-        windowless_python(sys.executable),
+        sys.executable,
         "-c",
         code,
         str(delay),
@@ -2383,21 +2419,11 @@ def _fault_frontend_restart_hostindex_loss(
 
 
 def _passive_daemon_creationflags() -> int:
-    """Windows process-creation flags for the detached passive daemon.
-
-    ``DETACHED_PROCESS`` **alone** -- the daemon gets NO console, so a DefTerm
-    handoff (Windows Terminal as the default terminal app) has nothing to surface
-    as a window/tab. Deliberately NOT ``CREATE_NO_WINDOW``: that flag *creates* a
-    console (merely hiding its window), which DefTerm then shows anyway -- the
-    headed-console bug. With no console the daemon has no inherited stdio, so the
-    spawn must redirect stdout/stderr to real handles (see ``spawn_passive``), or
-    uvicorn's logging writes to a broken stream and startup fails.
-    """
+    """Windows flags for a passive daemon with recurring console children."""
     if sys.platform == "win32":
-        # getattr fallback so this stays importable/testable on non-Windows CI,
-        # where subprocess lacks DETACHED_PROCESS (Win32 value 0x00000008); the
-        # win32 branch is exercised via monkeypatched sys.platform on Linux.
-        return getattr(subprocess, "DETACHED_PROCESS", 0x00000008)  # headless-guard: allow: passive daemon is DETACHED-only (no console at all, not merely no-window)
+        return int(
+            windowless_daemon_kwargs(breakaway=True).get("creationflags", 0)
+        )
     return 0
 
 
@@ -2432,14 +2458,10 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
 
     def spawn_passive(port: int):
         # Launch the *currently installed* code (this interpreter's venv) as a
-        # passive instance, detached so it outlives this deploy process. Use
-        # DETACHED_PROCESS (no console -> no DefTerm window) and REDIRECT stdio to
-        # the daemon's log files: a detached process has no console to provide
-        # stdout/stderr, so without valid handles uvicorn's logging fails at
-        # startup and the cutover rolls back. Also keeps the daemon from
-        # inheriting THIS deploy process's console handle (which would keep it
-        # alive / visible).
-        cmd = [windowless_python(sys.executable), "-m", "agent_bridge", "start",
+        # passive instance with one hidden console root for its recurring SSH
+        # descendants. Redirect stdio to the daemon logs and break away from the
+        # deploy process's job so the promoted generation survives cutover.
+        cmd = [sys.executable, "-m", "agent_bridge", "start",
                "--port", str(port), "--passive"]
         kwargs: dict = {}
         if sys.platform == "win32":
@@ -2451,7 +2473,15 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
             kwargs["creationflags"] = _passive_daemon_creationflags()
         else:
             kwargs["start_new_session"] = True
-        return subprocess.Popen(cmd, **kwargs)
+        try:
+            return subprocess.Popen(cmd, **kwargs)
+        except OSError:
+            if sys.platform != "win32":
+                raise
+            pid = _spawn_via_wmi_broker_pid(cmd)
+            if pid is None:
+                raise
+            return _BrokeredProcessHandle(pid)
 
     def health_check(h: str, port: int) -> bool:
         try:

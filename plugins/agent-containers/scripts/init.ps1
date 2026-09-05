@@ -563,7 +563,21 @@ if (-not $pythonCmd) {
 Write-Ok "Python: $pythonCmd"
 
 if (Get-Command docker -ErrorAction SilentlyContinue) {
-    $dockerVer = & docker --version 2>$null
+    $dockerPath = (Get-Command docker -ErrorAction Stop).Source
+    $dockerStart = [Diagnostics.ProcessStartInfo]::new()
+    $dockerStart.FileName = $dockerPath
+    if ($dockerStart.PSObject.Properties.Name -contains 'ArgumentList') {
+        [void]$dockerStart.ArgumentList.Add('--version')
+    } else {
+        $dockerStart.Arguments = '--version'
+    }
+    $dockerStart.UseShellExecute = $false
+    $dockerStart.CreateNoWindow = $true
+    $dockerStart.RedirectStandardOutput = $true
+    $dockerStart.RedirectStandardError = $true
+    $dockerProcess = [Diagnostics.Process]::Start($dockerStart)
+    $dockerVer = $dockerProcess.StandardOutput.ReadToEnd().Trim()
+    $dockerProcess.WaitForExit()
     Write-Ok "Docker: $dockerVer"
 } else {
     # Non-fatal: an installer must not fail on a missing prerequisite other than

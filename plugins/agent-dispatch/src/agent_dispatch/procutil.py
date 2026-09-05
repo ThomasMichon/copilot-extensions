@@ -34,6 +34,7 @@ from agent_procutil import (
     detached_kwargs,
     no_window_flags,
     no_window_kwargs,
+    windowless_daemon_kwargs,
     windowless_python,
 )
 
@@ -52,6 +53,7 @@ __all__ = [
     "ssh_subprocess_kwargs",
     "terminate_ssh_process_tree",
     "runtime_root",
+    "windowless_daemon_kwargs",
     "windowless_python",
 ]
 

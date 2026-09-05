@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import sys
 
+from agent_procutil import no_window_kwargs
+
 _STILL_ACTIVE = 259
 
 
@@ -100,6 +102,7 @@ def kill_pid(pid: int | None, *, force: bool = False) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            **no_window_kwargs(),
         )
         return
     import signal
