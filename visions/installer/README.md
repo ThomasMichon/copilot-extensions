@@ -190,9 +190,11 @@ its role/guarantees are owned by the [picker](../picker/README.md) vision; this
 app is where it is delivered and kept current. The interactive Picker opens by the
 **single most natural gesture — a bare, no-args invocation** of a project's front
 door; **every** other invocation routes programmatically to the plugins' own CLIs,
-whether or not it is interactive. Execution is provider-neutral: a
-TMux/PSMux-backed Copilot CLI host may be installed alongside ACP, SDK, App, or
-third-party hosts, and no lightweight plugin carries or assumes that dependency.
+whether or not it is interactive. Execution is provider-neutral: the app
+currently drives both the **TMux/PSMux presentation layer** and the **AHP
+session backend** — composable, not exclusive, choices — for launch, resume,
+and reattach, and may add ACP, SDK, App, or third-party hosts alongside them.
+No lightweight plugin carries or assumes any of these dependencies.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
@@ -376,3 +378,8 @@ the app to keep *itself* current.
   TMux/PSMux-backed Copilot CLI remains one optional host alongside ACP, SDK,
   App, and third-party rigs; plugins and durable worktree state assume none of
   them.
+- **2026-09-04** — Named the app as the current, near-term owner of **both**
+  the Mux presentation layer and the AHP session backend (previously
+  implemented inside agent-worktrees as an internal config branch). The two
+  compose rather than exclude each other: an AHP-hosted session may still be
+  Mux-wrapped for terminal access. Tracked by #2062.

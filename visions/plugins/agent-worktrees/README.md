@@ -202,6 +202,13 @@ manager, or session-host implementation.
   and console choreography belong to an execution-host provider.
 - **Not a universal session host.** Copilot CLI, ACP, SDK, App, and third-party
   rigs retain their own hosting and interaction semantics.
+- **Not a home for a provider-specific config union.** agent-worktrees does not
+  carry a typed "session backend" field set with one branch per hosting
+  technology (e.g. Mux fields beside AHP fields in the same record or config
+  schema). Each execution leg it records is a provider id plus an opaque,
+  provider-owned blob; the mechanics that establish and present a session —
+  currently Mux and AHP, both driven by the Worktree Manager control-plane —
+  live outside agent-worktrees entirely.
 - **Not the handoff transport.** It records lineage, head transitions, and
   durable responsibility; context transfer and live cutover are orchestrated
   above it through the selected execution host.

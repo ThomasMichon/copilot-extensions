@@ -34,7 +34,31 @@ Picker, or every coordinating client.
 A provider represents one execution technology and states the lifecycle,
 interaction, observation, and cutover capabilities it can honestly uphold.
 Providers may support fully owned headless sessions, human-attached interactive
-sessions, or a narrower observational surface.
+sessions, or a narrower observational surface. A provider is realized as a
+physically separate component from the durable agency store — never a
+configuration branch inside it.
+
+Provider concerns compose along **two independent axes**, and providers on
+different axes are not mutually exclusive alternatives:
+
+- **Backend** — how a session's underlying Copilot process or connection is
+  established and driven: a directly spawned CLI process, or a session hosted
+  through the Agent Host Protocol (AHP).
+- **Presentation** — how a human attaches a terminal to that running session:
+  TMux/PSMux pane wrapping, a plain terminal, a GUI window, or none (headless).
+
+Mux is a **presentation** concern: a Mux-wrapped pane can front a directly
+spawned process today, and can equally front an AHP-hosted session — choosing
+AHP does not forgo Mux, and choosing Mux does not forgo AHP. Treating Mux and
+AHP as if they were exclusive peers understates this composability; the
+contract must let a caller select a backend and a presentation independently.
+
+For now, both the Mux presentation layer and the AHP backend are owned and
+driven by the **Worktree Manager** control-plane app (see
+[installer](../installer/README.md)) rather than by agent-worktrees or by a
+separate per-technology plugin. This is a near-term consolidation, not a
+permanent exclusivity rule: a future execution technology may still ship as
+its own installable provider package under the same contract.
 
 ### Provider resolution
 
@@ -48,7 +72,12 @@ environment branches in the caller.
 Pane IDs, windows, process handles, protocol sessions, application instances,
 and host connections remain opaque provider identities. The provider validates
 and acts on them; the agency ledger stores only the bounded evidence needed to
-relate an execution leg to durable work.
+relate an execution leg to durable work. The agency ledger's execution-leg
+record is therefore a **provider id plus an opaque blob**, never a typed union
+with one branch per provider (e.g. a mux-shaped field set beside an
+AHP-shaped field set in the same record type). Adding a provider must not
+require widening that union or teaching the agency layer a new provider's
+field names.
 
 ### Durable transition requests
 
@@ -175,6 +204,12 @@ continuation.
 - **Not a privileged built-in provider.** The first implementation does not
   define the abstraction; CLI mux, ACP, SDK, application, and third-party hosts
   remain peers.
+- **Not a configuration mode of agent-worktrees.** A provider — Mux
+  presentation, the AHP backend, or any future one — is realized as a
+  physically separate component from the durable agency store, never an
+  internal branch inside agent-worktrees' state engine. This does not imply
+  Mux and AHP are mutually exclusive: they compose along independent backend
+  and presentation axes (see *Session-host provider* above).
 - **Not a specification.** This vision defines ownership and guarantees, not a
   registry format, endpoint protocol, request schema, or command vocabulary.
 
@@ -183,6 +218,8 @@ continuation.
 - Parent vision: [agent-fabric](../agent-fabric/README.md)
 - Durable agency state:
   [plugins/agent-worktrees](../plugins/agent-worktrees/README.md)
+- Current host of the Mux and AHP execution mechanics:
+  [installer](../installer/README.md) — the Worktree Manager control-plane app
 - Hosted coordination provider:
   [plugins/agent-bridge](../plugins/agent-bridge/README.md)
 - Human presentation: [picker](../picker/README.md)
@@ -196,3 +233,16 @@ continuation.
   model generalizes live handoff beyond TMux/PSMux so ACP, SDK, App, Herdr, and
   other rigs can own their mechanics without entering generic handoff or
   worktree code. Tracked by #2053.
+- **2026-09-04** — Clarified that Mux (presentation: terminal/pane wrapping)
+  and AHP (backend: session establishment/protocol) are **composable axes, not
+  mutually exclusive peers** — a Mux-wrapped pane can front either a directly
+  spawned process or an AHP-hosted session. Corrected an earlier framing that
+  treated AHP as an alternative a user picks *instead of* Mux. Directed that,
+  for now, both mechanics are consolidated under the **Worktree Manager**
+  control-plane app rather than living inside agent-worktrees or shipping as a
+  separate per-technology plugin; agent-worktrees keeps only an opaque
+  provider-id-plus-blob execution-leg record regardless of which backend or
+  presentation produced it. Mined from finding AHP implemented as an internal
+  `session_backend.is_ahp` config branch threaded through agent-worktrees'
+  `__main__.py`, `tracking.py`, `finalize.py`, and `config_dropins.py` (landed
+  via #1657 / PR #1998). Tracked by #2062.
