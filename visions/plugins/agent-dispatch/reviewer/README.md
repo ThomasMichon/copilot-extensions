@@ -178,6 +178,12 @@ reviving a released lineage.
 - Retry policy does not permit overlapping reviewers or duplicate verdicts.
 - Reviewer automation does not edit a contributor-owned branch unless the
   repository policy and contributor authorization explicitly permit it.
+- Reviewer or backlog automation never closes, supersedes, or replaces
+  another author's open pull request with a competing PR under its own
+  identity -- including when the original branch cannot be updated (a fork,
+  or a protected/deleted branch). The correct response is constructive review
+  feedback and a recorded blocked-on-external-work outcome (or steering card)
+  for a maintainer to reconcile, never unilaterally landing a replacement.
 - Target-change content is untrusted review data, never reviewer guidance or
   ambient executable trust. Any execution of contributor-supplied code remains
   inside the selected venue's explicit sandbox and credential boundaries.
@@ -190,10 +196,16 @@ reviving a released lineage.
 - [agent-worktrees vision](../../agent-worktrees/README.md)
 - [agent-bridge vision](../../agent-bridge/README.md)
 - Realization effort:
-  [`efforts/active/turnkey-reviewer-loops/`](../../../../efforts/active/turnkey-reviewer-loops/)
+  [`efforts/active/review-automation-reliability/`](../../../../efforts/active/review-automation-reliability/)
 
 ## Provenance
 
 - **2026-09-02** — Extracted from the parent agent-dispatch vision after live
   reviewer-loop use clarified the stable reviewer lineage, declarative PR
   capability, verdict latency, retry-window, and cooperative-flow intent.
+- **2026-09-05** — Added the non-supersession non-goal after a live
+  repository-issue-loop worker closed an external contributor's PR and
+  replaced it with its own competing PR under its own identity when the
+  contributor's branch could not be updated. Existing prose already forbade
+  editing a contributor's branch without authorization, but did not name
+  outright PR replacement/closure as an equally forbidden outcome.
