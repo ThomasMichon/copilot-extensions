@@ -38,13 +38,29 @@ def _binding(prcfg) -> dict:
     }
 
 
-def classify_pr(snap: pc.PRSnapshot, prcfg) -> pc.PRState:
+def classify_pr(
+    snap: pc.PRSnapshot,
+    prcfg,
+    *,
+    tracked_head_sha: str = "",
+    head_pushed_at: str = "",
+) -> pc.PRState:
     """Classify a snapshot against the repo's merge-consent binding."""
-    return pc.classify_state(snap, **_binding(prcfg))
+    return pc.classify_state(
+        snap,
+        **_binding(prcfg),
+        stale_approval_head_sha=tracked_head_sha,
+        stale_approval_head_pushed_at=head_pushed_at,
+    )
 
 
 def _decide(
-    snap: pc.PRSnapshot, prcfg, *, default_branch: str = ""
+    snap: pc.PRSnapshot,
+    prcfg,
+    *,
+    default_branch: str = "",
+    tracked_head_sha: str = "",
+    head_pushed_at: str = "",
 ) -> tuple[pc.PRState, str, str]:
     """Return ``(state, action, reason)`` incl. the default-branch guard.
 
@@ -52,7 +68,12 @@ def _decide(
     the repo's default branch), layered over the pure classifier so a PR aimed at
     a side branch is skipped even if otherwise eligible.
     """
-    state = classify_pr(snap, prcfg)
+    state = classify_pr(
+        snap,
+        prcfg,
+        tracked_head_sha=tracked_head_sha,
+        head_pushed_at=head_pushed_at,
+    )
     if default_branch and snap.base_ref and snap.base_ref != default_branch:
         return state, "skip", f"base {snap.base_ref!r} != {default_branch!r}"
     return state, state.consent_action, state.reason
@@ -67,6 +88,8 @@ def merge_one(
     token: str | None = None,
     apply: bool = False,
     default_branch: str = "",
+    tracked_head_sha: str = "",
+    head_pushed_at: str = "",
     provider=None,
 ) -> dict:
     """Classify PR ``number`` and, if eligible and ``apply``, apply the label.
@@ -81,10 +104,18 @@ def merge_one(
     tok = token if token is not None else account_token_for_slug(repo, prcfg)
 
     snap = provider.get_snapshot(repo, number, api_base=base, token=tok)
-    state, action, reason = _decide(snap, prcfg, default_branch=default_branch)
+    state, action, reason = _decide(
+        snap,
+        prcfg,
+        default_branch=default_branch,
+        tracked_head_sha=tracked_head_sha,
+        head_pushed_at=head_pushed_at,
+    )
     row: dict = {
         "pr": number, "action": action, "reason": reason, "title": snap.title,
         "verdict": state.verdict, "merge_state": state.merge_state,
+        "approval_stale": state.approval_stale,
+        "approval_stale_authorized": state.approval_stale_authorized,
     }
     if action == "apply" and apply:
         # "Request auto-complete" is the first-class concept; the provider

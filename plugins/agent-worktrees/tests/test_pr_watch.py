@@ -187,6 +187,7 @@ class TestDecorateEvents:
             # degrades to a verdict/merge-state readout with no action to take.
             "merge": {
                 "verdict": "APPROVED", "approval_stale": False,
+                "approval_stale_authorized": False,
                 "merge_state": "clean", "conflict": False,
                 "mergeable": True, "consent_present": False,
                 "consent_action": "skip", "consent_label": "", "eligible": False,
@@ -261,7 +262,15 @@ class TestDecorateEvents:
             pr_state="open",
             mergeable=True,
             head_sha="new",
-            reviews=(pc.Review(3, "APPROVED", "bob", commit_id="old"),),
+            reviews=(
+                pc.Review(
+                    3,
+                    "APPROVED",
+                    "bob",
+                    submitted_at="2026-01-01T00:02:00Z",
+                    commit_id="old",
+                ),
+            ),
         )
         clock = _Clock()
         res = prw.run_wait(
@@ -274,11 +283,14 @@ class TestDecorateEvents:
             interval=1.0,
             automerge_label="auto-merge",
             allow_stale_approval=True,
+            stale_approval_head_sha="new",
+            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
             now=clock.now,
             sleep=lambda s: None,
         )
         assert res.matched
         assert res.payload["merge"]["approval_stale"] is True
+        assert res.payload["merge"]["approval_stale_authorized"] is True
         assert res.payload["merge"]["consent_action"] == "apply"
 
 

@@ -780,6 +780,7 @@ def create_pr(
         target_pr.branch = feature_branch
         target_pr.base_sha = base_sha
         target_pr.head_sha = head_sha
+        target_pr.head_pushed_at = tracking._now_iso()
         target_pr.patch_id = patch_id
         if not target_pr.provider:
             target_pr.provider = prcfg.provider
@@ -1153,11 +1154,14 @@ def _live_pr_state(
         wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
         approval_required=bool(getattr(prcfg, "approval_required", True)),
         allow_stale_approval=bool(getattr(prcfg, "allow_stale_approval", False)),
+        stale_approval_head_sha=active.head_sha,
+        stale_approval_head_pushed_at=active.head_pushed_at,
     )
     return {
         "live": {
             "verdict": st.verdict,
             "approval_stale": st.approval_stale,
+            "approval_stale_authorized": st.approval_stale_authorized,
             "merge_state": st.merge_state,
             "conflict": st.conflict,
             "mergeable": snap.mergeable,
@@ -1673,6 +1677,7 @@ def _push_existing_feature(
         # target is always non-terminal here (a live match or a fresh record).
         target.state = "open"
         target.head_sha = head_sha
+        target.head_pushed_at = tracking._now_iso()
         # Refresh the squash-invariant patch-id after the re-squash (#898).
         target.patch_id = _patch_id(
             target.base_sha, feature_branch, cwd=worktree_path)
