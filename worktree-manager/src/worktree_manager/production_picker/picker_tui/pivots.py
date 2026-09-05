@@ -38,7 +38,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from dropin_registry import (
@@ -240,6 +240,11 @@ class RegisteredPivot:
     #: re-scan + diff) and the runtime applies them in place so an open pivot
     #: repaints without a re-fetch. Ignored unless ``stream`` is also set.
     subscribe: bool = False
+    #: Optional cheap visibility gate evaluated by the host before adding the
+    #: pivot. The path is relative to the resolved state root and must name a
+    #: file. This keeps configured, plugin-owned views out of unconfigured
+    #: users' tab rows without executing the provider.
+    visible_when_state_root_file: str | None = None
 
     @property
     def account_scoped(self) -> bool:
@@ -312,10 +317,20 @@ class PivotRegistryReport:
 
     @property
     def pivots(self) -> list[RegisteredPivot]:
-        return [
+        candidates = [
             contribution.pivot
             for contribution in self.contributions
             if contribution.pivot is not None
+        ]
+        state_root = (
+            _resolve_state_root_path()
+            if any(pivot.visible_when_state_root_file for pivot in candidates)
+            else None
+        )
+        return [
+            pivot
+            for pivot in candidates
+            if _pivot_is_visible(pivot, state_root=state_root)
         ]
 
     @property
@@ -580,6 +595,33 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
     subscribe = data.get("subscribe", False)
     if not isinstance(subscribe, bool):
         raise ManifestError("`subscribe` must be a boolean when present")
+    visible_when = data.get("visible_when")
+    if visible_when is None:
+        state_root_file = None
+    else:
+        if not isinstance(visible_when, Mapping):
+            raise ManifestError("`visible_when` must be an object when present")
+        unsupported = set(visible_when) - {"state_root_file"}
+        if unsupported:
+            raise ManifestError(
+                f"`visible_when` has unsupported keys: {', '.join(sorted(unsupported))}"
+            )
+        raw_state_root_file = visible_when.get("state_root_file")
+        if not isinstance(raw_state_root_file, str) or not raw_state_root_file.strip():
+            raise ManifestError(
+                "`visible_when.state_root_file` must be a non-empty relative path"
+            )
+        normalized = raw_state_root_file.strip().replace("\\", "/")
+        relative = PurePosixPath(normalized)
+        if (
+            relative.is_absolute()
+            or re.match(r"^[A-Za-z]:", normalized)
+            or any(part in {"", ".", ".."} for part in relative.parts)
+        ):
+            raise ManifestError(
+                "`visible_when.state_root_file` must stay within the state root"
+            )
+        state_root_file = relative.as_posix()
 
     return RegisteredPivot(
         name=name,
@@ -600,7 +642,34 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         group_field=group_field,
         stream=stream,
         subscribe=subscribe,
+        visible_when_state_root_file=state_root_file,
     )
+
+
+def _resolve_state_root_path() -> Path | None:
+    try:
+        from .._engine_runtime import engine_module
+
+        config_module = engine_module("config")
+        state_root_module = engine_module("state_root")
+        resolved = state_root_module.resolve_state_root(config_module.load_config())
+        return Path(resolved.path).resolve() if resolved.path else None
+    except (ImportError, KeyError, OSError, RuntimeError, ValueError):
+        return None
+
+
+def _pivot_is_visible(
+    pivot: RegisteredPivot,
+    *,
+    state_root: Path | None = None,
+) -> bool:
+    required = pivot.visible_when_state_root_file
+    if required is None:
+        return True
+    root = state_root if state_root is not None else _resolve_state_root_path()
+    if root is None:
+        return False
+    return root.joinpath(*PurePosixPath(required).parts).is_file()
 
 
 _VALID_ALIGN = {"l", "r", "c"}
@@ -1915,15 +1984,26 @@ def ensure_pivots(
 
 def discover_pivots(base: str | os.PathLike[str] | None = None) -> list[RegisteredPivot]:
     """Return active pivots, with parser-only explicit-dir support."""
-    out: list[RegisteredPivot] = []
+    candidates: list[RegisteredPivot] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
         if "list" not in data:
             continue
         try:
-            out.append(parse_manifest(data, name=path.stem, source_path=str(path)))
+            candidates.append(
+                parse_manifest(data, name=path.stem, source_path=str(path))
+            )
         except ManifestError:
             continue
-    return out
+    state_root = (
+        _resolve_state_root_path()
+        if any(pivot.visible_when_state_root_file for pivot in candidates)
+        else None
+    )
+    return [
+        pivot
+        for pivot in candidates
+        if _pivot_is_visible(pivot, state_root=state_root)
+    ]
 
 
 def order_pivots(builtins: Sequence[str], registered: Sequence[RegisteredPivot]) -> list[dict]:
