@@ -2,10 +2,11 @@
 
 How the 22 copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. **Twelve ship a runtime** (currently
-a `uv`-built venv under legacy `~/.agent-*`, deployed by the plugin's own
-installer) plus generated payload-local agent commands and session command
-glossaries; compatibility management wrappers remain in `~/.local/bin` during
-the installation-cell migration. **Ten are payload-only** — `efforts` (skills), `visions`
+a `uv`-built venv under a plugin-owned root such as `~/.agent-*` or
+`~/.budget-guidance`, deployed by the plugin's own installer) plus generated
+payload-local agent commands and session command glossaries; compatibility
+management wrappers remain in `~/.local/bin` during the installation-cell
+migration. **Ten are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
 (skills), `copilot-extensions-harness` (skills + contribution-boundary hook),
 `wsl-setup` (skills), and

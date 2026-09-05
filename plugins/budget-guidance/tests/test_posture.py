@@ -164,6 +164,29 @@ def test_partial_day_math_ceiling_and_projection():
     assert calculated["warning_band"] == "critical"
 
 
+def test_remaining_time_preserves_far_future_microseconds():
+    config = _config(
+        _adapter(
+            "manual",
+            1,
+            _reading(
+                "manual",
+                "9999-12-31T23:59:58Z",
+                allowance=Decimal("100"),
+                consumption=Decimal("40"),
+                reset_at="9999-12-31T23:59:58.000002Z",
+            ),
+        )
+    )
+
+    calculated = build_posture(
+        config,
+        datetime(9999, 12, 31, 23, 59, 58, 1, tzinfo=timezone.utc),
+    )["calculated"]
+
+    assert calculated["seconds_remaining"] == "0.000001"
+
+
 def test_projection_uses_shortest_fresh_supported_trailing_window():
     config = _config(
         _adapter(

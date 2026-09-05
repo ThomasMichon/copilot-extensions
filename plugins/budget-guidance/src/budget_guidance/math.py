@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 
 SECONDS_PER_DAY = Decimal(86400)
+MICROSECONDS_PER_SECOND = Decimal(1_000_000)
 
 
 @dataclass(frozen=True)
@@ -43,9 +44,12 @@ def calculate(
     balance = allowance - consumption
     remaining = max(balance, Decimal(0))
     overspend = max(-balance, Decimal(0))
-    seconds_remaining = max(
-        Decimal(str((reset_at - evaluated_at).total_seconds())),
-        Decimal(0),
+    delta = reset_at - evaluated_at
+    total_microseconds = (
+        (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+    )
+    seconds_remaining = (
+        Decimal(max(total_microseconds, 0)) / MICROSECONDS_PER_SECOND
     )
     days_remaining = seconds_remaining / SECONDS_PER_DAY
     sustainable = remaining / days_remaining if days_remaining > 0 else Decimal(0)

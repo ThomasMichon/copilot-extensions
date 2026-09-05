@@ -291,7 +291,7 @@ function Write-Skip    { param([string]$Msg) Write-Host "  [SKIP] $Msg" -Foregro
 function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 
-function Install-AgentSshPackage {
+function Install-BudgetGuidancePackage {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
         [Parameter(Mandatory = $true)][string]$Source,
@@ -798,7 +798,7 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 $vendoredDependencies = @()
-$pkgInstalled = Install-AgentSshPackage `
+$pkgInstalled = Install-BudgetGuidancePackage `
     -Python $VenvPython `
     -Source $PluginDir `
     -Dependencies $vendoredDependencies

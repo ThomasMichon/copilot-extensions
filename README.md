@@ -79,8 +79,9 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 ## Architecture at a glance
 
 22 plugins, one marketplace. **Twelve ship a runtime** (a `uv`-built venv under
-`~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
-installer); **ten are payload-only** — `efforts` (skills), `visions` (skills),
+a plugin-owned runtime root such as `~/.agent-*` or `~/.budget-guidance`, plus a
+`~/.local/bin` binstub, deployed by the plugin's own installer); **ten are
+payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (hook + session extension + skill), `customizing-copilot` (skills),
 `copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills),
 `harness-knowledge` (skills), `ai-attribution` (hook + skill),
