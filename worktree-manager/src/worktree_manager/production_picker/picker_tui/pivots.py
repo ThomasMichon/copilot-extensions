@@ -661,15 +661,14 @@ def _resolve_state_root_path() -> Path | None:
 def _pivot_is_visible(
     pivot: RegisteredPivot,
     *,
-    state_root: Path | None = None,
+    state_root: Path | None,
 ) -> bool:
     required = pivot.visible_when_state_root_file
     if required is None:
         return True
-    root = state_root if state_root is not None else _resolve_state_root_path()
-    if root is None:
+    if state_root is None:
         return False
-    return root.joinpath(*PurePosixPath(required).parts).is_file()
+    return state_root.joinpath(*PurePosixPath(required).parts).is_file()
 
 
 _VALID_ALIGN = {"l", "r", "c"}

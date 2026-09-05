@@ -142,6 +142,31 @@ def test_ungated_pivots_do_not_resolve_state_root(tmp_path, monkeypatch):
     assert [pivot.label for pivot in pivots.discover_pivots(tmp_path)] == ["Always"]
 
 
+def test_unbound_state_root_is_resolved_once_for_all_gated_pivots(
+    tmp_path,
+    monkeypatch,
+):
+    for name in ("first", "second"):
+        _write(
+            tmp_path,
+            name,
+            {
+                "label": name.title(),
+                "list": [name],
+                "visible_when": {"state_root_file": f"{name}.json"},
+            },
+        )
+    calls = []
+    monkeypatch.setattr(
+        pivots,
+        "_resolve_state_root_path",
+        lambda: calls.append(True) or None,
+    )
+
+    assert pivots.discover_pivots(tmp_path) == []
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize(
     "state_root_file",
     ["/absolute.json", "../escape.json", "C:/escape.json", ""],
