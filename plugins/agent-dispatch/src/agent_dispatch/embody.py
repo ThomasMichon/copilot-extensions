@@ -797,12 +797,13 @@ def spawn_fleet_headless_worker(
     all_repos: bool = False,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
-    """Spawn a **headless agent-bridge ACP** body on a remote pool ``host`` via SSH.
+    """Spawn a **headless agent-bridge ACP** body on a remote pool ``host``.
 
     The headless-fleet embodiment (Model C, headless variant). Runs
     ``agent-bridge create <agent> "<fleet seed>" --no-wait`` **on** ``host`` (its
-    SSH alias) over the SSH mesh -- spawning a headless ACP session in
-    that host's own persistent agent-bridge service, seeded
+    SSH alias) through the local Bridge carrier, with bounded SSH fallback only
+    when that capability is absent. This spawns a headless ACP session in that
+    host's own persistent agent-bridge service, seeded
     (:func:`fleet_autopilot_worker_prompt`) to drive the ``task_id`` lease back to
     the ``origin`` coordinator over SSH under the supervisor-assigned synthetic
     ``owner``. The seed is **identical** to the CLI fleet body's
@@ -819,11 +820,11 @@ def spawn_fleet_headless_worker(
     Unlike the CLI body, a headless body is **not a parallel worktree**, so no
     worktree handle is recovered (the caller records ``worktree=None``); the
     ``--no-wait`` create returns once the ACP session is spawned into the host's
-    bridge daemon, which owns it independently of this SSH invocation.
+    bridge daemon, which owns it independently of the command transport.
 
-    Raises :class:`EmbodyUnavailable` if ``ssh`` is not on PATH here; a remote host
-    lacking ``agent-bridge`` surfaces as a non-zero exit (the caller fails the
-    reservation).
+    If carrier capability is absent, missing local ``ssh`` raises
+    :class:`EmbodyUnavailable`; a fallback host lacking ``agent-bridge`` surfaces
+    as a non-zero exit (the caller fails the reservation).
     """
     seed = fleet_autopilot_worker_prompt(
         task_id,
@@ -985,8 +986,9 @@ def fleet_body_verdict(
 ) -> str:
     """Tri-state liveness of a **headless fleet body** via the pool host's bridge.
 
-    Runs ``ssh <host> agent-bridge --json status <session_id>`` and classifies
-    (see :func:`_classify_body_status`):
+    Queries the local Bridge carrier first, with bounded SSH fallback only when
+    that capability is absent, and classifies (see
+    :func:`_classify_body_status`):
 
     - **GONE** -- the bridge answers that the session is **absent** (not found,
       non-zero exit) or in a **terminal** status (:data:`_FLEET_BODY_TERMINAL`),
@@ -994,8 +996,9 @@ def fleet_body_verdict(
       non-terminal origin task means it died before completing -> re-embody.
     - **LIVE** -- the session is present in a known-alive status
       (:data:`_FLEET_BODY_ALIVE`).
-    - **UNKNOWN** -- ssh/bridge unreachable, timeout, unparseable output, or an
-      unrecognized status (a possibly-lagging reconcile). Left alone.
+    - **UNKNOWN** -- carrier/bridge ambiguity, fallback SSH failure, timeout,
+      unparseable output, or an unrecognized status (a possibly-lagging
+      reconcile). Left alone.
 
     Returns the string verdict (values match ``tracking.LIVE/GONE/UNKNOWN``).
     Never raises.
