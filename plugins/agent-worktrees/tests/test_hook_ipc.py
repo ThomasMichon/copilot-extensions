@@ -378,6 +378,59 @@ def test_session_start_writes_combined_session_guidance(
     )
 
 
+def test_session_start_reuses_registration_with_command_catalog(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        hook_client,
+        "_registration_context",
+        lambda payload, home: (
+            "## agent-worktrees session command catalog\n\n"
+            "catalog\n\n[agent-worktrees] binding"
+        ),
+    )
+    monkeypatch.setattr(
+        hook_client,
+        "_command_catalog_context",
+        lambda: pytest.fail("merged registration must avoid a subprocess"),
+    )
+
+    assert hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-1"
+        / "instructions"
+        / "agent-worktrees"
+        / "session-guidance.instructions.md"
+    )
+    assert target.read_text(encoding="utf-8").endswith(
+        "catalog\n\n[agent-worktrees] binding\n"
+    )
+
+
+def test_session_guidance_declared_inputs_fit_file_budget():
+    declaration = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "session-context.json"
+        ).read_text(encoding="utf-8")
+    )
+    contributor_bytes = sum(
+        int(contributor["maxBytes"])
+        for contributor in declaration["contributors"]
+    )
+    framing_bytes = len(
+        "# Agent Worktrees session guidance\n\n\n\n\n".encode("utf-8")
+    )
+    assert (
+        contributor_bytes + framing_bytes
+        <= hook_client._SESSION_GUIDANCE_MAX_BYTES
+    )
+
+
 def test_session_start_guidance_overwrites_on_resume(
     monkeypatch, tmp_path
 ):

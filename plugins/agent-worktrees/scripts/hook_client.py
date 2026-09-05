@@ -33,6 +33,7 @@ _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
+_COMMAND_CATALOG_HEADING = "## agent-worktrees session command catalog"
 
 
 def _read_json(path: Path) -> dict | None:
@@ -301,12 +302,12 @@ def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
         if isinstance(payload.get("_agentWorktrees"), dict)
         else _enrich_session_payload(payload)
     )
-    catalog = _command_catalog_context()
     registration = _registration_context(enriched, home)
     contexts = []
-    if registration and catalog and registration.startswith(catalog):
+    if registration.startswith(_COMMAND_CATALOG_HEADING):
         contexts.append(registration)
     else:
+        catalog = _command_catalog_context()
         for context in (catalog, registration):
             if context and context not in contexts:
                 contexts.append(context)
