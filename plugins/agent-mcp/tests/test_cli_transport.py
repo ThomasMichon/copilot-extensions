@@ -9,12 +9,17 @@ subprocess) + the isError path, plus scope gating and the legacy tools filter.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 import yaml
+
+from agent_mcp.cli_tools import CliTool
+from agent_mcp.transports.cli import _resolve_sidecar_command
 
 # A trivial "CLI" invoked by the sidecar: echoes its argv as JSON, and exits
 # non-zero when the first arg is "boom" (to exercise the isError path).
@@ -119,6 +124,39 @@ def test_cli_bridge_tools_filter_composes(tmp_path):
     by_id = {m.get("id"): m for m in out if "id" in m}
     names = [t["name"] for t in by_id[1]["result"]["tools"]]
     assert names == ["keep_me"], proc.stderr
+
+
+def test_path_qualified_command_resolves_from_sidecar(tmp_path, monkeypatch):
+    sidecar = tmp_path / "tools" / "demo.md"
+    tool = CliTool(
+        name="demo",
+        description="",
+        input_schema={},
+        command=os.path.join("scripts", "demo"),
+        args=[],
+        source=sidecar,
+    )
+    monkeypatch.chdir(tmp_path.parent)
+
+    resolved = _resolve_sidecar_command(tool, [tool.command, "arg"])
+
+    assert resolved == [
+        str((sidecar.parent / "scripts" / "demo").resolve()),
+        "arg",
+    ]
+
+
+def test_bare_command_keeps_path_lookup(tmp_path):
+    tool = CliTool(
+        name="demo",
+        description="",
+        input_schema={},
+        command="demo",
+        args=[],
+        source=Path(tmp_path / "tools" / "demo.md"),
+    )
+
+    assert _resolve_sidecar_command(tool, ["demo", "arg"]) == ["demo", "arg"]
 
 
 # --- auth injection into the spawned tool's environment ----------------------

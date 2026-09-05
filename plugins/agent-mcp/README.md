@@ -896,6 +896,11 @@ mcp:
 # vei-search  (human doc body — ignored by the bridge)
 ```
 
+A path-qualified `invoke.command` (for example `scripts/vei-search`) resolves
+relative to the declaring sidecar. A bare command such as `vei-search` keeps the
+normal `PATH` lookup. This lets a plugin ship a helper beside its sidecar without
+hardcoding its installed location.
+
 The bridge config points at the sidecar set:
 
 ```yaml
