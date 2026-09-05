@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** leaf (concrete component; links its sibling capability visions)
 - **Status:** Active
-- **Last revised:** 2026-08-14
+- **Last revised:** 2026-09-04
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -53,9 +53,11 @@ Two roles at first, a third as the harness grows — **one app**:
   when the harness is invoked with no project context.
 - **Control-plane** (optional): the app is also the **optional worktree- and
   agent- control-plane** — the interactive front door for **picking, launching,
-  and managing** worktree-backed agent sessions, with **session management**,
-  **terminal multiplexing**, and **visual decision aids** for choosing where to
-  launch. This is where the Worktree Picker lives. It is **optional** in the
+  and managing** worktree-backed agent sessions through whichever compatible
+  **session-host provider** the user selects, with visual decision aids for
+  choosing where and how to launch. A terminal multiplexer is one optional
+  provider capability, not the control-plane's universal execution model. This
+  is where the Worktree Picker lives. It is **optional** in the
   strongest sense: the plugins carry the in-session tools an agent needs to do
   its job and **provision and manage themselves — daemons included — with this
   control-plane entirely absent**. The control-plane makes the fleet *legible and
@@ -77,11 +79,12 @@ and fix how it is wired.
   familiar single-command `curl … | bash` / `iex …` shape) that fetches and runs
   the installer directly, independent of any plugin or prior harness tooling. It
   is the front door the inert-plugin failure mode requires.
-- **Prerequisite layer** — the step that ensures the machine's foundational tools
-  exist (a terminal multiplexer, a Python runtime, the Python package/venv
-  manager, and kin), installing what is missing and **pausing for a restart when
-  it changes the environment** (PATH, shell integration) so later steps run
-  against a ready machine.
+- **Prerequisite layer** — the step that ensures the machine's foundational
+  tools and the prerequisites of the user's selected session hosts exist,
+  installing what is missing and **pausing for a restart when it changes the
+  environment** (PATH, shell integration) so later steps run against a ready
+  machine. A terminal multiplexer is required only when the user selects a host
+  that depends on one.
 - **Core install** — driving the harness's **own** real install flow (not a
   reimplementation) so the **core actually exists**: the user-global ground
   runtime for Copilot, its binstubs, and the baseline services every other layer
@@ -97,11 +100,11 @@ and fix how it is wired.
   presents the harness's real state (installed plugins and their prerequisites,
   machine/config, registered repos and accounts) and lets a human browse and
   adjust it. It is the same app as the installer, entered in its ongoing mode.
-- **The optional control-plane (Worktree Picker & session launcher)** — the
+- **The optional control-plane (Worktree Picker & host selector)** — the
   interactive front door for the fleet of worktree-backed agents: viewing,
-  joining, resuming, creating, and **launching** agent sessions, with **session
-  management**, **terminal multiplexing**, and **visual decision aids** for
-  choosing *where* to launch before paying the cost. The Worktree Picker's role,
+  joining, resuming, creating, and **launching** agent sessions through
+  discovered providers, with visual decision aids for choosing *where and how*
+  to launch before paying the cost. The Worktree Picker's role,
   guarantees, and interaction promises are defined by the
   [picker](../picker/README.md) vision; this app is where that surface is
   **delivered and kept current**. It is **optional**: a user who only wants the
@@ -179,17 +182,17 @@ configurator, making the standing surface reachable by the most natural gesture.
 The app **optionally** serves as the worktree- and agent- control-plane: the
 interactive front door (the Worktree Picker) for viewing, joining, resuming,
 creating, and **launching** worktree-backed agent sessions, with **session
-management**, **terminal multiplexing**, and **visual decision aids** for
-choosing where to launch. This surface is **additive and optional** — the plugins
+management supplied by the selected execution host** and **visual decision
+aids** for choosing where and how to launch. This surface is **additive and
+optional** — the plugins
 provide the in-session tools agents use and are fully functional without it — and
 its role/guarantees are owned by the [picker](../picker/README.md) vision; this
 app is where it is delivered and kept current. The interactive Picker opens by the
 **single most natural gesture — a bare, no-args invocation** of a project's front
 door; **every** other invocation routes programmatically to the plugins' own CLIs,
-whether or not it is interactive. And because a **terminal multiplexer is a heavy,
-invasive dependency**, muxing is a capability this app **provides** (the plugins
-detect it and use it when present, and run **non-muxed** when it is absent) rather
-than something the lightweight plugins carry.
+whether or not it is interactive. Execution is provider-neutral: a
+TMux/PSMux-backed Copilot CLI host may be installed alongside ACP, SDK, App, or
+third-party hosts, and no lightweight plugin carries or assumes that dependency.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
@@ -263,8 +266,8 @@ never present behaves exactly the same; the installer's role is to *guarantee*
 the plugins' prerequisites and interop, never to be a thing they are wired to.
 
 ### control-plane-is-optional-plugins-are-self-sufficient
-The worktree/agent **control-plane** (picker, session launch, terminal muxing) is
-a convenience layer, not a foundation. With it absent, every plugin still
+The worktree/agent **control-plane** (picker and provider-backed session launch)
+is a convenience layer, not a foundation. With it absent, every plugin still
 **provisions and manages itself — its runtime *and* its daemons — and exposes the
 in-session tools an agent needs**, driven by the plugins' own self-provisioning
 model (see [plugin-services](../plugin-services/README.md)). The control-plane
@@ -292,7 +295,7 @@ the app to keep *itself* current.
   deterministic, human- (or script-) driven surface — orchestrating agents is not
   the same as being one.
 - **Its control-plane role is optional and additive, never a foundation.** The
-  picker / session-launch / terminal-mux surface is a convenience for a human
+  picker / provider-backed session-launch surface is a convenience for a human
   running the fleet. The plugins provide the in-session tools agents use and
   **self-provision and self-manage — daemons included — with this app absent**;
   the app must never become a prerequisite for a plugin (or an agent using its
@@ -319,7 +322,8 @@ the app to keep *itself* current.
   [picker](../picker/README.md) (the Worktree Picker — the control-plane's
   interactive surface, delivered and kept current by this app) ·
   [agent-fabric](../agent-fabric/README.md) (the fabric whose turnkey adoption it
-  enables)
+  enables) · [session-hosting](../session-hosting/README.md) (the plural
+  execution-provider boundary the control-plane selects and presents)
 - Reality docs: [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -367,3 +371,8 @@ the app to keep *itself* current.
   #540 (`setup` checkout discovery) and #541
   (unconditional tool-binstub deploy); the new surfaces are #543 / #544, and the
   Picker first-run behavior is #542. Umbrella #352; Phase 3/4 #356/#357.
+- **2026-09-04** — Generalized the optional control-plane from owning terminal
+  multiplexing to selecting and presenting pluggable session-host providers.
+  TMux/PSMux-backed Copilot CLI remains one optional host alongside ACP, SDK,
+  App, and third-party rigs; plugins and durable worktree state assume none of
+  them.
