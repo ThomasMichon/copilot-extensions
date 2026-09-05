@@ -14,8 +14,8 @@ from dataclasses import asdict
 
 import pytest
 
+from agent_dispatch import bridge, tracking
 from agent_dispatch import supervisor as supervisor_module
-from agent_dispatch import tracking
 from agent_dispatch.client import DispatchError
 from agent_dispatch.queue import SpawnState, Status
 from agent_dispatch.supervisor import Supervisor
@@ -2369,6 +2369,32 @@ def test_deferred_spawn_never_dead_letters(q, client):
     assert len(q.list_reservations(task_id=t.id, state="deferred")) == 10
     # A fresh attempt is still reserved every cycle (never dead-lettered).
     assert q.latest_reservation(t.id).attempt == 10
+
+
+def test_bridge_failure_during_spawn_preparation_releases_reservation(
+    q, client, monkeypatch
+):
+    task = q.create("work")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=1,
+    )
+
+    def fail_preparation(_task, _reservation):
+        raise bridge.BridgeUnavailable("registry unavailable")
+
+    monkeypatch.setattr(sup, "_prepare_spawn_task", fail_preparation)
+
+    assert sup.poll_once() == []
+    reservation = q.latest_reservation(task.id)
+    assert reservation.state == SpawnState.FAILED
+    assert reservation.detail == (
+        "reusable worktree preparation failed: registry unavailable"
+    )
+    assert spawn.calls == []
 
 
 def test_dead_letter_summary_is_compact_and_only_repeats_on_change(

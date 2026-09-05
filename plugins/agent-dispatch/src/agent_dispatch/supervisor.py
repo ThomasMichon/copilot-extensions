@@ -3237,6 +3237,7 @@ class Supervisor:
                 continue  # already actively reserved -> never double-spawn
             reservation = resp["reservation"]
             key = reservation["key"]
+            from . import bridge
             from .embody import EmbodyUnavailable
 
             try:
@@ -3249,7 +3250,11 @@ class Supervisor:
                     exc,
                 )
                 continue
-            except (DispatchError, EmbodyUnavailable) as exc:
+            except (
+                DispatchError,
+                EmbodyUnavailable,
+                bridge.BridgeUnavailable,
+            ) as exc:
                 try:
                     self.client.fail_spawn(
                         key,
