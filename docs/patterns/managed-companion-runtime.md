@@ -69,13 +69,40 @@ revision together with plugin root and plugin version. Provider uncertainty may
 retain a prior desired state only while that complete authority remains
 unchanged.
 
+## Immutable materialization
+
+The running dispatch supervisor resolves a machine-local runtime root and its
+Python/package-manager toolchain from supervisor-owned policy. For an active,
+attributed declaration it:
+
+1. serializes builders with one crash-safe interprocess lock for the physical
+   root;
+2. copies every declared plugin-relative project into a root-contained snapshot,
+   rejecting links, reparse points, special files, escapes, and source changes
+   during the copy;
+3. creates the environment in unique staging, installs only from that snapshot,
+   and validates the declared imports;
+4. atomically publishes a cell keyed by runtime version, profile, and snapshot
+   content digest, with a versioned receipt binding source authority and
+   supervisor toolchain identity; and
+5. reuses only a cell whose complete receipt, interpreter trust, and imports
+   still validate.
+
+On Windows, the policy-selected base Python and the copied environment
+interpreter must pass Authenticode verification before package installation.
+Ambient `PIP_*`, `UV_*`, `PYTHONPATH`, indexes, credentials, and provider
+environment are not inherited by build subprocesses.
+
+Materialization is preparation only. It does not inject the selected Python into
+a companion environment, stop or replace a process, publish a current pointer,
+lease a generation, or delete a cell.
+
 ## Increment boundary
 
 The declaration-contract increment is deliberately non-operative. Validation
 and provenance propagation do not create directories, invoke an environment
 builder or package manager, select a runtime, or change live companion launch.
-Materialization, safe cutover, and retention land as separate reviewed
-increments.
+Safe cutover and retention remain separate reviewed increments.
 
 ## See Also
 

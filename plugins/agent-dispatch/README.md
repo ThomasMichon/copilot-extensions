@@ -1212,6 +1212,16 @@ retire companion trees with the daemon. On POSIX, process groups and receipts
 allow a restarted daemon to recover a matching live companion without
 duplicating it.
 
+A companion may also declare versioned Python runtime inputs. The singleton
+daemon prepares those inputs asynchronously under a supervisor-owned root:
+plugin projects are copied into immutable snapshots, installed from disposable
+working copies with a supervisor-selected toolchain, import-validated, and
+atomically published as content-addressed cells. Root-wide process locks,
+complete receipts, full-cell integrity checks, Windows base-Python signature
+verification, and POSIX base-runtime identity prevent partial or ambiguous
+reuse. Preparation does not inject the interpreter into launch state or restart
+a healthy companion; selection and cutover are separate lifecycle increments.
+
 
 **Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
 spec, each cycle feeds every **newly-terminal** task's lifecycle event
