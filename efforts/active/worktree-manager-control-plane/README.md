@@ -13,9 +13,13 @@
   [#357](https://github.com/ThomasMichon/copilot-extensions/issues/357)
   (configurator: adoption + per-plugin config),
   [#1478](https://github.com/ThomasMichon/copilot-extensions/issues/1478)
-  (manual mux restoration for unreachable active sessions)
-- **Vision:** **vision-closing** against two already-stated visions (no revision
-  needed — this closes their delta vs. reality):
+  (manual mux restoration for unreachable active sessions),
+  [#2062](https://github.com/ThomasMichon/copilot-extensions/issues/2062)
+  (relocate Mux + AHP execution mechanics out of agent-worktrees)
+- **Vision:** **vision-closing** against three already-stated visions (no
+  revision needed to close their delta vs. reality; the recent
+  `session-hosting` split narrowed which of these visions govern the
+  Mux/AHP items):
   - [`visions/installer`](../../../visions/installer/README.md) —
     §*Features*/`optional-worktree-agent-control-plane`,
     `bare-invocation-launches-configurator`, `visual-configurator`,
@@ -28,6 +32,12 @@
     `decision-support-before-cost`, `programmatic-parity`;
     §*Behaviors*/`render-derive-not-own`, `live-not-snapshot`,
     `graceful-capability-scaling`, `renderable-and-assertable-headless`.
+  - [`visions/session-hosting`](../../../visions/session-hosting/README.md) —
+    Concepts/*Session-host provider* (Mux presentation and AHP backend as
+    composable axes, currently both owned by the Worktree Manager); the
+    matching Non-Goal in
+    [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
+    that agent-worktrees carries no provider-specific config union.
   - Parent: [`visions/agent-fabric`](../../../visions/agent-fabric/README.md).
 - **Reality docs:** [`worktree-manager/README.md`](../../../worktree-manager/README.md) ·
   [`plugins/agent-worktrees/docs/engine-picker-contract.md`](../../../plugins/agent-worktrees/docs/engine-picker-contract.md) ·
@@ -158,6 +168,33 @@ realized in `main`; unchecked items are the remaining delta.
       §`explicit-launch-target`, §`render-derive-not-own`, and
       §`programmatic-parity`.
 
+### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (Planned — #2062)
+- [ ] Move the AHP session backend (`agent_worktrees/ahp_backend.py`, the
+      `session_backend`/`is_ahp` config schema, and the branches it threads
+      through `__main__.py`, `tracking.py`, `finalize.py`, and
+      `config_dropins.py`) out of the `agent-worktrees` plugin. Per the
+      corrected [`session-hosting`](../../../visions/session-hosting/README.md)
+      vision, AHP is a near-term concern of the **Worktree Manager**
+      control-plane app, not a config mode of agent-worktrees and not a
+      permanent alternative to Mux — an AHP-hosted session may still be
+      Mux-wrapped for terminal presentation. The #1657/#1998 slice shipped the
+      right *behavior* in the wrong *location*; this item is the architecture
+      correction, not new capability.
+- [ ] Relocate Mux launch/reattach/remux mechanics
+      (`launch-session.{sh,ps1,cmd}`, `cmd_remux`) from `agent-worktrees` to the
+      Worktree Manager, consistent with the same vision. agent-worktrees keeps
+      only a bounded, provider-id-plus-opaque-blob execution-leg record; it
+      never owns a typed union with one field set per hosting technology.
+      Reuses the #1478/#1491 remux design's safety invariants (refuse an
+      existing live mux or ambiguous owner) under the new ownership boundary.
+- [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
+      AHP backend independently per launch/resume/create action, rather than
+      assuming exactly one of them.
+- [ ] Keep both mechanics fully functional through the relocation — this is a
+      location and ownership change, not a behavior regression; existing
+      worktrees with a recorded `session_backend` binding must keep resolving
+      correctly against the relocated code.
+
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
@@ -273,3 +310,15 @@ its issues; the public artifacts stay self-contained and general-purpose.
   session-backend slice. The reviewed contract keeps worktree and finalization
   authority in agent-worktrees, treats mux clients as detachable presentation,
   and requires exact-path binding plus fail-closed lifecycle handling.
+- **2026-09-04** — Corrected course after #1657/#1998 landed the AHP backend
+  *inside* `agent-worktrees` (`ahp_backend.py` + a `session_backend.is_ahp`
+  config branch threaded through `__main__.py`/`tracking.py`/`finalize.py`/
+  `config_dropins.py`). The new `session-hosting` vision (#2054) establishes
+  that agent-worktrees is pure durable agency state and never a home for a
+  provider-specific config union; a follow-up correction clarified that Mux
+  (terminal presentation) and AHP (session backend) are **composable, not
+  mutually exclusive** — an AHP-hosted session may still be Mux-wrapped — and
+  that both currently belong to the **Worktree Manager** control-plane, not to
+  agent-worktrees and not to a brand-new fourth plugin. Added Phase 3b to track
+  the physical relocation as an architecture correction (same behavior,
+  corrected ownership), filed as #2062.
