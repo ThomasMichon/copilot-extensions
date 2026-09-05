@@ -31,6 +31,13 @@ portable, attributable, and intentionally budgeted.
   execution surface, and demonstrated capability, then selects from an
   evidence-backed mapping of acceptable models rather than treating every
   worker as interchangeable.
+- **Budget posture** combines finite allowance, consumption, reset horizon,
+  recent pace, and projection into a sourced, freshness-bearing input that can
+  refine model-routing recommendations without becoming model eligibility.
+- **Budget adapters** obtain partial or complete posture from provider APIs,
+  manual/static configuration, or explicitly configured external readers behind
+  one portable contract. Each adapter remains attributable and reports
+  unavailable or stale data honestly.
 - **Routing evidence** links model-purpose eligibility to reviewed outcomes,
   including retries, discarded work, coordinator repair, and downstream
   findings, so a cheap call is not mistaken for a cheap accepted result.
@@ -142,6 +149,28 @@ that has demonstrated the capability, tools, context, and reliability required
 for the delegated role. Model choice should follow task classification and the
 direct-versus-delegate decision rather than becoming a reason to fragment
 cohesive work.
+
+### budget-aware-model-routing
+
+Harnesses should refine otherwise-eligible model choices against a finite,
+current budget posture. A coordinator should be able to distinguish sustainable
+pace from projected exhaustion or unused balance before committing to a model
+class, while preserving operator choice and every product gate.
+
+### adapter-based-budget-posture
+
+Allowance, consumption, reset horizon, and recent usage may come from different
+authorities. Harnesses should compose provider, manual, and external readings
+through a portable contract that carries source, capture time, freshness,
+availability, and explicit errors rather than assuming one universal billing
+surface.
+
+### concise-current-budget-guidance
+
+The current posture should reach an applicable decision-maker as a concise,
+attributable cue and through equivalent machine-readable status. Detailed
+history and accounting remain external; the harness carries only enough current
+state to make the next routing decision responsibly.
 
 ### purpose-to-model-grounding
 
@@ -268,6 +297,26 @@ unavailable preferred model may fall through to another demonstrated choice;
 an unproven candidate runs only as an explicit trial and never becomes a silent
 default.
 
+### budget-refines-but-never-qualifies
+
+Budget posture may reorder or discourage choices that are already eligible, but
+it cannot make an unproven, held, failed, or unavailable model eligible. When no
+qualified choice fits the desired budget posture, the result is an explicit
+escalation or no-fit decision rather than a fabricated cheap option.
+
+### unavailable-is-not-zero
+
+Missing, stale, unauthorized, contradictory, or adapter-failed budget data is a
+visible state. It must never be converted into zero consumption, full remaining
+allowance, or another optimistic success-shaped default.
+
+### one-posture-many-surfaces
+
+Injected guidance, CLI status, dashboards, and routing consumers should derive
+from the same resolved budget posture. A presenter may reshape the result for
+its audience, but it should not independently recalculate or reinterpret the
+underlying balance and freshness.
+
 ### accepted-outcome-economics
 
 Model-routing decisions should be evaluated against accepted work products, not
@@ -301,6 +350,10 @@ policy, availability, or routing choices.
 - It does not delegate final synthesis, goal ownership, or completion judgment.
 - It does not prescribe one model, task API, agent runtime, or orchestration
   transport.
+- It does not prescribe one billing provider, allowance, reset policy, account
+  type, or organization-specific usage service.
+- It does not become a longitudinal billing ledger, cost-attribution warehouse,
+  or financial dashboard.
 - It does not treat the cheapest available model as qualified merely because it
   can be launched.
 - It does not let a model, coordinator, worker, or pair promote itself into the
