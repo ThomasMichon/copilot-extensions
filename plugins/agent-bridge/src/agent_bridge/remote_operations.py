@@ -472,7 +472,14 @@ class CarrierRequestRouter:
                     EnvelopeType.RESPONSE,
                     payload={"result": result},
                 )
-            session_id = validate_session_id(payload.get("session_id"))
+            session_id = validate_session_id(
+                payload.get("session_id"),
+                field=(
+                    "target"
+                    if operation == "live_session.resolve"
+                    else "session_id"
+                ),
+            )
             if operation == "session.stop":
                 force = validate_optional_bool(payload, "force")
                 reap_host = validate_optional_bool(payload, "reap_host")
@@ -516,7 +523,7 @@ class CarrierRequestRouter:
                     raise RemoteBridgeError(
                         404,
                         "session_not_found",
-                        f"live session {session_id} was not found",
+                        f"live session target {session_id} was not found",
                     )
                 return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             caller_id = validate_caller_id(payload.get("caller_id"))

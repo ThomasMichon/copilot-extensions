@@ -408,6 +408,49 @@ async def test_live_message_validation_names_request_field(
 
 
 @pytest.mark.asyncio
+async def test_carrier_resolve_validation_names_target() -> None:
+    response = await CarrierRequestRouter(lambda: _RemoteClient())(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="resolve-target",
+            payload={
+                "operation": "live_session.resolve",
+                "version": 1,
+                "session_id": "",
+            },
+        )
+    )
+
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "invalid_request"
+    assert "target must" in response.payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_carrier_resolve_not_found_names_target() -> None:
+    class _MissingRemoteClient(_RemoteClient):
+        def resolve_live_session(self, target):
+            self.resolve_calls.append(target)
+            return None
+
+    response = await CarrierRequestRouter(lambda: _MissingRemoteClient())(
+        Envelope(
+            EnvelopeType.REQUEST,
+            request_id="resolve-missing",
+            payload={
+                "operation": "live_session.resolve",
+                "version": 1,
+                "session_id": "worktree-a",
+            },
+        )
+    )
+
+    assert response.type is EnvelopeType.ERROR
+    assert response.payload["code"] == "session_not_found"
+    assert "target worktree-a" in response.payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_cancelled_create_reclaims_late_session() -> None:
     started = threading.Event()
     release = threading.Event()
