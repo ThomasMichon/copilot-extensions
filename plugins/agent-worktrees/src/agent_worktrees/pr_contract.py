@@ -343,18 +343,36 @@ def compute_events(
 # ---------------------------------------------------------------------------
 
 def effective_verdict(
-    reviews: Iterable[Review], head_sha: str, author: str
+    reviews: Iterable[Review],
+    head_sha: str,
+    author: str,
+    *,
+    allow_stale_approval: bool = False,
 ) -> str:
     """Reduce a PR's reviews to one effective verdict at ``head_sha``.
 
     Considers only *submitted*, non-comment, non-dismissed reviews that are not
     the PR author's own.  The latest such review (by id) wins.  An ``APPROVED``
-    review only counts if it was submitted against the current head -- a stale
-    approval on a superseded head is treated as no-verdict so the PR is left for
-    re-review.
+    review normally counts only if it was submitted against the current head.
+    When ``allow_stale_approval`` is true, a stale approval remains effective;
+    callers still expose that it is stale through :class:`PRState`.
 
     Returns ``"APPROVED"``, ``"CHANGES_REQUESTED"``, or ``""`` (no verdict).
     """
+    verdict, latest_commit = _latest_verdict(reviews, author)
+    if (
+        verdict == "APPROVED"
+        and head_sha
+        and latest_commit
+        and latest_commit != head_sha
+        and not allow_stale_approval
+    ):
+        return ""
+    return verdict
+
+
+def _latest_verdict(reviews: Iterable[Review], author: str) -> tuple[str, str]:
+    """Return the latest actionable review state and its reviewed commit."""
     latest_id = -1
     verdict = ""
     latest_commit = ""
@@ -372,9 +390,7 @@ def effective_verdict(
             latest_id = r.id
             verdict = state
             latest_commit = r.commit_id or ""
-    if verdict == "APPROVED" and head_sha and latest_commit and latest_commit != head_sha:
-        return ""  # stale approval on an old head -> not actionable
-    return verdict
+    return verdict, latest_commit
 
 
 def title_is_wip(title: str, wip_title_prefixes: Iterable[str]) -> bool:
@@ -479,6 +495,7 @@ class PRState:
     """
 
     verdict: str          # "APPROVED" | "CHANGES_REQUESTED" | ""
+    approval_stale: bool  # latest approval targets an older head
     merge_state: str      # merged | closed | conflict | clean | unknown
     conflict: bool        # mergeable is False
     consent_present: bool  # the automerge_label is already on the PR
@@ -500,6 +517,7 @@ def classify_state(
     hold_labels: Iterable[str] = (),
     wip_title_prefixes: Iterable[str] = (),
     approval_required: bool = True,
+    allow_stale_approval: bool = False,
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
@@ -524,7 +542,19 @@ def classify_state(
     hold_set = {h.strip().lower() for h in hold_labels if h.strip()}
     held = tuple(sorted(label_set & hold_set))
     wip = snap.draft or title_is_wip(snap.title, wip_title_prefixes)
-    verdict = effective_verdict(snap.reviews, snap.head_sha, snap.author)
+    latest_verdict, latest_commit = _latest_verdict(snap.reviews, snap.author)
+    approval_stale = bool(
+        latest_verdict == "APPROVED"
+        and snap.head_sha
+        and latest_commit
+        and latest_commit != snap.head_sha
+    )
+    verdict = effective_verdict(
+        snap.reviews,
+        snap.head_sha,
+        snap.author,
+        allow_stale_approval=allow_stale_approval,
+    )
     ms = merge_state(snap)
     consent_present = bool(automerge_label) and automerge_label.lower() in label_set
 
@@ -532,9 +562,12 @@ def classify_state(
         snap, verdict=verdict, merge_state=ms, held=held, wip=wip,
         automerge_label=automerge_label, consent_present=consent_present,
         approval_required=approval_required,
+        approval_stale=approval_stale,
+        allow_stale_approval=allow_stale_approval,
     )
     return PRState(
         verdict=verdict,
+        approval_stale=approval_stale,
         merge_state=ms,
         conflict=snap.mergeable is False,
         consent_present=consent_present,
@@ -555,6 +588,8 @@ def _consent_decision(
     automerge_label: str,
     consent_present: bool,
     approval_required: bool = True,
+    approval_stale: bool = False,
+    allow_stale_approval: bool = False,
 ) -> tuple[str, str]:
     """Decide what ``pr-merge`` should do with this PR (pure; see classify_state)."""
     if consent_present:
@@ -583,6 +618,8 @@ def _consent_decision(
         # Not an error -- just nothing this command can apply.
         return "skip", "no auto-merge label configured (binding absent)"
     if verdict == "APPROVED":
+        if approval_stale and allow_stale_approval:
+            return "apply", "approved on stale head (policy permits merge)"
         return "apply", "approved at current head"
     return "apply", "eligible (no changes requested; approval not required)"
 
@@ -594,6 +631,7 @@ def merge_readiness(
     hold_labels: Iterable[str] = (),
     wip_title_prefixes: Iterable[str] = (),
     approval_required: bool = True,
+    allow_stale_approval: bool = False,
 ) -> dict:
     """A caller-facing "what stands between this PR and merge" summary.
 
@@ -622,9 +660,11 @@ def merge_readiness(
         hold_labels=hold_labels,
         wip_title_prefixes=wip_title_prefixes,
         approval_required=approval_required,
+        allow_stale_approval=allow_stale_approval,
     )
     return {
         "verdict": st.verdict,
+        "approval_stale": st.approval_stale,
         "merge_state": st.merge_state,
         "conflict": st.conflict,
         "mergeable": snap.mergeable,

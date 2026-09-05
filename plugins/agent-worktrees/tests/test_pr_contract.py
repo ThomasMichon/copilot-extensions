@@ -191,6 +191,15 @@ class TestEffectiveVerdict:
         reviews = (_rev(1, "APPROVED", commit_id="old"),)
         assert pc.effective_verdict(reviews, "new", "author") == ""
 
+    def test_stale_approval_can_be_retained_by_policy(self):
+        reviews = (_rev(1, "APPROVED", commit_id="old"),)
+        assert pc.effective_verdict(
+            reviews,
+            "new",
+            "author",
+            allow_stale_approval=True,
+        ) == "APPROVED"
+
     def test_approval_at_current_head_counts(self):
         reviews = (_rev(1, "APPROVED", commit_id="head"),)
         assert pc.effective_verdict(reviews, "head", "author") == "APPROVED"
@@ -775,6 +784,36 @@ class TestApprovalRequired:
                              reviews=(_rev(1, "APPROVED"),))
         st = pc.classify_state(snap, automerge_label="auto-complete")
         assert st.consent_action == "apply"
+
+    def test_stale_approval_is_visible_but_blocked_by_default(self):
+        snap = pc.PRSnapshot(
+            pr_state="open",
+            mergeable=True,
+            head_sha="new",
+            reviews=(_rev(1, "APPROVED", commit_id="old"),),
+        )
+        st = pc.classify_state(snap, automerge_label="auto-complete")
+        assert st.verdict == ""
+        assert st.approval_stale is True
+        assert st.consent_action == "skip"
+
+    def test_stale_approval_can_authorize_merge_when_policy_permits(self):
+        snap = pc.PRSnapshot(
+            pr_state="open",
+            mergeable=True,
+            head_sha="new",
+            reviews=(_rev(1, "APPROVED", commit_id="old"),),
+        )
+        readiness = pc.merge_readiness(
+            snap,
+            automerge_label="auto-complete",
+            allow_stale_approval=True,
+        )
+        assert readiness["verdict"] == "APPROVED"
+        assert readiness["approval_stale"] is True
+        assert readiness["consent_action"] == "apply"
+        assert readiness["clear_to_merge"] is True
+        assert "policy permits" in readiness["reason"]
 
 
 class TestThreadTypes:

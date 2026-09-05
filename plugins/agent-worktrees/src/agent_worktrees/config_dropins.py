@@ -321,6 +321,7 @@ def _validate_pr(raw: object, *, location: str) -> str | None:
         "auto_open",
         "source_attribution",
         "approval_required",
+        "allow_stale_approval",
         "squash",
         "delete_source_branch",
         "bypass_policy",

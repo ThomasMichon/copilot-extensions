@@ -1152,10 +1152,12 @@ def _live_pr_state(
         hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
         wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
         approval_required=bool(getattr(prcfg, "approval_required", True)),
+        allow_stale_approval=bool(getattr(prcfg, "allow_stale_approval", False)),
     )
     return {
         "live": {
             "verdict": st.verdict,
+            "approval_stale": st.approval_stale,
             "merge_state": st.merge_state,
             "conflict": st.conflict,
             "mergeable": snap.mergeable,

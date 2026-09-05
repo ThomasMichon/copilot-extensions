@@ -41,6 +41,7 @@ def decorate_events(
     hold_labels: tuple[str, ...] = (),
     wip_title_prefixes: tuple[str, ...] = (),
     approval_required: bool = True,
+    allow_stale_approval: bool = False,
 ) -> dict:
     """Wrap the raw transition list into the final result payload.
 
@@ -74,6 +75,7 @@ def decorate_events(
         hold_labels=hold_labels,
         wip_title_prefixes=wip_title_prefixes,
         approval_required=approval_required,
+        allow_stale_approval=allow_stale_approval,
     )
     return payload
 
@@ -91,6 +93,7 @@ def run_wait(
     hold_labels: tuple[str, ...] = (),
     wip_title_prefixes: tuple[str, ...] = (),
     approval_required: bool = True,
+    allow_stale_approval: bool = False,
     now: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
     on_poll: Callable[[pc.PRSnapshot], None] | None = None,
@@ -107,7 +110,8 @@ def run_wait(
     bad token / wrong repo fails fast instead of hanging the full timeout.
 
     The consent binding (``automerge_label`` / ``hold_labels`` /
-    ``wip_title_prefixes`` / ``approval_required``) is forwarded to
+    ``wip_title_prefixes`` / ``approval_required`` /
+    ``allow_stale_approval``) is forwarded to
     :func:`decorate_events` so the fired payload's ``merge`` block reports
     whether the caller must still grant merge consent.
     """
@@ -123,6 +127,7 @@ def run_wait(
             hold_labels=hold_labels,
             wip_title_prefixes=wip_title_prefixes,
             approval_required=approval_required,
+            allow_stale_approval=allow_stale_approval,
         )
 
     deadline = now() + timeout if timeout > 0 else None

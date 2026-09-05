@@ -170,6 +170,7 @@ class TestDataModels:
         assert pr.source_attribution is False
         # Auto-complete completion defaults.
         assert pr.approval_required is True
+        assert pr.allow_stale_approval is False
         assert pr.squash is True
         assert pr.delete_source_branch is True
         assert pr.bypass_policy is False
@@ -280,6 +281,7 @@ class TestPRConfigParsing:
             "      api_base: https://your-org.visualstudio.com\n"
             "      automerge_label: auto-complete\n"
             "      approval_required: false\n"
+            "      allow_stale_approval: true\n"
             "      bypass_policy: true\n"
             "      bypass_reason: self-serve\n"
             "      squash: true\n"
@@ -290,6 +292,7 @@ class TestPRConfigParsing:
         assert pr.provider == "azure-devops"
         assert pr.automerge_label == "auto-complete"
         assert pr.approval_required is False
+        assert pr.allow_stale_approval is True
         assert pr.bypass_policy is True
         assert pr.bypass_reason == "self-serve"
         assert pr.squash is True
