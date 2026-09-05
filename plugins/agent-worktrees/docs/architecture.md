@@ -819,6 +819,9 @@ The in-plugin flow:
 
 1. Pulls the agent-worktrees marketplace payload.
 2. Refreshes **every** registered plugin payload (incl. payload-only plugins).
+   After an authoritative catalog refresh, it uninstalls inactive installed
+   identities that no longer exist in that marketplace. Active or
+   activation-unknown identities remain fail-closed and are never purged.
 3. Deploys the agent-worktrees runtime installer.
 4. Updates sibling modules listed in `modules.json` (`agent-bridge` today).
 5. Reconciles registered runtime plugins not covered by the module/self steps.

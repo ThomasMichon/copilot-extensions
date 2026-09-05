@@ -135,6 +135,117 @@ def test_installed_but_inactive_plugin_is_updated(monkeypatch):
     ] in calls
 
 
+def test_retired_inactive_plugin_is_purged(monkeypatch, capsys):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: [])
+    monkeypatch.setattr(
+        reconcile,
+        "read_installed_plugins",
+        lambda: ["context-handoff", "retired-plugin"],
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if argv[1:4] == ["plugin", "marketplace", "browse"]:
+            return _ok(
+                'Plugins in "copilot-extensions":\n'
+                "  \u2022 context-handoff - Current plugin\n"
+            )
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert m._update_registered_plugins()
+    assert [
+        "copilot",
+        "plugin",
+        "uninstall",
+        "retired-plugin@copilot-extensions",
+    ] in calls
+    assert [
+        "copilot",
+        "plugin",
+        "update",
+        "retired-plugin@copilot-extensions",
+    ] not in calls
+    assert "retired-plugin (OK (purged))" in capsys.readouterr().out
+
+
+def test_retired_active_plugin_is_not_purged(monkeypatch):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(
+        reconcile,
+        "read_enabled_plugins",
+        lambda repo_dir: ["retired-plugin"],
+    )
+    monkeypatch.setattr(
+        reconcile, "read_installed_plugins", lambda: ["retired-plugin"]
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if argv[1:4] == ["plugin", "marketplace", "browse"]:
+            return _ok(
+                'Plugins in "copilot-extensions":\n'
+                "  \u2022 context-handoff - Current plugin\n"
+            )
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert m._update_registered_plugins()
+    assert not any("uninstall" in call for call in calls)
+    assert [
+        "copilot",
+        "plugin",
+        "update",
+        "retired-plugin@copilot-extensions",
+    ] in calls
+
+
+def test_unreadable_marketplace_inventory_skips_purge(monkeypatch):
+    _install_config(monkeypatch, "/repo/anchor")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: [])
+    monkeypatch.setattr(
+        reconcile, "read_installed_plugins", lambda: ["retired-plugin"]
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: Path(f"/inst/{name}"),
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if argv[1:4] == ["plugin", "marketplace", "browse"]:
+            return _fail()
+        return _ok()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert m._update_registered_plugins()
+    assert not any("uninstall" in call for call in calls)
+    assert [
+        "copilot",
+        "plugin",
+        "update",
+        "retired-plugin@copilot-extensions",
+    ] in calls
+
+
 def test_inactive_inventory_failure_is_advisory(monkeypatch, capsys):
     _install_config(monkeypatch, "/repo/anchor")
     monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: [])
