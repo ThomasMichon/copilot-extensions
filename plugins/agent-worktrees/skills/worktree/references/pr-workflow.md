@@ -83,9 +83,16 @@ So an **ADO repo** (e.g. `example-marketplace`) binds `automerge_label: auto-com
   changes-requested (we own the merge; no approval vote needed). A
   `CHANGES_REQUESTED` review still blocks -- address it, then re-run.
 - `allow_stale_approval: true` -- preserve an approval as merge authority only
-  for the bounded race where the tracked current head was published before the
-  stale approval was submitted. A post-approval push never inherits approval,
-  and missing/mismatched publication evidence fails closed. `pr-status` and
+  for the bounded race where the same provider endpoint observed the exact
+  tracked current head before the stale approval was submitted. Both timestamps
+  come from the provider clock, and the observation must strictly precede the
+  approval. Every mediated create, push, or manual association clears and
+  reacquires the evidence, so a post-approval mediated push cannot inherit the
+  approval. Same-second, missing, malformed, endpoint-mismatched, head-
+  mismatched, or provider-unsupported evidence fails closed. Providers expose
+  no portable head-generation watermark, so enabling this policy also requires
+  branch updates to use the mediated PR flow; a generic client cannot detect an
+  arbitrary out-of-band replay of a previously observed SHA. `pr-status` and
   `pr-watch` expose `approval_stale` plus `approval_stale_authorized`;
   mergeability, holds, WIP state, and changes-requested verdicts still block.
 - `bypass_policy: true` -- complete **past** a branch policy that never

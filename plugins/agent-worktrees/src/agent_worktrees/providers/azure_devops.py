@@ -76,6 +76,9 @@ class AzureDevOpsProvider:
 
     name = "azure-devops"
 
+    def authority_endpoint(self, api_base: str = "") -> str:
+        return (api_base or "").rstrip("/")
+
     def _env(self, token: str | None) -> dict[str, str]:
         return {"AZURE_DEVOPS_EXT_PAT": token} if token else {}
 
@@ -159,6 +162,15 @@ class AzureDevOpsProvider:
             number=number,
             state=state,
             merged=merged,
+        )
+
+    def observe_head(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PullResult:
+        """Azure DevOps has no server-clock head observation implementation."""
+        _ = (repo, number, api_base, token)
+        raise ProviderError(
+            "Azure DevOps does not support authoritative PR-head observation."
         )
 
     def publish_source_marker(
@@ -288,6 +300,7 @@ class AzureDevOpsProvider:
             merged=merged,
             head_sha=head_sha,
             base_ref=base_ref,
+            updated_at=str(data.get("closedDate", "") or ""),
             reviews=self._reviews_from_show(data),
             author=author,
             mergeable=mergeable,

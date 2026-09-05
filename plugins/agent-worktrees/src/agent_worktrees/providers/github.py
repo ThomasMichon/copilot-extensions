@@ -9,6 +9,9 @@ used (the resolve_token None case).
 from __future__ import annotations
 
 import json
+import os
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
@@ -45,6 +48,19 @@ class GitHubProvider:
     """Open + query pull requests on GitHub via the ``gh`` CLI."""
 
     name = "github"
+
+    def authority_endpoint(self, api_base: str = "") -> str:
+        configured = (api_base or "").strip()
+        if configured:
+            parsed = urlparse(
+                configured if "://" in configured else f"//{configured}"
+            )
+            if parsed.hostname:
+                endpoint = parsed.hostname.lower()
+                if parsed.port is not None:
+                    endpoint = f"{endpoint}:{parsed.port}"
+                return endpoint
+        return (os.environ.get("GH_HOST") or "github.com").strip().lower()
 
     def _env(self, token: str | None) -> dict[str, str]:
         return {"GH_TOKEN": token} if token else {}
@@ -102,6 +118,45 @@ class GitHubProvider:
             number=int(data.get("number", number)),
             state=state,
             merged=(state == "merged"),
+        )
+
+    def observe_head(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PullResult:
+        """Read the exact head and GitHub's HTTP ``Date`` in one response."""
+        host = self.authority_endpoint(api_base)
+        proc = run_cli(
+            [
+                "gh", "api", "--hostname", host, "--include",
+                f"/repos/{repo}/pulls/{number}",
+            ],
+            env=self._env(token),
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip()
+            raise ProviderError(f"gh PR #{number} observation failed: {detail}")
+        marker = "\n{"
+        body_at = proc.stdout.find(marker)
+        if body_at < 0:
+            raise ProviderError(f"gh PR #{number} observation was malformed.")
+        headers = proc.stdout[:body_at]
+        body = proc.stdout[body_at + 1:]
+        date_header = ""
+        for line in headers.splitlines():
+            name, sep, value = line.partition(":")
+            if sep and name.strip().lower() == "date":
+                date_header = value.strip()
+        try:
+            data = json.loads(body)
+            observed_at = parsedate_to_datetime(date_header).isoformat()
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ProviderError(
+                f"gh PR #{number} observation lacked valid server evidence."
+            ) from exc
+        return PullResult(
+            number=int(data.get("number", number)),
+            head_sha=str((data.get("head") or {}).get("sha", "")),
+            observed_at=observed_at,
         )
 
     def publish_source_marker(
@@ -190,12 +245,17 @@ class GitHubProvider:
         two independent signals -- legacy commit *statuses* and Actions
         *check-runs* -- into the provider-neutral vocabulary.
 
-        ``api_base`` is unused (GitHub Enterprise hosts are addressed via ``gh``'s
-        own ``GH_HOST`` config, not a per-call base), kept for signature parity.
+        ``api_base`` may identify a GitHub Enterprise host; otherwise the
+        ambient ``GH_HOST`` or ``github.com`` is resolved once and passed
+        explicitly to every snapshot read.
         """
-        _ = api_base
+        host = self.authority_endpoint(api_base)
         proc = run_cli(
-            ["gh", "api", f"/repos/{repo}/pulls/{number}"], env=self._env(token),
+            [
+                "gh", "api", "--hostname", host,
+                f"/repos/{repo}/pulls/{number}",
+            ],
+            env=self._env(token),
         )
         if proc.returncode != 0:
             detail = (proc.stderr.strip() or proc.stdout.strip())
@@ -229,17 +289,19 @@ class GitHubProvider:
             merged=bool(pr.get("merged", False)),
             head_sha=head_sha,
             base_ref=str((pr.get("base") or {}).get("ref", "")),
-            reviews=self._all_review_objs(repo, number, token),
+            updated_at=str(pr.get("updated_at", "") or ""),
+            reviews=self._all_review_objs(repo, number, token, host=host),
             author=str((pr.get("user") or {}).get("login", "")),
             mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
-            checks_state=self._combined_checks_state(repo, head_sha, token),
+            checks_state=self._combined_checks_state(repo, head_sha, token, host=host),
             labels=labels,
             title=str(pr.get("title", "")),
             draft=bool(pr.get("draft", False)),
         )
 
     def _all_review_objs(
-        self, repo: str, number: int, token: str | None
+        self, repo: str, number: int, token: str | None, *,
+        host: str = "github.com",
     ) -> tuple[Review, ...]:
         """Fetch every review as ``pr_contract.Review``s, paging the endpoint.
 
@@ -256,7 +318,7 @@ class GitHubProvider:
         while True:
             proc = run_cli(
                 [
-                    "gh", "api",
+                    "gh", "api", "--hostname", host,
                     f"/repos/{repo}/pulls/{number}/reviews"
                     f"?per_page={page_size}&page={page}",
                 ],
@@ -293,7 +355,8 @@ class GitHubProvider:
         return tuple(reviews)
 
     def _combined_checks_state(
-        self, repo: str, sha: str, token: str | None
+        self, repo: str, sha: str, token: str | None, *,
+        host: str = "github.com",
     ) -> str:
         """Provider-neutral CI rollup for ``sha`` over BOTH GitHub check systems.
 
@@ -314,7 +377,10 @@ class GitHubProvider:
 
         # 1. Legacy combined commit status.
         proc = run_cli(
-            ["gh", "api", f"/repos/{repo}/commits/{sha}/status"],
+            [
+                "gh", "api", "--hostname", host,
+                f"/repos/{repo}/commits/{sha}/status",
+            ],
             env=self._env(token),
         )
         if proc.returncode == 0:
@@ -334,7 +400,10 @@ class GitHubProvider:
 
         # 2. Actions check-runs.
         cproc = run_cli(
-            ["gh", "api", f"/repos/{repo}/commits/{sha}/check-runs"],
+            [
+                "gh", "api", "--hostname", host,
+                f"/repos/{repo}/commits/{sha}/check-runs",
+            ],
             env=self._env(token),
         )
         if cproc.returncode == 0:
@@ -398,20 +467,22 @@ class GitHubProvider:
         watches (via ``gh pr edit --add-label``); the squash / delete-source /
         bypass options do not apply.
         """
-        _ = (api_base, squash, delete_source_branch, bypass_policy, bypass_reason)
+        _ = (squash, delete_source_branch, bypass_policy, bypass_reason)
         if not automerge_label:
             return "github: no automerge_label bound to signal merge consent."
+        host = self.authority_endpoint(api_base)
         proc = run_cli(
             [
-                "gh", "pr", "edit", str(number),
-                "--repo", repo,
-                "--add-label", automerge_label,
+                "gh", "api", "--hostname", host,
+                "--method", "POST",
+                f"repos/{repo}/issues/{number}/labels",
+                "-f", f"labels[]={automerge_label}",
             ],
             env=self._env(token),
         )
         if proc.returncode != 0:
             return (
-                f"gh pr edit --add-label failed for {repo}#{number}: "
+                f"gh api label apply failed for {repo}#{number}: "
                 f"{proc.stderr.strip() or proc.stdout.strip()}"
             )
         return ""

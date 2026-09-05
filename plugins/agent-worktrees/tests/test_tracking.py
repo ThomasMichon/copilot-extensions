@@ -572,6 +572,8 @@ class TestSaveLoadRoundTrip:
                 branch="feature/fix-auth-abc123",
                 base_sha="abc123",
                 head_sha="def456",
+                head_observed_at="2026-09-05T06:01:02+00:00",
+                head_observed_api_base="https://gitea.example",
                 patch_id="pid789",
                 url="https://example/pulls/42",
                 number=42,
@@ -586,6 +588,8 @@ class TestSaveLoadRoundTrip:
         assert loaded.pr.branch == "feature/fix-auth-abc123"
         assert loaded.pr.base_sha == "abc123"
         assert loaded.pr.head_sha == "def456"
+        assert loaded.pr.head_observed_at == "2026-09-05T06:01:02+00:00"
+        assert loaded.pr.head_observed_api_base == "https://gitea.example"
         assert loaded.pr.patch_id == "pid789"
         assert loaded.pr.url == "https://example/pulls/42"
         assert loaded.pr.number == 42

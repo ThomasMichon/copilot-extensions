@@ -303,6 +303,28 @@ def _label_endpoint(args, label_post, applied, id_name):
 
 
 class TestGiteaProvider:
+    def test_observe_head_uses_server_date(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        payload = json.dumps({"number": 42, "head": {"sha": "abc"}})
+        monkeypatch.setattr(
+            gitea,
+            "run_cli",
+            lambda args: _proc(
+                stdout=(
+                    payload
+                    + "\nThu, 05 Sep 2026 06:01:02 GMT\n200"
+                )
+            ),
+        )
+
+        observed = gitea.GiteaProvider().observe_head(
+            "o/r", 42, api_base="https://h/gitea", token="tok"
+        )
+
+        assert observed.head_sha == "abc"
+        assert observed.observed_at == "2026-09-05T06:01:02+00:00"
+
     def test_publish_source_marker_creates_issue_comment(self, monkeypatch):
         from agent_worktrees.providers import gitea
 
@@ -739,6 +761,37 @@ class TestGiteaProvider:
 # ---------------------------------------------------------------------------
 
 class TestGitHubProvider:
+    def test_observe_head_uses_server_date(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        payload = json.dumps({"number": 42, "head": {"sha": "abc"}})
+        captured = {}
+
+        def fake(args, **kwargs):
+            captured["args"] = args
+            return _proc(
+                stdout=(
+                    "HTTP/2.0 200 OK\n"
+                    "Date: Thu, 05 Sep 2026 06:01:02 GMT\n"
+                    "\n"
+                    + payload
+                )
+            )
+
+        monkeypatch.setattr(
+            github,
+            "run_cli",
+            fake,
+        )
+
+        observed = github.GitHubProvider().observe_head(
+            "o/r", 42, api_base="https://github.example/api/v3"
+        )
+
+        assert observed.head_sha == "abc"
+        assert observed.observed_at == "2026-09-05T06:01:02+00:00"
+        assert captured["args"][2:4] == ["--hostname", "github.example"]
+
     def test_publish_source_marker_creates_pr_comment(self, monkeypatch):
         from agent_worktrees.providers import github
 
@@ -933,7 +986,7 @@ class TestGitHubProvider:
         reviews_pages = reviews_pages or [[]]
 
         def fake(args, **kw):
-            url = args[2] if len(args) > 2 else ""
+            url = args[-1] if len(args) > 2 else ""
             if "/reviews" in url:
                 # page is 1-based in the query string; default to last (empty).
                 page = 1
@@ -2072,18 +2125,27 @@ class TestGiteaThreads:
 
 
 class TestGitHubThreads:
-    def test_request_auto_complete_edits_label(self, monkeypatch):
+    def test_request_auto_complete_applies_endpoint_bound_label(self, monkeypatch):
         from agent_worktrees.providers import github
         captured = {}
         monkeypatch.setattr(
             github, "run_cli",
             lambda args, **kw: (captured.__setitem__("args", args), _proc())[1])
         err = github.GitHubProvider().request_auto_complete(
-            "o/r", 3, automerge_label="auto-merge", token="t")
+            "o/r",
+            3,
+            api_base="https://enterprise.example:8443/api/v3",
+            automerge_label="auto-merge",
+            token="t",
+        )
         assert err == ""
         a = captured["args"]
-        assert a[:3] == ["gh", "pr", "edit"]
-        assert a[a.index("--add-label") + 1] == "auto-merge"
+        assert a[:4] == [
+            "gh", "api", "--hostname", "enterprise.example:8443",
+        ]
+        assert a[a.index("--method") + 1] == "POST"
+        assert "repos/o/r/issues/3/labels" in a
+        assert a[a.index("-f") + 1] == "labels[]=auto-merge"
 
     def test_get_comment_threads_graphql(self, monkeypatch):
         from agent_worktrees.providers import github

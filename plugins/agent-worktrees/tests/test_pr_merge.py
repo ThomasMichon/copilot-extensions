@@ -85,7 +85,73 @@ class TestMergeOne:
                            default_branch="master", provider=prov)
         assert row["action"] == "apply"
         assert row["applied"] is True
-        assert prov.added == [("o/r", 7, "auto-merge")]
+
+    def test_head_change_before_consent_blocks_application(self):
+        approval = (pc.Review(1, "APPROVED", "bob", commit_id="approved"),)
+        first = _snap(
+            head_sha="approved",
+            updated_at="2026-01-01T00:01:00Z",
+            reviews=approval,
+        )
+        second = _snap(
+            head_sha="replacement",
+            updated_at="2026-01-01T00:01:59Z",
+            reviews=approval,
+        )
+
+        class _ChangingProvider(_FakeProvider):
+            def __init__(self):
+                super().__init__(first)
+                self.calls = 0
+
+            def get_snapshot(self, repo, number, *, api_base="", token=None):
+                self.calls += 1
+                return first if self.calls == 1 else second
+
+        prov = _ChangingProvider()
+
+        row = pm.merge_one(
+            _prcfg(),
+            "o/r",
+            7,
+            token="t",
+            apply=True,
+            default_branch="master",
+            provider=prov,
+        )
+
+        assert row["action"] == "skip"
+        assert "changed while merge consent was being prepared" in row["reason"]
+        assert prov.added == []
+
+    def test_approval_withdrawal_before_consent_blocks_application(self):
+        first = _snap()
+        second = _snap(reviews=())
+
+        class _ChangingProvider(_FakeProvider):
+            def __init__(self):
+                super().__init__(first)
+                self.calls = 0
+
+            def get_snapshot(self, repo, number, *, api_base="", token=None):
+                self.calls += 1
+                return first if self.calls == 1 else second
+
+        prov = _ChangingProvider()
+
+        row = pm.merge_one(
+            _prcfg(),
+            "o/r",
+            7,
+            token="t",
+            apply=True,
+            default_branch="master",
+            provider=prov,
+        )
+
+        assert row["action"] == "skip"
+        assert row["reason"] == "not yet approved"
+        assert prov.added == []
 
     def test_dry_run_does_not_apply(self):
         prov = _FakeProvider(_snap())
@@ -120,6 +186,7 @@ class TestMergeOne:
     def test_policy_permitted_stale_approval_applies(self):
         prov = _FakeProvider(_snap(
             head_sha="new",
+            updated_at="2026-01-01T00:01:59Z",
             reviews=(
                 pc.Review(
                     1,
@@ -138,7 +205,7 @@ class TestMergeOne:
             apply=True,
             default_branch="master",
             tracked_head_sha="new",
-            head_pushed_at="2026-01-01T00:01:00Z",
+            head_observed_at="2026-01-01T00:01:00Z",
             provider=prov,
         )
         assert row["action"] == "apply"
@@ -149,6 +216,7 @@ class TestMergeOne:
     def test_post_approval_push_does_not_inherit_approval(self):
         prov = _FakeProvider(_snap(
             head_sha="new",
+            updated_at="2026-01-01T00:02:00Z",
             reviews=(
                 pc.Review(
                     1,
@@ -167,7 +235,7 @@ class TestMergeOne:
             apply=True,
             default_branch="master",
             tracked_head_sha="new",
-            head_pushed_at="2026-01-01T00:02:00Z",
+            head_observed_at="2026-01-01T00:02:00Z",
             provider=prov,
         )
         assert row["action"] == "skip"

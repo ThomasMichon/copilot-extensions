@@ -890,11 +890,20 @@ def _push_changes_pr(
         ).stdout.strip()
         if pushed_pr is not None:
             pushed_pr.head_sha = head_sha
-            pushed_pr.head_pushed_at = tracking._now_iso()
+            pushed_pr.head_observed_at = ""
+            pushed_pr.head_observed_api_base = ""
             if pushed_pr.state in ("", "creating"):
                 pushed_pr.state = "open"
         tracking.save_record(record)
         from . import pr_ops
+        observation_error = pr_ops.refresh_head_observation(
+            config, record, pushed_pr, head_sha
+        )
+        if observation_error:
+            output.warn(
+                "PR head was pushed, but authoritative provider observation "
+                f"failed: {observation_error}"
+            )
         attribution_error = pr_ops.refresh_source_attribution(
             worktree_id,
             config,
@@ -1013,11 +1022,20 @@ def _push_changes_pr_refspec(
         ).stdout.strip()
         if pushed_pr is not None:
             pushed_pr.head_sha = head_sha
-            pushed_pr.head_pushed_at = tracking._now_iso()
+            pushed_pr.head_observed_at = ""
+            pushed_pr.head_observed_api_base = ""
             if pushed_pr.state in ("", "creating"):
                 pushed_pr.state = "open"
         tracking.save_record(record)
         from . import pr_ops
+        observation_error = pr_ops.refresh_head_observation(
+            config, record, pushed_pr, head_sha
+        )
+        if observation_error:
+            output.warn(
+                "PR head was pushed, but authoritative provider observation "
+                f"failed: {observation_error}"
+            )
         attribution_error = pr_ops.refresh_source_attribution(
             worktree_id,
             config,

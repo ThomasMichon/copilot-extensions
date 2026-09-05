@@ -103,6 +103,8 @@ class PRSnapshot:
     merged: bool = False
     head_sha: str = ""
     base_ref: str = ""
+    updated_at: str = ""
+    """Provider timestamp for the PR's latest mutation."""
     reviews: tuple[Review, ...] = ()
     author: str = ""             # the PR creator's login (its own reviews never fire)
     mergeable: bool | None = None
@@ -350,7 +352,7 @@ def effective_verdict(
     *,
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
-    stale_approval_head_pushed_at: str = "",
+    stale_approval_head_observed_at: str = "",
 ) -> str:
     """Reduce a PR's reviews to one effective verdict at ``head_sha``.
 
@@ -358,9 +360,10 @@ def effective_verdict(
     the PR author's own.  The latest such review (by id) wins.  An ``APPROVED``
     review normally counts only if it was submitted against the current head.
     When ``allow_stale_approval`` is true, a stale approval remains effective
-    only when local publication evidence proves the live head was already
-    published before the approval was submitted. A later push never inherits an
-    older approval. Callers still expose staleness through :class:`PRState`.
+    only when provider-clock evidence proves the exact live head was observed
+    before the approval was submitted. Every plugin-mediated push clears and
+    reacquires that evidence, so a later mediated push cannot inherit an older
+    approval. Callers still expose staleness through :class:`PRState`.
 
     Returns ``"APPROVED"``, ``"CHANGES_REQUESTED"``, or ``""`` (no verdict).
     """
@@ -377,7 +380,7 @@ def effective_verdict(
             head_sha=head_sha,
             allow_stale_approval=allow_stale_approval,
             stale_approval_head_sha=stale_approval_head_sha,
-            stale_approval_head_pushed_at=stale_approval_head_pushed_at,
+            stale_approval_head_observed_at=stale_approval_head_observed_at,
         )
     ):
         return ""
@@ -427,16 +430,24 @@ def _stale_approval_is_authoritative(
     head_sha: str,
     allow_stale_approval: bool,
     stale_approval_head_sha: str,
-    stale_approval_head_pushed_at: str,
+    stale_approval_head_observed_at: str,
 ) -> bool:
-    """Prove the live head existed before a stale approval was submitted."""
+    """Prove the observed head stayed current through approval submission."""
     if review is None or not allow_stale_approval:
         return False
     if not head_sha or stale_approval_head_sha != head_sha:
         return False
     submitted = _parse_timestamp(review.submitted_at)
-    pushed = _parse_timestamp(stale_approval_head_pushed_at)
-    return bool(submitted is not None and pushed is not None and pushed <= submitted)
+    observed = _parse_timestamp(stale_approval_head_observed_at)
+    if submitted is not None:
+        submitted = submitted.replace(microsecond=0)
+    if observed is not None:
+        observed = observed.replace(microsecond=0)
+    return bool(
+        submitted is not None
+        and observed is not None
+        and observed < submitted
+    )
 
 
 def title_is_wip(title: str, wip_title_prefixes: Iterable[str]) -> bool:
@@ -566,7 +577,7 @@ def classify_state(
     approval_required: bool = True,
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
-    stale_approval_head_pushed_at: str = "",
+    stale_approval_head_observed_at: str = "",
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
@@ -607,7 +618,7 @@ def classify_state(
             head_sha=snap.head_sha,
             allow_stale_approval=allow_stale_approval,
             stale_approval_head_sha=stale_approval_head_sha,
-            stale_approval_head_pushed_at=stale_approval_head_pushed_at,
+            stale_approval_head_observed_at=stale_approval_head_observed_at,
         )
     )
     verdict = effective_verdict(
@@ -616,7 +627,7 @@ def classify_state(
         snap.author,
         allow_stale_approval=allow_stale_approval,
         stale_approval_head_sha=stale_approval_head_sha,
-        stale_approval_head_pushed_at=stale_approval_head_pushed_at,
+        stale_approval_head_observed_at=stale_approval_head_observed_at,
     )
     ms = merge_state(snap)
     consent_present = bool(automerge_label) and automerge_label.lower() in label_set
@@ -697,7 +708,7 @@ def merge_readiness(
     approval_required: bool = True,
     allow_stale_approval: bool = False,
     stale_approval_head_sha: str = "",
-    stale_approval_head_pushed_at: str = "",
+    stale_approval_head_observed_at: str = "",
 ) -> dict:
     """A caller-facing "what stands between this PR and merge" summary.
 
@@ -728,7 +739,7 @@ def merge_readiness(
         approval_required=approval_required,
         allow_stale_approval=allow_stale_approval,
         stale_approval_head_sha=stale_approval_head_sha,
-        stale_approval_head_pushed_at=stale_approval_head_pushed_at,
+        stale_approval_head_observed_at=stale_approval_head_observed_at,
     )
     return {
         "verdict": st.verdict,

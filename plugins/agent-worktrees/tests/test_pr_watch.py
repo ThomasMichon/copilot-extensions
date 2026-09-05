@@ -262,6 +262,7 @@ class TestDecorateEvents:
             pr_state="open",
             mergeable=True,
             head_sha="new",
+            updated_at="2026-01-01T00:01:59Z",
             reviews=(
                 pc.Review(
                     3,
@@ -284,7 +285,7 @@ class TestDecorateEvents:
             automerge_label="auto-merge",
             allow_stale_approval=True,
             stale_approval_head_sha="new",
-            stale_approval_head_pushed_at="2026-01-01T00:01:00Z",
+            stale_approval_head_observed_at="2026-01-01T00:01:00Z",
             now=clock.now,
             sleep=lambda s: None,
         )
@@ -340,7 +341,7 @@ class TestBuildFetch:
         monkeypatch.setattr(
             ghmod, "run_cli",
             lambda args, **kw: _proc(stdout=json.dumps(pr))
-            if (len(args) > 2 and args[2].endswith("/pulls/5"))
+            if (len(args) > 2 and args[-1].endswith("/pulls/5"))
             else _proc(stdout="[]"),
         )
         prcfg = cfg.PRConfig(provider="github")
