@@ -504,6 +504,32 @@ def test_session_start_guidance_rejects_session_root_escape(
     assert not (outside / "instructions").exists()
 
 
+@pytest.mark.parametrize("component", (".copilot", "session-state"))
+def test_session_start_guidance_rejects_state_root_escape(
+    monkeypatch, tmp_path, component
+):
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "catalog"
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if component == ".copilot":
+        link = tmp_path / ".copilot"
+    else:
+        copilot_root = tmp_path / ".copilot"
+        copilot_root.mkdir()
+        link = copilot_root / "session-state"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are not available")
+
+    assert not hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    assert not (outside / "session-1").exists()
+
+
 def test_reparse_detection_does_not_require_creating_a_link():
     path = SimpleNamespace(
         lstat=lambda: SimpleNamespace(

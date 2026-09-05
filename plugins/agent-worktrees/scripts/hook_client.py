@@ -322,9 +322,17 @@ def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
         return False
 
     try:
-        state_root = (home / ".copilot" / "session-state").resolve()
+        copilot_root = home / ".copilot"
+        copilot_root.mkdir(exist_ok=True)
+        if _is_link_or_reparse(copilot_root):
+            return False
+        unresolved_state_root = copilot_root / "session-state"
+        unresolved_state_root.mkdir(exist_ok=True)
+        if _is_link_or_reparse(unresolved_state_root):
+            return False
+        state_root = unresolved_state_root.resolve()
         unresolved_session_root = state_root / session_id
-        unresolved_session_root.mkdir(parents=True, exist_ok=True)
+        unresolved_session_root.mkdir(exist_ok=True)
         if _is_link_or_reparse(unresolved_session_root):
             return False
         session_root = unresolved_session_root.resolve()
