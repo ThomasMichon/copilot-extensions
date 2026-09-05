@@ -9,7 +9,7 @@
 - **Scope:** branch (a cross-cutting capability that spans the fabric, the
   installer/control-plane, and the picker)
 - **Status:** Active
-- **Last revised:** 2026-08-23
+- **Last revised:** 2026-09-04
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -84,9 +84,11 @@ identity) that the CLI does not decide.
 ### Native cloud steering over the agent-host protocol
 The CLI exposes **cloud steering** of a live agent — a task→session→environment
 that can be shared and steered remotely over its **agent-host protocol**. The
-harness maps its **live-session coordination and handoff** onto these native
-surfaces rather than maintaining a parallel steering channel, contributing the
-cross-machine and claim semantics the native surface does not carry.
+harness adopts that surface as one session-host provider rather than making it
+the only execution model. Live-session coordination and handoff use the common
+hosting boundary, contributing cross-machine, durable-agency, and claim
+semantics the native surface does not carry while remaining compatible with
+CLI/mux, SDK, App, ACP, and third-party hosts.
 
 ## Features
 
@@ -113,7 +115,9 @@ are the **same objects**, visible to and usable by both.
 ### ride-native-identity-and-steering
 The harness reads the CLI's **canonical session identity** and rides the CLI's
 **cloud steering / agent-host** surfaces for live-session presentation and
-handoff, instead of shadowing them with a second identity or channel.
+handoff when that provider is selected, instead of shadowing them with a second
+identity or channel. Other execution providers participate through the same
+host-neutral agency model.
 
 ## Behaviors
 
@@ -170,6 +174,9 @@ change in the native surface can be backed out without stranding users.
   [plugins/agent-worktrees](../plugins/agent-worktrees/README.md) — the ground
   layer whose worktree + session state converges onto the native worktree and
   workspace constructs;
+  [session-hosting](../session-hosting/README.md) — the provider boundary that
+  treats native host steering as one execution option rather than a universal
+  process model;
   [installer](../installer/README.md) and [picker](../picker/README.md) — the
   out-of-plugin control plane and front door that present the converged
   constructs.
@@ -188,3 +195,7 @@ change in the native surface can be backed out without stranding users.
   **no capability regression** and **no hard dependency on an unreleased or
   unstable native construct** (convergence staged behind released,
   feature-detected surfaces).
+- **2026-09-04** — Clarified that native cloud steering converges as one
+  session-host provider inside a plural execution ecosystem. Native constructs
+  remain preferred substrates when selected and stable, without collapsing
+  worktree-lifetime agency identity onto one Copilot product or host.

@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-08-25
+- **Last revised:** 2026-09-04
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -47,27 +47,24 @@ load-bearing properties bind the layers:
   rather than keeping a second copy. This is what keeps the layers'
   responsibilities separate as the stack grows.
 
-### agent-worktrees — the isolation & session ground layer
-Owns **agent-per-worktree isolation**, the Copilot **session process
-lifecycle**, and core **worktree + git** state. It is the foundation every other
-layer builds on. On its own it yields **passive, coarse legibility**: state
-discoverable through declarative hooks and on-demand reads of raw session state —
-an Active / Recent / Completed view of agents, process management, and basic
-remote-shell interop — with **no always-on service required**. Owning the
-worktree, it also owns each worktree's **disposition** — whether its work is
-genuinely *resolved and prune-able* or has *actionable follow-ups remaining* —
-which the agent working there **asserts**, because git and process reality alone
-cannot tell a done worktree from a finalized one that still owes follow-ups.
-Alongside that, the ground layer surfaces a **live, passively-derived sense of
-what each agent is currently doing**, needing no cooperation from the agent — the
-same derivation instinct that already separates conversation from idle.
-A per-plugin child vision refines it at
-[`visions/plugins/agent-worktrees/`](../plugins/agent-worktrees/README.md) — the
-session-tracking & live-state authority: a single-owner live store, an
-**extension-free polling backbone**, an optional losable warm-cache accelerator,
-and **optional, non-load-bearing** event producers (its own native-session-event
-extension — the crisp rest/idle source — and agent-bridge's ACP tool/message
-eventing), where no in-session extension is ever load-bearing for correctness.
+### agent-worktrees — the worktree-lifetime agency ground layer
+Owns repository and worktree identity, isolation, source-control lifecycle,
+claims, obligations, asserted disposition, execution relationships, and the
+durable head/succession record. A worktree is a persistent unit of agency, not a
+Copilot process: its responsibility survives terminals, applications, protocol
+hosts, and session generations. Execution providers contribute attributable
+observations without becoming a second owner of worktree truth.
+A per-plugin child vision refines this host-neutral boundary at
+[`visions/plugins/agent-worktrees/`](../plugins/agent-worktrees/README.md).
+
+### Copilot session hosting — the execution-provider layer
+Owns how an agent process is launched, presented, prompted, observed, reattached,
+handed off, and retired. Copilot CLI under TMux/PSMux, plain CLI, ACP/session
+hosts, SDK integrations, graphical applications, and third-party rigs are peer
+providers behind one capability-honest boundary. The provider owns execution
+mechanics; the worktree ground layer owns durable agency meaning. The
+cross-cutting [session-hosting](../session-hosting/README.md) vision refines this
+seam.
 
 ### agent-bridge — the coordination layer
 Adds **remote agent creation, inspection, and communication** over discoverable
@@ -182,11 +179,12 @@ running or parked — so a duplicate is a deliberate choice, not an accident.
 Work can be **stashed** for later pickup, **handed off** between agents, or
 **delegated** to a spun-off agent, with a shared record of the task and its
 outcome — so a fleet cooperates through durable artifacts, not just live chatter.
-The **launch** underneath (spin a session in a worktree) is a ground-layer
-**primitive**; the **orchestration** of a handoff — composing the continuation,
-minting the claimable delegation record, cutting a successor over, verifying it,
-and retiring the predecessor — belongs to the layers **above** the primitive,
-never baked into the ground layer.
+The **launch** underneath is supplied by the selected session-host provider.
+The **orchestration** of a handoff — composing the continuation, minting the
+claimable delegation record, requesting a successor, verifying it, moving
+durable agency authority, and authorizing predecessor retirement — belongs
+above both the worktree ledger and the host. No generic handoff component
+hard-codes one provider's process mechanics.
 
 ### unreachable-machine-maintenance-handoff
 When every declared route to a machine is unavailable after bounded diagnosis,
@@ -519,18 +517,20 @@ for the exceptional case, but the safe default is that the fabric *refuses to
 duplicate* rather than quietly spawning a rival. This is the session-level
 expression of *discover-before-duplicate* and *derive-dont-duplicate*: the
 current-session pointer and the succession chain are **owned by the ground
-layer** (which owns session lifecycle), and higher layers **enforce and derive
-from** them rather than keeping a rival notion of "current."
+layer** (which owns durable execution lineage), and higher layers **enforce and
+derive from** them rather than keeping a rival notion of "current." The selected
+session host owns the process lifetime of each leg, not the meaning of the
+lineage.
 
-### handoff-orchestrated-above-primitives
-Session **launch** is a ground-layer **primitive** — "spin a Copilot session in
-worktree `<id>`." The **handoff** built on it — compose the continuation, mint a
-**claimable delegation record** (so a coordinator or the next session picks it
-up), cut a successor over, **verify it came up**, and retire the predecessor — is
-**orchestrated by the layers above** (the handoff extension driving the delegation
-layer), never absorbed into the ground layer. The ground layer offers the
-**mechanism**; a higher layer owns the **policy** — and a mux-less environment
-degrades to the same claimable record, not to a silent no-op.
+### handoff-orchestrated-across-ledger-and-host
+The handoff layer owns the continuation and transition policy; the worktree
+ground layer owns durable head, lineage, and responsibility; the selected
+session-host provider owns launch, prompt delivery, and retirement mechanics.
+A cutover is represented durably before a provider is notified. A provider's
+launch receipt remains provisional until the successor proves its session and
+opening context; only then does durable authority move and retirement become
+authorized. With no compatible provider, the same handoff remains recoverable
+for manual pickup rather than becoming a silent no-op.
 
 ### context-pressure-drives-handoff
 Context saturation is a legitimate **driver** of a handoff, but a driver held
@@ -544,9 +544,10 @@ off first and delivering that prompt to the successor**, rather than spending th
 last of the window on a degraded turn — so a minimal consumer that can only
 *send the next message* still advances. Like every other handoff this is
 **orchestrated above the primitive** (*handoff-orchestrated-above-primitives*):
-the ground layer never auto-rolls a session on its own, the policy and the
-pressure-reading live in the layers above, and the succession chain and
-current-session pointer it produces remain **owned by the ground layer**
+the worktree ground layer never auto-rolls a session on its own, the policy and
+pressure-reading live in the layers above, the selected host performs the
+execution transition, and the succession chain and current-session pointer
+remain **owned by the ground layer**
 (*single-current-session-per-worktree*). The signal is **fail-safe**: absent an
 opt-in, pressure changes nothing and the session behaves exactly as before.
 
@@ -563,6 +564,10 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
 - **Not a replacement for the human's editor or terminal.** The fabric
   coordinates *agents*; it does not own the human's own interactive editing
   surface.
+- **Not one universal Copilot process manager.** Execution is supplied by
+  capability-honest session-host providers. The fabric does not force every
+  Copilot product or third-party rig through one terminal, multiplexer, or
+  protocol implementation.
 - **No second store of another layer's state.** A higher layer must not persist
   its own copy of state a lower layer owns — it derives and coordinates. (Stated
   as a boundary precisely so realizations don't smear one capability's state
@@ -585,6 +590,8 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   constructs: delegate the primitive, align vocabulary + layout, keep the durable
   value the CLI lacks, without regressing a capability or hard-depending on an
   unreleased construct.
+- Cross-cutting vision: [session-hosting](../session-hosting/README.md) —
+  provider-neutral ownership of Copilot execution and live cutover mechanics.
 - Child visions: [agent-ssh](../plugins/agent-ssh/README.md) — the connectivity /
   transport layer the fabric's cross-machine reach rides on;
   [agent-dispatch](../plugins/agent-dispatch/README.md) — the delegation layer's
@@ -717,3 +724,10 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   identity before new claims or leases are created, with no fallback to the
   shared launch repository. Existing fenced ownership remains releasable during
   a later binding outage so fail-closed acquisition cannot wedge teardown.
+- **2026-09-04** — Split durable worktree-lifetime agency state from Copilot
+  execution hosting. agent-worktrees remains the host-neutral owner of worktree
+  identity, responsibility, claims, disposition, head, and succession, while
+  pluggable session hosts own launch, interaction, observation, reconnection,
+  prompt delivery, and retirement for CLI/mux, ACP, SDK, App, and third-party
+  rigs. Handoff now spans those authorities through durable requests and
+  verified takeover rather than treating one ground-layer launcher as universal.

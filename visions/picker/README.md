@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-08-26
+- **Last revised:** 2026-09-04
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -34,10 +34,10 @@ wrong machine, only to back out. The Picker earns its place by making the
 *decision* cheap even though the *action* is not.
 
 It is also the fabric's **coherent context anchor**. An operator drowning in
-near-identical terminal sessions must be able to glance at the Picker (and the
-multiplexer that wraps it) and know, unambiguously, **which project, which
-machine, and which versions** this surface represents. Confusing one terminal
-session for another is a class of error the Picker exists to abolish.
+near-identical sessions must be able to glance at the Picker and the selected
+session-host surface and know, unambiguously, **which project, which machine,
+which provider, and which versions** this surface represents. Confusing one
+execution context for another is a class of error the Picker exists to abolish.
 
 Finally, the Picker is the fabric's **unified presentation surface**. It is
 delivered by the **Configurator** — the optional worktree/agent control-plane
@@ -81,13 +81,13 @@ prerequisite for the plugins or their agents to function.
   consequential or multi-step. Browsing and acting are visibly different kinds of
   thing.
 - **The context header.** The always-present statement of *where you are*:
-  project, machine/venue, and the versions of the surfaces in play — coordinated
-  with the multiplexer wrapper so the two never disagree about the current
-  context.
+  project, machine/venue, selected session-host provider, and the versions of
+  the surfaces in play — coordinated with the active host so the two never
+  disagree about the current context.
 - **The launch handoff.** The informed transition out of the Picker into a
   worktree's Copilot session: it states plainly *which* worktree, on *which*
-  machine/environment, is about to be entered, and that a session will be spun
-  up.
+  machine/environment and through which provider, is about to be entered, and
+  that a session will be created or resumed.
 - **The programmatic substrate.** Everything the Picker shows is obtainable from
   the underlying CLI's machine-readable (`--json`) verbs. The Picker is a faithful
   *renderer* of that data, not a separate source of truth.
@@ -124,9 +124,10 @@ an afterthought.
 
 ### explicit-launch-target
 Whenever the Picker is about to kick an agent off into a worktree, it makes the
-**target unambiguous**: which worktree, on which machine and environment, and the
-fact that a session will be created or resumed. The operator never launches
-unsure of where the agent will land.
+**target unambiguous**: which worktree, on which machine and environment, which
+session-host provider owns the interaction, and whether a session will be
+created or resumed. The operator never launches unsure of where or how the
+agent will run.
 
 ### consequential-vs-browsing-clarity
 The Picker visibly distinguishes **browsing** (free, reversible, no side effects)
@@ -135,10 +136,10 @@ state). Consequential actions read as consequential; navigation and inspection
 never masquerade as them.
 
 ### coherent-context
-The Picker, together with the multiplexer that wraps it, coherently represents
-the current context — project, target machine/venue, and the app/plugin versions
-in play — so an operator with many similar terminal sessions open can always tell
-*which one this is* and *what it targets*.
+The Picker and the active session host coherently represent the current context
+— project, target machine/venue, provider, and app/plugin versions — so an
+operator with many similar sessions can always tell *which one this is*, *what
+it targets*, and *which surface owns it*.
 
 ### at-a-glance-multi-machine
 The fleet across **all** the fabric's machines is legible from a single Picker,
@@ -277,9 +278,9 @@ regression is something a test can catch before an operator does.
 - **Not the editor or the agent session.** The Picker is the front door and the
   fleet console; it **hands off** to the Copilot session and does not replace the
   operator's interactive working surface once inside a worktree.
-- **Not the multiplexer.** The Picker *coordinates context with* the mux wrapper
-  but is a distinct surface with a distinct job; it does not own session
-  multiplexing.
+- **Not a session host.** The Picker selects and invokes compatible providers,
+  then reflects their identity and status. It does not own terminal
+  multiplexing, Copilot processes, ACP sessions, SDK runtimes, or App windows.
 - **Not in-process with the engine — it sits *on top of* the CLI.** The Picker runs
   as a **separate process** that reaches each layer's engine **only by invoking its
   machine-readable (`--json`) CLI verbs**, never by importing it in-process. All the
@@ -318,6 +319,9 @@ regression is something a test can catch before an operator does.
   Configurator** is the optional worktree/agent control-plane that **delivers and
   keeps this Picker current** (out-of-band, self-updating). The Picker is an
   optional surface of that app; the plugins are self-sufficient without it.
+- Execution-host sibling: [session-hosting](../session-hosting/README.md) — the
+  provider-neutral launch/join/resume/cutover boundary the Picker drives but
+  does not implement.
 - CodeSpaces-pivot data owner: [agent-codespaces](../plugins/agent-codespaces/README.md)
   — the Picker's **CodeSpaces** pivot renders that venue's pool membership,
   per-venue state (in-use / idle / clean / stale), allocation, and budget
@@ -399,3 +403,7 @@ regression is something a test can catch before an operator does.
   through the same contract as every other operational pivot, rather than
   remaining a privileged Manager implementation. The Manager retains only the
   generic shell, interaction primitives, and provider-free onboarding floor.
+- **2026-09-04** — Generalized launch and context coherence from one
+  multiplexer-backed terminal to a selected session-host provider. The Picker
+  remains the provider-neutral decision and presentation surface; CLI/mux, ACP,
+  SDK, App, and third-party hosts own their own execution mechanics.

@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-08-31
+- **Last revised:** 2026-09-04
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -106,12 +106,15 @@ host remains authoritative and the bridge acts as a proxy or fidelity-declared
 projection. The bridge maps between roles without pretending the protocols have
 identical identity, lifecycle, replay semantics, or ownership.
 
-### session host
+### session host provider
 
-The **Session Host** is the stable kernel that owns a hosted Copilot child and
-its protocol pipes. Fronts may update or disconnect; the host keeps the child and
-its session identity alive until the bridge deliberately drains, hands off, stops,
-or ends it.
+The bridge's **Session Host** is one provider of the fabric's
+[session-hosting](../../session-hosting/README.md) capability. It owns a hosted
+Copilot child and its protocol pipes; fronts may update or disconnect while the
+host keeps the child alive until deliberate drain, handoff, stop, or end. It is
+not the universal implementation for interactive Copilot: CLI/mux, graphical,
+SDK, and third-party hosts may own peer execution providers while the bridge
+coordinates with or represents them honestly.
 
 ### session and event ledger
 
@@ -161,6 +164,14 @@ A hosted session can outlive the bridge frontend, any watching client, and a
 transport reconnect. The Session Host keeps the child and its pipes alive while
 the bridge reconciles back to durable session state and consumers reattach by
 cursor.
+
+### session-host-provider-participation
+
+The bridge can act as a full execution-host provider for sessions it owns and as
+a coordination client or fidelity-declared projection for sessions owned by
+another provider. Durable worktree identity and responsibility remain in
+agent-worktrees; bridge hosting contributes execution lifecycle and observations
+without taking over that ledger.
 
 ### cli-and-api-control-plane
 
@@ -310,7 +321,9 @@ limited to a tunnel-only client.
 A hosted session can roll itself to a successor in the same worktree when asked
 or when context pressure requires it under policy. The retiring session's
 continuation seeds the successor, the head moves deliberately, and watchers are
-told that the work continues under the successor identity.
+told that the work continues under the successor identity. The bridge performs
+this changeover as the owning session-host provider; generic handoff policy and
+durable worktree succession remain outside its process mechanics.
 
 ## Behaviors
 
@@ -510,9 +523,14 @@ machine may deliberately gate outbound reach until policy allows it.
 - **Not the task queue.** Durable, claimable, fire-and-forget work belongs to
   agent-dispatch. The bridge may embody or message workers, but queue state and
   scheduling are sibling-layer concerns.
-- **Not the git worktree manager.** agent-worktrees owns worktree creation,
-  finalization, picker pool state, and the passive ground-layer session
-  primitives the bridge coordinates over.
+- **Not the git worktree or agency-state manager.** agent-worktrees owns
+  worktree creation, finalization, relationships, claims, disposition, and
+  durable execution lineage. The bridge hosts or coordinates execution against
+  that state.
+- **Not the universal interactive Copilot host.** The bridge is a full provider
+  for sessions it owns and an honest coordinator for other hosts. It does not
+  require every CLI, SDK, App, multiplexer, or third-party rig to surrender its
+  native process and interaction ownership.
 - **Not the connectivity provisioner.** SSH keys, host adoption, tunnel setup,
   and reachability verification belong to the connectivity layer; the bridge
   routes over declared reachability.
@@ -542,6 +560,9 @@ machine may deliberately gate outbound reach until policy allows it.
 
 - Parent vision: [agent-fabric](../../agent-fabric/README.md) — §Concepts/
   *agent-bridge — the coordination layer*.
+- Cross-cutting hosting vision:
+  [session-hosting](../../session-hosting/README.md) — the provider boundary
+  agent-bridge implements for sessions it owns.
 - Sibling leaf: [agent-dispatch](../agent-dispatch/README.md) — the delegation
   layer that records claimable work, may embody workers through this runtime,
   and can hibernate a genuinely asynchronous wait until work needs attention.
@@ -554,6 +575,11 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-09-04** — Clarified agent-bridge as one execution-host provider and
+  coordination surface within a plural hosting ecosystem. Bridge-owned ACP and
+  headless sessions retain durable hosting and replay, while CLI/mux, SDK, App,
+  and third-party interactive hosts may remain peer providers. Durable worktree
+  agency state stays with agent-worktrees.
 - **2026-08-31** — Added explicit version-skew-safe contract evolution as the
   shared foundation beneath AHP host convergence and native-sub-agent-like
   delegation control. The foundation owns negotiation, session pinning,
