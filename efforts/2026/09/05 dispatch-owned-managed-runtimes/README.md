@@ -4,11 +4,12 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs
 - **Created:** 2026-09-04
-- **Status:** Active
-- **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
-  [agent-index/`lightweight-client-and-declared-host-service`](../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
+- **Status:** Done
+- **Vision:** [plugin-services/`delegated-heavy-companion-runtime`](../../../../visions/plugin-services/README.md#delegated-heavy-companion-runtime);
+  [agent-index/`lightweight-client-and-declared-host-service`](../../../../visions/plugins/agent-index/README.md#lightweight-client-and-declared-host-service)
 - **Umbrella issue:** #2007
 - **Sub-issues:** #2010, #2013, #2081, #2103, #2116
+- **Transferred follow-up:** #2118 (clean-room provisioning and lifecycle validation)
 
 ## Guiding Intent
 
@@ -148,7 +149,7 @@ provisioning, while every non-host path stays lightweight and inert.
 
 ## Validation Plan
 
-- [ ] Contract tests cover unknown fields, unsafe components, plugin-root
+- [x] Contract tests cover unknown fields, unsafe components, plugin-root
   escapes, provenance loss, direct registration, and non-execution in Slice 3A.
 - [x] Materialization tests cover concurrent builders, stale locks, unique
   staging, failed installs, failed validation, atomic publication, idempotent
@@ -161,10 +162,13 @@ provisioning, while every non-host path stays lightweight and inert.
   mismatched cells.
 - [x] Integration tests prove missing runtime triggers dispatch provisioning
   only, while plugin-side self-provision paths remain disabled.
-- [ ] Run the agent-dispatch and integrated plugin suites, repository guards,
-  install-contract checks, and the applicable clean-room provisioning scenario
-  for every behavior-changing slice.
-- [ ] Require independent review of each slice's authority, containment,
+- [x] Run the agent-dispatch and integrated plugin suites, repository guards,
+  and install-contract checks for every behavior-changing slice. All required
+  local/CI suites and gates passed; historical Windows installer-readiness
+  baseline failures remain documented in the Journal.
+- [x] Deferred to `#2118`: Run the applicable clean-room provisioning scenario
+  for every behavior-changing slice when a disposable runner is available.
+- [x] Require independent review of each slice's authority, containment,
   rollback, and cleanup boundaries before merge.
 
 ## Proposal
@@ -239,7 +243,7 @@ provisioning and cutover code is not a candidate for wholesale reuse.
   visible windows and zero owned foreground windows across the real-process
   scenario. Clean-room container scenarios were not run because Docker was
   unavailable.
-- Local implementation is ready for its publication/review phase. Retention,
+- Slice 3C subsequently merged as #2099. Retention,
   specific-plugin integration, independent engine lifecycle, and multi-host
   failover remain outside this slice.
 
@@ -285,10 +289,9 @@ provisioning and cutover code is not a candidate for wholesale reuse.
 - Agent-dispatch advances to **0.1.2-dev25**, beyond the concurrently published
   version. Its Python `__version__` already derives from package/build metadata
   and needs no duplicate constant.
-- Slice 3D is code-complete locally; publication remains intentionally deferred.
-  No PR, issue closure, dispatch completion, or worktree finalization is part
-  of this phase. Specific-plugin integration, independent engine lifecycle,
-  host placement, and failover remain outside this slice.
+- Slice 3D subsequently merged as #2115. Specific-plugin integration,
+  independent engine lifecycle, host placement, and failover remain outside
+  this slice.
 
 ### 2026-09-05 — Agent Index host integration implemented
 
@@ -333,9 +336,20 @@ provisioning and cutover code is not a candidate for wholesale reuse.
   `JSON document changed while it was being read`. Docker is unavailable, so
   container clean-room scenarios were not run; this is native Windows evidence,
   not a native Linux or fresh-container installation claim.
-- Agent Index advances to **0.1.0-dev135**, including its source fallback and
-  declaration version; Agent Dispatch advances to **0.1.2-dev26**. Both exceed
-  current `main`. Slice 3E is code-complete locally; no PR publication, issue/task
-  closure, or worktree finalization is part of this phase. Namespaced host
-  migration, independent warm-engine lifecycle, and multi-host policy remain
+- Initial implementation advanced Agent Index to **0.1.0-dev135**, including its
+  source fallback and declaration version, and Agent Dispatch to **0.1.2-dev26**.
+  Slice 3E subsequently merged as #2117, shipping Agent Index **0.1.0-dev136**.
+  Namespaced host migration, independent warm-engine lifecycle, and multi-host policy remain
   outside this integration.
+
+### 2026-09-05 — Effort closed and archived
+
+- All five slices merged: declaration contract #2012, immutable materialization
+  #2074, safe cutover #2099, retention #2115, and Agent Index integration #2117.
+  Contract coverage and independent review are complete; the required local/CI
+  suites and gates passed, with historical baseline failures retained above.
+- Transferred unavailable clean-room provisioning and lifecycle validation to
+  #2118. No fresh-container or clean-room execution is claimed by this closeout.
+- Marked the effort Done, moved it to the dated archive, and removed it from the
+  active index. Existing architecture and managed-companion-runtime pattern
+  docs remain the durable behavior reference.
