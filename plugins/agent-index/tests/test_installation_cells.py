@@ -4508,8 +4508,14 @@ def test_clean_room_cleanup_treats_posix_zombies_as_exited() -> None:
     )
     driver = (scenario_root / "scenario.py").read_text(encoding="utf-8")
 
-    assert 'if tail and tail[0] == "Z":' in driver
-    assert "return None" in driver
+    assert (
+        'if tail and tail[0] == "Z":\n'
+        "            return False"
+    ) in driver
+    assert (
+        'if tail and tail[0] == "Z":\n'
+        "            return None"
+    ) in driver
 
 
 def test_clean_room_acceptance_defaults_full_and_smoke_is_diagnostic_only() -> None:
