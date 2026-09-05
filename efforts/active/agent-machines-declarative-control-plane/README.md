@@ -117,7 +117,7 @@ fleet, topology, or operating environment.
 - [x] Let agent-ssh expose transport-host plan/status/apply behavior through its
   own command and transport metadata; agent-machines remains the optional
   declarative orchestrator rather than learning dtssh internals (#1627).
-- [ ] Add an attributable, source-neutral Playwright CLI provisioning command
+- [x] Add an attributable, source-neutral Playwright CLI provisioning command
   that installs `@playwright/cli`, runs its supported skill-registration task,
   verifies both results, and can be consumed through a requirement-package
   invocation module (#1961).
@@ -177,10 +177,11 @@ fleet, topology, or operating environment.
   dry-run, idempotent apply, missing authentication, unavailable provider,
   unsupported platform, and repeated no-op behavior without hardcoded payload
   paths (#1627).
-- [ ] Playwright provisioning fixtures prove prerequisite failures, install and
-  registration planning, apply, healthy no-op, repeated idempotence, provider
-  invocation, and payload-command synchronization on supported platforms
-  (#1961).
+- [x] Playwright provisioning fixtures prove user-contained prefix selection,
+  registry-latest convergence, prefix-local command resolution, complete
+  bundled-vs-registered skill-tree verification, structured failures, healthy
+  no-op, provider invocation, and payload-command synchronization on supported
+  platforms (#1961).
 
 ## Proposal
 
@@ -320,3 +321,47 @@ behavioral parity is demonstrated.
 - Kept browser profiles, credentials, navigation maps, and product-specific
   test policy downstream; requirement packages consume only the reusable
   provisioning mechanism through the existing invocation contract.
+
+### 2026-09-04 - Reusable Playwright CLI provisioning implemented
+
+- Added `agent-machines provision-playwright-cli` with default and explicit
+  dry-run behavior, explicit apply, stable JSON, prerequisite and global-package
+  detection, bounded command evidence, postcondition verification, and
+  user-home skill registration.
+- Kept the existing attributable payload command as the only invocation
+  surface. Requirement modules compose the subcommand on `windows`, `linux`,
+  and `wsl`; Playwright workspace initialization always runs from the target
+  user's home and never registers repository content.
+- Covered prerequisite, install, registration, postcondition, no-op,
+  serialization, command-resolution, and provider-invocation behavior. The
+  full agent-machines suite passes with 411 tests, and lint, documentation,
+  install-contract, payload-generation, and version-consistency gates pass.
+
+### 2026-09-04 - Playwright provisioning postconditions hardened
+
+- Reworked #1961 around one normalized, user-contained npm prefix without
+  changing npm configuration; all package, registry, install, and root queries
+  now use that explicit prefix.
+- Made registry `latest`, the prefix-local CLI, the package-bundled skill, and
+  complete registered-skill tree equality required postconditions. Package
+  updates force skill refresh, and every failed command or postcondition stays
+  structured with bounded evidence.
+- Kept dry-run read-only apart from the required registry lookup, kept every
+  apply command in the user home, and preserved the attributable requirement
+  invocation contract without project checkout mutation.
+
+### 2026-09-04 - Playwright provisioning final review hardened
+
+- Rejected symlink, junction, and reparse-point traversal across managed
+  user-home paths, registered and bundled skill entries, npm package roots, and
+  Playwright package content.
+- Anchored npm trust to the resolved Node installation prefix and replaced
+  Windows PID-tree cleanup with a gated, kill-on-close Job Object while keeping
+  bounded process-group cleanup on POSIX.
+- Added one shared 1500-second provision deadline, a 600-second per-command cap,
+  and explicit cleanup margin beneath the module runner's 1800-second envelope.
+- Covered unsafe path trees, escaped npm layouts, deadline hierarchy, Job Object
+  ordering and descendant containment, bounded fallback, and post-registration
+  validation. The final agent-machines suite passes with 447 tests (15 skipped),
+  with lint, documentation, install-contract, payload-generation, version, and
+  diff guards passing.
