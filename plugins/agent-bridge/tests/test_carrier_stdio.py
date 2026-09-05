@@ -40,7 +40,7 @@ def test_windows_remote_carrier_command_preserves_binary_hello(tmp_path: Path):
     shim = bin_dir / "agent-bridge.cmd"
     shim.write_text(
         f'@echo off\r\n"{sys.executable}" -m agent_bridge %*\r\n',
-        encoding="ascii",
+        encoding="utf-8",
     )
     env = dict(os.environ)
     env["USERPROFILE"] = str(tmp_path)
