@@ -23,7 +23,10 @@ commands are refused.
 - Session start is non-mutating: it does not stamp or provision a runtime and
 does not start a service. After repository opt-in, an operator explicitly chooses
 `setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call
-then provisions (`::agent-provisioning::`, usually ~30-120s). Automation must
+may provision only the lightweight client/base CLI (`::agent-provisioning::`).
+The configured host's `[store]` dependencies and service are provisioned and
+supervised only by an already-running `agent-dispatch`; without it the host
+is unavailable. Setup never starts dispatch or the host. Automation must
 also pass `--yes` and an explicit role choice. If the command is missing, the
 session command catalog reports it as unavailable; surface that exact failure
 rather than searching `PATH` or improvising an install.
@@ -62,8 +65,10 @@ Use the CLI directly when operating the runtime:
 - Setup/routing: `<catalog argv[0]> setup --single`, `<catalog argv[0]> setup
   --indexer <machine> --ssh <alias>`, `<catalog argv[0]> role`,
   `<catalog argv[0]> capability --json`.
-- Service: `<catalog argv[0]> start`, `<catalog argv[0]> stop`,
-  `<catalog argv[0]> status`, `<catalog argv[0]> deploy --recover`.
+- Service: `<catalog argv[0]> status`. `start`, `serve`, `restart`, and
+  `deploy` report dispatch ownership and do not launch or provision a host.
+  Stop remains ownership-checked, but dispatch may restart an enabled companion;
+  change its owning configuration to withdraw supervision durably.
 - Index refresh: `<catalog argv[0]> index [--source S] [--full]`. Incremental is the
 default; `--full` is explicit.
 - Engine daemon: `<catalog argv[0]> engine status|start|stop|run`.
@@ -82,13 +87,16 @@ clearly scoped, pass `source` or `repo` rather than doing an unscoped search.
 
 ## Troubleshooting
 
-- Service down on a host: run/check `<catalog argv[0]> status`, then use the
-explicit setup/installer lifecycle. Session start never starts the daemon.
+- Service down on a host: run/check `<catalog argv[0]> status`, then inspect the
+already-running dispatch supervisor. Plugin installers install only the client
+base package, never the host service dependencies. Namespaced installation
+contexts do not yet support managed hosts. Session start never starts the daemon.
 - Client cannot search: run inside a repo with `.agent-index/config.yaml`
 `indexer.ssh` or set `AGENT_INDEX_REPO`; the CLI read transport needs a project
 to choose the SSH target.
 - Engine issues: `<catalog argv[0]> engine status` shows durable engine health, PID,
 endpoint, and venv provisioning state.
-- Interrupted cutover: `<catalog argv[0]> deploy --recover`.
+- Interrupted host cutover: inspect dispatch's managed-runtime readiness and
+rollback state; do not use a plugin command to select a generation.
 
 Architecture details live in `plugins/agent-index/docs/architecture.md`.

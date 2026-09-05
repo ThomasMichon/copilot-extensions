@@ -88,7 +88,7 @@ def test_runtime_gates_use_validated_lock_reentry() -> None:
     )[1].split("_runtime_state()", 1)[0]
 
 
-def test_namespaced_session_ensure_is_background_coalesced() -> None:
+def test_namespaced_session_entrypoints_are_inert() -> None:
     posix_gate = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(
         encoding="utf-8"
     )
@@ -102,22 +102,12 @@ def test_namespaced_session_ensure_is_background_coalesced() -> None:
         encoding="utf-8"
     )
 
-    assert "service-ensure-kick" in posix_gate
-    assert "service-ensure-kick" in powershell_gate
-    assert "service-ensure-kick" in (
-        PLUGIN / "scripts" / "cell-runtime.py"
-    ).read_text(encoding="utf-8")
-    assert "__cell-service-ensure" in posix_hook
-    assert "__cell-service-ensure" in powershell_hook
-    assert '"$CELL_RUNTIME" service-ensure \\\n' not in posix_gate
-    assert "$cellRuntime service-ensure `" not in powershell_gate
-    assert '"$CELL_PYTHON" -I -X utf8 "$CELL_RUNTIME"' in posix_gate
-    assert "& $cellPython -I -X utf8 $cellRuntime" in powershell_gate
-    assert "namespaced deploy/recovery requires the owning cell transaction" in posix_gate
-    assert (
-        "namespaced deploy/recovery requires the owning cell transaction"
-        in powershell_gate
-    )
+    assert "__cell-service-ensure) exit 0" in posix_gate
+    assert "@('__cell-bootstrap', '__cell-service-ensure')) { exit 0 }" in powershell_gate
+    assert posix_hook.rstrip().endswith("exit 0")
+    assert powershell_hook.rstrip().endswith("exit 0")
+    assert "runtime-gate" not in posix_hook
+    assert "runtime-gate" not in powershell_hook
 
 
 def test_activation_import_checks_use_target_slot_python() -> None:
@@ -553,6 +543,12 @@ def test_fresh_namespaced_setup_reaches_role_writing(
         "--json",
     )
 
+    if expected_role == "host":
+        assert result.returncode == 126
+        assert "dispatch-managed" in result.stderr
+        assert not provisioned_role.exists()
+        assert not capture.exists()
+        return
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["role"] == expected_role
@@ -566,7 +562,7 @@ def test_fresh_namespaced_setup_reaches_role_writing(
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-def test_bootstrap_probe_ignores_current_repo_shadow_and_uses_slot_origin(
+def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     tmp_path: Path,
     shell: str,
 ) -> None:
@@ -691,7 +687,7 @@ def test_bootstrap_probe_ignores_current_repo_shadow_and_uses_slot_origin(
     )
 
     assert result.returncode == 0, result.stderr
-    assert selected_marker.read_text(encoding="utf-8") == "ok"
+    assert not selected_marker.exists()
     assert not shadow_marker.exists()
 
 
@@ -1435,7 +1431,7 @@ def test_namespaced_deploy_requires_live_cell_transaction(
     result = _run(shell, script, env, "deploy", "--recover", "--json")
 
     assert result.returncode == 126
-    assert "requires the owning cell transaction" in result.stderr
+    assert "managed by an already-running agent-dispatch" in result.stderr
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
@@ -1470,4 +1466,98 @@ def test_namespaced_public_start_is_blocked_by_runtime_gate(
     result = _run(shell, script, env, command)
 
     assert result.returncode == 126
-    assert "public start/serve is unavailable" in result.stderr
+    assert "managed by an already-running agent-dispatch" in result.stderr
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize(
+    "command", ["start", "serve", "restart", "deploy", "__cell-start", "__managed-start"]
+)
+def test_host_lifecycle_never_enters_runtime_or_installer(
+    tmp_path: Path, shell: str, command: str
+) -> None:
+    script, env = _fixture(tmp_path, shell)
+    env["AGENT_INDEX_ROLE"] = "host"
+    env["AGENT_INDEX_MANAGED_PYTHON"] = env["TEST_PYTHON"]
+    env["TEST_PYTHON"] = ""
+    before = sorted(str(path) for path in tmp_path.rglob("*"))
+    result = _run(shell, script, env, command)
+    assert result.returncode == 126, result.stderr
+    assert "managed by an already-running agent-dispatch" in result.stderr
+    assert sorted(str(path) for path in tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize("command", ["__cell-bootstrap", "__cell-service-ensure"])
+def test_compatibility_hook_commands_never_provision(
+    tmp_path: Path, shell: str, command: str
+) -> None:
+    script, env = _fixture(tmp_path, shell)
+    env["AGENT_INDEX_ROLE"] = "host"
+    env["TEST_PYTHON"] = ""
+    result = _run(shell, script, env, command)
+    assert result.returncode == 0, result.stderr
+    assert not Path(env["AGENT_INDEX_HOME"]).exists()
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_legacy_host_setup_installs_only_base_from_current_payload(
+    tmp_path: Path, shell: str
+) -> None:
+    script, env = _fixture(tmp_path, shell)
+    root = Path(env["AGENT_INDEX_HOME"])
+    runtime = _real_setup_runtime(tmp_path, root, "client")
+    marker = root / "provisioned-role.txt"
+    obsolete = tmp_path / "old-payload"
+    (obsolete / "scripts").mkdir(parents=True)
+    (root / "payload-dir").write_text(str(obsolete), encoding="utf-8")
+    env.update({
+        "TEST_PYTHON": str(runtime),
+        "TEST_PROVISIONED": str(marker),
+        "AGENT_INDEX_MACHINE": "local-box",
+        "AGENT_INDEX_ROLE": "host",
+    })
+    if shell == "bash":
+        (script.parent / "resolve-runtime.sh").write_text(
+            'AGENT_RT_PY=""\n'
+            '[ ! -f "$TEST_PROVISIONED" ] || AGENT_RT_PY="$TEST_PYTHON"\n',
+            encoding="utf-8", newline="\n",
+        )
+        (script.parent / "installation-context" / "legacy-entrypoint-probe.sh").write_text(
+            "exit 0\n", encoding="utf-8", newline="\n",
+        )
+        (script.parent / "install.sh").write_text(
+            '[ "$1" = provision ] || exit 3\n'
+            'printf "%s\\n" "$AGENT_INDEX_ROLE" >> "$TEST_PROVISIONED"\n',
+            encoding="utf-8", newline="\n",
+        )
+        (obsolete / "scripts" / "install.sh").write_text(
+            "exit 99\n", encoding="utf-8", newline="\n",
+        )
+    else:
+        (script.parent / "resolve-runtime.ps1").write_text(
+            "$AgentRtPy = if (Test-Path -LiteralPath $env:TEST_PROVISIONED) "
+            "{ $env:TEST_PYTHON } else { $null }\n", encoding="utf-8",
+        )
+        (script.parent / "installation-context" / "legacy-entrypoint-probe.ps1").write_text(
+            "exit 0\n", encoding="utf-8",
+        )
+        (script.parent / "install.ps1").write_text(
+            "param([string]$Action)\n"
+            "if ($Action -ne 'provision') { exit 3 }\n"
+            "[IO.File]::AppendAllText($env:TEST_PROVISIONED, $env:AGENT_INDEX_ROLE + \"`n\")\n"
+            "exit 0\n", encoding="utf-8",
+        )
+        (obsolete / "scripts" / "install.ps1").write_text(
+            "exit 99\n", encoding="utf-8",
+        )
+    result = _run(
+        shell, script, env, "setup", "--single", "--force", "--yes", "--json",
+    )
+    assert result.returncode == 0, result.stderr
+    assert marker.read_text(encoding="utf-8").splitlines() == ["client"]
+    result_data = json.loads(result.stdout)
+    assert result_data["role"] == "host"
+    assert result_data["service"]["manager"] == "agent-dispatch"
+    assert not result_data["service"]["started_by_setup"]
+    assert not result_data["service"]["provisioned_by_setup"]

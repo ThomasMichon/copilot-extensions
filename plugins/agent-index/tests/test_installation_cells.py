@@ -1632,35 +1632,15 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         environment[CELL.LOCK_TOKEN_ENV] = lock_token
         environment[CELL.LOCK_ROOT_ENV] = str(plugin_root)
         environment[CELL.CELL_START_TOKEN_ENV] = lock_token
-        CELL._run_cell_deploy(
-            command_launcher,
-            environment,
-            recover=True,
-        )
-
-    captured = json.loads(capture.read_text(encoding="utf-8"))
-    assert captured["argv"] == [
-        "deploy",
-        "--json",
-        "--health-timeout",
-        "30",
-        "--drain-timeout",
-        "30",
-        "--recover",
-    ]
-    assert captured["environment"] == {
-        CELL.LOCK_TOKEN_ENV: lock_token,
-        CELL.LOCK_ROOT_ENV: str(plugin_root),
-        CELL.CELL_START_TOKEN_ENV: lock_token,
-        CELL.TRANSACTION_PATH_ENV: str(
-            plugin_root / CELL.TRANSACTION_FILE
-        ),
-        CELL.TRANSACTION_TOKEN_ENV: transaction["token"],
-        CELL.TRANSACTION_ID_ENV: transaction["id"],
-    }
+        with pytest.raises(CELL.CellError, match="managed by an already-running"):
+            CELL._run_cell_deploy(
+                command_launcher,
+                environment,
+                recover=True,
+            )
+    assert not capture.exists()
     assert service_launcher.is_file()
 
-    capture.unlink()
     with CELL._installation_lock(plugin_root) as lock_token:
         environment[CELL.LOCK_TOKEN_ENV] = lock_token
         environment[CELL.LOCK_ROOT_ENV] = str(plugin_root)
@@ -1668,7 +1648,7 @@ def test_parent_lock_reenters_through_generated_launcher_for_recovery(
         environment[CELL.TRANSACTION_TOKEN_ENV] = "f" * 64
         with pytest.raises(
             CELL.CellError,
-            match="transaction reentry ownership does not match",
+            match="managed by an already-running",
         ):
             CELL._run_cell_deploy(
                 command_launcher,
@@ -3542,7 +3522,7 @@ def test_selected_completed_runtime_requires_successful_import(
         (None, "payload"),
     ],
 )
-def test_runtime_dependency_profile_installs_store_only_for_hosts(
+def test_runtime_dependency_profile_never_installs_host_store(
     monkeypatch,
     tmp_path: Path,
     role: str | None,
@@ -3576,6 +3556,14 @@ def test_runtime_dependency_profile_installs_store_only_for_hosts(
         lambda *_args, **_kwargs: interpreter,
     )
 
+    if role == "host":
+        with pytest.raises(CELL.CellError, match="dispatch-managed"):
+            CELL._build_runtime(
+                payload, slot, marketplace_id="example--1234",
+                runtime_version=runtime_version, role=role,
+            )
+        assert commands == []
+        return
     result = CELL._build_runtime(
         payload,
         slot,
@@ -3767,6 +3755,15 @@ def test_same_payload_version_uses_distinct_immutable_profile_slot(
         lambda *_args: {"status": "ready", "runtimeVersion": target_runtime},
     )
 
+    if target_role == "host":
+        with pytest.raises(CELL.CellError, match="dispatch-managed"):
+            CELL._provision_locked(
+                PLUGIN, PLUGIN, context, "example--1234", tmp_path,
+                payload_version, validated, "lock-token",
+            )
+        assert observed == {}
+        assert sentinel.read_text(encoding="utf-8") == prior_role
+        return
     result = CELL._provision_locked(
         PLUGIN,
         PLUGIN,
@@ -4176,7 +4173,7 @@ def test_public_start_and_serve_are_rejected_for_namespaced_runtime(
     args = SimpleNamespace(host=None, port=None, passive=False)
 
     assert agent_main.cmd_start(args) == 2
-    assert "public start/serve is unavailable" in capsys.readouterr().err
+    assert "managed by agent-dispatch" in capsys.readouterr().err
 
 
 def test_private_cell_start_requires_host_and_live_lifecycle_lock(
@@ -4367,10 +4364,10 @@ def test_passive_process_publishes_no_shared_active_evidence(
             "-I",
             "-X",
             "utf8",
-            "-m",
-            "agent_index",
-            "__cell-start",
-            "--passive",
+            "-c",
+            "from agent_index.server import serve; "
+            "from agent_index.config import load_config; "
+            "serve(load_config(), passive=True)",
         ],
         env=environment,
         stdin=subprocess.DEVNULL,
@@ -4502,9 +4499,10 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
                         "-I",
                         "-X",
                         "utf8",
-                        "-m",
-                        "agent_index",
-                        "__cell-start",
+                        "-c",
+                        "from agent_index.server import serve; "
+                        "from agent_index.config import load_config; "
+                        "serve(load_config())",
                     ],
                     env=environment,
                     stdin=subprocess.DEVNULL,
@@ -4929,8 +4927,12 @@ def test_executable_cell_coordinator_preserves_reserved_exit(
         "spec.loader.exec_module(module)\n"
         "class Parser:\n"
         "    def parse_args(self, _argv):\n"
-        "        return types.SimpleNamespace(action='service-ensure')\n"
+        "        return types.SimpleNamespace(action='service-ensure', "
+        "context='install.json', durable_home=None, expected_marketplace_id='example')\n"
         "module._parser = lambda: Parser()\n"
+        "module._validate_context = lambda *a, **kw: {}\n"
+        "module._cell_environment = lambda *a, **kw: {}\n"
+        "module._configured_role = lambda *a: 'client'\n"
         "def fail(*_args, **_kwargs):\n"
         f"    raise module.CellProcessExit({exit_code}, 'reserved crash')\n"
         "module.service_ensure = fail\n"

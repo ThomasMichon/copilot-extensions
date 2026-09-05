@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import platform
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,6 +15,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from resolve_effective_config import _load_yaml_mapping, resolve
+from companion_context import installation_mode
 
 
 def _platform_key() -> str:
@@ -72,36 +72,7 @@ def _request() -> dict[str, Any]:
 
 
 def _supports_companion_mode(environment: dict[str, str]) -> bool:
-    try:
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT_DIR / "companion-service.py"), "mode"],
-            cwd=SCRIPT_DIR.parent,
-            env={**os.environ, **environment},
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=25,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError("agent-index installation mode could not be inspected") from exc
-    if result.returncode != 0:
-        raise RuntimeError(
-            "agent-index installation mode could not be inspected"
-            + (f": {result.stderr.strip()}" if result.stderr.strip() else "")
-        )
-    try:
-        mode = json.loads(result.stdout)
-    except (TypeError, ValueError) as exc:
-        raise RuntimeError("agent-index installation mode is malformed") from exc
-    if (
-        not isinstance(mode, dict)
-        or mode.get("schema_version") != 1
-        or not isinstance(mode.get("supported"), bool)
-    ):
-        raise RuntimeError("agent-index installation mode is malformed")
-    return mode["supported"]
+    return installation_mode()["supported"]
 
 
 def _active_environment(request: dict[str, Any]) -> dict[str, str] | None:

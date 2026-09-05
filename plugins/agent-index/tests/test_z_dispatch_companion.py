@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,7 @@ def test_service_adapter_forces_no_self_provision(tmp_path: Path, monkeypatch) -
     )
     monkeypatch.setenv("COMPANION_TEST_MARKER", str(marker))
     monkeypatch.delenv("AGENT_INDEX_NO_SELFPROVISION", raising=False)
+    monkeypatch.setattr(module, "_companion_mode_supported", lambda: True)
 
     assert module._start() == 0
     assert marker.read_text(encoding="utf-8") == "start:1"
@@ -221,6 +223,11 @@ def test_service_adapter_scrubs_inherited_runtime_authority(monkeypatch) -> None
     monkeypatch.setenv("AGENT_INDEX_REPO", "approved-repo")
     monkeypatch.setenv("AGENT_INDEX_MACHINE", "approved-machine")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "wrong-context")
+    monkeypatch.setenv("AGENT_INDEX_MANAGED_PYTHON", sys.executable)
+    monkeypatch.setenv("UV_INDEX_URL", "https://example.invalid")
+    monkeypatch.setenv("PIP_EXTRA_INDEX_URL", "https://example.invalid")
+    monkeypatch.setenv("PYTHONPATH", "untrusted")
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_MODE", "inprocess")
 
     environment = module._runtime_environment()
 
@@ -232,12 +239,19 @@ def test_service_adapter_scrubs_inherited_runtime_authority(monkeypatch) -> None
     assert environment["AGENT_INDEX_REPO"] == "approved-repo"
     assert environment["AGENT_INDEX_MACHINE"] == "approved-machine"
     assert environment["AGENT_INDEX_NO_SELFPROVISION"] == "1"
+    assert environment["AGENT_INDEX_MANAGED_PYTHON"] == sys.executable
+    assert environment["AGENT_INDEX_ENGINE_MODE"] == "external"
+    assert environment["AGENT_INDEX_INDEX_ENSURE_ENGINES"] == "0"
+    assert "UV_INDEX_URL" not in environment
+    assert "PIP_EXTRA_INDEX_URL" not in environment
+    assert "PYTHONPATH" not in environment
 
 
 def test_service_adapter_does_not_stop_unsupported_installation(
     monkeypatch,
 ) -> None:
     module = _module(SERVICE, "companion_service_mode")
+    monkeypatch.setenv("AGENT_INDEX_MANAGED_PYTHON", sys.executable)
     calls: list[str] = []
 
     def run(action: str, *, capture: bool = False):
@@ -250,12 +264,16 @@ def test_service_adapter_does_not_stop_unsupported_installation(
         )
 
     monkeypatch.setattr(module, "_run", run)
+    monkeypatch.setattr(
+        module, "installation_mode",
+        lambda: {"schema_version": 1, "supported": False, "mode": "namespaced"},
+    )
 
     assert module._start() == 1
-    assert calls == ["__dispatch-companion-mode"]
+    assert calls == []
     calls.clear()
     assert module._stop() == 1
-    assert calls == ["__dispatch-companion-mode"]
+    assert calls == []
 
 
 def test_service_health_translates_confirmed_status(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -366,6 +384,11 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
     ]
     assert "ensure-service" not in json.dumps(declaration)
     assert "install" not in json.dumps(declaration)
+    runtime, = declaration["spec"]["managed_runtime"]["runtimes"]
+    assert runtime["python_env"] == "AGENT_INDEX_MANAGED_PYTHON"
+    assert runtime["profile"] == "host"
+    assert runtime["projects"][-1] == {"path": ".", "extras": ["store"]}
+    assert "engine" not in json.dumps(runtime)
 
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_start = hooks["hooks"]["sessionStart"]
@@ -377,3 +400,185 @@ def test_companion_declaration_and_hook_remain_non_provisioning() -> None:
         encoding="utf-8"
     )
     assert "Get-Command python" not in powershell_writer
+
+
+@pytest.mark.parametrize("action", ["start", "stop", "health"])
+def test_missing_dispatch_selection_never_launches_or_provisions(
+    monkeypatch, capsys, action
+) -> None:
+    module = _module(SERVICE, "companion_service_missing_dispatch")
+    monkeypatch.delenv("AGENT_INDEX_MANAGED_PYTHON", raising=False)
+    monkeypatch.setattr(module, "_companion_mode_supported", lambda: True)
+    monkeypatch.setattr(
+        module.subprocess, "run", lambda *_a, **_k: pytest.fail("process launched")
+    )
+    monkeypatch.setattr(sys, "argv", [str(SERVICE), action])
+    assert module.main() == 1
+    assert "dispatch-selected" in capsys.readouterr().err
+
+
+def test_selected_interpreter_is_the_only_lifecycle_target(monkeypatch) -> None:
+    module = _module(SERVICE, "companion_service_selected")
+    monkeypatch.setenv("AGENT_INDEX_MANAGED_PYTHON", sys.executable)
+    assert module._runtime_gate("start") == [
+        sys.executable, "-I", "-B", "-m", "agent_index", "__managed-start",
+    ]
+    for action in ("status", "stop"):
+        assert module._runtime_gate(action)[-1] == action
+    monkeypatch.setenv("AGENT_INDEX_MANAGED_PYTHON", "python")
+    with pytest.raises(RuntimeError, match="dispatch-selected"):
+        module._runtime_gate("start")
+
+
+@pytest.mark.parametrize("scopes", [[], ["global"], ["session:example"], ["project:"]])
+def test_non_project_activation_scopes_are_inert(monkeypatch, scopes) -> None:
+    module = _module(PROVIDER, "companion_provider_scope")
+    monkeypatch.setattr(
+        module, "_supports_companion_mode",
+        lambda _env: pytest.fail("installation inspected without a host"),
+    )
+    assert module._active_environment({"machine": "primary", "activation_scopes": scopes}) is None
+
+
+def test_companion_mode_uses_attributed_payload_without_a_runtime(
+    tmp_path, monkeypatch
+) -> None:
+    module = _module(PLUGIN / "scripts" / "companion_context.py", "companion_context_test")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "sibling-install.json")
+    monkeypatch.setenv("AGENT_INDEX_PAYLOAD_ROOT", "unattributed-payload")
+    monkeypatch.setenv("COPILOT_PLUGIN_STAGED_FROM", "unattributed-origin")
+    mode = module.installation_mode()
+    assert mode["supported"] is True
+    assert mode["mode"] == "legacy"
+    assert list(tmp_path.iterdir()) == []
+    policy = tmp_path / ".copilot-extensions" / "installation-mode.json"
+    policy.parent.mkdir()
+    policy.write_text(
+        json.dumps({"version": 1, "installationMode": {"enabled": True}}),
+        encoding="utf-8",
+    )
+    assert module.installation_mode()["supported"] is False
+    assert not (tmp_path / ".agent-index").exists()
+    policy.write_text("{", encoding="utf-8")
+    assert module.installation_mode()["supported"] is False
+
+
+def test_unattributed_payload_cannot_fall_back_to_legacy_host(tmp_path, monkeypatch) -> None:
+    payload = tmp_path / "unattributed" / "agent-index"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("plugin.json", "payload-invocation.json"):
+        shutil.copy2(PLUGIN / name, payload / name)
+    shutil.copytree(PLUGIN / "scripts" / "installation-context", scripts / "installation-context")
+    module = _module(PLUGIN / "scripts" / "companion_context.py", "companion_unattributed")
+    monkeypatch.setattr(module, "__file__", str(scripts / "companion_context.py"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(module.Path, "home", lambda: tmp_path)
+    mode = module.installation_mode()
+    assert mode["supported"] is False
+    assert mode["status"] == "provenance-blocked"
+    assert not (tmp_path / ".agent-index").exists()
+
+
+def _assert_no_owned_windows(pids: set[int]) -> None:
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    windows = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _data):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value in pids and user32.IsWindowVisible(hwnd):
+            windows.append(pid.value)
+        return True
+
+    assert user32.EnumWindows(visit, 0)
+    foreground_pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(foreground_pid))
+    assert windows == []
+    assert foreground_pid.value not in pids
+
+
+def test_managed_adapter_runs_real_service_without_plugin_or_engine_provisioning(
+    tmp_path, monkeypatch
+) -> None:
+    repo = _repo(tmp_path / "repo", "primary")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    module = _module(SERVICE, "companion_service_real")
+    environment = {
+        **module._runtime_environment(),
+        "AGENT_INDEX_MANAGED_PYTHON": sys.executable,
+        "AGENT_INDEX_REPO": str(repo),
+        "AGENT_INDEX_EFFECTIVE_CONFIG": str(repo / ".agent-index" / "config.yaml"),
+        "AGENT_INDEX_MACHINE": "primary",
+    }
+    launcher = Path(sys.executable)
+    if os.name == "nt":
+        launcher = launcher.with_name("pythonw.exe")
+        assert launcher.is_file()
+    log = tmp_path / "service.log"
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    with log.open("w", encoding="utf-8") as output:
+        process = subprocess.Popen(
+            [str(launcher), str(SERVICE), "start"],
+            cwd=repo, env=environment, stdout=output, stderr=output,
+            creationflags=flags,
+        )
+        try:
+            deadline = time.monotonic() + 15
+            healthy = False
+            while time.monotonic() < deadline and process.poll() is None:
+                result = subprocess.run(
+                    [sys.executable, str(SERVICE), "health"],
+                    cwd=repo, env=environment, capture_output=True, text=True,
+                    creationflags=flags, timeout=5,
+                )
+                if result.returncode == 0 and json.loads(result.stdout)["healthy"]:
+                    healthy = True
+                    break
+                time.sleep(0.1)
+            assert healthy, log.read_text(encoding="utf-8")
+            endpoint = json.loads(
+                (home / ".agent-index" / "run" / "endpoint.json").read_text(encoding="utf-8")
+            )
+            for _ in range(2):
+                _assert_no_owned_windows({process.pid, endpoint["pid"]})
+                result = subprocess.run(
+                    [sys.executable, str(SERVICE), "health"],
+                    cwd=repo, env=environment, capture_output=True, text=True,
+                    creationflags=flags, timeout=5,
+                )
+                assert result.returncode == 0, result.stderr
+                assert json.loads(result.stdout)["healthy"] is True
+                _assert_no_owned_windows({process.pid, endpoint["pid"]})
+                time.sleep(0.1)
+            assert not (home / ".agent-index" / "versions").exists()
+            assert not (home / ".agent-index" / "engine").exists()
+            assert not (home / ".agent-index" / "current-version").exists()
+        finally:
+            stopped = subprocess.run(
+                [sys.executable, str(SERVICE), "stop"],
+                cwd=repo, env=environment, capture_output=True, text=True,
+                creationflags=flags, timeout=15,
+            )
+            try:
+                process.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait(timeout=5)
+            assert stopped.returncode == 0, stopped.stderr
