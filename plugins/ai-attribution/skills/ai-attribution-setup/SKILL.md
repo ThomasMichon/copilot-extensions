@@ -73,7 +73,7 @@ at `.github/ai-attribution.conf`.
 ## 3. Validate both delivery paths
 
 1. Launch a normal session with the plugin enabled and confirm the emitted
-   context starts with `[owner: ai-attribution@0.1.0-dev9]`.
+   context starts with `[owner: ai-attribution@0.1.0-dev10]`.
 2. Run the projection scan and require no blocking findings:
 
    ```bash

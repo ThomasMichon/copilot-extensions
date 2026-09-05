@@ -1,7 +1,7 @@
 {
   "name": "ai-attribution",
   "description": "Ambient publication and AI-attribution safety for git repositories, with portable operator policy, host-qualified local remote hints, an idempotent setup skill, and an on-demand publication workflow. Payload-only: dependency-free Bash and PowerShell session-start hooks plus skills.",
-  "version": "0.1.0-dev9",
+  "version": "0.1.0-dev10",
   "runtimeScope": "none",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",

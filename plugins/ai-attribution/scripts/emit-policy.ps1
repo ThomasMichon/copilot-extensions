@@ -1,7 +1,7 @@
 # Emit the ai-attribution ambient policy for the session-start repository.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$script:PluginVersion = '0.1.0-dev9'
+$script:PluginVersion = '0.1.0-dev10'
 $script:MaxPayloadBytes = 65536
 $script:MaxConfigBytes = 65536
 $script:MaxConfigLines = 200
