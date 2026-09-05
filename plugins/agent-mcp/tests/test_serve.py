@@ -80,6 +80,68 @@ async def test_warmpool_reuses_one_session():
     assert pool.size == 0
 
 
+async def test_warmpool_cli_bridge_recovers_from_transient_auth_failure(tmp_path):
+    """A transient CLI-bridge auth failure must not permanently poison the
+    warm-pooled session.
+
+    Regression test: ``CliTransport`` used to compute its spawn environment
+    (including the auth-injected token) once and cache it for the life of the
+    transport object. ``WarmPool`` keeps that same transport alive across
+    many calls over hours (exactly this test's ``pool.call`` reuse), so a
+    one-time hiccup in the auth command (e.g. a cold vault) permanently broke
+    every subsequent call for that bridge until the daemon restarted. The
+    auth command here fails on its first invocation and succeeds afterward;
+    the second ``pool.call`` against the same warm session must receive the
+    token, not the poisoned/ambient environment from the first failure.
+    """
+    counter = tmp_path / "invocations"
+    auth_script = tmp_path / "mint_token.py"
+    auth_script.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"counter = Path({str(counter)!r})\n"
+        "n = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "counter.write_text(str(n))\n"
+        "if n == 1:\n"
+        "    sys.exit(1)\n"
+        "print('sekret-456')\n",
+        encoding="utf-8",
+    )
+    tool_md = tmp_path / "whoami.md"
+    mcp = {
+        "name": "whoami",
+        "description": "echo the injected token",
+        "inputSchema": {"type": "object", "properties": {}},
+        "invoke": {
+            "command": sys.executable,
+            "args": ["-c", "import os,sys; "
+                     "sys.stdout.write(os.environ.get('MY_TOKEN', '<unset>'))"],
+        },
+    }
+    tool_md.write_text("---\n" + json.dumps({"mcp": mcp}) + "\n---\n", encoding="utf-8")
+    cfg = _cfg({
+        "server": {"type": "cli", "tools_from": [str(tool_md)]},
+        "auth": {"kind": "command", "command": [sys.executable, str(auth_script)],
+                 "parse": "raw", "target_env": "MY_TOKEN"},
+    })
+
+    pool = WarmPool()
+    try:
+        r1 = await pool.call("k", cfg, "whoami", {})
+        assert pool.size == 1
+        entry = pool._entries["k"]
+        sess1 = entry.session
+        assert r1["content"][0]["text"] == "<unset>"
+
+        r2 = await pool.call("k", cfg, "whoami", {})
+        # Same warm session/transport reused, not reopened.
+        assert pool._entries["k"].session is sess1
+        assert pool.size == 1
+        assert r2["content"][0]["text"] == "sekret-456"
+    finally:
+        await pool.close_all()
+
+
 async def test_warmpool_list():
     pool = WarmPool()
     try:
