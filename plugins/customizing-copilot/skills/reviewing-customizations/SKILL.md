@@ -92,6 +92,50 @@ gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rat
 than cry wolf; feed its findings into the design critique, don't treat a clean
 scan as a full review.
 
+The ordinary scan also validates checked-in static instruction projections and
+`.github/copilot/context-projections.json` offline. With `--from-settings`, it
+uses the same enabled-plugin payload resolution as the rest of the scan to
+compare each explicit `instruction-projections.json` declaration with the
+checked-in result. Findings cover missing or stale projections, malformed
+declarations/markers/locks, duplicate ids or destinations, conflicting
+ownership, safely detectable `applyTo` overlap, orphaned lock/file entries,
+legacy marked `AGENTS.md` regions, 4 KiB per-file and 12 KiB aggregate budgets,
+and dynamic/session-specific content that cannot be checked in safely.
+
+### Static fail-safe projection sync
+
+Plugin hooks remain the primary ambient-policy path. A plugin may additionally
+declare a bounded, data-only fallback template for launchers that do not load
+hooks. Synchronize those enabled declarations with the companion manager:
+
+```bash
+python3 <skill-dir>/scripts/manage-instruction-projections.py sync <repo-root>
+python3 <skill-dir>/scripts/manage-instruction-projections.py scan <repo-root>
+python3 <skill-dir>/scripts/manage-instruction-projections.py \
+  scan <repo-root> --from-settings --json
+```
+
+`sync` reads committed repository settings independently of interactive folder
+trust, then reads only the explicit declaration and canonical template from
+each enabled payload (personal activation does not change a shared checked-in
+projection). Malformed settings and unavailable enabled payloads block the
+operation. It creates or updates only the declared
+`.github/instructions/<plugin>/` destination, writes deterministic UTF-8/LF
+bytes with machine-readable provenance, and commits all changed projections and
+the deterministic lock as one serialized, compare-before-replace,
+rollback-protected transaction. It refuses
+unmarked files, malformed or missing ownership, different owners, local body
+edits, nonportable or case-conflicting destinations, path escape, and
+symlink/reparse indirection. It never deletes repository-owned files; orphaned
+projections and old managed regions are review findings for a human or ordinary
+repository change to remove.
+
+The manager exits nonzero for every blocking conflict. Its `--json` result is a
+stable versioned object for automation. A plugin remains independently usable
+without this manager: its hook and skills do not import a sibling plugin. The
+manager is the suite's reference consumer of the optional inert projection
+contract.
+
 Add `--context-budget` for a reproducible, counts-only inventory:
 
 ```bash
@@ -263,7 +307,7 @@ Cross-check each artifact against the skill that governs its format:
 | Sub-agents | **`defining-subagents`** | `.agent.md` frontmatter, bounded direct-execution contract, Task-capability, per-agent MCP ownership, anti-recursion pattern |
 | MCP servers | **`registering-mcp-servers`** | registration scope (per-agent vs project vs global), config shape, env substitution, no inline secrets |
 | Plugin registration | **`installing-plugins`** | repo `settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), payload-vs-runtime, no "just in case" plugins |
-| Instructions | this skill + `authoring-skills` | `AGENTS.md` is a lean map with repository-owned invariants/fail-safes; plugin ambient policy uses config-backed injection; skills hold detailed procedures; headless/cloud fallback coverage remains |
+| Instructions | this skill + `authoring-skills` | `AGENTS.md` is a lean map with repository-owned invariants/fail-safes; plugin ambient policy uses config-backed injection; declared static projections are locked, provenance-marked, bounded, and free of dynamic state; skills hold detailed procedures |
 
 ## Output and follow-through
 

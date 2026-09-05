@@ -1,0 +1,16 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "completion-gate",
+      "template": "instructions/completion-gate.instructions.md",
+      "destination": ".github/instructions/efforts/completion-gate.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": [
+        "efforts:static-fallback"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "publication-safety",
+      "template": "instructions/publication-safety.instructions.md",
+      "destination": ".github/instructions/ai-attribution/publication-safety.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": [
+        "ai-attribution:static-fallback"
+      ]
+    }
+  ]
+}

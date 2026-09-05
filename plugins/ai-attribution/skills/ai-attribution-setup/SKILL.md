@@ -1,12 +1,11 @@
 ---
 name: ai-attribution-setup
 description: >
-  Adopt or repair ai-attribution policy in a repository. Idempotently reconcile
-  the stable marked fallback into the repo's always-on agent instructions and
-  configure host-qualified operator ownership policy. Use for first-time
+  Adopt or repair ai-attribution policy in a repository. Synchronize the
+  plugin-owned static fallback projection, configure host-qualified operator
+  ownership policy, and validate hook-less launch paths. Use for first-time
   ai-attribution setup, fallback installation, ownership-account configuration,
-  or validation of hook-less launch paths; not for publishing an artifact (use
-  ai-attribution).
+  or hook-less validation; not for publishing an artifact (use ai-attribution).
   Trigger phrases include:
   - 'set up ai attribution'
   - 'configure ai attribution'
@@ -20,39 +19,32 @@ description: >
 
 Adopt the plugin's durable safety boundary in a target repository. Enabling the
 plugin supplies the richer `sessionStart` kernel, but some launch paths do not
-run plugin hooks. This skill owns the real setup mechanism: a stable,
-idempotently reconciled fallback plus operator-scoped ownership policy.
+run plugin hooks. The canonical minimal fallback lives at
+`instructions/publication-safety.instructions.md` and is declared by
+`instruction-projections.json`; do not duplicate its prose in setup guidance.
 
-## 1. Choose the always-on instruction file
+## 1. Synchronize the static projection
 
-Use the adopting repository's existing always-on agent instructions, normally
-`AGENTS.md` or `.github/copilot-instructions.md`. Do not create a second
-competing instruction file when one already exists.
+Use the projection manager shipped by
+`customizing-copilot:reviewing-customizations`:
 
-## 2. Reconcile the marked fallback
-
-Replace the one existing region between these markers, or append it once when
-absent. Never duplicate the region and never alter neighboring repository-owned
-instructions.
-
-```markdown
-<!-- ai-attribution:static-fallback:start -->
-**Fallback policy `[owner: ai-attribution@0.1.0-dev8]`:** Before publishing,
-classify the audience and repository ownership. Disclose AI assistance
-prominently for another party's repository. In a verified operator-owned
-repository, omit disclosure unless the operator explicitly requests it or
-policy requires it; this carve-out changes disclosure only. Every public
-artifact must remain persona-neutral and be scrubbed of credentials, private
-identifiers, hosts, paths, accounts, record IDs, and private rationale. Use
-generic placeholders, follow the target repository's conventions, and audit the
-live published surface after publication.
-<!-- ai-attribution:static-fallback:end -->
+```bash
+python3 <reviewing-customizations-skill-dir>/scripts/manage-instruction-projections.py \
+  sync <repo-root>
 ```
 
-If either marker exists without its pair, stop and report the malformed managed
-region rather than guessing where neighboring content begins.
+The manager reads only explicit data declarations from enabled plugin payloads,
+writes the declared `.github/instructions/ai-attribution/` destination, and
+updates `.github/copilot/context-projections.json`. It refuses unmarked,
+modified, differently owned, malformed, escaped, symlinked, or reparse-point
+destinations and never deletes files. Review and commit the resulting diff.
 
-## 3. Configure operator policy
+If `customizing-copilot` is not installed, ai-attribution remains independently
+usable through its primary hook and skills, but the hook-less projection cannot
+be materialized by this reference workflow. Enable that manager or use another
+implementation of the same declarative contract; do not hand-copy the template.
+
+## 2. Configure operator policy
 
 Reconcile operator-owned policy outside the target repository, preferring
 `~/.copilot/ai-attribution.conf`. Preserve existing comments and valid settings;
@@ -78,18 +70,25 @@ contribution_guide=CONTRIBUTING.md
 
 at `.github/ai-attribution.conf`.
 
-## 4. Validate both delivery paths
+## 3. Validate both delivery paths
 
 1. Launch a normal session with the plugin enabled and confirm the emitted
-   context starts with `[owner: ai-attribution@0.1.0-dev8]`.
-2. Exercise every known hook-less launch path and confirm the marked fallback
-   remains in its always-on instructions.
-3. Re-run this setup and confirm it replaces the managed region in place without
-   creating a duplicate.
-4. Confirm operator config is outside the target repository and every ownership
+   context starts with `[owner: ai-attribution@0.1.0-dev9]`.
+2. Run the projection scan and require no blocking findings:
+
+   ```bash
+   python3 <reviewing-customizations-skill-dir>/scripts/manage-instruction-projections.py \
+     scan <repo-root> --from-settings
+   ```
+
+3. Exercise every known hook-less launch path and confirm the projected
+   instruction remains active.
+4. Re-run sync and confirm the generated file and lock are unchanged.
+5. Confirm operator config is outside the target repository and every ownership
    hint is host-qualified.
 
-Do not remove or shrink a fuller pre-existing static publication policy until
-this marked fallback is installed and the adopting repository's hook-less launch
-paths have been validated. After both preconditions hold, remove only redundant
-prose; preserve stricter repository-owned invariants.
+The scanner reports old `ai-attribution:static-fallback` managed regions as
+legacy migration findings. Do not remove or shrink a fuller pre-existing static
+publication policy until the projection is installed and the adopting
+repository's hook-less launch paths have been validated. Then remove only the
+legacy duplicate manually and preserve stricter repository-owned invariants.

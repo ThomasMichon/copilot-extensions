@@ -1,0 +1,19 @@
+{
+  "projections": [
+    {
+      "applyTo": "**",
+      "customizationKind": "instructions",
+      "destination": ".github/instructions/efforts/completion-gate.instructions.md",
+      "plugin": "efforts@copilot-extensions",
+      "pluginVersion": "0.1.0-dev18",
+      "renderedBytes": 1026,
+      "renderedSha256": "239cafd195085148ac168d330db11b4aaa47a1e98c5a410905991759364f9833",
+      "sourceId": "completion-gate",
+      "template": "instructions/completion-gate.instructions.md",
+      "templateBytes": 502,
+      "templateSha256": "e97a7a277036be999323addb4af8ec3e26bf7872000dfeebfd89901b5735a996"
+    }
+  ],
+  "schema": "copilot-extensions.context-projections",
+  "version": 1
+}

@@ -93,27 +93,19 @@ requires verification before using the disclosure-only own-repo exception.
 
 ## Static fallback for launchers without plugin hooks
 
-Some launch paths do not execute plugin hooks. Setup tooling that supports those
-paths must invoke the `ai-attribution-setup` skill to reconcile the following
-owner-marked region idempotently: update the single region in place, never append
-duplicates or copy the full plugin policy.
-
-<!-- ai-attribution:static-fallback:start -->
-**Fallback policy `[owner: ai-attribution@0.1.0-dev8]`:** Before publishing,
-classify the audience and repository ownership. Disclose AI assistance
-prominently for another party's repository. In a verified operator-owned
-repository, omit disclosure unless the operator explicitly requests it or
-policy requires it; this carve-out changes disclosure only. Every public
-artifact must remain persona-neutral and be scrubbed of credentials, private
-identifiers, hosts, paths, accounts, record IDs, and private rationale. Use
-generic placeholders, follow the target repository's conventions, and audit the
-live published surface after publication.
-<!-- ai-attribution:static-fallback:end -->
+Some launch paths do not execute plugin hooks. The canonical minimal fallback is
+`../instructions/publication-safety.instructions.md`, declared by
+`../instruction-projections.json`. The `ai-attribution-setup` skill routes
+adopters through the projection sync and scan commands owned by
+`customizing-copilot:reviewing-customizations`; setup guidance must not carry a
+second prose copy.
 
 Do not remove or shrink a fuller pre-existing static publication policy until
-this marked fallback is installed and every known hook-less launch path for the
-adopting repository has been validated. Once both preconditions hold, remove
-only redundant prose and preserve stricter repository-owned invariants.
+the projected fallback is installed and every known hook-less launch path for
+the adopting repository has been validated. The scanner reports old
+`ai-attribution:static-fallback` regions as legacy and never removes them.
+Once both preconditions hold, remove only redundant prose manually and preserve
+stricter repository-owned invariants.
 
 ## Failure behavior
 

@@ -252,6 +252,53 @@ minimal and is not a second full copy of plugin policy. A repository-owned
 invariant stays repository-owned; plugin compatibility prose remains
 plugin-attributable through its stable owner marker.
 
+#### Project plugin-owned static fail-safes declaratively
+
+When a plugin owns that minimal fallback, it may ship one bounded
+`instruction-projections.json` declaration at the payload root beside a
+supported plugin manifest. The declaration is inert versioned data: each entry
+names a stable source id, a canonical
+payload-relative `.instructions.md` template, one repository-relative
+destination under `.github/instructions/<plugin>/`, the customization kind,
+`applyTo`, and any legacy owner markers used for migration. Templates carry
+ordinary YAML frontmatter and useful human-readable policy; they contain no
+session identity, installed path, environment interpolation, or live state.
+
+`customizing-copilot:reviewing-customizations` owns the reference sync and scan
+tooling. It resolves the plugin payloads explicitly enabled by repository
+settings through the existing settings/marketplace rules. This explicit
+repository mutation reads committed settings independently of interactive
+folder trust, rejects malformed committed settings or unavailable enabled
+payloads, reads only plugins with the declaration, and never executes
+plugin-provided code. Personal plugin activation does not alter a shared
+checked-in projection. Sync renders
+deterministic UTF-8/LF bytes with an
+HTML provenance record containing the projection format, marketplace-qualified
+plugin identity and version, canonical template path and SHA-256, destination,
+customization kind, `applyTo`, and byte counts. It updates the versioned
+`.github/copilot/context-projections.json` lock in the same serialized,
+rollback-protected transaction as every changed projection.
+Compare-before-replace checks abort rather than overwrite a file changed after
+validation, and the resulting diff remains subject to normal repository review.
+
+Projection ownership is fail-closed even though ambient hook delivery remains
+fail-open. Sync creates or updates only a declared destination and refuses an
+unmarked file, another owner, a malformed marker or lock, local rendered-body
+changes, nonportable or case-conflicting destinations, path escape, and
+symlink/reparse indirection (including dangling lock links). It never deletes
+repository-owned files; transaction rollback may remove a newly created
+projection when a later write fails. The offline scan reports missing,
+malformed, orphaned, conflicting, stale, or over-budget projections; when
+current payloads are available it additionally advises that a source template
+or plugin version has changed. Old marked
+`AGENTS.md` regions remain actionable migration findings until reviewed and
+removed manually.
+
+The checked-in fallback budget is 4 KiB per projected file and 12 KiB in
+aggregate. This path is only a static fail-safe for launch modes that miss
+hooks; it does not aggregate dynamic context, inline or spill session content,
+or compete with the `context-injection` authority.
+
 A distinct case is the **ACP transport** (used by host integrations such as an
 ACP-mode bridge). It creates a normal session that loads plugin hooks, but ACP
 sessions **do not run an interactive trust prompt** -- they honor only *persisted*
