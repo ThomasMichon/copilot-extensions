@@ -15082,7 +15082,7 @@ def _invocation_update_context() -> Path | None:
     return None
 
 
-def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> None:
+def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
     """Refresh the local marketplace catalog (best-effort, non-fatal).
 
     ``copilot plugin update <name>`` resolves the target version from the
@@ -15099,11 +15099,91 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> None:
         )
         if r.returncode != 0:
             output.warn("Marketplace refresh returned non-zero -- continuing")
+            return False
+        return True
     except OSError:
         output.warn("'copilot' CLI not found or not executable -- "
                     "skipping marketplace refresh")
+        return False
     except subprocess.TimeoutExpired:
         output.warn("Marketplace refresh timed out -- continuing")
+        return False
+
+
+def _browse_marketplace_plugins(
+    marketplace: str, *, cwd: Path | None = None
+) -> set[str] | None:
+    """Return the refreshed marketplace's plugin names, or ``None`` if unknown."""
+    try:
+        r = subprocess.run(
+            [
+                _resolve_copilot() or "copilot",
+                "plugin",
+                "marketplace",
+                "browse",
+                marketplace,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=cwd,
+        )
+    except OSError:
+        output.warn(
+            "'copilot' CLI not found or not executable -- "
+            "skipping retired plugin purge"
+        )
+        return None
+    except subprocess.TimeoutExpired:
+        output.warn("Marketplace inventory timed out -- skipping retired plugin purge")
+        return None
+
+    if r.returncode != 0:
+        output.warn(
+            "Marketplace inventory returned non-zero -- "
+            "skipping retired plugin purge"
+        )
+        return None
+
+    names: set[str] = set()
+    for line in r.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("\u2022 "):
+            continue
+        name = stripped[2:].split(" - ", 1)[0].strip()
+        if name:
+            names.add(name)
+    if not names:
+        output.warn(
+            "Marketplace inventory contained no plugin names -- "
+            "skipping retired plugin purge"
+        )
+        return None
+    return names
+
+
+def _uninstall_one_plugin_payload(
+    name: str, marketplace: str, *, cwd: Path | None = None
+) -> str:
+    """Uninstall one confirmed-retired, inactive marketplace payload."""
+    ref = f"{name}@{marketplace}"
+    try:
+        r = subprocess.run(
+            [_resolve_copilot() or "copilot", "plugin", "uninstall", ref],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=cwd,
+        )
+    except OSError:
+        return "copilot CLI not found or not executable"
+    except subprocess.TimeoutExpired:
+        return "uninstall timed out"
+    if r.returncode == 0:
+        for line in r.stdout.strip().splitlines():
+            output.ok(line)
+        return "OK (purged)"
+    return f"uninstall exited {r.returncode}"
 
 
 def _update_one_plugin_payload(
@@ -15240,17 +15320,43 @@ def _update_registered_plugins(
     """
     from . import reconcile
 
-    targets = _registered_plugin_targets() if targets is None else targets
+    targets = dict(_registered_plugin_targets() if targets is None else targets)
     if not targets:
         return True
 
     output.header("Updating Registered Plugin Payloads")
     refreshed: set[Path | None] = set()
+    refreshed_contexts: list[Path | None] = []
     for target in targets.values():
         context = target.context
         if context not in refreshed:
-            _refresh_marketplace(reconcile.MARKETPLACE, cwd=context)
+            if _refresh_marketplace(reconcile.MARKETPLACE, cwd=context):
+                refreshed_contexts.append(context)
             refreshed.add(context)
+
+    purge_results: list[tuple[str, str, _RegisteredPluginTarget]] = []
+    available = (
+        _browse_marketplace_plugins(
+            reconcile.MARKETPLACE,
+            cwd=refreshed_contexts[0],
+        )
+        if refreshed_contexts
+        else None
+    )
+    if available is not None:
+        for name in sorted(list(targets)):
+            target = targets[name]
+            if (
+                target.activation is _PluginActivation.INACTIVE
+                and name not in available
+            ):
+                status = _uninstall_one_plugin_payload(
+                    name,
+                    reconcile.MARKETPLACE,
+                    cwd=target.context,
+                )
+                purge_results.append((name, status, target))
+                del targets[name]
 
     results: list[tuple[str, str, _RegisteredPluginTarget]] = []
     for name in sorted(targets):
@@ -15265,6 +15371,14 @@ def _update_registered_plugins(
             )
         )
 
+    if purge_results:
+        output.header("Retired Plugin Purge Summary")
+        for name, status, _target in purge_results:
+            if status.startswith("OK"):
+                output.ok(f"{name} ({status})")
+            else:
+                output.warn(f"{name}: {status} (inactive retired inventory advisory)")
+
     output.header("Plugin Payload Update Summary")
     for name, status, target in results:
         if status.startswith("OK"):
@@ -15275,10 +15389,15 @@ def _update_registered_plugins(
             )
         else:
             output.warn(f"{name}: {status}")
-    return all(
+    payloads_ok = all(
         status.startswith("OK") or not target.required
         for _, status, target in results
     )
+    purges_ok = all(
+        status.startswith("OK") or not target.required
+        for _, status, target in purge_results
+    )
+    return payloads_ok and purges_ok
 
 
 def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
