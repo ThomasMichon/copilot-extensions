@@ -381,6 +381,75 @@ def test_live_releasing_reservation_consumes_supervisor_capacity(q, client):
     assert q.latest_reservation(second.id) is None
 
 
+def _raise_probe_error(*_args):
+    raise RuntimeError("probe failed")
+
+
+@pytest.mark.parametrize(
+    ("session_handle", "verdict_kwarg"),
+    [
+        (
+            "local-body:session-unknown",
+            {"local_body_verdict_fn": lambda _sid: tracking.UNKNOWN},
+        ),
+        (
+            "local-body:session-error",
+            {"local_body_verdict_fn": _raise_probe_error},
+        ),
+        (
+            "fleet-body:host-b:session-unknown",
+            {"fleet_verdict_fn": lambda _host, _sid: tracking.UNKNOWN},
+        ),
+        (
+            "fleet-body:host-b:session-error",
+            {"fleet_verdict_fn": _raise_probe_error},
+        ),
+    ],
+)
+def test_nonlive_releasing_body_does_not_consume_process_capacity(
+    q, client, session_handle, verdict_kwarg
+):
+    first = q.create("releasing")
+    reservation, _ = q.reserve_spawn(first.id)
+    q.record_spawn(reservation.key, session_handle=session_handle)
+    q.request_spawn_release(reservation.key, disposition="failed")
+    second = q.create("runnable")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=1,
+        **verdict_kwarg,
+    )
+
+    assert sup.poll_once() == [second.id]
+    assert spawn.calls == [second.id]
+    assert q.latest_reservation(first.id).state == SpawnState.RELEASING
+
+
+def test_unknown_spawned_body_still_consumes_process_capacity(q, client):
+    first = q.create("spawned")
+    reservation, _ = q.reserve_spawn(first.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="local-body:session-unknown",
+    )
+    second = q.create("runnable")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=1,
+        local_body_verdict_fn=lambda _sid: tracking.UNKNOWN,
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert q.latest_reservation(second.id) is None
+
+
 def test_other_pool_reservation_does_not_consume_process_capacity(q, client):
     other = q.create("other pool", repo="github.com/example/other")
     reservation, _ = q.reserve_spawn(other.id)
