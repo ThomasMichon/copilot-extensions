@@ -1016,20 +1016,22 @@ class Supervisor:
         self, reservation: dict, task: dict
     ) -> bool:
         if reservation.get("state") == SpawnState.RELEASING:
+            # Release state retains resource ownership independently of process
+            # capacity. Only a positively live body still occupies a process slot.
             fleet = _parse_fleet_body_handle(reservation.get("session_handle"))
             if fleet is not None:
                 try:
-                    return self.fleet_verdict_fn(*fleet) != _tracking().GONE
+                    return self.fleet_verdict_fn(*fleet) == _tracking().LIVE
                 except Exception:
-                    return True
+                    return False
             local_sid = _parse_local_body_handle(
                 reservation.get("session_handle")
             )
             if local_sid is not None:
                 try:
-                    return self.local_body_verdict_fn(local_sid) != _tracking().GONE
+                    return self.local_body_verdict_fn(local_sid) == _tracking().LIVE
                 except Exception:
-                    return True
+                    return False
             worktree = _worktree_from_reservation(
                 reservation,
                 task.get("owner"),
@@ -1043,10 +1045,10 @@ class Supervisor:
                         _machine_from_owner(task.get("owner")),
                         task.get("owner_session_id"),
                     )
-                    != _tracking().GONE
+                    == _tracking().LIVE
                 )
             except Exception:
-                return True
+                return False
         if task.get("status") != Status.SUSPENDED:
             return True
         key = str(reservation.get("key") or "")
