@@ -10,6 +10,11 @@
   `proportional-independent-review`; also
   [`visions/plugins/agent-dispatch/reviewer/`](../../../visions/plugins/agent-dispatch/reviewer/README.md)
   (the declarative agent-dispatch engine for processing pull requests)
+- **Related issues:**
+  [#1733](https://github.com/ThomasMichon/copilot-extensions/issues/1733)
+  (stable reviewer lineage and bounded verdict retries) and
+  [#1846](https://github.com/ThomasMichon/copilot-extensions/issues/1846)
+  (remaining reviewer-loop contract validation)
 
 ## Guiding Intent
 
@@ -43,6 +48,14 @@ or partially apply work. Reliability requires durable ownership and state,
 idempotent delivery, bounded recovery, and a clear separation between analysis,
 recommendation, and the human-controlled verdict.
 
+The archived
+[`turnkey-reviewer-loops`](../../2026/09/03%20turnkey-reviewer-loops/README.md)
+effort already proved the stock reviewer recipe in this repository and a second
+public repository. This effort owns the remaining generic reliability and
+contract-hardening delta; it does not restart that completed campaign. The
+selected reusable ownership and integration seams are recorded in
+[`generic-reviewer-contract.md`](generic-reviewer-contract.md).
+
 ## Request
 
 Define and implement a provider-neutral review lifecycle that remains correct
@@ -58,6 +71,12 @@ failure, and explicit human steering.
 - [ ] Bind each active review to one owner and one immutable target revision.
 - [ ] Separate reviewer recommendation, comments, and evidence from the final
   verdict authority.
+- [ ] Make the generic-vs-consumer ownership boundary and the
+  reviewer-agent/result-applicator seam citable through
+  [`generic-reviewer-contract.md`](generic-reviewer-contract.md).
+- [ ] Keep declaration schema, discovery, and profile validation owned by the
+  existing agent-dispatch registrar; record missing fields there instead of
+  defining a reviewer-specific declaration format.
 
 ### Phase 2 - Make dispatch idempotent
 
@@ -161,6 +180,10 @@ re-queuing (or re-superseding) the same blocked issue.
   transport success.
 - [ ] Terminal failure and abandonment remain visible and cannot be rendered as
   approval or completion.
+- [ ] The generic reviewer contract contains no consumer ACL, acting identity,
+  review rubric, merge policy, scheduling policy, or organizational telemetry.
+- [ ] Reviewer declarations use the existing registrar schema and discovery
+  convention without a competing reviewer-specific format.
 
 ## Proposal
 
@@ -174,6 +197,16 @@ scenarios.
 
 - Established the generic review ownership, idempotency, steering, recovery,
   and verdict-boundary campaign.
+
+### 2026-09-04 - Reconcile the proven recipe with the active owner
+
+- Kept this effort as the single active owner instead of starting parallel
+  reviewer-recipe and registrar efforts.
+- Added a focused companion note for the generic-vs-consumer ownership seam,
+  the reviewer-agent/result-applicator boundary, and the existing registrar's
+  declaration ownership. The archived turnkey effort remains the proof that the
+  composed recipe runs; this effort owns only the unresolved reliability and
+  contract-hardening delta.
 
 ### 2026-09-05 - State-model gaps + PR-supersession found validating #2082
 
