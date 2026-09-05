@@ -5,14 +5,16 @@
 
 ## Status
 
-**Command-only exemplar operative; service-bearing exemplar implementation-ready,
-acceptance pending.** The reviewed contract, cross-platform resolver, immutable
-runtime-slot ownership/completion/cutover, Agent Machines payload/runtime flow,
-and Agent Index service/runtime implementation are in place. Each path may use
-only its own already-active validated cell; absent/false policy remains legacy.
-The Agent Index Linux full-lifecycle and Windows clean-room arms remain required
-before the service-bearing exemplar is called operative. Repair/release and
-uninstall remain non-operative.
+**Command-only and service-bearing exemplars operative on the accepted Linux
+arm; repair/release and uninstall design accepted, implementation pending.**
+The reviewed contract, cross-platform resolver, immutable runtime-slot
+ownership/completion/cutover, Agent Machines payload/runtime flow, and Agent
+Index service/runtime implementation are in place. Each path may use only its
+own already-active validated cell; absent/false policy remains legacy. Agent
+Index passed its full Linux lifecycle. Windows clean-room arms are waived for
+this effort; deterministic PowerShell parity remains required. Issue
+[#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122) carries
+the remaining Agent Machines repair/release and uninstall implementation.
 
 ## Goals
 
@@ -25,8 +27,9 @@ uninstall remain non-operative.
   remote execution, and uninstall.
 - Make a missing or conflicting context fail closed instead of selecting a
   legacy root or same-named command.
-- Prove the contract with two simultaneous cells containing the same plugin name
-  and version on Windows and Linux/WSL.
+- Prove the contract with two simultaneous Linux/WSL cells containing the same
+  plugin name and version, and preserve deterministic PowerShell parity for the
+  waived Windows clean-room arm.
 
 ## Non-goals
 
@@ -609,10 +612,59 @@ uninstall behavior.
 - Rollback explicitly selects only a completed historical slot owned by the
   same `install.json` and compare-and-swaps from the observed current version.
   After selection, both runtime markers name that rollback target.
-- Repair recreates only artifacts whose ownership receipt matches.
-- Uninstall validates the namespace and plugin receipt immediately before every
-  destructive step. It never removes the namespace or repo state merely because
-  the last payload is absent.
+- Interrupted runtime reservations become releasable only through a new
+  `.runtime-slot-reservation.json` receipt. Python and PowerShell publish it in
+  the hidden sibling before the no-replace rename; Bash publishes it as the
+  first entry immediately after the final-slot `mkdir` reservation. The Bash
+  directory may therefore be filesystem-visible briefly, but it remains inert
+  and ineligible for attributable enumeration or reconciliation until the
+  receipt is durably published. The receipt mirrors the immutable ownership
+  identity: marketplace/plugin/source identity, canonical runtime root/version,
+  snapshot id/root/provenance digest, canonical namespace/install receipt paths
+  and generations, a non-negative reservation generation, and an RFC3339 UTC
+  creation time.
+- Successful ownership publication replaces the reservation receipt with
+  `.runtime-slot-ownership.json`. Existing markerless hidden or final
+  reservations remain protected: absence of the reservation receipt is never
+  proof of ownership or permission to delete.
+- The shared Python, dependency-light Bash, and PowerShell primitives expose
+  `slot-release` (the release half of the repair/release lifecycle). It requires
+  explicit context, marketplace/plugin ids, runtime version, reservation
+  generation, current namespace/install generations, and durable home. Under
+  the marketplace genesis lock and plugin install lock it revalidates the
+  receipt and target immediately before deletion.
+- `slot-release` removes only a slot containing the exact matching reservation
+  receipt and no other entries. It refuses completed, selected, last-known-good,
+  non-empty, markerless, malformed, linked/reparse, foreign, generation-drifted,
+  or receipt-replaced targets. Matching replay after release is idempotent.
+- Agent Machines exposes `cell-repair` as an explicit installer action requiring
+  caller-supplied context, marketplace id, payload root/version, snapshot id,
+  runtime version, receipt generations, and an exact current-selection CAS.
+  Ambient context never authorizes repair.
+- Repair is derived-only. It may recreate missing or invalid
+  `deploy-manifest.json` and Agent Machines cell-local launch metadata only
+  from a validated completed slot, snapshot, payload, and receipt chain. It may
+  restore `current-version` and `last-known-good` only when the caller supplies
+  the exact intended runtime and the current-selection CAS still matches under
+  both locks. It never rewrites payload/snapshot contents, ownership or
+  completion receipts, state/run/log/cache data, services, tasks, endpoints, or
+  external machine resources. A missing immutable completion receipt is a
+  refusal, not repairable evidence.
+- Agent Machines exposes `cell-uninstall` as an explicit installer action
+  requiring caller-supplied context, marketplace id, receipt generations, and
+  exact current/LKG expectations. Ambient context never authorizes uninstall.
+- Uninstall acquires the same two locks and revalidates `namespace.json`,
+  `install.json`, canonical roots, generations, and the exact target immediately
+  before every destructive step. It clears current and LKG markers by CAS,
+  removes every validated owned runtime slot and snapshot, then removes derived
+  deploy/launcher/run/log/cache artifacts.
+- Uninstall preserves `state/`, `install.json`, `namespace.json`, and the plugin
+  directory structure required to retain attribution. It refuses every foreign,
+  malformed, linked/reparse, markerless, non-empty-unattributable, active, or
+  otherwise unvalidated artifact rather than partially claiming it.
+- Repeated repair returns already healthy; repeated uninstall returns preserved
+  when only durable state and receipts remain. Generation or selection drift
+  returns revalidation required without deleting the drifted target.
 - Namespace garbage collection is a separate explicit management operation and
   acts only on attributable, inactive cells.
 - Existing installations do not switch to cell mode merely because an exemplar

@@ -211,7 +211,8 @@ because they provide tools or services.
         namespaced first use/update publish owned build completion and cut over
         cell-local runtime markers, and fixed-identity cutover supports historical
         rollback without legacy fallback.
-      - [ ] Add ownership-checked Agent Machines repair/release and uninstall.
+      - [ ] Add ownership-checked Agent Machines repair/release and uninstall
+        ([#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122)).
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
     simultaneous marketplace cells in disposable clean-room environments before
     broad rollout. Do not activate or use either exemplar namespaced on a
@@ -229,9 +230,9 @@ because they provide tools or services.
       recovery, transaction-only namespaced deploy/recovery, exact instance-token
       controls, ownership-attested orphan reconciliation, stale-lock claiming,
       nonblocking session ensure, and PowerShell 5.1-safe launchers.
-    - [ ] Accept Agent Index as the operative service-bearing exemplar after the
-      full Linux lifecycle and Windows clean-room arms pass. Smoke mode is a fast
-      diagnostic only, not the acceptance lane.
+    - [x] Accept Agent Index as the operative service-bearing exemplar after the
+      full Linux lifecycle passes. Smoke mode is a fast diagnostic only, not the
+      acceptance lane; the Windows arm was explicitly waived for this effort.
       - [x] Pass the full Linux lifecycle: two live cells, isolated update and
         rollback, all four cutover crash-recovery phases, governance-blocked
         restoration, foreign-control refusal, isolated shutdown, and clean
@@ -243,15 +244,12 @@ because they provide tools or services.
         [#2089](https://github.com/ThomasMichon/copilot-extensions/pull/2089),
         and the final shutdown-liveness defect was fixed through
         [#2100](https://github.com/ThomasMichon/copilot-extensions/pull/2100).
-      - [ ] Pass the Windows clean-room arm. The 2026-09-05 attempt on a
-        Linux-container Docker engine stopped before scenario execution because
-        the Windows Server Core base image had no matching platform. A later
-        dispatch to a dedicated Windows-container host stopped before scenario
-        execution when the remote ACP launch connection closed; retry after
-        [#2106](https://github.com/ThomasMichon/copilot-extensions/issues/2106)
-        is resolved.
-    - [ ] Run the Agent Machines scenario in disposable Linux and Windows
-      clean-room arms.
+      - [x] Windows clean-room arm waived by operator decision on 2026-09-05.
+        Earlier attempts stopped before scenario execution because the local
+        engine ran Linux containers and the remote Windows-agent launch failed.
+    - [ ] Run the Agent Machines scenario in a disposable Linux clean-room arm.
+    - [x] Windows Agent Machines clean-room arm waived by operator decision on
+      2026-09-05; deterministic PowerShell parity tests remain required.
 
 ### Phase 4 — Runtime and state rollout
 
@@ -927,5 +925,19 @@ See [`design.md`](design.md).
   that platform. A second attempt dispatched the run to a dedicated
   Windows-container host, but the remote agent connection closed during ACP
   launch before the scenario started. The transport failure is tracked by
-  [#2106](https://github.com/ThomasMichon/copilot-extensions/issues/2106);
-  Windows acceptance remains open.
+  [#2106](https://github.com/ThomasMichon/copilot-extensions/issues/2106).
+
+### 2026-09-05 — Windows waiver and Agent Machines retirement design
+
+- The operator waived the remaining Windows clean-room arms for this effort.
+  Agent Index is accepted as the operative service-bearing exemplar on its full
+  Linux lifecycle; PowerShell parity remains a deterministic test requirement.
+- Filed and claimed
+  [#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122) for the
+  next Phase 3 slice: Agent Machines ownership-checked repair/release and
+  uninstall.
+- Chose receipt-only reservation release: future interrupted slots carry an
+  attributable reservation receipt, while existing markerless reservations
+  remain protected. Repair is derived-only and never recreates immutable
+  completion evidence. Uninstall removes all validated owned runtime slots and
+  snapshots but preserves durable state plus plugin and namespace receipts.
