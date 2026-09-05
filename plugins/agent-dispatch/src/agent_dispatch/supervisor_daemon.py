@@ -37,16 +37,25 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from .companion import (
+    CompanionController,
     CompanionError,
     CompanionIndeterminate,
+    CompanionResolution,
     DefaultCompanionController,
+    ManagedLaunchSnapshot,
     companion_authority_fingerprint,
+)
+from .managed_runtime import (
+    ManagedRuntimeError,
+    ManagedRuntimeMaterializer,
+    MaterializedRuntime,
+    RuntimeMaterializer,
 )
 from .procutil import no_window_kwargs
 from .registrations import RegistrationKind
@@ -92,14 +101,12 @@ def _spec_fingerprint(reg: dict) -> str:
     changes, so a reconcile restarts a unit exactly when its definition changed
     -- not on unrelated ``updated_at`` churn.
     """
+    if reg.get("managed_launch_digest"):
+        return reg["managed_launch_digest"]
     spec = dict(reg.get("spec") or {})
     spec.pop("reactive", None)
     spec.pop("reactive_interval", None)
-    spec.pop("managed_runtime", None)
     runtime_revision = reg.get("runtime_revision")
-    if isinstance(runtime_revision, dict):
-        runtime_revision = dict(runtime_revision)
-        runtime_revision.pop("managed_runtime", None)
     return json.dumps(
         {
             "kind": reg.get("kind"),
@@ -433,7 +440,7 @@ class ManagedUnit:
     kind: str
     fingerprint: str
     registration: dict = field(default_factory=dict)
-    companion_resolution: Any | None = None
+    companion_resolution: CompanionResolution | None = None
     proc: ProcHandle | None = None
     started_at: float = 0.0
     restarts: int = 0
@@ -493,9 +500,9 @@ class SupervisorDaemon:
         declared_source: Callable[[], Iterable[Any]] | None = None,
         overrides_source: Callable[[], Mapping[str, dict]] | None = None,
         client_factory: Callable[[], Any] | None = None,
-        companion_controller: Any | None = None,
-        runtime_materializer: Any | None = None,
-        runtime_executor: Any | None = None,
+        companion_controller: CompanionController | None = None,
+        runtime_materializer: RuntimeMaterializer | None = None,
+        runtime_executor: Executor | None = None,
     ):
         self.client = client
         #: Rebuilds the coordinator client by **re-resolving** its endpoint (the
@@ -543,11 +550,15 @@ class SupervisorDaemon:
         self._runtime_materializer = runtime_materializer
         self._runtime_executor = runtime_executor
         self._owns_runtime_executor = runtime_executor is None
-        self._last_companion_desired: dict[str, tuple[str, Any | None]] = {}
-        self._companion_resolutions: dict[str, Any] = {}
+        self._last_companion_desired: dict[str, tuple[str, CompanionResolution | None]] = {}
+        self._companion_resolutions: dict[str, CompanionResolution] = {}
+        self._managed_uncertain: set[str] = set()
+        self._managed_launch_failures: dict[str, tuple[str, float]] = {}
         self._managed_runtime_authorities: dict[str, str] = {}
-        self._managed_runtime_results: dict[str, tuple[Any, ...]] = {}
-        self._managed_runtime_futures: dict[str, tuple[str, Future[Any]]] = {}
+        self._managed_runtime_results: dict[str, tuple[MaterializedRuntime, ...]] = {}
+        self._managed_runtime_futures: dict[
+            str, tuple[str, Future[tuple[MaterializedRuntime, ...]]]
+        ] = {}
         self._managed_runtime_failures: dict[str, tuple[str, float, int]] = {}
         self._units: dict[str, ManagedUnit] = {}
 
@@ -646,7 +657,7 @@ class SupervisorDaemon:
         self._conflicts = merged.conflicts
         return desired
 
-    def _companion(self) -> Any:
+    def _companion(self) -> CompanionController:
         if self._companion_controller is None:
             self._companion_controller = DefaultCompanionController(
                 self._spec_dir() / "companions"
@@ -654,7 +665,8 @@ class SupervisorDaemon:
         return self._companion_controller
 
     def _resolve_companion_desired(self, desired: dict[str, dict]) -> None:
-        current: dict[str, Any] = {}
+        current: dict[str, CompanionResolution] = {}
+        self._managed_uncertain.clear()
         present = {
             rid
             for rid, registration in desired.items()
@@ -667,9 +679,40 @@ class SupervisorDaemon:
             authority = companion_authority_fingerprint(registration)
             try:
                 resolution = self._companion().resolve(
-                    registration, machine=self.machine, env=self.env
+                    copy.deepcopy(registration), machine=self.machine, env=self.env
                 )
+                if (
+                    resolution is not None
+                    and companion_authority_fingerprint(resolution.registration) != authority
+                ):
+                    raise CompanionError("resolved companion changed declaration authority")
             except CompanionIndeterminate as exc:
+                if registration.get("spec", {}).get("managed_runtime"):
+                    self._managed_uncertain.add(rid)
+                    unit = self._units.get(rid)
+                    snapshot = (
+                        unit.companion_resolution.managed_snapshot
+                        if unit is not None and unit.companion_resolution is not None
+                        else None
+                    )
+                    if snapshot is None:
+                        try:
+                            snapshot = self._companion().selected_managed(rid)
+                        except (CompanionError, CompanionIndeterminate, OSError, ValueError) as error:
+                            log.error("cannot recover managed companion %s: %s", rid, error)
+                    if snapshot is not None and snapshot.authority == authority:
+                        resolution = snapshot.resolution()
+                        desired[rid] = resolution.registration
+                        current[rid] = resolution
+                        log.warning("managed companion %s provider is indeterminate: %s", rid, exc)
+                    else:
+                        desired.pop(rid, None)
+                        self._last_companion_desired.pop(rid, None)
+                        log.warning(
+                            "managed companion %s provider is indeterminate with changed "
+                            "or unconfirmed authority; withholding it: %s", rid, exc,
+                        )
+                    continue
                 previous = self._last_companion_desired.get(rid)
                 if previous is not None and previous[0] == authority:
                     resolution = previous[1]
@@ -708,20 +751,18 @@ class SupervisorDaemon:
         }
         try:
             self._companion().reconcile_receipts(
-                set(current) | managed_companions
+                set(current) | managed_companions | self._managed_uncertain
             )
         except (CompanionError, CompanionIndeterminate, OSError) as exc:
             log.warning("companion receipt reconciliation is incomplete: %s", exc)
         self._companion_resolutions = current
 
-    def _managed_runtime(self) -> Any:
+    def _managed_runtime(self) -> RuntimeMaterializer:
         if self._runtime_materializer is None:
-            from .managed_runtime import ManagedRuntimeMaterializer
-
             self._runtime_materializer = ManagedRuntimeMaterializer()
         return self._runtime_materializer
 
-    def _runtime_pool(self) -> Any:
+    def _runtime_pool(self) -> Executor:
         if self._runtime_executor is None:
             self._runtime_executor = ThreadPoolExecutor(
                 max_workers=1,
@@ -761,8 +802,7 @@ class SupervisorDaemon:
     def _materialize_managed_runtime_desired(
         self, desired: Mapping[str, dict]
     ) -> None:
-        """Prepare declared runtime cells without changing companion launch state."""
-        self._harvest_managed_runtime_futures()
+        """Prepare cells asynchronously; stale completions never authorize a launch."""
         present = {
             rid
             for rid, registration in desired.items()
@@ -775,10 +815,14 @@ class SupervisorDaemon:
             self._managed_runtime_results.pop(rid, None)
         for rid in set(self._managed_runtime_failures) - present:
             self._managed_runtime_failures.pop(rid, None)
-        for rid, (_authority, future) in list(self._managed_runtime_futures.items()):
-            if rid not in present and future.cancel():
+        for rid, (authority, future) in list(self._managed_runtime_futures.items()):
+            if rid not in present or authority != companion_authority_fingerprint(desired[rid]):
+                future.cancel()
                 self._managed_runtime_futures.pop(rid, None)
+        self._harvest_managed_runtime_futures()
         for rid in present:
+            if rid in self._managed_uncertain:
+                continue
             registration = desired[rid]
             authority = companion_authority_fingerprint(registration)
             if self._managed_runtime_authorities.get(rid) == authority:
@@ -800,6 +844,195 @@ class SupervisorDaemon:
         self._harvest_managed_runtime_futures()
 
     # -- unit lifecycle ------------------------------------------------------
+
+    @staticmethod
+    def _rollback_allowed(snapshot: ManagedLaunchSnapshot, registration: dict) -> bool:
+        previous = snapshot.to_dict()["registration"]
+        keys = ("id", "kind", "source", "owner", "machine", "env")
+        if any(previous.get(key) != registration.get(key) for key in keys):
+            return False
+        old_plugin = previous.get("plugin")
+        new_plugin = registration.get("plugin")
+        if not isinstance(old_plugin, Mapping) or not isinstance(new_plugin, Mapping):
+            return False
+        if old_plugin.get("activation_scopes") != new_plugin.get("activation_scopes"):
+            return False
+        try:
+            old_source_path = old_plugin["source_path"]
+            old_root = old_plugin["root"]
+            new_source_path = new_plugin["source_path"]
+            new_root = new_plugin["root"]
+            if not all(
+                isinstance(value, str)
+                for value in (old_source_path, old_root, new_source_path, new_root)
+            ):
+                return False
+            old_source = Path(old_source_path).relative_to(old_root)
+            new_source = Path(new_source_path).relative_to(new_root)
+        except (KeyError, ValueError):
+            return False
+        return old_source == new_source
+
+    def _launch_managed(
+        self, snapshot: ManagedLaunchSnapshot, summary: ReconcileSummary, *, bucket: str
+    ) -> None:
+        resolution = snapshot.resolution()
+        self._managed_runtime().validate(resolution.registration, snapshot.runtimes)
+        launched = self._companion().launch(resolution, fingerprint=snapshot.fingerprint)
+        rid = resolution.registration["id"]
+        self._units[rid] = ManagedUnit(
+            registration_id=rid,
+            kind=RegistrationKind.PLUGIN_COMPANION,
+            fingerprint=snapshot.fingerprint,
+            registration=resolution.registration,
+            companion_resolution=resolution,
+            proc=launched.process,
+            started_at=self.clock(),
+        )
+        getattr(summary, "recovered" if launched.recovered else bucket).append(rid)
+
+    def _reconcile_managed(self, desired: dict[str, dict], summary: ReconcileSummary) -> set[str]:
+        """Keep prior launch authority separate from each prepared replacement."""
+        managed = {
+            rid for rid, reg in desired.items()
+            if reg.get("kind") == RegistrationKind.PLUGIN_COMPANION
+            and reg.get("spec", {}).get("managed_runtime")
+        }
+        for rid in set(self._managed_launch_failures) - managed:
+            self._managed_launch_failures.pop(rid, None)
+        for rid in managed:
+            registration = desired[rid]
+            authority = companion_authority_fingerprint(registration)
+            unit = self._units.get(rid)
+            previous = (
+                unit.companion_resolution.managed_snapshot
+                if unit is not None and unit.companion_resolution is not None
+                else None
+            )
+            try:
+                if (
+                    unit is not None and unit.companion_resolution is not None
+                    and unit.proc is not None and unit.proc.poll() is not None
+                ):
+                    self._companion().retire_crashed(unit.companion_resolution, unit.proc)
+                    unit.proc = None
+                if previous is None and unit is None:
+                    previous = self._companion().selected_managed(rid)
+                if previous is not None and not self._rollback_allowed(previous, registration):
+                    previous = None
+                    if unit is not None:
+                        if not self._stop(rid):
+                            summary.skipped.append(rid)
+                            continue
+                        summary.stopped.append(rid)
+                        unit = None
+                    self._companion().retire_managed(rid)
+
+                if rid in self._managed_uncertain:
+                    if unit is None and previous is not None and previous.authority == authority:
+                        self._managed_runtime().validate(
+                            previous.resolution().registration, previous.runtimes
+                        )
+                        recovered = self._companion().recover_live(previous)
+                        if recovered is not None:
+                            resolution = previous.resolution()
+                            self._units[rid] = ManagedUnit(
+                                registration_id=rid, kind=RegistrationKind.PLUGIN_COMPANION,
+                                fingerprint=previous.fingerprint, registration=resolution.registration,
+                                companion_resolution=resolution, proc=recovered.process,
+                                started_at=self.clock(),
+                            )
+                            summary.recovered.append(rid)
+                    continue
+
+                # Recover selected state before considering a new provider environment
+                # or materializer result. Recovery never runs a configuration provider.
+                failure = self._managed_launch_failures.get(rid)
+                if (
+                    unit is None and previous is not None and previous.authority == authority
+                    and failure is None
+                ):
+                    try:
+                        self._launch_managed(previous, summary, bucket="started")
+                    except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
+                        log.error("managed companion %s selected recovery failed: %s", rid, exc)
+                        failure = (
+                            previous.fingerprint,
+                            self.clock() + max(self.restart_backoff, self.poll_interval),
+                        )
+                        self._managed_launch_failures[rid] = failure
+                    else:
+                        continue
+
+                if self._managed_runtime_authorities.get(rid) != authority:
+                    summary.skipped.append(rid)
+                    continue
+                snapshot = ManagedLaunchSnapshot.capture(
+                    self._companion_resolutions[rid], self._managed_runtime_results[rid]
+                )
+                if failure is not None and failure[0] == snapshot.fingerprint and self.clock() < failure[1]:
+                    continue
+                if unit is not None and unit.fingerprint == snapshot.fingerprint:
+                    if unit.dead:
+                        continue
+                    if unit.proc is not None and unit.proc.poll() is None:
+                        try:
+                            healthy = self._companion().health(snapshot.resolution())
+                        except (CompanionError, CompanionIndeterminate, OSError) as exc:
+                            log.warning("managed companion %s health is indeterminate: %s", rid, exc)
+                            continue
+                        if healthy is not False:
+                            continue
+                        summary.unhealthy.append(rid)
+                    else:
+                        if self.max_restarts is not None and unit.restarts >= self.max_restarts:
+                            unit.dead = True
+                            continue
+                        if self.clock() < unit.restart_after:
+                            continue
+
+                # Both validation and immutable snapshot construction precede retirement.
+                self._managed_runtime().validate(snapshot.resolution().registration, snapshot.runtimes)
+                crashed = (
+                    unit is not None and unit.proc is None
+                    and unit.fingerprint == snapshot.fingerprint
+                )
+                restarts = unit.restarts + 1 if crashed else 0
+                if unit is not None and not self._stop(rid):
+                    summary.skipped.append(rid)
+                    continue
+                try:
+                    self._launch_managed(
+                        snapshot, summary,
+                        bucket="revived" if crashed else "restarted" if unit else "started",
+                    )
+                except (CompanionError, CompanionIndeterminate, ManagedRuntimeError, OSError) as exc:
+                    self._managed_launch_failures[rid] = (
+                        snapshot.fingerprint, self.clock() + max(self.restart_backoff, self.poll_interval),
+                    )
+                    log.error("managed companion %s launch failed: %s", rid, exc)
+                    summary.skipped.append(rid)
+                    if previous is not None and previous.fingerprint != snapshot.fingerprint:
+                        self._launch_managed(previous, summary, bucket="revived")
+                    continue
+                self._managed_launch_failures.pop(rid, None)
+                launched_unit = self._units[rid]
+                launched_unit.restarts = restarts
+                if crashed:
+                    launched_unit.restart_after = self.clock() + self.restart_backoff
+            except (
+                CompanionError, CompanionIndeterminate, ManagedRuntimeError,
+                OSError, ValueError, subprocess.SubprocessError,
+            ) as exc:
+                log.error("managed companion %s cannot safely reconcile: %s", rid, exc)
+                summary.skipped.append(rid)
+                if isinstance(exc, (ManagedRuntimeError, CompanionError)):
+                    self._managed_runtime_authorities.pop(rid, None)
+                    self._managed_runtime_results.pop(rid, None)
+                    self._managed_runtime_failures[rid] = (
+                        authority, self.clock() + max(self.poll_interval, 5.0), 1,
+                    )
+        return managed
 
     def _spec_dir(self) -> Path:
         from .config import run_dir
@@ -874,7 +1107,7 @@ class SupervisorDaemon:
             getattr(summary, bucket).append(rid)
 
     def _stop(self, rid: str) -> bool:
-        unit = self._units.pop(rid, None)
+        unit = self._units.get(rid)
         if unit is None:
             return False
         proc = unit.proc
@@ -882,6 +1115,12 @@ class SupervisorDaemon:
             try:
                 self._companion().stop(unit.companion_resolution, proc)
             except (CompanionError, CompanionIndeterminate, OSError, subprocess.SubprocessError):
+                if (
+                    unit.companion_resolution is not None
+                    and unit.companion_resolution.managed_snapshot is not None
+                ):
+                    log.exception("cannot confirm retirement of managed companion %s", rid)
+                    return False
                 log.exception("error stopping companion %s; forcing retirement", rid)
                 with contextlib.suppress(
                     CompanionError,
@@ -898,6 +1137,7 @@ class SupervisorDaemon:
                 proc.wait(timeout=10)
             except Exception:  # pragma: no cover -- best-effort teardown
                 log.exception("error stopping registration %s", rid)
+        self._units.pop(rid, None)
         return True
 
     # -- reconcile -----------------------------------------------------------
@@ -917,19 +1157,33 @@ class SupervisorDaemon:
         # 1. stop units no longer desired (removed or paused)
         for rid in list(self._units):
             if rid not in desired:
+                unit = self._units[rid]
                 if self._stop(rid):
                     summary.stopped.append(rid)
+                    if (
+                        unit.companion_resolution is not None
+                        and unit.registration.get("spec", {}).get("managed_runtime")
+                        and rid not in self._managed_uncertain
+                    ):
+                        self._companion().forget_managed(rid)
 
         # 2. restart units whose definition changed
+        managed = self._reconcile_managed(desired, summary)
         for rid, reg in desired.items():
+            if rid in managed:
+                continue
             unit = self._units.get(rid)
             if unit is not None and _spec_fingerprint(reg) != unit.fingerprint:
-                self._stop(rid)
-                self._start(reg, summary, bucket="restarted")
+                if self._stop(rid):
+                    if unit.registration.get("spec", {}).get("managed_runtime"):
+                        self._companion().forget_managed(rid)
+                    self._start(reg, summary, bucket="restarted")
 
         # 3. revive crashed units (backoff-gated, cap-bounded)
         now = self.clock()
         for rid, reg in desired.items():
+            if rid in managed:
+                continue
             unit = self._units.get(rid)
             if unit is None or unit.proc is None:
                 continue
@@ -1000,6 +1254,8 @@ class SupervisorDaemon:
 
         # 4. start newly-registered units
         for rid, reg in desired.items():
+            if rid in managed:
+                continue
             if rid not in self._units:
                 self._start(reg, summary, bucket="started")
 

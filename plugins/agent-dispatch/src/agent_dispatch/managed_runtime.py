@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .procutil import no_window_kwargs
 from .registrar_reconcile import DECLARED_ID_PREFIX
@@ -104,6 +104,18 @@ class MaterializedRuntime:
     cell: Path
     python: Path
     receipt: Path
+
+
+class RuntimeMaterializer(Protocol):
+    """The supervisor's preparation and non-provisioning validation boundary."""
+
+    def materialize(
+        self, registration: Mapping[str, Any]
+    ) -> tuple[MaterializedRuntime, ...]: ...
+
+    def validate(
+        self, registration: Mapping[str, Any], runtimes: tuple[MaterializedRuntime, ...]
+    ) -> None: ...
 
 
 def _subprocess_environment(
@@ -333,7 +345,9 @@ def _python_path(environment: Path, *, windows: bool) -> Path:
     return environment / ("python.exe" if windows else "bin/python")
 
 
-def _authority(registration: Mapping[str, Any]) -> tuple[dict[str, Any], Path]:
+def _authority(
+    registration: Mapping[str, Any], *, require_payload: bool = True
+) -> tuple[dict[str, Any], Path]:
     if (
         registration.get("kind") != RegistrationKind.PLUGIN_COMPANION
         or registration.get("source") != DECLARED_ID_PREFIX
@@ -367,9 +381,10 @@ def _authority(registration: Mapping[str, Any]) -> tuple[dict[str, Any], Path]:
     if not isinstance(plugin_root_raw, str):
         raise ManagedRuntimeError("managed runtime plugin root is missing")
     plugin_root = Path(plugin_root_raw).absolute()
-    if not plugin_root.is_dir():
-        raise ManagedRuntimeError("managed runtime plugin root is unavailable")
-    _reject_link(plugin_root, description="managed runtime plugin root")
+    if require_payload:
+        if not plugin_root.is_dir():
+            raise ManagedRuntimeError("managed runtime plugin root is unavailable")
+        _reject_link(plugin_root, description="managed runtime plugin root")
     return expected, plugin_root
 
 
@@ -1094,3 +1109,84 @@ class ManagedRuntimeMaterializer:
                 )
                 for runtime in managed["runtimes"]
             )
+
+    def validate(
+        self,
+        registration: Mapping[str, Any],
+        runtimes: tuple[MaterializedRuntime, ...],
+    ) -> None:
+        """Revalidate published launch/rollback cells without rebuilding a payload."""
+        authority, _ = _authority(registration, require_payload=False)
+        policy = self._policy()
+        root = policy.root.expanduser().absolute()
+        if not root.is_dir():
+            raise ManagedRuntimeError("selected managed runtime root is unavailable")
+        root = _ensure_safe_root(root)
+        declared = authority["managed_runtime"]["runtimes"]
+        if len(runtimes) != len(declared):
+            raise ManagedRuntimeError("selected managed runtime set is incomplete")
+        authority_digest = _canonical_digest(authority)
+        plugin_identity = _canonical_digest(
+            {
+                "owner": authority["plugin_owner"],
+                "root": authority["plugin_root"],
+                "source": authority["plugin_source_path"],
+            }
+        )[:16]
+        with self.lock_factory(root):
+            toolchain_digest = self._toolchain_digest(policy)
+            for runtime, declaration in zip(runtimes, declared):
+                cell_key = _canonical_digest(
+                    {
+                        "name": declaration["name"],
+                        "version": declaration["version"],
+                        "profile": declaration["profile"],
+                        "content_digest": runtime.content_digest,
+                        "authority_digest": authority_digest,
+                        "toolchain_digest": toolchain_digest,
+                    }
+                )[:40]
+                cell = root / "cells" / plugin_identity / cell_key
+                if (
+                    runtime.cell != cell
+                    or runtime.receipt != cell / RECEIPT_NAME
+                    or runtime.python != _python_path(cell / "runtime", windows=policy.windows)
+                ):
+                    raise ManagedRuntimeError("selected managed runtime location is inconsistent")
+                _assert_safe_descendant(root, runtime.receipt, description="managed runtime receipt")
+                try:
+                    expected = json.loads(runtime.receipt.read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    raise ManagedRuntimeError("selected managed runtime receipt is unavailable") from exc
+                if not isinstance(expected, dict):
+                    raise ManagedRuntimeError("selected managed runtime receipt is invalid")
+                expected.pop("cell_digest", None)
+                if any(
+                    expected.get(key) != value
+                    for key, value in {
+                        "schema_version": RECEIPT_SCHEMA_VERSION,
+                        "name": declaration["name"],
+                        "version": declaration["version"],
+                        "profile": declaration["profile"],
+                        "content_digest": runtime.content_digest,
+                        "authority_digest": authority_digest,
+                        "toolchain_digest": toolchain_digest,
+                        "imports": declaration["imports"],
+                        "windows_trust_files": (
+                            list(_windows_trust_files(policy.base_python)) if policy.windows else []
+                        ),
+                    }.items()
+                ):
+                    raise ManagedRuntimeError("selected managed runtime authority is inconsistent")
+                if _canonical_digest(
+                    {
+                        "runtime": {
+                            key: declaration[key]
+                            for key in ("name", "version", "profile", "projects", "imports")
+                        },
+                        "snapshot": expected.get("snapshot"),
+                    }
+                ) != runtime.content_digest:
+                    raise ManagedRuntimeError("selected managed runtime snapshot is inconsistent")
+                if self._ready(cell, expected, root=root, policy=policy) != runtime:
+                    raise ManagedRuntimeError("selected managed runtime is not ready")
