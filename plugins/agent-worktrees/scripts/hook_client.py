@@ -34,6 +34,7 @@ _MAX_RESPONSE = 64 * 1024
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _SESSION_GUIDANCE_MAX_BYTES = 4 * 1024
 _COMMAND_CATALOG_HEADING = "## agent-worktrees session command catalog"
+_GUIDANCE_HEADER = "# Agent Worktrees session guidance\n\n"
 
 
 def _read_json(path: Path) -> dict | None:
@@ -311,16 +312,20 @@ def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
         for context in (catalog, registration):
             if context and context not in contexts:
                 contexts.append(context)
-    if not contexts:
-        return False
-
-    content = (
-        "# Agent Worktrees session guidance\n\n"
-        + "\n\n".join(contexts)
-        + "\n"
-    )
+    content = _GUIDANCE_HEADER + "\n\n".join(contexts) + "\n"
     if len(content.encode("utf-8")) > _SESSION_GUIDANCE_MAX_BYTES:
-        return False
+        content = (
+            _GUIDANCE_HEADER
+            + "Current agent-worktrees session guidance was omitted because "
+            "it exceeded the bounded file budget. Treat guidance as "
+            "unavailable for this session-start invocation.\n"
+        )
+    elif not contexts:
+        content = (
+            _GUIDANCE_HEADER
+            + "No current agent-worktrees session guidance was available. "
+            "Treat guidance as unavailable for this session-start invocation.\n"
+        )
 
     try:
         copilot_root = home / ".copilot"

@@ -412,6 +412,52 @@ def test_session_start_reuses_registration_with_command_catalog(
     )
 
 
+@pytest.mark.parametrize(
+    ("registration", "catalog", "expected"),
+    (
+        (
+            "",
+            "",
+            "No current agent-worktrees session guidance was available.",
+        ),
+        (
+            "x" * 4096,
+            "",
+            "Current agent-worktrees session guidance was omitted because",
+        ),
+    ),
+)
+def test_session_start_replaces_stale_guidance_on_logical_failure(
+    monkeypatch, tmp_path, registration, catalog, expected
+):
+    monkeypatch.setattr(
+        hook_client,
+        "_registration_context",
+        lambda payload, home: registration,
+    )
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: catalog
+    )
+    target = (
+        tmp_path
+        / ".copilot"
+        / "session-state"
+        / "session-1"
+        / "instructions"
+        / "agent-worktrees"
+        / "session-guidance.instructions.md"
+    )
+    target.parent.mkdir(parents=True)
+    target.write_text("stale guidance", encoding="utf-8")
+
+    assert hook_client._write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    content = target.read_text(encoding="utf-8")
+    assert "stale guidance" not in content
+    assert expected in content
+
+
 def test_session_guidance_declared_inputs_fit_file_budget():
     declaration = json.loads(
         (
