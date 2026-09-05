@@ -18,13 +18,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from plugin_activation import read_json_object
+
 from .procutil import no_window_kwargs
 from .registrar_reconcile import DECLARED_ID_PREFIX
 from .registrations import RegistrationKind
 from .single_instance import SingleInstance
 
 RECEIPT_NAME = ".agent-dispatch-managed-runtime.json"
-RECEIPT_SCHEMA_VERSION = 1
+RECEIPT_SCHEMA_VERSION = 2
 MANAGED_RUNTIME_ROOT_ENV = "AGENT_DISPATCH_MANAGED_RUNTIME_ROOT"
 _LOCK_WAIT_SECONDS = 120.0
 _LOCK_POLL_SECONDS = 0.1
@@ -37,6 +39,10 @@ log = logging.getLogger("agent-dispatch.managed-runtime")
 
 class ManagedRuntimeError(RuntimeError):
     """Managed runtime intent cannot be safely materialized."""
+
+
+class ManagedRuntimeLockTimeout(ManagedRuntimeError):
+    """The shared root is busy; no runtime metadata was inspected or mutated."""
 
 
 Runner = Callable[[Sequence[str], Path | None, Mapping[str, str]], None]
@@ -57,10 +63,7 @@ class ManagedRuntimePolicy:
     @classmethod
     def resolve(cls) -> ManagedRuntimePolicy:
         """Resolve the default policy from the running dispatch installation."""
-        root = Path(
-            os.environ.get(MANAGED_RUNTIME_ROOT_ENV)
-            or (Path.home() / ".agent-dispatch" / "managed-runtimes")
-        )
+        root = managed_runtime_root()
         base_python = Path(
             getattr(sys, "_base_executable", None) or sys.executable
         ).resolve(strict=True)
@@ -116,6 +119,14 @@ class RuntimeMaterializer(Protocol):
     def validate(
         self, registration: Mapping[str, Any], runtimes: tuple[MaterializedRuntime, ...]
     ) -> None: ...
+
+
+def managed_runtime_root() -> Path:
+    """Resolve placement without acquiring a package-manager toolchain."""
+    return Path(
+        os.environ.get(MANAGED_RUNTIME_ROOT_ENV)
+        or (Path.home() / ".agent-dispatch" / "managed-runtimes")
+    )
 
 
 def _subprocess_environment(
@@ -237,21 +248,31 @@ def _authenticode_valid(path: Path) -> bool:
 
 def _is_reparse(path: Path) -> bool:
     try:
-        return bool(path.lstat().st_file_attributes & _WINDOWS_REPARSE_POINT)
-    except (AttributeError, OSError):
-        return False
+        info = path.lstat()
+    except OSError:
+        return True
+    return bool(
+        getattr(info, "st_file_attributes", 0) & _WINDOWS_REPARSE_POINT
+        or getattr(info, "st_reparse_tag", 0)
+    )
 
 
 def _reject_link(path: Path, *, description: str) -> None:
-    if path.is_symlink() or _is_reparse(path):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(info.st_mode) or (
+        getattr(info, "st_file_attributes", 0) & _WINDOWS_REPARSE_POINT
+        or getattr(info, "st_reparse_tag", 0)
+    ):
         raise ManagedRuntimeError(f"{description} must not be a link or reparse point")
 
 
 def _ensure_safe_root(root: Path) -> Path:
     root = root.expanduser().absolute()
     for ancestor in (root, *root.parents):
-        if ancestor.exists():
-            _reject_link(ancestor, description="managed runtime root ancestor")
+        _reject_link(ancestor, description="managed runtime root ancestor")
     existing = root
     missing: list[Path] = []
     while not existing.exists():
@@ -273,6 +294,10 @@ def _assert_safe_descendant(root: Path, path: Path, *, description: str) -> None
         relative = path.relative_to(root)
     except ValueError as exc:
         raise ManagedRuntimeError(f"{description} escapes the managed runtime root") from exc
+    if ".." in relative.parts:
+        raise ManagedRuntimeError(f"{description} escapes the managed runtime root")
+    for ancestor in root.parents:
+        _reject_link(ancestor, description=description)
     current = root
     _reject_link(current, description=description)
     for component in relative.parts:
@@ -315,16 +340,24 @@ class _RootLock:
         sleep: Callable[[float], None] = time.sleep,
         timeout: float = _LOCK_WAIT_SECONDS,
     ):
+        self._root = root
         self._lock = SingleInstance(root / ".materialize.lock")
         self._clock = clock
         self._sleep = sleep
         self._timeout = timeout
 
     def __enter__(self) -> _RootLock:
+        _assert_safe_descendant(
+            self._root, self._lock.lock_path, description="managed runtime root lock"
+        )
+        if self._lock.lock_path.exists() and (
+            not self._lock.lock_path.is_file() or self._lock.lock_path.stat().st_nlink != 1
+        ):
+            raise ManagedRuntimeError("managed runtime root lock must be an unlinked regular file")
         deadline = self._clock() + self._timeout
         while not self._lock.acquire():
             if self._clock() >= deadline:
-                raise ManagedRuntimeError(
+                raise ManagedRuntimeLockTimeout(
                     "timed out waiting for the managed runtime root lock"
                 )
             self._sleep(_LOCK_POLL_SECONDS)
@@ -339,6 +372,53 @@ def _canonical_digest(value: object) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _plugin_identity(authority: Mapping[str, Any]) -> str:
+    return _canonical_digest(
+        {
+            "owner": authority["plugin_owner"],
+            "root": authority["plugin_root"],
+            "source": authority["plugin_source_path"],
+        }
+    )[:16]
+
+
+def _cell_key(receipt: Mapping[str, Any]) -> str:
+    identity = {
+        key: receipt[key]
+        for key in (
+            "name", "version", "profile", "content_digest", "authority_digest", "toolchain_digest"
+        )
+    }
+    if receipt["schema_version"] == RECEIPT_SCHEMA_VERSION:
+        identity["schema_version"] = RECEIPT_SCHEMA_VERSION
+    return _canonical_digest(identity)[:40]
+
+
+def _read_metadata(root: Path, path: Path) -> dict[str, Any]:
+    """Read mandatory, ordinary metadata without accepting duplicate keys or races."""
+    _assert_safe_descendant(root, path, description="managed runtime metadata")
+    try:
+        before = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > 4 * 1024 * 1024:
+            raise ManagedRuntimeError("managed runtime metadata must be a bounded regular file")
+        digest = _hash_regular_file(path, description="managed runtime metadata")
+        _, value = read_json_object(path)
+        after = path.stat(follow_symlinks=False)
+        if (
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+            or digest != _hash_regular_file(path, description="managed runtime metadata")
+        ):
+            raise ManagedRuntimeError("managed runtime metadata changed while being read")
+        return value
+    except (OSError, ValueError) as exc:
+        raise ManagedRuntimeError(f"managed runtime metadata is unavailable or invalid: {path}") from exc
+
+
+def _walk_error(error: OSError) -> None:
+    raise error
 
 
 def _python_path(environment: Path, *, windows: bool) -> Path:
@@ -692,7 +772,9 @@ def _verify_windows_runtime_trust(
 
 def _tree_digest(root: Path, *, excluded: frozenset[str] = frozenset()) -> str:
     digest = hashlib.sha256()
-    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+    for current, directories, files in os.walk(
+        root, topdown=True, followlinks=False, onerror=_walk_error
+    ):
         current_path = Path(current)
         _reject_link(current_path, description="managed runtime cell directory")
         directories.sort()
@@ -823,12 +905,7 @@ class ManagedRuntimeMaterializer:
         python = _python_path(cell / "runtime", windows=policy.windows)
         _assert_safe_descendant(root, receipt_path, description="managed runtime receipt")
         _assert_safe_descendant(root, python, description="managed runtime Python")
-        try:
-            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            return None
-        if not isinstance(receipt, dict):
-            return None
+        receipt = _read_metadata(root, receipt_path)
         recorded_cell_digest = receipt.pop("cell_digest", None)
         if (
             receipt != expected
@@ -877,6 +954,7 @@ class ManagedRuntimeMaterializer:
         root: Path,
         plugin_root: Path,
         plugin_identity: str,
+        authority: Mapping[str, Any],
         authority_digest: str,
         runtime: Mapping[str, Any],
         policy: ManagedRuntimePolicy,
@@ -914,8 +992,9 @@ class ManagedRuntimeMaterializer:
                     "snapshot": snapshot,
                 }
             )
-            cell_key = _canonical_digest(
+            cell_key = _cell_key(
                 {
+                    "schema_version": RECEIPT_SCHEMA_VERSION,
                     "name": runtime["name"],
                     "version": runtime["version"],
                     "profile": runtime["profile"],
@@ -923,7 +1002,7 @@ class ManagedRuntimeMaterializer:
                     "authority_digest": authority_digest,
                     "toolchain_digest": toolchain_digest,
                 }
-            )[:40]
+            )
             cell = (
                 root
                 / "cells"
@@ -945,16 +1024,18 @@ class ManagedRuntimeMaterializer:
                     else []
                 ),
                 "snapshot": snapshot,
+                "ownership": {
+                    "root": str(root),
+                    "cell": str(cell),
+                    "authority": dict(authority),
+                    "windows": policy.windows,
+                },
             }
             if cell.exists():
-                try:
-                    ready = self._ready(cell, expected, root=root, policy=policy)
-                except ManagedRuntimeError:
-                    _quarantine_cell(root, cell)
-                else:
-                    if ready is not None:
-                        return ready
-                    _quarantine_cell(root, cell)
+                ready = self._ready(cell, expected, root=root, policy=policy)
+                if ready is not None:
+                    return ready
+                raise ManagedRuntimeError("existing managed runtime cell is invalid; preserving it")
 
             runtime_root = staging / "runtime"
             if policy.windows:
@@ -1087,13 +1168,7 @@ class ManagedRuntimeMaterializer:
         if not policy.base_python.is_file() or not policy.package_manager.is_file():
             raise ManagedRuntimeError("dispatch managed runtime toolchain is unavailable")
         authority_digest = _canonical_digest(authority)
-        plugin_identity = _canonical_digest(
-            {
-                "owner": authority["plugin_owner"],
-                "root": authority["plugin_root"],
-                "source": authority["plugin_source_path"],
-            }
-        )[:16]
+        plugin_identity = _plugin_identity(authority)
         managed = authority["managed_runtime"]
         with self.lock_factory(root):
             toolchain_digest = self._toolchain_digest(policy)
@@ -1102,6 +1177,7 @@ class ManagedRuntimeMaterializer:
                     root=root,
                     plugin_root=plugin_root,
                     plugin_identity=plugin_identity,
+                    authority=authority,
                     authority_digest=authority_digest,
                     runtime=runtime,
                     policy=policy,
@@ -1126,18 +1202,17 @@ class ManagedRuntimeMaterializer:
         if len(runtimes) != len(declared):
             raise ManagedRuntimeError("selected managed runtime set is incomplete")
         authority_digest = _canonical_digest(authority)
-        plugin_identity = _canonical_digest(
-            {
-                "owner": authority["plugin_owner"],
-                "root": authority["plugin_root"],
-                "source": authority["plugin_source_path"],
-            }
-        )[:16]
+        plugin_identity = _plugin_identity(authority)
         with self.lock_factory(root):
             toolchain_digest = self._toolchain_digest(policy)
             for runtime, declaration in zip(runtimes, declared):
-                cell_key = _canonical_digest(
+                expected = _read_metadata(root, runtime.receipt)
+                schema = expected.get("schema_version")
+                if type(schema) is not int or schema not in (1, RECEIPT_SCHEMA_VERSION):
+                    raise ManagedRuntimeError("selected managed runtime receipt version is invalid")
+                cell_key = _cell_key(
                     {
+                        "schema_version": schema,
                         "name": declaration["name"],
                         "version": declaration["version"],
                         "profile": declaration["profile"],
@@ -1145,7 +1220,7 @@ class ManagedRuntimeMaterializer:
                         "authority_digest": authority_digest,
                         "toolchain_digest": toolchain_digest,
                     }
-                )[:40]
+                )
                 cell = root / "cells" / plugin_identity / cell_key
                 if (
                     runtime.cell != cell
@@ -1153,18 +1228,16 @@ class ManagedRuntimeMaterializer:
                     or runtime.python != _python_path(cell / "runtime", windows=policy.windows)
                 ):
                     raise ManagedRuntimeError("selected managed runtime location is inconsistent")
-                _assert_safe_descendant(root, runtime.receipt, description="managed runtime receipt")
-                try:
-                    expected = json.loads(runtime.receipt.read_text(encoding="utf-8"))
-                except (OSError, ValueError) as exc:
-                    raise ManagedRuntimeError("selected managed runtime receipt is unavailable") from exc
-                if not isinstance(expected, dict):
-                    raise ManagedRuntimeError("selected managed runtime receipt is invalid")
                 expected.pop("cell_digest", None)
+                if schema == RECEIPT_SCHEMA_VERSION and expected.get("ownership") != {
+                    "root": str(root), "cell": str(cell), "authority": authority,
+                    "windows": policy.windows,
+                }:
+                    raise ManagedRuntimeError("selected managed runtime ownership is inconsistent")
                 if any(
                     expected.get(key) != value
                     for key, value in {
-                        "schema_version": RECEIPT_SCHEMA_VERSION,
+                        "schema_version": schema,
                         "name": declaration["name"],
                         "version": declaration["version"],
                         "profile": declaration["profile"],

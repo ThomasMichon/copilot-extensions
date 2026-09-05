@@ -17,6 +17,7 @@ from agent_dispatch.managed_runtime import (
     ManagedRuntimeError,
     ManagedRuntimeMaterializer,
     ManagedRuntimePolicy,
+    _is_reparse,
     _python_path,
     _subprocess_environment,
 )
@@ -153,6 +154,18 @@ def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
         environment={"PATH": str(tools), "PYTHONNOUSERSITE": "1"},
         base_runtime_paths=runtime_paths,
     )
+
+
+def test_reparse_probe_fails_closed_when_metadata_is_unavailable(tmp_path, monkeypatch):
+    path = tmp_path / "python.exe"
+    path.write_bytes(b"python")
+
+    def unavailable(_path):
+        raise OSError("metadata unavailable")
+
+    monkeypatch.setattr(Path, "lstat", unavailable)
+
+    assert _is_reparse(path)
 
 
 def test_materializes_snapshot_and_reuses_valid_cell(tmp_path):
@@ -348,7 +361,7 @@ def test_import_validation_disables_bytecode_writes(tmp_path):
     assert all("-B" in args for args in validation_calls)
 
 
-def test_incomplete_existing_cell_is_quarantined_and_rebuilt(tmp_path):
+def test_incomplete_existing_cell_is_preserved_without_rebuilding(tmp_path):
     plugin = _project(tmp_path)
     runner = FakeRunner()
     policy = _policy(tmp_path)
@@ -356,11 +369,11 @@ def test_incomplete_existing_cell_is_quarantined_and_rebuilt(tmp_path):
     published = materializer.materialize(_registration(plugin))[0]
     published.receipt.unlink()
 
-    rebuilt = materializer.materialize(_registration(plugin))[0]
-
-    assert rebuilt.cell == published.cell
-    assert runner.install_count == 2
-    assert len(list((policy.root / ".failed").iterdir())) == 1
+    with pytest.raises(ManagedRuntimeError, match="metadata"):
+        materializer.materialize(_registration(plugin))
+    assert published.cell.is_dir()
+    assert not published.receipt.exists()
+    assert runner.install_count == 1
 
 
 def test_failed_post_publish_validation_does_not_poison_cell_key(tmp_path):
@@ -444,7 +457,7 @@ def test_rejects_linked_publication_descendant(tmp_path):
     assert list(external.iterdir()) == []
 
 
-def test_quarantines_linked_python_inside_reused_cell(tmp_path):
+def test_preserves_linked_python_inside_reused_cell(tmp_path):
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
@@ -457,24 +470,22 @@ def test_quarantines_linked_python_inside_reused_cell(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("file links are unavailable")
 
-    rebuilt = materializer.materialize(_registration(plugin))[0]
+    with pytest.raises(ManagedRuntimeError, match="link or reparse"):
+        materializer.materialize(_registration(plugin))
+    assert published.python.is_symlink()
+    assert external.read_bytes() == b"python"
 
-    assert rebuilt.python.is_file()
-    assert not rebuilt.python.is_symlink()
-    assert len(list((policy.root / ".failed").iterdir())) == 1
 
-
-def test_quarantines_modified_regular_file_inside_reused_cell(tmp_path):
+def test_preserves_modified_regular_file_inside_reused_cell(tmp_path):
     plugin = _project(tmp_path)
     policy = _policy(tmp_path)
     materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
     published = materializer.materialize(_registration(plugin))[0]
     published.python.write_bytes(b"modified")
 
-    rebuilt = materializer.materialize(_registration(plugin))[0]
-
-    assert rebuilt.python.read_bytes() == b"python"
-    assert len(list((policy.root / ".failed").iterdir())) == 1
+    with pytest.raises(ManagedRuntimeError, match="preserving"):
+        materializer.materialize(_registration(plugin))
+    assert published.python.read_bytes() == b"modified"
 
 
 def test_cell_layout_stays_shallow_for_windows_paths(tmp_path):

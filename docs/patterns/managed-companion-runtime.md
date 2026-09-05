@@ -98,6 +98,13 @@ a companion environment, stop or replace a process, publish a current pointer,
 lease a generation, or delete a cell. Live selection belongs to the supervisor's
 separate cutover path.
 
+Version-2 cell receipts bind the complete declaration authority, physical root,
+exact cell path, platform, content identity, and toolchain identity. Their
+version participates in the cell key, so introducing retention never overwrites
+a version-1 generation. Existing invalid cells are preserved in place rather
+than quarantined or rebuilt beneath a potentially live selection. Version-1
+cells remain valid recovery inputs but are never automatically reclaimed.
+
 ## Safe cutover
 
 The supervisor captures one immutable launch snapshot containing complete
@@ -141,11 +148,100 @@ Lifecycle adapters remain attributed plugin commands; their referenced payload
 files must remain available for those commands to execute. Runtime package inputs
 and selected interpreters, by contrast, belong to the validated immutable cells.
 
+## Identity-bound retention
+
+The physical root contains a shared `.retention` registry, not a private
+supervisor-environment cache. Its leases bind registration and declaration
+authority, launch and command digests, exact cell paths and receipt hashes, and
+the holder's OS PID authority, PID, and process-start token. Process-start tokens
+come from the existing companion receipt implementation. Windows identifies the
+machine's PID authority; Linux additionally identifies the boot and PID
+namespace. Missing authority is unavailable, not an invitation to infer liveness
+from a PID or a configured host alias.
+
+Before stopping a predecessor, the supervisor leases the validated replacement.
+Before a new child's containment gate opens, its process receipt and matching
+runtime lease are durable. A surviving child therefore remains protected even
+if its supervisor exits. Releasing a preparation lease addresses only that exact
+supervisor/snapshot identity; unrelated corrupt records cannot tear down a
+healthy replacement or its rollback. A failed redundant-pin release is logged
+and retains the extra pin rather than retiring an already protected process.
+
+Each supervisor environment also has a durable selected-generation pin and one
+prior-ready rollback pin. Root pins normally precede last-ready selection
+publication. After readiness, a root-lock timeout or pin-write I/O failure is
+logged without retiring the healthy process: its gated receipt and process lease
+already protect the cells, and last-ready publication still records the exact
+ready snapshot for recovery. Later recovery republishes the redundant root pin.
+Unsafe metadata errors and failures to establish the pre-gate process lease
+remain fatal. External selection withdrawal and root-pin removal share the root
+lock. A crash between publications conservatively protects both generations. Cleanup checks
+the environment's exact process and last-ready receipts as well: an interrupted
+first-launch receipt remains discoverable and protected until recovery retires
+it or publishes selection. Every stale lease retained for an interrupted scope
+also protects its own referenced cells, not just the cells in the current process
+receipt. Neither selected nor rollback pins expire when the supervisor process
+dies. A validated unmanaged successor does not inherit managed cells or prevent
+unrelated retention.
+
+The supervisor schedules cleanup on its runtime executor at most once every
+five minutes. Cleanup, lease/pin mutation, validation, and materialization use
+the same crash-safe root-wide interprocess lock. Cleanup preflights the complete
+root tree and every lease, selection, owner, and cell before deleting anything.
+It rejects links, junctions, reparse points, special files, duplicate/malformed
+metadata, receipt/content/path mismatches, and ambiguous ownership. An otherwise
+identity-valid stale lease with a dangling or malformed reference is instead
+preserved and logged: its identifiable owners are excluded from reclamation,
+or all cells are preserved if the reference is opaque. The same exclusion applies
+when a process or last-ready launch receipt references a missing, quarantined,
+or invalid cell: cleanup logs the failure and treats that scope as interrupted,
+retaining its discovery leases even when a root selection pin exists. Excluded
+owners remain untouched without requiring valid cell metadata; unrelated owners
+still undergo full validation and reclamation. Structural filesystem and traversal
+errors remain errors, never an empty inventory. Only exact version-2 cells beneath
+`cells/<owner>/<generation>` can be deleted; legacy cells, failed builds, and
+staging are not cleanup targets.
+
+Deletion first atomically moves each revalidated eligible cell out of `cells/`
+into a unique, root-contained `.deleting/` destination under the same root lock.
+Only that unpublished tree is recursively removed, with three bounded attempts
+for filesystem errors and link/reparse validation before each attempt. An
+interruption or persistent antivirus lock can leave deletion staging residue,
+but never a partially deleted published cell. Cleanup ignores existing residue
+as a reclamation candidate and preserves it without receipt/content validation;
+the root-wide structural safety preflight still rejects links, reparse points,
+and special files there. Failed moves are logged and counted as preserved
+published cells while unrelated eligible cells continue. `CleanupResult.deleted`
+reports cells removed from the published namespace, not guaranteed disk-space
+recovery; exhausted recursive deletion attempts log the retained staging path.
+
+A lease is stale only when its own PID authority can prove that the recorded
+process and process group are absent. A matching live identity protects the
+generation. PID reuse, inaccessible identity, and leaderless live groups stop
+cleanup without deleting data; a foreign PID authority always retains its
+leases, regardless of what local PID inspection reports. There is no TTL-based
+liveness or cross-environment lease takeover.
+
+After these protections, the default policy retains the two newest unreferenced
+generations per attributed owner/runtime/profile and every cell younger than
+24 hours (using its immutable receipt's modification time). Supervisor-owned
+policy bounds count to 0-100 and minimum age to 0-365 days; plugins cannot set
+either. Protected generations do not consume the unreferenced allowance. This
+is a bounded reclamation policy, not a disk quota: live/selected/rollback,
+foreign, legacy, or ambiguous data may exceed it indefinitely. Conservative
+retention is preferable to destroying an unreconstructable live runtime.
+
+Receipts prevent accidental cross-environment adoption and stale-generation
+cleanup; they are not cryptographic attestation against a malicious process
+running as the same filesystem owner. Lifecycle writers must honor the root
+lock. A foreign OS authority or malformed retained artifact requires explicit
+ownership repair rather than an automated destructive fallback.
+
 ## Increment boundary
 
 Unmanaged plugin companions retain their existing lifecycle. This increment
-adds no generation leases, retention/garbage collection, specific-plugin
-integration, independent engine lifecycle, or multi-host failover.
+adds generic generation leases and bounded retention, but no specific-plugin
+integration, independent engine lifecycle, host placement, or multi-host failover.
 
 ## See Also
 
