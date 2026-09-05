@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "budget-guidance"
-version = "0.1.0-dev8"
+version = "0.1.0-dev9"
 description = "Provider-neutral current AI usage budget posture."
 readme = "README.md"
 license = "MIT"

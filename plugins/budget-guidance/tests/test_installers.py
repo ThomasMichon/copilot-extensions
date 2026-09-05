@@ -20,6 +20,16 @@ VERSION = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
 pytestmark = pytest.mark.guard
 
 
+def test_installers_recommend_supported_version_flag():
+    posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "Try: budget-guidance --version" in posix
+    assert "Try: budget-guidance --version" in powershell
+    assert "Try: budget-guidance version" not in posix
+    assert "Try: budget-guidance version" not in powershell
+
+
 def _fake_uv_environment(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

@@ -613,5 +613,5 @@ esac
 
 echo ''
 echo '=== budget-guidance install complete ==='
-echo '  Try: budget-guidance version'
+echo '  Try: budget-guidance --version'
 exit 0

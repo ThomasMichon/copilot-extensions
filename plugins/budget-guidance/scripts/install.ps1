@@ -882,5 +882,5 @@ if ($pathDirs -contains $LocalBin) {
 
 Write-Host ''
 Write-Host '=== budget-guidance install complete ===' -ForegroundColor Cyan
-Write-Host '  Try: budget-guidance version' -ForegroundColor DarkGray
+Write-Host '  Try: budget-guidance --version' -ForegroundColor DarkGray
 exit 0
