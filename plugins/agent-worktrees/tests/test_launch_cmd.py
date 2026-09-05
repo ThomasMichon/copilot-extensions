@@ -559,10 +559,67 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "$env:PATH" in text
     assert "& pwsh.exe -NoProfile -NoLogo -File $SetupHook" in text
     assert "& $overrideCmd.Source @CopilotArgs" in text
-    assert "copilot @CopilotArgs" in text
+    assert "Get-Command copilot -CommandType Application -All" in text
+    assert "$source -notmatch '\\\\WindowsApps\\\\'" in text
+    assert "& $copilotCmd.Source @CopilotArgs" in text
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PATH resolution regression")
+def test_default_setup_skips_windowsapps_shadow_candidate(tmp_path):
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+
+    shadow_dir = tmp_path / "WindowsApps"
+    concrete_dir = tmp_path / "WinGet" / "Links"
+    shadow_dir.mkdir()
+    concrete_dir.mkdir(parents=True)
+    marker = tmp_path / "launched"
+    shadow_marker = tmp_path / "shadow-launched"
+
+    (shadow_dir / "copilot.cmd").write_text(
+        "@echo off\r\n"
+        "> \"%COPILOT_SHADOW_MARKER%\" echo shadow\r\n"
+        "exit /b 91\r\n",
+        encoding="utf-8",
+    )
+    (concrete_dir / "copilot.cmd").write_text(
+        "@echo off\r\n"
+        "> \"%COPILOT_LAUNCH_MARKER%\" echo launched\r\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join((str(shadow_dir), str(concrete_dir)))
+    env["HOSTNAME"] = "test-host"
+    env["HOME"] = str(tmp_path / "home")
+    env["USERPROFILE"] = str(tmp_path / "home")
+    env["COPILOT_LAUNCH_MARKER"] = str(marker)
+    env["COPILOT_SHADOW_MARKER"] = str(shadow_marker)
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+
+    proc = subprocess.run(
+        [
+            shell,
+            "-NoProfile",
+            "-NoLogo",
+            "-File",
+            str(scripts / "default-setup.ps1"),
+            "-Machine",
+            "test",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert marker.read_text(encoding="utf-8").strip() == "launched"
+    assert not shadow_marker.exists()
 
 
 def test_default_setup_launches_absolute_copilot_with_empty_path(

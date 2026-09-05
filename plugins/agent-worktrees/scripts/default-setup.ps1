@@ -213,7 +213,26 @@ Write-Host "  Path:     $PWD"
 Write-Host ''
 
 # ── Launch Copilot ───────────────────────────────────────────────────────
-$copilotCmd = Get-Command copilot -ErrorAction SilentlyContinue
+function Resolve-CopilotApplication {
+    <# A broken Windows App Execution Alias can shadow a concrete CLI later on
+       PATH. Prefer an existing non-WindowsApps application, but retain the
+       first result so a sole working App Execution Alias remains supported. #>
+    $commands = @(Get-Command copilot -CommandType Application -All `
+        -ErrorAction SilentlyContinue)
+    foreach ($command in $commands) {
+        $source = [string]$command.Source
+        if (
+            $source -and
+            $source -notmatch '\\WindowsApps\\' -and
+            (Test-Path -LiteralPath $source -PathType Leaf)
+        ) {
+            return $command
+        }
+    }
+    return $commands | Select-Object -First 1
+}
+
+$copilotCmd = Resolve-CopilotApplication
 if ($CopilotPath) {
     $overrideCmd = Get-Command $CopilotPath -ErrorAction SilentlyContinue
     if (-not $overrideCmd) {
@@ -230,7 +249,7 @@ if ($CopilotPath) {
         exit 1
     }
 } else {
-    copilot @CopilotArgs
+    & $copilotCmd.Source @CopilotArgs
 }
 
 exit $LASTEXITCODE
