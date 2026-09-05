@@ -46,7 +46,7 @@ def test_engine_command_targets_durable_venv(tmp_path):
     assert str(tmp_path) in cmd[0]
 
 
-def test_engine_command_keeps_console_interpreter_for_no_window_spawn(
+def test_engine_command_prefers_pythonw_to_avoid_console_reexec_window(
     monkeypatch, tmp_path
 ):
     monkeypatch.setattr(daemon.os, "name", "nt")
@@ -54,6 +54,23 @@ def test_engine_command_keeps_console_interpreter_for_no_window_spawn(
     scripts.mkdir(parents=True)
     (scripts / "python.exe").write_bytes(b"")
     (scripts / "pythonw.exe").write_bytes(b"")
+
+    cmd = daemon.engine_command(tmp_path)
+
+    # The console python.exe launcher re-execs the base interpreter as a
+    # visible-console child even under CREATE_NO_WINDOW; pythonw.exe never
+    # allocates a console at all, and this single long-lived server has no
+    # recurring console descendants that would need a console interpreter.
+    assert cmd[0] == str(scripts / "pythonw.exe")
+
+
+def test_engine_command_falls_back_to_console_python_without_pythonw_sibling(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(daemon.os, "name", "nt")
+    scripts = tmp_path / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "python.exe").write_bytes(b"")
 
     cmd = daemon.engine_command(tmp_path)
 
