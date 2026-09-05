@@ -2,12 +2,12 @@
 
 if [[ "${1:-}" == "--recovery" ]] ||
     [[ "${AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED:-}" == "1" ]]; then
-    return 0
+    return 0 2>/dev/null || exit 0
 fi
 
 if ! command -v agent-machines >/dev/null 2>&1; then
     export AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED=1
-    return 0
+    return 0 2>/dev/null || exit 0
 fi
 
 _aw_machine_settings_output=""
@@ -20,7 +20,7 @@ if _aw_machine_settings_output="$(
 )"; then
     export AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED=1
     unset _aw_machine_settings_output
-    return 0
+    return 0 2>/dev/null || exit 0
 else
     _aw_machine_settings_rc=$?
 fi
@@ -31,4 +31,4 @@ if [[ -n "$_aw_machine_settings_output" ]]; then
     printf '%s\n' "$_aw_machine_settings_output" >&2
 fi
 unset _aw_machine_settings_output
-return "$_aw_machine_settings_rc"
+return "$_aw_machine_settings_rc" 2>/dev/null || exit "$_aw_machine_settings_rc"

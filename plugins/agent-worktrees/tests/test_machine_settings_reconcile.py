@@ -320,6 +320,27 @@ def test_posix_reconciler_is_bounded_idempotent_and_recovery_safe(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell behavior is non-Windows")
+def test_posix_reconciler_can_execute_directly(tmp_path):
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash is unavailable")
+
+    helper = SCRIPTS / "reconcile-machine-settings.sh"
+    env = os.environ.copy()
+    env["PATH"] = str(tmp_path)
+    result = subprocess.run(
+        [bash, str(helper)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "can only" not in result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell behavior is non-Windows")
 def test_posix_launch_wrapper_reconciles_before_child(tmp_path):
     bash = shutil.which("bash")
     if not bash:
