@@ -80,7 +80,9 @@ async def test_warmpool_reuses_one_session():
     assert pool.size == 0
 
 
-async def test_warmpool_cli_bridge_recovers_from_transient_auth_failure(tmp_path):
+async def test_warmpool_cli_bridge_recovers_from_transient_auth_failure(
+    tmp_path, monkeypatch,
+):
     """A transient CLI-bridge auth failure must not permanently poison the
     warm-pooled session.
 
@@ -94,6 +96,9 @@ async def test_warmpool_cli_bridge_recovers_from_transient_auth_failure(tmp_path
     the second ``pool.call`` against the same warm session must receive the
     token, not the poisoned/ambient environment from the first failure.
     """
+    # Hermetic: the first call's assertion depends on MY_TOKEN being absent
+    # from the base environment CliTransport merges in.
+    monkeypatch.delenv("MY_TOKEN", raising=False)
     counter = tmp_path / "invocations"
     auth_script = tmp_path / "mint_token.py"
     auth_script.write_text(
