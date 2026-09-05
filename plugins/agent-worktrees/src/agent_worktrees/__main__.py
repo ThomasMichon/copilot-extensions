@@ -2051,6 +2051,37 @@ def _emit_parent_context_hint(record, *, to_stderr: bool = False) -> None:
         print(msg)
 
 
+def _wait_for_handoff_candidate(
+    record_path: Path,
+    token: str,
+    pane_id: str | None,
+    *,
+    timeout: float = 30.0,
+) -> tuple[str | None, str]:
+    """Wait until sessionStart associates the exact handoff token."""
+    deadline = time.monotonic() + timeout
+    mux_bin = sessions._mux_bin()
+    while time.monotonic() < deadline:
+        try:
+            candidate_record = tracking.load_record(record_path)
+            handoff = next(
+                (
+                    item
+                    for item in candidate_record.handoffs
+                    if item.token == token
+                ),
+                None,
+            )
+        except (OSError, ValueError):
+            handoff = None
+        if handoff is not None and handoff.candidate:
+            return handoff.candidate, "session-associated"
+        if pane_id and not sessions._mux_pane_alive(pane_id, mux_bin):
+            return None, "pane-exited-before-session"
+        time.sleep(0.05)
+    return None, "session-association-timeout"
+
+
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     """Live-cutover handoff: spawn a seeded successor Copilot or retire a pane.
 
@@ -2272,6 +2303,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
 
     mux_session = None
     record = None
+    record_path = None
     if anchor_mode:
         if config is None:
             try:
@@ -2298,10 +2330,10 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
                 config = cfg.load_config()
             except Exception as e:
                 return _json_error(str(e))
-        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-        if not yaml_path.exists():
+        record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if not record_path.exists():
             return _json_error(f"Worktree not found: {wt_id}")
-        record = tracking.load_record(yaml_path)
+        record = tracking.load_record(record_path)
         work_dir = record.worktree_path
 
     backend_error = _unsupported_hosted_launch(
@@ -2352,8 +2384,8 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         predecessor_pid = predecessor_binding.get("copilot_pid")
         predecessor_start = predecessor_binding.get("copilot_start_time")
         if predecessor_pid and predecessor_start:
-            predecessor_copilot_path = procs.process_executable_path(
-                predecessor_pid
+            predecessor_copilot_path = procs.copilot_relaunch_path(
+                procs.process_executable_path(predecessor_pid)
             )
             if (
                 not predecessor_copilot_path
@@ -2436,6 +2468,31 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         return 4
 
     new_pane = result.get("new_pane")
+    candidate_session = None
+    if handoff_token and record_path is not None:
+        candidate_session, candidate_status = _wait_for_handoff_candidate(
+            record_path,
+            handoff_token,
+            new_pane,
+        )
+        if not candidate_session:
+            process_tree = sessions._mux_pane_process_tree(new_pane)
+            cleanup = sessions._retire_failed_successor(
+                new_pane,
+                process_tree,
+            )
+            failure = dict(result)
+            failure.update({
+                "ok": False,
+                "candidate_status": candidate_status,
+                "cleanup": cleanup,
+                "error": (
+                    "successor did not create a token-associated Copilot "
+                    f"session (status: {candidate_status})"
+                ),
+            })
+            _json_output(failure)
+            return 4
     activity.log_event(
         "handoff_cutover_spawn",
         worktree_id=wt_id,
@@ -2445,6 +2502,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         new_pane=new_pane,
         seeded=bool(result.get("prompt_received")),
         seed_ready=bool(result.get("prompt_received")),
+        candidate_session=candidate_session,
         method="mux_new_window_interactive_argv",
     )
 
@@ -2458,6 +2516,8 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         "seed_ready": bool(result.get("prompt_received")),
         "seed_method": "interactive-argv",
     }
+    if candidate_session:
+        response["candidate_session"] = candidate_session
     if selection.assignment is not None:
         response["profile_assignment"] = profile_assignment.metadata(
             selection.assignment
