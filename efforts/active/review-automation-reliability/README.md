@@ -170,7 +170,7 @@ re-queuing (or re-superseding) the same blocked issue.
 
 ### Phase 7 - Harden trusted-tool/credential resolution against environment drift
 
-Discovered live (2026-09-05) operating the Intelligence Dampener reviewer --
+Discovered live (2026-09-05) operating a downstream reviewer deployment --
 the current, most heavily-exercised consumer of this vision's reviewer-loop
 shape -- across a multi-hour production incident on a single pull request and
 several related ones. Six distinct failures, none
@@ -197,7 +197,7 @@ rendering a verdict:
    across unrelated causes.
 2. A checked-out trusted script's executable bit is not guaranteed to
    survive every checkout/worktree-provisioning path (observed: a mode-only
-   git commit landed correctly on `master`, but every already-materialized
+   git commit landed correctly on the default branch, but every already-materialized
    worktree checkout of the reviewer's trusted-tool directory still carried
    the old `644` mode, because Git only applies a tracked mode change on the
    *next* checkout of that path, not retroactively to an already-checked-out
@@ -226,7 +226,7 @@ rendering a verdict:
 4. **This is a direct violation of this vision's own `bounded-verdict-reliability`
    feature, not merely an implementation gap.** The feature states every
    attempt -- the initial try and every retry -- counts toward the rolling
-   attempt budget. The Intelligence Dampener consumer's idle-round evaluator
+   attempt budget. The downstream consumer's idle-round evaluator
    had two early-return paths (a failed session-suspend, an incomplete
    verdict-payload read) that returned a bare retry *without* charging the
    attempt budget at all, so a structural failure (like #1 above) could
@@ -310,10 +310,10 @@ scenarios.
 
 ## Journal
 
-### 2026-09-05 - Phase 7: six live environment-drift failures from Intelligence Dampener
+### 2026-09-05 - Phase 7: six live environment-drift failures from a downstream reviewer deployment
 
 - Added Phase 7 after a multi-hour production incident
-  (Intelligence Dampener reviewer, its production deployment) surfaced six
+  (a downstream reviewer deployment, its production instance) surfaced six
   distinct trusted-tool/credential/pool failures, none in the review logic
   itself: ambient-`PATH`-dependent shebang resolution through a long-lived
   daemon's inherited environment, a checked-out executable bit not
@@ -328,7 +328,7 @@ scenarios.
   two branches did not); the rest are below-altitude implementation
   hardening, matching Phase 5's classification pattern.
 - Four of the six failures are already fixed and merged in the
-  Intelligence Dampener consumer's own repository and in
+  downstream consumer's own repository and in
   `agent-mcp` itself (dev95,
   ThomasMichon/copilot-extensions#2135); this phase captures the generic
   principle each fix implies for any future generalized reviewer recipe,
