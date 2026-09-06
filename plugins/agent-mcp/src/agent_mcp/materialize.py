@@ -218,10 +218,10 @@ def bridge_source_digest(cfg: BridgeConfig) -> str:
         declared_source = tool.source
         paths.add(declared_source.resolve())
         command = Path(tool.command).expanduser()
-        if not command.is_absolute():
+        if not command.is_absolute() and command.parent.parts:
             command = (declared_source.parent / command).resolve()
-        if command.is_file():
-            paths.add(command)
+            if command.is_file():
+                paths.add(command)
     for path in sorted(paths, key=str):
         stat_result = path.stat()
         digest.update(os.path.relpath(path, base_dir).encode("utf-8"))

@@ -117,7 +117,9 @@ def test_bridge_source_digest_tracks_effective_config() -> None:
 def test_bridge_source_digest_tracks_cli_sidecar_and_helper(
     tmp_path: Path,
 ) -> None:
-    helper = tmp_path / "tool.py"
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    helper = helpers / "tool.py"
     helper.write_text("print('one')\n", encoding="utf-8")
     sidecar = tmp_path / "tool.md"
     sidecar.write_text(
@@ -125,7 +127,7 @@ def test_bridge_source_digest_tracks_cli_sidecar_and_helper(
 mcp:
   name: example
   invoke:
-    command: tool.py
+    command: helpers/tool.py
 ---
 """,
         encoding="utf-8",
@@ -148,6 +150,40 @@ mcp:
     assert bridge_source_digest(cfg) != updated
 
 
+@pytest.mark.parametrize("command_kind", ["bare", "absolute"])
+def test_bridge_source_digest_does_not_hash_path_lookup_or_absolute_binary(
+    tmp_path: Path,
+    command_kind: str,
+) -> None:
+    helper = tmp_path / "tool.py"
+    helper.write_text("print('one')\n", encoding="utf-8")
+    command = "tool.py" if command_kind == "bare" else str(helper)
+    sidecar = tmp_path / "tool.md"
+    sidecar.write_text(
+        f"""---
+mcp:
+  name: example
+  invoke:
+    command: {command}
+---
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "bridge.yaml"
+    config.write_text(
+        "server:\n  type: cli\n  tools_from: [tool.md]\n",
+        encoding="utf-8",
+    )
+    cfg = parse_config(
+        {"server": {"type": "cli", "tools_from": ["tool.md"]}},
+        source_path=config,
+    )
+
+    original = bridge_source_digest(cfg)
+    helper.write_text("print('two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg) == original
+
+
 @pytest.mark.skipif(os.name == "nt", reason="symlink semantics are POSIX-specific")
 def test_bridge_source_digest_resolves_helper_from_declared_symlink(
     tmp_path: Path,
@@ -156,16 +192,19 @@ def test_bridge_source_digest_resolves_helper_from_declared_symlink(
     targets = tmp_path / "targets"
     declarations.mkdir()
     targets.mkdir()
-    executed_helper = declarations / "helper.py"
+    (declarations / "helpers").mkdir()
+    (targets / "helpers").mkdir()
+    executed_helper = declarations / "helpers" / "helper.py"
     executed_helper.write_text("print('executed-one')\n", encoding="utf-8")
-    (targets / "helper.py").write_text("print('not-executed-one')\n", encoding="utf-8")
+    target_helper = targets / "helpers" / "helper.py"
+    target_helper.write_text("print('not-executed-one')\n", encoding="utf-8")
     target_sidecar = targets / "tool.md"
     target_sidecar.write_text(
         """---
 mcp:
   name: example
   invoke:
-    command: ./helper.py
+    command: helpers/helper.py
 ---
 """,
         encoding="utf-8",
@@ -186,7 +225,7 @@ mcp:
     assert bridge_source_digest(cfg) != original
 
     updated = bridge_source_digest(cfg)
-    (targets / "helper.py").write_text("print('not-executed-two')\n", encoding="utf-8")
+    target_helper.write_text("print('not-executed-two')\n", encoding="utf-8")
     assert bridge_source_digest(cfg) == updated
 
 
