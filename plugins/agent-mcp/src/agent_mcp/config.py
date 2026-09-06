@@ -523,9 +523,9 @@ def _expand_command_vars(argv: list[str], base_dir: str | None) -> list[str]:
       or a stdio launcher) with no PATH deploy and no install. Only expanded when
       the config was loaded from a file (``base_dir`` known); a bare-dict parse
       leaves it intact.
-    * ``${python}`` -> a working Python 3 interpreter for **this** platform (see
-      :func:`_resolve_python`), so the same YAML runs on Windows (``python``) and
-      POSIX (``python3``) without a per-OS launcher. Path-independent, so it is
+    * ``${python}`` -> the absolute interpreter running agent-mcp (see
+      :func:`_resolve_python`), so the same YAML uses the provisioned runtime on
+      every platform without consulting the daemon's inherited ``PATH``. It is
       expanded regardless of ``base_dir``.
 
     Invoke a sibling via such an interpreter (``${python}``/``node``/``pwsh``)
