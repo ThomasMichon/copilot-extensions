@@ -19,7 +19,6 @@ import json
 import math
 import os
 import re
-import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -499,22 +498,19 @@ def _as_command(value: Any) -> list[str]:
 
 
 def _resolve_python() -> str:
-    """Resolve the ``${python}`` command token to a working Python 3 interpreter.
+    """Resolve ``${python}`` to agent-mcp's own absolute interpreter.
 
-    A stateless, plugin-shipped command (run in-place via ``${config_dir}``) needs
-    an interpreter on ``PATH``, but the bare name differs by platform: many POSIX
-    installs ship only ``python3`` (no ``python`` at all), while Windows ships
-    ``python``. Probe the platform-appropriate names in order; if none is on
-    ``PATH``, fall back to the interpreter running agent-mcp itself
-    (``sys.executable``), which always exists and can run any stdlib-only sibling
-    script. This keeps a plugin's bridge YAML portable without a per-OS launcher.
+    Config-local helpers are part of the trusted bridge declaration. They must
+    not select an unrelated interpreter from a long-lived daemon's inherited
+    ``PATH``; the provisioned runtime already owns a working cross-platform
+    Python executable.
     """
-    names = ("python", "python3") if os.name == "nt" else ("python3", "python")
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            return found
-    return sys.executable
+    if not sys.executable:
+        raise ConfigError("agent-mcp runtime interpreter is unavailable")
+    executable = Path(os.path.abspath(sys.executable))
+    if not executable.is_file():
+        raise ConfigError(f"agent-mcp runtime interpreter is not a file: {executable}")
+    return str(executable)
 
 
 def _expand_command_vars(argv: list[str], base_dir: str | None) -> list[str]:
