@@ -532,7 +532,7 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(
 
 def test_hook_registration_is_separate_from_bootstrap_contract() -> None:
     entries = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]["sessionStart"]
-    assert len(entries) == 3
+    assert len(entries) == 4
     assert "bootstrap-check" in entries[0]["bash"]
     assert "bootstrap-check" in entries[0]["powershell"]
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["bash"]
@@ -547,6 +547,14 @@ def test_hook_registration_is_separate_from_bootstrap_contract() -> None:
     assert "COPILOT_PLUGIN_ROOT" in entries[1]["powershell"]
     assert "emit-command-catalog" in entries[2]["bash"]
     assert "emit-command-catalog" in entries[2]["powershell"]
+    assert "write-session-guidance" in entries[3]["bash"]
+    assert "write-session-guidance" in entries[3]["powershell"]
+    assert "COPILOT_PLUGIN_ROOT" in entries[3]["bash"]
+    assert "COPILOT_PLUGIN_ROOT" in entries[3]["powershell"]
+    assert "else printf '{}'" in entries[3]["bash"]
+    assert "else { [Console]::Out.Write('{}') }" in entries[3]["powershell"]
+    assert "focus-guidance" not in entries[3]["bash"]
+    assert "focus-guidance" not in entries[3]["powershell"]
     for bootstrap in (
         PLUGIN / "scripts" / "bootstrap-check.sh",
         PLUGIN / "scripts" / "bootstrap-check.ps1",
