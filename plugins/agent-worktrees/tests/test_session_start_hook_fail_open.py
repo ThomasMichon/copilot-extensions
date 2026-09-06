@@ -501,7 +501,11 @@ def test_powershell_lifecycle_hook_is_one_bounded_client():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows command resolution regression")
-def test_powershell_lifecycle_hook_ignores_windowsapps_alias(tmp_path: Path):
+@pytest.mark.parametrize("alias_first", [False, True])
+def test_powershell_lifecycle_hook_ignores_windowsapps_alias(
+    tmp_path: Path,
+    alias_first: bool,
+):
     powershell = _powershell()
     home = tmp_path / "home"
     cwd = tmp_path / "cwd"
@@ -529,7 +533,10 @@ def test_powershell_lifecycle_hook_ignores_windowsapps_alias(tmp_path: Path):
     env["USERPROFILE"] = str(home)
     env["COPILOT_PROJECT_DIR"] = str(cwd)
     env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
-    env["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), str(alias_bin)))
+    candidates = (str(alias_bin), str(Path(sys.executable).parent))
+    if not alias_first:
+        candidates = tuple(reversed(candidates))
+    env["PATH"] = os.pathsep.join(candidates)
 
     result = subprocess.run(
         [powershell, "-NoLogo", "-NoProfile", "-Command", command],
