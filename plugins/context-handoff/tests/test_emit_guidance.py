@@ -93,19 +93,26 @@ def _catalog(context: str) -> dict[str, object]:
     return json.loads(raw)
 
 
-def _hook_entry() -> dict[str, object]:
+def _contributor_hook_entry() -> dict[str, object]:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     hook_path = (PLUGIN / manifest["hooks"]).resolve()
     assert hook_path.is_relative_to(PLUGIN.resolve())
     assert hook_path == HOOKS.resolve()
     hooks = json.loads(hook_path.read_text(encoding="utf-8"))
-    return hooks["hooks"]["sessionStart"][0]
+    entries = hooks["hooks"]["sessionStart"]
+    matching = [
+        entry
+        for entry in entries
+        if "invoke-context-contributor" in str(entry.get("bash", ""))
+    ]
+    assert len(matching) == 1
+    return matching[0]
 
 
 def test_manifest_registers_cross_platform_session_start_hook() -> None:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert manifest["hooks"] == "hooks.json"
-    entry = _hook_entry()
+    entry = _contributor_hook_entry()
     assert entry["type"] == "command"
     assert entry["timeoutSec"] == 30
     for shell in ("powershell", "bash"):
@@ -236,7 +243,7 @@ def test_bash_falls_back_to_script_location() -> None:
 
 
 def test_hook_commands_use_plugin_root() -> None:
-    entry = _hook_entry()
+    entry = _contributor_hook_entry()
     environment = os.environ.copy()
     environment["COPILOT_PLUGIN_ROOT"] = _bash_path(PLUGIN)
 
@@ -266,7 +273,7 @@ def test_hook_commands_use_plugin_root() -> None:
 
 
 def test_hook_commands_accept_compatibility_root_aliases() -> None:
-    entry = _hook_entry()
+    entry = _contributor_hook_entry()
     for alias in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
         environment = os.environ.copy()
         for name in ("COPILOT_PLUGIN_ROOT", "PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):

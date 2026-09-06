@@ -21,8 +21,10 @@ description: >
 The plugin has two independently loaded ambient components with no runtime
 install step:
 
-- A declarative `sessionStart` hook injects the concise owner-marked continuity
-  kernel through `additionalContext`.
+- A declarative `sessionStart` hook writes the full owner-marked continuity
+  contract to the exact session folder, where a static pointer instructs the
+  agent to read it. A separate contributor retains the concise
+  `additionalContext` kernel as a best-effort supplement.
 - The **context-handoff extension** provides the live context-window monitor: token
 tracking + percentage-based 55%/70% defaults with optional repository config +
 `generate_handoff_prompt` /
@@ -34,16 +36,12 @@ For the `/handoff` authoring workflow itself, see the **context-handoff** skill.
 ## How it loads
 
 When `context-handoff@copilot-extensions` is enabled, the CLI reads the
-plugin-declared `hooks.json` and invokes its engine-v2 producer wrapper at
-session start. Before aggregate-authority proof, the wrapper runs
-`scripts/emit-guidance.sh` or `scripts/emit-guidance.ps1` directly. That
-standalone output retains the bounded adjacent agent-worktrees compatibility
-catalog when its exact payload is present. After proof of the compatible
-`context-injection@copilot-extensions` authority, context-handoff contributes
-only its compact continuity kernel and agent-worktrees contributes its own
-catalog to the deterministic aggregate. The POSIX standalone compatibility
-catalog requires a system `python3` or `python`; the continuity kernel still
-emits without it. Standalone context-handoff installations remain independent.
+plugin-declared `hooks.json`. One hook invokes the full `emit-guidance` producer
+with `--own-only` and atomically writes its result beneath the exact session's
+`instructions/context-handoff/` folder. The projected static pointer directs
+the agent to that file. The existing authority-aware contributor continues to
+emit the compact `--aggregate` kernel through `additionalContext` as a
+best-effort supplementary channel.
 
 Separately, the CLI scans
 `~/.copilot/installed-plugins/copilot-extensions/context-handoff/extensions/`
@@ -93,13 +91,13 @@ not require experimental mode. Neither component requires worktree registration.
 
 ## Verify
 
-Start a fresh Copilot CLI session. When the hook loads, the agent's additional
-context begins with `[owner: context-handoff@<version>]`. A payload failure
-emits `{}` and the stderr diagnostic
+Start a fresh Copilot CLI session. When the writer hook loads, the exact
+session folder contains
+`instructions/context-handoff/session-guidance.instructions.md`, beginning
+with the `# Context handoff session guidance` heading and an
+`[owner: context-handoff@<version>]` marker. The separate compact contributor
+still emits `{}` on failure and logs
 `[context-handoff] no guidance context emitted` instead of blocking startup.
-With a sibling agent-worktrees plugin, the additional context also contains
-`## agent-worktrees session command catalog` when the platform can construct
-the compatibility catalog.
 
 A loaded extension exposes
 `generate_handoff_prompt`, `save_handoff_prompt`, and `continue_handoff`, and
