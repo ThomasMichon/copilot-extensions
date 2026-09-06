@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -523,39 +524,68 @@ def test_python_token_expands_without_source_path(monkeypatch):
     assert cfg.server.command == ["/opt/py/python3", "${config_dir}/server.py"]
 
 
-def test_resolve_python_prefers_platform_names(monkeypatch):
+def test_python_token_ignores_hostile_path(tmp_path, monkeypatch):
     import agent_mcp.config as cfgmod
 
-    monkeypatch.setattr(cfgmod.os, "name", "posix")
-    seen: list[str] = []
+    hostile = tmp_path / "hostile"
+    hostile.mkdir()
+    fake_python = hostile / ("python.exe" if os.name == "nt" else "python3")
+    fake_python.write_text("not the runtime")
+    fake_python.chmod(0o755)
+    runtime_python = tmp_path / ("runtime.exe" if os.name == "nt" else "runtime-python")
+    runtime_python.write_text("runtime")
+    runtime_python.chmod(0o755)
+    monkeypatch.setenv("PATH", str(hostile))
+    monkeypatch.setattr(cfgmod.sys, "executable", str(runtime_python))
 
-    def fake_which(name):
-        seen.append(name)
-        return "/usr/bin/python3" if name == "python3" else None
+    cfg = parse_config(
+        {
+            "server": {"type": "stdio", "command": ["${python}", "server.py"]},
+            "auth": {"kind": "none"},
+        }
+    )
 
-    monkeypatch.setattr(cfgmod.shutil, "which", fake_which)
-    assert cfgmod._resolve_python() == "/usr/bin/python3"
-    assert seen[0] == "python3"  # POSIX probes python3 first
+    assert cfg.server.command == [str(runtime_python.absolute()), "server.py"]
 
 
-def test_resolve_python_windows_probes_python_first(monkeypatch):
+def test_resolve_python_uses_runtime_executable(tmp_path, monkeypatch):
     import agent_mcp.config as cfgmod
 
-    monkeypatch.setattr(cfgmod.os, "name", "nt")
-    seen: list[str] = []
+    executable = tmp_path / "runtime-python"
+    executable.write_text("runtime")
+    monkeypatch.setattr(cfgmod.sys, "executable", str(executable))
 
-    def fake_which(name):
-        seen.append(name)
-        return r"C:\Python\python.exe" if name == "python" else None
-
-    monkeypatch.setattr(cfgmod.shutil, "which", fake_which)
-    assert cfgmod._resolve_python() == r"C:\Python\python.exe"
-    assert seen[0] == "python"  # Windows probes python first
+    assert cfgmod._resolve_python() == str(executable.absolute())
 
 
-def test_resolve_python_falls_back_to_sys_executable(monkeypatch):
+def test_resolve_python_rejects_empty_runtime_executable(monkeypatch):
     import agent_mcp.config as cfgmod
 
-    monkeypatch.setattr(cfgmod.shutil, "which", lambda name: None)
-    monkeypatch.setattr(cfgmod.sys, "executable", "/venv/bin/python")
-    assert cfgmod._resolve_python() == "/venv/bin/python"
+    monkeypatch.setattr(cfgmod.sys, "executable", "")
+
+    with pytest.raises(ConfigError, match="interpreter is unavailable"):
+        cfgmod._resolve_python()
+
+
+def test_resolve_python_rejects_missing_runtime_executable(tmp_path, monkeypatch):
+    import agent_mcp.config as cfgmod
+
+    missing = tmp_path / "missing-python"
+    monkeypatch.setattr(cfgmod.sys, "executable", str(missing))
+
+    with pytest.raises(ConfigError, match="interpreter is not a file"):
+        cfgmod._resolve_python()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation is privilege-gated on Windows")
+def test_resolve_python_preserves_virtualenv_symlink(tmp_path, monkeypatch):
+    import agent_mcp.config as cfgmod
+
+    base = tmp_path / "base-python"
+    base.write_text("base")
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(base)
+    monkeypatch.setattr(cfgmod.sys, "executable", str(venv_python))
+
+    assert cfgmod._resolve_python() == str(venv_python.absolute())

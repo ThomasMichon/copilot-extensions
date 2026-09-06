@@ -204,21 +204,19 @@ auth:
 
 Invoke the sibling through an interpreter (`${python}`/`node`/`pwsh`) rather than
 as `argv[0]` directly (a bare `.ps1`/`.py` is not itself executable). `${python}`
-resolves to a full interpreter path (an absolute `sys.executable` when neither
-`python`/`python3` is on `PATH`); `node`/`pwsh` are looked up on `PATH`. The
+resolves to the absolute interpreter running agent-mcp; `node`/`pwsh` are looked
+up on `PATH`. The
 `${config_dir}` token is only expanded when the config is loaded from a file (its
 directory is known); a `--config <path>` or plugin-discovered bridge both qualify.
 
 #### Portable interpreter (`${python}`)
 
 Prefer the `${python}` token over a bare `python` in the command: it expands at
-load time to a **working Python 3 interpreter for the current platform** — probing
-`python3` then `python` on POSIX (many Linux/CodeSpaces installs ship only
-`python3`), and `python` then `python3` on Windows, falling back to the interpreter
-running agent-mcp itself (`sys.executable`) if neither is on `PATH`. This keeps a
-plugin's bridge YAML portable across Windows and POSIX without a per-OS launcher.
-`${python}` is path-independent, so it resolves even for a bare-dict config (where
-`${config_dir}` is left intact).
+load time to the **absolute interpreter running agent-mcp**. It never consults
+the daemon's inherited `PATH`, so a config-local trusted helper cannot be
+redirected into an unrelated virtual environment. The runtime interpreter is
+already provisioned and cross-platform, and the token resolves even for a
+bare-dict config (where `${config_dir}` is left intact).
 
 ## Config location — in-repo vs. user-global
 

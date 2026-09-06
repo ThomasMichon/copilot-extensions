@@ -19,7 +19,6 @@ import json
 import math
 import os
 import re
-import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -499,22 +498,19 @@ def _as_command(value: Any) -> list[str]:
 
 
 def _resolve_python() -> str:
-    """Resolve the ``${python}`` command token to a working Python 3 interpreter.
+    """Resolve ``${python}`` to agent-mcp's own absolute interpreter.
 
-    A stateless, plugin-shipped command (run in-place via ``${config_dir}``) needs
-    an interpreter on ``PATH``, but the bare name differs by platform: many POSIX
-    installs ship only ``python3`` (no ``python`` at all), while Windows ships
-    ``python``. Probe the platform-appropriate names in order; if none is on
-    ``PATH``, fall back to the interpreter running agent-mcp itself
-    (``sys.executable``), which always exists and can run any stdlib-only sibling
-    script. This keeps a plugin's bridge YAML portable without a per-OS launcher.
+    Config-local helpers are part of the trusted bridge declaration. They must
+    not select an unrelated interpreter from a long-lived daemon's inherited
+    ``PATH``; the provisioned runtime already owns a working cross-platform
+    Python executable.
     """
-    names = ("python", "python3") if os.name == "nt" else ("python3", "python")
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            return found
-    return sys.executable
+    if not sys.executable:
+        raise ConfigError("agent-mcp runtime interpreter is unavailable")
+    executable = Path(os.path.abspath(sys.executable))
+    if not executable.is_file():
+        raise ConfigError(f"agent-mcp runtime interpreter is not a file: {executable}")
+    return str(executable)
 
 
 def _expand_command_vars(argv: list[str], base_dir: str | None) -> list[str]:
@@ -527,9 +523,9 @@ def _expand_command_vars(argv: list[str], base_dir: str | None) -> list[str]:
       or a stdio launcher) with no PATH deploy and no install. Only expanded when
       the config was loaded from a file (``base_dir`` known); a bare-dict parse
       leaves it intact.
-    * ``${python}`` -> a working Python 3 interpreter for **this** platform (see
-      :func:`_resolve_python`), so the same YAML runs on Windows (``python``) and
-      POSIX (``python3``) without a per-OS launcher. Path-independent, so it is
+    * ``${python}`` -> the absolute interpreter running agent-mcp (see
+      :func:`_resolve_python`), so the same YAML uses the provisioned runtime on
+      every platform without consulting the daemon's inherited ``PATH``. It is
       expanded regardless of ``base_dir``.
 
     Invoke a sibling via such an interpreter (``${python}``/``node``/``pwsh``)
