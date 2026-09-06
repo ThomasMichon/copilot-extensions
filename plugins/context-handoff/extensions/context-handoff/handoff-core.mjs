@@ -774,7 +774,19 @@ export function parseHerdrLaunchOutput(output) {
   return {
     pane: values.pane_handle || null,
     sessionId: values.copilot_session_id || null,
+    startupPending: values.startup_pending === "true",
   };
+}
+
+export function herdrStartupPendingMessage(pane) {
+  return (
+    `Live cutover is awaiting startup/confirmation in existing seeded Herdr pane ${pane}. ` +
+    "The receiver and its native -i seed were preserved. Resolve only authorized " +
+    "confirmations in that exact pane. Do NOT call retry_handoff_cutover, replay " +
+    "the seed, or create another successor. The predecessor remains the recovery " +
+    "point until successful native-aware consumption and exact retirement. " +
+    "Stop working here and wait."
+  );
 }
 
 export function runHerdrHandoffCutover(
@@ -846,6 +858,7 @@ export function runHerdrHandoffCutover(
       old_pane: env.HERDR_PANE_ID,
       new_pane: launched.pane,
       new_session: launched.sessionId,
+      startup_pending: launched.startupPending,
       predecessor_retirement: "after-consume",
     };
   } catch (error) {

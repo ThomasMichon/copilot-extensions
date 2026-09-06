@@ -58,6 +58,7 @@ import {
   resolveHerdrPredecessorIdentity,
   retireHerdrPredecessorAfterConsume,
   runHandoffCutover,
+  herdrStartupPendingMessage,
 } from "./handoff-core.mjs";
 
 // --- State ---
@@ -1664,6 +1665,9 @@ const session = await joinSession({
           );
         }
         if (result.host === "herdr") {
+          if (result.startup_pending) {
+            return herdrStartupPendingMessage(result.new_pane);
+          }
           return (
             `Live cutover initiated through Herdr. A successor Copilot was ` +
             `created in sibling pane ${result.new_pane || "?"} and its first ` +
@@ -1817,6 +1821,9 @@ const session = await joinSession({
         const src =
           kind === "task" ? `agent-dispatch task ${id}` : `handoff file ${id}`;
         if (result.host === "herdr") {
+          if (result.startup_pending) {
+            return herdrStartupPendingMessage(result.new_pane);
+          }
           return (
             `Cutover re-attempted through Herdr from the saved handoff (${src}). ` +
             `A fresh successor Copilot was created in sibling pane ` +

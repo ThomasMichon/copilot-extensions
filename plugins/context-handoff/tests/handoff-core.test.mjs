@@ -20,6 +20,7 @@ import {
   currentMuxSession, currentPaneId, herdrHandoffDir, runHandoffCutover,
   makeHandoffMetadata, resolveHandoffCwd, resolveHerdrPredecessorIdentity,
   retireHerdrPredecessorAfterConsume, worktreeInfo,
+  herdrStartupPendingMessage,
   HANDOFF_META_PREFIX,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import {
@@ -618,6 +619,7 @@ test("runHandoffCutover routes Herdr through one copilot-pane task file", () => 
       old_pane: "w1:p2",
       new_pane: "w1:p3",
       new_session: "01234567-89ab-4cde-8fab-0123456789ab",
+      startup_pending: false,
       predecessor_retirement: "after-consume",
     });
   } finally {
@@ -625,7 +627,7 @@ test("runHandoffCutover routes Herdr through one copilot-pane task file", () => 
   }
 });
 
-test("runHandoffCutover passes the inherited permission mode to Herdr", () => {
+test("runHandoffCutover retains a pending Herdr receiver with inherited permissions", () => {
   const home = mkdtempSync(join(process.cwd(), ".test-herdr-permissions-"));
   const paneCwd = join(process.cwd(), "fixture-checkout");
   let invocation = null;
@@ -646,11 +648,19 @@ test("runHandoffCutover passes the inherited permission mode to Herdr", () => {
           "terminal_identity=t3",
           "observed_process_kind=copilot",
           "copilot_session_id=01234567-89ab-4cde-8fab-0123456789ab",
+          "startup_pending=true",
         ].join("\n");
       },
     });
 
     assert.equal(result.ok, true);
+    assert.equal(result.startup_pending, true);
+    assert.equal(result.new_pane, "w1:p3");
+    const notice = herdrStartupPendingMessage(result.new_pane);
+    assert.match(notice, /existing seeded Herdr pane w1:p3/);
+    assert.match(notice, /Resolve only authorized confirmations/);
+    assert.match(notice, /Do NOT call retry_handoff_cutover/);
+    assert.match(notice, /Stop working here and wait/);
     assert.deepEqual(invocation.args.slice(-2), [
       "--permission-mode", "manual",
     ]);
