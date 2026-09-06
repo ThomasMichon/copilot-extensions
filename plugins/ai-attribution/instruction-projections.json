@@ -11,6 +11,14 @@
       "legacyMarkers": [
         "ai-attribution:static-fallback"
       ]
+    },
+    {
+      "id": "session-guidance",
+      "template": "instructions/session-guidance.instructions.md",
+      "destination": ".github/instructions/ai-attribution/session-guidance.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }

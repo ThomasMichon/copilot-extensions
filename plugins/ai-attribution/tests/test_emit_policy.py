@@ -21,6 +21,9 @@ PROJECTION_DECLARATION = PLUGIN / "instruction-projections.json"
 PROJECTION_TEMPLATE = (
     PLUGIN / "instructions" / "publication-safety.instructions.md"
 )
+SESSION_GUIDANCE_TEMPLATE = (
+    PLUGIN / "instructions" / "session-guidance.instructions.md"
+)
 
 
 def test_authority_resolver_matches_canonical_copy() -> None:
@@ -244,7 +247,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev10] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev11] Before publishing"
     )
     assert "another party's repo require" in context
     assert "verified operator-owned repo, omit disclosure" in context
@@ -291,7 +294,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev10]"
+            "[owner: ai-attribution@0.1.0-dev11]"
         )
 
 
@@ -421,7 +424,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev10]"
+                "[owner: ai-attribution@0.1.0-dev11]"
             )
         else:
             assert result.stdout == "{}"
@@ -1236,6 +1239,36 @@ def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
     assert declaration["projections"][0]["legacyMarkers"] == [
         "ai-attribution:static-fallback"
     ]
+    assert declaration["projections"][1] == {
+        "id": "session-guidance",
+        "template": "instructions/session-guidance.instructions.md",
+        "destination": (
+            ".github/instructions/ai-attribution/"
+            "session-guidance.instructions.md"
+        ),
+        "customizationKind": "instructions",
+        "applyTo": "**",
+        "legacyMarkers": [],
+    }
+    pointer = SESSION_GUIDANCE_TEMPLATE.read_text(encoding="utf-8")
+    assert "COPILOT_AGENT_SESSION_ID" in pointer
+    assert "instructions/ai-attribution/session-guidance.instructions.md" in pointer
+    assert "~/.copilot/session-state" not in pointer
+
+
+@pytest.mark.guard
+def test_session_guidance_writer_is_a_separate_side_effect_hook() -> None:
+    entries = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]["sessionStart"]
+    assert len(entries) == 2
+    assert "invoke-context-contributor" in entries[0]["bash"]
+    assert "--aggregate" in entries[0]["bash"]
+    assert "write-session-guidance" in entries[1]["bash"]
+    assert "write-session-guidance" in entries[1]["powershell"]
+    assert entries[1]["timeoutSec"] == 30
+    for shell in ("bash", "powershell"):
+        assert "COPILOT_PLUGIN_ROOT" in entries[1][shell]
+        assert "PLUGIN_ROOT" in entries[1][shell]
+        assert "CLAUDE_PLUGIN_ROOT" in entries[1][shell]
 
 
 def test_bash_powershell_parity_or_static_semantics(tmp_path: Path) -> None:
