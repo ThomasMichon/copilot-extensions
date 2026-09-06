@@ -475,7 +475,7 @@ class TestMuxRetirePane:
 def _ns(**kw):
     base = dict(seed=None, worktree_id=None, session_id=None, old_pane=None,
                 retire_pane=None, mux_session=None, require_mux_identity=False,
-                dry_run=False,
+                dry_run=False, permission_mode=None,
                 copilot_args=[], recovery=False)
     base.update(kw)
     return argparse.Namespace(**base)
@@ -491,6 +491,14 @@ class TestCmdHandoffCutover:
         ])
         assert args.mux_session == "caller-session"
         assert args.require_mux_identity is True
+
+    def test_parser_accepts_permission_mode(self):
+        args = m.build_parser().parse_args([
+            "handoff-cutover",
+            "--seed", "continue",
+            "--permission-mode", "manual",
+        ])
+        assert args.permission_mode == "manual"
 
     def test_retire_mode(self, monkeypatch, capfd):
         monkeypatch.setattr(sessions, "mux_retire_pane",

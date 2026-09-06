@@ -31,7 +31,18 @@ import {
 } from "../extensions/context-handoff/cli-timeouts.mjs";
 
 test("encode/decode round-trips metadata + text", () => {
-  const meta = { kind: "context-handoff", id: "handoff-sid1", title: "Fix X", oldPane: "%3" };
+  const meta = {
+    kind: "context-handoff",
+    id: "handoff-sid1",
+    title: "Fix X",
+    oldPane: "%3",
+    nativeContinuation: {
+      version: 1,
+      mode: "autopilot",
+      permissionMode: "manual",
+      autopilotObjective: "{\"version\":1}",
+    },
+  };
   const body = "## Session Continuation\nline two\nline three";
   const encoded = encodeHandoffPayload(body, meta);
   assert.ok(encoded.startsWith(HANDOFF_META_PREFIX));
@@ -87,6 +98,31 @@ test("buildSeedForStored: file-backed -> tool-based consume_handoff seed", () =>
   const seed = buildSeedForStored(stored, { retry: true });
   assert.match(seed, /consume_handoff tool/);
   assert.match(seed, /"path":"C:\\\\state\\\\handoff-sid1.json"/);
+});
+
+test("buildSeedForStored: native task metadata requires restoration on first launch and retry", () => {
+  const stored = {
+    storage: "agent-dispatch",
+    id: "task-native",
+    metadata: {
+      oldPane: "%7",
+      worktree: "wt-abc",
+      worktreeDir: "/tmp/src/wt-abc",
+      sessionId: "sid-9",
+      nativeContinuation: {
+        version: 1,
+        mode: "autopilot",
+        permissionMode: "manual",
+        autopilotObjective: "{\"version\":1}",
+      },
+    },
+  };
+  for (const retry of [false, true]) {
+    const seed = buildSeedForStored(stored, { retry });
+    assert.match(seed, /consume_handoff tool/);
+    assert.match(seed, /"task_id":"task-native"/);
+    assert.doesNotMatch(seed, /agent-dispatch consume|handoff-cutover --retire-pane/);
+  }
 });
 
 test("buildSeedForStored: paste prompt (retry:false) omits the loading-race retry clause", () => {
@@ -589,6 +625,40 @@ test("runHandoffCutover routes Herdr through one copilot-pane task file", () => 
   }
 });
 
+test("runHandoffCutover passes the inherited permission mode to Herdr", () => {
+  const home = mkdtempSync(join(process.cwd(), ".test-herdr-permissions-"));
+  const paneCwd = join(process.cwd(), "fixture-checkout");
+  let invocation = null;
+  try {
+    const result = runHandoffCutover("/stale", "seed", "session-1", {
+      env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2" },
+      home,
+      permissionMode: "manual",
+      execute: (bin, args, options) => {
+        if (bin === join(home, ".local", "bin", "herdr")) {
+          return JSON.stringify({ result: { pane: { cwd: paneCwd } } });
+        }
+        invocation = { bin, args, options };
+        const taskFile = args[args.indexOf("--task-file") + 1];
+        assert.equal(readFileSync(taskFile, "utf-8"), "seed");
+        return [
+          "pane_handle=w1:p3",
+          "terminal_identity=t3",
+          "observed_process_kind=copilot",
+          "copilot_session_id=01234567-89ab-4cde-8fab-0123456789ab",
+        ].join("\n");
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(invocation.args.slice(-2), [
+      "--permission-mode", "manual",
+    ]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("runHandoffCutover preserves launcher stdout when stderr is empty", () => {
   const home = mkdtempSync(join(process.cwd(), ".test-herdr-error-"));
   const env = { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2" };
@@ -643,6 +713,23 @@ test("runHandoffCutover keeps the existing mux route outside Herdr", () => {
     new_pane: "%8",
     host: "mux",
   });
+});
+
+test("runHandoffCutover passes the inherited permission mode to mux", () => {
+  let invocation = null;
+  const result = runHandoffCutover("/repo", "seed", "session-1", {
+    env: { TMUX_PANE: "%7" },
+    permissionMode: "assisted",
+    execute: (bin, args, options) => {
+      invocation = { bin, args, options };
+      return JSON.stringify({ ok: true, old_pane: "%7", new_pane: "%8" });
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(invocation.args.slice(-2), [
+    "--permission-mode", "assisted",
+  ]);
 });
 
 test("agentWorktreesGet allows slow startup-time identity queries", () => {

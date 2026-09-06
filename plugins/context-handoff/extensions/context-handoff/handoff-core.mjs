@@ -404,6 +404,7 @@ export function worktreeInfo(
 
 export function makeHandoffMetadata({
   sid, cwd, title, storage, taskId = null, predecessor = null,
+  nativeContinuation = null,
 }) {
   const { wtDir, worktree, stateDir } = worktreeInfo(cwd, sid);
   const id = `handoff-${safePathSegment(sid)}`;
@@ -421,6 +422,7 @@ export function makeHandoffMetadata({
     oldPane: currentPaneId(),
     muxSession: currentMuxSession(),
     predecessor,
+    nativeContinuation,
     stateDir,
     createdAt: new Date().toISOString(),
   };
@@ -470,7 +472,9 @@ export function writeJsonAtomic(path, value) {
 }
 
 // --- file-backed store ----------------------------------------------------
-export function saveFileHandoff(promptText, sid, cwd, title) {
+export function saveFileHandoff(
+  promptText, sid, cwd, title, nativeContinuation = null,
+) {
   const identity = resolveHerdrPredecessorIdentity(sid);
   if (identity.error) return { error: identity.error };
   const metadata = makeHandoffMetadata({
@@ -479,6 +483,7 @@ export function saveFileHandoff(promptText, sid, cwd, title) {
     title,
     storage: "file",
     predecessor: identity.predecessor,
+    nativeContinuation,
   });
   const dir = handoffDirFor(cwd, sid);
   if (!dir) {
@@ -706,8 +711,12 @@ export function abandonSupersededHandoffs(cwd, worktree, keepId) {
   }
 }
 
-export function dispatchHandoff(promptText, sid, cwd, title) {
-  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
+export function dispatchHandoff(
+  promptText, sid, cwd, title, nativeContinuation = null,
+) {
+  const metadata = makeHandoffMetadata({
+    sid, cwd, title, storage: "agent-dispatch", nativeContinuation,
+  });
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   const tmp = join(dir, `${metadata.id}-payload-${process.pid}.md`);
@@ -778,6 +787,7 @@ export function runHerdrHandoffCutover(
     home = homedir(),
     now = Date.now,
     launcherPath = join(home, ".local", "bin", "copilot-pane"),
+    permissionMode = null,
   } = {},
 ) {
   const cwdResult = resolveHandoffCwd(cwd, { execute, env, home });
@@ -806,15 +816,19 @@ export function runHerdrHandoffCutover(
   try {
     mkdirSync(dir, { recursive: true });
     writeFileSync(taskFile, seed, { encoding: "utf-8", mode: 0o600 });
+    const launcherArgs = [
+      "launch",
+      "--role", "coordinator",
+      "--cwd", launchCwd,
+      "--host", "local",
+      "--task-file", taskFile,
+    ];
+    if (permissionMode) {
+      launcherArgs.push("--permission-mode", permissionMode);
+    }
     const output = execute(
       launcherPath,
-      [
-        "launch",
-        "--role", "coordinator",
-        "--cwd", launchCwd,
-        "--host", "local",
-        "--task-file", taskFile,
-      ],
+      launcherArgs,
       { cwd: launchCwd, timeout: 180_000 },
     );
     const launched = parseHerdrLaunchOutput(output);
@@ -863,6 +877,9 @@ export function runHandoffCutover(
   const ownPane = env.TMUX_PANE || env.PSMUX_PANE || "";
   if (ownPane) argv.push("--old-pane", ownPane);
   if (sessionId) argv.push("--session-id", sessionId);
+  if (options.permissionMode) {
+    argv.push("--permission-mode", options.permissionMode);
+  }
   try {
     const result = JSON.parse(execute(
       "agent-worktrees", argv, { cwd, timeout: 20000 },
@@ -891,7 +908,9 @@ export function runHandoffCutover(
 // Mirrors the extension's save_handoff_prompt store selection. Returns:
 //   { storage: "agent-dispatch"|"file", id, taskId?, path?, metadata }
 // On failure returns a storage:null result with the resolver/write diagnostic.
-export function storeHandoff({ promptText, sid, cwd, title, preferTask = true }) {
+export function storeHandoff({
+  promptText, sid, cwd, title, preferTask = true, nativeContinuation = null,
+}) {
   const cwdResult = resolveHandoffCwd(cwd);
   if (!cwdResult.cwd) {
     return {
@@ -903,13 +922,17 @@ export function storeHandoff({ promptText, sid, cwd, title, preferTask = true })
   }
   cwd = cwdResult.cwd;
   if (preferTask && !isHerdrPane() && agentDispatchAvailable()) {
-    const task = dispatchHandoff(promptText, sid, cwd, title);
+    const task = dispatchHandoff(
+      promptText, sid, cwd, title, nativeContinuation,
+    );
     if (task) {
       noteHandoffInRecord(cwd, sid, task.id, title);
       return { storage: "agent-dispatch", id: task.id, taskId: task.id, metadata: task.metadata };
     }
   }
-  const file = saveFileHandoff(promptText, sid, cwd, title);
+  const file = saveFileHandoff(
+    promptText, sid, cwd, title, nativeContinuation,
+  );
   if (!file?.path) {
     return { storage: null, id: null, metadata: null, error: file?.error || "unknown file-store failure" };
   }
@@ -932,14 +955,20 @@ export function buildSeedForStored(stored, { retry = true } = {}) {
     sessionId: md.sessionId || null,
     path: stored.path || null,
     muxSession: md.muxSession || null,
+    requiresNativeRestore: Boolean(md.nativeContinuation),
   });
 }
 
 // Store + build seed + (optionally) trigger the live cutover in one call --
 // the standalone equivalent of save_handoff_prompt followed by continue_handoff.
 // Returns { stored, seed, pastePrompt, cutover? }.
-export function saveAndCutover({ promptText, sid, cwd, title, preferTask = true, cutover = true }) {
-  const stored = storeHandoff({ promptText, sid, cwd, title, preferTask });
+export function saveAndCutover({
+  promptText, sid, cwd, title, preferTask = true, cutover = true,
+  nativeContinuation = null,
+}) {
+  const stored = storeHandoff({
+    promptText, sid, cwd, title, preferTask, nativeContinuation,
+  });
   if (!stored?.storage) {
     return {
       stored: null,
@@ -951,6 +980,10 @@ export function saveAndCutover({ promptText, sid, cwd, title, preferTask = true,
   const seed = buildSeedForStored(stored, { retry: true });
   const pastePrompt = buildSeedForStored(stored, { retry: false });
   const result = { stored, seed, pastePrompt };
-  if (cutover) result.cutover = runHandoffCutover(cwd, seed, sid);
+  if (cutover) {
+    result.cutover = runHandoffCutover(cwd, seed, sid, {
+      permissionMode: nativeContinuation?.permissionMode || null,
+    });
+  }
   return result;
 }

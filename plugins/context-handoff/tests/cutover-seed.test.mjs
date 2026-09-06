@@ -3,12 +3,12 @@
 // Run: node --test  (from plugins/context-handoff/, or point at this file)
 //
 // These guard the load-bearing invariant behind GitHub issue #853: a
-// TASK-backed cutover seed with a known predecessor pane / worktree / session
+// legacy TASK-backed cutover seed with a known predecessor pane / worktree / session
 // must be BASH-FIRST -- the successor's first actionable step is a core `bash`
 // command chain, NOT the `consume_handoff` extension tool -- so the successor
 // cannot be orphaned by the CLI's startup extension-reload race. The tool-based
-// seed is retained only as the fallback (file-backed handoffs, or when the
-// pane/worktree/session are unknown).
+// seed is also required for native state restoration before retirement, and for
+// file-backed handoffs or when the pane/worktree/session are unknown.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -120,6 +120,17 @@ test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () =>
   assert.ok(!seed.includes("\n"), "seed must be a single line");
   // eslint-disable-next-line no-control-regex
   assert.ok(!/[^\x00-\x7F]/.test(seed), "seed must be ASCII");
+});
+
+test("task with native state uses consume_handoff before retirement", () => {
+  const seed = buildCutoverSeed("task", TASK, leadFrom("x"), {
+    ...known,
+    requiresNativeRestore: true,
+  });
+  assert.match(seed, /consume_handoff tool/);
+  assert.match(seed, new RegExp(`"task_id":"${TASK}"`));
+  assert.ok(!seed.includes("agent-dispatch consume"));
+  assert.ok(!seed.includes("handoff-cutover --retire-pane"));
 });
 
 test("task + missing pane -> tool-based fallback seed", () => {

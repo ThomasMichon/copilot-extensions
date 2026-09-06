@@ -25,8 +25,15 @@ def _config(launch: dict[str, list[str]] | None = None) -> cfg.Config:
     )
 
 
-def _args(copilot_args: list[str]) -> argparse.Namespace:
-    return argparse.Namespace(copilot_args=copilot_args, recovery=False)
+def _args(
+    copilot_args: list[str],
+    permission_mode: str | None = None,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        copilot_args=copilot_args,
+        recovery=False,
+        permission_mode=permission_mode,
+    )
 
 
 def test_plain_launch_appends_allow_all():
@@ -56,6 +63,36 @@ def test_existing_all_perm_flag_not_duplicated():
         cmd = m._build_launch_cmd(_config(), _args([flag]), "/w/wt")
         assert "--allow-all" not in [c for c in cmd if c != flag]
         assert cmd.count(flag) == 1
+
+
+def test_handoff_manual_permission_does_not_add_bypass_flag():
+    cmd = m._build_launch_cmd(
+        _config(),
+        _args(["--allow-all"], permission_mode="manual"),
+        "/w/wt",
+    )
+    assert "--allow-all" not in cmd
+    assert "--assisted-approval" not in cmd
+
+
+def test_handoff_assisted_permission_starts_manual_until_native_restore():
+    cmd = m._build_launch_cmd(
+        _config(),
+        _args(["--allow-all"], permission_mode="assisted"),
+        "/w/wt",
+    )
+    assert "--allow-all" not in cmd
+    assert "--assisted-approval" not in cmd
+
+
+def test_handoff_allow_all_permission_replaces_assisted_flag():
+    cmd = m._build_launch_cmd(
+        _config(),
+        _args(["--assisted-approval"], permission_mode="allow-all"),
+        "/w/wt",
+    )
+    assert cmd.count("--allow-all") == 1
+    assert "--assisted-approval" not in cmd
 
 
 def test_resume_uses_equals_form():

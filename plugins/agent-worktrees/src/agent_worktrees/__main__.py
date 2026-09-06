@@ -1683,22 +1683,36 @@ def _build_launch_cmd(
             if recovery:
                 cmd.append("--recovery")
 
-    extra = getattr(args, "copilot_args", []) or []
+    extra = list(getattr(args, "copilot_args", []) or [])
+
+    permission_mode = getattr(args, "permission_mode", None)
+    permission_flags = {
+        "--allow-all-tools", "--allow-all", "--yolo", "--assisted-approval",
+    }
+    if permission_mode:
+        extra = [arg for arg in extra if arg not in permission_flags]
     cmd.extend(extra)
 
     # Append profile-specific Copilot args
-    profile_args = profile.copilot_args if profile and profile.copilot_args else []
+    profile_args = list(
+        profile.copilot_args if profile and profile.copilot_args else []
+    )
+    if permission_mode:
+        profile_args = [arg for arg in profile_args if arg not in permission_flags]
     cmd.extend(profile_args)
 
-    # Auto-approve everything so worktree sessions run without any
+    # Auto-approve everything so ordinary worktree sessions run without any
     # confirmation prompts.  --allow-all is equivalent to
     # --allow-all-tools --allow-all-paths --allow-all-urls, so a worktree
-    # session never stalls on a tool, path, or URL prompt.  Skip ACP
-    # sessions (agent-bridge manages permissions over the protocol) and
-    # never duplicate an all-permissions flag the caller already supplied.
+    # session never stalls on a tool, path, or URL prompt. Handoff successors
+    # instead start without a bypass. Interactive Copilot rejects the
+    # --assisted-approval flag; consume restores native assisted mode after
+    # manual startup. Skip ACP sessions (agent-bridge manages permissions over
+    # the protocol) and never duplicate an existing all-permissions flag.
     passthrough = list(extra) + list(profile_args)
     is_acp = "--acp" in passthrough
-    if not is_acp and not any(
+    inherit_allow_all = permission_mode in (None, "allow-all")
+    if inherit_allow_all and not is_acp and not any(
         a == flag
         for a in passthrough
         for flag in ("--allow-all-tools", "--allow-all", "--yolo")
@@ -17075,6 +17089,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Resumed session id -- authoritative worktree fallback "
                         "when cwd is HOME (bare resume); resolves the worktree "
                         "from the session registry")
+    p.add_argument(
+        "--permission-mode",
+        choices=("manual", "assisted", "allow-all"),
+        default=None,
+        help="Permission mode inherited by the handoff successor",
+    )
     p.add_argument("--mux-session", dest="mux_session", default=None,
                    help="Retire mode: expected mux session containing the pane; "
                         "a mismatch is treated as predecessor already gone")

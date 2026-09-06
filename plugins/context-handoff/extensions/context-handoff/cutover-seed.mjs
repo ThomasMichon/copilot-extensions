@@ -68,7 +68,9 @@ export const CONTINUATION_DIRECTIVE =
 // bash-first path exists. The bash-first seed is used only when the predecessor
 // pane / worktree / cwd / session id are known (`oldPane`, `worktree`,
 // `worktreeDir`, `sessionId`); otherwise, and for file-backed handoffs, we fall
-// back to the tool-based seed + retry clause.
+// back to the tool-based seed + retry clause. A task carrying native session
+// state also uses the tool-based seed because consume_handoff must restore that
+// state before predecessor retirement.
 //
 // `retry` (default true) appends the retry-on-not-ready clause described above.
 // Pass `retry: false` for the human-facing paste prompt (resumed in an
@@ -83,6 +85,7 @@ export function buildCutoverSeed(
     sessionId = null,
     path = null,
     muxSession = null,
+    requiresNativeRestore = false,
   } = {},
 ) {
   const retryClause = retry
@@ -100,7 +103,13 @@ export function buildCutoverSeed(
     // the exact numbered handoff, then retire + reap its pane. Reproducing that as
     // one shell chain keeps extension tools out of the reload-window critical
     // path and makes the successor's intended worktree explicit.
-    if (oldPane && worktree && worktreeDir && sessionId) {
+    if (
+      !requiresNativeRestore
+      && oldPane
+      && worktree
+      && worktreeDir
+      && sessionId
+    ) {
       const cwd = `"${String(worktreeDir)
         .replace(/[\r\n]+/g, " ")
         .replace(/"/g, '\\"')}"`;

@@ -33,10 +33,13 @@
 //   --handoff-id <id> | --path <f>   (consume) which file-backed handoff to load
 //   --json                machine-readable output
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   storeHandoff, buildSeedForStored, runHandoffCutover,
-  consumeFileHandoffOnce, decodeHandoffPayload,
+  consumeFileHandoffOnce, decodeHandoffPayload, readFileHandoff,
+  safePathSegment,
 } from "./handoff-core.mjs";
 
 function parseArgs(argv) {
@@ -75,6 +78,22 @@ function emit(obj, args) {
   return obj;
 }
 
+function nativeObjectivePath(sid) {
+  if (!sid) return null;
+  const base = process.env.COPILOT_HOME || join(homedir(), ".copilot");
+  return join(base, "session-state", safePathSegment(sid), "autopilot-objective.json");
+}
+
+function nativeObjectiveExists(sid) {
+  const path = nativeObjectivePath(sid);
+  return Boolean(path && existsSync(path));
+}
+
+function fileHandoffHasNativeContinuation(cwd, sid, handoffId, path) {
+  const found = readFileHandoff(cwd, sid, handoffId, path || null);
+  return Boolean(found?.record?.nativeContinuation);
+}
+
 const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-free fallback).
 
   node handoff-cli.mjs cutover  --title "<t>" --prompt-file <f>   store + live cutover (default)
@@ -95,6 +114,14 @@ function cmdStore(args, { cutover }) {
   if (!sid) {
     process.stderr.write("handoff-cli: no session id (pass --session-id or set COPILOT_AGENT_SESSION_ID)\n");
     process.exit(2);
+  }
+  if (nativeObjectiveExists(sid)) {
+    process.stderr.write(
+      "handoff-cli: this session has a native autopilot objective. The SDK-free " +
+      "fallback cannot transfer native mode and permissions; use the in-session " +
+      "context-handoff tools instead. Nothing was written.\n",
+    );
+    process.exit(1);
   }
   const cwd = args.cwd || process.cwd();
   const stored = storeHandoff({
@@ -147,6 +174,21 @@ function cmdContinue(args) {
   }
   const cwd = args.cwd || process.cwd();
   const sid = resolveSid(args);
+  const match = String(seed).match(/(\{"path":.+?\})/);
+  if (match) {
+    try {
+      const target = JSON.parse(match[1]);
+      if (fileHandoffHasNativeContinuation(cwd, sid, "", target.path)) {
+        process.stderr.write(
+          "handoff-cli continue: this baton carries native session state and " +
+          "must be continued by the in-session extension. Nothing was launched.\n",
+        );
+        process.exit(1);
+      }
+    } catch {
+      // The normal cutover path validates the seed.
+    }
+  }
   const cut = runHandoffCutover(cwd, seed, sid);
   if (args.json) return emit({ ok: cut.ok, cutover: cut }, args);
   if (cut.ok) {
@@ -160,6 +202,15 @@ function cmdContinue(args) {
 function cmdConsume(args) {
   const cwd = args.cwd || process.cwd();
   const sid = resolveSid(args);
+  if (fileHandoffHasNativeContinuation(
+    cwd, sid, args["handoff-id"], args.path,
+  )) {
+    process.stderr.write(
+      "handoff-cli consume: this baton carries native session state and must " +
+      "be consumed by the in-session extension. It remains unconsumed.\n",
+    );
+    process.exit(1);
+  }
   const consumed = consumeFileHandoffOnce(
     cwd, sid, args["handoff-id"], args.path || null,
   );

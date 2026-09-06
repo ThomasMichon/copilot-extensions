@@ -41,7 +41,6 @@ import {
 import { execSync, execFileSync } from "node:child_process";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
   CONTINUATION_DIRECTIVE,
@@ -75,6 +74,7 @@ const state = {
   hardLogShown: false,            // session.log shown to user
   handoffGenerated: false,
   firstUserPrompt: null,          // first user message (for topic bias)
+  pendingCutover: null,           // { seed, permissionMode } from the last save
   // Context window tracking (from session.usage_info events)
   currentTokens: 0,
   tokenLimit: 0,
@@ -306,6 +306,7 @@ function worktreeInfo(cwd, sid) {
 
 function makeHandoffMetadata({
   sid, cwd, title, storage, taskId = null, predecessor = null,
+  nativeContinuation = null,
 }) {
   const { wtDir, worktree, stateDir } = worktreeInfo(cwd, sid);
   const id = `handoff-${safePathSegment(sid)}`;
@@ -323,6 +324,7 @@ function makeHandoffMetadata({
     oldPane: currentPaneId(),
     muxSession: currentMuxSession(),
     predecessor,
+    nativeContinuation,
     stateDir,
     createdAt: new Date().toISOString(),
   };
@@ -369,7 +371,9 @@ function writeJsonAtomic(path, value) {
   }
 }
 
-function saveFileHandoff(promptText, sid, cwd, title) {
+function saveFileHandoff(
+  promptText, sid, cwd, title, nativeContinuation = null,
+) {
   const identity = resolveHerdrPredecessorIdentity(sid);
   if (identity.error) return { error: identity.error };
   const metadata = makeHandoffMetadata({
@@ -378,6 +382,7 @@ function saveFileHandoff(promptText, sid, cwd, title) {
     title,
     storage: "file",
     predecessor: identity.predecessor,
+    nativeContinuation,
   });
   const dir = handoffDirFor(cwd, sid);
   if (!dir) {
@@ -517,8 +522,12 @@ function bindConsumedHandoff(cwd, token, metadata, sid) {
 // Store a handoff as a proposed, handoff-labeled agent-dispatch task pinned to
 // the current worktree; payload = metadata + handoff markdown. Returns the task
 // id, or null if anything fails (the caller then falls back to a worktree file).
-function dispatchHandoff(promptText, sid, cwd, title) {
-  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
+function dispatchHandoff(
+  promptText, sid, cwd, title, nativeContinuation = null,
+) {
+  const metadata = makeHandoffMetadata({
+    sid, cwd, title, storage: "agent-dispatch", nativeContinuation,
+  });
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   const tmp = join(dir, `${metadata.id}-payload-${process.pid}.md`);
@@ -1074,11 +1083,120 @@ function formatHandoffMarkdown(handoffData, scope) {
   return lines.join("\n");
 }
 
+function hasActiveAutopilotObjective(content) {
+  if (typeof content !== "string" || !content.trim()) return false;
+  try {
+    return JSON.parse(content)?.current?.status === "active";
+  } catch {
+    return false;
+  }
+}
+
+function objectiveRestored(expected, actual, targetMode) {
+  if (!expected) return actual === null;
+  if (targetMode === "autopilot") return actual === expected;
+  try {
+    const expectedCurrent = JSON.parse(expected)?.current;
+    const actualCurrent = JSON.parse(actual)?.current;
+    return (
+      expectedCurrent?.objective === actualCurrent?.objective
+      && expectedCurrent?.status === actualCurrent?.status
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function captureNativeContinuation() {
+  try {
+    const [mode, objective, permissions, pending] = await Promise.all([
+      session.rpc.mode.get(),
+      session.rpc.workspaces.readAutopilotObjective(),
+      session.rpc.permissions.getMode(),
+      session.rpc.permissions.pendingRequests(),
+    ]);
+    if (!Array.isArray(pending?.items)) {
+      throw new Error("Copilot returned an invalid pending-permissions response.");
+    }
+    if (pending.items.length > 0) {
+      return {
+        value: null,
+        error:
+          `${pending.items.length} permission confirmation request(s) are still ` +
+          "pending. Resolve them in this session before handing off.",
+      };
+    }
+    return {
+      value: {
+        version: 1,
+        mode,
+        permissionMode: permissions.mode,
+        autopilotObjective: objective.content,
+      },
+      error: null,
+    };
+  } catch (error) {
+    return {
+      value: null,
+      error: error?.message || String(error),
+    };
+  }
+}
+
+async function restoreNativeContinuation(metadata) {
+  const native = metadata?.nativeContinuation;
+  if (!native || native.version !== 1) {
+    return { restored: false, mode: null, permissionMode: null };
+  }
+  const permissionMode = native.permissionMode;
+  if (!["manual", "assisted", "allow-all"].includes(permissionMode)) {
+    throw new Error(`unsupported inherited permission mode: ${permissionMode}`);
+  }
+  const permissionResult = await session.rpc.permissions.setMode({
+    mode: permissionMode,
+  });
+  if (!permissionResult.success || permissionResult.mode !== permissionMode) {
+    throw new Error(
+      `could not restore permission mode ${permissionMode}; runtime reported ` +
+      `${permissionResult.mode || "unknown"}`,
+    );
+  }
+
+  const objective = native.autopilotObjective;
+  if (typeof objective === "string" && objective.trim()) {
+    await session.rpc.workspaces.writeAutopilotObjective({ content: objective });
+  } else {
+    await session.rpc.workspaces.deleteAutopilotObjective();
+  }
+
+  const targetMode =
+    native.mode === "autopilot" && !hasActiveAutopilotObjective(objective)
+      ? "interactive"
+      : native.mode;
+  if (!["interactive", "plan", "autopilot"].includes(targetMode)) {
+    throw new Error(`unsupported inherited session mode: ${targetMode}`);
+  }
+  await session.rpc.mode.set({ mode: targetMode });
+  const [restoredMode, restoredObjective] = await Promise.all([
+    session.rpc.mode.get(),
+    session.rpc.workspaces.readAutopilotObjective(),
+  ]);
+  if (
+    restoredMode !== targetMode
+    || !objectiveRestored(
+      objective || null,
+      restoredObjective.content,
+      targetMode,
+    )
+  ) {
+    throw new Error("native goal or execution mode did not persist after restore");
+  }
+  return { restored: true, mode: targetMode, permissionMode };
+}
+
 // --- Extension ---
 
 const session = await joinSession({
-  onPermissionRequest: approveAll,
-
   tools: [
     {
       name: "generate_handoff_prompt",
@@ -1233,6 +1351,14 @@ const session = await joinSession({
         }
         const cwd = cwdResult.cwd;
         const title = (args?.title ?? "").toString().trim();
+        const native = await captureNativeContinuation();
+        if (!native.value) {
+          return (
+            "Cannot save handoff: native session state could not be captured " +
+            `without losing a confirmation or execution authority. Nothing was written. ` +
+            `[native: ${native.error}]`
+          );
+        }
         // Front-load the seed with the specific action so the successor
         // session's title-inference (biased toward the START of the prompt)
         // derives a meaningful title from the topic rather than the generic
@@ -1250,7 +1376,9 @@ const session = await joinSession({
         let storedMsg = null;     // the instruction to reply with
 
         if (!isHerdrPane() && agentDispatchAvailable()) {
-          const stored = dispatchHandoff(text, sid, cwd, title);
+          const stored = dispatchHandoff(
+            text, sid, cwd, title, native.value,
+          );
           const taskId = stored?.id;
           if (taskId) {
             // Two seeds, two completion models (see the context-handoff skill):
@@ -1269,18 +1397,17 @@ const session = await joinSession({
             // Each LEADS with the specific action (`lead`) so the successor
             // session's title-inference resolves to the topic, not the generic
             // "Agent Dispatch Task Handoff" boilerplate.
-            seed =
-              `${lead}. You are resuming a handoff (agent-dispatch task ` +
-              `${taskId}); continue the prior session's work IN PLACE -- do not ` +
-              `restart or create a new worktree. Load your full brief by ` +
-              `running: agent-dispatch consume ${taskId} . ` +
-              `${CONTINUATION_DIRECTIVE}`;
+            seed = buildCutoverSeed("task", taskId, lead, {
+              retry: false,
+              requiresNativeRestore: true,
+            });
             cutoverSeed = buildCutoverSeed("task", taskId, lead, {
               oldPane: stored?.metadata?.oldPane,
               worktree: stored?.metadata?.worktree,
               worktreeDir: stored?.metadata?.worktreeDir,
               sessionId: sid,
               muxSession: stored?.metadata?.muxSession,
+              requiresNativeRestore: true,
             });
             // Mirror the handoff into the worktree record (record-first recovery).
             noteHandoffInRecord(cwd, sid, taskId, title);
@@ -1303,7 +1430,9 @@ const session = await joinSession({
         }
 
         if (!seed) {
-          const fileStored = saveFileHandoff(text, sid, cwd, title);
+          const fileStored = saveFileHandoff(
+            text, sid, cwd, title, native.value,
+          );
           if (!fileStored?.path) {
             return (
               "Cannot save handoff: the machine-local file resolver failed. " +
@@ -1339,6 +1468,10 @@ const session = await joinSession({
         // (the PRIMARY handoff path): call continue_handoff with `seed` set to
         // exactly this string. For a task-backed handoff it is the *deferred*
         // cutover seed (the successor completes explicitly at the goal).
+        state.pendingCutover = {
+          seed: cutoverSeed,
+          permissionMode: native.value.permissionMode,
+        };
         return (
           `${storedMsg}\n\n` +
           `HANDOFF_SEED: ${cutoverSeed}\n` +
@@ -1398,13 +1531,36 @@ const session = await joinSession({
 
         let result;
         if (taskId) {
-          result = consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete);
+          result = consumeDispatchHandoffTask(
+            cwd, taskId, sid, deferComplete, { deferRetire: true },
+          );
         } else if (handoffId || path) {
-          result = consumeFileHandoff(cwd, sid, handoffId, path || null);
+          result = consumeFileHandoff(
+            cwd, sid, handoffId, path || null, { deferRetire: true },
+          );
         } else {
           return (
             "Cannot consume handoff: pass task_id for an agent-dispatch handoff " +
             "or handoff_id/path for a file-backed handoff."
+          );
+        }
+
+        if (result?.ok) {
+          try {
+            result.nativeContinuation = await restoreNativeContinuation(
+              result.metadata,
+            );
+          } catch (error) {
+            return {
+              textResultForLlm:
+                "The handoff baton was consumed, but native goal, mode, or " +
+                "permission restoration failed. The predecessor was NOT retired. " +
+                `Stop and report this blocker: ${error?.message || String(error)}`,
+              resultType: "error",
+            };
+          }
+          result.retire = retireAfterConsume(
+            cwd, result.metadata, sid, result.id,
           );
         }
 
@@ -1458,7 +1614,11 @@ const session = await joinSession({
         }
         const cwd = cwdResult.cwd;
         const sid = state.sessionId || invocation?.sessionId || null;
-        const result = runHandoffCutover(cwd, seed, sid);
+        const permissionMode =
+          state.pendingCutover?.seed === seed
+            ? state.pendingCutover.permissionMode
+            : null;
+        const result = runHandoffCutover(cwd, seed, sid, { permissionMode });
         if (!result || !result.ok) {
           const reason = result?.reason || "error";
           const tail =
@@ -1560,6 +1720,7 @@ const session = await joinSession({
         let kind = null;
         let id = null;
         let filePath = null;
+        let permissionMode = null;
         let lead = leadFrom("");
         const wtDir = isHerdrPane()
           ? null
@@ -1571,6 +1732,11 @@ const session = await joinSession({
             kind = "task";
             id = task.id;
             lead = leadFrom(task.title || task.name || "");
+            const decoded = decodeHandoffPayload(
+              readTaskPayloadRaw(cwd, task.id),
+            );
+            permissionMode =
+              decoded.metadata?.nativeContinuation?.permissionMode || null;
           }
         }
         if (!id) {
@@ -1580,6 +1746,8 @@ const session = await joinSession({
             id = file.record.id;
             filePath = file.path;
             lead = leadFrom(file.record.title || "");
+            permissionMode =
+              file.record.nativeContinuation?.permissionMode || null;
           }
         }
         if (!id) {
@@ -1601,10 +1769,13 @@ const session = await joinSession({
                 worktreeDir: wtDir,
                 sessionId: sid,
                 muxSession: currentMuxSession(),
+                requiresNativeRestore: Boolean(permissionMode),
               }
             : { path: filePath },
         );
-        const result = runHandoffCutover(cwd, seed, sid);
+        const result = runHandoffCutover(
+          cwd, seed, sid, { permissionMode },
+        );
         if (!result || !result.ok) {
           const reason = result?.reason || "error";
           const tail =
