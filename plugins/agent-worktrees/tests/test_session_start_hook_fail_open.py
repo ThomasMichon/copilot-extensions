@@ -500,6 +500,57 @@ def test_powershell_lifecycle_hook_is_one_bounded_client():
     assert "sessionStart" in commands[0]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows command resolution regression")
+@pytest.mark.parametrize("alias_first", [False, True])
+def test_powershell_lifecycle_hook_ignores_windowsapps_alias(
+    tmp_path: Path,
+    alias_first: bool,
+):
+    powershell = _powershell()
+    home = tmp_path / "home"
+    cwd = tmp_path / "cwd"
+    plugin_root = tmp_path / "plugin"
+    scripts = plugin_root / "scripts"
+    alias_bin = tmp_path / "WindowsApps"
+    marker = tmp_path / "python-args.txt"
+    for directory in (home, cwd, scripts, alias_bin):
+        directory.mkdir(parents=True)
+    (scripts / "hook_client.py").write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        f"Path({str(marker)!r}).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n"
+        "print('{}', end='')\n",
+        encoding="utf-8",
+    )
+    (alias_bin / "python.exe").write_bytes(b"")
+    command = next(
+        str(hook["powershell"])
+        for hook in _hooks("sessionStart")
+        if "hook_client.py" in str(hook["powershell"])
+    )
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["COPILOT_PROJECT_DIR"] = str(cwd)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
+    candidates = (str(alias_bin), str(Path(sys.executable).parent))
+    if not alias_first:
+        candidates = tuple(reversed(candidates))
+    env["PATH"] = os.pathsep.join(candidates)
+
+    result = subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-Command", command],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert marker.read_text(encoding="utf-8") == "sessionStart"
+
+
 def test_register_session_powershell_coalesces_context_and_fails_open(
     tmp_path: Path,
 ):
