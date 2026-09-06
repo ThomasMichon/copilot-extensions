@@ -24,8 +24,12 @@ if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
     exit 0
 }
 $env:PYTHONPATH = ''
-& $python.Source $script
-if ($LASTEXITCODE -ne 0) {
+try {
+    & $python.Source $script
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Out.Write('{}')
+    }
+} catch {
     [Console]::Out.Write('{}')
 }
 exit 0
