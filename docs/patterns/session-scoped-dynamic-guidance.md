@@ -173,6 +173,12 @@ review mechanism is needed -- only a documented content convention.
   session-scoped file carries the current repository-aware publication policy,
   while the existing `publication-policy` contributor retains its compact
   `--aggregate` kernel as a best-effort supplementary channel.
+- [`agent-ssh`](../../plugins/agent-ssh/) uses a dedicated side-effect-only
+  hook to invoke its independent `emit-command-catalog` and
+  `emit-mesh-pointer` scripts in contributor order. The session-scoped file
+  always carries any available attributable command catalog and conditionally
+  adds the repository-gated mesh pointer, while both original contributors
+  remain best-effort supplementary channels.
 
 ## See Also
 
