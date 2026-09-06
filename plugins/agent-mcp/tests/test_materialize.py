@@ -14,7 +14,9 @@ from agent_mcp.config import parse_config
 from agent_mcp.materialize import (
     DISPATCHER_NAME,
     MaterializedTool,
+    _artifact_label,
     _source_digest_key,
+    _wait_for_source_digest_key,
     bridge_source_digest,
     build_manifest,
     plan_tools,
@@ -261,6 +263,33 @@ def test_source_digest_key_is_private_and_stable(
     assert second == first
     if os.name != "nt":
         assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_source_digest_key_waits_for_concurrent_writer() -> None:
+    class RacingPath:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def read_bytes(self) -> bytes:
+            self.reads += 1
+            return b"short" if self.reads == 1 else b"k" * 32
+
+        def __str__(self) -> str:
+            return "<key>"
+
+    path = RacingPath()
+    assert _wait_for_source_digest_key(
+        path,  # type: ignore[arg-type]
+        attempts=2,
+        sleeper=lambda _seconds: None,
+    ) == b"k" * 32
+
+
+def test_artifact_label_handles_external_absolute_path() -> None:
+    assert _artifact_label(
+        Path("/external/tool.md"),
+        Path("/bridge"),
+    ) == "absolute:/external/tool.md"
 
 
 def test_server_name_for():

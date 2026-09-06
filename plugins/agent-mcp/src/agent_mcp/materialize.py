@@ -37,6 +37,7 @@ import re
 import secrets
 import shutil
 import stat
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -198,6 +199,24 @@ def render_index(server: str, plan: list[MaterializedTool], *, bridge_ref: str) 
     return "\n".join(lines)
 
 
+def _wait_for_source_digest_key(
+    path: Path,
+    *,
+    attempts: int = 50,
+    sleeper=time.sleep,
+) -> bytes:
+    """Wait briefly for a concurrent first-use writer to finish the key."""
+    for _ in range(attempts):
+        try:
+            key = path.read_bytes()
+        except FileNotFoundError:
+            key = b""
+        if len(key) >= 32:
+            return key
+        sleeper(0.01)
+    raise ValueError(f"source digest key is invalid: {path}")
+
+
 def _source_digest_key() -> bytes:
     """Load or create the machine-local key used for source fingerprints."""
     home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
@@ -208,20 +227,25 @@ def _source_digest_key() -> bytes:
         pass
     else:
         if len(key) < 32:
-            raise ValueError(f"source digest key is invalid: {path}")
+            return _wait_for_source_digest_key(path)
         return key
     path.parent.mkdir(parents=True, exist_ok=True)
     key = secrets.token_bytes(32)
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        key = path.read_bytes()
-        if len(key) < 32:
-            raise ValueError(f"source digest key is invalid: {path}")
-        return key
+        return _wait_for_source_digest_key(path)
     with os.fdopen(descriptor, "wb") as stream:
         stream.write(key)
     return key
+
+
+def _artifact_label(path: Path, base_dir: Path) -> str:
+    """Return a stable declared-path label without cross-drive relpath errors."""
+    try:
+        return path.relative_to(base_dir).as_posix()
+    except ValueError:
+        return f"absolute:{path.as_posix()}"
 
 
 def bridge_source_digest(cfg: BridgeConfig, *, key: bytes | None = None) -> str:
@@ -247,12 +271,12 @@ def bridge_source_digest(cfg: BridgeConfig, *, key: bytes | None = None) -> str:
         if tool.source is None:
             continue
         declared_source = tool.source
-        artifacts[os.path.relpath(declared_source, base_dir)] = declared_source
+        artifacts[_artifact_label(declared_source, base_dir)] = declared_source
         command = Path(tool.command).expanduser()
         if not command.is_absolute() and command.parent.parts:
             command = declared_source.parent / command
             if command.is_file():
-                artifacts[os.path.relpath(command, base_dir)] = command
+                artifacts[_artifact_label(command, base_dir)] = command
     for label, path in sorted(artifacts.items()):
         stat_result = path.stat()
         digest.update(label.encode("utf-8"))
