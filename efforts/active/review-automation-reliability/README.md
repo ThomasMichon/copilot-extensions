@@ -172,8 +172,8 @@ re-queuing (or re-superseding) the same blocked issue.
 
 Discovered live (2026-09-05) operating the Intelligence Dampener reviewer --
 the current, most heavily-exercised consumer of this vision's reviewer-loop
-shape -- across a multi-hour production incident on a single pull request
-(aperture-labs #6514) and several related ones. Six distinct failures, none
+shape -- across a multi-hour production incident on a single pull request and
+several related ones. Six distinct failures, none
 in the review *logic* itself, compounded to keep a reviewer from ever
 rendering a verdict:
 
@@ -186,8 +186,7 @@ rendering a verdict:
    real dependencies. 134 retries over 8+ hours, all failing identically,
    before this was traced by hand-replaying the daemon's exact captured
    environment. Fixed downstream by pinning an explicit `PATH` in the
-   consumer's bridge config
-   (aperture-labs #6515, private tracker)),
+   consumer's bridge config,
    but the *generic* lesson is structural: a trusted tool invoked by
    subprocess exec must not depend on whatever `PATH`/environment a
    long-lived host process happens to have accumulated. It should either
@@ -205,8 +204,7 @@ rendering a verdict:
    worktree). A trusted tool the reviewer directly executes should verify
    (and where safe, restore) its own required file mode at the point of
    invocation rather than assuming a git-tracked mode change alone is
-   sufficient. Fixed downstream in
-   aperture-labs #6515 (private tracker)
+   sufficient. Fixed downstream in the consumer's own repository
    (also switched the invocation itself off a `python <cwd-relative-path>`
    shebang-adjacent pattern that additionally depended on the session's
    working directory).
@@ -233,9 +231,8 @@ rendering a verdict:
    verdict-payload read) that returned a bare retry *without* charging the
    attempt budget at all, so a structural failure (like #1 above) could
    retry unboundedly while the budget only ever protected the one failure
-   mode it was least likely to see. Fixed downstream in
-   aperture-labs #6518 (private tracker):
-   every no-verdict outcome -- including a failure to even suspend/start --
+   mode it was least likely to see. Fixed downstream in the
+   consumer's own repository: every no-verdict outcome -- including a failure to even suspend/start --
    now charges one deduped attempt. Any generic implementation of
    `bounded-verdict-reliability` must charge the budget from a single choke
    point that every non-verdict exit passes through, not from a per-branch
@@ -248,11 +245,11 @@ rendering a verdict:
    meaning the *resilience path itself* silently carried the same defect as
    the primary path it exists to protect against, for as long as the outage.
    Cross-referenced against the open "change detection (schema drift)" item
-   in aperture-labs's `mcp-to-cli-migration` effort; not yet fixed as of
-   this writing.
+   in the downstream consumer's own MCP-to-CLI migration effort; not yet
+   fixed as of this writing.
 6. A reviewer's own bootstrap/config fix cannot be reviewed by that same
-   reviewer while the bug is live -- observed twice today (aperture-labs
-   #6498, #6515), each requiring an ad hoc administrative
+   reviewer while the bug is live -- observed twice today in the
+   downstream consumer, each requiring an ad hoc administrative
    approve-and-merge to break the deadlock. A generic reviewer-loop
    deployment should document (or better, provide) a sanctioned,
    audited self-bootstrap override authority for exactly this
@@ -281,8 +278,8 @@ rendering a verdict:
   the bridge's declared config/tool content (a hash), not just the
   `agent-mcp` runtime version, so the fallback path cannot silently carry
   a fixed-upstream defect for the life of an outage. Coordinate with
-  aperture-labs's `mcp-to-cli-migration` effort, which owns the open
-  "change detection (schema drift)" item this closes.
+  the downstream consumer's own MCP-to-CLI migration effort, which owns the
+  open "change detection (schema drift)" item this closes.
 - [ ] Document (or implement) a sanctioned, audited reviewer self-bootstrap
   override: an explicit authority path for landing a fix to the reviewer's
   own trusted config/tooling when the reviewer cannot review itself,
@@ -313,10 +310,10 @@ scenarios.
 
 ## Journal
 
-### 2026-09-05 - Phase 7: five live environment-drift failures from Intelligence Dampener
+### 2026-09-05 - Phase 7: six live environment-drift failures from Intelligence Dampener
 
-- Added Phase 7 after a multi-hour aperture-labs production incident
-  (Intelligence Dampener reviewer, PR #6514 and related) surfaced five
+- Added Phase 7 after a multi-hour production incident
+  (Intelligence Dampener reviewer, its production deployment) surfaced six
   distinct trusted-tool/credential/pool failures, none in the review logic
   itself: ambient-`PATH`-dependent shebang resolution through a long-lived
   daemon's inherited environment, a checked-out executable bit not
@@ -330,8 +327,8 @@ scenarios.
   `bounded-verdict-reliability` feature states every attempt counts, and
   two branches did not); the rest are below-altitude implementation
   hardening, matching Phase 5's classification pattern.
-- All five downstream instances are already fixed and merged in the
-  Intelligence Dampener consumer (aperture-labs #6515, #6518) and in
+- Five of six downstream instances are already fixed and merged in the
+  Intelligence Dampener consumer's own repository and in
   `agent-mcp` itself (dev95,
   ThomasMichon/copilot-extensions#2135); this phase captures the generic
   principle each fix implies for any future generalized reviewer recipe,
