@@ -29,14 +29,19 @@ re-materialize is atomic and drift-safe (no partial-write window).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
-from dataclasses import dataclass
+import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .cli_tools import load_cli_tools
 from .config import BridgeConfig
 from .decorators._catalog import render_tools_interface
 
@@ -44,6 +49,7 @@ from .decorators._catalog import render_tools_interface
 # dispatches on ``argv[0]`` (busybox / git-multicall style).
 DISPATCHER_NAME = "_amcp-dispatch"
 MANIFEST_NAME = "manifest.json"
+SOURCE_DIGEST_KEY_NAME = "source-digest.key"
 
 # Characters allowed in an on-disk stub name; anything else becomes ``-``.
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -193,16 +199,114 @@ def render_index(server: str, plan: list[MaterializedTool], *, bridge_ref: str) 
     return "\n".join(lines)
 
 
-def build_manifest(server: str, plan: list[MaterializedTool], *, bridge_ref: str,
-                   version: str) -> dict:
+def _wait_for_source_digest_key(
+    path: Path,
+    *,
+    attempts: int = 50,
+    sleeper=time.sleep,
+) -> bytes:
+    """Wait briefly for a concurrent first-use writer to finish the key."""
+    for _ in range(attempts):
+        try:
+            key = path.read_bytes()
+        except FileNotFoundError:
+            key = b""
+        if len(key) >= 32:
+            return key
+        sleeper(0.01)
+    raise ValueError(f"source digest key is invalid: {path}")
+
+
+def _source_digest_key() -> bytes:
+    """Load or create the machine-local key used for source fingerprints."""
+    home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
+    path = home / SOURCE_DIGEST_KEY_NAME
+    try:
+        key = path.read_bytes()
+    except FileNotFoundError:
+        pass
+    else:
+        if len(key) < 32:
+            return _wait_for_source_digest_key(path)
+        return key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_bytes(32)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return _wait_for_source_digest_key(path)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(key)
+    return key
+
+
+def _artifact_label(path: Path, base_dir: Path) -> str:
+    """Return a stable declared-path label without cross-drive relpath errors."""
+    try:
+        return path.relative_to(base_dir).as_posix()
+    except ValueError:
+        return f"absolute:{path.as_posix()}"
+
+
+def bridge_source_digest(cfg: BridgeConfig, *, key: bytes | None = None) -> str:
+    """Key-hash effective config plus file-backed CLI declarations/helpers."""
+    payload = asdict(cfg)
+    payload.pop("source_path", None)
+    digest = hmac.new(
+        key or _source_digest_key(),
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8"),
+        hashlib.sha256,
+    )
+    if cfg.server.type != "cli" or cfg.source_path is None:
+        return digest.hexdigest()
+
+    base_dir = cfg.source_path.parent
+    artifacts: dict[str, Path] = {}
+    for tool in load_cli_tools(cfg.server.tools_from, base_dir=base_dir):
+        if tool.source is None:
+            continue
+        declared_source = tool.source
+        artifacts[_artifact_label(declared_source, base_dir)] = declared_source
+        command = Path(tool.command).expanduser()
+        if not command.is_absolute() and command.parent.parts:
+            command = declared_source.parent / command
+            if command.is_file():
+                artifacts[_artifact_label(command, base_dir)] = command
+    for label, path in sorted(artifacts.items()):
+        stat_result = path.stat()
+        digest.update(label.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(f"{stat_result.st_mode & 0o777:o}".encode("ascii"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def build_manifest(
+    server: str,
+    plan: list[MaterializedTool],
+    *,
+    bridge_ref: str,
+    version: str,
+    source_digest: str | None = None,
+) -> dict:
     """The stub->tool map + bridge reference that ``agent-mcp call`` reads."""
-    return {
+    manifest = {
         "schema": 1,
         "server": server,
         "bridge": bridge_ref,
         "generated_by": f"agent-mcp {version}",
         "tools": {mt.stub: {"tool": mt.tool_name} for mt in plan},
     }
+    if source_digest is not None:
+        manifest["bridge_source_digest"] = source_digest
+    return manifest
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +366,16 @@ def _make_executable(path: Path) -> None:
     path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def write_farm(server_dir: Path, plan: list[MaterializedTool], *, server: str,
-               bridge_ref: str, version: str, windows: bool = False) -> None:
+def write_farm(
+    server_dir: Path,
+    plan: list[MaterializedTool],
+    *,
+    server: str,
+    bridge_ref: str,
+    version: str,
+    windows: bool = False,
+    source_digest: str | None = None,
+) -> None:
     """Build ``<server_dir>`` (bin/ + doc/ + index.md + manifest.json) atomically.
 
     On POSIX a symlink farm points at one dispatcher; on Windows a two-template
@@ -278,7 +390,8 @@ def write_farm(server_dir: Path, plan: list[MaterializedTool], *, server: str,
         shutil.rmtree(tmp)
     try:
         _build_and_swap(tmp, server_dir, parent, plan, server=server,
-                        bridge_ref=bridge_ref, version=version, windows=windows)
+                        bridge_ref=bridge_ref, version=version, windows=windows,
+                        source_digest=source_digest)
     finally:
         # On success ``tmp`` was renamed into place (gone); on any failure this
         # removes the half-built tree so temp dirs never accumulate.
@@ -288,15 +401,25 @@ def write_farm(server_dir: Path, plan: list[MaterializedTool], *, server: str,
 
 def _build_and_swap(tmp: Path, server_dir: Path, parent: Path,
                     plan: list[MaterializedTool], *, server: str, bridge_ref: str,
-                    version: str, windows: bool) -> None:
+                    version: str, windows: bool,
+                    source_digest: str | None) -> None:
     bin_dir = tmp / "bin"
     doc_dir = tmp / "doc"
     bin_dir.mkdir(parents=True)
     doc_dir.mkdir(parents=True)
 
     (tmp / MANIFEST_NAME).write_text(
-        json.dumps(build_manifest(server, plan, bridge_ref=bridge_ref, version=version),
-                   indent=2) + "\n",
+        json.dumps(
+            build_manifest(
+                server,
+                plan,
+                bridge_ref=bridge_ref,
+                version=version,
+                source_digest=source_digest,
+            ),
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     (tmp / "index.md").write_text(

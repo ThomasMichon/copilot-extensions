@@ -14,6 +14,10 @@ from agent_mcp.config import parse_config
 from agent_mcp.materialize import (
     DISPATCHER_NAME,
     MaterializedTool,
+    _artifact_label,
+    _source_digest_key,
+    _wait_for_source_digest_key,
+    bridge_source_digest,
     build_manifest,
     plan_tools,
     render_index,
@@ -32,6 +36,7 @@ TOOLS = [
     {"name": "list_issues", "description": "List issues.\nWith detail.",
      "inputSchema": {"type": "object", "properties": {}}},
 ]
+SOURCE_DIGEST_KEY = b"k" * 32
 
 
 def test_sanitize_stub():
@@ -91,6 +96,200 @@ def test_build_manifest():
     assert m["server"] == "gitea"
     assert m["bridge"] == "/x/gitea.yaml"
     assert m["tools"]["create_issue"] == {"tool": "create_issue"}
+    assert "bridge_source_digest" not in m
+
+    with_digest = build_manifest(
+        "gitea",
+        plan,
+        bridge_ref="/x/gitea.yaml",
+        version="9.9",
+        source_digest="abc123",
+    )
+    assert with_digest["bridge_source_digest"] == "abc123"
+
+
+def test_bridge_source_digest_tracks_effective_config() -> None:
+    first = parse_config(
+        {"server": {"type": "http", "url": "https://api.example.com/mcp"}}
+    )
+    second = parse_config(
+        {"server": {"type": "http", "url": "https://api.example.com/other"}}
+    )
+    assert bridge_source_digest(
+        first, key=SOURCE_DIGEST_KEY
+    ) != bridge_source_digest(second, key=SOURCE_DIGEST_KEY)
+
+
+def test_bridge_source_digest_tracks_cli_sidecar_and_helper(
+    tmp_path: Path,
+) -> None:
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    helper = helpers / "tool.py"
+    helper.write_text("print('one')\n", encoding="utf-8")
+    sidecar = tmp_path / "tool.md"
+    sidecar.write_text(
+        """---
+mcp:
+  name: example
+  invoke:
+    command: helpers/tool.py
+---
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "bridge.yaml"
+    config.write_text(
+        "server:\n  type: cli\n  tools_from: [tool.md]\n",
+        encoding="utf-8",
+    )
+    cfg = parse_config(
+        {"server": {"type": "cli", "tools_from": ["tool.md"]}},
+        source_path=config,
+    )
+    original = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
+    sidecar.write_text(
+        sidecar.read_text(encoding="utf-8") + "\nChanged docs.\n",
+        encoding="utf-8",
+    )
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) != original
+
+    updated = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
+    helper.write_text("print('two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) != updated
+
+
+@pytest.mark.parametrize("command_kind", ["bare", "absolute"])
+def test_bridge_source_digest_does_not_hash_path_lookup_or_absolute_binary(
+    tmp_path: Path,
+    command_kind: str,
+) -> None:
+    helper = tmp_path / "tool.py"
+    helper.write_text("print('one')\n", encoding="utf-8")
+    command = "tool.py" if command_kind == "bare" else str(helper)
+    sidecar = tmp_path / "tool.md"
+    sidecar.write_text(
+        f"""---
+mcp:
+  name: example
+  invoke:
+    command: {command}
+---
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "bridge.yaml"
+    config.write_text(
+        "server:\n  type: cli\n  tools_from: [tool.md]\n",
+        encoding="utf-8",
+    )
+    cfg = parse_config(
+        {"server": {"type": "cli", "tools_from": ["tool.md"]}},
+        source_path=config,
+    )
+
+    original = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
+    helper.write_text("print('two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) == original
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink semantics are POSIX-specific")
+def test_bridge_source_digest_resolves_helper_from_declared_symlink(
+    tmp_path: Path,
+) -> None:
+    declarations = tmp_path / "declared"
+    targets = tmp_path / "targets"
+    declarations.mkdir()
+    targets.mkdir()
+    (declarations / "helpers").mkdir()
+    (targets / "helpers").mkdir()
+    executed_helper = declarations / "helpers" / "helper.py"
+    executed_helper.write_text("print('executed-one')\n", encoding="utf-8")
+    target_helper = targets / "helpers" / "helper.py"
+    target_helper.write_text("print('not-executed-one')\n", encoding="utf-8")
+    target_sidecar = targets / "tool.md"
+    target_sidecar.write_text(
+        """---
+mcp:
+  name: example
+  invoke:
+    command: helpers/helper.py
+---
+""",
+        encoding="utf-8",
+    )
+    (declarations / "tool.md").symlink_to(target_sidecar)
+    config = tmp_path / "bridge.yaml"
+    config.write_text(
+        "server:\n  type: cli\n  tools_from: [declared/tool.md]\n",
+        encoding="utf-8",
+    )
+    cfg = parse_config(
+        {"server": {"type": "cli", "tools_from": ["declared/tool.md"]}},
+        source_path=config,
+    )
+
+    original = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
+    executed_helper.write_text("print('executed-two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) != original
+
+    updated = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
+    target_helper.write_text("print('not-executed-two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) == updated
+
+
+def test_bridge_source_digest_is_keyed() -> None:
+    cfg = parse_config(
+        {
+            "server": {"type": "http", "url": "https://api.example.com/mcp"},
+            "auth": {"kind": "static", "value": "guessable-secret"},
+        }
+    )
+    assert bridge_source_digest(cfg, key=b"a" * 32) != bridge_source_digest(
+        cfg, key=b"b" * 32
+    )
+
+
+def test_source_digest_key_is_private_and_stable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    first = _source_digest_key()
+    second = _source_digest_key()
+    path = tmp_path / "source-digest.key"
+
+    assert len(first) == 32
+    assert second == first
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_source_digest_key_waits_for_concurrent_writer() -> None:
+    class RacingPath:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def read_bytes(self) -> bytes:
+            self.reads += 1
+            return b"short" if self.reads == 1 else b"k" * 32
+
+        def __str__(self) -> str:
+            return "<key>"
+
+    path = RacingPath()
+    assert _wait_for_source_digest_key(
+        path,  # type: ignore[arg-type]
+        attempts=2,
+        sleeper=lambda _seconds: None,
+    ) == b"k" * 32
+
+
+def test_artifact_label_handles_external_absolute_path() -> None:
+    assert _artifact_label(
+        Path("/external/tool.md"),
+        Path("/bridge"),
+    ) == "absolute:/external/tool.md"
 
 
 def test_server_name_for():
@@ -177,8 +376,27 @@ def test_materialize_verb_then_stub_call(tmp_path, capsys):
     manifest_data = json.loads(manifest.read_text())
     assert Path(manifest_data["bridge"]).is_absolute()
     assert Path(manifest_data["bridge"]) == cfg.resolve()
+    assert manifest_data["bridge_source_digest"]
     capsys.readouterr()  # drain
     rc = main(["call", "--manifest", str(manifest), "--stub", "greet",
                '{"name": "materialized"}'])
     assert rc == 0
     assert capsys.readouterr().out.strip() == "hello materialized"
+
+
+def test_source_digest_verb_matches_materialized_manifest(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    cfg = _write_cfg(tmp_path)
+    dest = tmp_path / "materialized"
+    assert main(
+        ["materialize", str(cfg), "--server-name", "fix", "--dest", str(dest)]
+    ) == 0
+    manifest = json.loads((dest / "fix" / "manifest.json").read_text())
+    capsys.readouterr()
+
+    assert main(["source-digest", str(cfg)]) == 0
+    assert capsys.readouterr().out.strip() == manifest["bridge_source_digest"]
