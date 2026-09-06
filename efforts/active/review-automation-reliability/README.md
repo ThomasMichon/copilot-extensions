@@ -173,9 +173,8 @@ re-queuing (or re-superseding) the same blocked issue.
 Discovered live (2026-09-05) operating a downstream reviewer deployment --
 the current, most heavily-exercised consumer of this vision's reviewer-loop
 shape -- across a multi-hour production incident on a single pull request and
-several related ones. Six distinct failures, none
-in the review *logic* itself, compounded to keep a reviewer from ever
-rendering a verdict:
+several related ones. Six distinct failures, none in the review *logic*
+itself, compounded to keep a reviewer from ever rendering a verdict:
 
 1. The trusted reviewer tool's `#!/usr/bin/env python3` shebang resolved
    through the *calling process's* ambient `PATH` rather than a pinned,
@@ -195,13 +194,12 @@ rendering a verdict:
    before doing any real work and fail with a specific, actionable
    diagnostic rather than a generic import error that looks identical
    across unrelated causes.
-2. A checked-out trusted script's executable bit is not guaranteed to
-   survive every checkout/worktree-provisioning path (observed: a mode-only
-   git commit landed correctly on the default branch, but every already-materialized
-   worktree checkout of the reviewer's trusted-tool directory still carried
-   the old `644` mode, because Git only applies a tracked mode change on the
-   *next* checkout of that path, not retroactively to an already-checked-out
-   worktree). A trusted tool the reviewer directly executes should verify
+2. A checked-out trusted script's executable bit is not guaranteed to be
+   current across every independent worktree a reviewer-loop deployment
+   maintains (observed: a mode-only fix landed correctly on the default
+   branch, but every pre-existing worktree still pinned to an older commit
+   -- i.e. never re-synced past the fix -- kept serving the stale `644` mode
+   from its own checked-out tree). A trusted tool the reviewer directly executes should verify
    (and where safe, restore) its own required file mode at the point of
    invocation rather than assuming a git-tracked mode change alone is
    sufficient. Fixed downstream in the consumer's own repository
