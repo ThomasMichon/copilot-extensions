@@ -12,6 +12,7 @@ Subcommands:
   validate <name|FILE>          Parse + schema-check a bridge config (no run).
   status                        Show prerequisites and available bridges.
   call <bridge> <tool> [args]   One-shot: invoke one upstream tool, print result.
+  source-digest <bridge>        Print the keyed effective source fingerprint.
   materialize <bridge>          Project the upstream catalog into a CLI stub fleet.
   serve                         Resident warmth daemon: keep upstreams warm over a socket.
 
@@ -353,6 +354,20 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_source_digest(args: argparse.Namespace) -> int:
+    from . import materialize as _materialize
+    from .config import ConfigError, load_config
+
+    try:
+        cfg = load_config(args.name)
+        digest = _materialize.bridge_source_digest(cfg)
+    except (ConfigError, OSError, ValueError) as exc:
+        print(f"agent-mcp source-digest: {exc}", file=sys.stderr)
+        return 1
+    print(digest)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # serve -- resident warmth daemon
 # ---------------------------------------------------------------------------
@@ -444,6 +459,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="bypass a running 'agent-mcp serve' daemon and use "
                              "the stateless one-shot path directly")
     p_call.set_defaults(func=_cmd_call)
+
+    p_digest = sub.add_parser(
+        "source-digest",
+        help="print the machine-keyed effective bridge source fingerprint",
+    )
+    p_digest.add_argument("name", help="bridge name or path to a config file")
+    p_digest.set_defaults(func=_cmd_source_digest)
 
     p_serve = sub.add_parser(
         "serve", help="run the resident warmth daemon (keeps upstreams warm)")

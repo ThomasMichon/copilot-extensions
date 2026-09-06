@@ -30,9 +30,11 @@ re-materialize is atomic and drift-safe (no partial-write window).
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 from dataclasses import asdict, dataclass
@@ -46,6 +48,7 @@ from .decorators._catalog import render_tools_interface
 # dispatches on ``argv[0]`` (busybox / git-multicall style).
 DISPATCHER_NAME = "_amcp-dispatch"
 MANIFEST_NAME = "manifest.json"
+SOURCE_DIGEST_KEY_NAME = "source-digest.key"
 
 # Characters allowed in an on-disk stub name; anything else becomes ``-``.
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -195,36 +198,64 @@ def render_index(server: str, plan: list[MaterializedTool], *, bridge_ref: str) 
     return "\n".join(lines)
 
 
-def bridge_source_digest(cfg: BridgeConfig) -> str:
-    """Hash effective config plus file-backed CLI tool declarations/helpers."""
+def _source_digest_key() -> bytes:
+    """Load or create the machine-local key used for source fingerprints."""
+    home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
+    path = home / SOURCE_DIGEST_KEY_NAME
+    try:
+        key = path.read_bytes()
+    except FileNotFoundError:
+        pass
+    else:
+        if len(key) < 32:
+            raise ValueError(f"source digest key is invalid: {path}")
+        return key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_bytes(32)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        key = path.read_bytes()
+        if len(key) < 32:
+            raise ValueError(f"source digest key is invalid: {path}")
+        return key
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(key)
+    return key
+
+
+def bridge_source_digest(cfg: BridgeConfig, *, key: bytes | None = None) -> str:
+    """Key-hash effective config plus file-backed CLI declarations/helpers."""
     payload = asdict(cfg)
     payload.pop("source_path", None)
-    digest = hashlib.sha256(
+    digest = hmac.new(
+        key or _source_digest_key(),
         json.dumps(
             payload,
             sort_keys=True,
             separators=(",", ":"),
             default=str,
-        ).encode("utf-8")
+        ).encode("utf-8"),
+        hashlib.sha256,
     )
     if cfg.server.type != "cli" or cfg.source_path is None:
         return digest.hexdigest()
 
-    base_dir = cfg.source_path.resolve().parent
-    paths: set[Path] = set()
+    base_dir = cfg.source_path.parent
+    artifacts: dict[str, Path] = {}
     for tool in load_cli_tools(cfg.server.tools_from, base_dir=base_dir):
         if tool.source is None:
             continue
         declared_source = tool.source
-        paths.add(declared_source.resolve())
+        artifacts[os.path.relpath(declared_source, base_dir)] = declared_source
         command = Path(tool.command).expanduser()
         if not command.is_absolute() and command.parent.parts:
-            command = (declared_source.parent / command).resolve()
+            command = declared_source.parent / command
             if command.is_file():
-                paths.add(command)
-    for path in sorted(paths, key=str):
+                artifacts[os.path.relpath(command, base_dir)] = command
+    for label, path in sorted(artifacts.items()):
         stat_result = path.stat()
-        digest.update(os.path.relpath(path, base_dir).encode("utf-8"))
+        digest.update(label.encode("utf-8"))
         digest.update(b"\0")
         digest.update(f"{stat_result.st_mode & 0o777:o}".encode("ascii"))
         digest.update(b"\0")

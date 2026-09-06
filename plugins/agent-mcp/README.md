@@ -77,9 +77,13 @@ Identity-affecting values belong in the bridge config/overlay, not only in
 Use an existing fleet first. Re-materialize when the expected stub is absent or
 `manifest.json.generated_by` differs from `agent-mcp --version`.
 `agent-mcp materialize` also records `manifest.json.bridge_source_digest`, a
-deterministic hash of the effective post-overlay config and, for `type: cli`,
-the declared sidecars plus relative helper content/modes. Repository deploy
-tools can compare that value to detect declaration drift without `--force`.
+machine-keyed HMAC of the effective post-overlay config and, for `type: cli`,
+the declared sidecars plus path-qualified relative helper content/modes. The
+machine-local key prevents low-entropy secrets in a bridge declaration from
+becoming guessable through the published fingerprint. Repository deploy tools
+can compare the manifest value with `agent-mcp source-digest <bridge>` to detect
+declaration drift without `--force`; losing the local key safely makes existing
+fleets stale.
 Materialize standing fleets from a stable checkout or plugin-shipped named
 bridge; use `--windows` for PowerShell/CMD shims. On Windows pass arguments via
 `--request-file` to the `.ps1` shim. Use `--no-serve` for identity-sensitive

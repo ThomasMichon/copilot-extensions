@@ -14,6 +14,7 @@ from agent_mcp.config import parse_config
 from agent_mcp.materialize import (
     DISPATCHER_NAME,
     MaterializedTool,
+    _source_digest_key,
     bridge_source_digest,
     build_manifest,
     plan_tools,
@@ -33,6 +34,7 @@ TOOLS = [
     {"name": "list_issues", "description": "List issues.\nWith detail.",
      "inputSchema": {"type": "object", "properties": {}}},
 ]
+SOURCE_DIGEST_KEY = b"k" * 32
 
 
 def test_sanitize_stub():
@@ -111,7 +113,9 @@ def test_bridge_source_digest_tracks_effective_config() -> None:
     second = parse_config(
         {"server": {"type": "http", "url": "https://api.example.com/other"}}
     )
-    assert bridge_source_digest(first) != bridge_source_digest(second)
+    assert bridge_source_digest(
+        first, key=SOURCE_DIGEST_KEY
+    ) != bridge_source_digest(second, key=SOURCE_DIGEST_KEY)
 
 
 def test_bridge_source_digest_tracks_cli_sidecar_and_helper(
@@ -141,13 +145,16 @@ mcp:
         {"server": {"type": "cli", "tools_from": ["tool.md"]}},
         source_path=config,
     )
-    original = bridge_source_digest(cfg)
-    sidecar.write_text(sidecar.read_text() + "\nChanged docs.\n", encoding="utf-8")
-    assert bridge_source_digest(cfg) != original
+    original = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
+    sidecar.write_text(
+        sidecar.read_text(encoding="utf-8") + "\nChanged docs.\n",
+        encoding="utf-8",
+    )
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) != original
 
-    updated = bridge_source_digest(cfg)
+    updated = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
     helper.write_text("print('two')\n", encoding="utf-8")
-    assert bridge_source_digest(cfg) != updated
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) != updated
 
 
 @pytest.mark.parametrize("command_kind", ["bare", "absolute"])
@@ -179,9 +186,9 @@ mcp:
         source_path=config,
     )
 
-    original = bridge_source_digest(cfg)
+    original = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
     helper.write_text("print('two')\n", encoding="utf-8")
-    assert bridge_source_digest(cfg) == original
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) == original
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink semantics are POSIX-specific")
@@ -220,13 +227,40 @@ mcp:
         source_path=config,
     )
 
-    original = bridge_source_digest(cfg)
+    original = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
     executed_helper.write_text("print('executed-two')\n", encoding="utf-8")
-    assert bridge_source_digest(cfg) != original
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) != original
 
-    updated = bridge_source_digest(cfg)
+    updated = bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY)
     target_helper.write_text("print('not-executed-two')\n", encoding="utf-8")
-    assert bridge_source_digest(cfg) == updated
+    assert bridge_source_digest(cfg, key=SOURCE_DIGEST_KEY) == updated
+
+
+def test_bridge_source_digest_is_keyed() -> None:
+    cfg = parse_config(
+        {
+            "server": {"type": "http", "url": "https://api.example.com/mcp"},
+            "auth": {"kind": "static", "value": "guessable-secret"},
+        }
+    )
+    assert bridge_source_digest(cfg, key=b"a" * 32) != bridge_source_digest(
+        cfg, key=b"b" * 32
+    )
+
+
+def test_source_digest_key_is_private_and_stable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    first = _source_digest_key()
+    second = _source_digest_key()
+    path = tmp_path / "source-digest.key"
+
+    assert len(first) == 32
+    assert second == first
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_server_name_for():
@@ -319,3 +353,21 @@ def test_materialize_verb_then_stub_call(tmp_path, capsys):
                '{"name": "materialized"}'])
     assert rc == 0
     assert capsys.readouterr().out.strip() == "hello materialized"
+
+
+def test_source_digest_verb_matches_materialized_manifest(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    cfg = _write_cfg(tmp_path)
+    dest = tmp_path / "materialized"
+    assert main(
+        ["materialize", str(cfg), "--server-name", "fix", "--dest", str(dest)]
+    ) == 0
+    manifest = json.loads((dest / "fix" / "manifest.json").read_text())
+    capsys.readouterr()
+
+    assert main(["source-digest", str(cfg)]) == 0
+    assert capsys.readouterr().out.strip() == manifest["bridge_source_digest"]
