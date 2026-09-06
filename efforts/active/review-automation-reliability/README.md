@@ -327,7 +327,7 @@ scenarios.
   `bounded-verdict-reliability` feature states every attempt counts, and
   two branches did not); the rest are below-altitude implementation
   hardening, matching Phase 5's classification pattern.
-- Five of six downstream instances are already fixed and merged in the
+- Four of the six failures are already fixed and merged in the
   Intelligence Dampener consumer's own repository and in
   `agent-mcp` itself (dev95,
   ThomasMichon/copilot-extensions#2135); this phase captures the generic
