@@ -70,6 +70,14 @@ this plugin:
 
 ## Verify
 
+Enable only one installation of context-handoff. A direct installation and a
+marketplace installation register the same extension tools; enabling both can
+make either process fail with an external-tool-name clash. A successor must use
+the same transport-capable implementation as the session that stored its baton.
+After changing the selected installation, reload extensions in existing sessions
+and inspect the loaded extension path; a version shown by `plugin list` does not
+prove which implementation an already-running session uses.
+
 A session where the plugin hooks loaded receives the full owner-marked
 continuity contract in
 `instructions/context-handoff/session-guidance.instructions.md` beneath its
@@ -117,6 +125,26 @@ it does not interrupt an in-flight turn. Failures to send the nudge are logged
 as warnings; they do not block the session.
 
 ## Live cutover is successor-consume-driven
+
+In a local Herdr pane (`HERDR_ENV=1` and `HERDR_PANE_ID`), the handoff uses
+checkout-scoped files under `~/.copilot/context-handoff/checkouts/`, without
+agent-worktrees or agent-dispatch. The checkout comes from Herdr's `pane.cwd`,
+not an extension subprocess's `foreground_cwd`, which may point into a replaced
+plugin payload. The baton records the predecessor's pane, terminal, and session.
+
+The installed `~/.local/bin/copilot-pane launch --task-file` helper launches one
+seeded successor. The extension passes its current SDK permission mode; CLI
+callers must supply `--permission-mode` explicitly. Unsupported modes fail
+through the launcher rather than being escalated. A `startup_pending` result
+means retain that exact receiver, not replay its seed or create another pane.
+
+Only successful consumption can retire the recorded Herdr predecessor. The
+consumer verifies its own distinct pane/session and the predecessor's terminal,
+reported session, and optional name before invoking `copilot-pane stop --pane`.
+A reused identity, a failed consume, or consuming in the predecessor pane never
+stops a pane. Retirement failures are reported and the consumed record remains
+retryable by the same successor; successful retirement is checkpointed.
+Non-Herdr sessions retain the existing mux lifecycle below.
 
 A live cutover (`continue_handoff`) spawns a successor Copilot in a new mux
 window and passes the exact first prompt through Copilot's native `-i` argv.
