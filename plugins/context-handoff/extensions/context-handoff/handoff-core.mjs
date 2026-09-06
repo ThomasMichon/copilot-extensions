@@ -30,6 +30,10 @@ import {
 } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
+import {
+  isHerdrPane, herdrStateDir, resolveHerdrCwd, captureHerdrPredecessor,
+  retireHerdrPredecessor, launchHerdrSuccessor,
+} from "./herdr.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -206,6 +210,7 @@ export function runCli(bin, args, opts = {}) {
 
 // True if an agent-dispatch coordinator answers a health probe.
 export function agentDispatchAvailable() {
+  if (isHerdrPane()) return false;
   try {
     runCli("agent-dispatch", ["health"], {
       timeout: 5000,
@@ -221,6 +226,7 @@ export function agentDispatchAvailable() {
 // passed binding-first so a bare-resumed session (cwd=HOME) still resolves its
 // worktree from the session->worktree binding rather than the HOME cwd.
 export function agentWorktreesGet(key, cwd, sessionId, execute = runCli) {
+  if (isHerdrPane()) return null;
   return agentWorktreesGetResult(key, cwd, sessionId, execute).value;
 }
 
@@ -269,6 +275,7 @@ export function normalizeHandoffTitle(value) {
 }
 
 export function currentPaneId() {
+  if (isHerdrPane()) return null;
   return process.env.TMUX_PANE || process.env.PSMUX_PANE || null;
 }
 
@@ -288,6 +295,7 @@ export function currentMuxSession(pane = currentPaneId(), execute = runCli) {
 export function sessionBindingForSession(
   sessionId, cwd, execute = runCli,
 ) {
+  if (isHerdrPane()) return { found: false, session_id: sessionId };
   if (!sessionId) return { found: false, session_id: null };
   try {
     const raw = execute(
@@ -314,6 +322,7 @@ function processAlive(pid) {
 }
 
 export function worktreeInfo(cwd, sid, get = agentWorktreesGet) {
+  if (isHerdrPane()) return { wtDir: null, worktree: null, stateDir: null };
   const wtDir = get("worktree-dir", cwd, sid);
   const worktree = wtDir ? basename(wtDir) : null;
   const stateDir = get("worktree-state-dir", cwd, sid);
@@ -372,6 +381,17 @@ export function makeHandoffMetadata(
   execute = runCli,
   get = agentWorktreesGet,
 ) {
+  if (isHerdrPane()) {
+    cwd = resolveHerdrCwd(cwd, execute);
+    return {
+      kind: "context-handoff", version: 2,
+      id: `handoff-${safePathSegment(sid)}`,
+      storage, taskId, sessionId: sid, cwd, title: title || "",
+      worktree: null, worktreeDir: null, oldPane: null, muxSession: null,
+      predecessor: captureHerdrPredecessor(sid, execute),
+      stateDir: herdrStateDir(cwd), createdAt: new Date().toISOString(),
+    };
+  }
   const { wtDir, worktree, stateDir } = worktreeInfo(cwd, sid, get);
   const authority = sessionBindingForSession(sid, cwd, execute);
   const envBinding = validatedEnvironmentBinding(worktree, execute);
@@ -434,6 +454,9 @@ export function decodeHandoffPayload(raw) {
 }
 
 export function handoffDirFor(cwd, sid, get = agentWorktreesGet) {
+  if (isHerdrPane()) {
+    return join(herdrStateDir(resolveHerdrCwd(cwd, runCli)), "handoff");
+  }
   const stateDir = get("worktree-state-dir", cwd, sid);
   return stateDir ? join(stateDir, "handoff") : null;
 }
@@ -449,8 +472,8 @@ export function writeJsonAtomic(path, value) {
 }
 
 // --- file-backed store ----------------------------------------------------
-export function saveFileHandoff(promptText, sid, cwd, title) {
-  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
+export function saveFileHandoff(promptText, sid, cwd, title, execute = runCli) {
+  const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" }, execute);
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) {
     const resolution = agentWorktreesGetResult(
@@ -931,6 +954,14 @@ function checkpointPath(metadata, token) {
       execute = runCli,
     } = {},
   ) {
+    if (metadata?.predecessor?.transport === "herdr") {
+      if (checkpoint?.steps?.predecessorRetired) {
+        return { host: "herdr", successorVerified: true, retired: true };
+      }
+      const retired = retireHerdrPredecessor(metadata, sid, execute);
+      if (retired.retired) checkpointStep(checkpoint, "predecessorRetired", retired);
+      return retired;
+    }
     const emit = typeof log === "function" ? log : () => {};
     const result = {
       bound: false,
@@ -1254,7 +1285,9 @@ function checkpointPath(metadata, token) {
       "## Handoff Consumed",
       "",
       result.id ? `**Handoff:** ${result.id}` : null,
-      lifecycle.headVerified
+      lifecycle.host === "herdr" && lifecycle.successorVerified
+        ? "**Successor lifecycle:** Herdr successor verified"
+        : lifecycle.headVerified
         ? "**Successor lifecycle:** bound, linked, and verified as worktree head"
         : "**Successor lifecycle:** incomplete; predecessor preserved",
       lifecycle.retired
@@ -1332,7 +1365,7 @@ export function recoverStoredHandoff(cwd, sid) {
 }
 
 export function retryStoredHandoffCutover(
-  cwd, sid, execute = runCli,
+  cwd, sid, execute = runCli, { permissionMode = null } = {},
 ) {
   const stored = recoverStoredHandoff(cwd, sid);
   if (!stored) {
@@ -1351,6 +1384,7 @@ export function retryStoredHandoffCutover(
     {
       handoffToken: stored.id,
       worktreeId: stored.metadata?.worktree || null,
+      permissionMode,
     },
   );
   return { ...cutover, stored, seed };
@@ -1376,6 +1410,7 @@ export function buildResumePrompt(
 
 // Mirror the stored handoff into the worktree's own record (best-effort).
 export function noteHandoffInRecord(cwd, sid, ref, title) {
+  if (isHerdrPane()) return;
   try {
     const argv = ["note-handoff"];
     if (ref) argv.push("--task", ref);
@@ -1395,8 +1430,9 @@ export function runHandoffCutover(
   seed,
   sessionId,
   execute = runCli,
-  { handoffToken = null, worktreeId = null } = {},
+  { handoffToken = null, worktreeId = null, permissionMode = null } = {},
 ) {
+  if (isHerdrPane()) return launchHerdrSuccessor(cwd, seed, execute, permissionMode);
   const argv = ["handoff-cutover", "--seed", seed];
   const binding = sessionBindingForSession(sessionId, cwd, execute);
   const ownPane = binding.found
@@ -1450,7 +1486,17 @@ export function runHandoffCutover(
 // extension's save_handoff_prompt store selection. Returns:
 //   { storage: "agent-dispatch"|"file", id, taskId?, path?, metadata }
 // On failure returns a storage:null result with the resolver/write diagnostic.
-export function storeHandoff({ promptText, sid, cwd, title, preferTask = true }) {
+export function storeHandoff({ promptText, sid, cwd, title, preferTask = true, execute = runCli }) {
+  if (isHerdrPane()) {
+    try {
+      const file = saveFileHandoff(promptText, sid, cwd, title, execute);
+      return file?.path
+        ? { storage: "file", id: file.id, path: file.path, metadata: file.metadata }
+        : { storage: null, error: file?.error };
+    } catch (error) {
+      return { storage: null, error: `Cannot capture Herdr handoff: ${error.message}` };
+    }
+  }
   if (preferTask && agentDispatchAvailable()) {
     const task = dispatchHandoff(promptText, sid, cwd, title);
     if (task) {
@@ -1495,7 +1541,9 @@ export function manualFallbackInstructions(stored, seed) {
 // Store + build seed + (optionally) trigger the live cutover in one call --
 // the standalone equivalent of save_handoff_prompt followed by continue_handoff.
 // Returns { stored, seed, pastePrompt, cutover? }.
-export function saveAndCutover({ promptText, sid, cwd, title, preferTask = true, cutover = true }) {
+export function saveAndCutover({
+  promptText, sid, cwd, title, preferTask = true, cutover = true, permissionMode = null,
+}) {
   const stored = storeHandoff({ promptText, sid, cwd, title, preferTask });
   if (!stored?.storage) {
     return {
@@ -1517,6 +1565,7 @@ export function saveAndCutover({ promptText, sid, cwd, title, preferTask = true,
       {
         handoffToken: stored.id,
         worktreeId: stored.metadata?.worktree || null,
+        permissionMode,
       },
     );
   }

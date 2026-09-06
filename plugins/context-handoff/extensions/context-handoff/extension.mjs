@@ -56,6 +56,7 @@ import {
 } from "./handoff-core.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import { contextPressure, formatContextUsage } from "./thresholds.mjs";
+import { isHerdrPane, resolveHerdrCwd } from "./herdr.mjs";
 
 // --- State ---
 const handoffConfig = loadContextHandoffConfig(process.cwd());
@@ -99,7 +100,7 @@ function ensureState(invocation) {
 // Collect structured handoff data from current session state.
 // Used by both the generate_handoff_prompt tool and the /handoff command.
 function collectHandoffData(sid, overrides = {}) {
-  const cwd = state.cwd || process.cwd();
+  const cwd = resolveHerdrCwd(state.cwd || process.cwd(), runCli);
   const git = collectAdvisoryGitFacts(cwd);
   const utilPct = state.tokenLimit > 0
     ? Math.round(state.lastUtilization * 100)
@@ -400,7 +401,7 @@ const session = await joinSession({
         return (
           `Handoff stored (${stored.storage}: ${stored.id}). The stored record ` +
           "and note-handoff pointer remain available even if no mux exists.\n\n" +
-          "For an automatic mux cutover, call `continue_handoff` with the exact " +
+          "For an automatic Herdr or mux cutover, call `continue_handoff` with the exact " +
           "HANDOFF_SEED below.\n\n" +
           `HANDOFF_SEED: ${cutoverSeed}\n` +
           `HANDOFF_TOKEN: ${stored.id}\n` +
@@ -479,10 +480,10 @@ const session = await joinSession({
         "save_handoff_prompt (the explicit 'kick the flow' step of a live " +
         "handoff): pass `seed` = the exact HANDOFF_SEED string save_handoff_prompt " +
         "returned and `handoff_token` = HANDOFF_TOKEN when supplied. It spawns a successor Copilot in a new window of this " +
-        "worktree's mux session, seeds it with that prompt (copilot -i), cuts the " +
+        "active Herdr or worktree mux host, seeds it with that prompt (copilot -i), cuts the " +
         "operator over to it; the successor retires THIS predecessor only after " +
         "it consumes the stored handoff. Requires running " +
-        "under a mux session; if not (or the cutover fails) it does nothing " +
+        "under Herdr or a mux session; if not (or the cutover fails) it does nothing " +
         "destructive and says so -- the handoff is still safely stored.",
       skipPermission: true,
       parameters: {
@@ -536,6 +537,7 @@ const session = await joinSession({
           {
             handoffToken,
             worktreeId: pending?.worktree || null,
+            permissionMode: isHerdrPane() ? (await session.rpc.permissions.getMode()).mode : null,
           },
         );
         if (!result || !result.ok) {
@@ -574,6 +576,14 @@ const session = await joinSession({
             (result?.error ? ` [host: ${result.error}]` : "")
           );
         }
+        if (result.host === "herdr") {
+          return (
+            `Herdr successor ${result.new_pane} was seeded. ` +
+            (result.startup_pending ? "Startup is pending there; do not replay the seed or launch another successor. " : "") +
+            "End this turn and do not start new work here. The successor retires " +
+            "this exact predecessor only after successfully consuming the handoff."
+          );
+        }
         return (
           `Live cutover initiated. A successor Copilot was spawned in a new window ` +
           `of this worktree's mux session (pane ${result.new_pane || "?"}) and ` +
@@ -608,7 +618,9 @@ const session = await joinSession({
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || invocation?.sessionId || null;
 
-        const result = retryStoredHandoffCutover(cwd, sid, runCli);
+        const result = retryStoredHandoffCutover(cwd, sid, runCli, {
+          permissionMode: isHerdrPane() ? (await session.rpc.permissions.getMode()).mode : null,
+        });
         if (result?.reason === "not-found") {
           return (
             "Cannot retry the cutover: no saved handoff was found for this " +
@@ -652,6 +664,13 @@ const session = await joinSession({
           result.stored.storage === "agent-dispatch"
             ? `agent-dispatch task ${result.stored.id}`
             : `handoff file ${result.stored.id}`;
+        if (result.host === "herdr") {
+          return (
+            `Saved ${src} seeded Herdr successor ${result.new_pane}. ` +
+            "Do not replay the seed or launch another successor while startup is pending. " +
+            "End this turn; retirement follows successful consumption in that successor."
+          );
+        }
         return (
           `Cutover re-attempted from the saved handoff (${src}). A fresh ` +
           `successor Copilot was spawned in a new window of this worktree's mux ` +

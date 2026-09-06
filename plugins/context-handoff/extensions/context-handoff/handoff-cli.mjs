@@ -34,6 +34,7 @@
 //   --no-task             force the file store (skip an agent-dispatch task)
 //   --seed <s>            (continue) the exact HANDOFF_SEED to spawn a successor with
 //   --handoff-token <id>  (continue) stored token associated at successor sessionStart
+//   --permission-mode <mode>  Herdr launch: the predecessor's current permission mode
 //   --locator "task:<id>"|"file:<id>" | --task-id <id> | --handoff-id <id> | --path <f>
 //                         stored handoff to consume
 //   --json                machine-readable output
@@ -98,7 +99,7 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs facts --json                              emit basic extension-free facts
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id (\$COPILOT_AGENT_SESSION_ID),
-         --cwd, --no-task, --seed, --handoff-token, --worktree-id,
+         --cwd, --no-task, --seed, --handoff-token, --worktree-id, --permission-mode,
          --locator|--task-id|--handoff-id|--path, --defer-complete, --json`;
 
 function cmdStore(args, { cutover }) {
@@ -140,6 +141,7 @@ function cmdStore(args, { cutover }) {
       {
         handoffToken: stored.id,
         worktreeId: stored.metadata?.worktree || null,
+        permissionMode: args["permission-mode"] || null,
       },
     );
     result.cutover = cut;
@@ -188,6 +190,7 @@ function cmdContinue(args) {
     {
       handoffToken: args["handoff-token"] || null,
       worktreeId: args["worktree-id"] || null,
+      permissionMode: args["permission-mode"] || null,
     },
   );
   if (args.json) return emit({ ok: cut.ok, cutover: cut }, args);
@@ -281,7 +284,9 @@ function cmdRetry(args) {
     );
     process.exit(2);
   }
-  const result = retryStoredHandoffCutover(cwd, sid);
+  const result = retryStoredHandoffCutover(cwd, sid, undefined, {
+    permissionMode: args["permission-mode"] || null,
+  });
   if (args.json) return emit(result, args);
   if (!result.ok) {
     process.stderr.write(
