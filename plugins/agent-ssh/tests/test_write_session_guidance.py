@@ -186,14 +186,19 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
 def test_hook_and_projection_contracts():
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     entries = hooks["hooks"]["sessionStart"]
-    assert len(entries) == 4
-    assert "write-session-guidance" in entries[3]["bash"]
-    assert "write-session-guidance" in entries[3]["powershell"]
-    assert entries[3]["timeoutSec"] == 45
+    writer_entries = [
+        entry
+        for entry in entries
+        if "write-session-guidance" in entry.get("bash", "")
+    ]
+    assert len(writer_entries) == 1
+    writer_entry = writer_entries[0]
+    assert "write-session-guidance" in writer_entry["powershell"]
+    assert writer_entry["timeoutSec"] == 45
     for shell in ("bash", "powershell"):
-        assert "COPILOT_PLUGIN_ROOT" in entries[3][shell]
-        assert "PLUGIN_ROOT" in entries[3][shell]
-        assert "CLAUDE_PLUGIN_ROOT" in entries[3][shell]
+        assert "COPILOT_PLUGIN_ROOT" in writer_entry[shell]
+        assert "PLUGIN_ROOT" in writer_entry[shell]
+        assert "CLAUDE_PLUGIN_ROOT" in writer_entry[shell]
 
     declaration = json.loads(
         (_PLUGIN / "instruction-projections.json").read_text(encoding="utf-8")
