@@ -179,6 +179,11 @@ review mechanism is needed -- only a documented content convention.
   always carries any available attributable command catalog and conditionally
   adds the repository-gated mesh pointer, while both original contributors
   remain best-effort supplementary channels.
+- [`context-handoff`](../../plugins/context-handoff/) uses a dedicated
+  side-effect-only hook to invoke its existing continuity producer with
+  `--own-only`, writing the full plugin-owned continuity contract without
+  duplicating the adjacent agent-worktrees compatibility catalog. Its compact
+  `--aggregate` contributor remains a best-effort supplementary channel.
 
 ## See Also
 
