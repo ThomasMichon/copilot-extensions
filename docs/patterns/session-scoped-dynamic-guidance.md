@@ -161,6 +161,13 @@ review mechanism is needed -- only a documented content convention.
   file combines the attributable command catalog with the current worktree
   binding while the existing `session-context.json` contributors remain as a
   best-effort supplementary channel.
+- [`agent-dispatch`](../../plugins/agent-dispatch/) adds a dedicated,
+  side-effect-only `sessionStart` hook entry (`write-session-guidance.ps1` /
+  `.sh`, backed by the portable `write_session_guidance.py`) that invokes its
+  existing `focus-guidance` and `emit-command-catalog` scripts fresh and
+  writes their combined non-aggregate output to the session-scoped file. The
+  declared `session-context.json` contributors keep using the shorter
+  `--aggregate` variant as the best-effort supplementary channel.
 
 ## See Also
 
