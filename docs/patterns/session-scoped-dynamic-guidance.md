@@ -168,6 +168,11 @@ review mechanism is needed -- only a documented content convention.
   writes their combined non-aggregate output to the session-scoped file. The
   declared `session-context.json` contributors keep using the shorter
   `--aggregate` variant as the best-effort supplementary channel.
+- [`ai-attribution`](../../plugins/ai-attribution/) adds the same dedicated
+  side-effect-only hook shape around its existing `emit-policy` scripts. The
+  session-scoped file carries the current repository-aware publication policy,
+  while the existing `publication-policy` contributor retains its compact
+  `--aggregate` kernel as a best-effort supplementary channel.
 
 ## See Also
 
