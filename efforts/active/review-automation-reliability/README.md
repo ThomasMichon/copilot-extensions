@@ -168,7 +168,127 @@ re-queuing (or re-superseding) the same blocked issue.
   PR merges or closes -- so the block clears itself instead of silently
   persisting after the dependency resolves.
 
-## Validation Plan
+### Phase 7 - Harden trusted-tool/credential resolution against environment drift
+
+Discovered live (2026-09-05) operating the Intelligence Dampener reviewer --
+the current, most heavily-exercised consumer of this vision's reviewer-loop
+shape -- across a multi-hour production incident on a single pull request
+(aperture-labs #6514) and several related ones. Five distinct failures, none
+in the review *logic* itself, compounded to keep a reviewer from ever
+rendering a verdict:
+
+1. The trusted reviewer tool's `#!/usr/bin/env python3` shebang resolved
+   through the *calling process's* ambient `PATH` rather than a pinned,
+   verified interpreter. A long-lived `agent-mcp serve` daemon had
+   inherited an unrelated tool's venv `bin/` directory ahead of `/usr/bin`
+   on its own captured environment (from whatever spawned/restarted it),
+   silently redirecting every tool spawn to a Python missing the reviewer's
+   real dependencies. 134 retries over 8+ hours, all failing identically,
+   before this was traced by hand-replaying the daemon's exact captured
+   environment. Fixed downstream by pinning an explicit `PATH` in the
+   consumer's bridge config
+   (aperture-labs [#6515](https://gitea.michon.ski/tmichon/aperture-labs/pulls/6515)),
+   but the *generic* lesson is structural: a trusted tool invoked by
+   subprocess exec must not depend on whatever `PATH`/environment a
+   long-lived host process happens to have accumulated. It should either
+   receive an explicitly pinned environment from the declaration, or
+   self-verify its own runtime (interpreter identity, required imports)
+   before doing any real work and fail with a specific, actionable
+   diagnostic rather than a generic import error that looks identical
+   across unrelated causes.
+2. A checked-out trusted script's executable bit is not guaranteed to
+   survive every checkout/worktree-provisioning path (observed: a mode-only
+   git commit landed correctly on `master`, but every already-materialized
+   worktree checkout of the reviewer's trusted-tool directory still carried
+   the old `644` mode, because Git only applies a tracked mode change on the
+   *next* checkout of that path, not retroactively to an already-checked-out
+   worktree). A trusted tool the reviewer directly executes should verify
+   (and where safe, restore) its own required file mode at the point of
+   invocation rather than assuming a git-tracked mode change alone is
+   sufficient. Fixed downstream in
+   aperture-labs [#6515](https://gitea.michon.ski/tmichon/aperture-labs/pulls/6515)
+   (also switched the invocation itself off a `python <cwd-relative-path>`
+   shebang-adjacent pattern that additionally depended on the session's
+   working directory).
+3. `agent-mcp`'s `CliTransport` (the `type: cli` bridge transport a
+   repository-owned trusted tool is exposed through) computed its spawn
+   environment -- including an auth injector's acquired credential -- once
+   and cached it for the life of the transport object, **even on a failed
+   acquisition**. Under `agent-mcp serve`'s warm pool, one transport is
+   reused across many calls over hours, so a single transient credential
+   hiccup permanently disabled that bridge's auth injection until the
+   daemon restarted, with no further retry ever attempted. Fixed upstream
+   in `agent-mcp` 0.2.0-dev95
+   ([ThomasMichon/copilot-extensions#2135](https://github.com/ThomasMichon/copilot-extensions/pull/2135)):
+   the transport now re-applies the injector's `child_env()` on every call,
+   relying on the injector's own cache/TTL/`invalidate` semantics instead of
+   a second, unsafe layer of caching. The generic principle: nothing in a
+   *transport* or *pool* layer should cache the outcome of a credential
+   acquisition beyond what the credential's own injector already owns.
+4. **This is a direct violation of this vision's own `bounded-verdict-reliability`
+   feature, not merely an implementation gap.** The feature states every
+   attempt -- the initial try and every retry -- counts toward the rolling
+   attempt budget. The Intelligence Dampener consumer's idle-round evaluator
+   had two early-return paths (a failed session-suspend, an incomplete
+   verdict-payload read) that returned a bare retry *without* charging the
+   attempt budget at all, so a structural failure (like #1 above) could
+   retry unboundedly while the budget only ever protected the one failure
+   mode it was least likely to see. Fixed downstream in
+   aperture-labs [#6518](https://gitea.michon.ski/tmichon/aperture-labs/pulls/6518):
+   every no-verdict outcome -- including a failure to even suspend/start --
+   now charges one deduped attempt. Any generic implementation of
+   `bounded-verdict-reliability` must charge the budget from a single choke
+   point that every non-verdict exit passes through, not from a per-branch
+   opt-in.
+5. The materialized-CLI-fallback fleet (the resilience path when a live MCP
+   session degrades) is only refreshed when `agent-mcp`'s own runtime
+   version changes, not when the bridge's declared config/tool content
+   changes. A fix landing in the bridge config was therefore invisible to
+   an already-materialized fallback fleet until forced with `--force` --
+   meaning the *resilience path itself* silently carried the same defect as
+   the primary path it exists to protect against, for as long as the outage.
+   Cross-referenced against the open "change detection (schema drift)" item
+   in aperture-labs's `mcp-to-cli-migration` effort; not yet fixed as of
+   this writing.
+6. A reviewer's own bootstrap/config fix cannot be reviewed by that same
+   reviewer while the bug is live -- observed twice today (aperture-labs
+   #6498, #6515), each requiring an ad hoc administrative
+   approve-and-merge to break the deadlock. A generic reviewer-loop
+   deployment should document (or better, provide) a sanctioned,
+   audited self-bootstrap override authority for exactly this
+   self-referential case, rather than leaving it to an improvised admin
+   action each time it recurs.
+
+- [ ] Specify that a repository-owned trusted tool exposed through the
+  `type: cli` bridge transport receives its execution environment either
+  fully pinned by the declaration or self-verified at invocation time
+  (interpreter identity + required imports), never solely inherited from
+  whatever long-lived host process happens to spawn it.
+- [ ] Specify that a trusted tool's required executable bit (or equivalent
+  platform permission) is verified -- and restored where safe -- at the
+  point the reviewer loop invokes it, not assumed from a git-tracked mode
+  alone.
+- [ ] Confirm the `agent-mcp` `CliTransport` fix (dev95,
+  ThomasMichon/copilot-extensions#2135) as the generic pattern: no
+  transport/pool layer may cache a credential-acquisition *outcome* beyond
+  what the credential's own injector already owns.
+- [ ] Audit every `bounded-verdict-reliability` implementation path (current
+  and any future generic recipe) for a single charge-the-attempt choke
+  point that every non-verdict exit -- including a failure to start or
+  suspend the reviewer process -- passes through. No branch may return an
+  unproductive retry without charging the budget.
+- [ ] Extend the materialized-CLI-fallback fleet's staleness detection to
+  the bridge's declared config/tool content (a hash), not just the
+  `agent-mcp` runtime version, so the fallback path cannot silently carry
+  a fixed-upstream defect for the life of an outage. Coordinate with
+  aperture-labs's `mcp-to-cli-migration` effort, which owns the open
+  "change detection (schema drift)" item this closes.
+- [ ] Document (or implement) a sanctioned, audited reviewer self-bootstrap
+  override: an explicit authority path for landing a fix to the reviewer's
+  own trusted config/tooling when the reviewer cannot review itself,
+  distinct from and narrower than an ordinary human/admin override.
+
+
 
 - [ ] Concurrent claim attempts yield exactly one review owner.
 - [ ] Duplicate request and response delivery produces one analysis and at most
@@ -192,6 +312,31 @@ drivers and prove reliability with deterministic interruption and duplication
 scenarios.
 
 ## Journal
+
+### 2026-09-05 - Phase 7: five live environment-drift failures from Intelligence Dampener
+
+- Added Phase 7 after a multi-hour aperture-labs production incident
+  (Intelligence Dampener reviewer, PR #6514 and related) surfaced five
+  distinct trusted-tool/credential/pool failures, none in the review logic
+  itself: ambient-`PATH`-dependent shebang resolution through a long-lived
+  daemon's inherited environment, a checked-out executable bit not
+  surviving worktree provisioning, `agent-mcp`'s `CliTransport` caching a
+  transient auth failure for the life of a warm-pooled session, two
+  no-verdict retry paths bypassing the `bounded-verdict-reliability` attempt
+  budget entirely, and a materialized-CLI-fallback fleet whose staleness
+  detection only tracks the `agent-mcp` runtime version, not the bridge's
+  own declared content.
+- Item 4 is the one direct vision violation (this effort's own
+  `bounded-verdict-reliability` feature states every attempt counts, and
+  two branches did not); the rest are below-altitude implementation
+  hardening, matching Phase 5's classification pattern.
+- All five downstream instances are already fixed and merged in the
+  Intelligence Dampener consumer (aperture-labs #6515, #6518) and in
+  `agent-mcp` itself (dev95,
+  ThomasMichon/copilot-extensions#2135); this phase captures the generic
+  principle each fix implies for any future generalized reviewer recipe,
+  plus the two items not yet addressed anywhere (fallback-fleet content
+  staleness, a sanctioned reviewer self-bootstrap override).
 
 ### 2026-08-29 - Kickoff
 
