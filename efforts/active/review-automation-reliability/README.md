@@ -173,7 +173,7 @@ re-queuing (or re-superseding) the same blocked issue.
 Discovered live (2026-09-05) operating the Intelligence Dampener reviewer --
 the current, most heavily-exercised consumer of this vision's reviewer-loop
 shape -- across a multi-hour production incident on a single pull request
-(aperture-labs #6514) and several related ones. Five distinct failures, none
+(aperture-labs #6514) and several related ones. Six distinct failures, none
 in the review *logic* itself, compounded to keep a reviewer from ever
 rendering a verdict:
 
@@ -187,7 +187,7 @@ rendering a verdict:
    before this was traced by hand-replaying the daemon's exact captured
    environment. Fixed downstream by pinning an explicit `PATH` in the
    consumer's bridge config
-   (aperture-labs [#6515](https://gitea.michon.ski/tmichon/aperture-labs/pulls/6515)),
+   (aperture-labs #6515, private tracker)),
    but the *generic* lesson is structural: a trusted tool invoked by
    subprocess exec must not depend on whatever `PATH`/environment a
    long-lived host process happens to have accumulated. It should either
@@ -206,7 +206,7 @@ rendering a verdict:
    (and where safe, restore) its own required file mode at the point of
    invocation rather than assuming a git-tracked mode change alone is
    sufficient. Fixed downstream in
-   aperture-labs [#6515](https://gitea.michon.ski/tmichon/aperture-labs/pulls/6515)
+   aperture-labs #6515 (private tracker)
    (also switched the invocation itself off a `python <cwd-relative-path>`
    shebang-adjacent pattern that additionally depended on the session's
    working directory).
@@ -234,7 +234,7 @@ rendering a verdict:
    attempt budget at all, so a structural failure (like #1 above) could
    retry unboundedly while the budget only ever protected the one failure
    mode it was least likely to see. Fixed downstream in
-   aperture-labs [#6518](https://gitea.michon.ski/tmichon/aperture-labs/pulls/6518):
+   aperture-labs #6518 (private tracker):
    every no-verdict outcome -- including a failure to even suspend/start --
    now charges one deduped attempt. Any generic implementation of
    `bounded-verdict-reliability` must charge the budget from a single choke
@@ -288,7 +288,7 @@ rendering a verdict:
   own trusted config/tooling when the reviewer cannot review itself,
   distinct from and narrower than an ordinary human/admin override.
 
-
+## Validation Plan
 
 - [ ] Concurrent claim attempts yield exactly one review owner.
 - [ ] Duplicate request and response delivery produces one analysis and at most
