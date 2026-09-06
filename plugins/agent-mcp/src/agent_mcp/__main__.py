@@ -343,6 +343,7 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     _materialize.write_farm(
         server_dir, plan, server=server, bridge_ref=bridge_ref,
         version=__version__, windows=args.windows,
+        source_digest=_materialize.bridge_source_digest(cfg),
     )
     if not args.quiet:
         print(f"materialized {len(plan)} tool(s) -> {server_dir}")

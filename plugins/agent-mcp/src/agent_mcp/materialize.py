@@ -29,14 +29,16 @@ re-materialize is atomic and drift-safe (no partial-write window).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import stat
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .cli_tools import load_cli_tools
 from .config import BridgeConfig
 from .decorators._catalog import render_tools_interface
 
@@ -193,16 +195,63 @@ def render_index(server: str, plan: list[MaterializedTool], *, bridge_ref: str) 
     return "\n".join(lines)
 
 
-def build_manifest(server: str, plan: list[MaterializedTool], *, bridge_ref: str,
-                   version: str) -> dict:
+def bridge_source_digest(cfg: BridgeConfig) -> str:
+    """Hash effective config plus file-backed CLI tool declarations/helpers."""
+    payload = asdict(cfg)
+    payload.pop("source_path", None)
+    digest = hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    )
+    if cfg.server.type != "cli" or cfg.source_path is None:
+        return digest.hexdigest()
+
+    base_dir = cfg.source_path.resolve().parent
+    paths: set[Path] = set()
+    for tool in load_cli_tools(cfg.server.tools_from, base_dir=base_dir):
+        if tool.source is None:
+            continue
+        declared_source = tool.source
+        paths.add(declared_source.resolve())
+        command = Path(tool.command).expanduser()
+        if not command.is_absolute():
+            command = (declared_source.parent / command).resolve()
+        if command.is_file():
+            paths.add(command)
+    for path in sorted(paths, key=str):
+        stat_result = path.stat()
+        digest.update(os.path.relpath(path, base_dir).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(f"{stat_result.st_mode & 0o777:o}".encode("ascii"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def build_manifest(
+    server: str,
+    plan: list[MaterializedTool],
+    *,
+    bridge_ref: str,
+    version: str,
+    source_digest: str | None = None,
+) -> dict:
     """The stub->tool map + bridge reference that ``agent-mcp call`` reads."""
-    return {
+    manifest = {
         "schema": 1,
         "server": server,
         "bridge": bridge_ref,
         "generated_by": f"agent-mcp {version}",
         "tools": {mt.stub: {"tool": mt.tool_name} for mt in plan},
     }
+    if source_digest is not None:
+        manifest["bridge_source_digest"] = source_digest
+    return manifest
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +311,16 @@ def _make_executable(path: Path) -> None:
     path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def write_farm(server_dir: Path, plan: list[MaterializedTool], *, server: str,
-               bridge_ref: str, version: str, windows: bool = False) -> None:
+def write_farm(
+    server_dir: Path,
+    plan: list[MaterializedTool],
+    *,
+    server: str,
+    bridge_ref: str,
+    version: str,
+    windows: bool = False,
+    source_digest: str | None = None,
+) -> None:
     """Build ``<server_dir>`` (bin/ + doc/ + index.md + manifest.json) atomically.
 
     On POSIX a symlink farm points at one dispatcher; on Windows a two-template
@@ -278,7 +335,8 @@ def write_farm(server_dir: Path, plan: list[MaterializedTool], *, server: str,
         shutil.rmtree(tmp)
     try:
         _build_and_swap(tmp, server_dir, parent, plan, server=server,
-                        bridge_ref=bridge_ref, version=version, windows=windows)
+                        bridge_ref=bridge_ref, version=version, windows=windows,
+                        source_digest=source_digest)
     finally:
         # On success ``tmp`` was renamed into place (gone); on any failure this
         # removes the half-built tree so temp dirs never accumulate.
@@ -288,15 +346,25 @@ def write_farm(server_dir: Path, plan: list[MaterializedTool], *, server: str,
 
 def _build_and_swap(tmp: Path, server_dir: Path, parent: Path,
                     plan: list[MaterializedTool], *, server: str, bridge_ref: str,
-                    version: str, windows: bool) -> None:
+                    version: str, windows: bool,
+                    source_digest: str | None) -> None:
     bin_dir = tmp / "bin"
     doc_dir = tmp / "doc"
     bin_dir.mkdir(parents=True)
     doc_dir.mkdir(parents=True)
 
     (tmp / MANIFEST_NAME).write_text(
-        json.dumps(build_manifest(server, plan, bridge_ref=bridge_ref, version=version),
-                   indent=2) + "\n",
+        json.dumps(
+            build_manifest(
+                server,
+                plan,
+                bridge_ref=bridge_ref,
+                version=version,
+                source_digest=source_digest,
+            ),
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     (tmp / "index.md").write_text(

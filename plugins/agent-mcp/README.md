@@ -75,9 +75,11 @@ Identity-affecting values belong in the bridge config/overlay, not only in
 `mcp-servers.env`, because shell fallback does not inherit frontmatter-only env.
 
 Use an existing fleet first. Re-materialize when the expected stub is absent or
-`manifest.json.generated_by` differs from `agent-mcp --version`; repositories
-that need config/schema/overlay drift detection should own a digest of the
-effective post-overlay config.
+`manifest.json.generated_by` differs from `agent-mcp --version`.
+`agent-mcp materialize` also records `manifest.json.bridge_source_digest`, a
+deterministic hash of the effective post-overlay config and, for `type: cli`,
+the declared sidecars plus relative helper content/modes. Repository deploy
+tools can compare that value to detect declaration drift without `--force`.
 Materialize standing fleets from a stable checkout or plugin-shipped named
 bridge; use `--windows` for PowerShell/CMD shims. On Windows pass arguments via
 `--request-file` to the `.ps1` shim. Use `--no-serve` for identity-sensitive

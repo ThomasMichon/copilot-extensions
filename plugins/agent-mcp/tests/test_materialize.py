@@ -14,6 +14,7 @@ from agent_mcp.config import parse_config
 from agent_mcp.materialize import (
     DISPATCHER_NAME,
     MaterializedTool,
+    bridge_source_digest,
     build_manifest,
     plan_tools,
     render_index,
@@ -91,6 +92,102 @@ def test_build_manifest():
     assert m["server"] == "gitea"
     assert m["bridge"] == "/x/gitea.yaml"
     assert m["tools"]["create_issue"] == {"tool": "create_issue"}
+    assert "bridge_source_digest" not in m
+
+    with_digest = build_manifest(
+        "gitea",
+        plan,
+        bridge_ref="/x/gitea.yaml",
+        version="9.9",
+        source_digest="abc123",
+    )
+    assert with_digest["bridge_source_digest"] == "abc123"
+
+
+def test_bridge_source_digest_tracks_effective_config() -> None:
+    first = parse_config(
+        {"server": {"type": "http", "url": "https://api.example.com/mcp"}}
+    )
+    second = parse_config(
+        {"server": {"type": "http", "url": "https://api.example.com/other"}}
+    )
+    assert bridge_source_digest(first) != bridge_source_digest(second)
+
+
+def test_bridge_source_digest_tracks_cli_sidecar_and_helper(
+    tmp_path: Path,
+) -> None:
+    helper = tmp_path / "tool.py"
+    helper.write_text("print('one')\n", encoding="utf-8")
+    sidecar = tmp_path / "tool.md"
+    sidecar.write_text(
+        """---
+mcp:
+  name: example
+  invoke:
+    command: tool.py
+---
+""",
+        encoding="utf-8",
+    )
+    config = tmp_path / "bridge.yaml"
+    config.write_text(
+        "server:\n  type: cli\n  tools_from: [tool.md]\n",
+        encoding="utf-8",
+    )
+    cfg = parse_config(
+        {"server": {"type": "cli", "tools_from": ["tool.md"]}},
+        source_path=config,
+    )
+    original = bridge_source_digest(cfg)
+    sidecar.write_text(sidecar.read_text() + "\nChanged docs.\n", encoding="utf-8")
+    assert bridge_source_digest(cfg) != original
+
+    updated = bridge_source_digest(cfg)
+    helper.write_text("print('two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg) != updated
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink semantics are POSIX-specific")
+def test_bridge_source_digest_resolves_helper_from_declared_symlink(
+    tmp_path: Path,
+) -> None:
+    declarations = tmp_path / "declared"
+    targets = tmp_path / "targets"
+    declarations.mkdir()
+    targets.mkdir()
+    executed_helper = declarations / "helper.py"
+    executed_helper.write_text("print('executed-one')\n", encoding="utf-8")
+    (targets / "helper.py").write_text("print('not-executed-one')\n", encoding="utf-8")
+    target_sidecar = targets / "tool.md"
+    target_sidecar.write_text(
+        """---
+mcp:
+  name: example
+  invoke:
+    command: ./helper.py
+---
+""",
+        encoding="utf-8",
+    )
+    (declarations / "tool.md").symlink_to(target_sidecar)
+    config = tmp_path / "bridge.yaml"
+    config.write_text(
+        "server:\n  type: cli\n  tools_from: [declared/tool.md]\n",
+        encoding="utf-8",
+    )
+    cfg = parse_config(
+        {"server": {"type": "cli", "tools_from": ["declared/tool.md"]}},
+        source_path=config,
+    )
+
+    original = bridge_source_digest(cfg)
+    executed_helper.write_text("print('executed-two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg) != original
+
+    updated = bridge_source_digest(cfg)
+    (targets / "helper.py").write_text("print('not-executed-two')\n", encoding="utf-8")
+    assert bridge_source_digest(cfg) == updated
 
 
 def test_server_name_for():
@@ -177,6 +274,7 @@ def test_materialize_verb_then_stub_call(tmp_path, capsys):
     manifest_data = json.loads(manifest.read_text())
     assert Path(manifest_data["bridge"]).is_absolute()
     assert Path(manifest_data["bridge"]) == cfg.resolve()
+    assert manifest_data["bridge_source_digest"]
     capsys.readouterr()  # drain
     rc = main(["call", "--manifest", str(manifest), "--stub", "greet",
                '{"name": "materialized"}'])
