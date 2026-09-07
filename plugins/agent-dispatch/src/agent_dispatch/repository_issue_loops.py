@@ -52,6 +52,7 @@ _KNOWN_KEYS = frozenset(
     }
 )
 _FORGE_KEYS = frozenset({"provider", "producer_login"})
+_SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops"})
 _RESERVATION_KEYS = frozenset({"label", "comment", "orphan_after_seconds"})
 _MARKER_RE = re.compile(
     r"<!-- agent-dispatch:repository-issue-loop:v1 "
@@ -207,9 +208,10 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
         raise RegistrarError(
             f"repository-issue-loop forge: unknown key(s) {forge_extra}"
         )
-    if forge.get("provider") != "github":
+    if forge.get("provider") not in _SUPPORTED_FORGE_PROVIDERS:
         raise RegistrarError(
-            "repository-issue-loop forge.provider: only 'github' is supported"
+            "repository-issue-loop forge.provider: only "
+            f"{sorted(_SUPPORTED_FORGE_PROVIDERS)} is supported"
         )
     producer_login = forge.get("producer_login")
     if not isinstance(producer_login, str) or not producer_login:
@@ -218,7 +220,8 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
         )
     if not re.fullmatch(r"[^/\s]+/[^/\s]+", repo):
         raise RegistrarError(
-            "repository-issue-loop repo: GitHub repositories must use owner/name"
+            "repository-issue-loop repo: expected 'owner/name' (GitHub) or "
+            "'organization/project' (Azure DevOps)"
         )
 
     reservation = data.get("reservation")
@@ -384,7 +387,7 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
         "batch_size": int(batch_size),
         "task_label": task_label,
         "forge": {
-            "provider": "github",
+            "provider": forge.get("provider"),
             "producer_login": producer_login,
         },
         "reservation": {
@@ -829,6 +832,342 @@ class GitHubProvider:
             )
 
 
+class AzureDevOpsProvider:
+    """Narrow Azure DevOps work-item adapter implemented through the
+    authenticated ``az`` CLI (``azure-devops`` extension).
+
+    ``repo`` is ``<organization>/<project>``, the Azure DevOps analog of a
+    GitHub ``owner/name`` repository -- both satisfy the same top-level
+    ``repo`` shape validated by :func:`validate_config`. Tags stand in for
+    GitHub labels; work item comments (via the generic ``az devops invoke``
+    REST bridge) carry the same reservation marker convention as GitHub issue
+    comments, so :func:`_marker`/:func:`_parse_marker`/:func:`_latest_reservations`
+    are shared unmodified across both providers.
+    """
+
+    def __init__(
+        self,
+        expected_login: str,
+        runner: Callable[..., Any] = subprocess.run,
+    ):
+        if not expected_login:
+            raise ValueError("expected_login must be non-empty")
+        self.expected_login = expected_login
+        self.runner = runner
+        self._verified_repos: set[str] = set()
+
+    @staticmethod
+    def _split(repo: str) -> tuple[str, str]:
+        organization, _, project = repo.partition("/")
+        return organization, project
+
+    @staticmethod
+    def _org_url(organization: str) -> str:
+        return f"https://dev.azure.com/{organization}"
+
+    def _az(self, *args: str, input: str | None = None) -> Any:
+        kwargs: dict[str, Any] = {
+            "check": False,
+            "capture_output": True,
+            "text": True,
+        }
+        if input is not None:
+            kwargs["input"] = input
+        completed = self.runner(["az", *args, "--output", "json"], **kwargs)
+        if int(completed.returncode) != 0:
+            raise RuntimeError(
+                f"Azure DevOps operation failed: {str(completed.stderr or '').strip()}"
+            )
+        return completed
+
+    def _verify_identity(self, repo: str, *, allow_cache: bool = True) -> None:
+        if allow_cache and repo in self._verified_repos:
+            return
+        organization, project = self._split(repo)
+        org_url = self._org_url(organization)
+        connection = self._az(
+            "devops",
+            "invoke",
+            "--area",
+            "connectionData",
+            "--resource",
+            "connectionData",
+            "--organization",
+            org_url,
+            "--http-method",
+            "GET",
+        )
+        data = json.loads(connection.stdout or "{}")
+        display_name = str(
+            ((data.get("authenticatedUser") or {}).get("providerDisplayName"))
+            or ""
+        ).strip()
+        if display_name.casefold() != self.expected_login.casefold():
+            raise RuntimeError(
+                "Azure DevOps producer identity mismatch: expected "
+                f"{self.expected_login!r}, got {display_name!r}"
+            )
+        proj = self._az(
+            "devops",
+            "project",
+            "show",
+            "--project",
+            project,
+            "--organization",
+            org_url,
+        )
+        proj_name = str(json.loads(proj.stdout or "{}").get("name") or "")
+        if proj_name.casefold() != project.casefold():
+            raise RuntimeError(
+                f"Azure DevOps project identity mismatch: expected {project!r}, "
+                f"got {proj_name!r}"
+            )
+        if allow_cache:
+            self._verified_repos.add(repo)
+
+    def list_open_issues(self, repo: str) -> list[Issue]:
+        self._verify_identity(repo)
+        organization, project = self._split(repo)
+        org_url = self._org_url(organization)
+        wiql = (
+            "Select [System.Id] From WorkItems Where "
+            "[System.State] <> 'Closed' And [System.State] <> 'Removed' "
+            "Order By [System.CreatedDate] Asc"
+        )
+        query = self._az(
+            "boards",
+            "query",
+            "--wiql",
+            wiql,
+            "--organization",
+            org_url,
+            "--project",
+            project,
+        )
+        rows = json.loads(query.stdout or "[]")
+        issues = []
+        for row in rows:
+            work_item_id = int(row["id"])
+            show = self._az(
+                "boards",
+                "work-item",
+                "show",
+                "--id",
+                str(work_item_id),
+                "--organization",
+                org_url,
+            )
+            fields = json.loads(show.stdout or "{}").get("fields") or {}
+            comments_resp = self._az(
+                "devops",
+                "invoke",
+                "--area",
+                "wit",
+                "--resource",
+                "comments",
+                "--route-parameters",
+                f"project={project}",
+                f"workItemId={work_item_id}",
+                "--organization",
+                org_url,
+                "--http-method",
+                "GET",
+            )
+            comments = json.loads(comments_resp.stdout or "{}").get(
+                "comments"
+            ) or []
+            reservations = tuple(
+                marker
+                for comment in comments
+                if (
+                    marker := _parse_marker(
+                        str(comment.get("text") or ""),
+                        author=str(
+                            (comment.get("createdBy") or {}).get(
+                                "displayName"
+                            )
+                            or ""
+                        ),
+                        expected_author=self.expected_login,
+                        issue_number=work_item_id,
+                    )
+                )
+            )
+            tags = fields.get("System.Tags") or ""
+            issues.append(
+                Issue(
+                    number=work_item_id,
+                    title=str(fields.get("System.Title") or ""),
+                    url=f"{org_url}/_workitems/edit/{work_item_id}",
+                    labels=tuple(
+                        tag.strip() for tag in tags.split(";") if tag.strip()
+                    ),
+                    created_at=_parse_time(str(fields["System.CreatedDate"])),
+                    updated_at=_parse_time(str(fields["System.ChangedDate"])),
+                    reservations=reservations,
+                )
+            )
+        return issues
+
+    def _comment(self, repo: str, issue: Issue, payload: dict[str, Any]) -> None:
+        payload = {
+            key: value
+            for key, value in payload.items()
+            if key != "comment_author"
+        }
+        state = str(payload.get("state") or "reserved")
+        summary = (
+            f"Repository issue loop `{payload.get('loop')}` marked this work "
+            f"item `{state}` for occurrence `{payload.get('occurrence')}`."
+        )
+        organization, project = self._split(repo)
+        org_url = self._org_url(organization)
+        self._verify_identity(repo, allow_cache=False)
+        self._az(
+            "devops",
+            "invoke",
+            "--area",
+            "wit",
+            "--resource",
+            "comments",
+            "--route-parameters",
+            f"project={project}",
+            f"workItemId={issue.number}",
+            "--organization",
+            org_url,
+            "--http-method",
+            "POST",
+            "--in-file",
+            "-",
+            "--api-version",
+            "7.1-preview",
+            input=json.dumps({"text": f"{summary}\n\n{_marker(payload)}"}),
+        )
+
+    def _set_tags(self, repo: str, issue: Issue, tags: tuple[str, ...]) -> None:
+        organization, project = self._split(repo)
+        org_url = self._org_url(organization)
+        self._verify_identity(repo, allow_cache=False)
+        self._az(
+            "boards",
+            "work-item",
+            "update",
+            "--id",
+            str(issue.number),
+            "--organization",
+            org_url,
+            "--fields",
+            f"System.Tags={'; '.join(tags)}",
+        )
+
+    def reserve(
+        self, repo: str, issue: Issue, reservation: dict[str, Any]
+    ) -> None:
+        self._comment(repo, issue, {**reservation, "issue": issue.number})
+        self._set_tags(repo, issue, (*issue.labels, reservation["label"]))
+
+    def claim(
+        self, repo: str, issue: Issue, reservation: dict[str, Any], task_id: str
+    ) -> None:
+        self._comment(
+            repo,
+            issue,
+            {
+                **reservation,
+                "issue": issue.number,
+                "state": "claimed",
+                "task_id": task_id,
+            },
+        )
+
+    def release(
+        self,
+        repo: str,
+        issue: Issue,
+        reservation: dict[str, Any],
+        reason: str,
+    ) -> None:
+        self._comment(
+            repo,
+            issue,
+            {
+                **reservation,
+                "issue": issue.number,
+                "state": "released",
+                "reason": reason,
+            },
+        )
+        organization, project = self._split(repo)
+        org_url = self._org_url(organization)
+        comments_resp = self._az(
+            "devops",
+            "invoke",
+            "--area",
+            "wit",
+            "--resource",
+            "comments",
+            "--route-parameters",
+            f"project={project}",
+            f"workItemId={issue.number}",
+            "--organization",
+            org_url,
+            "--http-method",
+            "GET",
+        )
+        comments = json.loads(comments_resp.stdout or "{}").get(
+            "comments"
+        ) or []
+        current = Issue(
+            number=issue.number,
+            title=issue.title,
+            url=issue.url,
+            labels=issue.labels,
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            reservations=tuple(
+                marker
+                for comment in comments
+                if (
+                    marker := _parse_marker(
+                        str(comment.get("text") or ""),
+                        author=str(
+                            (comment.get("createdBy") or {}).get(
+                                "displayName"
+                            )
+                            or ""
+                        ),
+                        expected_author=self.expected_login,
+                        issue_number=issue.number,
+                    )
+                )
+            ),
+        )
+        other_active = any(
+            value.get("state") in {"reserved", "claimed"}
+            and value.get("loop") != reservation.get("loop")
+            and value.get("label") == reservation.get("label")
+            for value in _latest_reservations(current).values()
+        )
+        if not other_active:
+            remaining = tuple(
+                tag for tag in issue.labels if tag != reservation["label"]
+            )
+            self._set_tags(repo, issue, remaining)
+
+
+def _forge_provider_for(config: Mapping[str, Any]) -> ForgeProvider:
+    """Select the provider implementation named by ``config['forge']['provider']``."""
+    provider_name = config["forge"]["provider"]
+    producer_login = config["forge"]["producer_login"]
+    if provider_name == "github":
+        return GitHubProvider(producer_login)
+    if provider_name == "azure-devops":
+        return AzureDevOpsProvider(producer_login)
+    raise RegistrarError(
+        f"repository-issue-loop forge.provider: unsupported provider {provider_name!r}"
+    )
+
+
 def _latest_reservations(issue: Issue) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for reservation in issue.reservations:
@@ -1010,7 +1349,7 @@ def run_tick(
 ) -> dict[str, Any]:
     """Run one issue-source occurrence with visible reserve/create/reconcile."""
     config = validate_config(config)
-    provider = provider or GitHubProvider(config["forge"]["producer_login"])
+    provider = provider or _forge_provider_for(config)
     now = clock()
     discovered = plan(client, config, provider=provider, now=now)
     if not dry_run:
