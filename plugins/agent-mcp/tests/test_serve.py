@@ -266,6 +266,7 @@ async def test_server_list_op_over_socket_matches_cold_materialize_filtering(tmp
             if serve_socket_if_available(str(sock)):
                 break
             await asyncio.sleep(0.05)
+        assert serve_socket_if_available(str(sock)) == sock
 
         resp = await list_tools_via_socket(sock, str(bridge))
         assert resp["ok"]

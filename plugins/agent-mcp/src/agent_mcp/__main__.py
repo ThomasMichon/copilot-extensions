@@ -357,7 +357,14 @@ def _try_serve_materialize(bridge_ref: str, *, no_serve: bool) -> list[dict] | N
         return None  # socket vanished/refused -> fall back to cold path
     if not resp.get("ok"):
         return None  # let the cold path re-derive and report the failure
-    return resp.get("tools")
+    tools = resp.get("tools")
+    if not isinstance(tools, list):
+        # Malformed/corrupted daemon reply (missing field, version skew, a
+        # future protocol change) -- never hand plan_tools() a non-list, and
+        # never treat this as the upstream's real (empty) catalog. Fall back
+        # to the cold path, which re-derives the catalog independently.
+        return None
+    return tools
 
 
 def _cmd_materialize(args: argparse.Namespace) -> int:

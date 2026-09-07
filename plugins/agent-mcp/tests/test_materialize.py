@@ -417,8 +417,8 @@ class _ServeDaemonThread:
     def __init__(self, sock: Path) -> None:
         self.sock = sock
         self.server = None
+        self._reachable = False
         self._ready = threading.Event()
-        self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self) -> None:
@@ -432,8 +432,13 @@ class _ServeDaemonThread:
             task = asyncio.ensure_future(server.serve_forever())
             for _ in range(50):
                 if serve_socket_if_available(str(self.sock)):
+                    self._reachable = True
                     break
                 await asyncio.sleep(0.05)
+            # Always unblock start()'s wait, reachable or not -- a caller
+            # that only checked the Event (without also checking
+            # _reachable) would otherwise hang forever on a daemon that
+            # never bound.
             self._ready.set()
             await task
 
@@ -441,14 +446,23 @@ class _ServeDaemonThread:
 
     def start(self) -> None:
         self._thread.start()
-        assert self._ready.wait(timeout=5), "serve daemon never became reachable"
+        woke = self._ready.wait(timeout=5)
+        assert woke and self._reachable, "serve daemon never became reachable"
 
     def shutdown(self) -> None:
         import asyncio
 
         from agent_mcp.serve import request_via_socket
-        asyncio.run(request_via_socket(self.sock, {"op": "shutdown"}))
+        # Best-effort: the daemon may already be gone (crashed, evicted
+        # itself on idle, or never bound in the first place) -- a failed
+        # shutdown request must not skip joining the thread and leave it
+        # running past the test.
+        try:
+            asyncio.run(request_via_socket(self.sock, {"op": "shutdown"}))
+        except OSError:
+            pass
         self._thread.join(timeout=5)
+        assert not self._thread.is_alive(), "serve daemon thread did not stop"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink farm")
