@@ -28,6 +28,24 @@ via init/install scripts (`init.ps1`/`init.sh` → `install.{ps1,sh}`), or via t
 global binstub's first-use `provision` fallback, and provides the
 `agent-worktrees` CLI, session launchers, and per-project binstubs.
 
+### Installation-cell runtime selection
+
+The payload-local `agent-worktrees` command resolves installation governance
+before selecting a runtime. Legacy/default/false policy keeps the established
+`~/.agent-worktrees` root. An explicitly active, validated installation context
+selects that cell's plugin root instead, and first use provisions the versioned
+runtime, markers, wrappers, and deploy manifest only beneath that root. Invalid,
+foreign, inactive, or governance-blocked context fails without falling back to
+the legacy runtime. The session-start bootstrap hook stands down whenever an
+explicit context is present so it cannot recreate legacy state before the
+payload command validates the selected cell.
+
+This is the first Phase 4 installation-cell slice. The machine-global
+`projects.yaml`/`repos.yaml` registries, per-project `~/.{project}` state,
+project binstubs, pivots, sessions, leases, and other harness state remain on
+their legacy paths until their ownership contracts move in later slices.
+Namespaced activation remains opt-in and clean-room-only during the migration.
+
 ## Installed Layout
 
 After full installation and project registration:

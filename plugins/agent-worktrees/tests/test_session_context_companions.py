@@ -35,11 +35,11 @@ def _payload(
 
 
 def _bash() -> str:
+    if os.name == "nt":
+        pytest.skip("POSIX companion semantics run in the Linux/WSL suite")
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("Bash is not available")
-    if os.name == "nt" and "WindowsApps" in Path(bash).parts:
-        pytest.skip("WSL Bash cannot execute Windows test paths directly")
     return bash
 
 
@@ -47,6 +47,8 @@ def _powershell() -> str:
     powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
     if powershell is None:
         pytest.skip("PowerShell is not available")
+    if os.name != "nt" and Path(powershell).suffix.lower() == ".exe":
+        pytest.skip("Windows PowerShell cannot execute POSIX test paths")
     return powershell
 
 

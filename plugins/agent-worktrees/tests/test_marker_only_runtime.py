@@ -37,7 +37,8 @@ def test_resolver_helpers_are_marker_only():
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
 def test_powershell_resolver_exports_payload_invocation_contract(tmp_path):
-    runtime = tmp_path / ".agent-worktrees"
+    home = tmp_path / "home"
+    runtime = tmp_path / "cell-runtime"
     slot_python = runtime / "versions" / "1.2.3" / "Scripts" / "python.exe"
     slot_python.parent.mkdir(parents=True)
     slot_python.touch()
@@ -51,10 +52,12 @@ def test_powershell_resolver_exports_payload_invocation_contract(tmp_path):
     )
     (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
     resolver = _SCRIPTS / "resolve-runtime.ps1"
-    home_literal = str(tmp_path).replace("'", "''")
+    home_literal = str(home).replace("'", "''")
+    runtime_literal = str(runtime).replace("'", "''")
     resolver_literal = str(resolver).replace("'", "''")
     script = (
         f"$env:USERPROFILE = '{home_literal}'; "
+        f"$env:AGENT_RT_ROOT = '{runtime_literal}'; "
         f". '{resolver_literal}'; "
         "[pscustomobject]@{ AwPy = $AwPy; AgentRtPy = $AgentRtPy } "
         "| ConvertTo-Json -Compress"
@@ -237,6 +240,42 @@ def test_posix_resolver_exports_payload_invocation_contract(tmp_path):
     aw_py, agent_rt_py = result.stdout.splitlines()
     assert Path(aw_py).name == "python"
     assert agent_rt_py == aw_py
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
+def test_posix_resolver_honors_explicit_runtime_root(tmp_path):
+    cell = tmp_path / "cell-runtime"
+    slot = cell / "versions" / "1.2.3"
+    (slot / "bin").mkdir(parents=True)
+    (slot / ".install-complete.json").write_text(
+        json.dumps(
+            {
+                "version": "1.2.3",
+                "completed_at": "2026-08-27T00:00:00Z",
+                "pid": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    python = slot / "bin" / "python"
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o755)
+    (cell / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    resolver = _SCRIPTS / "resolve-runtime.sh"
+    script = f'. "{resolver}"; printf "%s" "$AW_PY"'
+    result = subprocess.run(
+        ["sh", "-c", script],
+        capture_output=True,
+        text=True,
+        env={
+            "HOME": str(tmp_path / "home"),
+            "AGENT_RT_ROOT": str(cell),
+            "PATH": "/usr/bin:/bin",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(python)
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")

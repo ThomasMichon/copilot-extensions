@@ -167,7 +167,7 @@ because they provide tools or services.
 - [x] Land the reviewed
   [installation-context and dual-cell proposal](phase-3-installation-context.md)
   before either platform makes the new root operative.
-- [ ] Introduce a self-contained, vendorable installation-context primitive
+- [x] Introduce a self-contained, vendorable installation-context primitive
   separate from versioned interpreter resolution.
   - [x] Land the non-operative Windows/PowerShell resolver, receipt validator,
     portable source-identity fixtures, and CI tests.
@@ -190,7 +190,7 @@ because they provide tools or services.
   - [x] Prove activation CAS pins namespace, install, and activation generations
     and that Windows/WSL/POSIX receipts fail closed outside their exact
     environment.
-- [ ] Persist and validate marketplace, plugin, payload, runtime, and instance
+- [x] Persist and validate marketplace, plugin, payload, runtime, and instance
   identity through stamp, snapshot, provision, cutover, rollback, and uninstall.
   - [x] Publish and independently validate immutable, generation-pinned snapshot
     provenance at the exact cell-local snapshot path without creating or
@@ -213,7 +213,7 @@ because they provide tools or services.
         rollback without legacy fallback.
       - [x] Add ownership-checked Agent Machines repair/release and uninstall
         ([#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122)).
-- [ ] Prove one on-demand plugin and one service-bearing plugin with two
+- [x] Prove one on-demand plugin and one service-bearing plugin with two
     simultaneous marketplace cells in disposable clean-room environments before
     broad rollout. Do not activate or use either exemplar namespaced on a
     persistent machine.
@@ -981,3 +981,28 @@ See [`design.md`](design.md).
   smoke/parity lane passed 22 tests (one platform skip), and the dedicated
   reservation corpus passed 15 tests. Required lint, install-contract,
   documentation, version-consistency/bump, and vendoring checks passed.
+
+### 2026-09-07 — Phase 3 closure and first agent-worktrees runtime slice
+
+- Reconciled the three Phase 3 parent checklist items after both accepted
+  exemplars, their identity/lifecycle paths, and the operator-approved Windows
+  dispositions were already complete in their nested acceptance records.
+- Started Phase 4 issue
+  [#1105](https://github.com/ThomasMichon/copilot-extensions/issues/1105) with
+  the narrow runtime boundary: the payload-local agent-worktrees command now
+  resolves installation governance before runtime selection. Legacy/default
+  policy preserves `~/.agent-worktrees`; an active validated context selects
+  and first-use provisions only its cell-local versioned runtime, markers,
+  wrappers, and deploy manifest.
+- Invalid, foreign, inactive, and governance-blocked contexts fail without
+  legacy fallback. The session-start bootstrap hook stands down for every
+  explicit context so it cannot recreate legacy runtime state before payload
+  invocation validates the selected cell.
+- Real Windows first use passed through the payload dispatcher from paths
+  containing spaces, built the cell-local runtime, and left the legacy root
+  absent. The full WSL agent-worktrees portfolio passed; native Windows
+  coverage passed after correcting cross-OS tests that had selected the WSL
+  launcher for Windows paths or modeled POSIX paths with `WindowsPath`.
+- Kept the larger #1105 state migration open. Global project/repository
+  registries, per-project worktree/session state, project binstubs, pivots,
+  leases, and harness state remain legacy until later attributable slices.

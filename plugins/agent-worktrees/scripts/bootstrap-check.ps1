@@ -13,6 +13,11 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# A selected installation context owns runtime resolution. The payload-local
+# command validates it and provisions its cell on first use; this best-effort
+# hook must never touch the legacy root while any explicit context is present.
+if ($env:COPILOT_EXTENSIONS_CONTEXT) { exit 0 }
+
 $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 $LibDir     = Join-Path $InstallDir 'lib'
 $PkgDst     = Join-Path $LibDir 'agent_worktrees'

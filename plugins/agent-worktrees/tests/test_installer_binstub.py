@@ -780,8 +780,12 @@ def test_payload_shims_propagate_ownership_root() -> None:
     ).read_text(encoding="utf-8")
     assert 'export AGENT_WORKTREES_PAYLOAD_ROOT="$_payload_root"' in posix
     assert "$env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRoot" in powershell
-    assert "[Environment]::GetEnvironmentVariable" in powershell
-    assert "Remove-Item Env:AGENT_WORKTREES_PAYLOAD_ROOT" in powershell
+    assert "scripts/invoke-payload-runtime.sh" in posix
+    assert "scripts\\invoke-payload-runtime.ps1" in powershell
+    dispatcher = (
+        PLUGIN / "scripts" / "invoke-payload-runtime.ps1"
+    ).read_text(encoding="utf-8")
+    assert "[Environment]::GetEnvironmentVariable" in dispatcher
 
 
 def test_project_binstub_rejects_invalid_command_name(

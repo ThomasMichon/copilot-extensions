@@ -509,6 +509,668 @@ def _activate_agent_machines_context(
     return context.parent
 
 
+def _copied_agent_worktrees_payload(tmp_path: Path) -> Path:
+    payload = tmp_path / "agent-worktrees"
+    shutil.copytree(
+        REPO / "plugins" / "agent-worktrees",
+        payload,
+        ignore=shutil.ignore_patterns(
+            ".pytest_cache",
+            ".ruff_cache",
+            "__pycache__",
+            "*.pyc",
+            "*.egg-info",
+        ),
+    )
+    return payload
+
+
+def _stamp_agent_worktrees_context(
+    tmp_path: Path,
+    payload: Path,
+    pwsh: str,
+) -> Path:
+    version = json.loads(
+        (payload / "plugin.json").read_text(encoding="utf-8")
+    )["version"]
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
+            "stamp",
+            "-SourceJson",
+            '{"source":"github","repo":"example-org/example-marketplace"}',
+            "-MarketplaceKey",
+            "example",
+            "-PluginId",
+            "agent-worktrees",
+            "-PayloadRoot",
+            str(payload),
+            "-PayloadVersion",
+            version,
+            "-PayloadOrigin",
+            "explicit",
+            "-ExpectedNamespaceGeneration",
+            "0",
+            "-ExpectedInstallGeneration",
+            "0",
+            "-DurableHome",
+            str(tmp_path / "durable"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return Path(json.loads(result.stdout)["installReceipt"])
+
+
+def _activate_agent_worktrees_context(
+    tmp_path: Path,
+    home: Path,
+    context: Path,
+    pwsh: str,
+) -> Path:
+    install = json.loads(context.read_text(encoding="utf-8"))
+    namespace = json.loads(
+        Path(install["namespaceReceipt"]).read_text(encoding="utf-8")
+    )
+    policy = home / ".copilot-extensions" / "installation-mode.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.installation-mode",
+                "version": 1,
+                "installationMode": {"enabled": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.update({"HOME": str(home), "USERPROFILE": str(home)})
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
+            "activation-cas",
+            "-Context",
+            str(context),
+            "-ExpectedMarketplaceId",
+            install["marketplaceId"],
+            "-ExpectedPluginId",
+            "agent-worktrees",
+            "-ExpectedNamespaceGeneration",
+            str(namespace["generation"]),
+            "-ExpectedInstallGeneration",
+            str(install["generation"]),
+            "-ExpectedActivationGeneration",
+            "0",
+            "-ActivationMode",
+            "namespaced",
+            "-ActivationState",
+            "active",
+            "-LegacyDisposition",
+            "absent",
+            "-LegacyProbeJson",
+            '{"declared":true,"result":"absent","checkedAt":"2026-01-01T00:00:00Z"}',
+            "-LegacyRoot",
+            str(home / ".agent-worktrees"),
+            "-DurableHome",
+            str(tmp_path / "durable"),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    json.loads(result.stdout)
+    return context.parent
+
+
+def _agent_worktrees_test_environment(
+    home: Path,
+    payload: Path,
+) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(payload),
+            "PYTHONPATH": os.pathsep.join(
+                [
+                    str(payload / "src"),
+                    str(payload / "libs" / "config-migrate" / "src"),
+                    str(payload / "libs" / "plugin-resolve" / "src"),
+                    str(payload / "libs" / "agent-procutil" / "src"),
+                    str(payload / "libs" / "dropin-registry" / "src"),
+                    str(payload / "libs" / "plugin-activation" / "src"),
+                ]
+            ),
+            "TEST_PYTHON": sys.executable,
+        }
+    )
+    return environment
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="canonical Windows profile semantics require native Windows",
+)
+@pytest.mark.parametrize("policy_state", ["absent", "explicit-false"])
+def test_agent_worktrees_required_context_preserves_legacy_default(
+    tmp_path: Path,
+    policy_state: str,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = $env:TEST_PYTHON\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    if policy_state == "explicit-false":
+        policy = home / ".copilot-extensions" / "installation-mode.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text(
+            json.dumps(
+                {
+                    "schema": "copilot-extensions.installation-mode",
+                    "version": 1,
+                    "installationMode": {"enabled": False},
+                }
+            ),
+            encoding="utf-8",
+        )
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("agent-worktrees ")
+    assert not (home / ".agent-worktrees").exists()
+    if policy_state == "absent":
+        assert not (home / ".copilot-extensions").exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_agent_worktrees_requested_context_never_falls_back_to_legacy(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "AGENT_WORKTREES_NO_SELFPROVISION": "1",
+        }
+    )
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 126
+    assert "requested installation context is not active" in result.stderr
+    assert not (home / ".agent-worktrees").exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_agent_worktrees_active_context_selects_only_its_cell_root(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context, pwsh)
+    root_record = tmp_path / "selected-root.txt"
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "[IO.File]::WriteAllText($env:TEST_ROOT_RECORD, $env:AGENT_RT_ROOT)\n"
+        "$AgentRtPy = $env:TEST_PYTHON\n",
+        encoding="utf-8",
+    )
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "TEST_ROOT_RECORD": str(root_record),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert root_record.read_text(encoding="utf-8") == str(plugin_root)
+    assert not (home / ".agent-worktrees").exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_agent_worktrees_active_context_provisions_only_its_cell_root(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    home = tmp_path / "home"
+    home.mkdir()
+    plugin_root = _activate_agent_worktrees_context(tmp_path, home, context, pwsh)
+    install_record = tmp_path / "install-record.txt"
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = $null\n",
+        encoding="utf-8",
+    )
+    (payload / "scripts" / "install.ps1").write_text(
+        "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
+        "[IO.File]::WriteAllText(\n"
+        "  $env:TEST_INSTALL_RECORD,\n"
+        "  ($Action + '|' + $InstallDir + '|' + $env:COPILOT_EXTENSIONS_CONTEXT)\n"
+        ")\n"
+        "$resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'\n"
+        "[IO.File]::WriteAllText($resolver, '$AgentRtPy = $env:TEST_PYTHON' + [Environment]::NewLine)\n",
+        encoding="utf-8",
+    )
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "TEST_INSTALL_RECORD": str(install_record),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
+            "--version",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert install_record.read_text(encoding="utf-8") == (
+        f"install|{plugin_root}|{context}"
+    )
+    assert not (home / ".agent-worktrees").exists()
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="Windows file-lock serialization",
+)
+def test_agent_worktrees_namespaced_first_use_is_single_flight(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    context = _stamp_agent_worktrees_context(tmp_path, payload, pwsh)
+    home = tmp_path / "home"
+    home.mkdir()
+    _activate_agent_worktrees_context(tmp_path, home, context, pwsh)
+    install_record = tmp_path / "install-record.txt"
+    (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = $null\n",
+        encoding="utf-8",
+    )
+    (payload / "scripts" / "install.ps1").write_text(
+        "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
+        "Add-Content -LiteralPath $env:TEST_INSTALL_RECORD -Value $PID\n"
+        "Start-Sleep -Seconds 1\n"
+        "$resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'\n"
+        "[IO.File]::WriteAllText($resolver, '$AgentRtPy = $env:TEST_PYTHON' + [Environment]::NewLine)\n",
+        encoding="utf-8",
+    )
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "TEST_INSTALL_RECORD": str(install_record),
+        }
+    )
+    command = [
+        pwsh,
+        "-NoProfile",
+        "-File",
+        str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
+        "--version",
+    ]
+
+    first = subprocess.Popen(
+        command,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    second = subprocess.Popen(
+        command,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    first_stdout, first_stderr = first.communicate(timeout=30)
+    second_stdout, second_stderr = second.communicate(timeout=30)
+
+    assert first.returncode == 0, first_stderr
+    assert second.returncode == 0, second_stderr
+    assert first_stdout.startswith("agent-worktrees ")
+    assert second_stdout.startswith("agent-worktrees ")
+    assert len(install_record.read_text(encoding="utf-8").splitlines()) == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX payload dispatcher semantics")
+def test_agent_worktrees_posix_requested_context_never_uses_legacy(
+    tmp_path: Path,
+) -> None:
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
+    mode_runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' "
+        "'{\"status\":\"ready\",\"reason\":\"policy-default-false\","
+        "\"actualMode\":\"legacy\",\"desiredMode\":\"legacy\"}'\n",
+        encoding="utf-8",
+    )
+    mode_runner.chmod(0o755)
+    (payload / "scripts" / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY="$TEST_PYTHON"\n',
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(tmp_path / "requested" / "install.json"),
+            "AGENT_WORKTREES_NO_SELFPROVISION": "1",
+        }
+    )
+
+    result = subprocess.run(
+        [str(payload / "bin" / "payload" / "agent-worktrees"), "--version"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 126
+    assert "requested installation context is not active" in result.stderr
+    assert not (home / ".agent-worktrees").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX payload dispatcher semantics")
+def test_agent_worktrees_posix_active_context_selects_cell_root(
+    tmp_path: Path,
+) -> None:
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    plugin_root = tmp_path / "durable" / "marketplaces" / "example" / "plugins" / "agent-worktrees"
+    context = plugin_root / "install.json"
+    context.parent.mkdir(parents=True)
+    context.write_text("{}\n", encoding="utf-8")
+    mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
+    mode_runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' "
+        f"'{{\"status\":\"ready\",\"reason\":\"namespaced-active\","
+        f"\"actualMode\":\"namespaced\",\"desiredMode\":\"namespaced\","
+        f"\"runtimeRoot\":\"{plugin_root}\",\"context\":\"{context}\"}}'\n",
+        encoding="utf-8",
+    )
+    mode_runner.chmod(0o755)
+    root_record = tmp_path / "selected-root.txt"
+    (payload / "scripts" / "resolve-runtime.sh").write_text(
+        'printf "%s" "$AGENT_RT_ROOT" >"$TEST_ROOT_RECORD"\n'
+        'AGENT_RT_PY="$TEST_PYTHON"\n',
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "TEST_ROOT_RECORD": str(root_record),
+            "TEST_PYTHON": str(fake_python),
+        }
+    )
+
+    result = subprocess.run(
+        [str(payload / "bin" / "payload" / "agent-worktrees"), "--version"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert root_record.read_text(encoding="utf-8") == str(plugin_root)
+    assert not (home / ".agent-worktrees").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group semantics")
+def test_agent_worktrees_posix_interrupt_reaps_provisioner_before_unlock(
+    tmp_path: Path,
+) -> None:
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    plugin_root = tmp_path / "cell-runtime"
+    context = plugin_root / "install.json"
+    context.parent.mkdir(parents=True)
+    context.write_text("{}\n", encoding="utf-8")
+    mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
+    mode_runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' "
+        f"'{{\"status\":\"ready\",\"reason\":\"namespaced-active\","
+        f"\"actualMode\":\"namespaced\",\"desiredMode\":\"namespaced\","
+        f"\"runtimeRoot\":\"{plugin_root}\",\"context\":\"{context}\"}}'\n",
+        encoding="utf-8",
+    )
+    mode_runner.chmod(0o755)
+    (payload / "scripts" / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY=""\n',
+        encoding="utf-8",
+    )
+    child_pid_record = tmp_path / "child-pid.txt"
+    (payload / "scripts" / "install.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        "set -m\n"
+        "(\n"
+        "  trap 'exit 143' INT TERM\n"
+        "  printf '%s' \"$BASHPID\" >\"$TEST_CHILD_PID_RECORD\"\n"
+        "  sleep 30\n"
+        ") &\n"
+        "child=$!\n"
+        "set +m\n"
+        "stop_child() {\n"
+        "  kill -- -\"$child\" 2>/dev/null || kill \"$child\" 2>/dev/null || true\n"
+        "  wait \"$child\" 2>/dev/null || true\n"
+        "  exit 143\n"
+        "}\n"
+        "trap stop_child INT TERM\n"
+        "wait \"$child\"\n",
+        encoding="utf-8",
+    )
+    (payload / "scripts" / "install.sh").chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "COPILOT_EXT_NO_FLOCK": "1",
+            "TEST_CHILD_PID_RECORD": str(child_pid_record),
+        }
+    )
+    process = subprocess.Popen(
+        [str(payload / "bin" / "payload" / "agent-worktrees"), "--version"],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    for _ in range(100):
+        if child_pid_record.exists():
+            break
+        import time
+
+        time.sleep(0.05)
+    assert child_pid_record.exists()
+    child_pid = int(child_pid_record.read_text(encoding="utf-8"))
+
+    process.terminate()
+    process.communicate(timeout=10)
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
+    assert not (plugin_root / ".provision.lock.pid").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX governance revalidation")
+def test_agent_worktrees_posix_revalidates_after_provisioning(
+    tmp_path: Path,
+) -> None:
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    plugin_root = tmp_path / "cell-runtime"
+    context = plugin_root / "install.json"
+    context.parent.mkdir(parents=True)
+    context.write_text("{}\n", encoding="utf-8")
+    status_count = tmp_path / "status-count.txt"
+    mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
+    mode_runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ \"${1:-}\" = validate ]; then\n"
+        "  printf '%s\\n' '{\"namespaceGeneration\":1,\"generation\":1}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "count=0\n"
+        "[ ! -f \"$TEST_STATUS_COUNT\" ] || count=$(cat \"$TEST_STATUS_COUNT\")\n"
+        "count=$((count + 1))\n"
+        "printf '%s' \"$count\" >\"$TEST_STATUS_COUNT\"\n"
+        "if [ \"$count\" -le 2 ]; then\n"
+        "  printf '%s\\n' "
+        f"'{{\"status\":\"ready\",\"reason\":\"namespaced-active\","
+        f"\"actualMode\":\"namespaced\",\"desiredMode\":\"namespaced\","
+        f"\"runtimeRoot\":\"{plugin_root}\",\"context\":\"{context}\","
+        f"\"activationGeneration\":1,\"installGeneration\":1}}'\n"
+        "else\n"
+        "  printf '%s\\n' "
+        "'{\"status\":\"maintenance\",\"reason\":\"plugin-maintenance\","
+        "\"actualMode\":\"namespaced\",\"desiredMode\":\"namespaced\"}'\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    mode_runner.chmod(0o755)
+    (payload / "scripts" / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY=""\n',
+        encoding="utf-8",
+    )
+    install_record = tmp_path / "install-record.txt"
+    runtime_record = tmp_path / "runtime-record.txt"
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text(
+        "#!/bin/sh\nprintf invoked >\"$TEST_RUNTIME_RECORD\"\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    (payload / "scripts" / "install.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        "printf installed >\"$TEST_INSTALL_RECORD\"\n"
+        "cat >\"$(dirname \"$0\")/resolve-runtime.sh\" <<'EOF'\n"
+        'AGENT_RT_PY=\"$TEST_PYTHON\"\n'
+        "EOF\n",
+        encoding="utf-8",
+    )
+    (payload / "scripts" / "install.sh").chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "TEST_STATUS_COUNT": str(status_count),
+            "TEST_INSTALL_RECORD": str(install_record),
+            "TEST_RUNTIME_RECORD": str(runtime_record),
+            "TEST_PYTHON": str(fake_python),
+        }
+    )
+
+    result = subprocess.run(
+        [str(payload / "bin" / "payload" / "agent-worktrees"), "--version"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 126
+    assert "governance changed during provisioning" in result.stderr
+    assert install_record.read_text(encoding="utf-8") == "installed"
+    assert not runtime_record.exists()
+    assert status_count.read_text(encoding="utf-8") == "3"
+
+
 @pytest.mark.skipif(
     os.name != "nt" or shutil.which("pwsh") is None,
     reason="canonical Windows profile semantics require native Windows",

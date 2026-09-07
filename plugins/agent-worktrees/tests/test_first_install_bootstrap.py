@@ -54,6 +54,18 @@ def test_bootstrap_stamps_payload_when_runtime_is_unprovisioned() -> None:
     assert "deploy-manifest.json" in ps1
 
 
+def test_bootstrap_stands_down_for_explicit_installation_context() -> None:
+    sh = (PLUGIN / "scripts" / "bootstrap-check.sh").read_text(encoding="utf-8")
+    ps1 = (PLUGIN / "scripts" / "bootstrap-check.ps1").read_text(encoding="utf-8")
+
+    assert 'if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]' in sh
+    assert "if ($env:COPILOT_EXTENSIONS_CONTEXT) { exit 0 }" in ps1
+    assert sh.index("COPILOT_EXTENSIONS_CONTEXT") < sh.index('INSTALL_DIR="$HOME/.agent-worktrees"')
+    assert ps1.index("COPILOT_EXTENSIONS_CONTEXT") < ps1.index(
+        "Join-Path $env:USERPROFILE '.agent-worktrees'"
+    )
+
+
 def test_windows_binstub_resolves_complete_slots_and_serializes_provision() -> None:
     ps1 = (PLUGIN / "bin" / "agent-worktrees.ps1").read_text(encoding="utf-8")
     cmd = (PLUGIN / "bin" / "agent-worktrees.cmd").read_text(encoding="utf-8")
@@ -115,6 +127,96 @@ def test_lean_provision_deploys_runtime_resolvers() -> None:
     assert "Deploy-RuntimeResolvers" in ps1_provision
     assert "Copy-Item $src $tmp -Force" in ps1_deploy
     assert "Move-Item $tmp $dst -Force" in ps1_deploy
+
+
+def test_posix_context_install_bootstraps_uv_before_runtime_build() -> None:
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    install = sh.split("    install)", 1)[1].split("    uninstall)", 1)[0]
+
+    assert "if $CONTEXTUAL_INSTALL; then" in install
+    assert "_ensure_uv || exit 1" in install
+    assert "_ensure_uv_index" in install
+    assert install.index("_ensure_uv || exit 1") < install.index(
+        "deploy_venv || exit 1"
+    )
+    update = sh.split("    update)", 1)[1].split("    *)", 1)[0]
+    assert "_ensure_uv || exit 1" in update
+    assert "_ensure_uv_index" in update
+
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    ps1_update = ps1.split("    'update' {", 1)[1]
+    assert "if (-not (Ensure-Uv)) { exit 1 }" in ps1_update
+    assert "Ensure-UvIndex" in ps1_update
+
+
+def test_context_install_revalidates_generations_before_cutover() -> None:
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    for generation in (
+        "activationGeneration",
+        "namespaceGeneration",
+        "installGeneration",
+    ):
+        assert generation in sh
+        assert generation in ps1
+    assert "context_governance_unchanged" in sh
+    assert "Test-ContextGovernanceUnchanged" in ps1
+    assert sh.index("context_governance_unchanged") < sh.index(
+        "_versioned_activate || exit 1"
+    )
+    assert ps1.index("Test-ContextGovernanceUnchanged") < ps1.index(
+        "Invoke-VersionedActivate"
+    )
+
+
+def test_windows_context_install_uses_shallow_staging_root() -> None:
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    context = ps1.split("if ($ContextualInstall) {", 1)[1].split(
+        "# === install-contract:v4 self-stage", 1
+    )[0]
+
+    assert "[IO.Path]::GetTempPath()" in context
+    assert "'copilot-extensions-install'" in context
+    assert "'agent-worktrees'" in context
+    assert "Join-Path $InstallDir '.install-stage'" not in context
+
+
+def test_windows_context_stage_preserves_argument_boundaries() -> None:
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    context = ps1.split("if ($ContextualInstall) {", 1)[1].split(
+        "# === install-contract:v4 self-stage", 1
+    )[0]
+
+    assert "[Diagnostics.ProcessStartInfo]::new()" in context
+    assert "ArgumentList.Add([string]$argument)" in context
+    assert "ConvertTo-NativeArgument ([string]$_)" in context
+    assert "Start-Process -FilePath $hostExe" not in context
+
+
+def test_windows_context_stage_preserves_default_for_invalid_deadline() -> None:
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    context = ps1.split("if ($ContextualInstall) {", 1)[1].split(
+        "# === install-contract:v4 self-stage", 1
+    )[0]
+
+    assert "$parsedContextDeadline = 0" in context
+    assert "[ref]$parsedContextDeadline" in context
+    assert "$parsedContextDeadlineOk = [int]::TryParse" in context
+    assert "$contextDeadline = $parsedContextDeadline" in context
+    assert "[ref]$contextDeadline" not in context
+
+
+def test_posix_context_stage_reaps_child_group_before_exit() -> None:
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    context = sh.split(
+        "# A structured caller supplies both the validated context", 1
+    )[1].split("# === install-contract:v4 self-stage", 1)[0]
+
+    assert "__aw_stop_context_child()" in context
+    assert 'kill -- -"$__aw_child"' in context
+    assert 'wait "$__aw_child"' in context
+    assert "trap '__aw_stop_context_child 143' TERM" in context
 
 
 def test_installers_preserve_activation_during_inventory_bootstrap() -> None:

@@ -13,6 +13,13 @@
 
 set -euo pipefail
 
+# A selected installation context owns runtime resolution. The payload-local
+# command validates it and provisions its cell on first use; this best-effort
+# hook must never touch the legacy root while any explicit context is present.
+if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    exit 0
+fi
+
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '')"
 INSTALL_DIR="$HOME/.agent-worktrees"
 LIB_DIR="$INSTALL_DIR/lib"
