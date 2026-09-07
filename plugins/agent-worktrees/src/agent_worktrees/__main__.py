@@ -19168,11 +19168,27 @@ def plan_pre_launch() -> dict:
     if not aw_resolution_failed and aw_runtime_root is not None:
         wm_dir = aw_runtime_root
         wm_manifest = wm_dir / "deploy-manifest.json"
-        staleness = (
-            svc.check_staleness(wm_manifest, repo_dir)
-            if wm_manifest.exists()
-            else "missing"
-        )
+        if not wm_manifest.exists():
+            staleness = "missing"
+        else:
+            # check_staleness() is git-commit-based and needs a real `commit`
+            # recorded in the manifest, which only a `local` (git-checkout)
+            # deploy has. A `marketplace` deploy (the standard layout) always
+            # records `commit: null`, so routing it through check_staleness()
+            # would always read "unknown" -> always re-run self-update, even
+            # when nothing changed. Use the content-fingerprint comparison
+            # for that layout instead; fall back to the git-based check
+            # (or "missing"/plugin-dir-unresolved) otherwise.
+            _manifest_data = svc._read_manifest(wm_manifest)
+            _source_kind = (
+                (_manifest_data or {}).get("source") or {}
+            ).get("kind")
+            if _source_kind == "marketplace" and aw_plugin_dir is not None:
+                staleness = svc.check_marketplace_staleness(
+                    wm_manifest, aw_plugin_dir
+                )
+            else:
+                staleness = svc.check_staleness(wm_manifest, repo_dir)
         if staleness != "current":
             installer = next(
                 (

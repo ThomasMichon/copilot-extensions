@@ -351,6 +351,51 @@ def check_staleness(manifest_path: Path, repo_dir: Path) -> str:
     return "current"
 
 
+def check_marketplace_staleness(manifest_path: Path, plugin_dir: Path) -> str:
+    """Content-fingerprint staleness check for a ``marketplace``-layout deploy.
+
+    ``check_staleness`` above is git-commit-based and needs a real ``commit``
+    recorded in the manifest -- which a ``marketplace`` install (the standard
+    Copilot CLI plugin layout; the payload dir is not a git checkout the
+    launcher's own ``repo_dir`` can meaningfully ``git log`` against) never
+    has. Before this function existed, that meant ``check_staleness`` always
+    fell through to ``"unknown"`` for a marketplace install, and callers (see
+    ``plan_pre_launch``) treat anything other than ``"current"`` as reason to
+    re-run the full self-update pipeline -- so a marketplace install re-ran
+    ``install.ps1 update`` against its own already-active runtime slot on
+    *every* launch, not just when something genuinely changed.
+
+    This compares the payload content fingerprint recorded at deploy time
+    (``source.payload_fingerprint`` in ``deploy-manifest.json``, written via
+    :func:`update_stage.fingerprint` at deploy time) against a fresh
+    fingerprint of the current payload dir, using the exact same hash the
+    deploy recorded -- so the comparison is meaningful regardless of git
+    history.
+
+    Returns:
+        ``"current"`` -- recorded and current fingerprints match.
+        ``"stale:content-changed"`` -- they differ (payload changed).
+        ``"unknown"`` -- cannot determine (missing manifest, no recorded
+        fingerprint yet -- e.g. a manifest written before this field existed,
+        or the payload dir is gone).
+    """
+    manifest = _read_manifest(manifest_path)
+    if manifest is None:
+        return "unknown"
+
+    recorded = (manifest.get("source") or {}).get("payload_fingerprint")
+    if not recorded:
+        return "unknown"
+
+    if not plugin_dir.is_dir():
+        return "unknown"
+
+    from . import update_stage
+
+    current = update_stage.fingerprint(plugin_dir)
+    return "current" if current == recorded else "stale:content-changed"
+
+
 def get_service_status(
     service: ServiceInfo,
     repo_dir: Path,
