@@ -142,12 +142,26 @@ elif [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
       -z "$(json_get "$RESOLUTION" "$(json_path legacy tombstone)" 2>/dev/null || true)" &&
       "$(json_get "$RESOLUTION" "$(json_path legacy disposition)" 2>/dev/null || true)" == active ]]; then
     MARKETPLACES_PATH="$(json_path installationMode marketplaces)"
-    MARKETPLACES_TYPE="$(json_type "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)"
-    if [[ -z "$MARKETPLACES_TYPE" ]] ||
-       [[ "$MARKETPLACES_TYPE" == object &&
-          "$(json_len "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)" == 0 ]]; then
-        SIMPLE_POLICY_LEGACY=1
-    fi
+      set +e
+      MARKETPLACES_TYPE="$(
+          json_type "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null
+      )"
+      MARKETPLACES_TYPE_RC=$?
+      set -e
+      if [[ "$MARKETPLACES_TYPE_RC" == 3 ]]; then
+          SIMPLE_POLICY_LEGACY=1
+      elif [[ "$MARKETPLACES_TYPE_RC" == 0 &&
+              "$MARKETPLACES_TYPE" == object ]]; then
+          set +e
+          MARKETPLACES_LEN="$(
+              json_len "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null
+          )"
+          MARKETPLACES_LEN_RC=$?
+          set -e
+          if [[ "$MARKETPLACES_LEN_RC" == 0 && "$MARKETPLACES_LEN" == 0 ]]; then
+              SIMPLE_POLICY_LEGACY=1
+          fi
+      fi
 fi
 if [[ ( "$RESOLUTION_STATUS" == ready &&
       "$ACTUAL_MODE" == legacy &&

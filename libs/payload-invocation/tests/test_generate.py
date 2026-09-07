@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -959,6 +960,85 @@ def test_agent_worktrees_posix_requested_context_never_uses_legacy(
     assert result.returncode == 126
     assert "requested installation context is not active" in result.stderr
     assert not (home / ".agent-worktrees").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX policy parsing semantics")
+@pytest.mark.parametrize(
+    ("policy_text", "expected_code"),
+    [
+        (
+            json.dumps(
+                {
+                    "schema": "copilot-extensions.installation-mode",
+                    "version": 1,
+                    "installationMode": {"enabled": False},
+                }
+            ),
+            0,
+        ),
+        ("{\n", 126),
+    ],
+)
+def test_agent_worktrees_posix_simple_legacy_requires_readable_policy(
+    tmp_path: Path,
+    policy_text: str,
+    expected_code: int,
+) -> None:
+    payload = _copied_agent_worktrees_payload(tmp_path)
+    mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
+    mode_runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' "
+        "'{\"status\":\"provenance-blocked\",\"reason\":\"source-unresolved\","
+        "\"actualMode\":\"legacy\",\"desiredMode\":\"legacy\","
+        "\"policy\":{\"state\":\"valid\",\"enabled\":false},"
+        "\"legacy\":{\"tombstone\":null,\"disposition\":\"active\"}}'\n",
+        encoding="utf-8",
+    )
+    mode_runner.chmod(0o755)
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    (payload / "scripts" / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY="$TEST_PYTHON"\n',
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    policy = home / ".copilot-extensions" / "installation-mode.json"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(policy_text, encoding="utf-8")
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    (fake_bin / "id").write_text(
+        "#!/bin/sh\n[ \"${1:-}\" = -u ] && { printf 123; exit 0; }\nexit 1\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "getent").write_text(
+        f"#!/bin/sh\nprintf 'user:x:123:123::%s:/bin/sh\\n' {shlex.quote(str(home))}\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "id").chmod(0o755)
+    (fake_bin / "getent").chmod(0o755)
+    environment = _agent_worktrees_test_environment(home, payload)
+    environment.update(
+        {
+            "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
+            "TEST_PYTHON": str(fake_python),
+        }
+    )
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+
+    result = subprocess.run(
+        [str(payload / "bin" / "payload" / "agent-worktrees"), "--version"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == expected_code, result.stderr
+    if expected_code:
+        assert "installation context blocks invocation" in result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload dispatcher semantics")
