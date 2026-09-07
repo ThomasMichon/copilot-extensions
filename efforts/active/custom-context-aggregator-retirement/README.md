@@ -220,19 +220,60 @@ There is no third, custom composition authority between plugins and the host.
 - Added scanner regression coverage for both sides of the contract:
   JSON-only named `bootstrap-check` scripts remain `proven-output-free`, while
   a trusted-name `bootstrap-check` that writes plain stdout is now rejected.
-- Validation this pass:
-  1. Isolated stdout/stderr contract audit: 56/56 scratch runs passed across
-     both shells and the modified bootstrap/registration branches.
-  2. Targeted plugin suites: 709 passed, 39 skipped, 0 failed across
-     `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-dispatch`,
-     `agent-index`, `agent-logger`, `agent-machines`, `agent-mcp`,
-     `agent-ssh`, `agent-vault`, `budget-guidance`, and
-     `customizing-copilot`.
-  3. Roster/guard checks: payload generation (12 manifests), payload coverage
-     (14 passed), runtime sync (12 plugins / 11 resolvers), install contract
-     (12 plugins), bootstrap sync (12 runtime plugins / 7 families), strict
-     runtime resolution, marketplace isolation (report-only baseline, 791
-     findings), version consistency, docs consistency (21 plugins: 12 runtime /
-     9 payload-only), installer-readiness (46 passed, 1 skipped), and the
-     strict settings-aware customization scan (`blocking: 0`,
-     `session_context.disposition: output-free-stack`) all passed.
+### 2026-09-07 — PR #2194 merged: six review findings closed
+
+- Consumed a handoff to resume Phase 11 and closed the six remaining
+  high-confidence findings from the independent review before landing:
+  `agent-worktrees` hook_client.py sessionStart now folds decision/lifecycle
+  context into the exact-session guidance file and always emits `{}` (with a
+  follow-up fix moving that write outside the `try` block so an unhandled
+  exception still leaves valid stdout — flagged by the PR's own automated
+  review); `agent-codespaces` and `agent-index` guidance writers now also
+  compose `emit-codespace-map` / `emit-scope-binding` using the authoritative
+  payload `cwd`; the full-roster bootstrap/output-free audit and scanner
+  hardening (recorded above); authoring docs (`authoring-skills/SKILL.md`,
+  `docs/patterns/README.md`, `docs/harness-runbook.md`) rewritten to the
+  exact-session-writer model; and `agent-ssh` now requires a validated
+  absolute/existing payload `cwd` before running the repository-sensitive
+  mesh-pointer producer, never falling back to ambient process `cwd`.
+- Opened [PR #2194](https://github.com/ThomasMichon/copilot-extensions/pull/2194)
+  and iterated through five review rounds before merging (squash, self-merge
+  per the `pr-self-merge` profile — GitHub authors cannot approve their own
+  PRs):
+  1. `check-version-bump` guard failure: `agent-mcp` content changed without a
+     version bump; bumped to `0.2.0-dev100` across `plugin.json`,
+     `pyproject.toml`, `__init__.py`, and `marketplace.json`.
+  2. `libs/payload-invocation/tests` (`test_generate.py`,
+     `test_worktrees_catalog.py`) and `agent-dispatch`'s own
+     `test_payload_invocation.py` asserted the retired direct
+     `emit-command-catalog` sessionStart wiring; updated all three to accept
+     the exact-session-writer wiring (a `write-session-guidance`/`hook_client.py`
+     hook that composes `emit-command-catalog` internally) as an equally valid
+     contract.
+  3. The PR's own Copilot review flagged `hook_client.py` could still produce
+     no stdout on an unhandled exception during `sessionStart`; moved the
+     unconditional `{}` write outside the `try` block, and restored the
+     scanner's literal `sys.stdout.write("{}")` static-proof pattern (my first
+     fix used a variable-assignment style that satisfied exception-safety but
+     broke `scan-customizations.py`'s hardened content proof, regressing the
+     marketplace-wide `output-free-stack` disposition to
+     `single-possible-output`). Added a dedicated regression test
+     (`test_session_start_main_emits_empty_object_on_unhandled_exception`).
+  4. Regenerated the stale `agent-dispatch` instruction projection lock/marker
+     (`.github/copilot/context-projections.json` +
+     `.github/instructions/agent-dispatch/session-guidance.instructions.md`)
+     via `manage-instruction-projections.py sync .` after the version bump.
+  5. The PR's review also flagged `bootstrap-check.sh`/`.ps1` in
+     `agent-worktrees` for emitting an `additionalContext` JSON object from the
+     no-python-available last-resort fallback, inconsistent with this effort's
+     own "sessionStart always emits `{}`" contract; routed that setup hint to
+     stderr and always emit `{}` there too, accepting that the ultra-rare
+     no-Python fallback no longer surfaces the hint as model context (only as
+     an operator-visible diagnostic).
+- Final review: 0 findings, "Findings: None" with 2 prior findings marked
+  resolved. Merged and reconciled the worktree onto `origin/main`
+  (`agent-worktrees pr-complete`).
+- Still open before this effort reaches Done: the fresh/resume/ACP launch-path
+  proof (Phase 3) and the cross-platform determinism/resume-safety validation
+  item remain unchecked below.
+
