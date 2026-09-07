@@ -59,7 +59,10 @@ def test_bash_auth_free_branch_precedes_token_lookup():
     assert 'if [ "$no_scenario_auth" = true ]; then' in body
 
 
-@pytest.mark.skipif(os.name == "nt" or not shutil.which("bash"), reason="POSIX Bash required")
+BASH = shutil.which("bash")
+
+
+@pytest.mark.skipif(os.name == "nt" or not BASH, reason="POSIX Bash required")
 def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(tmp_path):
     # A host with only `python` (no `python3` binary) must still resolve the
     # Tier-P auth-free contract instead of hard-failing on a missing binary.
@@ -74,7 +77,10 @@ def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(t
     os.chmod(fake_bin / "python", 0o755)
     source = (RIG / "run.sh").read_text(encoding="utf-8")
     body = source[source.index("start_container() {"):]
-    body = body[: body.index("\n}\n", body.index("if [ -n \"$token\" ]"))] + "\n}\n"
+    # Slice up to (not including) the first line after the auth/image-selection
+    # if/elif/else/fi block -- a stable anchor, unlike brace-matching against a
+    # block that closes with `fi`, not `}`.
+    body = body[: body.index('docker rm -f "$CONTAINER"')] + "\n}\n"
     probe = tmp_path / "probe.sh"
     probe.write_text(
         "#!/bin/sh\nset -eu\n"
@@ -87,8 +93,11 @@ def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(t
         + "\nstart_container\necho \"img=$img\"\n",
         encoding="utf-8",
     )
-    env = {**os.environ, "PATH": f"{fake_bin}"}
-    result = subprocess.run(["bash", str(probe)], capture_output=True, text=True, timeout=30, env=env)
+    # Restrict PATH to the fake bin only so `_py()` cannot find a real python3
+    # anywhere else on this host; resolve bash by absolute path (not a PATH
+    # search) so restricting the child's PATH cannot also hide bash itself.
+    env = {**os.environ, "PATH": str(fake_bin)}
+    result = subprocess.run([BASH, str(probe)], capture_output=True, text=True, timeout=30, env=env)
     assert result.returncode == 0, result.stderr
     assert "img=base-image" in result.stdout
 
