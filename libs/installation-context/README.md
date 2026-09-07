@@ -27,7 +27,7 @@ namespace, install, and activation generations. The cross-runner actions do not
 otherwise migrate legacy state, launch a runtime, or wire an automatic caller.
 The Python module additionally exposes importable slot APIs. All three runners
 provide equivalent `slot-provision`, `slot-validate`, `slot-complete`,
-`slot-completion-validate`, and `slot-cutover` CLI actions. Ownership publication
+`slot-completion-validate`, `slot-cutover`, and `slot-release` CLI actions. Ownership publication
 reserves a cell-local version slot. Completion publication immutably binds that
 owned slot to strict build-completion evidence without activating it. Cutover
 uses explicit receipt-generation and current-marker compare-and-swap
@@ -49,6 +49,34 @@ of Windows device basenames.
 
 All successful actions emit one JSON object. Ambiguous or mismatched evidence
 writes an actionable error to stderr and exits nonzero.
+
+### Interrupted reservations
+
+Slot provisioning first publishes `.runtime-slot-reservation.json`, with the
+ownership identity fields, schema `copilot-extensions.runtime-slot-reservation`,
+version 1, and a random non-negative signed-64-bit `generation`. Python and
+PowerShell stage it in the hidden sibling before no-replace rename; Bash writes
+it as the first final-slot entry. Successful ownership publication removes it.
+An interruption before that publication is not an owned or completed runtime.
+
+`slot-release` requires `--context`, `--durable-home`,
+`--expected-marketplace-id`, `--expected-plugin-id`, `--runtime-version`,
+`--reservation-root`, `--expected-reservation-generation`,
+`--expected-reservation-sha256`, `--expected-namespace-generation`, and
+`--expected-install-generation`. PowerShell uses the corresponding PascalCase
+parameters. The root is the exact final slot or its digest-qualified hidden
+sibling; the digest pins the caller-observed receipt bytes, not just its path.
+
+Both receipt locks cover validation and deletion. Only a directory containing
+exactly the matching reservation receipt can be released. Markerless, linked,
+foreign, replaced, malformed, non-empty, completed, current, and LKG targets
+are protected. Generation mismatch returns `status: revalidation-required`,
+`released: false`; successful deletion returns `status: ready`,
+`reason: runtime-slot-reservation-released`, `released: true`. Absent replay
+returns `runtime-slot-reservation-absent` with `released: false`: it proves only
+that nothing was deleted, never that an absent receipt was owned.
+
+### Invocation examples
 
 ```powershell
 .\installation-context.ps1 source-id `

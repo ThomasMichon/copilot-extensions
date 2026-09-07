@@ -583,6 +583,10 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
     )
     for path in bootstrap_mutators:
         text = path.read_text(encoding="utf-8")
+        if path.parents[1].name == "agent-index":
+            code = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+            assert code == ["exit 0"]
+            continue
         assert "legacy-entrypoint-probe" in text
         if "bootstrap-check" in path.name:
             gate = (
@@ -590,7 +594,8 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
                 if path.suffix == ".ps1"
                 else "legacy_mutation_allowed ||"
             )
-            assert text.rindex(gate) < text.index("reconciling in background")
+            assert text.rindex(gate) < text.rindex("reconciling in background")
+            assert text.index("namespaced-active") < text.index("reconciling in background")
         if path.suffix == ".ps1":
             assert "$global:LASTEXITCODE = 1" in text
             assert "| Out-Null" in text
@@ -641,8 +646,8 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
     ) < machines_sh.index('_lock="$_root/.provision.lock"')
 
     for plugin, timeouts in {
-        "agent-machines": [30, 10],
-        "agent-index": [30, 20, 10, 10],
+        "agent-machines": [30, 30],
+        "agent-index": [30, 30, 10],
     }.items():
         hooks = json.loads(
             (REPO / "plugins" / plugin / "hooks.json").read_text(encoding="utf-8")
@@ -650,6 +655,10 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         assert [
             hook["timeoutSec"] for hook in hooks["hooks"]["sessionStart"]
         ] == timeouts
+        if plugin == "agent-index":
+            assert "bootstrap-check" not in json.dumps(hooks)
+            assert "ensure-service" not in json.dumps(hooks)
+            assert "register-dispatch-companion" in json.dumps(hooks)
 
 
 def _uid_absent_from_passwd() -> str:

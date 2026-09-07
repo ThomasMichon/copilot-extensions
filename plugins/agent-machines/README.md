@@ -100,6 +100,50 @@ reconcile. Cell snapshot copy is staged in an owned sibling and atomically
 published before provenance stamping. Retry cleans only a marker-proven
 unfinished publication and never removes a pre-existing snapshot.
 
+### Explicit cell repair and uninstall
+
+`scripts/init.sh cell-repair` and `cell-uninstall` (PowerShell:
+`scripts\init.ps1 -Action cell-repair` or `cell-uninstall`) use the same
+stdlib-only management engine and an existing Python 3.10+ interpreter.
+They never self-provision a toolchain or trust an inherited context/action.
+Both require every value below explicitly:
+
+| Bash argument | PowerShell parameter |
+|---|---|
+| `--context` | `-Context` |
+| `--durable-home` | `-DurableHome` |
+| `--expected-marketplace-id` | `-ExpectedMarketplaceId` |
+| `--expected-payload-root`, `--expected-payload-version` | `-ExpectedPayloadRoot`, `-ExpectedPayloadVersion` |
+| `--snapshot-id`, `--runtime-version` | `-SnapshotId`, `-RuntimeVersion` |
+| `--expected-namespace-generation`, `--expected-install-generation` | `-ExpectedNamespaceGeneration`, `-ExpectedInstallGeneration` |
+| `--expected-current-version` or `--expect-current-absent` | `-ExpectedCurrentVersion` or `-ExpectCurrentAbsent` |
+| `--expected-last-known-good-version` or `--expect-last-known-good-absent` | `-ExpectedLastKnownGoodVersion` or `-ExpectLastKnownGoodAbsent` |
+
+Repair recreates only the derived schema-4 deploy manifest and exact intended
+current/LKG selection, from validated immutable completion and snapshot evidence.
+It preserves current receipt payload provenance separately from the selected
+historical runtime. Missing completion refuses repair. Agent Machines owns no
+additional cell-local launch metadata: commands remain in the payload, so repair
+does not invent launchers. It never rebuilds payloads, snapshots, ownership,
+completion, state, caches, services, tasks, endpoints, or external resources.
+
+Uninstall requires an absent or explicitly deactivated activation and no live
+owned runtime processes. It preflights the entire owned inventory, CAS-clears
+both selection markers, removes all owned historical slots and snapshots, then
+derived deploy/launcher/run/log/cache artifacts. Each deletion revalidates the
+canonical receipt chain, exact generations, selection, ownership, and target
+identity. Unknown, foreign, malformed, linked, or otherwise ambiguous artifacts
+refuse removal. Ordinary POSIX venv interpreter links and the exact `lib64 -> lib`
+scaffolding may be unlinked without following them; all other links are refused.
+
+`state/`, namespace/install/activation receipts, lock infrastructure, and empty
+attributable plugin directories remain. Namespace garbage collection and legacy
+migration are separate operations. Repeated repair reports
+`reason: cell-repair-healthy`; repeated uninstall reports `status: preserved`.
+Generation or selection drift reports `status: revalidation-required`; callers
+must inspect JSON status, not merely exit 0. Interrupted reservation release is
+the shared library's explicit `slot-release`, never automatic cleanup.
+
 Verify:
 
 ```bash

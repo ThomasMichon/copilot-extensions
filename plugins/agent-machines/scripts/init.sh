@@ -363,7 +363,7 @@ while [[ $# -gt 0 ]]; do
         --expected-install-generation) EXPECTED_INSTALL_GENERATION="${2:-}"; shift 2 ;;
         --expected-current-version) EXPECTED_CURRENT_VERSION="${2:-}"; shift 2 ;;
         --expect-current-absent) EXPECT_CURRENT_ABSENT=1; shift ;;
-        stamp|provision|init|cell-provision|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
+        stamp|provision|init|cell-provision|cell-repair|cell-uninstall|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
@@ -371,6 +371,22 @@ export AGENT_MACHINES_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ "$ACTION" == cell-repair || "$ACTION" == cell-uninstall ]]; then
+    [[ "${ORIGINAL_ARGS[0]:-}" == "$ACTION" ]] || {
+        _fail 'Cell lifecycle actions must be explicit, not inherited'
+        exit 2
+    }
+    # Management uses an existing Python, never a repaired/deleted cell runtime.
+    for lifecycle_python in python3 python; do
+        if command -v "$lifecycle_python" >/dev/null 2>&1; then
+            cd "$HOME"
+            exec "$lifecycle_python" -I "$SCRIPT_DIR/cell_lifecycle.py" "${ORIGINAL_ARGS[@]}"
+        fi
+    done
+    _fail 'Cell lifecycle management requires an existing Python 3.10+ interpreter'
+    exit 1
+fi
 
 # Cell-local slot actions authorize themselves from the explicit context
 # transaction below. Every legacy mutation still requires the legacy probe.
