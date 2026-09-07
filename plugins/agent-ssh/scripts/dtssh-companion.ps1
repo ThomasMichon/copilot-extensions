@@ -78,9 +78,11 @@ function Get-InstallHostArgs {
     $args = @(
         $Verb,
         '-Alias', $Config.Alias,
-        '-Port', "$($Config.Port)",
-        '-HostKeyBackupRoot', $Config.HostKeyBackupRoot
+        '-Port', "$($Config.Port)"
     )
+    if ($Config.HostKeyBackupRoot) {
+        $args += @('-HostKeyBackupRoot', $Config.HostKeyBackupRoot)
+    }
     if ($Config.Tunnel) { $args += @('-Tunnel', $Config.Tunnel) }
     if ($Config.User) { $args += @('-User', $Config.User) }
     if ($ForegroundLauncher) { $args += '-ForegroundLauncher' }

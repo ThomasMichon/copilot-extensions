@@ -32,7 +32,10 @@ def _module(path: Path, name: str):
 
 
 def _write_host_install(
-    install_root: Path, *, healthy_after_start: bool = True
+    install_root: Path,
+    *,
+    healthy_after_start: bool = True,
+    include_backup_root: bool = True,
 ) -> tuple[Path, Path]:
     install_root.mkdir(parents=True, exist_ok=True)
     config = install_root / "dispatch-companion.json"
@@ -44,7 +47,11 @@ def _write_host_install(
                 "port": 2222,
                 "tunnel": None,
                 "user": None,
-                "host_key_backup_root": str(install_root / "backup"),
+                **(
+                    {"host_key_backup_root": str(install_root / "backup")}
+                    if include_backup_root
+                    else {}
+                ),
             }
         ),
         encoding="utf-8",
@@ -308,4 +315,43 @@ def test_companion_restores_presence_without_startup_shortcut(tmp_path: Path) ->
     finally:
         if process.poll() is None:
             process.terminate()
+            process.wait(timeout=10)
+
+
+@pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+def test_companion_handles_missing_backup_root_in_config(tmp_path: Path) -> None:
+    install_root = tmp_path / "local" / "agent-ssh-dtssh"
+    config, state = _write_host_install(install_root, include_backup_root=False)
+    env = {
+        **os.environ,
+        "LOCALAPPDATA": str(tmp_path / "local"),
+        "AGENT_SSH_DTSSH_COMPANION_CONFIG": str(config),
+    }
+
+    process = subprocess.Popen(
+        [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(COMPANION), "start"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and not state.exists():
+            time.sleep(0.1)
+        assert state.exists(), "companion should start even without a backup root"
+    finally:
+        subprocess.run(
+            [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(COMPANION), "stop"],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=30,
+        )
+        if process.poll() is None:
             process.wait(timeout=10)
