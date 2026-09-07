@@ -90,7 +90,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable contribution, diagnosis, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev36",
+      "version": "0.1.0-dev37",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -126,7 +126,7 @@
     {
       "name": "delegation-guidance",
       "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
-      "version": "0.1.0-dev12",
+      "version": "0.1.0-dev13",
       "source": "plugins/delegation-guidance"
     },
     {

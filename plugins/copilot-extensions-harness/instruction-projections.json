@@ -1,0 +1,14 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "contribution-boundary",
+      "template": "instructions/contribution-boundary.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    }
+  ]
+}
