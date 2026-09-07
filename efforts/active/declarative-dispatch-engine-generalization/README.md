@@ -53,13 +53,25 @@ and the parent agent-dispatch vision:
 
 ### Phase 1 - Azure DevOps backlog provider
 
-- [ ] Implement a `ForgeProvider` adapter for Azure DevOps work items
+- [x] Implement a `ForgeProvider` adapter for Azure DevOps work items
   (list/reserve/claim/release) alongside the existing GitHub implementation.
-- [ ] Generalize `validate_config`'s hard-coded `"only 'github' is supported"`
+  Landed `AzureDevOpsProvider` (via the `az` CLI's `devops`/`boards`
+  subcommands): WIQL discovery + `az boards work-item show` for fields,
+  `System.Tags` as the label equivalent, and reservation markers carried as
+  work-item comments through the generic `az devops invoke` REST bridge --
+  reusing the existing `_marker`/`_parse_marker`/`_latest_reservations`
+  helpers unmodified across both providers.
+- [x] Generalize `validate_config`'s hard-coded `"only 'github' is supported"`
   gate to dispatch on the adapter registry instead of a literal string.
+  `_SUPPORTED_FORGE_PROVIDERS = {"github", "azure-devops"}`; a new
+  `_forge_provider_for(config)` factory selects the adapter class, replacing
+  `run_tick`'s hard-coded `GitHubProvider(...)` default.
 - [ ] Prove one live Azure DevOps-backed declaration end-to-end (discovery,
   batching, reservation, settlement) alongside the existing GitHub declaration
-  it must not regress.
+  it must not regress. Still open -- no live Azure DevOps organization/project
+  has exercised this adapter yet; today it is validated only by mocked-`az`
+  unit tests (17 new tests: identity mismatch, tag-as-label round-trip,
+  reservation-marker parity with GitHub, provider selection).
 
 ### Phase 2 - Declarative worker identity
 
@@ -179,3 +191,31 @@ other phases actually land in.
 - Phase 2's third bullet (structural enforcement of never-supersede) is
   still open -- the identity file today only carries prose rules, no
   enforced tool/mutation boundary; deferred to a follow-up slice.
+
+### 2026-09-06 (cont.) - Landed Phase 1 (Azure DevOps provider)
+
+- Also fixed a pre-existing, unrelated CI-blocking baseline bug found while
+  landing Phase 2: `#2167` bumped `agent-index`'s own version without
+  updating its shipped agent-dispatch registrar declaration fixture, failing
+  the `agent-dispatch` suite's version-consistency assertion for any PR.
+  Landed separately as `#2170` (merged) so it didn't get bundled with
+  unrelated Phase 2 content.
+- Implemented Phase 1's `AzureDevOpsProvider` (list/reserve/claim/release
+  over Azure DevOps work items via the `az` CLI), generalized
+  `validate_config`'s forge-provider gate to
+  `_SUPPORTED_FORGE_PROVIDERS = {"github", "azure-devops"}`, and added a
+  `_forge_provider_for(config)` factory replacing `run_tick`'s hard-coded
+  `GitHubProvider(...)`. `repo` keeps the same `owner/name`-shaped format for
+  both providers (`organization/project` for Azure DevOps satisfies the same
+  regex), so no new top-level declaration field was needed. Reused
+  `_marker`/`_parse_marker`/`_latest_reservations` unmodified -- Azure
+  DevOps work-item comments carry the identical JSON marker convention as
+  GitHub issue comments. 17 new tests (identity mismatch, tag round-trip,
+  provider-factory selection, malformed-config message update); full
+  existing suite passes unchanged.
+- Phase 1's third bullet (a live Azure DevOps org/project proving the full
+  discovery -> batch -> reserve -> settle path) is still open -- this
+  session had no Azure DevOps organization available to validate against;
+  today's coverage is mocked-`az` unit tests only. That live proof is the
+  next slice for whoever picks this back up, alongside a first real
+  `azure-devops`-backed declaration to adopt it.

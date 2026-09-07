@@ -38,23 +38,31 @@ issues sort by the first matching `priority_labels` rank, then `created_at`,
 then issue number. `batch_size` bounds the selected set.
 
 The forge boundary is intentionally narrow: list open issues, reserve, promote
-to claimed, and release an orphan. The initial `github` adapter uses `gh`.
-Discovery uses a bounded GraphQL connection: at most ten 100-issue pages, with
-the latest 100 comments and first 100 labels fetched inline per issue. This
-keeps call count proportional to bounded pages rather than issue count; missing
-cursors, GraphQL errors, or exceeding the 1,000-issue bound are observable
-failures rather than an empty result. The declaration names the expected
-`forge.producer_login`; every read or mutation verifies that `gh api user`
-matches that login and that the authenticated identity resolves the configured
-repository. Credentials remain outside the declaration and follow the caller's
-ordinary authenticated CLI boundary. Reservation markers are accepted only
-from that verified login and only after strict field, issue-number, state,
-occurrence, and task-id validation.
+to claimed, and release an orphan. Two adapters implement it today: `github`
+(via `gh`) and `azure-devops` (via the `az` CLI's `devops`/`boards`
+subcommands, with an untagged work item's title, tags, and dates read through
+`az boards work-item show` and its reservation markers carried as work-item
+comments through the generic `az devops invoke` REST bridge). `repo` is
+`owner/name` for GitHub and `organization/project` for Azure DevOps -- the
+same two-segment shape either way. GitHub discovery uses a bounded GraphQL
+connection: at most ten 100-issue pages, with the latest 100 comments and
+first 100 labels fetched inline per issue. This keeps call count proportional
+to bounded pages rather than issue count; missing cursors, GraphQL errors, or
+exceeding the 1,000-issue bound are observable failures rather than an empty
+result. The declaration names the expected `forge.producer_login`; every read
+or mutation verifies that the authenticated identity (`gh api user` for
+GitHub, the Azure DevOps connection data's `providerDisplayName` for Azure
+DevOps) matches that login and that the identity resolves the configured
+repository/project. Credentials remain outside the declaration and follow the
+caller's ordinary authenticated CLI boundary. Reservation markers are accepted
+only from that verified login and only after strict field, issue-number,
+state, occurrence, and task-id validation.
 
 Read discovery may reuse a verified repository identity within one provider
-instance. Mutations may not: each comment or label mutation re-runs the
+instance. Mutations may not: each comment or label/tag mutation re-runs the
 configured producer-login and repository checks immediately before invoking
-`gh`, so a changed ambient credential cannot inherit an earlier verification.
+`gh` or `az`, so a changed ambient credential cannot inherit an earlier
+verification.
 
 Forge mutation and coordinator task creation cannot be one transaction. The
 source therefore separates visible attribution from authoritative election:
