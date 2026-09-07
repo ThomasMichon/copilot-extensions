@@ -39,7 +39,10 @@ def test_powershell_uses_manifest_auth_contract(tmp_path, auth):
         + function + "\nStart-Container\nWrite-Output \"selected=$script:selectedImage\"\n",
         encoding="utf-8",
     )
-    result = subprocess.run([POWERSHELL, "-NoProfile", "-File", str(script)], capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(script)],
+        capture_output=True, encoding="utf-8", timeout=30,
+    )
     if auth == "none":
         assert result.returncode == 0, result.stderr
         assert "selected=base-image" in result.stdout
@@ -99,9 +102,39 @@ def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(t
     # anywhere else on this host; resolve bash by absolute path (not a PATH
     # search) so restricting the child's PATH cannot also hide bash itself.
     env = {**os.environ, "PATH": str(fake_bin)}
-    result = subprocess.run([BASH, str(probe)], capture_output=True, text=True, timeout=30, env=env)
+    result = subprocess.run(
+        [BASH, str(probe)], capture_output=True, encoding="utf-8", timeout=30, env=env,
+    )
     assert result.returncode == 0, result.stderr
     assert "img=base-image" in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt" or not BASH, reason="POSIX Bash required")
+def test_bash_malformed_manifest_fails_closed_to_auth(tmp_path):
+    scenario = tmp_path / "scenario"
+    scenario.mkdir()
+    (scenario / "manifest.json").write_text("{not valid json", encoding="utf-8")
+    source = (RIG / "run.sh").read_text(encoding="utf-8")
+    body = source[source.index("start_container() {"):]
+    body = body[: body.index('docker rm -f "$CONTAINER"')] + '\n    echo "no_scenario_auth=$no_scenario_auth"\n}\n'
+    probe = tmp_path / "probe.sh"
+    probe.write_text(
+        "#!/bin/sh\nset -eu\n"
+        "_py() { command -v python3 || command -v python; }\n"
+        "resolve_token() { :; }\n"
+        "img_exists() { return 1; }\n"
+        "do_build() { :; }\n"
+        "do_auth() { :; }\n"
+        f'SCENARIO_DIR="{scenario}"\nBASE_TAG=base-image\nAUTH_TAG=auth-image\n'
+        + body
+        + "\nstart_container\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run([BASH, str(probe)], capture_output=True, encoding="utf-8", timeout=30)
+    # A malformed manifest must never crash the rig, and must never be
+    # silently treated as auth-free.
+    assert result.returncode == 0, result.stderr
+    assert "no_scenario_auth=false" in result.stdout
 
 
 def test_version_witness_normalizes_only_dev_spelling():
