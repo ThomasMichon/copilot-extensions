@@ -4037,6 +4037,41 @@ def test_recover_gone_worktree_started_requeues_then_reembodies(q, client):
     assert q.latest_reservation(t.id).attempt == 2
 
 
+def test_make_redrive_sender_builds_concise_seed(monkeypatch):
+    """A re-drive targets an already-embodied worker, so its seed should pull
+    the charter on demand (``concise=True``) rather than re-inline the whole
+    behavioral essay a second time."""
+    from agent_dispatch import bridge, embody
+
+    captured = {}
+
+    def fake_autopilot_worker_prompt(task_id, *, worker_id, route, **kwargs):
+        captured["task_id"] = task_id
+        captured["route"] = route
+        captured["kwargs"] = kwargs
+        return "concise-seed"
+
+    def fake_redrive_embodied_worker(worktree, prompt, **kwargs):
+        captured["worktree"] = worktree
+        captured["prompt"] = prompt
+        return True
+
+    monkeypatch.setattr(embody, "autopilot_worker_prompt", fake_autopilot_worker_prompt)
+    monkeypatch.setattr(bridge, "redrive_embodied_worker", fake_redrive_embodied_worker)
+
+    redrive = supervisor_module.make_redrive_sender(route=" --shared")
+    result = redrive(
+        "wt-1", None, {"id": "task-1"}, {"session_id": "s1"}, {"key": "r1"}
+    )
+
+    assert result is True
+    assert captured["task_id"] == "task-1"
+    assert captured["route"] == " --shared"
+    assert captured["kwargs"] == {"concise": True}
+    assert captured["prompt"] == "concise-seed"
+    assert captured["worktree"] == "wt-1"
+
+
 def test_redrive_live_spawned_worker_that_never_claimed(q, client):
     """A live spawned worker with a queued task is re-prompted, not duplicated."""
     task = q.create("work")

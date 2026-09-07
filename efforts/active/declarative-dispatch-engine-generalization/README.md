@@ -125,9 +125,13 @@ and the parent agent-dispatch vision:
   behavioral fidelity is unchanged since the charter is the same prose,
   fetched on demand instead of always pasted in -- claim/evaluate/complete
   mechanics and decline conventions are identical either way.
-  **Not yet wired to any live call site's default** -- see Successor Work
-  below; that switch (and picking which events pass `concise=True`) is the
-  next slice.
+  Wired to its first live call site: `supervisor.make_redrive_sender` now
+  builds its re-drive seed with `concise=True` -- a re-drive always targets an
+  already-embodied worker that already had a chance to read the charter, so
+  re-inlining the full essay a second time is pure waste. Every other call
+  site (initial spawn, both CLI and headless) is unaffected. New test
+  `test_make_redrive_sender_builds_concise_seed` asserts the redrive sender
+  builds its seed with `concise=True`.
 
 ### Phase 4 - Preloaded dispatch supplement on the worker identity
 
@@ -269,3 +273,34 @@ other phases actually land in.
   charter name to a Phase 2 worker identity rather than hard-coding
   `"autopilot"` in the caller.
 - Phase 5 (turnkey colleague adoption docs) still not started.
+
+### 2026-09-07 (cont.) - Wired `concise=True` into the redrive call site
+
+- Landed the first live call site for `concise=True`:
+  `supervisor.make_redrive_sender` now builds its re-drive seed with
+  `concise=True`. A re-drive always targets a **live, already-embodied**
+  worker that never claimed its task -- it already had a chance to read the
+  charter the first time it embodied, so re-inlining the whole behavioral
+  essay a second time was pure waste. Every other call site (initial CLI
+  spawn, headless spawn, fleet spawn) is unaffected -- still `concise=False`
+  by default. New test `test_make_redrive_sender_builds_concise_seed`
+  (`test_supervisor.py`) asserts the redrive sender passes `concise=True`
+  through to `embody.autopilot_worker_prompt`; full targeted suite
+  (`test_worker_charter.py`, `test_embody.py`, `test_supervisor.py` -- 231
+  tests) passes unchanged otherwise. Bumped agent-dispatch to `0.1.2-dev35`
+  across all three version surfaces (`pyproject.toml`, `plugin.json`,
+  `.github/plugin/marketplace.json`).
+- Attaching a charter name to a Phase 2 worker identity (Phase 4's second
+  bullet) is still open -- today's identity `rules` only ever feed
+  `worker_guidance` in a repository-issue-loop's *task* prompt
+  (`_task_prompt`), which is a different prompt from the *embodiment* seed
+  (`autopilot_worker_prompt`) that the charter lives on. Wiring a charter
+  name onto an identity would need a new path connecting a dispatched task
+  back to the identity that created it (so the supervisor's spawn/redrive
+  knows which charter to reference) -- deferred as a larger slice, not
+  bundled with this one.
+- Confirmed again this leg (unchanged from prior handoffs): the live
+  `dotfiles` declaration is still NOT switched to
+  `worker_identity: odsp-web-harness-backlog` -- did not re-check the daemon
+  version this leg; re-verify before attempting that switch.
+

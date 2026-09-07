@@ -186,7 +186,16 @@ def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
 
 
 def make_redrive_sender(route: str = "") -> RedriveFn:
-    """Build a re-drive sender that uses the same coordinator route as spawn."""
+    """Build a re-drive sender that uses the same coordinator route as spawn.
+
+    A re-drive targets a **live** embodied session that never claimed its
+    spawned task -- the same worktree/session the supervisor originally
+    embodied with the full autopilot seed. That worker already had a chance to
+    read the charter (``agent-dispatch charter show autopilot``) the first
+    time it embodied, so the re-drive seed is built ``concise=True``: a short
+    reminder of the task-specific mechanics that points back at the charter
+    command instead of re-inlining the whole behavioral essay a second time.
+    """
 
     def redrive(
         worktree: str,
@@ -202,7 +211,7 @@ def make_redrive_sender(route: str = "") -> RedriveFn:
             return False
         worker_id = f"redrive-{uuid.uuid4().hex[:8]}"
         prompt = embody.autopilot_worker_prompt(
-            task_id, worker_id=worker_id, route=route
+            task_id, worker_id=worker_id, route=route, concise=True
         )
         session_id = session.get("session_id")
         expected_session_id = session_id if isinstance(session_id, str) else None
