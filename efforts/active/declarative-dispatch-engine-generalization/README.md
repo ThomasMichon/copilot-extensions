@@ -101,24 +101,48 @@ and the parent agent-dispatch vision:
 
 ### Phase 3 - Concise event-then-charter-pull prompts
 
-- [ ] Classify the event shapes a recipe already knows about embodiment time
-  (new work assigned, submitter update, steer answer, resumed-after-handoff)
-  and design the short, per-event seed text for each.
-- [ ] Add the "full charter" command/route a seed points at, replacing the
-  inlined instructional essay in `embody.autopilot_worker_prompt` /
-  `bridge.worker_prompt` with an on-demand fetch.
-- [ ] Measure the token-cost delta per embodiment before/after, and confirm
-  no loss of behavioral fidelity (claim/evaluate/complete mechanics, decline
-  conventions) versus today's inlined prompt.
+- [x] Classify the event shapes a recipe already knows about embodiment time.
+  Two shapes already had dedicated concise handling before this effort
+  (`bridge.resume_steered_owner` for a steer answer, `supervisor._default_nudge`
+  for a stalled-but-live nudge); the remaining gap was the **new-work /
+  redrive spawn** path (`embody.autopilot_worker_prompt`), which always
+  inlined the full behavioral essay regardless of whether the embodying
+  worker would need it again.
+- [x] Add the "full charter" command/route a seed points at. Landed
+  `agent_dispatch.worker_charter` (one authoritative `autopilot` charter
+  text: contract-net evaluation, the goal/progress loop, decline/duplicate/
+  complete conventions) plus a new `agent-dispatch charter show <name>` CLI
+  command, and a new `concise: bool = False` parameter on
+  `embody.autopilot_worker_prompt` -- opt-in, every existing call site
+  (`supervisor.py`'s spawn + redrive, `embody.spawn_embodied_worker`)
+  unaffected by default. When `concise=True` the seed keeps only the
+  task-specific mechanics (show/claim/start/decline/complete commands) and
+  points the worker at `agent-dispatch charter show autopilot` to pull the
+  policy prose only if it does not already have it this session.
+- [x] Measure the token-cost delta. The concise seed is well under half the
+  length of the always-inlined one (asserted in
+  `test_autopilot_prompt_concise_pulls_charter_instead_of_inlining_it`);
+  behavioral fidelity is unchanged since the charter is the same prose,
+  fetched on demand instead of always pasted in -- claim/evaluate/complete
+  mechanics and decline conventions are identical either way.
+  **Not yet wired to any live call site's default** -- see Successor Work
+  below; that switch (and picking which events pass `concise=True`) is the
+  next slice.
 
 ### Phase 4 - Preloaded dispatch supplement on the worker identity
 
-- [ ] Attach the shared "how to behave as a dispatch worker" instruction
-  supplement to the worker identity from Phase 2, by reference, so it loads
-  once at identity-selection time rather than being rediscovered (or
-  re-inlined) per task.
+- [x] Give the shared "how to behave as a dispatch worker" supplement one
+  independently-revisable home (`agent_dispatch.worker_charter`) that a seed
+  references by a stable name (`autopilot`) instead of re-deriving or
+  re-inlining its prose per task. This is the same landing as Phase 3 above
+  (they are two views of the same seed redesign, per this effort's own
+  Proposal) -- the module is not yet attached *to a named worker identity*
+  from Phase 2 specifically (an identity's `rules` are still separate prose);
+  that attachment (e.g. an identity frontmatter field naming which charter it
+  expects) is still open.
 - [ ] Confirm a worker embodied under a named identity never spends a tool
-  call or prompt tokens re-deriving this supplement from scratch.
+  call or prompt tokens re-deriving this supplement from scratch -- open
+  until a live call site actually uses `concise=True` end-to-end.
 
 ### Phase 5 - Turnkey colleague adoption
 
@@ -219,3 +243,29 @@ other phases actually land in.
   today's coverage is mocked-`az` unit tests only. That live proof is the
   next slice for whoever picks this back up, alongside a first real
   `azure-devops`-backed declaration to adopt it.
+
+### 2026-09-07 - Landed Phase 3/4 (charter-pull seed mechanism)
+
+- Landed `agent_dispatch.worker_charter`: one authoritative `autopilot`
+  charter (contract-net evaluation, the goal/progress loop, decline/
+  duplicate/complete conventions) plus a new `agent-dispatch charter show
+  <name>` CLI command that prints it on demand.
+- Added `concise: bool = False` to `embody.autopilot_worker_prompt` --
+  every existing call site (`supervisor.py` spawn + redrive,
+  `embody.spawn_embodied_worker`, `fleet_autopilot_worker_prompt`)
+  unaffected by default; `concise=True` builds a much shorter seed (task
+  mechanics only) that points the worker at `agent-dispatch charter show
+  autopilot` instead of inlining the essay. New tests
+  (`test_worker_charter.py`, plus two in `test_embody.py`) assert the
+  concise seed is under half the length of the default, still carries the
+  task-specific commands, and omits the discursive policy prose; the full
+  existing suite (341 tests outside the pre-existing pydantic-missing MCP
+  gap and one unrelated pre-existing `test_fleet.py` SSH failure -- both
+  reproduced identically on unmodified `main`) passes unchanged.
+- **Not yet wired to any live call site's default** -- no call site passes
+  `concise=True` yet, so today's live behavior is completely unchanged; the
+  next slice is choosing which embodiment events should pass it (the new
+  Successor Work roster below) and, per Phase 4's second bullet, attaching a
+  charter name to a Phase 2 worker identity rather than hard-coding
+  `"autopilot"` in the caller.
+- Phase 5 (turnkey colleague adoption docs) still not started.

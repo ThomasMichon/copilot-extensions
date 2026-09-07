@@ -444,6 +444,7 @@ def autopilot_worker_prompt(
     repo: str | None = None,
     all_repos: bool = False,
     explicit_worker_identity: bool = False,
+    concise: bool = False,
 ) -> str:
     """Build the autopilot seed handed to a dispatched, embodied CLI session.
 
@@ -470,6 +471,14 @@ def autopilot_worker_prompt(
     coordinator port cutover transparent to a long-running dispatcher. A stable
     explicit target (``--url``) or the env-configured ``--shared`` endpoint is
     preserved so a task created on a non-default coordinator is still reachable.
+
+    ``concise`` (default ``False``, every existing call site unaffected) swaps
+    the always-inlined behavioral essay for a short seed that instead points
+    the worker at ``agent-dispatch charter show autopilot`` (see
+    :mod:`agent_dispatch.worker_charter`) to pull the same policy prose only
+    when it needs it -- cheaper per embodiment when a worker already learned
+    the charter earlier in the same session (e.g. a repository-issue-loop body
+    that claims several tasks in one embodied lifetime).
     """
     ad = f"agent-dispatch{route}"
     if repo and all_repos:
@@ -511,6 +520,28 @@ def autopilot_worker_prompt(
             "Use the payload-local `agent-dispatch` CLI commands exactly as shown "
             "below, without `--url`; the CLI resolves the live local coordinator "
             "endpoint for each command (transparent to a coordinator port change). "
+        )
+    if concise:
+        from .worker_charter import AUTOPILOT_CHARTER_NAME
+
+        return (
+            f"You are a dispatched agent-dispatch **autopilot** worker (worker id: "
+            f"{worker_id}), running in a fresh parallel worktree with tools "
+            f"auto-approved (--allow-all-tools). Task {task_id} is queued for you. "
+            f"{route_note}{identity_note}"
+            f"If you do not already have this session's agent-dispatch worker "
+            f"charter, read it now: `{ad} charter show {AUTOPILOT_CHARTER_NAME}` "
+            f"(contract-net evaluation, the goal/progress loop, and "
+            f"decline/duplicate/complete conventions -- required before you claim; "
+            f"skip only if a prior turn this session already read it). "
+            f"Then: (1) read the task with `{ad} show {task_id}`; "
+            f"(2) claim it for evaluation with "
+            f"`{ad} claim --task {task_id} --evaluation{claim_owner}{lane}` "
+            f"(add `--capability <cap>` for each capability the task requires); "
+            f"(3) on ACCEPT per the charter, `{ad} start {task_id}{owner_arg}`; "
+            f"(4) decline per the charter with {decline}; "
+            f"(5) once genuinely done, `{ad} complete {task_id}{owner_arg} "
+            f"--result-ref <ref>`."
         )
     return (
         f"You are a dispatched agent-dispatch **autopilot** worker (worker id: "
