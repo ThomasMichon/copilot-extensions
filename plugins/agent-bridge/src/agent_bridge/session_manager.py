@@ -6399,14 +6399,22 @@ class SessionManager:
         return text
 
     async def handoff_session(
-        self, session_id: str, *, reason: str | None = None, seed: bool = True,
+        self,
+        session_id: str,
+        *,
+        reason: str | None = None,
+        seed: bool = True,
+        seed_text: str | None = None,
+        handoff_token: str | None = None,
     ) -> Session:
         """Hand a hosted session off to a fresh successor in the same worktree.
 
         The in-place, bridge-native analogue of the interactive context handoff:
 
-        1. Ask the retiring child to author a continuation brief (synthesize one
-           from session state if it cannot).
+        1. Build the successor's opening prompt: either use an externally
+           supplied seed verbatim, or ask the retiring child to author a
+           continuation brief (synthesize one from session state if it cannot)
+           and wrap it as the warm-start prompt.
         2. Spawn a successor with the SAME target (same worktree, agent, caller).
         3. Record a durable two-way predecessor/successor link.
         4. Announce the changeover with a ``session_handoff`` event on BOTH the
@@ -6453,21 +6461,40 @@ class SessionManager:
             session.status = SessionStatus.STOPPED
             await self.resume_session(session_id, drain=False)
 
-        # 1. Author the continuation brief (agent-authored; synthesize on fail).
+        # 1. Resolve the successor's opening turn. External requestors may
+        #    provide the exact prompt text; otherwise the predecessor authors a
+        #    brief and agent-bridge wraps it as the successor seed.
+        external_seed = (seed_text or "").strip()
         brief = ""
-        try:
-            brief = (
-                await self._run_turn_sync(session, self._build_handoff_prompt(session))
-            ).strip()
-        except Exception as exc:
-            log.warning(
-                "Handoff brief authoring failed for %s: %s", session_id, exc
-            )
-        if not brief:
-            brief = self._synthesize_handoff_brief(session)
+        seed_prompt = ""
+        seed_source = "external" if external_seed else "agent-authored"
+        if external_seed:
+            brief = external_seed
+            seed_prompt = external_seed
+        else:
+            try:
+                brief = (
+                    await self._run_turn_sync(
+                        session, self._build_handoff_prompt(session)
+                    )
+                ).strip()
+            except Exception as exc:
+                log.warning(
+                    "Handoff brief authoring failed for %s: %s", session_id, exc
+                )
+            if not brief:
+                brief = self._synthesize_handoff_brief(session)
+                seed_source = "synthesized"
+            seed_prompt = self._build_seed_prompt(brief)
         if session.event_log:
             session.event_log.append(
-                "handoff_brief", {"brief": brief, "reason": reason}
+                "handoff_brief",
+                {
+                    "brief": brief,
+                    "reason": reason,
+                    "source": seed_source,
+                    "handoff_token": handoff_token,
+                },
             )
 
         # 2. Spawn the successor in the SAME worktree. Local worktree agents are
@@ -6535,7 +6562,10 @@ class SessionManager:
             "worktree_id": session.caller_id,
             "reason": reason or "context-pressure",
             "summary": brief[:1000],
+            "seed_source": seed_source,
         }
+        if handoff_token:
+            payload["handoff_token"] = handoff_token
         if session.event_log:
             session.event_log.append("session_handoff", payload)
         if successor.event_log:
@@ -6548,7 +6578,6 @@ class SessionManager:
         #    -- so the ACP successor learns its lineage from its opening turn
         #    instead. Fail-open: a missing digest never blocks the warm seed.
         if seed:
-            seed_prompt = self._build_seed_prompt(brief)
             if gl_local and gl_worktree and succ_acp:
                 from . import worktree_lineage
                 with contextlib.suppress(Exception):

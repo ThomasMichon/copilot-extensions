@@ -112,6 +112,30 @@ class SessionInfo(BaseModel):
     at_rest: bool = False
 
 
+class WorktreeHandoffRequest(BaseModel):
+    """External control-plane request to hand off a worktree's current session.
+
+    Used by callers that already composed the successor's exact opening turn and
+    want agent-bridge to perform only the in-place session swap.
+    """
+
+    session_id: str = Field(
+        min_length=1,
+        description="Current bridge or ACP session id expected to own the "
+        "worktree right now.",
+    )
+    seed_text: str = Field(
+        min_length=1,
+        description="Exact opening-turn text to submit to the successor "
+        "instead of asking the predecessor to author a continuation brief.",
+    )
+    handoff_token: str | None = Field(
+        default=None,
+        description="Opaque handoff correlation token carried on the "
+        "session_handoff event and CLI response.",
+    )
+
+
 class TurnInfo(BaseModel):
     """Public view of a single turn."""
 

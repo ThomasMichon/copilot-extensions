@@ -1235,6 +1235,33 @@ class BridgeClient:
             params=params or None,
         ) or {}
 
+    def handoff_request(
+        self,
+        worktree_id: str,
+        *,
+        session_id: str,
+        seed_text: str,
+        handoff_token: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/worktrees/{id}/handoff-request -- external control-plane
+        ping for a worktree's current session.
+
+        The caller already composed the successor's exact opening turn
+        (``seed_text``) and identifies the session it believes currently owns
+        the worktree. Returns the successor's SessionInfo on success.
+        """
+        body: dict[str, Any] = {
+            "session_id": session_id,
+            "seed_text": seed_text,
+        }
+        if handoff_token:
+            body["handoff_token"] = handoff_token
+        return self._request(
+            "POST",
+            f"/api/v1/worktrees/{worktree_id}/handoff-request",
+            body=body,
+        ) or {}
+
     def gc(self) -> dict[str, Any]:
         """POST /api/v1/gc -- prune aged terminal sessions and compact the DB."""
         return self._request("POST", "/api/v1/gc") or {}
