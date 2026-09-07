@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -400,3 +401,130 @@ def test_source_digest_verb_matches_materialized_manifest(
 
     assert main(["source-digest", str(cfg)]) == 0
     assert capsys.readouterr().out.strip() == manifest["bridge_source_digest"]
+
+
+class _ServeDaemonThread:
+    """Run a real ``Server`` on its own event loop in a background thread.
+
+    ``main()`` (the synchronous CLI entry point under test) owns its *own*
+    ``asyncio.run()`` call internally, so it cannot run on the same thread as
+    a live ``async def`` server loop -- nesting ``asyncio.run()`` inside a
+    running loop raises. Isolating the daemon on its own thread + loop lets
+    the test call the real, synchronous ``main()`` exactly as a caller would,
+    while a warm daemon is genuinely reachable over the socket.
+    """
+
+    def __init__(self, sock: Path) -> None:
+        self.sock = sock
+        self.server = None
+        self._reachable = False
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        import asyncio
+
+        from agent_mcp.serve import Server, serve_socket_if_available
+
+        async def _go():
+            server = Server(self.sock)
+            self.server = server
+            task = asyncio.ensure_future(server.serve_forever())
+            for _ in range(50):
+                if serve_socket_if_available(str(self.sock)):
+                    self._reachable = True
+                    break
+                await asyncio.sleep(0.05)
+            # Always unblock start()'s wait, reachable or not -- a caller
+            # that only checked the Event (without also checking
+            # _reachable) would otherwise hang forever on a daemon that
+            # never bound.
+            self._ready.set()
+            await task
+
+        asyncio.run(_go())
+
+    def start(self) -> None:
+        self._thread.start()
+        woke = self._ready.wait(timeout=5)
+        assert woke and self._reachable, "serve daemon never became reachable"
+
+    def shutdown(self) -> None:
+        import asyncio
+
+        from agent_mcp.serve import request_via_socket
+        # Best-effort: the daemon may already be gone (crashed, evicted
+        # itself on idle, or never bound in the first place) -- a failed
+        # shutdown request must not skip joining the thread and leave it
+        # running past the test.
+        try:
+            asyncio.run(request_via_socket(self.sock, {"op": "shutdown"}))
+        except OSError:
+            pass
+        self._thread.join(timeout=5)
+        assert not self._thread.is_alive(), "serve daemon thread did not stop"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink farm")
+def test_materialize_consults_warm_serve_daemon_instead_of_spawning_cold(
+    tmp_path, monkeypatch,
+):
+    """Regression test for the reproduced hang (a fresh ``materialize`` always
+    spawning the upstream cold contends with every other concurrent spawn of
+    that bridge on a busy host and can stall for minutes). When a resident
+    ``agent-mcp serve`` daemon already holds this bridge warm, ``materialize``
+    must use it instead of spawning a fresh upstream process."""
+    from agent_mcp import __main__ as agent_mcp_main
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("AGENT_MCP_HOME", str(home))
+    home.mkdir()
+    sock = home / "serve.sock"
+    cfg = _write_cfg(tmp_path)
+    dest = tmp_path / "materialized"
+
+    # Prove the cold path is never reached: it would normally spawn the
+    # upstream process directly, so make it fail loudly if invoked.
+    async def _cold_path_must_not_run(_cfg):
+        raise AssertionError("materialize spawned the upstream cold with a "
+                             "warm serve daemon available")
+    monkeypatch.setattr(agent_mcp_main, "_run_materialize", _cold_path_must_not_run)
+
+    daemon = _ServeDaemonThread(sock)
+    daemon.start()
+    try:
+        rc = main(["materialize", str(cfg), "--server-name", "fix",
+                  "--dest", str(dest), "--quiet"])
+        assert rc == 0
+        assert (dest / "fix" / "bin" / "greet").is_symlink()
+        manifest = json.loads((dest / "fix" / "manifest.json").read_text())
+        assert "greet" in manifest["tools"]
+    finally:
+        daemon.shutdown()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink farm")
+def test_materialize_no_serve_flag_forces_cold_path_even_with_daemon(
+    tmp_path, monkeypatch,
+):
+    """``--no-serve`` is the escape hatch: always spawn cold, even when a
+    warm daemon is present (mirrors ``call --no-serve``)."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("AGENT_MCP_HOME", str(home))
+    home.mkdir()
+    sock = home / "serve.sock"
+    cfg = _write_cfg(tmp_path)
+    dest = tmp_path / "materialized"
+
+    daemon = _ServeDaemonThread(sock)
+    daemon.start()
+    try:
+        rc = main(["materialize", str(cfg), "--server-name", "fix",
+                  "--dest", str(dest), "--quiet", "--no-serve"])
+        assert rc == 0
+        assert (dest / "fix" / "bin" / "greet").is_symlink()
+        # A warm daemon was live and reachable throughout, yet the pool never
+        # opened a session for this bridge -- proof --no-serve skipped it.
+        assert daemon.server.pool.size == 0
+    finally:
+        daemon.shutdown()
