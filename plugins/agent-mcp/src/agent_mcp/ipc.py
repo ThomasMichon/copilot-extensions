@@ -51,6 +51,7 @@ __all__ = [
     "aclose_writer",
     "call_via_socket",
     "default_socket_path",
+    "list_tools_via_socket",
     "open_attached_session",
     "request_via_socket",
     "serve_socket_if_available",
@@ -119,6 +120,26 @@ async def call_via_socket(socket_path: str | Path, bridge: str, tool: str,
     resp = await request_via_socket(
         socket_path,
         {"op": "call", "bridge": bridge, "tool": tool, "arguments": arguments},
+    )
+    if resp is None:
+        raise OSError("serve socket closed without a response")
+    return resp
+
+
+async def list_tools_via_socket(socket_path: str | Path, bridge: str) -> dict:
+    """Send one ``list`` over the serve socket and return the parsed response.
+
+    Returns the bridge's tool catalog exactly as a live session would see it
+    (the bridge's ``tools:`` allow/deny filter applies) -- the same result
+    ``materialize``'s cold ``OneShotSession.list_tools()`` path already
+    returns, so consulting a warm daemon changes nothing about *what*
+    materialize projects, only *how fast* and at what contention cost it
+    gets there. Raises ``OSError`` if the socket can't be reached (caller
+    falls back to the cold one-shot path).
+    """
+    resp = await request_via_socket(
+        socket_path,
+        {"op": "list", "bridge": bridge},
     )
     if resp is None:
         raise OSError("serve socket closed without a response")
