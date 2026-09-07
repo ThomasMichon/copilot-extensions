@@ -558,6 +558,11 @@ def _external_state_root(root: Path) -> tuple[str, Path | None]:
             errors="replace",
             timeout=20,
             check=False,
+            # `command` can resolve to the PATH `.cmd` binstub (shutil.which
+            # prefers .cmd over .ps1 on Windows), which Windows must interpret
+            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
+            # invisible instead of flashing on every companion-provider probe.
+            creationflags=(0x08000000 if os.name == "nt" else 0),
         )
     except (OSError, subprocess.SubprocessError):
         return "unavailable", None

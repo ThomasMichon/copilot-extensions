@@ -262,6 +262,32 @@ def test_required_external_state_without_config_is_inactive(
     assert result["reason"] == "external-state-root-config-absent"
 
 
+def test_external_state_root_suppresses_console_for_resolved_command(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # `_worktrees_command` can resolve to the PATH `.cmd` binstub (shutil.which
+    # prefers .cmd over .ps1 on Windows), which Windows must interpret through
+    # a fresh cmd.exe -- CREATE_NO_WINDOW must be set so it never flashes on
+    # every companion-provider probe.
+    module = _module()
+    monkeypatch.setattr(
+        module, "_worktrees_command", lambda: r"C:\bin\agent-worktrees.CMD"
+    )
+    monkeypatch.setattr(module.os, "name", "nt")
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured.update(argv=argv, kwargs=kwargs)
+        return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    state, path = module._external_state_root(tmp_path)
+
+    assert state == "invalid"  # {} has neither stateless nor requires_external key
+    assert path is None
+    assert captured["kwargs"].get("creationflags") == 0x08000000
+
+
 def test_invalid_local_config_never_falls_through(
     tmp_path: Path, monkeypatch
 ) -> None:
