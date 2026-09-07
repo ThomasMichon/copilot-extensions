@@ -23,6 +23,7 @@ from .registrar import (
     _load_filters,
     load_declaration,
 )
+from .worker_identities import load_worker_identity
 
 _TERMINAL = frozenset({"completed", "abandoned", "dead_letter"})
 _KNOWN_KEYS = frozenset(
@@ -46,6 +47,7 @@ _KNOWN_KEYS = frozenset(
         "owner",
         "description",
         "worker_guidance",
+        "worker_identity",
         "allow_self_config_changes",
     }
 )
@@ -308,16 +310,29 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
     owner = data.get("owner")
     description = data.get("description")
     guidance = data.get("worker_guidance")
+    worker_identity = data.get("worker_identity")
     allow_self_config = data.get("allow_self_config_changes", False)
     for key, value in (
         ("owner", owner),
         ("description", description),
         ("worker_guidance", guidance),
+        ("worker_identity", worker_identity),
     ):
         if value is not None and not isinstance(value, str):
             raise RegistrarError(
                 f"repository-issue-loop {key}: expected a string"
             )
+    if worker_identity and guidance:
+        raise RegistrarError(
+            "repository-issue-loop: worker_identity and worker_guidance are "
+            "mutually exclusive -- select a named identity or inline "
+            "guidance, not both"
+        )
+    identity_name = ""
+    if worker_identity:
+        identity = load_worker_identity(worker_identity)
+        guidance = identity.rules
+        identity_name = identity.name
     if not isinstance(allow_self_config, bool):
         raise RegistrarError(
             "repository-issue-loop allow_self_config_changes: expected true/false"
@@ -383,6 +398,7 @@ def validate_config(data: Mapping[str, Any]) -> dict[str, Any]:
         "owner": owner,
         "description": description,
         "worker_guidance": guidance or "",
+        "worker_identity": identity_name,
         "allow_self_config_changes": allow_self_config,
     }
 
