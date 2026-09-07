@@ -384,4 +384,4 @@ policy, availability, or routing choices.
 
 - Parent vision: none
 - Child visions: none (leaf)
-- Reality docs: `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
+- Reality docs: `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`

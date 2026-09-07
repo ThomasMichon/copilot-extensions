@@ -1,8 +1,3 @@
----
-visions:
-  - visions/harness-guidance
----
-
 # Custom Context Aggregator Retirement
 
 - **Slug:** `custom-context-aggregator-retirement`
