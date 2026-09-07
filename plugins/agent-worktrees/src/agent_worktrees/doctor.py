@@ -100,6 +100,7 @@ _AUTOFIXABLE = {
     "overlay_redundant_base_repo",
     "overlay_conflicting_srcroot",
     "overlay_conflicting_branch",
+    "project_identity_invalid",
 }
 
 
@@ -252,8 +253,14 @@ def _read_global_config() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _overlay_path(config_dir: str | None) -> Path | None:
+def _overlay_path(config_dir: str | None, project: str = "") -> Path | None:
     """Resolve a project's overlay ``config.yaml`` from its ``config_dir``."""
+    from . import project_state
+
+    if project and project_state.namespaced():
+        from . import config as _cfg
+
+        return _cfg.project_dir(project) / "config.yaml"
     if not config_dir:
         return None
     return Path(os.path.expanduser(config_dir)) / "config.yaml"
@@ -324,7 +331,30 @@ def _overlay_findings(
     gcfg = _read_global_config()
     for pname in sorted(projects):
         proj = projects[pname]
-        opath = _overlay_path(proj.get("config_dir"))
+        try:
+            opath = _overlay_path(proj.get("config_dir"), pname)
+        except ValueError as error:
+            finding = Finding(
+                repo=pname,
+                kind="project_identity_invalid",
+                severity=SEV_ERROR,
+                detail=str(error),
+                fixable=True,
+                fix_detail="create or repair the cell-local repository identity",
+            )
+            if fix:
+                try:
+                    from . import project_state
+
+                    project_state.ensure_project_state(pname)
+                    finding.fixed = True
+                except (OSError, ValueError) as fix_error:
+                    finding.fixable = False
+                    finding.fix_detail = str(fix_error)
+            findings.append(finding)
+            if not finding.fixed:
+                continue
+            opath = _overlay_path(proj.get("config_dir"), pname)
         overlay = _read_overlay(opath)
         if not overlay:
             continue
@@ -656,6 +686,34 @@ def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
                 detail=f"path for {plat} does not exist: {p}",
                 fixable=False,
                 fix_detail=f"re-clone or remove with: repos remove {name}",
+            ))
+
+    # Identity repair needs the repo entry on disk because project-state
+    # validation deliberately re-reads the registry rather than trusting an
+    # in-memory mutation.
+    if fix and dirty_repos:
+        try:
+            repos.write_registry(registry)
+            dirty_repos = False
+        except OSError as error:
+            dirty_repos = False
+            for finding in findings:
+                if finding.fixed and finding.kind in {
+                    "missing_repo_entry",
+                    "wrong_class",
+                    "anchor_mismatch",
+                    "name_collision",
+                }:
+                    finding.fixed = False
+                    finding.fixable = False
+                    finding.fix_detail = str(error)
+            findings.append(Finding(
+                repo="*",
+                kind="registry_write_failed",
+                severity=SEV_ERROR,
+                detail=f"could not write repos.yaml: {error}",
+                fixable=False,
+                fix_detail=str(error),
             ))
 
     # --- per-project overlay reconciliation (redundant/conflicting keys) ----

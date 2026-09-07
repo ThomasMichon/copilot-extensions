@@ -29,6 +29,7 @@ from pathlib import Path
 _CONNECT_TIMEOUT_S = 0.5
 _SESSION_START_TIMEOUT_S = 12.0
 _SESSION_START_DECISION_S = 10.0
+_SESSION_END_TIMEOUT_S = 8.0
 _FALLBACK_PRE_BUDGET_S = 25.0
 _MAX_RESPONSE = 64 * 1024
 _SESSION_IDENTIFIER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
@@ -656,6 +657,33 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _fallback_session_end(payload: dict, home: Path) -> dict:
+    python = _runtime_python(home)
+    if python is None:
+        return {}
+    try:
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = ""
+        subprocess.run(
+            [
+                str(python),
+                "-m",
+                "agent_worktrees",
+                "deregister-session",
+                "--stdin",
+            ],
+            input=json.dumps(payload, separators=(",", ":")),
+            capture_output=True,
+            text=True,
+            timeout=_SESSION_END_TIMEOUT_S,
+            check=False,
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {}
+
+
 @cache
 def _load_sibling(name: str):
     path = Path(__file__).resolve().with_name(name)
@@ -795,13 +823,15 @@ def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
         return _fallback_post(payload, home)
     if kind == "sessionStart":
         return _fallback_session_start(payload, home)
+    if kind == "sessionEnd":
+        return _fallback_session_end(payload, home)
     return {}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     kind = argv[0] if argv else ""
-    if kind not in {"preToolUse", "postToolUse", "sessionStart"}:
+    if kind not in {"preToolUse", "postToolUse", "sessionStart", "sessionEnd"}:
         return 0
     try:
         raw = sys.stdin.read()

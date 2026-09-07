@@ -113,7 +113,11 @@ fi
 # Recovery escape hatch resolves from explicit project identity or CWD.
 if [[ "$RECOVERY_MODE" == "1" ]]; then
     CANDIDATES=()
-    if [[ -n "$LAUNCH_PROJECT" ]]; then
+    if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+          -n "${AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR:-}" ]]; then
+        CANDIDATES+=("$AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR")
+    fi
+    if [[ -n "$LAUNCH_PROJECT" && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         CONFIG="$HOME/.$LAUNCH_PROJECT/config.yaml"
         if [[ -f "$CONFIG" ]]; then
             CONFIG_ANCHOR=$(sed -nE 's/^[[:space:]]+anchor:[[:space:]]+["'"'"']?([^"'"'"']+)["'"'"']?[[:space:]]*$/\1/p' "$CONFIG" | head -n 1)
@@ -141,7 +145,18 @@ fi
 # Runtime resolution (junction-free, marker-only). Prefer the `current-version`
 # marker -> versions/<ver>/bin/python; fall back to the newest slot only -- the
 # `.venv` symlink is retired (#1106).
-RUNTIME_DIR="$HOME/.agent-worktrees"
+if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    RUNTIME_DIR="${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}"
+    CONTEXT_ROOT="$(dirname -- "$COPILOT_EXTENSIONS_CONTEXT")"
+    [[ "$RUNTIME_DIR" == /* && -d "$RUNTIME_DIR" &&
+       "$(cd -P -- "$RUNTIME_DIR" && pwd)" == "$(cd -P -- "$CONTEXT_ROOT" && pwd)" ]] || {
+        setup_log ERROR 'Validated cell runtime root is unavailable'
+        echo "ERROR: Validated cell runtime root is unavailable." >&2
+        exit 1
+    }
+else
+    RUNTIME_DIR="$HOME/.agent-worktrees"
+fi
 AW_PY=""
 if [[ -f "$RUNTIME_DIR/bin/resolve-runtime.sh" ]]; then
     # shellcheck source=../scripts/resolve-runtime.sh

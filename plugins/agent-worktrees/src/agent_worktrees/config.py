@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from . import config_migrations, registry_paths
+from . import config_migrations, project_state, registry_paths
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
@@ -803,8 +803,10 @@ def install_dir() -> Path:
 
 
 def project_dir(name: str | None = None) -> Path:
-    """Per-project config/state root (``~/.{name}/``)."""
-    return _home() / f".{name or project_name()}"
+    """Per-project config/state root in legacy or validated cell scope."""
+    project = name or project_name()
+    legacy = _home() / f".{project}"
+    return project_state.project_state_root(project, legacy)
 
 
 def default_config_path() -> Path:

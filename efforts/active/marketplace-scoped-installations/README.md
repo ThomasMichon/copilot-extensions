@@ -1039,3 +1039,33 @@ See [`design.md`](design.md).
   cross-plugin activation model, leases, and broader harness state remain
   legacy or explicitly inert under namespaced context for later attributable
   slices.
+
+### 2026-09-07 — Cell-local repository and project state
+
+- Added a stable repository identity derived from the normalized registered
+  remote. Namespaced adoption publishes a cell-owned `identity.json` at
+  `<cell>/repos/<repository-id>/` and stores agent-worktrees project config,
+  worktree records, histories, obligations, and session bindings in its
+  `agent-worktrees/` child. Legacy/default operation remains exactly
+  `~/.<project>`.
+- Made receipt publication concurrent-safe and crash-durable: complete bytes
+  are synced before atomic no-replace publication, POSIX directory metadata is
+  synced, and Windows uses write-through `MoveFileExW`. Invalid, partial,
+  mismatched, relative, or unstable identities fail closed. Equivalent GitHub
+  remotes and default ports converge on one repository ID; the same remote in
+  two cells keeps independent state.
+- Prepared repository identity before first project-directory access in both
+  install and register flows. Doctor now reports missing/invalid identity,
+  persists repaired repo entries before identity repair, and returns unfixed
+  findings rather than crashing on registry or filesystem write failures.
+- Routed explicit-context session end through the selected cell runtime and
+  tracking state. Every project-binstub invocation, including zero arguments,
+  enters its pinned payload; bundled-picker fallback selects the validated cell
+  launcher and passes a validated recovery anchor instead of re-entering or
+  reading the legacy runtime.
+- Preserved the host-owned `~/.copilot/session-state` database and deferred
+  pivot composition, leases, service identity, and full project-command
+  ownership transfer. The full native Windows portfolio passed 3,964 tests with
+  47 skips; the final WSL portfolio passed 3,974 tests with 37 skips after one
+  corrected POSIX legacy assertion. All publication guards passed, and the
+  report-only marketplace-isolation inventory fell to 718 findings.

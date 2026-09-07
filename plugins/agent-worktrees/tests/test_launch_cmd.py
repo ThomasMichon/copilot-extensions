@@ -14,6 +14,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import registry_paths
 
 
 def _config(launch: dict[str, list[str]] | None = None) -> cfg.Config:
@@ -73,6 +74,68 @@ def test_resume_uses_equals_form():
     cmd.append(f"--resume={session}")
     assert f"--resume={session}" in cmd
     assert "--resume" not in cmd  # bare flag must not appear separately
+
+
+def test_namespaced_launch_uses_cell_launcher_without_legacy_fallback(
+    monkeypatch, tmp_path
+):
+    cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    launcher = cell_runtime / "bin" / "launch-session.sh"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    legacy = tmp_path / "legacy"
+    (legacy / "bin").mkdir(parents=True)
+    (legacy / "bin" / "launch-session.sh").write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
+    cfg.set_active_project("example")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(cfg, "install_dir", lambda: legacy)
+    monkeypatch.setattr(
+        registry_paths,
+        "installation_context",
+        lambda: {"pluginRoot": str(cell_runtime)},
+    )
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda **_kwargs: cfg.Config(
+            srcroot=str(tmp_path),
+            machine="test",
+            platform="linux",
+            repo_name="example",
+            repos={
+                "example": cfg.RepoConfig(
+                    anchor=str(tmp_path / "anchor"),
+                    worktree_root=str(tmp_path / "worktrees"),
+                )
+            },
+        ),
+    )
+    seen = {}
+    launch_env = {}
+    monkeypatch.setattr(
+        m,
+        "_env_set",
+        lambda key, value: launch_env.__setitem__(key, value),
+    )
+
+    def execvp(file, argv):
+        seen.update(file=file, argv=argv)
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(m.os, "execvp", execvp)
+
+    with pytest.raises(RuntimeError, match="captured"):
+        m.cmd_launch([])
+
+    assert seen["argv"][1] == str(launcher)
+    assert launch_env["AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT"] == str(
+        cell_runtime
+    )
+    assert launch_env["AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR"] == str(
+        tmp_path / "anchor"
+    )
 
 
 # ---------------------------------------------------------------------------

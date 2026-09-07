@@ -102,6 +102,25 @@ def resolve_registry_root(
             _legacy_home(environment) / ".agent-worktrees"
         )  # marketplace-isolation: allow legacy-default registry root
 
+    return Path(
+        resolve_registry_context(
+            payload_root=payload_root,
+            environment=environment,
+        )["pluginRoot"]
+    )
+
+
+def resolve_registry_context(
+    *,
+    payload_root: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict:
+    """Return the validated explicit agent-worktrees installation context."""
+    environment = environment if environment is not None else os.environ
+    context = environment.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if not context:
+        raise RegistryRootError("no explicit installation context is selected")
+
     pointer = Path(context).expanduser()
     if not pointer.is_absolute():
         raise RegistryRootError(
@@ -131,7 +150,7 @@ def resolve_registry_root(
         raise RegistryRootError(
             "installation-context validation returned a relative plugin root"
         )
-    return root
+    return resolved
 
 
 if __name__ == "__main__":

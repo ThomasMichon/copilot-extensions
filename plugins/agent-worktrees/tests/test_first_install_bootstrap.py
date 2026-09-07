@@ -26,7 +26,9 @@ def test_session_start_prefers_payload_lifecycle_client_with_installed_fallback(
         if "hook_client.py" in entry.get("bash", "")
     )
 
-    assert '${COPILOT_PLUGIN_ROOT:-$PWD}' in lifecycle["bash"]
+    assert 'r="${COPILOT_PLUGIN_ROOT:-}"' in lifecycle["bash"]
+    assert 'r="$PWD"' in lifecycle["bash"]
+    assert '[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]' in lifecycle["bash"]
     assert 's="$r/scripts/hook_client.py"' in lifecycle["bash"]
     assert '$HOME/.agent-worktrees/bin/hook_client.py' in lifecycle["bash"]
     assert "$env:COPILOT_PLUGIN_ROOT" in lifecycle["powershell"]
