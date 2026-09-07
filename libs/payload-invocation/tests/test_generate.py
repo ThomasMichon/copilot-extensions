@@ -749,7 +749,10 @@ def test_agent_worktrees_requested_context_never_falls_back_to_legacy(
     assert not (home / ".agent-worktrees").exists()
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="canonical Windows profile semantics require native Windows",
+)
 def test_agent_worktrees_active_context_selects_only_its_cell_root(
     tmp_path: Path,
 ) -> None:
@@ -793,7 +796,10 @@ def test_agent_worktrees_active_context_selects_only_its_cell_root(
     assert not (home / ".agent-worktrees").exists()
 
 
-@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+@pytest.mark.skipif(
+    os.name != "nt" or shutil.which("pwsh") is None,
+    reason="canonical Windows profile semantics require native Windows",
+)
 def test_agent_worktrees_active_context_provisions_only_its_cell_root(
     tmp_path: Path,
 ) -> None:
