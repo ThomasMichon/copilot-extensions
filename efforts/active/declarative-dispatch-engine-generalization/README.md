@@ -63,12 +63,25 @@ and the parent agent-dispatch vision:
 
 ### Phase 2 - Declarative worker identity
 
-- [ ] Define the shape of a reusable, named worker identity (a sub-agent
+- [x] Define the shape of a reusable, named worker identity (a sub-agent
   definition, in the mold of `proxy-code-review:proxy-reviewer`) that a
   declaration selects instead of inlining `worker_guidance` prose.
-- [ ] Extract at least one existing declaration's inline prose (the
+  Landed as `agent_dispatch.worker_identities.load_worker_identity`: an
+  identity is a `<name>.identity.md` file in the same frontmatter (`name`,
+  `description`) plus markdown-body (`rules`) shape as an in-session
+  `*.agent.md` sub-agent, resolved repo-local-first then from the plugin's
+  packaged `plugins/agent-dispatch/identities/`. A declaration's new
+  `worker_identity` field is mutually exclusive with inline
+  `worker_guidance`; `validate_config` resolves it at validation time.
+- [x] Extract at least one existing declaration's inline prose (the
   `odsp-web-harness-backlog` loop is the live candidate) into such an
   identity, proving the declaration shrinks to policy/eligibility only.
+  Extracted verbatim into the packaged built-in
+  `plugins/agent-dispatch/identities/odsp-web-harness-backlog.identity.md`.
+  **Not yet applied to the live `dotfiles` declaration** -- that requires the
+  running agent-dispatch daemon to have this PR's code deployed first (an
+  older daemon would reject `worker_identity` as an unknown key and break the
+  live loop); see Gotchas.
 - [ ] Assess whether a named identity's structural boundaries (permitted
   tools/mutations) can enforce the reviewer vision's never-supersede rule
   more robustly than prose alone -- closing the Phase-6 open question in
@@ -137,3 +150,32 @@ other phases actually land in.
   identity, concise event-first prompts with on-demand charter pull, and a
   preloaded shared dispatch-behavior supplement on the identity. No
   implementation started; this effort tracks the plan only.
+
+### 2026-09-06 - Reconciled with aperture-labs; started Phase 2
+
+- Reconciled the "aperture-labs" reviewer-loop concern from the prior
+  handoff: the copilot-extensions PR history for the reviewer module
+  (`#1445`..`#2134`) is entirely merged under the one operator account, and
+  already matches the vision docs this effort builds on. No separate
+  unmerged branch or competing identity concept was found; the existing
+  `*.agent.md` sub-agent shape (e.g.
+  `copilot-extensions-reviewer.agent.md`) is the precedent Phase 2's worker
+  identity borrows from.
+- Landed Phase 2's identity shape and one extraction: new
+  `agent_dispatch.worker_identities` module (`WorkerIdentity`,
+  `load_worker_identity`), a new `worker_identity` declaration field on
+  `repository-issue-loop` (validated, mutually exclusive with
+  `worker_guidance`), and the `odsp-web-harness-backlog` identity extracted
+  verbatim from the live dotfiles declaration into
+  `plugins/agent-dispatch/identities/odsp-web-harness-backlog.identity.md`.
+  10 new tests (`test_worker_identities.py` + 4 cases in
+  `test_repository_issue_loops.py`); full existing suite (55 tests) passes
+  unchanged.
+- Did **not** switch the live `dotfiles` declaration to
+  `worker_identity: odsp-web-harness-backlog` yet -- the running
+  agent-dispatch daemon must have this PR's code deployed first, or it will
+  reject the new field as an unknown key and break the live backlog loop.
+  That switch is the very next slice once this PR lands and deploys.
+- Phase 2's third bullet (structural enforcement of never-supersede) is
+  still open -- the identity file today only carries prose rules, no
+  enforced tool/mutation boundary; deferred to a follow-up slice.

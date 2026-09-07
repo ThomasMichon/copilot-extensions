@@ -1425,3 +1425,32 @@ def test_loser_release_removes_only_its_distinct_label():
 def test_malformed_config_is_rejected(change, message):
     with pytest.raises(RegistrarError, match=message):
         validate_config(_config(**change))
+
+
+def test_worker_identity_resolves_rules_into_worker_guidance():
+    config = validate_config(
+        _config(worker_identity="odsp-web-harness-backlog")
+    )
+    assert config["worker_identity"] == "odsp-web-harness-backlog"
+    assert "blocked-on-external-pr" in config["worker_guidance"]
+
+
+def test_worker_identity_and_worker_guidance_are_mutually_exclusive():
+    with pytest.raises(RegistrarError, match="mutually exclusive"):
+        validate_config(
+            _config(
+                worker_identity="odsp-web-harness-backlog",
+                worker_guidance="inline prose",
+            )
+        )
+
+
+def test_unknown_worker_identity_is_rejected():
+    with pytest.raises(RegistrarError, match="no identity file found"):
+        validate_config(_config(worker_identity="does-not-exist"))
+
+
+def test_inline_worker_guidance_still_supported_without_identity():
+    config = validate_config(_config(worker_guidance="be nice"))
+    assert config["worker_identity"] == ""
+    assert config["worker_guidance"] == "be nice"
