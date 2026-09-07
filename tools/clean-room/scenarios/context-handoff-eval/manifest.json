@@ -1,6 +1,6 @@
 {
   "name": "context-handoff-eval",
-  "description": "Tier-E F1 efficiency and fidelity witness for context-handoff. Setup installs the unpublished agent-worktrees/context-handoff pair, creates a synthetic worktree with a pending file-backed handoff, and launches one fresh successor with the real compact seed. The eval measures seed size, turns/tool calls to acknowledgement, takeover/retire-or-preserve latency, payload fidelity, and prompt-before-session lifecycle ordering.",
+  "description": "Tier-E F1 witness for the process-manager-agnostic context-handoff flow. Setup installs the unpublished context-handoff payload, creates a synthetic stored file-backed baton, and drives one successor session from the short seed. The eval measures seed size, one-turn trigger behavior, session-state copy fidelity, and whether the structured result always prints the final seed and the manual fallback guidance when no control plane picks the request up.",
   "tier": "E",
   "family": "F1",
   "image": "base",
@@ -15,31 +15,29 @@
   },
   "starting_state": {
     "setup": "setup.sh",
-    "installed_plugins": ["agent-worktrees", "context-handoff"],
-    "notes": "A synthetic worktree has predecessor session eval-predecessor as head and pending token handoff-eval-predecessor. The compact seed is the eval's sole initial prompt. AGENT_WORKTREES_HANDOFF_TOKEN is present in the ACP login environment so sessionStart can associate the real successor only after Copilot creates it."
+    "installed_plugins": ["context-handoff"],
+    "notes": "A synthetic stored handoff exists for predecessor session eval-predecessor. The successor receives only the compact seed and must call trigger_handoff or /consume-handoff explicitly; no in-process cutover or pane retirement is assumed."
   },
   "tier_p_precondition": "python3 /home/operator/scenario/fixture.py verify --root /home/operator/context-handoff-eval",
-  "prompt": "Task: Measure handoff takeover | Resume: /consume-handoff to take over | Recovery: context-handoff file:handoff-eval-predecessor",
+  "prompt": "Task: Measure handoff pickup | Resume: /consume-handoff to take over | Recovery: context-handoff file:handoff-eval-predecessor",
   "expected_outcome": {
     "steps": [
-      "Receive the compact seed as the one initial submitted prompt; no Copilot session or successor binding exists before that submit.",
-      "Let sessionStart associate the newly-created successor session with token handoff-eval-predecessor and the synthetic target worktree while leaving eval-predecessor as head.",
-      "Explicitly invoke /consume-handoff (or the consume_handoff tool) once to acknowledge the baton and perform takeover.",
-      "Return the stored HANDOFF_FIDELITY_7f1a9c2e canary and continue from the full stored brief without reconstructing or truncating it.",
-      "Move the worktree head only during acknowledgement. Retire only a creation-verified predecessor; this fixture intentionally lacks that proof and must preserve it for manual cleanup."
+      "Receive the compact seed as the one initial submitted prompt.",
+      "Explicitly invoke trigger_handoff once to request pickup, or consume the baton in a fresh session when validating the resume path.",
+      "Preserve the full stored payload and the HANDOFF_FIDELITY_7f1a9c2e canary byte-for-byte.",
+      "Write the session-state copy of the baton and always print the final short handoff seed.",
+      "If no control plane acknowledges the request during the grace window, print manual fallback guidance instead of attempting process management."
     ],
-    "affirmative_ready": "context-handoff-eval-metrics.json derives from agent-bridge structured turn evidence and reports a seed <=200 characters whose Recovery field contains only an opaque file locator, exactly one submitted initial prompt equal to the runner-written literal-mode composite and containing the exact handoff seed, exactly one agent turn to acknowledgement, exactly one consume_handoff tool call whose structured result contains the complete stored payload byte-for-byte, candidate_acknowledged=true, headVerified=true, and predecessorPreserved=true.",
-    "pass_if": "the successor explicitly consumes the handoff, preserves the canary and payload hash, takes over only after startup association, and reaches the safe retire-or-preserve decision within the recorded timing budget.",
-    "false_pass_if": "the agent claims takeover without consuming, treats the recovery locator as lifecycle acknowledgement, reconstructs the brief from files/history, loses the canary, binds before a real successor session exists, or retires an unverified predecessor."
+    "affirmative_ready": "context-handoff-eval-metrics.json reports a seed <=200 characters whose Recovery field contains only an opaque file locator, exactly one submitted initial prompt equal to the runner-written literal-mode composite and containing the exact handoff seed, exactly one agent turn, exactly one trigger_handoff or consume_handoff tool call as appropriate for the scenario, a session-state baton copy, payload fidelity including the canary, and a structured result that still ends with the final seed when no automatic pickup occurs.",
+    "pass_if": "the agent preserves the baton faithfully, uses the signal-only trigger path rather than inventing a local cutover, and always leaves behind a manual continuation seed.",
+    "false_pass_if": "the agent claims automatic takeover without signaling or consuming, reconstructs the brief from files/history instead of the stored baton, loses the canary, or omits the final seed/manual fallback text."
   },
   "eval": {
     "acp_cwd_file": "/home/operator/context-handoff-eval/acp-cwd",
     "acp_plugin_dirs": [
-      "/home/operator/.copilot/installed-plugins/copilot-extensions/agent-worktrees",
       "/home/operator/.copilot/installed-plugins/copilot-extensions/context-handoff"
     ],
     "payload_fingerprint_dirs": [
-      "/home/operator/.copilot/installed-plugins/copilot-extensions/agent-worktrees",
       "/home/operator/.copilot/installed-plugins/copilot-extensions/context-handoff"
     ]
   },

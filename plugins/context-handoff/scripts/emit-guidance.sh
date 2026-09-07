@@ -22,7 +22,8 @@ version="$(
 )" || emit_empty
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$ ]] || emit_empty
 
-context="[owner: context-handoff@$version]\\nThis session has context-handoff enabled. When you own the active objective, it can span multiple agent sessions. Work thoroughly across context windows: do not narrow investigation, planning, implementation, validation, or landing merely to fit one session. A context boundary is a relay point, not a stopping condition. If the active plan is unfinished, finish the planning needed to act, then begin execution immediately, subject to any required safety, review, approval, or confirmation gate; do not stop at a plan unless the user requested planning only. Consuming or producing a handoff is setup or progress, never completion. Near token pressure, preserve the objective, remaining work, decisions, and in-flight state in a precise baton, transfer it through the available handoff path, and keep going in the successor. Bounded delegates remain within their assigned scope, and a session superseded by cutover stops work and assists the successor rather than competing. The session owning the objective stops only when its completion gate is met, an explicit scope or required confirmation stops progress, or a real blocker needs input. Use the \`context-handoff\` skill for handoff mechanics."
+context="[owner: context-handoff@$version]\\nThis session has context-handoff enabled. When you own the active objective, it can span multiple agent sessions. Work thoroughly across context windows: do not narrow investigation, planning, implementation, validation, or landing merely to fit one session. A context boundary is a relay point, not a stopping condition. At a natural stopping point, compose and store the baton safely before context gets tight. Unless autopilot or prior explicit authorization applies, ask whether to continue via handoff before calling \`trigger_handoff\`; that step only signals pickup and never performs process management. When efforts and handoffs coexist, let one session own one slice of the larger effort and hand the next slice forward. Consuming or producing a handoff is setup or progress, never completion. Near token pressure, preserve the objective, remaining work, decisions, and in-flight state in a precise baton, then keep going in the successor when pickup occurs. Bounded delegates remain within their assigned scope. The session owning the objective stops only when its completion gate is met, an explicit scope or required confirmation stops progress, or a real blocker needs input. Use the \`context-handoff\` skill for handoff mechanics."
+aggregate_context="[owner: context-handoff@$version]\\nAn owned objective may span sessions: a context boundary or handoff is progress, never completion. At a natural stopping point, compose/store the baton; ask before calling \`trigger_handoff\` unless autopilot or prior authorization applies. \`trigger_handoff\` only signals pickup. When efforts and handoffs coexist, let one session own one slice and hand the next slice forward. Near token pressure preserve the objective, remaining work, decisions, and in-flight state in the handoff. Use the \`context-handoff\` skill for mechanics."
 
 context_bytes="$(printf '%b' "$context" | LC_ALL=C wc -c)" || emit_empty
 context_bytes="${context_bytes//[[:space:]]/}"
@@ -31,6 +32,10 @@ if [[ ! "$context_bytes" =~ ^[0-9]+$ ]] || (( context_bytes >= max_kernel_bytes 
 fi
 
 own_json="$(printf '{"additionalContext":"%s"}' "$context")"
+if [[ "${1:-}" == "--aggregate" ]]; then
+    printf '{"additionalContext":"%s"}' "$aggregate_context"
+    exit 0
+fi
 if [[ "${1:-}" == "--own-only" ]]; then
     printf '%s' "$own_json"
     exit 0
