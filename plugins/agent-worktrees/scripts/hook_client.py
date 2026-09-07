@@ -711,11 +711,12 @@ def _fallback_pre(payload: dict, home: Path) -> dict:
                 legacy_root=home / ".agent-worktrees",
                 environment=os.environ,
             )
-        except Exception:
+        except Exception as error:
             return {
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
-                    "agent-worktrees installation context is invalid"
+                    "agent-worktrees installation context is invalid: "
+                    f"{error}"
                 ),
             }
     deadline = time.monotonic() + _FALLBACK_PRE_BUDGET_S

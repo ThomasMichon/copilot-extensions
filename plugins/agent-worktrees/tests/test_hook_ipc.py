@@ -796,6 +796,7 @@ def test_windows_session_hook_rejects_windowsapps_python_alias():
     bash = hooks["hooks"]["sessionStart"][0]["bash"]
     assert 'if python3 "$s" sessionStart; then ran=true; fi' in bash
     assert '[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]' in bash
+    assert '${COPILOT_PLUGIN_ROOT:-$PWD}' not in bash
 
 
 def test_explicit_context_pre_and_post_hooks_use_payload_client_only():
@@ -808,6 +809,7 @@ def test_explicit_context_pre_and_post_hooks_use_payload_client_only():
         assert "COPILOT_PLUGIN_ROOT" in entry["powershell"]
         assert "COPILOT_EXTENSIONS_CONTEXT" in entry["bash"]
         assert "COPILOT_PLUGIN_ROOT" in entry["bash"]
+        assert '${COPILOT_PLUGIN_ROOT:-}/scripts' not in entry["bash"]
 
 
 def test_explicit_context_bypasses_legacy_resident(monkeypatch, tmp_path):
