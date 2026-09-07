@@ -42,10 +42,11 @@ def test_session_start_emits_payload_catalog_after_bootstrap() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
 
-    assert len(session_hooks) == 2
+    assert len(session_hooks) == 3
     for shell in ("bash", "powershell"):
         assert "bootstrap-check" in session_hooks[0][shell]
         assert "emit-command-catalog" in session_hooks[1][shell]
+        assert "write-session-guidance" in session_hooks[2][shell]
         for hook in session_hooks:
             assert "COPILOT_PLUGIN_ROOT" in hook[shell]
             assert "'{}'" in hook[shell]
