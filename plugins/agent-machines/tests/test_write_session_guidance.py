@@ -128,7 +128,11 @@ def test_reparse_detection_without_link_creation():
 
 
 def test_main_always_emits_empty_object(monkeypatch, capsys):
-    monkeypatch.setattr(sys, "stdin", __import__("io").StringIO("not json"))
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        SimpleNamespace(buffer=__import__("io").BytesIO(b"not json")),
+    )
     assert writer.main() == 0
     assert capsys.readouterr().out == "{}"
 
