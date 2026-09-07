@@ -407,6 +407,11 @@ def _run_related(
         proc = subprocess.run(
             [*argv, "related", *args], cwd=cwd,
             capture_output=True, text=True, timeout=timeout,
+            # `argv` can fall back to the PATH `.cmd` binstub (rarely reached,
+            # see `_runtime_argv`'s docstring), which Windows must interpret
+            # through a fresh cmd.exe -- CREATE_NO_WINDOW keeps that console
+            # invisible instead of flashing on every preToolUse hook check.
+            creationflags=(0x08000000 if _IS_WIN else 0),
         )
     except (OSError, subprocess.SubprocessError):
         return None
