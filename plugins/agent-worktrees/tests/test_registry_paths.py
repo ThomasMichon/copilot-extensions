@@ -163,6 +163,23 @@ def test_invalid_context_refuses_legacy_fallback(monkeypatch, tmp_path):
         installer.read_projects_registry()
 
 
+def test_missing_registry_helper_has_bounded_validation_error(
+    monkeypatch, tmp_path
+):
+    payload = _payload(tmp_path, "payload")
+    context, _ = _stamp(
+        tmp_path / "durable",
+        payload,
+        marketplace="missing-helper",
+        repository="Example-Org/Missing-Helper-Marketplace",
+    )
+    (payload / "scripts" / "registry_root.py").unlink()
+    _select(monkeypatch, context, payload)
+
+    with pytest.raises(ValueError, match="registry-root helper is unavailable"):
+        config.global_config_path()
+
+
 def test_context_rejects_foreign_plugin_and_payload(monkeypatch, tmp_path):
     aw_payload = _payload(tmp_path, "aw-payload")
     other_payload = _payload(tmp_path, "other-payload", plugin="agent-bridge")

@@ -31,6 +31,8 @@ def _payload_root() -> Path:
 
 def _helper() -> ModuleType:
     helper = _payload_root() / "scripts" / "registry_root.py"
+    if not helper.is_file():
+        raise ValueError("agent-worktrees registry-root helper is unavailable")
     spec = importlib.util.spec_from_file_location(
         "_agent_worktrees_registry_root", helper
     )
@@ -38,7 +40,13 @@ def _helper() -> ModuleType:
         raise ValueError("agent-worktrees registry-root helper is unavailable")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except (ImportError, OSError, SyntaxError) as error:
+        sys.modules.pop(spec.name, None)
+        raise ValueError(
+            "agent-worktrees registry-root helper cannot be loaded"
+        ) from error
     return module
 
 
