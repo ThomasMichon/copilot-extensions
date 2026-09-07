@@ -1021,6 +1021,34 @@ function Invoke-VersionedMarkComplete {
     if ($ph) { $mcArgs += @('--payload-hash', $ph) }
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
 }
+
+function Test-SlotAlreadyComplete {
+    <# "Create forward, never touch an already-activated slot" gate (#2174):
+       an already-completed slot whose content hash still matches the current
+       payload must be a true no-op -- Deploy-Venv/Deploy-Package must never
+       reinstall into it. Without this, `update` unconditionally reinstalled
+       into $VenvDir on every invocation, including the CURRENTLY ACTIVE, live
+       slot (current-version / last-known-good already point at it, and a
+       long-lived process such as the status-monitor daemon or a foreground
+       `pr-watch wait` may be running out of it) -- an in-place reinstall then
+       collides with Windows file locks on the running interpreter's open
+       module files. Returns $true only when the exact target version's slot
+       is present, healthy (has a valid completion marker), and its recorded
+       payload hash matches the CURRENT source tree -- i.e. nothing to do.
+       No-op ($false, forcing the normal build path) in legacy mode or when
+       the bootstrap python / versioned_runtime.py helper is unavailable, so a
+       missing prerequisite never silently skips a real build. #>
+    if (-not $VersionedRuntime) { return $false }
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) { return $false }
+    $payloadHash = Get-PayloadHash
+    if (-not $payloadHash) { return $false }
+    $icArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir),
+                'is-complete', $SrcVersion, '--expect-hash', $payloadHash)
+    $result = Invoke-NativeCapture { & $py @icArgs }
+    return ($result.ExitCode -eq 0)
+}
 # === end install-contract:v4 marker/toss helpers ===
 
 function Get-SourceKind {
@@ -1099,20 +1127,42 @@ function Write-V3Manifest {
         $g = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $pluginPath))
         $commit = $g.commit; $branch = $g.branch; $dirty = $g.dirty
     }
+    # Content fingerprint (#2174): a `marketplace` deploy never has a git
+    # `commit` to compare against (it isn't a git checkout the launcher's
+    # repo_dir can `git log`), so the staleness check falls back to comparing
+    # this fingerprint against a fresh one of the current payload dir. Reuse
+    # the canonical Python implementation (`update_stage.fingerprint`) via the
+    # just-deployed venv rather than reimplementing the hash in PowerShell, so
+    # the two sides can never drift apart. Best-effort: a failure here must
+    # never fail the deploy -- the staleness check already treats a missing
+    # fingerprint as "unknown" and behaves exactly as it did before this field
+    # existed.
+    $payloadFingerprint = $null
+    if (Test-Path $VenvPython) {
+        try {
+            $normPluginPath = ($pluginPath -replace '\\', '/')
+            $pyCode = "from agent_worktrees.update_stage import fingerprint; from pathlib import Path; print(fingerprint(Path(r'$normPluginPath')))"
+            $fpResult = Invoke-NativeCapture { & $VenvPython -c $pyCode }
+            if ($fpResult.ExitCode -eq 0 -and $fpResult.Output.Trim()) {
+                $payloadFingerprint = $fpResult.Output.Trim()
+            }
+        } catch {}
+    }
     $manifest = [ordered]@{
         schema_version = 3
         service        = 'agent-worktrees'
         deployed_at    = (Get-Date -Format 'o')
         deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
         source         = [ordered]@{
-            kind    = $kind
-            path    = ($pluginPath -replace '\\', '/')
-            repo    = 'copilot-extensions'
-            plugin  = 'agent-worktrees'
-            version = $ver
-            commit  = $commit
-            branch  = $branch
-            dirty   = $dirty
+            kind                = $kind
+            path                = ($pluginPath -replace '\\', '/')
+            repo                = 'copilot-extensions'
+            plugin              = 'agent-worktrees'
+            version             = $ver
+            commit              = $commit
+            branch              = $branch
+            dirty               = $dirty
+            payload_fingerprint = $payloadFingerprint
         }
         venv           = ($LinkDir -replace '\\', '/')
         runtime        = 'python'
@@ -2984,8 +3034,12 @@ switch ($Action) {
         Ensure-UvIndex
         foreach ($dir in @($InstallDir, $BinDir, $LocalBin)) { Ensure-InstallDir $dir }
         if (-not (Deploy-RuntimeResolvers)) { exit 1 }
-        if (-not (Deploy-Venv)) { exit 1 }
-        if (-not (Deploy-Package)) { exit 1 }
+        if (Test-SlotAlreadyComplete) {
+            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
+        } else {
+            if (-not (Deploy-Venv)) { exit 1 }
+            if (-not (Deploy-Package)) { exit 1 }
+        }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-GlobalBinstub
         Write-V3Manifest
@@ -3033,8 +3087,12 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if (-not (Deploy-Venv)) { exit 1 }
-        if (-not (Deploy-Package)) { exit 1 }
+        if (Test-SlotAlreadyComplete) {
+            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
+        } else {
+            if (-not (Deploy-Venv)) { exit 1 }
+            if (-not (Deploy-Package)) { exit 1 }
+        }
         if (-not (Deploy-Wrappers)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         if ($ContextualInstall) {
@@ -3362,8 +3420,12 @@ switch ($Action) {
             foreach ($dir in @($InstallDir, $BinDir)) {
                 Ensure-InstallDir $dir
             }
-            if (-not (Deploy-Venv)) { exit 1 }
-            if (-not (Deploy-Package)) { exit 1 }
+            if (Test-SlotAlreadyComplete) {
+                Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
+            } else {
+                if (-not (Deploy-Venv)) { exit 1 }
+                if (-not (Deploy-Package)) { exit 1 }
+            }
             if (-not (Deploy-Wrappers)) { exit 1 }
             if (-not (Invoke-VersionedActivate)) { exit 1 }
             Write-V3Manifest
@@ -3377,8 +3439,12 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if (-not (Deploy-Venv)) { exit 1 }
-        if (-not (Deploy-Package)) { exit 1 }
+        if (Test-SlotAlreadyComplete) {
+            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
+        } else {
+            if (-not (Deploy-Venv)) { exit 1 }
+            if (-not (Deploy-Package)) { exit 1 }
+        }
         if (-not (Deploy-Wrappers)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-CopilotPlugin
