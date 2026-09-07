@@ -1,0 +1,116 @@
+"""Reusable, named worker identities for declarative recipe loops.
+
+A repository-issue-loop (or other declarative recipe) declaration can select a
+worker identity by name instead of inlining its acting theme, focus, and rules
+as ad hoc prompt prose. An identity is authored once, in the same
+frontmatter-plus-markdown shape as an in-session sub-agent definition
+(``*.agent.md``), and is independently revisable: sharpening its rules
+improves every declaration that selects it.
+
+Resolution order for a named identity (first hit wins):
+
+1. A repo-local override: ``<repo>/.agent-dispatch/identities/<name>.identity.md``
+   under the current working directory, so an adopting repository can carry
+   its own private identity without touching this package.
+2. The packaged built-in identities shipped alongside this plugin:
+   ``plugins/agent-dispatch/identities/<name>.identity.md``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+from .registrar import RegistrarError
+
+_FRONTMATTER = "---"
+_REPO_LOCAL_SUBDIR = Path(".agent-dispatch") / "identities"
+# plugins/agent-dispatch/src/agent_dispatch/worker_identities.py -> plugins/agent-dispatch/identities
+_BUILTIN_DIR = Path(__file__).resolve().parents[2] / "identities"
+
+
+@dataclass(frozen=True)
+class WorkerIdentity:
+    """One reusable, named worker identity.
+
+    ``rules`` is the identity's full markdown body -- its structural theme,
+    focus, and behavioral rules -- rendered verbatim into a task prompt in
+    place of a declaration's inlined ``worker_guidance`` prose.
+    """
+
+    name: str
+    description: str
+    rules: str
+    source_path: str
+
+
+def _parse_identity_file(path: Path) -> WorkerIdentity:
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith(_FRONTMATTER):
+        raise RegistrarError(
+            f"worker identity {str(path)!r}: expected a '---' frontmatter header"
+        )
+    _, _, rest = text.partition(_FRONTMATTER)
+    frontmatter_raw, sep, body = rest.partition(_FRONTMATTER)
+    if not sep:
+        raise RegistrarError(
+            f"worker identity {str(path)!r}: unterminated frontmatter"
+        )
+    try:
+        frontmatter = yaml.safe_load(frontmatter_raw) or {}
+    except yaml.YAMLError as exc:
+        raise RegistrarError(
+            f"worker identity {str(path)!r}: invalid frontmatter YAML: {exc}"
+        ) from exc
+    if not isinstance(frontmatter, dict):
+        raise RegistrarError(
+            f"worker identity {str(path)!r}: frontmatter must be a mapping"
+        )
+    name = frontmatter.get("name")
+    description = frontmatter.get("description", "")
+    if not isinstance(name, str) or not name:
+        raise RegistrarError(
+            f"worker identity {str(path)!r}: frontmatter 'name' must be a "
+            "non-empty string"
+        )
+    if not isinstance(description, str):
+        raise RegistrarError(
+            f"worker identity {str(path)!r}: frontmatter 'description' must "
+            "be a string"
+        )
+    rules = body.strip()
+    if not rules:
+        raise RegistrarError(
+            f"worker identity {str(path)!r}: body (the rules) must not be empty"
+        )
+    return WorkerIdentity(
+        name=name,
+        description=description.strip(),
+        rules=rules,
+        source_path=str(path),
+    )
+
+
+def _candidate_paths(name: str, *, cwd: Path | None = None) -> list[Path]:
+    filename = f"{name}.identity.md"
+    base = cwd if cwd is not None else Path.cwd()
+    return [base / _REPO_LOCAL_SUBDIR / filename, _BUILTIN_DIR / filename]
+
+
+def load_worker_identity(name: str, *, cwd: Path | None = None) -> WorkerIdentity:
+    """Resolve and parse a named worker identity.
+
+    Raises ``RegistrarError`` if ``name`` does not resolve to any candidate
+    path, or if the resolved file is malformed.
+    """
+    if not name or not isinstance(name, str):
+        raise RegistrarError("worker_identity: expected a non-empty string")
+    for candidate in _candidate_paths(name, cwd=cwd):
+        if candidate.is_file():
+            return _parse_identity_file(candidate)
+    raise RegistrarError(
+        f"worker_identity {name!r}: no identity file found (looked for "
+        f"{[str(p) for p in _candidate_paths(name, cwd=cwd)]})"
+    )
