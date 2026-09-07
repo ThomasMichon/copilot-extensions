@@ -11194,7 +11194,7 @@ def _reap_worktree(
     failures = 0
 
     if not rec.checkout_managed:
-        (tracking_path / f"{rec.worktree_id}.yaml").unlink(missing_ok=True)
+        tracking.retire_record(rec, tracking_path)
         disposition_history.remove(rec.worktree_id)
         activity.log_event(
             "external_worktree_tracking_retired",
@@ -11251,8 +11251,8 @@ def _reap_worktree(
         permissions.merge_permissions(repo.anchor, rec.worktree_path)
         permissions.remove_trusted_folder(rec.worktree_path)
 
-    # Remove tracking YAML
-    (tracking_path / f"{rec.worktree_id}.yaml").unlink(missing_ok=True)
+    # Remove tracking YAML (or tombstone it, when paired -- #957/#220)
+    tracking.retire_record(rec, tracking_path)
     disposition_history.remove(rec.worktree_id)
 
     activity.log_event(
