@@ -2298,9 +2298,8 @@ def test_hook_shims_drifted_true_when_shim_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(reconcile, "_home", lambda: home)
     plugin_dir = tmp_path / "plugin"
     _, bin_dir = _make_hook_layout(home, plugin_dir, deploy=True)
-    # Simulate a payload that added a new shim never deployed to bin/ (the
-    # resolve-runtime.ps1 / #1106 case that broke the sessionStart reseed).
-    (bin_dir / "resolve-runtime.ps1").unlink()
+    # A guard companion missing from bin/ disables registry validation.
+    (bin_dir / "registry_root.py").unlink()
     assert reconcile.hook_shims_drifted(plugin_dir) is True
 
 

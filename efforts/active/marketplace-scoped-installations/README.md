@@ -1006,3 +1006,36 @@ See [`design.md`](design.md).
 - Kept the larger #1105 state migration open. Global project/repository
   registries, per-project worktree/session state, project binstubs, pivots,
   leases, and harness state remain legacy until later attributable slices.
+
+### 2026-09-07 — Agent-worktrees coupled registry-root slice
+
+- Moved the global `config.yaml`, lean `projects.yaml`, and authoritative
+  `repos.yaml` readers and writers through one validated registry-root
+  selector. Legacy/default operation preserves the exact existing paths;
+  explicit context validates the agent-worktrees payload and selects that
+  cell's plugin root for all three files.
+- Routed config fallbacks, repo CRUD and legacy migration classification,
+  doctor reads/fixes, eager schema migration, resident session catalog reads,
+  terminal generation, and pivot activation through the same boundary.
+  Invalid, foreign, or payload-mismatched context fails without legacy fallback;
+  `AGENT_RT_ROOT`, `AGENT_HOME`, `COPILOT_PLUGIN_ROOT`, and per-file path
+  overrides cannot independently select a cell.
+- Hardened standalone and resident hook paths. Registration nudges stand down
+  before legacy reads; anchor/statelessness guards validate the selected root;
+  explicit-context hooks bypass the legacy resident, select only the cell
+  runtime for session start, deny pre-tool evaluation when context cannot be
+  validated, and stand down for session-end deregistration until session state
+  moves in a later slice. Every installer and quick-skip drift check now carries
+  the registry-root helper with the guards.
+- Added two-cell isolation, invalid/foreign context, spoof resistance, doctor
+  symmetry, selected-root-only migration, hook, resident-cache, and deployment
+  regressions. The full native Windows portfolio passed 3,946 tests with 47
+  skips. The final full WSL portfolio passed 3,955 tests with 37 skips after one
+  isolated timeout passed on retry. Install-contract, version, generated
+  payload, vendored-library, installation-context, headless-launch,
+  documentation, marketplace-inventory, and lint guards passed.
+- Kept [#1105](https://github.com/ThomasMichon/copilot-extensions/issues/1105)
+  open. Per-project worktree/session state, project binstubs, pivots and their
+  cross-plugin activation model, leases, and broader harness state remain
+  legacy or explicitly inert under namespaced context for later attributable
+  slices.

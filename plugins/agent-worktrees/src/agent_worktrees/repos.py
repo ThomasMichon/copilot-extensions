@@ -31,7 +31,7 @@ from pathlib import Path
 
 import yaml
 
-from . import git_ops, output
+from . import git_ops, output, registry_paths
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -140,8 +140,9 @@ def _current_platform() -> str:
 
 def _repos_yaml_path() -> Path:
     """Path to the repos registry file."""
-    home = Path.home()
-    return home / ".agent-worktrees" / "repos.yaml"
+    return registry_paths.registry_path(
+        "repos.yaml", legacy_root=Path.home() / ".agent-worktrees"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +704,9 @@ def _adopted_project_names() -> set[str]:
 
     Used by migration to classify adopted projects as ``worktree``.
     """
-    projects_path = Path.home() / ".agent-worktrees" / "projects.yaml"
+    projects_path = registry_paths.registry_path(
+        "projects.yaml", legacy_root=Path.home() / ".agent-worktrees"
+    )
     if not projects_path.exists():
         return set()
     try:

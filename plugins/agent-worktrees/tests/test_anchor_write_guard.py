@@ -102,6 +102,32 @@ def test_read_tool_into_anchor_allows(tmp_path, anchor):
     assert guard.decide(p, env={}, home=tmp_path, anchors=anchor) is None
 
 
+def test_explicit_invalid_context_never_reads_legacy_registry(
+    tmp_path, monkeypatch
+):
+    invalid = tmp_path / "invalid" / "install.json"
+    invalid.parent.mkdir()
+    invalid.write_text("{", encoding="utf-8")
+    monkeypatch.setattr(
+        guard,
+        "load_worktree_anchors",
+        lambda _root: pytest.fail("legacy registry must not be read"),
+    )
+    env = {
+        "COPILOT_EXTENSIONS_CONTEXT": str(invalid),
+        "AGENT_WORKTREES_PAYLOAD_ROOT": str(
+            Path(__file__).resolve().parents[1]
+        ),
+    }
+
+    with pytest.raises(ValueError):
+        guard.decide(
+            _write("create", tmp_path / "x.py", tmp_path),
+            env=env,
+            home=tmp_path,
+        )
+
+
 def test_relative_write_path_resolves_against_cwd(tmp_path, anchor):
     cwd = Path(anchor[0]["path"]) / "src"
     p = {"toolName": "edit", "cwd": str(cwd), "toolArgs": {"path": "x.py"}}
@@ -445,7 +471,7 @@ def test_load_worktree_anchors_filters_by_class(tmp_path):
         "    class: worktree\n"
         "    windows: \"C:\\\\Data\\\\Src\\\\other\"\n",
         encoding="utf-8")
-    anchors = guard.load_worktree_anchors(home)
+    anchors = guard.load_worktree_anchors(home / ".agent-worktrees")
     names = {a["name"] for a in anchors}
     assert names == {"copilot-extensions", "other-wt"}  # singleton excluded
     paths = {a["path"] for a in anchors}

@@ -51,6 +51,32 @@ def test_read_tool_allows(harness):
     assert guard.decide(p, env={}, home=harness) is None
 
 
+def test_invalid_explicit_context_never_reads_legacy_registry(
+    harness, monkeypatch, tmp_path
+):
+    invalid = tmp_path / "invalid" / "install.json"
+    invalid.parent.mkdir()
+    invalid.write_text("{", encoding="utf-8")
+    monkeypatch.setattr(
+        guard,
+        "project_name",
+        lambda *_args: pytest.fail("legacy registry must not be read"),
+    )
+    env = {
+        "COPILOT_EXTENSIONS_CONTEXT": str(invalid),
+        "AGENT_WORKTREES_PAYLOAD_ROOT": str(
+            Path(__file__).resolve().parents[1]
+        ),
+    }
+
+    with pytest.raises(ValueError):
+        guard.decide(
+            _write("create", harness / "efforts" / "x.md", harness),
+            env=env,
+            home=tmp_path,
+        )
+
+
 def test_write_into_harness_docs_allows(harness):
     # docs/ and visions/ are legit harness content, not personal state.
     for ok in ("docs/x.md", "visions/harbor.md", "AGENTS.md", ".github/x.json"):

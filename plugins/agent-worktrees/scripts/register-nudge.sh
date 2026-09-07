@@ -24,6 +24,10 @@ if [[ "${1:-}" == "--await-context" ]]; then
 fi
 side_effect_only=0
 [[ "${1:-}" == "--side-effect-only" ]] && side_effect_only=1
+if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    printf '{}'
+    exit 0
+fi
 payload=""
 if [[ ! -t 0 ]]; then
     payload="$(cat)"

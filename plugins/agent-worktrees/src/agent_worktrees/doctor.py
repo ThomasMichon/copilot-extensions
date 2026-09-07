@@ -121,7 +121,11 @@ class Finding:
 # ---------------------------------------------------------------------------
 
 def _projects_path() -> Path:
-    return Path.home() / ".agent-worktrees" / "projects.yaml"
+    from . import registry_paths
+
+    return registry_paths.registry_path(
+        "projects.yaml", legacy_root=Path.home() / ".agent-worktrees"
+    )
 
 
 def _read_projects() -> dict[str, dict]:
@@ -234,7 +238,11 @@ def _wsl_install_present(distro: str | None) -> bool | None:
 
 def _read_global_config() -> dict:
     """Machine-wide ``~/.agent-worktrees/config.yaml`` (srcroot/machine/platform)."""
-    path = Path.home() / ".agent-worktrees" / "config.yaml"
+    from . import registry_paths
+
+    path = registry_paths.registry_path(
+        "config.yaml", legacy_root=Path.home() / ".agent-worktrees"
+    )
     if not path.exists():
         return {}
     try:
