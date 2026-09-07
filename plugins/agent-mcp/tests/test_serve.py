@@ -8,6 +8,7 @@ import pytest
 
 from agent_mcp.client import UpstreamError
 from agent_mcp.config import parse_config
+from agent_mcp.ipc import list_tools_via_socket
 from agent_mcp.serve import (
     _HAS_AF_UNIX,
     Server,
@@ -241,6 +242,39 @@ async def test_server_roundtrip_over_socket(tmp_path):
         await asyncio.wait_for(task, timeout=5)
     # handle cleaned up on shutdown (socket file on POSIX / endpoint on Windows)
     assert serve_socket_if_available(str(sock)) is None
+
+
+async def test_server_list_op_over_socket_matches_cold_materialize_filtering(tmp_path):
+    """The wire-protocol counterpart of materialize's daemon fast path: a
+    caller sends ``{"op": "list"}`` and gets exactly the same (bridge
+    ``tools:``-filtered) result the cold ``OneShotSession.list_tools()`` path
+    already returns -- consulting a warm daemon must not change *what*
+    materialize projects, only *how fast* it gets there."""
+    sock = tmp_path / "serve.sock"
+    bridge = tmp_path / "echo.mcp.yaml"
+    bridge.write_text(
+        "server:\n  type: stdio\n  command:\n"
+        f"    - {sys.executable}\n    - '-c'\n    - |\n"
+        + "".join("      " + ln + "\n" for ln in _CHILD.splitlines())
+        + "auth:\n  kind: none\ntools:\n  deny: ['echo']\n",
+        encoding="utf-8",
+    )
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        for _ in range(50):
+            if serve_socket_if_available(str(sock)):
+                break
+            await asyncio.sleep(0.05)
+
+        resp = await list_tools_via_socket(sock, str(bridge))
+        assert resp["ok"]
+        # The bridge's tools.deny filter is honored, same as a cold
+        # OneShotSession.list_tools() call against this same config would do.
+        assert resp["tools"] == []
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)
 
 
 async def test_server_reports_config_error(tmp_path):

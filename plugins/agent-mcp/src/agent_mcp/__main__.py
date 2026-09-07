@@ -14,6 +14,9 @@ Subcommands:
   call <bridge> <tool> [args]   One-shot: invoke one upstream tool, print result.
   source-digest <bridge>        Print the keyed effective source fingerprint.
   materialize <bridge>          Project the upstream catalog into a CLI stub fleet.
+                                Consults a resident ``serve`` daemon first when
+                                one already holds the bridge warm; ``--no-serve``
+                                always spawns the upstream cold.
   serve                         Resident warmth daemon: keep upstreams warm over a socket.
 
 Heavy imports (the bridge tree: config, credential injectors, decorators,
@@ -312,6 +315,51 @@ async def _run_materialize(cfg) -> list[dict]:
         return await sess.list_tools()
 
 
+def _try_serve_materialize(bridge_ref: str, *, no_serve: bool) -> list[dict] | None:
+    """Attempt to fetch the upstream tool catalog via a running ``agent-mcp
+    serve`` daemon instead of spawning a fresh upstream process.
+
+    Mirrors ``_try_serve_call``'s fast-path/fallback shape: returns the tool
+    list (bridge ``tools:`` filter already applied, identical to what the
+    cold ``OneShotSession.list_tools()`` path returns) when a warm daemon
+    served the request, or ``None`` when no daemon is available so the
+    caller falls back to the cold spawn. A daemon-reported error also
+    returns ``None`` (not raised) -- materialize's cold path re-derives and
+    reports the same failure with its own error handling, so surfacing it
+    twice would be redundant and the fallback path is always safe to
+    attempt.
+
+    This is the fix for a reproduced failure mode: on a host running many
+    concurrent Copilot CLI sessions, an upstream spawned via a package-runner
+    shim (e.g. ``bunx``/``npx``) can share a single per-user, per-package
+    temp workspace across every concurrent invocation. A fresh materialize
+    that always spawns cold contends with every other concurrent spawn for
+    that bridge on the same workspace, and can stall for minutes with no
+    daemon-warmth fast path to avoid it. Consulting a resident ``serve``
+    daemon first means a fleet host that already keeps a bridge warm never
+    pays that cost again for materialize.
+    """
+    from . import ipc
+    socket = None if no_serve else ipc.serve_socket_if_available()
+    if socket is None:
+        return None
+    ref = bridge_ref
+    try:
+        p = Path(bridge_ref)
+        if p.exists():
+            ref = str(p.resolve())
+    except OSError:
+        pass
+    import asyncio
+    try:
+        resp = asyncio.run(ipc.list_tools_via_socket(socket, ref))
+    except OSError:
+        return None  # socket vanished/refused -> fall back to cold path
+    if not resp.get("ok"):
+        return None  # let the cold path re-derive and report the failure
+    return resp.get("tools")
+
+
 def _cmd_materialize(args: argparse.Namespace) -> int:
     import asyncio
 
@@ -324,11 +372,17 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"agent-mcp: {exc}", file=sys.stderr)
         return 1
-    try:
-        tools = asyncio.run(_run_materialize(cfg))
-    except UpstreamError as exc:
-        print(f"agent-mcp materialize: {exc}", file=sys.stderr)
-        return 1
+
+    # Fast path: a running serve daemon already holds this bridge's upstream
+    # warm. Falls through to the cold spawn when the daemon is absent, not
+    # warm for this bridge yet, or reports an error.
+    tools = _try_serve_materialize(args.name, no_serve=args.no_serve)
+    if tools is None:
+        try:
+            tools = asyncio.run(_run_materialize(cfg))
+        except UpstreamError as exc:
+            print(f"agent-mcp materialize: {exc}", file=sys.stderr)
+            return 1
 
     plan = _materialize.plan_tools(tools)
     if not plan:
@@ -485,6 +539,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_mat.add_argument("--windows", action="store_true",
                        help="emit the Windows .ps1/.cmd shim farm instead of symlinks")
     p_mat.add_argument("--quiet", action="store_true", help="suppress the summary")
+    p_mat.add_argument("--no-serve", action="store_true",
+                       help="bypass a running 'agent-mcp serve' daemon and always "
+                            "spawn the upstream cold to enumerate its catalog")
     p_mat.set_defaults(func=_cmd_materialize)
 
     return parser
