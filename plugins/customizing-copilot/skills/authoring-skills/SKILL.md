@@ -217,7 +217,7 @@ fades on later turns. Author with that grain, not against it:
   policy.
 
 This preserves one owner for each rule and prevents both skill decay and
-`AGENTS.md` bloat. Follow *sessionStart context injection* below when a plugin
+`AGENTS.md` bloat. Follow *sessionStart dynamic guidance* below when a plugin
 owns the ambient policy.
 
 ## Custom Instructions
@@ -242,10 +242,10 @@ Suppress with `--no-custom-instructions`.
 > deploys `*.instructions.md` files into a directory and the launcher injects the
 > dir path, so the *same bytes* load into every session for that project. When the
 > guidance is **computed at session start** or must be **targeted by which repo
-> the session is in**, a plugin `sessionStart` **hook** that emits
-> `{"additionalContext": "..."}` is the better delivery (see *Hooks →
-> sessionStart context injection* below): the hook runs a script that can read
-> live state and the session's `cwd`, so a single globally-installed plugin injects
+> the session is in**, an output-free `sessionStart` **hook** that writes an
+> exact-session guidance file (see *sessionStart dynamic guidance* below) is the
+> better delivery: the hook runs a script that can read
+> live state and the session's `cwd`, so a single globally-installed plugin writes
 > *different* context per repo -- something a fixed instructions dir cannot do. It
 > also removes the launcher's `COPILOT_CUSTOM_INSTRUCTIONS_DIRS`-injection
 > dependency for launch paths that load plugin hooks. Some headless/cloud paths
@@ -356,7 +356,7 @@ text or a slash command.
 > still use an intentional, much smaller budget. Output composition is
 > event/field-specific: all matching hooks running does not imply that duplicate
 > output fields survive. See
-> [`references/session-context-aggregation.md`](references/session-context-aggregation.md)
+> [`references/hook-output-composition.md`](references/hook-output-composition.md)
 > for the ordering contract and the open `sessionStart`/`subagentStart`
 > `additionalContext` work.
 
@@ -383,7 +383,7 @@ Relative order among plugins is not alphabetical and is not an author-facing
 priority contract. `enabledPlugins` is an enablement/precedence map, not a hook
 queue; its JSON key order must never arrange a winner. Full ordering and output
 composition guidance is in
-[`references/session-context-aggregation.md`](references/session-context-aggregation.md).
+[`references/hook-output-composition.md`](references/hook-output-composition.md).
 Two further consequences shape how a plugin author writes hooks:
 
 - **A plugin hook fires for every session the plugin loads into** -- there is no
@@ -418,7 +418,7 @@ JavaScript extensions, and plugin LSP servers is
 Use that matrix whenever a plugin script needs both its payload location and the
 repository Copilot is targeting.
 
-### sessionStart context injection
+### sessionStart dynamic guidance
 
 `sessionStart` is the declarative replacement for a deployed
 `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` instructions dir: a command hook reads the
@@ -433,51 +433,74 @@ instructions file used to.
 
 Do not make a plugin last by name, `enabledPlugins` key position, marketplace
 order, or observed inventory. Plugin authors cannot safely rely on running last,
-and harness owners must not use ambient plugin order as arbitration. For
-`sessionStart` and `subagentStart` `additionalContext`, use runtime-defined
-merge semantics when available or one attributable composition owner whose
-design does not depend on a last-writer race. The current bug and unshipped
-implementation work, plus the suite's inspectable contributor declaration, are
-documented in
-[`references/session-context-aggregation.md`](references/session-context-aggregation.md).
+and harness owners must not use ambient plugin order as arbitration. The current
+supported runtime floor does not reliably preserve every plugin-owned
+`sessionStart` `additionalContext` value, so do not assemble critical ambient
+guidance through several direct output hooks.
 
-For a copilot-extensions marketplace producer, publish a complete
-`session-context.json` declaration from `plugin.json`, declare each contributor
-as a pure payload-relative Bash/PowerShell argv pair, and register the
-engine-v5 producer wrapper for each contributor with `timeoutSec: 30`.
-Context-only plugins declare `sideEffects: none`; mixed plugins declare
-`sideEffects: restart-safe-idempotent` and keep those direct idempotent commands
-separate from the pure contributor. Never put a state mutation in a contributor:
-the aggregate authority runs contributors but never reruns direct hooks.
+Use a checked-in static instruction pointer plus an output-free `sessionStart`
+writer for dynamic guidance. The writer validates `sessionId`, writes beneath
+that exact session's `instructions/<plugin>/` directory, and emits only `{}`.
+Declare the hook as `sideEffects: restart-safe-idempotent`, `context: none` so
+the customization scanner can prove that a stack of independent writers and
+other side effects has no competing model output.
 
-The wrapper invokes the payload-relative contributor directly before exact
-authority proof. After proof of
-`context-injection@copilot-extensions` and its compatible engine, it
-rendezvouses on `(sessionId, canonical resolved cwd)` and emits the same cached
-aggregate bytes as every producer and the authority. Keep the canonical Bash
-and PowerShell wrappers synchronized; do not hand-author a per-plugin authority
-resolver.
+A single direct non-empty `sessionStart` output remains composition-safe. More
+than one possible non-empty output fails the scanner unless the supported host
+version floor has proven native merge semantics for that event and field. When
+that proof exists, direct plugin-owned output becomes the preferred fully
+dynamic path; remove the static compatibility pointer only through an explicit
+migration. Do not introduce a custom cross-plugin authority, rendezvous,
+resolver, wrapper, cache, or spill engine in the meantime. The current and
+future contracts are documented in
+[`references/hook-output-composition.md`](references/hook-output-composition.md).
 
-Hook payload/output shape:
+For an output-free plugin hook, publish a complete `session-context.json`
+declaration from `plugin.json`:
 
 ```json
-{"cwd":"/path/to/repository","source":"<runtime-provided value>"}
+{
+  "schema": "copilot-extensions.session-context-contributors",
+  "version": 1,
+  "complete": true,
+  "contributors": [],
+  "sessionStart": {
+    "sideEffects": "restart-safe-idempotent",
+    "context": "none"
+  }
+}
+```
+
+The historical schema name is retained for compatibility, but an empty
+`contributors` list plus `context: none` is now the useful contract: it proves
+the hook cannot participate in an output collision. Keep real bootstrap,
+registration, and exact-session file writes direct, bounded, idempotent, and
+restart-safe.
+
+Hook payload/writer shape:
+
+```json
+{"sessionId":"<runtime-provided value>","cwd":"/path/to/repository","source":"<runtime-provided value>"}
 ```
 
 ```text
 read one JSON payload from stdin using the platform standard library
+validate sessionId against the runtime session-identifier shape; if invalid, emit {} and stop
 extract cwd and source without assuming a source vocabulary
 resolve cwd and applicable repository markers/config to canonical paths
 if cwd/config proves applicability and source is not explicitly excluded:
-    emit {"additionalContext":"[owner: example-plugin@1.2.3]\n<concise kernel>"}
+    render "[owner: example-plugin@1.2.3]\n<concise kernel>"
 else:
-    emit {}
+    render nothing
+atomically write the rendered content (or an explicit "unavailable" status) beneath
+    that exact session's instructions/<plugin>/session-guidance.instructions.md
+emit {} unconditionally
 ```
 
-Reference output:
+Reference output (always, regardless of what the writer rendered to the file):
 
 ```json
-{"additionalContext":"[owner: example-plugin@1.2.3]\n<concise kernel>"}
+{}
 ```
 
 Discipline (context is a **shared, intentionally budgeted** resource):
@@ -488,35 +511,37 @@ Discipline (context is a **shared, intentionally budgeted** resource):
 - **Mark ownership.** Begin every injected kernel with a stable owner marker:
   the plugin name, preferably plus its version. Budget reports and diagnostics
   need to attribute the emitted bytes.
-- **Self-gate hard on applicability.** Emit `{}` (not a partial nudge) when
-  resolved cwd/config does not prove the policy applies. Prefer a capability or
-  repository marker; use configured target-root lists only as a fallback. Never
-  use substring matching or repository-name inference.
+- **Self-gate hard on applicability.** Render nothing (an explicit "unavailable"
+  status, not a partial nudge) when resolved cwd/config does not prove the
+  policy applies. Prefer a capability or repository marker; use configured
+  target-root lists only as a fallback. Never use substring matching or
+  repository-name inference.
 - **Allow source by default.** Source is an opaque runtime value. Exclude only
-  explicitly documented incompatible sources; do not invent an allowlist.
-  Command-hook `additionalContext` applies on resume, so preserve resume
-  behavior.
+  explicitly documented incompatible sources; do not invent an allowlist. An
+  exact-session writer file applies on resume, so preserve resume behavior.
 - **Treat configuration as data with bounded delegation.** Apply documented
   repository-over-operator-over-default precedence only for an explicit
   plugin-declared allowlist of repo-delegable keys. Reject unknown keys and
   unauthorized repository overrides. Safety, publication, attribution, and
   sanitization policy remains operator/plugin-owned and non-overridable. Never
   source, import, or execute configuration.
-- **Fail open.** Missing optional config or hook errors emit `{}` and may log to
-  stderr; they do not block startup. Retain a minimal static fail-safe for
-  critical rules on launch paths that do not load plugin hooks.
+- **Fail open.** Missing optional config or writer errors leave the writer
+  emitting `{}` and may log to stderr; they do not block startup. Retain a
+  minimal static fail-safe for critical rules on launch paths that do not load
+  plugin hooks.
 - **Own written fallbacks.** If setup writes compatibility/fallback prose into
   `AGENTS.md` or custom instructions, idempotently reconcile it inside a stable
   region naming the plugin (or a dedicated plugin-named rule file). Future setup
   versions use the same marker to update, shrink, or remove the fallback without
   duplicate text or collateral edits.
-- **Prefer this over a fixed instructions dir** when the guidance is dynamic
-  (machine/account/state-derived), conditional, or repo-scoped; keep the static
-  dir for genuinely always-identical text.
+- **Prefer exact-session files over direct startup output** when the guidance is
+  dynamic (machine/account/state-derived), conditional, or repo-scoped; keep
+  static projections for the load-before-action pointer or genuinely identical
+  fallback text.
 
 This section is the portable normative summary for installed skills. The suite
 design rationale remains in the copilot-extensions repository's
-`docs/patterns/context-injection.md`.
+`docs/patterns/session-scoped-dynamic-guidance.md`.
 
 ### Script I/O
 

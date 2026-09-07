@@ -23,6 +23,9 @@ not search other marketplace installations for a same-named plugin.
 Session bootstrap also reads deployed and payload versions without ambient
 Python, so an older valid runtime cannot suppress reconciliation to a newer
 owning payload on a Python-less host.
+The bootstrap hook is declared output-free and emits only `{}`. Command-catalog
+rendering remains a plugin-owned emitter for explicit use and a future native
+host-composition seam; no custom cross-plugin authority invokes it.
 
 Reset horizon and projection are anchored to the posture's `evaluated_at`
 instant, while each selected field retains its own source `captured_at`. A

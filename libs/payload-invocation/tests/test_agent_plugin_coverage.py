@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -24,24 +23,6 @@ if _spec is None or _spec.loader is None:
     raise RuntimeError("cannot load payload-invocation generator")
 generator = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(generator)
-CONFORMANCE_SCRIPT = (
-    REPO
-    / "plugins"
-    / "context-injection"
-    / "scripts"
-    / "session_context_conformance.py"
-)
-_conformance_spec = importlib.util.spec_from_file_location(
-    "payload_invocation_session_context_conformance",
-    CONFORMANCE_SCRIPT,
-)
-if _conformance_spec is None or _conformance_spec.loader is None:
-    raise RuntimeError("cannot load session-context conformance scanner")
-conformance = importlib.util.module_from_spec(_conformance_spec)
-sys.modules[_conformance_spec.name] = conformance
-_conformance_spec.loader.exec_module(conformance)
-
-
 def _runtime_agent_plugins() -> list[tuple[str, Path, dict]]:
     marketplace = json.loads(
         (REPO / ".github" / "plugin" / "marketplace.json").read_text(
@@ -67,7 +48,7 @@ def _runtime_agent_plugins() -> list[tuple[str, Path, dict]]:
     return plugins
 
 
-def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> None:
+def test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary() -> None:
     marketplace = json.loads(
         (REPO / ".github" / "plugin" / "marketplace.json").read_text(
             encoding="utf-8"
@@ -105,11 +86,16 @@ def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> No
         data = generator.load_manifest(manifest)
         installer = str(data["installer"])
         for suffix in ("sh", "ps1"):
-            for required in (
+            required_scripts = [
                 plugin / "scripts" / f"{installer}.{suffix}",
                 plugin / "scripts" / f"bootstrap-check.{suffix}",
                 plugin / "scripts" / f"emit-command-catalog.{suffix}",
-            ):
+            ]
+            if name != "agent-worktrees":
+                required_scripts.append(
+                    plugin / "scripts" / f"write-session-guidance.{suffix}"
+                )
+            for required in required_scripts:
                 if not required.is_file():
                     failures.append(
                         f"{name}: missing {required.relative_to(REPO).as_posix()}"
@@ -133,17 +119,25 @@ def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> No
             for hook in session_start
             if isinstance(hook, dict) and hook.get("type") == "command"
         ]
-        required_hook_names = ["emit-command-catalog"]
+        required_hook_names = [
+            "hook_client.py" if name == "agent-worktrees" else "write-session-guidance"
+        ]
         if data["sessionStartBootstrap"]:
             required_hook_names.insert(0, "bootstrap-check")
         for shell_field, required_hooks in (
             (
                 "bash",
-                tuple(f"{name}.sh" for name in required_hook_names),
+                tuple(
+                    name if name.endswith(".py") else f"{name}.sh"
+                    for name in required_hook_names
+                ),
             ),
             (
                 "powershell",
-                tuple(f"{name}.ps1" for name in required_hook_names),
+                tuple(
+                    name if name.endswith(".py") else f"{name}.ps1"
+                    for name in required_hook_names
+                ),
             ),
         ):
             for required_hook in required_hooks:
@@ -163,34 +157,42 @@ def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> No
     assert not failures, "\n" + "\n".join(failures)
 
 
-def test_runtime_agent_roster_passes_shared_session_context_conformance() -> None:
-    targets, discovery = conformance.marketplace_targets(REPO)
-    authority = next(
-        item
-        for item in targets
-        if item.source == "context-injection@copilot-extensions"
-    )
-    report = conformance.scan_plugins(
-        targets,
-        scope=discovery.scope,
-        authority_source=authority.source,
-        wrapper_root=authority.root,
-        initial_violations=discovery.violations,
-    )
-    runtime_sources = {
-        f"{name}@copilot-extensions"
-        for name, _plugin, _manifest in _runtime_agent_plugins()
-    }
+def test_runtime_agent_roster_declares_output_free_session_start() -> None:
+    names = set()
+    failures: list[str] = []
+    for name, plugin, _manifest in _runtime_agent_plugins():
+        names.add(name)
+        plugin_manifest = json.loads(
+            (plugin / "plugin.json").read_text(encoding="utf-8")
+        )
+        declaration_rel = plugin_manifest.get("sessionContext")
+        if not isinstance(declaration_rel, str) or not declaration_rel:
+            failures.append(f"{name}: plugin.json does not declare sessionContext")
+            continue
+        declaration_path = plugin / declaration_rel
+        try:
+            declaration = json.loads(declaration_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            failures.append(f"{name}: invalid {declaration_rel}")
+            continue
+        if declaration.get("contributors") != []:
+            failures.append(f"{name}: session context still declares contributors")
+        session_start = declaration.get("sessionStart")
+        if not isinstance(session_start, dict):
+            failures.append(f"{name}: missing sessionStart classification")
+            continue
+        if session_start.get("context") != "none":
+            failures.append(f"{name}: sessionStart is not output-free")
+        for retired in (
+            "scripts/invoke-context-contributor.sh",
+            "scripts/invoke-context-contributor.ps1",
+            "scripts/resolve_context_authority.py",
+        ):
+            if (plugin / retired).exists():
+                failures.append(f"{name}: retained {retired}")
 
-    assert {
-        "agent-index@copilot-extensions",
-        "agent-logger@copilot-extensions",
-    } <= runtime_sources
-    assert not [
-        item.as_dict()
-        for item in report.violations
-        if item.source in runtime_sources
-    ]
+    assert {"agent-index", "agent-logger"} <= names
+    assert not failures, "\n" + "\n".join(failures)
 
 
 @pytest.mark.parametrize(

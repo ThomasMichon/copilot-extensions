@@ -1,18 +1,17 @@
 # Architecture Overview
 
-How the 22 copilot-extensions plugins fit together — install topology,
+How the 21 copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. **Twelve ship a runtime** (currently
 a `uv`-built venv under a plugin-owned root such as `~/.agent-*` or
 `~/.budget-guidance`, deployed by the plugin's own installer) plus generated
 payload-local agent commands and session command glossaries; compatibility
 management wrappers remain in `~/.local/bin` during the installation-cell
-migration. **Ten are payload-only** — `efforts` (skills), `visions`
+migration. **Nine are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
 (skills), `copilot-extensions-harness` (skills + contribution-boundary hook),
 `wsl-setup` (skills), and
 `harness-knowledge` (skills), `ai-attribution` (hook + skill), and
-`delegation-guidance` (hook + skill), and `context-injection` (aggregation hook)
-deploy entirely from the marketplace
+`delegation-guidance` (hook + skill) deploy entirely from the marketplace
 payload with no installer. For per-plugin internals, follow the links in each
 section.
 
@@ -48,7 +47,6 @@ section.
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
 | [delegation-guidance](../plugins/delegation-guidance/) | Ambient coordinator-first routing hook + `delegating-work` skill | Marketplace payload (hook + scripts + skill) | The hook emits a concise owner-marked kernel at session start; detailed routing loads on demand; no runtime to install |
-| [context-injection](../plugins/context-injection/) | Compatibility session-context aggregator | Marketplace payload (hook + scripts + contributor schema) | On affected hosts, verifies one exact source-qualified marketplace authority, trust, compatible engine, complete declarations, and aggregate admission before emitting; otherwise every authority-aware producer preserves its standalone path |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -111,7 +109,7 @@ flowchart TB
       AV["agent-vault/<br/>scripts • src"]
       AI["agent-index/<br/>scripts • src"]
       AK["agent-machines/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/ • context-injection/<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
@@ -167,7 +165,7 @@ flowchart TB
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 > `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-> `ai-attribution`, `delegation-guidance`, and `context-injection` — deploy entirely from the
+> `ai-attribution` and `delegation-guidance` — deploy entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 ### Agent-facing invocation and command glossaries
@@ -183,12 +181,15 @@ sibling's payload or runtime path. The sibling owns and emits its mapping. A
 missing or ambiguous mapping is unavailable, not a reason to fall back to
 `PATH`.
 
-The complete marketplace-owned startup stack is declared rather than inferred:
-15 contributing plugins publish 21 pure contributors, and
-`context-injection` is the sole aggregate authority. Four contributors are
-context-only; eleven plugins keep restart-safe idempotent side effects direct
-while publishing only their read-only context through the authority-aware
-wrapper. The authority never reruns those direct side effects.
+The marketplace-owned startup stack is declared rather than inferred. Plugin
+hooks retain ownership of their own side effects and guidance, and no custom
+cross-plugin authority coordinates, caches, spills, or reruns those
+contributions. Guidance that must reach the agent uses the
+[session-scoped dynamic guidance](patterns/session-scoped-dynamic-guidance.md)
+pattern: a checked-in pointer directs the agent to the exact session's
+file. Native host-composed `additionalContext` may become the preferred
+dynamic convergence path only after behavior is proven at the supported
+version floor.
 
 On current Copilot CLI hosts, a successful `sessionStart` `additionalContext`
 result is not written into the durable local timeline as part of the persisted

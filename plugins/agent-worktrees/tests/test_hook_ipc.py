@@ -458,25 +458,6 @@ def test_session_start_replaces_stale_guidance_on_logical_failure(
     assert expected in content
 
 
-def test_session_guidance_declared_inputs_fit_file_budget():
-    declaration = json.loads(
-        (
-            Path(__file__).resolve().parents[1] / "session-context.json"
-        ).read_text(encoding="utf-8")
-    )
-    contributor_bytes = sum(
-        int(contributor["maxBytes"])
-        for contributor in declaration["contributors"]
-    )
-    framing_bytes = len(
-        "# Agent Worktrees session guidance\n\n\n\n\n".encode("utf-8")
-    )
-    assert (
-        contributor_bytes + framing_bytes
-        <= hook_client._SESSION_GUIDANCE_MAX_BYTES
-    )
-
-
 def test_session_start_guidance_overwrites_on_resume(
     monkeypatch, tmp_path
 ):
@@ -661,7 +642,7 @@ def test_session_start_guidance_fails_open_on_resolve_loop(
     )
 
 
-def test_session_start_main_writes_guidance_before_emitting_result(
+def test_session_start_main_folds_decision_context_and_emits_empty_result(
     monkeypatch, capsys
 ):
     payload = {"sessionId": "session-1", "cwd": str(Path.cwd())}
@@ -691,16 +672,40 @@ def test_session_start_main_writes_guidance_before_emitting_result(
     monkeypatch.setattr(
         hook_client,
         "_write_session_guidance",
-        lambda value: seen.update(guidance_payload=value) or True,
+        lambda value, *, decision_context="": (
+            seen.update(
+                guidance_payload=value, guidance_decision_context=decision_context
+            )
+            or True
+        ),
     )
 
     assert hook_client.main(["sessionStart"]) == 0
     assert seen["enrichment_calls"] == 1
     assert seen["decide_payload"] is enriched
     assert seen["guidance_payload"] is enriched
-    assert json.loads(capsys.readouterr().out) == {
-        "additionalContext": "supplement"
-    }
+    assert seen["guidance_decision_context"] == "supplement"
+    assert json.loads(capsys.readouterr().out) == {}
+
+
+def test_session_start_main_emits_empty_object_on_unhandled_exception(
+    monkeypatch, capsys
+):
+    """sessionStart must emit a single JSON object even if decide() raises.
+
+    main()'s output defaults to "{}" before any risky work runs, so an
+    exception anywhere in the try block (decide(), payload enrichment,
+    _write_session_guidance) still leaves valid stdout for the host to parse.
+    """
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"sessionId": "s"})))
+    monkeypatch.setattr(
+        hook_client,
+        "decide",
+        lambda kind, value: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    assert hook_client.main(["sessionStart"]) == 0
+    assert json.loads(capsys.readouterr().out) == {}
 
 
 def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
@@ -783,10 +788,10 @@ def test_windows_session_hook_rejects_windowsapps_python_alias():
     hooks = json.loads(
         (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
     )
-    command = hooks["hooks"]["sessionStart"][1]["powershell"]
+    command = hooks["hooks"]["sessionStart"][0]["powershell"]
     assert "WindowsApps" in command
     assert "$ran = ($LASTEXITCODE -eq 0)" in command
-    bash = hooks["hooks"]["sessionStart"][1]["bash"]
+    bash = hooks["hooks"]["sessionStart"][0]["bash"]
     assert 'if python3 "$s" sessionStart; then ran=true; fi' in bash
 
 

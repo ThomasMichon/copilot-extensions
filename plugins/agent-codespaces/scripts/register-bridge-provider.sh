@@ -13,6 +13,14 @@
 # Safe + best-effort: if the binstub isn't provisioned yet (fresh install), exit
 # 0 and let a later session drop it. Never blocks the session; never raises.
 set -uo pipefail
+session_start_json_emitted=0
+emit_session_start_json() {
+  if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
+    printf '{}'
+    session_start_json_emitted=1
+  fi
+}
+trap 'emit_session_start_json' EXIT
 
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"

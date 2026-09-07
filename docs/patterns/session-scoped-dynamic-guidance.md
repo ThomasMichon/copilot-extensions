@@ -5,10 +5,9 @@ behaviors `resilient-safety-boundary`, `ambient-delivery-fails-open`).
 
 ## Problem
 
-`sessionStart` `additionalContext` aggregation across multiple hooks -- whether
-raw competing hooks or the coordinated `context-injection` authority pattern in
-[`context-injection.md`](context-injection.md) -- is **empirically unreliable**
-in current Copilot CLI releases. This is a distinct, harder failure than the
+`sessionStart` `additionalContext` aggregation across multiple hooks is
+**empirically unreliable** in current Copilot CLI releases. This is a distinct,
+harder failure than the
 previously tracked
 [github/copilot-cli#3589](https://github.com/github/copilot-cli/issues/3589)
 ("only the last hook's `additionalContext` survives"): repeated real testing
@@ -57,10 +56,10 @@ directed by an always-loaded static instruction, is observed to succeed.
 ### 1. Static half: a checked-in pointer projection
 
 Every plugin that needs to deliver per-session dynamic guidance ships an
-ordinary static fail-safe projection through the existing
-[declarative projection mechanism](context-injection.md#project-plugin-owned-static-fail-safes-declaratively)
-(`instruction-projections.json` + `customizing-copilot:reviewing-customizations`
-sync/scan). The projected file's entire body is a minimal, literal,
+ordinary static fail-safe projection through the existing declarative
+projection mechanism (`instruction-projections.json` +
+`customizing-copilot:reviewing-customizations` sync/scan). The projected
+file's entire body is a minimal, literal,
 non-interpolated pointer:
 
 ```markdown
@@ -78,9 +77,8 @@ not exist, proceed without it -- do not treat its absence as an error.
 
 This file never embeds a session ID, host path, or other live value -- it
 instructs the *agent* to resolve one at read time, which is not interpolation
-and satisfies the existing static-instruction constraints in
-[`context-injection.md`](context-injection.md). It fails open by design: a
-missing dynamic file is explicitly a no-op, never a blocker.
+and satisfies the existing static-instruction constraints. It fails open by
+design: a missing dynamic file is explicitly a no-op, never a blocker.
 
 ### 2. Dynamic half: a session-folder file, written as a side effect
 
@@ -94,10 +92,9 @@ a **pure side effect** -- never through `additionalContext` -- to:
 using the `sessionId` supplied in the hook's own stdin payload. The write:
 
 - is atomic (write to a temp file in the same directory, then rename);
-- validates `sessionId` against the same general safe-identifier pattern the
-  shipped `context-injection` engine already uses (non-empty, restricted to
-  `[A-Za-z0-9._-]`, bounded length -- not UUID-only) and rejects a missing or
-  malformed value rather than guessing;
+- validates `sessionId` against a general safe-identifier pattern (non-empty,
+  restricted to `[A-Za-z0-9._-]`, bounded length -- not UUID-only) and rejects
+  a missing or malformed value rather than guessing;
 - is contained beneath the exact session's `session-state` root -- no
   symlink/reparse escape, no path outside `instructions/<plugin>/`;
 - uses the plugin's own topic-scoped subpath so two plugins never collide;
@@ -108,13 +105,12 @@ using the `sessionId` supplied in the hook's own stdin payload. The write:
   the static projection budget) -- this is a targeted per-session fact sheet,
   not a spill dump.
 
-The hook's own `additionalContext` output, if any, is **not required and not
-relied upon** for this content to reach the model -- the static pointer plus
-the agent's own file read is the delivery path. A plugin **may** still also
-emit an `additionalContext` best-effort value as a redundant supplementary
-attempt (in case a future Copilot CLI release fixes composition), but must
-never treat its arrival as guaranteed, and every path this pattern protects
-must work correctly with `additionalContext` completely absent.
+The hook emits exactly `{}`. The static pointer plus the agent's own file read
+is the delivery path. Direct plugin-owned `additionalContext` is activated only
+after the supported Copilot CLI version floor proves native composition across
+fresh, resume, non-interactive, and ACP paths. That future activation replaces
+the compatibility path deliberately; it is not a redundant second mechanism
+enabled in advance.
 
 ### 3. Folder trust is a hard prerequisite for repository-level hooks
 
@@ -128,29 +124,25 @@ trusted (e.g. at worktree-creation time) before depending on this pattern, and
 should treat "the dynamic file never appears" as a trust-gap symptom to check
 first, not a delivery-mechanism failure.
 
-### 4. Status of `additionalContext` aggregation
+### 4. Current and future dynamic convergence
 
-The `context-injection` authority in [`context-injection.md`](context-injection.md)
-remains a documented, tested engine and is not being removed -- some launch
-paths and some low-stakes advisory content may still benefit from a best-effort
-`additionalContext` attempt. But it must not be treated as the **primary or
-sole** delivery channel for guidance a harness actually depends on. Until
-upstream Copilot CLI lands a fix for `sessionStart` `additionalContext`
-composition ([github/copilot-cli#3589](https://github.com/github/copilot-cli/issues/3589)
-and the complete-loss mode this document adds evidence for) and that fix
-reaches the supported version floor, **every plugin
-delivering guidance a harness depends on must implement the static-pointer +
-session-folder-file pattern above**, independent of whatever `additionalContext`
-contribution it also attempts.
+The current reliable delivery path is the checked-in static pointer plus the
+exact-session guidance file above. A custom aggregation, rendezvous, cache, or
+spill authority is not part of this pattern and must not be recreated beside
+the host. Native host-composed `additionalContext` is the only future dynamic
+convergence path: it may become preferred after upstream behavior is proven at
+the supported version floor, but no current guidance may depend on its arrival.
+Until then, every plugin delivering guidance a harness depends on must implement
+the static-pointer plus session-folder-file pattern and emit no model context
+from its writer hook.
 
 ## Rationale
 
-Moving the "many independent contributors, one result" problem from
-host-mediated hook-output composition (observed unreliable) to agent-initiated,
-statically-instructed file reads (observed reliable) sidesteps the exact
-mechanism that is failing, without waiting on an upstream runtime fix. It also
-composes cleanly with existing `applyTo`-scoped instruction file support and
-the already-shipped projection sync/scan tooling, so no new distribution or
+Moving delivery from host-mediated hook-output composition (observed unreliable)
+to agent-initiated, statically-instructed file reads (observed reliable)
+sidesteps the exact mechanism that is failing, without waiting on an upstream
+runtime fix. It also composes cleanly with existing `applyTo`-scoped instruction
+file support and the projection sync/scan tooling, so no new distribution or
 review mechanism is needed -- only a documented content convention.
 
 ## Exemplars
@@ -159,36 +151,29 @@ review mechanism is needed -- only a documented content convention.
   `instructions/session-guidance.instructions.md` and writes the matching
   session-scoped file from its payload-local `sessionStart` hook client. The
   file combines the attributable command catalog with the current worktree
-  binding while the existing `session-context.json` contributors remain as a
-  best-effort supplementary channel.
-- [`agent-dispatch`](../../plugins/agent-dispatch/) adds a dedicated,
-  side-effect-only `sessionStart` hook entry (`write-session-guidance.ps1` /
-  `.sh`, backed by the portable `write_session_guidance.py`) that invokes its
-  existing `focus-guidance` and `emit-command-catalog` scripts fresh and
-  writes their combined non-aggregate output to the session-scoped file. The
-  declared `session-context.json` contributors keep using the shorter
-  `--aggregate` variant as the best-effort supplementary channel.
-- [`ai-attribution`](../../plugins/ai-attribution/) adds the same dedicated
-  side-effect-only hook shape around its existing `emit-policy` scripts. The
-  session-scoped file carries the current repository-aware publication policy,
-  while the existing `publication-policy` contributor retains its compact
-  `--aggregate` kernel as a best-effort supplementary channel.
-- [`agent-ssh`](../../plugins/agent-ssh/) uses a dedicated side-effect-only
-  hook to invoke its independent `emit-command-catalog` and
-  `emit-mesh-pointer` scripts in contributor order. The session-scoped file
-  always carries any available attributable command catalog and conditionally
-  adds the repository-gated mesh pointer, while both original contributors
-  remain best-effort supplementary channels.
-- [`context-handoff`](../../plugins/context-handoff/) uses a dedicated
-  side-effect-only hook to invoke its existing continuity producer with
-  `--own-only`, writing the full plugin-owned continuity contract without
-  duplicating the adjacent agent-worktrees compatibility catalog. Its compact
-  `--aggregate` contributor remains a best-effort supplementary channel.
+  binding.
+- Runtime command plugins such as
+  [`agent-bridge`](../../plugins/agent-bridge/),
+  [`agent-codespaces`](../../plugins/agent-codespaces/),
+  [`agent-containers`](../../plugins/agent-containers/),
+  [`agent-dispatch`](../../plugins/agent-dispatch/),
+  [`agent-index`](../../plugins/agent-index/),
+  [`agent-logger`](../../plugins/agent-logger/),
+  [`agent-machines`](../../plugins/agent-machines/),
+  [`agent-mcp`](../../plugins/agent-mcp/),
+  [`agent-ssh`](../../plugins/agent-ssh/), and
+  [`agent-vault`](../../plugins/agent-vault/) use a side-effect-only writer
+  hook backed by a portable `write_session_guidance.py`. Each invokes only its
+  own emitters and writes only its own session-scoped file.
+- [`ai-attribution`](../../plugins/ai-attribution/) and
+  [`context-handoff`](../../plugins/context-handoff/) use the same writer shape
+  for repository-aware publication policy and the continuity contract.
+- Static-only plugins such as
+  [`delegation-guidance`](../../plugins/delegation-guidance/) and
+  [`copilot-extensions-harness`](../../plugins/copilot-extensions-harness/)
+  project reviewed fallback policy without a dynamic writer.
 
 ## See Also
 
-- [`context-injection.md`](context-injection.md) -- the aggregation authority
-  this pattern now supersedes as the primary delivery path, and the static
-  fail-safe projection mechanism this pattern reuses for its static half.
 - Vision: `visions/harness-guidance/README.md`
 - [github/copilot-cli#3589](https://github.com/github/copilot-cli/issues/3589)

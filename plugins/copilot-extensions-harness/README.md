@@ -6,8 +6,10 @@ any control repo and your agent knows how to **contribute** changes to the
 plugins, **diagnose** the deployed runtimes, and **validate** them on a fresh box,
 without you hand-writing a per-repo guide or installing a runtime.
 
-At session start, the plugin injects one concise pointer to its contribution
-boundary. The full guide remains versioned at
+The plugin declares a checked-in contribution-boundary projection. Adopting
+repositories synchronize that projection with the
+`customizing-copilot:reviewing-customizations` manager; it remains available
+without a competing `sessionStart` output. The full guide remains versioned at
 [`references/contribution-ground-rules.md`](references/contribution-ground-rules.md):
 generic, organization-neutral capabilities are welcome; personal or
 organization-specific needs are routed elsewhere.
@@ -34,8 +36,10 @@ credentials apply to Azure DevOps rather than this GitHub repository.
 ## Enable
 
 No runtime, binstub, service, or setup script is involved. Enabling the plugin is
-the whole install; restart the session so the skills, agent, and contribution
-boundary hook are scanned.
+the whole install; restart the session so the skills and agent are scanned.
+Synchronize the declared instruction projection in each adopting repository so
+the contribution boundary is available on launch paths that load checked-in
+instructions.
 
 In a control repo, declare the marketplace (if it is not already declared) and
 enable the plugin in `.github/copilot/settings.json`:
@@ -55,6 +59,11 @@ enable the plugin in `.github/copilot/settings.json`:
 
 Then use the skills directly by asking to contribute to copilot-extensions,
 diagnose an installed plugin/runtime, or validate a plugin in the clean room.
+
+The retained cross-platform boundary emitter is not registered as a hook. It is
+the policy producer seam for a future direct plugin-owned `additionalContext`
+path, which may be activated only after native host composition is proven at the
+supported Copilot CLI version floor.
 
 ## The `<repo>-harness` standard
 

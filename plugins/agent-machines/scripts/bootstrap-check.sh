@@ -17,6 +17,14 @@
 
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
+session_start_json_emitted=0
+emit_session_start_json() {
+  if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
+    printf '{}'
+    session_start_json_emitted=1
+  fi
+}
+trap 'emit_session_start_json' EXIT
 legacy_mutation_allowed() {
   local probe="$ScriptDir/installation-context/legacy-entrypoint-probe.sh"
   [ -f "$probe" ] || {
@@ -155,7 +163,7 @@ if [ ! -f "$Manifest" ]; then
     if [ "$ContextActive" = 1 ]; then
       init="$PluginDir/scripts/init.sh"
       if [ -f "$init" ]; then
-        echo "[agent-machines] active cell has no runtime; reconciling in background..."
+        echo "[agent-machines] active cell has no runtime; reconciling in background..." >&2
         nohup bash "$init" cell-provision \
           --context "$ContextPath" \
           --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1 &
@@ -248,7 +256,7 @@ print("\x1c".join((
   fi
   init="$PluginDir/scripts/init.sh"
   [ -f "$init" ] || exit 0
-  echo "[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background..."
+  echo "[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background..." >&2
   nohup bash "$init" cell-provision \
     --context "$ContextPath" \
     --expected-marketplace-id "$ContextMarketplaceId" >/dev/null 2>&1 &
@@ -273,7 +281,7 @@ init="$pluginDir/scripts/init.sh"
 [ -f "$init" ] || exit 0
 
 legacy_mutation_allowed || exit 0
-echo "[agent-machines] runtime $deployed -> $current; reconciling in background..."
+echo "[agent-machines] runtime $deployed -> $current; reconciling in background..." >&2
 nohup bash "$init" >/dev/null 2>&1 &
 
 exit 0

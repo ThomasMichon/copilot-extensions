@@ -155,10 +155,7 @@ def test_bash_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         home.mkdir(parents=True)
         cwd.mkdir()
         command = str(hook["bash"])
-        if (
-            "invoke-context-contributor.sh" in command
-            or "hook_client.py" in command
-        ):
+        if "hook_client.py" in command:
             continue
         _stage_stub(command, home, cwd, "exit 23")
 
@@ -479,10 +476,7 @@ def test_powershell_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         script = tmp_path / str(index) / "stub.ps1"
         script.write_text("exit 23\n", encoding="utf-8")
         raw_command = str(hook["powershell"])
-        if (
-            "invoke-context-contributor.ps1" in raw_command
-            or "hook_client.py" in raw_command
-        ):
+        if "hook_client.py" in raw_command:
             continue
         command = _powershell_wrapper(raw_command, script)
 

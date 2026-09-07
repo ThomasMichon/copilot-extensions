@@ -25,14 +25,12 @@ def test_session_start_hooks_use_payload_root_and_fail_open():
     hooks = json.loads((PLUGIN_ROOT / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
     expected_order = [
-        "readiness-context",
         "bootstrap-check",
-        "emit-command-catalog",
         "register-bridge-provider",
-        "emit-codespace-map",
+        "write-session-guidance",
     ]
 
-    assert len(session_hooks) == 5
+    assert len(session_hooks) == 3
     assert [
         next(name for name in expected_order if name in hook["bash"])
         for hook in session_hooks
@@ -42,20 +40,6 @@ def test_session_start_hooks_use_payload_root_and_fail_open():
             command = hook[shell]
             assert "COPILOT_PLUGIN_ROOT" in command
             assert "'{}'" in command
-
-
-def test_codespace_map_timeout_covers_registry_cold_path():
-    declaration = json.loads(
-        (PLUGIN_ROOT / "session-context.json").read_text(encoding="utf-8")
-    )
-    contributor = next(
-        item
-        for item in declaration["contributors"]
-        if item["id"] == "codespace-map"
-    )
-
-    assert 8 <= contributor["timeoutSeconds"] <= 15
-
 
 def test_provider_management_boundary_stays_explicit():
     text = _read("codespaces-lifecycle")
