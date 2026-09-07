@@ -155,7 +155,7 @@ def _healthy_status(output: str) -> bool:
         "host not running",
         "NOT serving",
         "watchdog not running",
-        "startup shortcut missing",
+        "dispatch companion launch config missing",
         "durable host identity: pending",
     )
     if any(marker.casefold() in output.casefold() for marker in unhealthy):

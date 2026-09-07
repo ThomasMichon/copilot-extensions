@@ -1,0 +1,25 @@
+{
+  "name": "agent-ssh-dtssh-host",
+  "kind": "plugin-companion",
+  "spec": {
+    "command": [
+      "scripts/dtssh-companion.ps1",
+      "start"
+    ],
+    "stop_command": [
+      "scripts/dtssh-companion.ps1",
+      "stop"
+    ],
+    "config_provider": [
+      "scripts/companion-provider.py"
+    ],
+    "health_probe": [
+      "scripts/dtssh-companion.ps1",
+      "health"
+    ],
+    "config_timeout_seconds": 15,
+    "health_timeout_seconds": 20,
+    "startup_timeout_seconds": 120,
+    "stop_timeout_seconds": 20
+  }
+}

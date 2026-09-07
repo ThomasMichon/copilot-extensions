@@ -49,6 +49,13 @@ script's `-HostKeyBackupRoot` parameter selects an explicit location. Partial,
 corrupt, or conflicting identities fail closed instead of silently rotating a
 key that clients have pinned.
 
+The dtssh launcher now also persists a local dispatch-companion config under
+`%LOCALAPPDATA%\agent-ssh-dtssh`, and the plugin's session-start hook publishes
+an attributed `agent-dispatch` companion declaration. On a configured Windows
+host, the already-durable interactive-session dispatch coordinator can
+re-launch the watchdog even when the historical Startup-folder shortcut did not
+fire for that logon or the launcher died later in the session.
+
 `mesh-status [--json]` is a fail-open view of a calling repository's
 `machines.yaml`. In addition to SSH readiness and environments, it shows the
 optional static machine metadata shared with agent-worktrees and agent-bridge:
