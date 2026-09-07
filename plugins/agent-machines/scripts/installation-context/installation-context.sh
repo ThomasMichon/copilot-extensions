@@ -2712,7 +2712,10 @@ provision_runtime_slot() {
     reservation="${desired/copilot-extensions.runtime-slot-ownership/copilot-extensions.runtime-slot-reservation}"
     reservation="${reservation%\}},\"generation\":$generation}"
     if ! mkdir -- "$RUNTIME_SLOT_ROOT" 2>/dev/null; then
-        fail "Runtime slot appeared during publication; refusing replacement."
+        if [[ -e "$RUNTIME_SLOT_ROOT" ]]; then
+            fail "Runtime slot appeared during publication; refusing replacement."
+        fi
+        fail "Cannot create runtime slot '$RUNTIME_SLOT_ROOT'."
     fi
     TEMP_DIRS+=("$RUNTIME_SLOT_ROOT")
     # The first final-slot entry is evidence, never an unattributed temporary file.
