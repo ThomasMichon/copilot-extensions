@@ -62,6 +62,16 @@ def registry_root(legacy_root: Path | None = None) -> Path:
     )
 
 
+def installation_context() -> dict | None:
+    """Return the validated explicit context, or ``None`` in legacy mode."""
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        return None
+    return _helper().resolve_registry_context(
+        payload_root=_payload_root(),
+        environment=os.environ,
+    )
+
+
 def registry_path(filename: str, *, legacy_root: Path | None = None) -> Path:
     """Return one file beneath the validated coupled-registry root."""
     return registry_root(legacy_root) / filename

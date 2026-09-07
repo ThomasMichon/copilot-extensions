@@ -28,8 +28,8 @@
     "sessionEnd": [
       {
         "type": "command",
-        "powershell": "if (-not $env:COPILOT_EXTENSIONS_CONTEXT) { try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\deregister-session.ps1\"; if (Test-Path $s) { & $s } }",
-        "bash": "if [ -z \"${COPILOT_EXTENSIONS_CONTEXT:-}\" ]; then cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; s=\"$HOME/.agent-worktrees/bin/deregister-session.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else :; fi; fi",
+        "powershell": "try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop } catch { try { Set-Location -LiteralPath ([IO.Path]::GetPathRoot((Get-Location).Path)) -ErrorAction Stop } catch {} }; try { [IO.Directory]::SetCurrentDirectory((Get-Location).Path) } catch {}; if ($env:COPILOT_EXTENSIONS_CONTEXT) { $py = Get-Command python -CommandType Application -All -ErrorAction SilentlyContinue | Where-Object { $_.Source -notlike '*\\WindowsApps\\*' } | Select-Object -First 1 -ExpandProperty Source; $s=if ($env:COPILOT_PLUGIN_ROOT) { Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\\hook_client.py' } else { '' }; if ($py -and $s -and (Test-Path $s)) { & $py $s sessionEnd } } else { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\deregister-session.ps1\"; if (Test-Path $s) { & $s } }",
+        "bash": "cd \"$HOME\" 2>/dev/null || cd / 2>/dev/null || :; if [ -n \"${COPILOT_EXTENSIONS_CONTEXT:-}\" ]; then if [ -n \"${COPILOT_PLUGIN_ROOT:-}\" ]; then s=\"$COPILOT_PLUGIN_ROOT/scripts/hook_client.py\"; else s=\"\"; fi; if command -v python3 >/dev/null 2>&1 && [ -f \"$s\" ]; then python3 \"$s\" sessionEnd || true; fi; else s=\"$HOME/.agent-worktrees/bin/deregister-session.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else :; fi; fi",
         "timeoutSec": 10
       }
     ]

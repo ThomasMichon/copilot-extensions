@@ -67,6 +67,26 @@ def test_flat_plan_passes_through_unchanged():
     assert _unwrap(flat_in) == flat_in
 
 
+def test_explicit_context_recovery_never_reads_legacy_project_config():
+    posix = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+    powershell = _LAUNCH_PS1.read_text(encoding="utf-8")
+
+    assert (
+        '[[ -n "$LAUNCH_PROJECT" && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]'
+        in posix
+    )
+    assert (
+        "$script:LaunchProject -and -not $env:COPILOT_EXTENSIONS_CONTEXT"
+        in powershell
+    )
+    assert "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR" in posix
+    assert "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR" in powershell
+    assert "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT" in posix
+    assert "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT" in powershell
+    assert 'dirname -- "$COPILOT_EXTENSIONS_CONTEXT"' in posix
+    assert "Split-Path -Parent" in powershell
+
+
 def test_none_action_plan_passes_through():
     assert _unwrap({"action": "none", "exit_code": 0}) == {
         "action": "none",

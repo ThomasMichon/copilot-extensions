@@ -159,8 +159,25 @@ def cmd_launch(argv: list[str]) -> int:
         else passthrough
     )
 
-    # Resolve launch script path from installed location
-    inst_dir = cfg.install_dir()
+    # Resolve launch support from the same validated runtime root that entered
+    # this Python process. An explicit cell must never fall back to legacy.
+    from . import registry_paths
+
+    context = registry_paths.installation_context()
+    inst_dir = (
+        Path(context["pluginRoot"])
+        if context is not None
+        else cfg.install_dir()
+    )
+    if context is not None:
+        _env_set("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", str(inst_dir))
+        try:
+            _env_set(
+                "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
+                cfg.load_config(project=launch_project).default_repo.anchor,
+            )
+        except (OSError, RuntimeError, ValueError):
+            os.environ.pop("AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR", None)
     plat = cfg.detect_platform()
 
     if plat == "windows":
@@ -169,7 +186,7 @@ def cmd_launch(argv: list[str]) -> int:
         launch_script = inst_dir / "bin" / "launch-session.sh"
 
     # Fall back to legacy location
-    if not launch_script.exists():
+    if not launch_script.exists() and context is None:
         legacy_name = "launch-session.sh"
         legacy = Path.home() / f".{cfg.project_name()}" / "bin" / legacy_name
         if legacy.exists():
@@ -14171,6 +14188,53 @@ def _cleanup_stale_instructions(proj_dir: Path) -> None:
                 pass
 
 
+def _prepare_namespaced_project_state(
+    project: str,
+    repo_dir: Path,
+    platform_name: str,
+) -> bool:
+    """Publish repository identity before the first cell-local state lookup."""
+    from . import project_state
+
+    if not project_state.namespaced():
+        return True
+    from . import repos as repos_mod
+
+    existing = repos_mod.find_repo(project)
+    remote = ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            remote = result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if not remote and existing is not None:
+        remote = existing.remote
+    try:
+        repos_mod.add_repo(
+            project,
+            str(repo_dir),
+            repo_class=(
+                existing.repo_class
+                if existing is not None and existing.repo_class != "reference"
+                else "worktree"
+            ),
+            remote=remote,
+            agent=existing.agent if existing is not None else True,
+            plat=platform_name,
+        )
+        project_state.ensure_project_state(project)
+    except ValueError as error:
+        output.err(f"Could not establish repository identity for {project}: {error}")
+        return False
+    return True
+
+
 def _ensure_ado_pr_cli(pr_cfg) -> None:
     """Provision the Azure DevOps CLI prereq for a repo that manages PRs via ADO.
 
@@ -14226,6 +14290,9 @@ def cmd_install(args: argparse.Namespace) -> int:
     runtime_dir = cfg._home() / ".agent-worktrees"
     for d in [runtime_dir, runtime_dir / "bin", inst.local_bin()]:
         d.mkdir(parents=True, exist_ok=True)
+
+    if not _prepare_namespaced_project_state(project, repo_dir, plat):
+        return 1
 
     # Create per-project directories
     proj_dir = cfg.project_dir(project)
@@ -14653,6 +14720,9 @@ def cmd_register(args: argparse.Namespace) -> int:
         machine_entry = _validate_machine_registry(repo_dir, machine)
         if machine_entry is None:
             return 1
+
+    if not _prepare_namespaced_project_state(project, repo_dir, plat):
+        return 1
 
     # Create project directory
     proj_dir = cfg.project_dir(project)
