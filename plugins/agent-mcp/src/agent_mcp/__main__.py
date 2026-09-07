@@ -356,7 +356,10 @@ def _try_serve_materialize(bridge_ref: str, *, no_serve: bool) -> list[dict] | N
         resp = asyncio.run(ipc.list_tools_via_socket(socket, ref))
     except OSError:
         return None  # socket vanished/refused -> fall back to cold path
-    if not resp.get("ok"):
+    if not isinstance(resp, dict) or not resp.get("ok"):
+        # A malformed/skewed daemon could return non-dict JSON in principle;
+        # never let request_via_socket's raw parsed value hit resp.get()
+        # unguarded, only to crash instead of falling back to the cold path.
         return None  # let the cold path re-derive and report the failure
     tools = resp.get("tools")
     if not isinstance(tools, list):
