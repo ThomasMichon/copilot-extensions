@@ -13,6 +13,7 @@ param(
     [string]$User,
     [switch]$NoStart,
     [switch]$SkipLogin,
+    [switch]$ForegroundLauncher,
     [string]$DtsshVersion,
     [string]$HostKeyBackupRoot
 )
@@ -51,6 +52,7 @@ $InstallerSrc = $PSCommandPath
 $InstallerDst = Join-Path $InstallDir 'install-host.ps1'
 $LauncherSrc = Join-Path $PSScriptRoot 'dtssh-host-launcher.ps1'
 $LauncherDst = Join-Path $InstallDir 'dtssh-host-launcher.ps1'
+$CompanionConfigPath = Join-Path $InstallDir 'dispatch-companion.json'
 $StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'agent-ssh-dtssh-host.lnk'
 $HostStateDir = Join-Path $env:LOCALAPPDATA 'dtssh\host'
 
@@ -385,6 +387,44 @@ function Add-UserPath([string]$PathToAdd) {
     if ($env:Path -notlike "*$PathToAdd*") { $env:Path = "$PathToAdd;$env:Path" }
 }
 
+function Write-DispatchCompanionConfig {
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $payload = [ordered]@{
+        schema_version = 1
+        alias = $Alias
+        port = $Port
+        tunnel = if ($Tunnel) { $Tunnel } else { $null }
+        user = if ($User) { $User } else { $null }
+        host_key_backup_root = Resolve-DurableHostIdentityRoot
+    } | ConvertTo-Json
+    $temporary = "$CompanionConfigPath.$PID.tmp"
+    $backup = "$CompanionConfigPath.$PID.bak"
+    [IO.File]::WriteAllText(
+        $temporary,
+        $payload,
+        [Text.UTF8Encoding]::new($false)
+    )
+    try {
+        if (Test-Path -LiteralPath $CompanionConfigPath) {
+            [IO.File]::Replace($temporary, $CompanionConfigPath, $backup, $true)
+        } else {
+            try {
+                [IO.File]::Move($temporary, $CompanionConfigPath)
+            } catch [IO.IOException] {
+                if (-not (Test-Path -LiteralPath $CompanionConfigPath)) { throw }
+                [IO.File]::Replace($temporary, $CompanionConfigPath, $backup, $true)
+            }
+        }
+    } finally {
+        Remove-Item -LiteralPath $temporary, $backup -Force `
+            -ErrorAction SilentlyContinue
+    }
+}
+
+function Remove-DispatchCompanionConfig {
+    Remove-Item -LiteralPath $CompanionConfigPath -Force -ErrorAction SilentlyContinue
+}
+
 function Install-Dtssh {
     <#
       Install dtssh, or -- on -Force (the `update` action) -- REPLACE an
@@ -588,11 +628,21 @@ function Install-Shortcut {
 }
 
 function Start-HostLauncher {
+    param([switch]$Foreground)
     if (Get-HostProcess) { Write-Host "dtssh host already running"; return }
     if (-not (Test-Path $LauncherDst)) { throw "Launcher not installed: $LauncherDst" }
     $args = @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$LauncherDst`"", '-Alias', $Alias, '-Port', "$Port")
     if ($Tunnel) { $args += @('-Tunnel', $Tunnel) }
     if ($User) { $args += @('-User', $User) }
+    if ($Foreground) {
+        Push-Location $InstallDir
+        try {
+            & (Get-Command pwsh).Source @args
+        } finally {
+            Pop-Location
+        }
+        return
+    }
     # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
     # handoff and can flash a console (windows-launch-hardening #786).
     Start-Process -FilePath 'conhost.exe' `
@@ -676,6 +726,7 @@ switch ($Action) {
         Install-OpenSSHBinaries
         Assert-Login
         Install-Shortcut
+        Write-DispatchCompanionConfig
         if (-not $NoStart) { Start-HostLauncher }
         # A fresh install creates its host key during first launch. Persist it
         # immediately so the next convergence can restore the same identity.
@@ -686,14 +737,20 @@ switch ($Action) {
         Stop-Launcher
         Stop-HostLauncher
         if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
+        Remove-DispatchCompanionConfig
         Write-Host "Removed launcher. Existing dtssh tunnel/client state is left intact."
     }
     'start' {
         Install-HostIdentityValidationTools
         Sync-DtsshHostIdentity
         Install-OpenSSHBinaries
-        Start-HostLauncher
-        Wait-DtsshHostIdentity
+        Write-DispatchCompanionConfig
+        if ($ForegroundLauncher) {
+            Start-HostLauncher -Foreground
+        } else {
+            Start-HostLauncher
+            Wait-DtsshHostIdentity
+        }
     }
     'stop' { Stop-Launcher; Stop-HostLauncher }
     'status' {
@@ -744,7 +801,16 @@ switch ($Action) {
                 }
             }
         }
-        if (Test-Path $StartupLnk) { Write-Host "startup shortcut: $StartupLnk" } else { Write-Warning 'startup shortcut missing' }
+        if (Test-Path $CompanionConfigPath) {
+            Write-Host "dispatch companion config: $CompanionConfigPath"
+        } else {
+            Write-Warning 'dispatch companion launch config missing'
+        }
+        if (Test-Path $StartupLnk) {
+            Write-Host "startup shortcut: $StartupLnk"
+        } else {
+            Write-Warning 'startup shortcut missing (dispatch companion supervision can still restore launcher presence)'
+        }
         $backupDirectory = Get-HostIdentityDirectory
         if (Test-Path -LiteralPath $backupDirectory -PathType Container) {
             Write-Host "durable host identity: $backupDirectory"
