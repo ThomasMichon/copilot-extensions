@@ -11,6 +11,7 @@ safe.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import types
 from pathlib import Path
@@ -253,6 +254,79 @@ def test_prelaunch_selected_context_uses_validated_installer_environment(
     assert update["unset_environment"] == list(reconcile._RUNTIME_ENV_UNSET)
     expected_flag = "-InstallDir" if m.platform.system() == "Windows" else "--install-dir"
     assert update["argv"][-2:] == [expected_flag, str(cell_root)]
+
+
+def test_prelaunch_uses_marketplace_fingerprint_staleness_for_marketplace_kind(
+    tmp_path,
+    monkeypatch,
+    plugin_dir,
+):
+    """#2174: a `marketplace`-kind manifest must be staleness-checked via the
+    content-fingerprint comparison, never the git-commit-based check_staleness
+    -- which always reads "unknown" for a marketplace deploy (it never has a
+    real commit recorded) and would therefore force the full self-update
+    pipeline to re-run on every single launch, even when nothing changed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    legacy_root = tmp_path / "legacy"
+    legacy_root.mkdir()
+    (legacy_root / "deploy-manifest.json").write_text(
+        json.dumps(
+            {"source": {"kind": "marketplace", "payload_fingerprint": "abc"}}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(service_paths=None)
+        ),
+    )
+    monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
+    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        reconcile,
+        "core_installed_payload_dir",
+        lambda name: plugin_dir,
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "resolve_runtime_installation",
+        lambda name, selected_plugin_dir, **kwargs: (
+            reconcile.RuntimeInstallationResolution(
+                runtime_root=legacy_root,
+                context=None,
+                actual_mode="legacy",
+                desired_mode="legacy",
+                status="ready",
+                reason="policy-default-false",
+            )
+        ),
+    )
+    calls: dict[str, list] = {"staleness": [], "marketplace": []}
+    monkeypatch.setattr(
+        m.svc,
+        "check_staleness",
+        lambda *a: calls["staleness"].append(a) or "unknown",
+    )
+    monkeypatch.setattr(
+        m.svc,
+        "check_marketplace_staleness",
+        lambda *a: calls["marketplace"].append(a) or "current",
+    )
+
+    plan = m.plan_pre_launch()
+
+    assert calls["marketplace"], (
+        "must use the fingerprint check for a marketplace manifest"
+    )
+    assert not calls["staleness"], (
+        "must never use the git-commit check for a marketplace manifest"
+    )
+    assert plan["action"] == "continue"
 
 
 def test_prelaunch_legacy_default_uses_conventional_runtime(

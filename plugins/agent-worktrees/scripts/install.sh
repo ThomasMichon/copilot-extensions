@@ -602,6 +602,33 @@ _versioned_mark_complete() {
     "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
 }
 
+_test_slot_already_complete() {
+    # "Create forward, never touch an already-activated slot" gate (#2174): an
+    # already-completed slot whose content hash still matches the current
+    # payload must be a true no-op -- deploy_venv/deploy_package must never
+    # reinstall into it. Without this, `update` unconditionally reinstalled
+    # into VENV_DIR on every invocation, including the CURRENTLY ACTIVE, live
+    # slot (current-version / last-known-good already point at it, and a
+    # long-lived process such as the status-monitor daemon may be running out
+    # of it) -- an in-place reinstall then collides with any file the running
+    # interpreter holds open. Returns 0 (true) only when the exact target
+    # version's slot is present, healthy (has a valid completion marker), and
+    # its recorded payload hash matches the CURRENT source tree -- i.e.
+    # nothing to do. No-op (1/false, forcing the normal build path) in legacy
+    # mode or when the bootstrap python / versioned_runtime.py helper is
+    # unavailable, so a missing prerequisite never silently skips a real
+    # build.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 1
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    local ph
+    ph="$(_payload_hash)"
+    [[ -n "$ph" ]] || return 1
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" is-complete "$SRC_VERSION" --expect-hash "$ph" >/dev/null 2>&1
+}
+
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
 # A runtime footprint's source is inferred from where the installer runs.
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
@@ -1164,6 +1191,27 @@ write_deploy_manifest() {
         [[ -n "$(git -C "$repo_root" status --porcelain -- plugins/agent-worktrees/ 2>/dev/null)" ]] && dirty="true"
     fi
 
+    # Content fingerprint (#2174): a `marketplace` deploy never has a git
+    # `commit` to compare against (it isn't a git checkout the launcher's
+    # repo_dir can `git log`), so the staleness check falls back to comparing
+    # this fingerprint against a fresh one of the current payload dir. Reuse
+    # the canonical Python implementation (`update_stage.fingerprint`) via the
+    # just-deployed venv rather than reimplementing the hash in bash, so the
+    # two sides can never drift apart. Best-effort: a failure here must never
+    # fail the deploy -- the staleness check already treats a missing
+    # fingerprint as "unknown" and behaves exactly as it did before this field
+    # existed.
+    local payload_fingerprint="null"
+    if [[ -x "$VENV_PYTHON" ]]; then
+        local fp
+        fp="$("$VENV_PYTHON" -c "
+from agent_worktrees.update_stage import fingerprint
+from pathlib import Path
+print(fingerprint(Path('$stable_plugin')))
+" 2>/dev/null || true)"
+        [[ -n "$fp" ]] && payload_fingerprint="\"$fp\""
+    fi
+
     local tmp="$manifest_path.tmp"
     cat > "$tmp" <<EOF
 {
@@ -1179,7 +1227,8 @@ write_deploy_manifest() {
     "version": "$ver",
     "commit": $commit,
     "branch": $branch,
-    "dirty": $dirty
+    "dirty": $dirty,
+    "payload_fingerprint": $payload_fingerprint
   },
   "venv": "$LINK_DIR",
   "runtime": "python"
@@ -1750,8 +1799,12 @@ case "$ACTION" in
         _ensure_uv_index
         mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
         deploy_runtime_resolvers || exit 1
-        deploy_venv || exit 1
-        deploy_package || exit 1
+        if _test_slot_already_complete; then
+            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
+        else
+            deploy_venv || exit 1
+            deploy_package || exit 1
+        fi
         _versioned_activate || exit 1
         deploy_tool_binstub
         write_deploy_manifest
@@ -1794,8 +1847,12 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        deploy_venv || exit 1
-        deploy_package || exit 1
+        if _test_slot_already_complete; then
+            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
+        else
+            deploy_venv || exit 1
+            deploy_package || exit 1
+        fi
         deploy_wrappers || exit 1
         _versioned_activate || exit 1
         if $CONTEXTUAL_INSTALL; then
@@ -2060,8 +2117,12 @@ case "$ACTION" in
 
         if $CONTEXTUAL_INSTALL; then
             mkdir -p "$INSTALL_DIR" "$BIN_DIR"
-            deploy_venv || exit 1
-            deploy_package || exit 1
+            if _test_slot_already_complete; then
+                skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
+            else
+                deploy_venv || exit 1
+                deploy_package || exit 1
+            fi
             deploy_wrappers || exit 1
             _versioned_activate || exit 1
             remove_legacy_scripts
@@ -2076,8 +2137,12 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        deploy_venv || exit 1
-        deploy_package || exit 1
+        if _test_slot_already_complete; then
+            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
+        else
+            deploy_venv || exit 1
+            deploy_package || exit 1
+        fi
         deploy_wrappers || exit 1
         _versioned_activate || exit 1
         remove_legacy_scripts
