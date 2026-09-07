@@ -74,21 +74,37 @@ the work.
 - You reach a natural stopping point and want to preserve a baton before the
   conversation gets tighter.
 
-## Default behavior: compose, save, ask
+## Two triggers, two gates
 
-The normal flow is:
+### 1. Context-pressure-driven handoff: trigger directly
+
+When context pressure is the reason for handing off and the objective still has
+more work left to do:
 
 1. **Call `generate_handoff_prompt`.**
 2. **Compose the markdown brief** using the effort-backed shape when a valid
    open active effort exists, otherwise the full standalone shape.
 3. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
    short handoff seed.
-4. **Ask the user** whether to continue via handoff, phrased so they can answer
-   briefly (for example, "sure").
-5. **Call `trigger_handoff` only after that yes.**
+4. **Call `trigger_handoff` immediately.**
 
-Only skip the ask-and-wait step when **autopilot** is active or the user
-already explicitly pre-authorized automatic handoff triggering.
+Do **not** ask the user for confirmation first on this path. Running low on
+context while work remains is sufficient justification by itself.
+
+### 2. Turn-end / follow-ups handoff: compose, save, ask
+
+When you have completed the requested work and would otherwise end the turn by
+listing a set of follow-up ideas or questions:
+
+1. **Call `generate_handoff_prompt`.**
+2. **Compose the markdown brief.**
+3. **Call `save_handoff_prompt`.**
+4. **Replace the usual follow-up list** with one short, low-friction offer to
+   continue via handoff.
+5. **Call `trigger_handoff` only after the user says yes.**
+
+Only this turn-end follow-up path is skippable via **autopilot** or prior
+explicit pre-authorization.
 
 ## Efforts + handoffs
 
@@ -107,8 +123,12 @@ blockers, decisions, in-flight work, and required confirmations.
 
 ## `trigger_handoff`
 
-`trigger_handoff` is the explicit "arm pickup" step. Use it only after user
-approval, or in autopilot / pre-authorized mode.
+`trigger_handoff` is the explicit "arm pickup" step.
+
+- For a **context-pressure-driven** handoff with work still left to do, call it
+  immediately after `save_handoff_prompt`.
+- For a **turn-end / follow-ups** handoff, call it only after the user says yes,
+  unless autopilot or prior authorization already covers that path.
 
 It may either:
 

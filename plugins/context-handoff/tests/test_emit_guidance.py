@@ -145,6 +145,8 @@ def test_bash_emits_owned_bounded_continuity_guidance() -> None:
     assert "do not narrow investigation, planning, implementation" in context
     assert "compose and store the baton safely" in context
     assert "trigger_handoff" in context
+    assert "do not ask first" in context
+    assert "ending the turn with proposed follow-ups" in context
     assert "only signals pickup and never performs process management" in context
     assert "Consuming or producing a handoff is setup or progress, never completion" in context
     assert "one slice of the larger effort" in context
@@ -183,6 +185,8 @@ def test_aggregate_mode_is_owned_compact_and_cross_platform() -> None:
     assert context.startswith("[owner: context-handoff@")
     assert "handoff is progress, never completion" in context
     assert "trigger_handoff" in context
+    assert "Near token pressure" in context
+    assert "Only the turn-end follow-up path asks" in context
     assert "one slice" in context
     assert "Use the `context-handoff` skill" in context
     assert len(context.encode("utf-8")) <= 700

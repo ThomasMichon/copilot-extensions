@@ -106,16 +106,23 @@ That is the routine, safe, non-committal step. It preserves the baton before
 context gets tighter, but it does **not** arm pickup or request that any
 external system create a successor.
 
-### 2. Ask before triggering, unless already authorized
+### 2. Context pressure triggers immediately
 
-The default behavior is:
+If the reason for the handoff is **context pressure** and the objective still
+has more work left to do, the agent should call `trigger_handoff` directly
+after saving the baton. This path does **not** ask for confirmation first.
+
+### 3. Turn-end follow-ups ask before triggering
+
+If the requested work is done and the agent would otherwise end the turn by
+listing follow-up ideas or questions, the flow is different:
 
 - **compose + save** the baton,
 - **ask the user** whether to continue via handoff,
 - only after a brief yes (for example, "sure") call `trigger_handoff`.
 
-`trigger_handoff` should be called immediately **only** when autopilot mode is
-active or the user has already explicitly pre-authorized that behavior.
+Only this turn-end follow-up path is skipped by autopilot mode or prior user
+pre-authorization.
 
 ### 3. Let one session own one slice
 
@@ -130,7 +137,14 @@ immediate baton.
 ## `trigger_handoff`: the signal-only contract
 
 `trigger_handoff` is the plugin's one "arm the continuation" tool. It never
-performs process management. Its contract is:
+performs process management.
+
+- For **context-pressure-driven** handoffs with remaining work, call it
+  immediately after `save_handoff_prompt`.
+- For **turn-end / follow-up** handoffs, call it only after the user says yes,
+  unless autopilot or prior pre-authorization applies.
+
+Its contract is:
 
 1. drop the composed handoff markdown in the current session's session-state
    folder,
@@ -233,8 +247,8 @@ node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_S
 
 | Threshold | Behavior |
 |-----------|----------|
-| 55% of window | Soft reminder: compose/store a baton at the next clean boundary |
-| 70% of window | Urgent reminder: preserve the baton now; compaction remains at ~80% |
+| 55% of window | Soft reminder: compose/store a baton at the next clean boundary and trigger directly if work still remains |
+| 70% of window | Urgent reminder: preserve the baton now and trigger directly; compaction remains at ~80% |
 
 An owning repository may override either percentage in
 `.context-handoff/config.yaml`:

@@ -22,10 +22,10 @@
 //
 // The /handoff gesture is handled as a skill invocation (context-handoff
 // skill), not a slash command. The skill triggers the agent to call
-// generate_handoff_prompt, compose prose, and call save_handoff_prompt. The
-// routine path stores the baton safely and asks whether to continue through a
-// handoff. Only an explicit yes (or autopilot/pre-authorization) should trigger
-// the pending-handoff signal flow, which never performs process management.
+// generate_handoff_prompt, compose prose, and call save_handoff_prompt.
+// Context-pressure-driven handoffs then trigger immediately to preserve
+// continuity; only turn-end follow-up handoffs ask first unless autopilot or
+// prior explicit authorization already covers them.
 
 import {
   existsSync,
@@ -311,11 +311,16 @@ const session = await joinSession({
             "   agent-dispatch task when a coordinator is reachable, else a",
             "   one-time worktree-state file — and returns the short handoff",
             "   prompt plus its exact HANDOFF_SEED/HANDOFF_TOKEN identifiers.",
-            "3. Unless autopilot or prior explicit authorization applies, ask the",
-            "   user whether to continue through a handoff; phrase it so they can",
-            "   answer briefly (for example, 'sure'). Only after that yes should",
-            "   you call trigger_handoff. In autopilot or pre-authorized mode,",
-            "   trigger_handoff may be called immediately at the stopping point.",
+            "3. Distinguish the trigger:",
+            "   - If context pressure is the reason for the handoff and work",
+            "     remains, call trigger_handoff directly after saving. Do NOT ask",
+            "     for confirmation first; continuity is the point.",
+            "   - If you are otherwise done with the requested work and would end",
+            "     the turn by listing follow-up ideas/questions, store the baton",
+            "     and replace that list with one short offer to continue via",
+            "     handoff. Only after the user says yes should you call",
+            "     trigger_handoff, unless autopilot or prior authorization",
+            "     already covers that turn-end follow-up path.",
             "Do NOT paste the handoff contents, commit anything, or claim the",
             "handoff auto-loads on restart (it does not).",
           ].join("\n"),
@@ -329,8 +334,10 @@ const session = await joinSession({
         "Store the composed handoff markdown and return the short prompt/seed " +
         "that a human or control system can use to resume it later. This is the " +
         "routine, non-committal step: safe to call whenever you reach a natural " +
-        "stopping point and want to preserve a baton before asking whether to " +
-        "continue via handoff. When an agent-dispatch coordinator is reachable, " +
+        "stopping point. Use it both for context-pressure handoffs that will " +
+        "trigger immediately and for turn-end follow-up handoffs where you want " +
+        "to preserve the baton before offering the user a low-friction yes/no " +
+        "choice. When an agent-dispatch coordinator is reachable, " +
         "the handoff is stored as a *proposed, handoff-labeled task* pinned to " +
         "this worktree (payload = the markdown, no session file) and resumed via " +
         "/resume-handoff; otherwise it falls back to a one-time file in this " +
@@ -398,9 +405,12 @@ const session = await joinSession({
         };
         return (
           `Handoff stored (${stored.storage}: ${stored.id}). This preserves the ` +
-          "baton without arming the pickup flow. Unless autopilot or prior " +
-          "explicit authorization applies, ask the user whether to continue via " +
-          "handoff and call `trigger_handoff` only after they say yes.\n\n" +
+          "baton without arming the pickup flow.\n\n" +
+          "If this handoff exists because context pressure is rising and work " +
+          "still remains, call `trigger_handoff` directly now.\n\n" +
+          "If this is a turn-end follow-up handoff, ask the user whether to " +
+          "continue via handoff and call `trigger_handoff` only after they say " +
+          "yes, unless autopilot or prior authorization already covers that path.\n\n" +
           "If you later need manual continuation, open the successor session and " +
           "run `/consume-handoff`; if that command is unavailable, use the " +
           "payload-local context-handoff CLI with the recovery locator embedded " +
@@ -476,7 +486,9 @@ const session = await joinSession({
         "Signal that THIS session is ready for a handoff pickup, without " +
         "performing any process management. Call this only after the user said " +
         "yes to continuing via handoff, or when autopilot / prior explicit " +
-        "authorization already permits it. The tool may either reuse the current " +
+        "authorization already permits it -- EXCEPT for context-pressure-driven " +
+        "handoffs with work still left to do, which should trigger immediately " +
+        "without asking. The tool may either reuse the current " +
         "session's most recently saved handoff or store fresh markdown passed as " +
         "`prompt_text` / `prompt`. It then: (1) drops the full handoff markdown " +
         "in this session's session-state folder; (2) refreshes worktree-visible " +
@@ -839,24 +851,21 @@ session.on("session.idle", () => {
   const level = pendingNudge;
   pendingNudge = null;
   const usage = formatContextUsage(state.currentTokens, state.tokenLimit);
-  // The nudge JUST hands the agent to the context-handoff skill -- it does NOT
-  // prescribe individual tool calls or a "write a file" outcome. The skill owns
-  // the sequencing: compose and save safely at a clean boundary, ask the user
-  // about continuing via handoff unless autopilot/pre-authorization applies,
-  // and only then trigger the pending-handoff signal flow.
+  // The nudge JUST hands the agent to the context-handoff skill. Under context
+  // pressure, that skill should compose/save and then trigger_handoff directly
+  // without asking. The ask-first branch is only for turn-end follow-up handoffs.
   const msg = level === "hard"
     ? `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
       `(${usage.tokens}). ` +
       `The configured hard threshold was reached; auto-compaction still triggers ` +
-      `at ~80%. Invoke the context-handoff skill now to preserve a baton before ` +
-      `context is lost. Compose and store the handoff at this stopping point; ` +
-      `unless autopilot or prior authorization applies, ask the user whether to ` +
-      `continue via handoff before calling trigger_handoff.`
+      `at ~80%. Invoke the context-handoff skill now to preserve continuity ` +
+      `before context is lost. Compose/store the baton and then call ` +
+      `trigger_handoff directly; do not pause to ask the user first.`
     : `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
       `(${usage.tokens}). ` +
       `The configured soft threshold was reached. Invoke the context-handoff skill ` +
-      `at the next clean boundary so you can compose/store a baton early and ask ` +
-      `whether to continue via handoff before the window gets tighter.`;
+      `at the next clean boundary so you can compose/store a baton early and, if ` +
+      `work still remains, trigger_handoff directly before the window gets tighter.`;
   session.send(msg).catch((e) =>
     session.log(`[Context Handoff] nudge send failed: ${e.message}`, { level: "warning" })
   );
@@ -909,8 +918,9 @@ session.on("session.usage_info", (event) => {
       `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
       `Configured ${pressure.softPercent}% threshold ` +
       `${Math.round(pressure.softThreshold).toLocaleString()} ` +
-      `tokens reached. Hand off at the next clean boundary ` +
-      `(invoke the context-handoff skill).`,
+      `tokens reached. Preserve the baton at the next clean boundary and, if ` +
+      `work still remains, trigger the handoff directly (invoke the ` +
+      `context-handoff skill).`,
       { level: "warning" }
     );
   }
@@ -929,7 +939,8 @@ session.on("session.usage_info", (event) => {
       `Configured ${pressure.hardPercent}% hard threshold ` +
       `${Math.round(pressure.hardThreshold).toLocaleString()} ` +
       `tokens reached; auto-compaction still triggers at ~80%. ` +
-      `Hand off NOW -- invoke the context-handoff skill.`,
+      `Hand off NOW -- invoke the context-handoff skill and trigger the handoff ` +
+      `directly without asking first.`,
       { level: "warning" }
     );
   }
