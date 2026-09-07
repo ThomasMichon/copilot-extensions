@@ -167,13 +167,11 @@ Cross-cell composition is a separate opt-in contract and always names the target
 cell. A missing same-cell peer degrades gracefully; a same-named cross-cell peer
 is never a fallback.
 
-Session-context aggregation is one explicit cross-cell contract. Repository
-adoption names the exact source-qualified `context-injection` authority, and
-each contributor declaration identifies its owning plugin and payload-relative
-commands. The authority reconstructs a fresh child environment with the
-contributor's validated payload roots instead of inheriting its own. Before
-authority proof, each producer invokes its own payload-relative contributor;
-it never scans for a same-named coordinator or contributor in another cell.
+Session guidance does not introduce a cross-cell coordinator. Each plugin cell
+owns its checked-in pointer, exact-session writer, and payload-relative
+emitters. A host that natively composes independent `additionalContext` outputs
+may do so only with each plugin's attributable payload identity intact; one
+cell never scans for or adopts a same-named aggregation authority from another.
 
 ## Lifecycle and migration
 

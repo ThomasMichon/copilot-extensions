@@ -408,10 +408,12 @@ states, concisely:
 - **Keep ambient guidance with its owner.** Repository identity, irreducible
   local invariants, configuration pointers, and minimal safety/publication
   fail-safes live here. Generic plugin-owned ambient policy is config-backed and
-  injected by the owning plugin as a concise `sessionStart` context kernel;
-  detailed procedures live in on-demand skills. A one-shot skill body decays,
+  delivered by the owning plugin through a checked-in static pointer plus an
+  output-free `sessionStart` writer that renders a concise context kernel into
+  that exact session's guidance file; detailed procedures live in on-demand
+  skills. A one-shot skill body decays,
   but copying wholesale plugin policy into `AGENTS.md` creates a second owner.
-  Follow `docs/patterns/context-injection.md`.
+  Follow `docs/patterns/session-scoped-dynamic-guidance.md`.
 - **Preserve launch-path fallbacks.** Some headless/cloud paths do not load
   plugin hooks. Keep critical static fail-safes on those paths even after
   plugin-owned injection exists.

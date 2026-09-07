@@ -1155,11 +1155,47 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
     hooks = json.loads((plugin_root / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
     for shell in ("bash", "powershell"):
-        catalog_hooks = [
+        direct_hooks = [
             hook for hook in session_hooks if "emit-command-catalog" in hook[shell]
         ]
-        assert len(catalog_hooks) == 1
-        assert "COPILOT_PLUGIN_ROOT" in catalog_hooks[0][shell]
+        if direct_hooks:
+            # Legacy direct-output wiring: the sessionStart hook itself invokes
+            # emit-command-catalog.
+            assert len(direct_hooks) == 1
+            assert "COPILOT_PLUGIN_ROOT" in direct_hooks[0][shell]
+            continue
+        # Exact-session-writer wiring: the sessionStart hook invokes a writer
+        # (write-session-guidance.* or hook_client.py) that composes
+        # emit-command-catalog internally rather than emitting it directly.
+        writer_hooks = [
+            hook
+            for hook in session_hooks
+            if "write-session-guidance." in hook[shell]
+            or "hook_client.py" in hook[shell]
+        ]
+        assert len(writer_hooks) == 1, (
+            f"{plugin} ({shell}): no direct emit-command-catalog hook and no "
+            "write-session-guidance/hook_client.py writer hook found"
+        )
+        assert "COPILOT_PLUGIN_ROOT" in writer_hooks[0][shell]
+        for writer_name in (
+            "write_session_guidance.py",
+            "hook_client.py",
+        ):
+            writer_path = plugin_root / "scripts" / writer_name
+            if writer_path.is_file():
+                assert "emit-command-catalog" in writer_path.read_text(
+                    encoding="utf-8"
+                ), (
+                    f"{plugin}: {writer_name} no longer composes "
+                    "emit-command-catalog"
+                )
+                break
+        else:
+            pytest.fail(
+                f"{plugin}: no write_session_guidance.py or hook_client.py "
+                "found to compose emit-command-catalog"
+            )
 
 
 def test_skill_catalog_references_name_payload_adopters() -> None:
@@ -1208,11 +1244,38 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
             continue
         hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
         session_hooks = hooks.get("hooks", {}).get("sessionStart", [])
-        if not any(
+        direct_wired = any(
             "emit-command-catalog" in hook.get("bash", "")
             and "emit-command-catalog" in hook.get("powershell", "")
             for hook in session_hooks
-        ):
+        )
+        writer_wired = False
+        if not direct_wired:
+            plugin_root = REPO / "plugins" / plugin
+            has_writer_hook = any(
+                (
+                    "write-session-guidance." in hook.get("bash", "")
+                    or "hook_client.py" in hook.get("bash", "")
+                )
+                and (
+                    "write-session-guidance." in hook.get("powershell", "")
+                    or "hook_client.py" in hook.get("powershell", "")
+                )
+                for hook in session_hooks
+            )
+            composes_catalog = any(
+                (plugin_root / "scripts" / writer_name).is_file()
+                and "emit-command-catalog"
+                in (plugin_root / "scripts" / writer_name).read_text(
+                    encoding="utf-8"
+                )
+                for writer_name in (
+                    "write_session_guidance.py",
+                    "hook_client.py",
+                )
+            )
+            writer_wired = has_writer_hook and composes_catalog
+        if not (direct_wired or writer_wired):
             missing_hooks[plugin] = paths
     assert missing_hooks == {}
 

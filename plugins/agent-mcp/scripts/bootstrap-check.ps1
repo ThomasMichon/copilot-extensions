@@ -8,10 +8,21 @@
     Reconciles the TOOL, never machine state/config. PS5.1+.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
+$script:SessionStartJsonEmitted = $false
+function Write-SessionStartJson {
+    if (-not $script:SessionStartJsonEmitted) {
+        [Console]::Out.Write('{}')
+        $script:SessionStartJsonEmitted = $true
+    }
+}
+function Exit-SessionStart {
+    Write-SessionStartJson
+    exit 0
+}
 $PluginDir = Split-Path -Parent $PSScriptRoot
 try {
     $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
-    if (-not $name) { exit 0 }
+    if (-not $name) { Exit-SessionStart }
     $InstallDir = Join-Path $env:USERPROFILE ".$name"
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     if (-not (Test-Path $Manifest)) {
@@ -27,7 +38,7 @@ try {
             $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
             & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
         }
-        exit 0
+        Exit-SessionStart
     }
     $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
     $current = $deployed
@@ -52,16 +63,16 @@ try {
             if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
         }
     }
-    if ($provisioned -and $deployed -eq $current) { exit 0 }
+    if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
         $reCmd = "& `"$init`""
     } else {
         $inst = Join-Path $PluginDir 'scripts\install.ps1'
-        if (-not (Test-Path $inst)) { exit 0 }
+        if (-not (Test-Path $inst)) { Exit-SessionStart }
         $reCmd = "& `"$inst`" install"
     }
-    Write-Host "[$name] runtime $deployed -> $current; reconciling in background..." -ForegroundColor DarkGray
+    [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; reconciling in background...")
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
     # Launch the background reconcile through conhost --headless so Windows
@@ -75,4 +86,4 @@ try {
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
         -WindowStyle Hidden | Out-Null
 } catch { }
-exit 0
+Exit-SessionStart

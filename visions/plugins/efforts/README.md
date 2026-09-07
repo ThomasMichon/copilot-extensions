@@ -176,7 +176,7 @@ gate and effort-discovery rule.
 - Reality docs:
   [`efforts/README.md`](../../../efforts/README.md) ·
   [`docs/harness-runbook.md`](../../../docs/harness-runbook.md) ·
-  [`docs/patterns/context-injection.md`](../../../docs/patterns/context-injection.md) ·
+  [`docs/patterns/session-scoped-dynamic-guidance.md`](../../../docs/patterns/session-scoped-dynamic-guidance.md) ·
   [`plugins/efforts/README.md`](../../../plugins/efforts/README.md)
 
 ## Provenance

@@ -9,17 +9,16 @@ Its strategy is model-neutral and independently enableable. Optional inert
 configuration can map delegated purposes to current demonstrated or candidate
 models without hardcoding a preferred provider into the plugin.
 
-The ambient kernel is deliberately concise and ordered into the spill
-compatibility engine's bounded first-turn kernel before continuity guidance, so
-broad routing decisions do not depend on the model loading deferred context.
-Detailed routing guidance loads only when the `delegating-work` skill is invoked
-or matched.
+The ambient kernel is deliberately concise and shipped as a checked-in
+instruction projection, so broad routing decisions do not depend on competing
+`sessionStart` output. Detailed routing guidance loads only when the
+`delegating-work` skill is invoked or matched.
 
 ## What it does (and how to use it)
 
 | Entry point | When it applies | What it does |
 |-------------|-----------------|--------------|
-| `sessionStart` hook | Every new or resumed session where the plugin is enabled | Injects a bounded owner-marked coordinator/delegate policy |
+| checked-in instruction projection | Every adopting repository | Loads a bounded owner-marked coordinator/delegate policy without a startup output hook |
 | [`delegating-work`](skills/delegating-work/SKILL.md) skill | "delegate this research", "use agents to compare", "parallelize the investigation", "split these bulk edits" | Chooses direct versus delegated work, defines bounded contracts, and preserves coordinator ownership |
 
 Enable it in Copilot settings:
@@ -92,6 +91,8 @@ example model IDs are intentionally synthetic.
 - a versioned purpose-to-model configuration contract and inert resolver;
 - demonstrated/candidate/held/failed model eligibility guidance.
 - deterministic ordinary, fallback, explicit-trial, and no-route decisions.
+- retained cross-platform policy emitters for validation and a future native
+  host-composition seam.
 
 **Does NOT provide**
 
@@ -109,11 +110,9 @@ example model IDs are intentionally synthetic.
 
 ## Dependencies & assumptions
 
-The plugin has no runtime, service, network, or authentication dependency. Its
-hook uses the platform's Bash or PowerShell environment and fails open with `{}`
-when the plugin payload is incomplete. Model-routing configuration is optional;
-the stdlib-only resolver uses Python when invoked, while the ambient hook remains
-independent of it.
+The plugin has no runtime, service, network, or authentication dependency.
+Model-routing configuration is optional; the stdlib-only resolver uses Python
+when invoked, while the checked-in projection remains independent of it.
 
 Plugin manifests do not install companion plugins transitively. Enable domain
 agent, MCP, bridge, or dispatch plugins separately when the task needs them.
@@ -123,7 +122,7 @@ agent, MCP, bridge, or dispatch plugins separately when the task needs them.
 | Path | Purpose |
 |------|---------|
 | [`skills/delegating-work/SKILL.md`](skills/delegating-work/SKILL.md) | Detailed direct-versus-delegated routing procedure |
-| [`hooks.json`](hooks.json) | Cross-platform `sessionStart` registration |
+| [`instruction-projections.json`](instruction-projections.json) | Declares the checked-in ambient fallback |
 | [`scripts/emit-guidance.ps1`](scripts/emit-guidance.ps1) | PowerShell policy producer |
 | [`scripts/emit-guidance.sh`](scripts/emit-guidance.sh) | Bash policy producer |
 | [`scripts/resolve-model-routing.py`](scripts/resolve-model-routing.py) | Strict inert repository/operator registry resolver |
@@ -136,16 +135,18 @@ The skill file is the source of truth for task-time routing behavior.
 
 ## Troubleshooting, contributing & issues
 
-- **No ambient guidance:** confirm the plugin is enabled and start or resume a
-  session that loads plugin hooks.
-- **The hook emits `{}`:** confirm the host supplies a plugin-root environment
-  variable, then reinstall or update the plugin if the payload is incomplete.
+- **No ambient guidance:** confirm the plugin is enabled and synchronize its
+  declared instruction projection into the adopting repository.
 - **No suitable sub-agent is available:** use the skill's unavailable-agent
   path; the plugin does not install agent types.
 - **Repository routing config is ignored:** confirm the exact repository root is
   listed in Copilot `trustedFolders` and the config matches the bundled schema.
 - **A config layer is reported invalid:** fix the named layer; the resolver
   excludes it instead of partially accepting ambiguous policy.
+
+Direct plugin-owned `additionalContext` is reserved for a future activation
+after native host composition is proven across fresh, resume, non-interactive,
+and ACP launches at the supported version floor.
 
 Contributions follow the repository's PR-required workflow in
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md). File issues in the

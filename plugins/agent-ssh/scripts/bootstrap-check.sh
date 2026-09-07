@@ -16,6 +16,14 @@
 
 InstallDir="$HOME/.agent-ssh"
 Manifest="$InstallDir/deploy-manifest.json"
+session_start_json_emitted=0
+emit_session_start_json() {
+  if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
+    printf '{}'
+    session_start_json_emitted=1
+  fi
+}
+trap 'emit_session_start_json' EXIT
 
 # FIRST install (no deploy manifest yet): do the cheap 'stamp' so the binstub is
 # on PATH THIS session and self-provisions the runtime on first use. Without this
@@ -65,7 +73,7 @@ if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
 init="$pluginDir/scripts/init.sh"
 [ -f "$init" ] || exit 0
 
-echo "[agent-ssh] runtime $deployed -> $current; reconciling in background..."
+echo "[agent-ssh] runtime $deployed -> $current; reconciling in background..." >&2
 nohup bash "$init" >/dev/null 2>&1 &
 
 exit 0

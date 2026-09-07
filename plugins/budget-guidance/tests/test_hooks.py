@@ -17,6 +17,25 @@ PWSH = shutil.which("pwsh")
 pytestmark = pytest.mark.guard
 
 
+def test_session_start_is_bootstrap_only_and_output_free():
+    hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    entries = hooks["hooks"]["sessionStart"]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert "bootstrap-check" in entry["bash"]
+    assert "bootstrap-check" in entry["powershell"]
+    assert "invoke-context-contributor" not in json.dumps(entry)
+
+    declaration = json.loads(
+        (PLUGIN / "session-context.json").read_text(encoding="utf-8")
+    )
+    assert declaration["contributors"] == []
+    assert declaration["sessionStart"] == {
+        "sideEffects": "restart-safe-idempotent",
+        "context": "none",
+    }
+
+
 def _python_disabled_environment(tmp_path: Path) -> dict[str, str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

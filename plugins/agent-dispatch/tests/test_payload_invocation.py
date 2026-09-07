@@ -49,15 +49,24 @@ def test_session_catalog_hook_is_payload_root_aware_and_fail_open() -> None:
         and "COPILOT_PLUGIN_ROOT" in hook["powershell"]
         for hook in session_hooks
     )
-    catalog_hooks = [
+    # The command catalog is no longer emitted directly by a sessionStart
+    # hook; the output-free write-session-guidance writer composes
+    # emit-command-catalog internally and writes it into the exact-session
+    # guidance file instead (see write_session_guidance.py).
+    writer_hooks = [
         hook
         for hook in session_hooks
-        if "emit-command-catalog" in hook["bash"]
-        and "emit-command-catalog" in hook["powershell"]
+        if "write-session-guidance" in hook["bash"]
+        and "write-session-guidance" in hook["powershell"]
     ]
-    assert len(catalog_hooks) == 1
-    assert "else printf '{}'" in catalog_hooks[0]["bash"]
-    assert "else { [Console]::Out.Write('{}') }" in catalog_hooks[0]["powershell"]
+    assert len(writer_hooks) == 1
+    assert "else printf '{}'" in writer_hooks[0]["bash"]
+    assert "else { [Console]::Out.Write('{}') }" in writer_hooks[0]["powershell"]
+
+    writer = (PLUGIN / "scripts" / "write_session_guidance.py").read_text(
+        encoding="utf-8"
+    )
+    assert "emit-command-catalog" in writer
 
     powershell_catalog = (
         PLUGIN / "scripts" / "emit-command-catalog.ps1"

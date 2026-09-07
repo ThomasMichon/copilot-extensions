@@ -66,15 +66,12 @@ treats that value as a bounced dispatch rather than a degradable bookkeeping
 error. See
 [`state-root-bound coordination`](state-root-coordination.md).
 
-**Optional session-context composition.** `context-injection` is an optional
-coordinator, not a prerequisite for any contributor. Each context-producing
-plugin retains a payload-relative standalone path. Its producer wrapper uses
-that path until the repository proves the exact compatible
-`context-injection@copilot-extensions` authority; after proof, the producer
-joins the pair-key rendezvous and emits `{}`, while only the authority emits the
-aggregate. Missing, incompatible, ambiguous, or inactive coordination restores
-standalone behavior. Direct bootstrap and reconciliation side effects never run
-through the coordinator.
+**Session guidance remains plugin-local.** Each plugin projects its own static
+pointer and writes its own exact-session guidance file without requiring a
+sibling coordinator. Direct bootstrap and reconciliation side effects remain
+owned by that plugin. If a supported host later proves native composition of
+independent `additionalContext` outputs, plugins may activate their own direct
+contributors without adding a cross-plugin authority.
 
 ## Rationale
 

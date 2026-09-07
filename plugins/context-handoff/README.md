@@ -6,7 +6,7 @@ This plugin ships four cooperating payload pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **continuity guidance hooks** | Declarative `sessionStart` hooks | Write the full owner-marked continuity contract to the exact session folder through a side-effect-only hook and retain a concise `additionalContext` kernel as a best-effort supplement |
+| **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias. Storage prefers a worktree-pinned agent-dispatch task and falls back to a one-time worktree-state file. Both front ends use the same SDK-free `handoff-core.mjs` implementation. |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 | **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save/cutover/continue, task/file consume with acknowledgement and takeover, retry, and manual fallback. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension. |
@@ -28,8 +28,7 @@ hook surface a plugin normally uses cannot replicate it:
 So token monitoring and idle-boundary nudges require the extension payload.
 The ambient continuity contract does not: it is delivered independently through
 the plugin's static instruction pointer plus a declarative `sessionStart` file
-writer. A second contributor hook retains the concise `additionalContext`
-kernel as a best-effort supplement.
+writer.
 
 The hook intentionally treats plugin enablement as its applicability gate. Its
 policy is capability-generic and source-neutral, so it does not inspect
@@ -74,15 +73,19 @@ A session where the plugin hooks loaded receives the full owner-marked
 continuity contract in
 `instructions/context-handoff/session-guidance.instructions.md` beneath its
 exact session folder. The checked-in static pointer instructs the agent to read
-that file if present. The separate `continuity-guidance` contributor also
-emits the compact owner-marked kernel through `additionalContext` as a
-best-effort supplement. A loaded extension exposes the `generate_handoff_prompt`,
+that file if present. The hook itself emits only `{}`. A loaded extension exposes
+the `generate_handoff_prompt`,
 `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and
 `retry_handoff_cutover` tools, plus
 `/handoff-continue` and `/resume-handoff`; `/extensions` lists it with source **plugin**. It
 intentionally does **not** emit a user-visible "Session started" breadcrumb. If
 it does not load, confirm both requirements above and start a fresh session (the
 `context-handoff-setup` troubleshooting skill walks through this).
+
+The underlying continuity emitter remains plugin-owned because the writer uses
+it and because it is the future direct-output seam. Direct plugin-owned
+`additionalContext` may replace the compatibility pointer only after native
+host composition is proven across the supported Copilot CLI version floor.
 
 ## Thresholds
 

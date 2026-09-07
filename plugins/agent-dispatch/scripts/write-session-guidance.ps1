@@ -1,6 +1,6 @@
 # Side-effect-only sessionStart wrapper: invokes write_session_guidance.py.
-# Never emits additionalContext -- a raw hooks.json entry, not a declared
-# session-context.json contributor. See scripts/write_session_guidance.py.
+# Never emits additionalContext; this raw hooks.json entry writes the
+# exact-session guidance file. See scripts/write_session_guidance.py.
 $ErrorActionPreference = 'SilentlyContinue'
 
 $root = if ($env:COPILOT_PLUGIN_ROOT) {

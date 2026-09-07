@@ -18,6 +18,10 @@ description: >
   - 'check my AGENTS.md'
   - 'review my hooks'
   - 'review my sub-agents'
+  - 'migrate session guidance'
+  - 'remove context injection'
+  - 'conform all plugins'
+  - 'conform plugin guidance'
 ---
 
 # Reviewing Customizations
@@ -85,8 +89,8 @@ plugin-packaged MCP agent without a discoverable troubleshooting skill, or
 without an explicit dependency/prerequisite section in the plugin README),
 **inline secrets** in config files, **raw IPs** in ssh/scp/rsync commands, and,
 with `--from-settings`,
-**session-start context composition**, including missing or ambiguous aggregate
-ownership.
+**session-start context composition**, including ambiguous stacks with more than
+one possible non-empty output.
 `--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
 gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rather
 than cry wolf; feed its findings into the design critique, don't treat a clean
@@ -104,9 +108,12 @@ and dynamic/session-specific content that cannot be checked in safely.
 
 ### Static fail-safe projection sync
 
-Plugin hooks remain the primary ambient-policy path. A plugin may additionally
-declare a bounded, data-only fallback template for launchers that do not load
-hooks. Synchronize those enabled declarations with the companion manager:
+Until the supported Copilot CLI version floor proves native composition of every
+plugin-owned `sessionStart` `additionalContext` value, checked-in projections
+plus exact-session guidance files are the reliable ambient-policy path. A plugin
+declares a bounded, data-only pointer or fallback template and, when guidance is
+dynamic, uses an output-free `sessionStart` hook to write the exact session's
+file. Synchronize enabled declarations with the companion manager:
 
 ```bash
 python3 <skill-dir>/scripts/manage-instruction-projections.py sync <repo-root>
@@ -129,6 +136,22 @@ edits, nonportable or case-conflicting destinations, path escape, and
 symlink/reparse indirection. It never deletes repository-owned files; orphaned
 projections and old managed regions are review findings for a human or ordinary
 repository change to remove.
+
+### Session guidance conformance
+
+For a complete migration rather than a point-in-time scan, follow
+[`references/session-guidance-conformance.md`](references/session-guidance-conformance.md).
+It has two modes:
+
+- **adopting repository** -- update payloads, disable the retired authority at
+  repository precedence, remove its config, synchronize every enabled
+  projection, scan the settings-derived roster, and run blind launch probes;
+- **plugin suite** -- classify every marketplace plugin, migrate dynamic
+  guidance to exact-session writers, preserve static-only/output-free hooks,
+  remove retired machinery, and enforce the complete roster mechanically.
+
+The runbook also owns the later native-host transition gate. It never treats a
+custom cross-plugin aggregator as a migration option.
 
 The manager exits nonzero for every blocking conflict. Its `--json` result is a
 stable versioned object for automation. A plugin remains independently usable
@@ -201,47 +224,29 @@ python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --from-settings
 The same loaded-set pass inventories each active command `sessionStart` plugin
 without executing hooks. It reports plugin identities and these roles only:
 
-- **aggregate authority** — the exact `context-injection@copilot-extensions`
-  plugin selected by repository adoption;
-- **complete declared contributor** — `plugin.json` points through
-  `sessionContext` to a version-1 `session-context.json` whose contributors are
-  explicitly pure and whose direct context behavior is `authority-aware`;
-- **complete declared side-effect-only** — the declaration is complete and has
-  `sideEffects: restart-safe-idempotent`, `context: none`, and no contributors;
-  and
-- **legacy direct or unknown** — no complete declaration proves the hook's
-  context behavior.
+- **complete declared output-capable** — a complete declaration says the hook
+  may emit context;
+- **proven output-free** — a complete `context: none` declaration or a
+  suite-standard exact-session writer/bootstrap/registration shape proves the
+  hook does not emit model context; and
+- **legacy direct or unknown** — no complete declaration proves the hook
+  output-free.
 
-The scanner accepts aggregate authority only when the plugin-owned
-`.context-injection/config.yaml` names the exact enabled
-`context-injection@copilot-extensions` authority and its engine contract is
-compatible. Host settings only enable the plugin. Missing, malformed,
-unknown-shaped, or ambiguous adoption remains BLOCKING. In an adopted stack,
-every enabled session-start plugin must be complete-declared; unclassified hooks,
-incomplete side-effect-only declarations, and contributors without
-authority-aware direct behavior are BLOCKING. An external plugin whose payload
-cannot be inspected remains a warning because the scanner cannot establish
-whether it emits context. After proof, every producer and the authority emits
-the same cached aggregate bytes. The authority may run before, after, or
-concurrently with producers. Their host-level `timeoutSec` must be at
-least the engine's 25-second rendezvous deadline, with 30 seconds recommended
-for wrapper overhead.
+Stacks containing only side-effect-only exact-session writers, bootstrap hooks,
+registrations, and other output-free work are valid without a composition
+authority. One possible non-empty output is also valid. More than one possible
+non-empty result is BLOCKING unless the runtime version floor has a separately
+proven merge contract for that event and field. An unavailable external payload
+is a warning by itself, but joins collision detection when another possible
+output is present. Reports never include hook commands, contributor argv, or
+emitted context.
 
-For this marketplace's owned stack, the repository guard is stricter: every
-declared contributor must have exactly one 30-second engine-v5 wrapper hook,
-the Bash and PowerShell wrapper copies must remain byte-identical to the
-authority copy, and no legacy direct hook may still invoke the contributor.
-Mixed plugins must prove their direct state mutations use context-free modes;
-the aggregate authority must never invoke those mutations.
-
-More than one possible non-empty result is BLOCKING unless the runtime defines
-merge semantics for that event/field or one attributable owner composes the
-outputs. The version-1 declaration makes
-contributors inspectable; it does not prove host execution order. Reports never
-include hook commands, contributor argv, or emitted context. The full execution
-and output-composition contract, including the open start-hook runtime work, is
-in `authoring-skills`'
-[`references/session-context-aggregation.md`](../authoring-skills/references/session-context-aggregation.md).
+The version-1 `sessionContext` declaration remains useful as static proof that a
+side-effect hook returns only `{}`. Existing output-capable declarations are
+treated conservatively as possible non-empty output; they do not establish
+execution order or composition. The current contract and the future native-host
+composition seam are in `authoring-skills`'
+[`references/hook-output-composition.md`](../authoring-skills/references/hook-output-composition.md).
 
 Collision owners are tagged with their origin (`skill [marketplace/plugin]`).
 (The older `--include-installed` / `--include-plugins DIR` still work — they add

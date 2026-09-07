@@ -289,7 +289,12 @@ def _is_link_or_reparse(path: Path) -> bool:
     )
 
 
-def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
+def _write_session_guidance(
+    payload: dict,
+    *,
+    home: Path | None = None,
+    decision_context: str = "",
+) -> bool:
     home = home or Path.home()
     session_id = payload.get("sessionId")
     if (
@@ -312,6 +317,8 @@ def _write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
         for context in (catalog, registration):
             if context and context not in contexts:
                 contexts.append(context)
+    if decision_context and decision_context not in contexts:
+        contexts.append(decision_context)
     content = _GUIDANCE_HEADER + "\n\n".join(contexts) + "\n"
     if len(content.encode("utf-8")) > _SESSION_GUIDANCE_MAX_BYTES:
         content = (
@@ -761,17 +768,28 @@ def main(argv: list[str] | None = None) -> int:
         if kind == "sessionStart":
             payload = _enrich_session_payload(payload)
         result = decide(kind, payload)
-        if kind == "sessionStart":
-            _write_session_guidance(payload)
         diagnostic = result.pop("_stderr", None)
         if diagnostic:
             sys.stderr.write(str(diagnostic))
-        if result:
+        if kind == "sessionStart":
+            decision_context = result.get("additionalContext")
+            _write_session_guidance(
+                payload,
+                decision_context=(
+                    decision_context
+                    if isinstance(decision_context, str)
+                    else ""
+                ),
+            )
+        elif result:
             sys.stdout.write(json.dumps(result, separators=(",", ":")))
-        elif kind == "sessionStart":
-            sys.stdout.write("{}")
     except Exception:
         pass
+    # sessionStart always emits exactly one JSON object -- write it here,
+    # outside the try block, so an exception anywhere above still leaves
+    # valid, parseable stdout for the host.
+    if kind == "sessionStart":
+        sys.stdout.write("{}")
     return 0
 
 

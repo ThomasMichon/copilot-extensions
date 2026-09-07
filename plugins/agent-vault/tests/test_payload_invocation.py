@@ -38,20 +38,15 @@ def test_payload_manifest_describes_agent_vault_runtime() -> None:
     assert "payload-dir" not in powershell
 
 
-def test_session_catalog_hook_is_payload_root_aware_and_fail_open() -> None:
+def test_session_catalog_producer_is_not_registered_as_a_hook() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
-    catalog_hooks = [
-        hook
-        for hook in session_hooks
-        if "emit-command-catalog" in hook["bash"]
-        and "emit-command-catalog" in hook["powershell"]
-    ]
-    assert len(catalog_hooks) == 1
-    assert "COPILOT_PLUGIN_ROOT" in catalog_hooks[0]["bash"]
-    assert "COPILOT_PLUGIN_ROOT" in catalog_hooks[0]["powershell"]
-    assert "else printf '{}'" in catalog_hooks[0]["bash"]
-    assert "else { [Console]::Out.Write('{}') }" in catalog_hooks[0]["powershell"]
+    assert len(session_hooks) == 2
+    assert "bootstrap-check" in session_hooks[0]["bash"]
+    assert "bootstrap-check" in session_hooks[0]["powershell"]
+    assert "write-session-guidance" in session_hooks[1]["bash"]
+    assert "write-session-guidance" in session_hooks[1]["powershell"]
+    assert "emit-command-catalog" not in str(session_hooks)
 
     powershell_catalog = (
         PLUGIN / "scripts" / "emit-command-catalog.ps1"

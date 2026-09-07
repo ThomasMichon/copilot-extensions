@@ -337,20 +337,6 @@ def test_aggregate_mode_skips_expensive_status_capability_probe(
         assert context.startswith(f"[owner: agent-dispatch@{VERSION}]\n")
 
 
-def test_focus_guidance_timeout_survives_windows_process_fanout() -> None:
-    declaration = json.loads(
-        (PLUGIN / "session-context.json").read_text(encoding="utf-8")
-    )
-    contributor = next(
-        item
-        for item in declaration["contributors"]
-        if item["id"] == "focus-guidance"
-    )
-
-    assert contributor["timeoutSeconds"] >= 8
-    assert contributor["timeoutSeconds"] <= 10
-
-
 @pytest.mark.parametrize(
     "payload",
     ["", "{", "[]", '{"source":"copilot-cli"}', '{"cwd":"relative"}'],
@@ -532,29 +518,21 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(
 
 def test_hook_registration_is_separate_from_bootstrap_contract() -> None:
     entries = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]["sessionStart"]
-    assert len(entries) == 4
+    assert len(entries) == 2
     assert "bootstrap-check" in entries[0]["bash"]
     assert "bootstrap-check" in entries[0]["powershell"]
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["bash"]
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["powershell"]
     assert "else printf '{}'" in entries[0]["bash"]
     assert "else { [Console]::Out.Write('{}') }" in entries[0]["powershell"]
-    assert "focus-guidance" not in entries[0]["bash"]
-    assert "focus-guidance" not in entries[0]["powershell"]
-    assert "focus-guidance" in entries[1]["bash"]
-    assert "focus-guidance" in entries[1]["powershell"]
+    assert "write-session-guidance" in entries[1]["bash"]
+    assert "write-session-guidance" in entries[1]["powershell"]
     assert "COPILOT_PLUGIN_ROOT" in entries[1]["bash"]
     assert "COPILOT_PLUGIN_ROOT" in entries[1]["powershell"]
-    assert "emit-command-catalog" in entries[2]["bash"]
-    assert "emit-command-catalog" in entries[2]["powershell"]
-    assert "write-session-guidance" in entries[3]["bash"]
-    assert "write-session-guidance" in entries[3]["powershell"]
-    assert "COPILOT_PLUGIN_ROOT" in entries[3]["bash"]
-    assert "COPILOT_PLUGIN_ROOT" in entries[3]["powershell"]
-    assert "else printf '{}'" in entries[3]["bash"]
-    assert "else { [Console]::Out.Write('{}') }" in entries[3]["powershell"]
-    assert "focus-guidance" not in entries[3]["bash"]
-    assert "focus-guidance" not in entries[3]["powershell"]
+    assert "else printf '{}'" in entries[1]["bash"]
+    assert "else { [Console]::Out.Write('{}') }" in entries[1]["powershell"]
+    assert "focus-guidance" not in json.dumps(entries)
+    assert "emit-command-catalog" not in json.dumps(entries)
     for bootstrap in (
         PLUGIN / "scripts" / "bootstrap-check.sh",
         PLUGIN / "scripts" / "bootstrap-check.ps1",

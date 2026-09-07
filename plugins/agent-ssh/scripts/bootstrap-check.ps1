@@ -17,6 +17,17 @@
     staleness -- first install is the one-time setting-up-ssh-* / setup step. PS5.1+.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
+$script:SessionStartJsonEmitted = $false
+function Write-SessionStartJson {
+    if (-not $script:SessionStartJsonEmitted) {
+        [Console]::Out.Write('{}')
+        $script:SessionStartJsonEmitted = $true
+    }
+}
+function Exit-SessionStart {
+    Write-SessionStartJson
+    exit 0
+}
 
 $InstallDir = Join-Path $env:USERPROFILE '.agent-ssh'
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
@@ -33,15 +44,15 @@ if (-not (Test-Path $Manifest)) {
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
         & $exe -NoProfile -ExecutionPolicy Bypass -File $installer stamp *> $null
     }
-    exit 0
+    Exit-SessionStart
 }
 
 try {
     $m = Get-Content $Manifest -Raw | ConvertFrom-Json
     $pluginDir = $m.source.path
-    if (-not $pluginDir) { exit 0 }
+    if (-not $pluginDir) { Exit-SessionStart }
     $pluginDir = $pluginDir -replace '/', '\'
-    if (-not (Test-Path $pluginDir)) { exit 0 }
+    if (-not (Test-Path $pluginDir)) { Exit-SessionStart }
 
     $deployed = "" + $m.source.version
     $current  = $deployed
@@ -68,12 +79,12 @@ try {
             if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
         }
     }
-    if ($provisioned -and $deployed -eq $current) { exit 0 }
+    if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }
 
     $init = Join-Path $pluginDir 'scripts\init.ps1'
-    if (-not (Test-Path $init)) { exit 0 }
+    if (-not (Test-Path $init)) { Exit-SessionStart }
 
-    Write-Host "[agent-ssh] runtime $deployed -> $current; reconciling in background..." -ForegroundColor DarkGray
+    [Console]::Error.WriteLine("[agent-ssh] runtime $deployed -> $current; reconciling in background...")
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
     # conhost --headless so Windows Terminal / the DefTerm handoff can't surface
@@ -85,4 +96,4 @@ try {
         -WindowStyle Hidden | Out-Null
 } catch { }
 
-exit 0
+Exit-SessionStart

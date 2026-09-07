@@ -21,5 +21,11 @@ commands from it, call a network service, store a longitudinal ledger, qualify
 models, or alter routing decisions. Provider and bounded external-reader
 adapters, concise session guidance, and routing composition are later slices.
 
+The current `sessionStart` hook is output-free: it only performs bounded,
+restart-safe runtime bootstrap and emits `{}`. The payload retains its command
+catalog emitter, but does not register a competing startup context producer.
+Direct plugin-owned startup guidance remains a future seam after native host
+composition is proven at the supported Copilot CLI version floor.
+
 See [Configuration](docs/configuration.md) and
 [Architecture](docs/architecture.md).

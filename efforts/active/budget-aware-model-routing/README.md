@@ -64,9 +64,10 @@ The intended implementation is a new independently usable `budget-guidance`
 plugin. It owns budget posture, arithmetic, adapters, current status, and a
 concise context contribution. `delegation-guidance` remains the owner of routing
 strategy and eligibility; it may consume budget-guidance output when both are
-enabled. `context-injection` remains the composition authority. External
-accounting systems remain the owners of longitudinal ledgers and detailed cost
-attribution.
+enabled. The checked-in pointer plus exact-session guidance file owns current
+delivery; native host composition may later carry direct plugin output after
+supported-version proof. External accounting systems remain the owners of
+longitudinal ledgers and detailed cost attribution.
 
 ## Request
 
@@ -85,8 +86,8 @@ attribution.
 - [x] Extend the harness-guidance vision with budget-aware routing and explicit
   adapter/failure semantics.
 - [x] Assign ownership: `budget-guidance` owns posture; `delegation-guidance`
-  owns eligibility and routing policy; `context-injection` owns composition;
-  external accounting owns longitudinal history.
+  owns eligibility and routing policy; each plugin owns its exact-session
+  guidance file; external accounting owns longitudinal history.
 - [x] Land this vision and effort through the repository review gate before
   plugin implementation.
 
@@ -122,8 +123,8 @@ attribution.
   repository's runtime-plugin and configuration patterns.
 - [x] Expose one machine-readable status result for hooks, dashboards, scripts,
   and routing consumers.
-- [ ] Contribute a concise, attributable session-start cue through the existing
-  context-injection contract and its static fallback pattern.
+- [ ] Contribute a concise, attributable session-start cue through the
+  checked-in pointer plus exact-session guidance-file pattern.
 - [ ] Keep injected output inside a declared byte/token budget and avoid loading
   the detailed adapter/config reference into every session.
 - [x] Preserve source, capture time, freshness, projection, and error status in

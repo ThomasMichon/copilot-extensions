@@ -75,9 +75,10 @@ an external state root, it may select the valid config from the bound knowledge
 repo. A present invalid local config, an unsafe path, a conflicting
 singular/plural indexer declaration, a missing required binding, or an
 unavailable resolver leaves the plugin inactive.
-2. Session-start hooks are pure contributors. They emit the command catalog and
-scope context only while that resolver reports active; they never stamp or
-provision a runtime and never start a service.
+2. Session-start hooks only register the dispatch companion while that resolver
+reports active; they never emit aggregate context, stamp or provision a
+runtime, or start a service. Retrieval guidance belongs in the exact-session
+guidance file when a session-file writer is present.
 3. Every payload CLI entry runs the same resolver before installation-context
 selection, runtime provisioning, or transport routing. `status` reports
 structured `inactive` outside an opted-in repository; other commands are
@@ -231,9 +232,10 @@ separate lower-level MCP surface:
    `agent-index search` / `similar` / `clusters` / `status` **directly**;
    there is no sub-agent and no MCP-tool wrapper. agent-index is a uniform
    retrieval capability every agent may use, so how-to-search guidance is
-   delivered by the sessionStart scope-binding hook's `additionalContext` rather
-   than by wrapping the tools. The CLI transport handles host/client SSH routing,
-   so the same commands work on a host (local) or a client (over SSH).
+   documented by the plugin skills and command catalog rather than delivered
+   through aggregate sessionStart `additionalContext`. The CLI transport
+   handles host/client SSH routing, so the same commands work on a host (local)
+   or a client (over SSH).
 2. **Direct `agent-index mcp`** — `src/agent_index/mcp_app.py` exposes HTTP-client
    FastMCP tools (`agent_index_search`/`find_similar`/`clusters`/`status`) plus
    `agent_index_reindex`. It resolves `AGENT_INDEX_ENDPOINT` first, then local

@@ -20,10 +20,21 @@
     see whether the last auto-reconcile succeeded.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
+$script:SessionStartJsonEmitted = $false
+function Write-SessionStartJson {
+    if (-not $script:SessionStartJsonEmitted) {
+        [Console]::Out.Write('{}')
+        $script:SessionStartJsonEmitted = $true
+    }
+}
+function Exit-SessionStart {
+    Write-SessionStartJson
+    exit 0
+}
 $PluginDir = Split-Path -Parent $PSScriptRoot
 try {
     $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
-    if (-not $name) { exit 0 }
+    if (-not $name) { Exit-SessionStart }
     $InstallDir = Join-Path $env:USERPROFILE ".$name"
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     if (-not (Test-Path $Manifest)) {
@@ -42,7 +53,7 @@ try {
             $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
             & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
         }
-        exit 0
+        Exit-SessionStart
     }
     $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version
     $current = $deployed
@@ -85,13 +96,13 @@ try {
     # version -> nothing to reconcile. (When a legacy fallback set the flag,
     # $curVer is $null and we fall back to the version-string check alone, as
     # before.)
-    if ($runtimeHealthy -and $deployed -eq $current -and (-not $curVer -or $curVer -eq $deployed)) { exit 0 }
+    if ($runtimeHealthy -and $deployed -eq $current -and (-not $curVer -or $curVer -eq $deployed)) { Exit-SessionStart }
     $init = Join-Path $PluginDir 'scripts\init.ps1'
     if (Test-Path $init) {
         $reInner = "& `"$init`""
     } else {
         $inst = Join-Path $PluginDir 'scripts\install.ps1'
-        if (-not (Test-Path $inst)) { exit 0 }
+        if (-not (Test-Path $inst)) { Exit-SessionStart }
         $reInner = "& `"$inst`" install -NonInteractive"
     }
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -130,13 +141,13 @@ try {
                     $dto = if ($atVal -is [DateTime]) { [DateTimeOffset]$atVal } else { [DateTimeOffset]::Parse([string]$atVal) }
                     $ageMin = ([DateTimeOffset]::UtcNow - $dto).TotalMinutes
                 } catch { }
-                if ($ageMin -lt $staleMinutes) { exit 0 }         # in flight -- don't stack
+                if ($ageMin -lt $staleMinutes) { Exit-SessionStart }         # in flight -- don't stack
                 Stop-Process -Id $prevPid -Force -ErrorAction SilentlyContinue  # wedged -- reap
             }
         }
     } catch { }
 
-    Write-Host "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir\reconcile.log)..." -ForegroundColor DarkGray
+    [Console]::Error.WriteLine("[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir\reconcile.log)...")
 
     # The background reconcile is HEADLESS and non-blocking. Two guards keep the
     # installer from ever waiting on input:
@@ -173,4 +184,4 @@ try {
     } | ConvertTo-Json -Compress
     [System.IO.File]::WriteAllText($statusFile, $status, $utf8NoBom)
 } catch { }
-exit 0
+Exit-SessionStart

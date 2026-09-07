@@ -29,9 +29,7 @@ def test_warning_payload_and_hook_are_removed() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     assert "session-ext-reload" not in json.dumps(hooks)
 
-    aggregator = (scripts / "emit_session_context.py").read_text(encoding="utf-8")
-    assert "session-ext-reload" not in aggregator
-    assert '"extension"' not in aggregator
+    assert not (scripts / "emit_session_context.py").exists()
 
 
 def test_installer_retires_previously_deployed_assets(

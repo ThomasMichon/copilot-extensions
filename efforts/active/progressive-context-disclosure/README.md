@@ -25,10 +25,9 @@ fragments into an evidence-calibrated progressive-disclosure system.
 Hooks should inject only the critical policy, constraints, orientation, and
 decision cues required before safe action. Detailed overarching behavior and
 grounding remain plugin-owned and available through attributable guide
-references that an agent follows when the task requires them. The aggregate may
-gain semantic structure so independently delivered fragments read as one
-coherent document, but composition must preserve ownership and must not invent,
-paraphrase, or silently reconcile policy.
+references that an agent follows when the task requires them. Each plugin's
+exact-session guidance may gain semantic structure, but assembly must preserve
+ownership and must not invent, paraphrase, or silently reconcile policy.
 
 The campaign is experiment-first. It will not standardize one link syntax,
 emphasis level, deferral threshold, or hierarchical schema until literal-mode
@@ -59,10 +58,10 @@ upfront context and unnecessary exploration.
 
 ## Context
 
-The current context-injection pattern already requires a concise owner-marked
-kernel and recommends a backtick faux-link for detailed mechanics. It also
-provides deterministic composition, contributor budgets, exact ownership,
-spill-to-session-state behavior, and counts-only customization review.
+The current session-scoped dynamic-guidance pattern already requires a concise
+owner-marked kernel and recommends a backtick faux-link for detailed mechanics.
+It also provides exact ownership, bounded per-session files, static fail-safes,
+and counts-only customization review.
 
 Those foundations answer who owns context and how independent hook results
 survive. They do not yet answer:
@@ -169,8 +168,8 @@ prompts the primary context channel.
 
 ### Phase 4 - Authoring guidance and exemplars
 
-- [ ] Update `customizing-copilot:authoring-skills`, its session-context
-  reference, and `docs/patterns/context-injection.md` with the selected
+- [ ] Update `customizing-copilot:authoring-skills`, its hook-composition
+  reference, and `docs/patterns/session-scoped-dynamic-guidance.md` with the selected
   criticality, deferral, reference, and emphasis rules.
 - [ ] Define the boundary between a deferred overarching grounding guide and a
   task-triggered skill; neither should be used as a disguise for the other.
@@ -179,22 +178,22 @@ prompts the primary context channel.
   contribution if adopted.
 - [ ] Require guide ownership, applicability cues, contained resolution,
   stable identifiers, and bounded critical bytes.
-- [ ] Document how resume recovery, session-state spill, and progressive
-  disclosure compose without duplicating the full aggregate.
+- [ ] Document how resume recovery, exact-session guidance files, and
+  progressive disclosure compose without duplicating complete guidance.
 
-### Phase 5 - Contributor contract and authority implementation
+### Phase 5 - Plugin-owned rendering and native-host seam
 
-- [ ] Version the contributor and engine contracts only after the experiment
-  and structured-assembly decisions are reviewed.
-- [ ] Add backward-compatible parsing so existing authority-aware contributors
-  preserve behavior during partial rollout.
+- [ ] Version plugin-owned critical-kernel and deferred-reference metadata only
+  after the experiment and structured-assembly decisions are reviewed.
 - [ ] Implement deterministic rendering, reference containment, budgeting, and
-  diagnostics in the authority; never execute or auto-load a guide merely
-  because it is declared.
-- [ ] Migrate a policy contributor, a command-catalog contributor, and an
-  environment/routing contributor before broad suite conversion.
-- [ ] Preserve byte-identical shared output, source qualification, trust gates,
-  cross-platform wrappers, and standalone fallback throughout rollout.
+  diagnostics in each plugin's exact-session writer; never execute or auto-load
+  a guide merely because it is declared.
+- [ ] Migrate a policy writer, a command-catalog writer, and an
+  environment/routing writer before broad suite conversion.
+- [ ] Preserve source qualification, trust gates, cross-platform writers, and
+  static fallback throughout rollout.
+- [ ] Keep direct multi-plugin `additionalContext` activation deferred until
+  native host composition passes the supported-version matrix.
 
 ### Phase 6 - Reviewing-customizations enforcement
 
@@ -224,9 +223,9 @@ prompts the primary context channel.
   one do not, critical rules remain active before exploration, and malformed or
   unsafe references fail closed.
 - [ ] Prove deterministic hierarchical or flat rendering across Windows and
-  POSIX, contributor order permutations, plugin subsets, resume, compaction,
-  spill, and version skew.
-- [ ] Convert the remaining suite-owned contributors, update architecture and
+  POSIX, plugin subsets, resume, compaction, exact-session file replacement,
+  and version skew.
+- [ ] Convert the remaining suite-owned writers, update architecture and
   reality documentation, and run customization, generated-file, marketplace,
   and clean-room guards.
 - [ ] Close or transfer every sub-issue, mark this effort Done, and archive it.
@@ -276,8 +275,8 @@ prompts the primary context channel.
   relative to full-inline or over-linked variants.
 - [ ] `reviewing-customizations` findings match the calibrated contract without
   executing hooks, dumping context, or flagging every subjective prose choice.
-- [ ] Fresh, resume, compaction, ACP, and spill scenarios preserve critical
-  guidance and the selected on-demand discovery behavior.
+- [ ] Fresh, resume, compaction, ACP, and exact-session replacement scenarios
+  preserve critical guidance and the selected on-demand discovery behavior.
 
 ## Proposal
 

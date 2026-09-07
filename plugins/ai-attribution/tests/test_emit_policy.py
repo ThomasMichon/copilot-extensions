@@ -25,19 +25,6 @@ SESSION_GUIDANCE_TEMPLATE = (
     PLUGIN / "instructions" / "session-guidance.instructions.md"
 )
 
-
-def test_authority_resolver_matches_canonical_copy() -> None:
-    canonical = (
-        PLUGIN.parent
-        / "context-injection"
-        / "scripts"
-        / "resolve_context_authority.py"
-    )
-    resolver = PLUGIN / "scripts" / "resolve_context_authority.py"
-
-    assert resolver.read_bytes() == canonical.read_bytes()
-
-
 def _powershell_command() -> str | None:
     if os.name == "nt":
         return shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -131,37 +118,6 @@ def _context(result: subprocess.CompletedProcess[str]) -> str:
     return payload["additionalContext"]
 
 
-def _run_hook_wrapper(
-    shell_key: str,
-    cwd: Path,
-    home: Path,
-    *,
-    payload: str | None = None,
-    plugin_root: Path | None = None,
-) -> subprocess.CompletedProcess[str]:
-    hook_command = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"][
-        "sessionStart"
-    ][0][shell_key]
-    if shell_key == "powershell":
-        powershell = _powershell_command()
-        assert powershell
-        command = [powershell, "-NoProfile", "-Command", hook_command]
-    else:
-        command = ["bash", "-c", hook_command]
-    environment = _environment(home)
-    if plugin_root is not None:
-        environment["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
-    return subprocess.run(
-        command,
-        cwd=cwd,
-        env=environment,
-        input=payload or json.dumps({"cwd": str(cwd), "source": "copilot-cli"}),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -247,7 +203,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev11] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev12] Before publishing"
     )
     assert "another party's repo require" in context
     assert "verified operator-owned repo, omit disclosure" in context
@@ -294,7 +250,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev11]"
+            "[owner: ai-attribution@0.1.0-dev12]"
         )
 
 
@@ -424,7 +380,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev11]"
+                "[owner: ai-attribution@0.1.0-dev12]"
             )
         else:
             assert result.stdout == "{}"
@@ -1029,25 +985,6 @@ def test_exact_json_output_and_kernel_size(tmp_path: Path) -> None:
     assert context.count("Target-repo contribution guide:") == 4
 
 
-def test_aggregate_mode_is_compact_and_preserves_publication_safety(
-    tmp_path: Path,
-) -> None:
-    repo = _git_repo(tmp_path / "repo")
-    results = [
-        _run(hook, repo, tmp_path / hook.suffix.removeprefix("."), "--aggregate")
-        for hook in _parity_hooks()
-    ]
-    contexts = [_context(result) for result in results]
-    for context in contexts:
-        assert context.startswith("[owner: ai-attribution@")
-        assert "classify audience and repository ownership" in context
-        assert "ownership hints are not proof" in context
-        assert "must be persona-neutral and scrub credentials" in context
-        assert "Use the `ai-attribution` skill" in context
-        assert len(context.encode("utf-8")) <= 544
-    assert len(set(contexts)) == 1
-
-
 @pytest.mark.skipif(
     os.name == "nt" or not shutil.which("bash"),
     reason="live Bash/PowerShell parity requires POSIX Bash",
@@ -1080,113 +1017,6 @@ def test_powershell_json_serializer_escapes_nul() -> None:
         check=True,
     )
     assert result.stdout == r"\u0000"
-
-
-@pytest.mark.parametrize("shell_key", ["bash", "powershell"])
-def test_hook_wrapper_finds_non_default_marketplace(
-    tmp_path: Path,
-    shell_key: str,
-) -> None:
-    if shell_key == "powershell" and not _powershell_command():
-        pytest.skip("PowerShell is not installed")
-    if shell_key == "bash" and (os.name == "nt" or not shutil.which("bash")):
-        pytest.skip("Bash wrapper behavior is tested on POSIX")
-    repo = _git_repo(tmp_path / "repo")
-    home = tmp_path / "home"
-    installed = (
-        home
-        / ".copilot"
-        / "installed-plugins"
-        / "alternate-marketplace"
-        / "ai-attribution"
-    )
-    shutil.copytree(PLUGIN, installed)
-    result = _run_hook_wrapper(
-        shell_key,
-        repo,
-        home,
-        plugin_root=installed,
-    )
-    assert _context(result).startswith("[owner: ai-attribution@")
-    assert result.stderr == ""
-
-
-@pytest.mark.skipif(
-    os.name == "nt" or not shutil.which("pwsh"),
-    reason="POSIX pwsh is required",
-)
-def test_powershell_wrapper_uses_components_under_posix_pwsh(
-    tmp_path: Path,
-) -> None:
-    repo = _git_repo(tmp_path / "repo")
-    home = tmp_path / "home"
-    installed = (
-        home
-        / ".copilot"
-        / "installed-plugins"
-        / "non-default-marketplace"
-        / "ai-attribution"
-    )
-    shutil.copytree(PLUGIN, installed)
-    result = _run_hook_wrapper(
-        "powershell",
-        repo,
-        home,
-        plugin_root=installed,
-    )
-    assert _context(result).startswith("[owner: ai-attribution@")
-    assert result.stderr == ""
-
-
-@pytest.mark.parametrize("shell_key", ["bash", "powershell"])
-@pytest.mark.parametrize("condition", ["missing", "directory", "ambiguous"])
-def test_hook_wrapper_rejects_missing_non_leaf_or_ambiguous_payloads(
-    tmp_path: Path,
-    shell_key: str,
-    condition: str,
-) -> None:
-    if shell_key == "powershell" and not _powershell_command():
-        pytest.skip("PowerShell is not installed")
-    if shell_key == "bash" and (os.name == "nt" or not shutil.which("bash")):
-        pytest.skip("Bash wrapper behavior is tested on POSIX")
-    home = tmp_path / "home"
-    if condition == "directory":
-        suffix = "emit-policy.ps1" if shell_key == "powershell" else "emit-policy.sh"
-        (
-            home
-            / ".copilot"
-            / "installed-plugins"
-            / "alternate-marketplace"
-            / "ai-attribution"
-            / "scripts"
-            / suffix
-        ).mkdir(parents=True)
-    elif condition == "ambiguous":
-        for marketplace in ("alpha-marketplace", "zeta-marketplace"):
-            installed = (
-                home
-                / ".copilot"
-                / "installed-plugins"
-                / marketplace
-                / "ai-attribution"
-            )
-            shutil.copytree(PLUGIN, installed)
-    result = _run_hook_wrapper(shell_key, tmp_path, home, payload="{}")
-    assert result.stdout == "{}"
-    assert result.stderr == ""
-
-
-@pytest.mark.guard
-def test_hook_wrapper_uses_cross_platform_path_components() -> None:
-    command = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"][
-        "sessionStart"
-    ][0]["powershell"]
-    assert "COPILOT_PLUGIN_ROOT" in command
-    assert "PLUGIN_ROOT" in command
-    assert "CLAUDE_PLUGIN_ROOT" in command
-    assert command.count("Join-Path") >= 2
-    assert "invoke-context-contributor.ps1" in command
-    assert "Test-Path -LiteralPath $w -PathType Leaf" in command
 
 
 @pytest.mark.guard
@@ -1259,16 +1089,25 @@ def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
 @pytest.mark.guard
 def test_session_guidance_writer_is_a_separate_side_effect_hook() -> None:
     entries = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]["sessionStart"]
-    assert len(entries) == 2
-    assert "invoke-context-contributor" in entries[0]["bash"]
-    assert "--aggregate" in entries[0]["bash"]
-    assert "write-session-guidance" in entries[1]["bash"]
-    assert "write-session-guidance" in entries[1]["powershell"]
-    assert entries[1]["timeoutSec"] == 30
+    assert len(entries) == 1
+    assert "write-session-guidance" in entries[0]["bash"]
+    assert "write-session-guidance" in entries[0]["powershell"]
+    assert "invoke-context-contributor" not in entries[0]["bash"]
+    assert "--aggregate" not in entries[0]["bash"]
+    assert entries[0]["timeoutSec"] == 30
     for shell in ("bash", "powershell"):
-        assert "COPILOT_PLUGIN_ROOT" in entries[1][shell]
-        assert "PLUGIN_ROOT" in entries[1][shell]
-        assert "CLAUDE_PLUGIN_ROOT" in entries[1][shell]
+        assert "COPILOT_PLUGIN_ROOT" in entries[0][shell]
+        assert "PLUGIN_ROOT" in entries[0][shell]
+        assert "CLAUDE_PLUGIN_ROOT" in entries[0][shell]
+
+    declaration = json.loads(
+        (PLUGIN / "session-context.json").read_text(encoding="utf-8")
+    )
+    assert declaration["contributors"] == []
+    assert declaration["sessionStart"] == {
+        "sideEffects": "restart-safe-idempotent",
+        "context": "none",
+    }
 
 
 def test_bash_powershell_parity_or_static_semantics(tmp_path: Path) -> None:

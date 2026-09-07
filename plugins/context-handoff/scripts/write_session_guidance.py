@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Write context-handoff guidance as a sessionStart side effect.
+"""Write context-handoff guidance as an output-free sessionStart side effect.
 
-The existing continuity-guidance contributor remains a compact best-effort
-additionalContext channel. This writer invokes the full plugin-owned continuity
-contract and atomically writes it to the session-scoped guidance file.
+This writer invokes the full plugin-owned continuity contract and atomically
+writes it to the session-scoped guidance file.
 """
 
 from __future__ import annotations

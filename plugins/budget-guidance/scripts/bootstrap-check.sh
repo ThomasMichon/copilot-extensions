@@ -10,6 +10,14 @@
 #      only when the deployed version drifts. Reconciles the TOOL, never state.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
+session_start_json_emitted=0
+emit_session_start_json() {
+  if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
+    printf '{}'
+    session_start_json_emitted=1
+  fi
+}
+trap 'emit_session_start_json' EXIT
 name="budget-guidance"
 InstallDir="$HOME/.$name"
 Manifest="$InstallDir/deploy-manifest.json"
@@ -69,6 +77,6 @@ elif [ -f "$PluginDir/scripts/install.sh" ]; then
 else
   exit 0
 fi
-echo "[$name] runtime $deployed -> $current; reconciling in background..."
+echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
 nohup bash "${target[@]}" >/dev/null 2>&1 &
 exit 0

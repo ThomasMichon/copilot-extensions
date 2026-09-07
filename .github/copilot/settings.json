@@ -7,7 +7,7 @@
   "enabledPlugins": {
     "agent-dispatch@copilot-extensions": true,
     "copilot-extensions-harness@copilot-extensions": true,
-    "context-injection@copilot-extensions": true,
+    "context-injection@copilot-extensions": false,
     "customizing-copilot@copilot-extensions": true,
     "efforts@copilot-extensions": true,
     "visions@copilot-extensions": true

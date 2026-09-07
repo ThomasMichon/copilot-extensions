@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Write ai-attribution guidance as a sessionStart side effect.
+"""Write ai-attribution guidance as an output-free sessionStart side effect.
 
-The existing publication-policy contributor remains a best-effort
-additionalContext channel. This writer invokes the same policy producer without
-its aggregate-only kernel and atomically writes the richer result to the
-session-scoped file used by the static pointer projection.
+This writer invokes the plugin-owned policy producer and atomically writes the
+result to the session-scoped file used by the static pointer projection.
 """
 
 from __future__ import annotations

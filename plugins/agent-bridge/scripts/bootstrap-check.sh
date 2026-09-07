@@ -15,6 +15,14 @@
 # diagnosable.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
+session_start_json_emitted=0
+emit_session_start_json() {
+  if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
+    printf '{}'
+    session_start_json_emitted=1
+  fi
+}
+trap 'emit_session_start_json' EXIT
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
 name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || exit 0
@@ -52,7 +60,7 @@ elif [ -f "$PluginDir/scripts/install.sh" ]; then
 else
   exit 0
 fi
-echo "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir/reconcile.log)..."
+echo "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir/reconcile.log)..." >&2
 reconcile_log="$InstallDir/reconcile.log"
 status_file="$InstallDir/reconcile-status.json"
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -60,5 +68,6 @@ now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 nohup bash "${target[@]}" >"$reconcile_log" 2>&1 &
 launched_pid=$!
 printf '{"at":"%s","from":"%s","to":"%s","launched_pid":%s,"log":"%s"}\n' \
-  "$now" "$deployed" "$current" "$launched_pid" "$reconcile_log" >"$status_file" 2>/dev/null || true
+  "$now" "$deployed" "$current" "$launched_pid" "$reconcile_log" \
+  >"$status_file" 2>/dev/null || true
 exit 0

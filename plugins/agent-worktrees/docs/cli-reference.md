@@ -441,7 +441,7 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules and fast-forward the managed repo anchor(s). Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--no-anchor-sync` skips the anchor sync) |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Retire migrated managed instruction files (machine identity now via the `session-machine` sessionStart hook) |
-| `machine-context` | sessionStart hook entrypoint: emit machine identity as `additionalContext` (cwd-gated) |
+| `machine-context` | sessionStart producer for the exact-session guidance writer (cwd-gated) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
 
 ## Effort Focus

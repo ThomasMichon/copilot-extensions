@@ -147,18 +147,16 @@ def test_catalog_is_empty_without_valid_opt_in(
     assert json.loads(result.stdout) == {}
 
 
-def test_hooks_use_runtime_payload_context_and_emit_catalog() -> None:
+def test_hooks_keep_only_runtime_side_effects() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_start = hooks["hooks"]["sessionStart"]
-    assert any("emit-command-catalog.sh" in hook["bash"] for hook in session_start)
-    assert any(
-        "emit-command-catalog.ps1" in hook["powershell"] for hook in session_start
-    )
+    assert len(session_start) == 2
+    assert "register-dispatch-companion.sh" in session_start[0]["bash"]
+    assert "register-dispatch-companion.ps1" in session_start[0]["powershell"]
+    assert "write-session-guidance" in session_start[1]["bash"]
+    assert "write-session-guidance" in session_start[1]["powershell"]
+    assert not any("emit-command-catalog" in str(hook) for hook in session_start)
+    assert not any("emit-scope-binding" in str(hook) for hook in session_start)
     for hook in session_start:
         assert "COPILOT_PLUGIN_ROOT" in hook["bash"]
         assert "COPILOT_PLUGIN_ROOT" in hook["powershell"]
-    for platform in ("bash", "powershell"):
-        assert not any(
-            "bootstrap-check" in hook[platform] for hook in session_start
-        )
-        assert not any("ensure-service" in hook[platform] for hook in session_start)

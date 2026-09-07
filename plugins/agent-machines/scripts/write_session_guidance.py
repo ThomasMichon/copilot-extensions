@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Write agent-machines guidance as a sessionStart side effect.
 
-The existing command-catalog contributor remains a best-effort
-additionalContext channel. This writer invokes it fresh and atomically writes
-its output to the session-scoped guidance file.
+The command-catalog producer is invoked fresh and its output is atomically
+written to the exact session's guidance file.
 """
 
 from __future__ import annotations

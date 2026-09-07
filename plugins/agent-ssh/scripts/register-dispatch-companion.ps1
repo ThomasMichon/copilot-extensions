@@ -1,8 +1,19 @@
 $ErrorActionPreference = 'SilentlyContinue'
+$script:SessionStartJsonEmitted = $false
+function Write-SessionStartJson {
+    if (-not $script:SessionStartJsonEmitted) {
+        [Console]::Out.Write('{}')
+        $script:SessionStartJsonEmitted = $true
+    }
+}
+function Exit-SessionStart {
+    Write-SessionStartJson
+    exit 0
+}
 try {
     $pluginRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
     $registrar = Join-Path $pluginRoot 'references\agent-dispatch\registrar'
-    if (-not (Test-Path -LiteralPath $registrar -PathType Container)) { exit 0 }
+    if (-not (Test-Path -LiteralPath $registrar -PathType Container)) { Exit-SessionStart }
     $directory = if ($env:AGENT_DISPATCH_REGISTRAR_DROPINS_DIR) {
         $env:AGENT_DISPATCH_REGISTRAR_DROPINS_DIR
     } else {
@@ -46,4 +57,4 @@ try {
         }
     }
 } catch {}
-exit 0
+Exit-SessionStart

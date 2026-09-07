@@ -16,12 +16,23 @@
     once the runtime has been installed, and only reconciles staleness. PS5.1+.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
+$script:SessionStartJsonEmitted = $false
+function Write-SessionStartJson {
+    if (-not $script:SessionStartJsonEmitted) {
+        [Console]::Out.Write('{}')
+        $script:SessionStartJsonEmitted = $true
+    }
+}
+function Exit-SessionStart {
+    Write-SessionStartJson
+    exit 0
+}
 
 $PluginDir = Split-Path -Parent $PSScriptRoot
 function Test-LegacyMutationAllowed {
     $probe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
     if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) {
-        Write-Host '[agent-machines] legacy mutation probe is unavailable; skipping reconcile.' -ForegroundColor DarkGray
+        [Console]::Error.WriteLine('[agent-machines] legacy mutation probe is unavailable; skipping reconcile.')
         return $false
     }
     $hostExe = (Get-Process -Id $PID).Path
@@ -50,8 +61,8 @@ $policyPresent = (
 )
     $resolver = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
     if (-not (Test-Path $resolver)) {
-        Write-Host '[agent-machines] installation context is selected but its validator is unavailable; skipping reconcile.' -ForegroundColor DarkGray
-        exit 0
+        [Console]::Error.WriteLine('[agent-machines] installation context is selected but its validator is unavailable; skipping reconcile.')
+        Exit-SessionStart
     }
     $hostExe = (Get-Process -Id $PID).Path
     $statusArgs = @(
@@ -71,12 +82,12 @@ $policyPresent = (
     }
     $statusJson = @(& $hostExe @statusArgs)
     if ($LASTEXITCODE -ne 0) {
-        Write-Host '[agent-machines] installation status is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
-        exit 0
+        [Console]::Error.WriteLine('[agent-machines] installation status is invalid; skipping reconcile without legacy fallback.')
+        Exit-SessionStart
     }
     try { $status = ($statusJson -join "`n") | ConvertFrom-Json } catch {
-        Write-Host '[agent-machines] installation status is malformed; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
-        exit 0
+        [Console]::Error.WriteLine('[agent-machines] installation status is malformed; skipping reconcile without legacy fallback.')
+        Exit-SessionStart
     }
     $simplePolicyLegacy = $false
     if (
@@ -127,8 +138,8 @@ $policyPresent = (
         $simplePolicyLegacy
     ) {
         if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-            Write-Host '[agent-machines] requested installation context is not active; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
-            exit 0
+            [Console]::Error.WriteLine('[agent-machines] requested installation context is not active; skipping reconcile without legacy fallback.')
+            Exit-SessionStart
         }
     }
     elseif (
@@ -139,14 +150,14 @@ $policyPresent = (
         [string]$status.status -ceq 'deactivation-required'
     ) {
         if ([string]$status.actualMode -cne 'namespaced') {
-            exit 0
+            Exit-SessionStart
         }
         $InstallDir = [string]$status.runtimeRoot
         $contextPath = [string]$status.context
         $contextMarketplaceId = [string]$status.marketplaceId
         if (-not $InstallDir -or -not $contextPath -or -not $contextMarketplaceId) {
-            Write-Host '[agent-machines] active installation context is incomplete; skipping reconcile.' -ForegroundColor DarkGray
-            exit 0
+            [Console]::Error.WriteLine('[agent-machines] active installation context is incomplete; skipping reconcile.')
+            Exit-SessionStart
         }
         $contextSelected = $true
         $contextActive = (
@@ -155,11 +166,11 @@ $policyPresent = (
         )
     }
     else {
-        Write-Host (
+        [Console]::Error.WriteLine(
             '[agent-machines] installation governance blocks reconcile without legacy fallback: ' +
             "status=$($status.status) reason=$($status.reason)."
-        ) -ForegroundColor DarkGray
-        exit 0
+        )
+        Exit-SessionStart
     }
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 $Binstub    = Join-Path $env:USERPROFILE '.local\bin\agent-machines.cmd'
@@ -185,16 +196,16 @@ if (-not (Test-Path $Manifest)) {
                     -WindowStyle Hidden | Out-Null
             }
         }
-        exit 0
+        Exit-SessionStart
     }
     $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
     if ((Test-Path $payloadInit) -and (Select-String -Path $payloadInit -Pattern "'stamp'" -Quiet)) {
-        if (-not (Test-LegacyMutationAllowed)) { exit 0 }
+        if (-not (Test-LegacyMutationAllowed)) { Exit-SessionStart }
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
         & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp *> $null
     }
-    exit 0
+    Exit-SessionStart
 }
 
 try {
@@ -232,8 +243,8 @@ try {
             [string]$m.installation.context -ceq $manifestContext
         )
         if (-not $validManifest) {
-            Write-Host '[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
-            exit 0
+            [Console]::Error.WriteLine('[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.')
+            Exit-SessionStart
         }
         try {
             if ($env:OS -eq 'Windows_NT') {
@@ -245,8 +256,8 @@ try {
             $runtimePath = [IO.Path]::GetFullPath($runtimePathText)
             $runtimeInterpreter = [IO.Path]::GetFullPath($runtimeInterpreterText)
         } catch {
-            Write-Host '[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
-            exit 0
+            [Console]::Error.WriteLine('[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.')
+            Exit-SessionStart
         }
         $expectedRuntimePath = Join-Path (Join-Path $InstallDir 'versions') $activeVersion
         $expectedInterpreter = if ($env:OS -eq 'Windows_NT') {
@@ -278,8 +289,8 @@ try {
             ) -or
             -not (Test-Path -LiteralPath $runtimeInterpreter -PathType Leaf)
         ) {
-            Write-Host '[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
-            exit 0
+            [Console]::Error.WriteLine('[agent-machines] active cell deploy manifest is invalid; skipping reconcile without legacy fallback.')
+            Exit-SessionStart
         }
         $current = $deployed
         $pyproj = Join-Path $PluginDir 'pyproject.toml'
@@ -292,12 +303,10 @@ try {
             $sourcePath,
             [IO.Path]::GetFullPath($PluginDir)
         )
-        if (($deployed -ceq $current -and $samePayloadPath) -or -not $contextActive) {
-            exit 0
-        }
+        if (($deployed -ceq $current -and $samePayloadPath) -or -not $contextActive) { Exit-SessionStart }
         $init = Join-Path $PluginDir 'scripts\init.ps1'
-        if (-not (Test-Path $init)) { exit 0 }
-        Write-Host "[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background..." -ForegroundColor DarkGray
+        if (-not (Test-Path $init)) { Exit-SessionStart }
+        [Console]::Error.WriteLine("[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background...")
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
         $command = "& `"$init`" -Action cell-provision -Context `"$contextPath`" -ExpectedMarketplaceId `"$contextMarketplaceId`""
@@ -307,13 +316,13 @@ try {
         Start-Process -FilePath 'conhost.exe' `
             -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
             -WindowStyle Hidden | Out-Null
-        exit 0
+        Exit-SessionStart
     }
 
     $pluginDir = $m.source.path
-    if (-not $pluginDir) { exit 0 }
+    if (-not $pluginDir) { Exit-SessionStart }
     $pluginDir = $pluginDir -replace '/', '\'
-    if (-not (Test-Path $pluginDir)) { exit 0 }
+    if (-not (Test-Path $pluginDir)) { Exit-SessionStart }
 
     $deployed = "" + $m.source.version
     $current  = $deployed
@@ -324,13 +333,13 @@ try {
     }
 
     # Up to date and binstub present -> fast no-op (the common case).
-    if ((Test-Path $Binstub) -and $deployed -eq $current) { exit 0 }
+    if ((Test-Path $Binstub) -and $deployed -eq $current) { Exit-SessionStart }
 
     $init = Join-Path $pluginDir 'scripts\init.ps1'
-    if (-not (Test-Path $init)) { exit 0 }
+    if (-not (Test-Path $init)) { Exit-SessionStart }
 
-    if (-not (Test-LegacyMutationAllowed)) { exit 0 }
-    Write-Host "[agent-machines] runtime $deployed -> $current; reconciling in background..." -ForegroundColor DarkGray
+    if (-not (Test-LegacyMutationAllowed)) { Exit-SessionStart }
+    [Console]::Error.WriteLine("[agent-machines] runtime $deployed -> $current; reconciling in background...")
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
     # conhost --headless so Windows Terminal / the DefTerm handoff can't surface
@@ -342,4 +351,4 @@ try {
         -WindowStyle Hidden | Out-Null
 } catch { }
 
-exit 0
+Exit-SessionStart
