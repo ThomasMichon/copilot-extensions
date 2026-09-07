@@ -309,9 +309,16 @@ or plugin version has changed. Old marked
 removed manually.
 
 The checked-in fallback budget is 4 KiB per projected file and 12 KiB in
-aggregate. This path is only a static fail-safe for launch modes that miss
-hooks; it does not aggregate dynamic context, inline or spill session content,
-or compete with the `context-injection` authority.
+aggregate by default. A repository may raise or lower the aggregate ceiling
+(bounded between the per-file 4 KiB floor and a 64 KiB hard cap) via a small,
+strictly validated `.github/copilot/instruction-projections.config.json`
+(`{"schema": "copilot-extensions.instruction-projections-config", "version":
+1, "maxAggregateBytes": <n>}`); a missing config keeps the 12 KiB default, and
+a malformed or out-of-range override is itself a blocking finding rather than
+silently falling back or accepting an unsafe value. This path is only a static
+fail-safe for launch modes that miss hooks; it does not aggregate dynamic
+context, inline or spill session content, or compete with the
+`context-injection` authority.
 
 A distinct case is the **ACP transport** (used by host integrations such as an
 ACP-mode bridge). It creates a normal session that loads plugin hooks, but ACP

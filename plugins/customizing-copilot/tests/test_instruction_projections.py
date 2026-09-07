@@ -774,6 +774,141 @@ def test_file_and_aggregate_budgets_are_blocking(tmp_path: Path) -> None:
     )
 
 
+def _write_budget_config(repo: Path, payload: object) -> None:
+    config_path = repo.joinpath(*projections.CONFIG_RELATIVE.parts)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_repository_config_raises_the_aggregate_budget(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_budget_config(
+        repo,
+        {
+            "schema": projections.CONFIG_SCHEMA,
+            "version": projections.CONFIG_VERSION,
+            "maxAggregateBytes": 20 * 1024,
+        },
+    )
+    sources = [
+        _write_plugin(
+            tmp_path,
+            "aggregate-market",
+            f"policy-{index}",
+            body="x" * 2700 + "\n",
+        )[1]
+        for index in range(4)
+    ]
+
+    result = projections.sync_repository(repo, sources)
+
+    assert not any(
+        finding.check == "projection-budget" for finding in result.findings
+    )
+    assert result.blocking == 0
+
+
+def test_repository_config_can_lower_the_aggregate_budget(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_budget_config(
+        repo,
+        {
+            "schema": projections.CONFIG_SCHEMA,
+            "version": projections.CONFIG_VERSION,
+            "maxAggregateBytes": projections.MIN_AGGREGATE_BYTES,
+        },
+    )
+    sources = [
+        _write_plugin(
+            tmp_path,
+            "lower-market",
+            f"policy-{index}",
+            body="x" * 2700 + "\n",
+        )[1]
+        for index in range(4)
+    ]
+
+    result = projections.sync_repository(repo, sources)
+
+    assert any(
+        finding.check == "projection-budget"
+        and "aggregate" in finding.message
+        and str(projections.MIN_AGGREGATE_BYTES) in finding.message
+        for finding in result.findings
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"maxAggregateBytes": 20480},
+        {
+            "schema": "wrong-schema",
+            "version": 1,
+            "maxAggregateBytes": 20480,
+        },
+        {
+            "schema": "copilot-extensions.instruction-projections-config",
+            "version": 2,
+            "maxAggregateBytes": 20480,
+        },
+        {
+            "schema": "copilot-extensions.instruction-projections-config",
+            "version": 1,
+            "maxAggregateBytes": "20480",
+        },
+        {
+            "schema": "copilot-extensions.instruction-projections-config",
+            "version": 1,
+            "maxAggregateBytes": 1,
+        },
+        {
+            "schema": "copilot-extensions.instruction-projections-config",
+            "version": 1,
+            "maxAggregateBytes": 999999,
+        },
+        {
+            "schema": "copilot-extensions.instruction-projections-config",
+            "version": 1,
+            "maxAggregateBytes": True,
+        },
+    ],
+)
+def test_malformed_or_out_of_range_config_is_blocking_and_uses_default(
+    tmp_path: Path, payload: dict
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_budget_config(repo, payload)
+    sources = [
+        _write_plugin(
+            tmp_path,
+            "aggregate-market",
+            f"policy-{index}",
+            body="x" * 2700 + "\n",
+        )[1]
+        for index in range(4)
+    ]
+
+    result = projections.sync_repository(repo, sources)
+
+    assert any(finding.check == "projection-config" for finding in result.findings)
+    assert any(
+        finding.check == "projection-budget"
+        and str(projections.MAX_AGGREGATE_BYTES) in finding.message
+        for finding in result.findings
+    )
+
+
+def test_absent_config_uses_default_budget_unaffected(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    result = projections._load_aggregate_budget(repo, projections.Result(operation="scan"))
+    assert result == projections.MAX_AGGREGATE_BYTES
+
+
 @pytest.mark.parametrize(
     "dynamic",
     [
@@ -1143,6 +1278,7 @@ def test_representative_plugins_ship_valid_canonical_declarations() -> None:
     assert result.blocking == 0
     assert {spec.source_id for spec in specs} == {
         "publication-safety",
+        "session-guidance",
         "completion-gate",
     }
     assert all(spec.apply_to == "**" for spec in specs)
@@ -1151,4 +1287,5 @@ def test_representative_plugins_ship_valid_canonical_declarations() -> None:
         f"[owner: {spec.plugin_name}@{spec.plugin_version}]"
         in spec.template_content.decode("utf-8")
         for spec in specs
+        if spec.source_id != "session-guidance"
     )

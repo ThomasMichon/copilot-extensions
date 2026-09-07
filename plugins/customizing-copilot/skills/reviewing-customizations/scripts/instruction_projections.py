@@ -36,6 +36,9 @@ RESULT_VERSION = 1
 
 DECLARATION_FILE = "instruction-projections.json"
 LOCK_RELATIVE = PurePosixPath(".github/copilot/context-projections.json")
+CONFIG_RELATIVE = PurePosixPath(".github/copilot/instruction-projections.config.json")
+CONFIG_SCHEMA = "copilot-extensions.instruction-projections-config"
+CONFIG_VERSION = 1
 MARKER_PREFIX = "<!-- copilot-extension-instruction-projection "
 MARKER_SUFFIX = " -->"
 MAX_DECLARATION_BYTES = 16 * 1024
@@ -43,6 +46,8 @@ MAX_PROJECTIONS_PER_PLUGIN = 16
 MAX_TEMPLATE_BYTES = 4 * 1024
 MAX_PROJECTION_BYTES = 4 * 1024
 MAX_AGGREGATE_BYTES = 12 * 1024
+MIN_AGGREGATE_BYTES = MAX_PROJECTION_BYTES
+MAX_AGGREGATE_BYTES_CEILING = 64 * 1024
 MAX_LEGACY_MARKERS = 8
 CUSTOMIZATION_KINDS = {"instructions"}
 
@@ -886,6 +891,62 @@ def _validate_lock_entry(entry: object) -> dict[str, object]:
     return dict(entry)
 
 
+def _load_aggregate_budget(repo_root: Path, result: Result) -> int:
+    """Resolve the effective aggregate projection budget for this repository.
+
+    Defaults to ``MAX_AGGREGATE_BYTES``. A repository may opt into a
+    different ceiling via a small, strictly validated, checked-in config
+    file so a harness with a genuinely larger reviewed set of static
+    fail-safe/pointer projections is not stuck at a value sized for a
+    smaller stack. A malformed or out-of-range override is a blocking
+    finding -- the default remains in effect rather than silently accepting
+    an unsafe or unbounded value.
+    """
+    config_path = repo_root.joinpath(*CONFIG_RELATIVE.parts)
+    try:
+        config_path.lstat()
+    except FileNotFoundError:
+        return MAX_AGGREGATE_BYTES
+    except OSError as exc:
+        result.add(
+            BLOCKING,
+            "projection-config",
+            CONFIG_RELATIVE.as_posix(),
+            f"projection config is unreadable: {exc}",
+        )
+        return MAX_AGGREGATE_BYTES
+    try:
+        _safe_destination(repo_root, CONFIG_RELATIVE)
+        raw = _read_bounded_regular(config_path, 4 * 1024)
+        value = _load_json_bytes(raw)
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"schema", "version", "maxAggregateBytes"}
+            or value.get("schema") != CONFIG_SCHEMA
+            or value.get("version") != CONFIG_VERSION
+        ):
+            raise ValueError("config schema/version/shape is unsupported")
+        budget = value["maxAggregateBytes"]
+        if (
+            not isinstance(budget, int)
+            or isinstance(budget, bool)
+            or not (MIN_AGGREGATE_BYTES <= budget <= MAX_AGGREGATE_BYTES_CEILING)
+        ):
+            raise ValueError(
+                "maxAggregateBytes must be an integer between "
+                f"{MIN_AGGREGATE_BYTES} and {MAX_AGGREGATE_BYTES_CEILING}"
+            )
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        result.add(
+            BLOCKING,
+            "projection-config",
+            CONFIG_RELATIVE.as_posix(),
+            f"projection config is invalid, using default budget: {exc}",
+        )
+        return MAX_AGGREGATE_BYTES
+    return budget
+
+
 def _load_lock(
     repo_root: Path,
     result: Result,
@@ -1199,18 +1260,19 @@ def scan_repository(
         result.add(BLOCKING, "projection-root", repo_root, str(exc))
         return result
     lock, _lock_exists, _lock_raw = _load_lock(root, result)
+    aggregate_budget = _load_aggregate_budget(root, result)
     total_bytes = 0
     for entry in lock.values():
         raw = _validate_projection_file(root, entry, result)
         if raw is not None:
             total_bytes += len(raw)
-    if total_bytes > MAX_AGGREGATE_BYTES:
+    if total_bytes > aggregate_budget:
         result.add(
             BLOCKING,
             "projection-budget",
             LOCK_RELATIVE.as_posix(),
             f"projection aggregate is {total_bytes} bytes; budget is "
-            f"{MAX_AGGREGATE_BYTES} bytes",
+            f"{aggregate_budget} bytes",
         )
     _scan_orphan_files(root, lock, result)
 
@@ -1450,6 +1512,7 @@ def _sync_repository_locked(
     result: Result,
 ) -> Result:
     lock, lock_exists, lock_preimage = _load_lock(root, result)
+    aggregate_budget = _load_aggregate_budget(root, result)
     specs, _unknown_plugins = _load_specs(root, sources, result)
     _scan_legacy_regions(root, specs, result)
     rendered: dict[str, RenderedProjection] = {}
@@ -1511,13 +1574,13 @@ def _sync_repository_locked(
     for destination, projection in rendered.items():
         merged[destination] = projection.lock_entry()
     aggregate = sum(int(entry["renderedBytes"]) for entry in merged.values())
-    if aggregate > MAX_AGGREGATE_BYTES:
+    if aggregate > aggregate_budget:
         result.add(
             BLOCKING,
             "projection-budget",
             LOCK_RELATIVE.as_posix(),
             f"resulting projection aggregate is {aggregate} bytes; budget is "
-            f"{MAX_AGGREGATE_BYTES} bytes",
+            f"{aggregate_budget} bytes",
         )
     if result.blocking:
         return result
@@ -1648,7 +1711,11 @@ __all__ = [
     "DECLARATION_VERSION",
     "LOCK_SCHEMA",
     "LOCK_VERSION",
+    "CONFIG_SCHEMA",
+    "CONFIG_VERSION",
     "MAX_AGGREGATE_BYTES",
+    "MAX_AGGREGATE_BYTES_CEILING",
+    "MIN_AGGREGATE_BYTES",
     "MAX_PROJECTION_BYTES",
     "Finding",
     "ProjectionSpec",
