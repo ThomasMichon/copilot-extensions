@@ -301,6 +301,16 @@ other phases actually land in.
   bundled with this one.
 - Confirmed again this leg (unchanged from prior handoffs): the live
   `dotfiles` declaration is still NOT switched to
-  `worker_identity: odsp-web-harness-backlog` -- did not re-check the daemon
-  version this leg; re-verify before attempting that switch.
+  `worker_identity: odsp-web-harness-backlog`. Unlike prior legs, this time
+  the check found the running daemon HAS auto-updated: `agent-dispatch
+  --version` -> `0.1.2-dev34` (was `0.1.2-dev29`), and its own venv
+  (`C:\Users\tmichon\.agent-dispatch\versions\0.1.2-dev34\Scripts\python.exe`)
+  successfully imports `agent_dispatch.worker_identities`. The daemon-version
+  gate for the dotfiles switch is now clear -- this is the next slice, not a
+  re-check. A paired `odsp-web-harness` + `dotfiles` knowledge worktree
+  (`tmichon-cloud1-win-20260907-033821-8451` /
+  `tmichon-cloud1-win-20260907-033821-8451-k`) already exists, empty and
+  unused, ready for whoever picks up the switch (edit
+  `dotfiles/.agent-dispatch/registrar/odsp-web-harness-issue-loop.json` from
+  its `-k` worktree, never the dotfiles anchor).
 
