@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+import posixpath
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from agent_worktrees import procs
 
@@ -23,12 +24,14 @@ def test_process_executable_path_rejects_invalid_pid() -> None:
 
 def test_process_executable_path_uses_proc_link_on_posix(monkeypatch) -> None:
     monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(procs, "Path", PurePosixPath)
+    monkeypatch.setattr(procs.os.path, "isabs", posixpath.isabs)
     monkeypatch.setattr(
         procs.os,
         "readlink",
         lambda path: (
             "/opt/copilot/bin/copilot"
-            if path == Path("/proc/42/exe")
+            if path == PurePosixPath("/proc/42/exe")
             else None
         ),
     )
@@ -39,8 +42,10 @@ def test_process_executable_path_uses_proc_link_on_posix(monkeypatch) -> None:
 def test_process_executable_path_retains_live_deleted_proc_link(
     monkeypatch,
 ) -> None:
-    proc_link = Path("/proc/42/exe")
+    proc_link = PurePosixPath("/proc/42/exe")
     monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(procs, "Path", PurePosixPath)
+    monkeypatch.setattr(procs.os.path, "isabs", posixpath.isabs)
     monkeypatch.setattr(
         procs.os,
         "readlink",

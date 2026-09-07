@@ -19,7 +19,11 @@
 #
 # Compatible with PowerShell 5.1+ and pwsh 7+.
 $AwPy = $null
-$_awr = Join-Path $env:USERPROFILE '.agent-worktrees'
+$_awr = if ($env:AGENT_RT_ROOT) {
+  $env:AGENT_RT_ROOT
+} else {
+  Join-Path $env:USERPROFILE '.agent-worktrees'
+}
 
 function _Aw-MarkerValid([string]$slot, [string]$ver) {
   if (-not $ver) { return $false }

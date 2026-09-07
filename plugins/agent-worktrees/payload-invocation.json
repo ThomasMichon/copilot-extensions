@@ -1,11 +1,16 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-worktrees",
   "module": "agent_worktrees",
-  "runtimeRoot": ".agent-worktrees",
+  "legacyRuntimeRoot": ".agent-worktrees",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_WORKTREES_NO_SELFPROVISION",
   "payloadRootEnv": "AGENT_WORKTREES_PAYLOAD_ROOT",
   "purpose": "Manage worktrees and project lifecycle",
+  "payloadDispatcher": {
+    "posix": "scripts/invoke-payload-runtime.sh",
+    "windows": "scripts/invoke-payload-runtime.ps1"
+  },
   "outputDir": "bin/payload"
 }

@@ -22,7 +22,7 @@
 # pre-commit/pre-push shims run there): POSIX slots keep python at bin/python,
 # Windows slots at Scripts/python.exe.
 AW_PY=""
-_awr="$HOME/.agent-worktrees"
+_awr="${AGENT_RT_ROOT:-$HOME/.agent-worktrees}"
 _awv=""
 
 _aw_marker_valid() {
