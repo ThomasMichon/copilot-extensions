@@ -3214,6 +3214,40 @@ def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
     return None
 
 
+def retire_record(record: WorktreeRecord, tracking_path: Path) -> None:
+    """Retire a reaped worktree's tracking record: delete it, or tombstone it
+    when paired (BOTH-gate follow-up, #957/#220).
+
+    An ordinary (unpaired) record is deleted outright -- nothing else depends
+    on it once its worktree is reaped. A **paired** -harness/-knowledge
+    record is instead rewritten as a minimal ``finalized`` tombstone rather
+    than unlinked: :func:`find_paired_record` resolves a sibling purely by
+    whether ``<id>.yaml`` exists in the *other* project's tracking directory,
+    so deleting it left the sibling side with no way to distinguish "this half
+    of the pair was never carved" from "this half was already reaped" --
+    :func:`default_paired_sibling_final` reports ``None`` ("unknown") either
+    way, and a `None` permanently spares the sibling's own paired-worktree
+    gate. Leaving a tombstoned ``finalized`` record instead lets that probe
+    resolve ``sibling.status == "finalized"`` -> ``True`` and unblock the
+    sibling's cleanup, without weakening the gate for a pair that genuinely
+    hasn't been carved yet.
+
+    Fail-safe: if the tombstone write raises for any reason, falls back to a
+    plain unlink -- a reap must never be blocked by this bookkeeping.
+    """
+    path = tracking_path / f"{record.worktree_id}.yaml"
+    if record.is_paired:
+        try:
+            record.status = "finalized"
+            if record.completed_at is None:
+                record.completed_at = _now_iso()
+            save_record(record, path=path)
+            return
+        except Exception:
+            pass
+    path.unlink(missing_ok=True)
+
+
 def find_worktree_id_by_session(session_id: str) -> str | None:
     """Resolve a session ID from the active project's tracked worktrees.
 

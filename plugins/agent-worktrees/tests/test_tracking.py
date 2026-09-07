@@ -34,6 +34,7 @@ from agent_worktrees.tracking import (
     register_session,
     release_all_resources,
     resolve_worktree_path,
+    retire_record,
     save_record,
     set_disposition,
     update_status,
@@ -1517,6 +1518,96 @@ class TestPairedRecordResolution:
             pair_ref="test/proj/wt-gone", pair_kind="worktree",
         )
         assert find_paired_record(rec) is None
+
+
+class TestRetireRecord:
+    """retire_record -- delete outright, or tombstone a paired sibling (#957/#220).
+
+    Reproduces the "paired sibling state unknown" bug: a plain unlink on reap
+    left the OTHER half of a -harness/-knowledge pair permanently unable to
+    tell "sibling never carved" apart from "sibling already reaped", because
+    both looked identical (no record file). A paired record must instead be
+    retired to a minimal ``finalized`` tombstone that :func:`find_paired_record`
+    can still resolve.
+    """
+
+    def _rec(self, wt_id: str, **overrides) -> WorktreeRecord:
+        base = dict(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/src/{wt_id}",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="completed",
+            completed_at=None,
+            sessions=[],
+        )
+        base.update(overrides)
+        return WorktreeRecord(**base)
+
+    def test_unpaired_record_is_deleted(self, tmp_tracking_dir: Path):
+        rec = self._rec("wt-solo")
+        save_record(rec, tmp_tracking_dir / "wt-solo.yaml")
+        retire_record(rec, tmp_tracking_dir)
+        assert not (tmp_tracking_dir / "wt-solo.yaml").exists()
+
+    def test_paired_record_is_tombstoned_not_deleted(self, tmp_tracking_dir: Path):
+        rec = self._rec(
+            "wt-k", pair_id="p1", pair_role="knowledge",
+            pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
+            status="active",
+        )
+        save_record(rec, tmp_tracking_dir / "wt-k.yaml")
+        retire_record(rec, tmp_tracking_dir)
+        path = tmp_tracking_dir / "wt-k.yaml"
+        assert path.exists()
+        tombstoned = load_record(path)
+        assert tombstoned.status == "finalized"
+        assert tombstoned.completed_at is not None
+
+    def test_reaping_knowledge_side_first_unblocks_harness_side(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """End-to-end repro of the reported bug + fix, across two projects."""
+        from agent_worktrees import prune
+
+        harness_dir = tmp_path / ".citadel-harness" / "worktrees"
+        knowledge_dir = tmp_path / ".citadel-knowledge" / "worktrees"
+        monkeypatch.setattr(
+            "agent_worktrees.config.project_dir",
+            lambda name=None: tmp_path / f".{name}",
+        )
+
+        harness = self._rec(
+            "wt-harness", pair_id="p1", pair_role="harness",
+            pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
+            status="finalized",
+        )
+        knowledge = self._rec(
+            "wt-k", pair_id="p1", pair_role="knowledge",
+            pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
+            status="active",
+        )
+        save_record(harness, harness_dir / "wt-harness.yaml")
+        save_record(knowledge, knowledge_dir / "wt-k.yaml")
+
+        # Before the knowledge side is reaped, the harness side is correctly held.
+        assert prune.default_paired_sibling_final(harness) is False
+
+        # Reap the knowledge-side sibling first (this is what cleanup --clean
+        # --include-unused does for an `unused` knowledge worktree).
+        retire_record(knowledge, knowledge_dir)
+
+        # Bug (pre-fix): the record file was gone -> find_paired_record returned
+        # None -> default_paired_sibling_final returned None ("unknown") forever,
+        # even though the sibling is legitimately settled.
+        # Fix: the tombstone resolves and reports finalized -> True.
+        assert prune.default_paired_sibling_final(harness) is True
 
 
 class TestCascadeAndOrphans:
