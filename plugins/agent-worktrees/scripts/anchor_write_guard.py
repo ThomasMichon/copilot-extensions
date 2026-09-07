@@ -59,6 +59,12 @@ import sys
 import time
 from pathlib import Path
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from registry_root import resolve_registry_root
+
 # --- Tool classification (mirrors the sibling guards) -------------------------
 WRITE_TOOLS = frozenset({
     "create", "edit", "str_replace", "str_replace_editor",
@@ -263,8 +269,8 @@ def active_break_glass(repo_name: str, home: Path) -> bool:
 
 # --- Worktree-class anchor discovery (repos.yaml, stdlib parse) ---------------
 
-def _repos_yaml(home: Path) -> Path:
-    return home / ".agent-worktrees" / "repos.yaml"
+def _repos_yaml(registry_root: Path) -> Path:
+    return registry_root / "repos.yaml"
 
 
 def _yaml_unquote(val: str) -> str:
@@ -279,7 +285,7 @@ def _yaml_unquote(val: str) -> str:
     return val
 
 
-def load_worktree_anchors(home: Path) -> list[dict]:
+def load_worktree_anchors(registry_root: Path) -> list[dict]:
     """Parse ``repos.yaml`` -> ``[{name, path}]`` for every ``class: worktree``
     repo, across all platform path keys (windows/wsl/linux).
 
@@ -288,7 +294,7 @@ def load_worktree_anchors(home: Path) -> list[dict]:
     regular ``repos:`` shape. Prefers PyYAML when importable. Never raises.
     """
     try:
-        text = _repos_yaml(home).read_text("utf-8")
+        text = _repos_yaml(registry_root).read_text("utf-8")
     except (OSError, UnicodeDecodeError):
         return []
 
@@ -503,7 +509,11 @@ def decide(payload: dict, *, env=None, home=None,
 
     cwd = str(payload.get("cwd") or "")
     if anchors is None:
-        anchors = load_worktree_anchors(home)
+        registry_root = resolve_registry_root(
+            legacy_root=home / ".agent-worktrees",
+            environment=env,
+        )
+        anchors = load_worktree_anchors(registry_root)
     if not anchors:
         return None
 

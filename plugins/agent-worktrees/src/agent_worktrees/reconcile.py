@@ -1147,6 +1147,7 @@ HOOK_SHIM_FILES = (
     "marketplace-overrides.ps1", "marketplace-overrides.sh",
     "provision-check.ps1", "provision-check.sh",
     "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+    "registry_root.py",
 )
 
 

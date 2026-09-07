@@ -17,6 +17,10 @@ $ErrorActionPreference = 'SilentlyContinue'
 $AwaitContext = $args -contains '--await-context'
 $ContextOnly = ($args -contains '--context-only') -or $AwaitContext
 $SideEffectOnly = $args -contains '--side-effect-only'
+if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+    [Console]::Out.Write('{}')
+    exit 0
+}
 $Payload = ''
 if ([Console]::IsInputRedirected) {
     try { $Payload = [Console]::In.ReadToEnd() } catch { }

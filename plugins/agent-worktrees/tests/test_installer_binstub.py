@@ -788,6 +788,18 @@ def test_payload_shims_propagate_ownership_root() -> None:
     assert "[Environment]::GetEnvironmentVariable" in dispatcher
 
 
+def test_hook_deployment_includes_registry_root_helper() -> None:
+    posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    python = (
+        PLUGIN / "src" / "agent_worktrees" / "installer.py"
+    ).read_text(encoding="utf-8")
+
+    assert "anchor_write_guard.py registry_root.py" in posix
+    assert "'anchor_write_guard.py', 'registry_root.py'" in powershell
+    assert '"anchor_write_guard.py", "registry_root.py"' in python
+
+
 def test_project_binstub_rejects_invalid_command_name(
     monkeypatch, tmp_path: Path
 ):

@@ -137,9 +137,9 @@ def run_migrations(install_dir: Path | None = None) -> list[Any]:
     if not _AVAILABLE:
         return []
     if install_dir is None:
-        from . import config
+        from . import config, registry_paths
 
-        install_dir = config.install_dir()
+        install_dir = registry_paths.registry_root(config.install_dir())
     return _run(managed_files(Path(install_dir)), REGISTRY)
 
 

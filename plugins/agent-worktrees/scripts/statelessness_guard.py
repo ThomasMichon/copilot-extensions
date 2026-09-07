@@ -38,6 +38,12 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from registry_root import resolve_registry_root
+
 # --- Personal-state paths that must never be written into a stateless harness -
 FORBIDDEN_PREFIXES = ("efforts/", "logs/", "weekly-updates/", "icm/")
 FORBIDDEN_FILES = ("ownership.yml", "dev-assignments.yml")
@@ -96,7 +102,11 @@ def find_repo_root(start: str) -> Path | None:
     return None
 
 
-def project_name(root: Path, home: Path) -> str:
+def project_name(
+    root: Path,
+    home: Path,
+    registry_root: Path | None = None,
+) -> str:
     """Resolve the registry project name without spawning a process."""
     anchor = root
     dotgit = root / ".git"
@@ -115,7 +125,8 @@ def project_name(root: Path, home: Path) -> str:
             pass
 
     try:
-        text = (home / ".agent-worktrees" / "repos.yaml").read_text("utf-8")
+        selected_root = registry_root or home / ".agent-worktrees"
+        text = (selected_root / "repos.yaml").read_text("utf-8")
         current = None
         in_repos = False
         for raw in text.splitlines():
@@ -242,7 +253,11 @@ def decide(payload: dict, *, env=None, home=None) -> dict | None:
     if root is None or not requires_external_state_root(root):
         return None  # not a stateless harness => not our business
 
-    harness = project_name(root, home).strip()
+    registry_root = resolve_registry_root(
+        legacy_root=home / ".agent-worktrees",
+        environment=env,
+    )
+    harness = project_name(root, home, registry_root).strip()
     if active_break_glass(harness, home):
         return None
 

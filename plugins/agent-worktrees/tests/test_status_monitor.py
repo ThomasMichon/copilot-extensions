@@ -555,19 +555,27 @@ def test_hook_mutation_targets_are_target_aware():
     }) is None
 
 
-def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path):
+def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path, monkeypatch):
     registry = tmp_path / "repos.yaml"
     registry.write_text("one", encoding="utf-8")
+    selected_root = tmp_path / "selected"
+    seen_roots = []
+    monkeypatch.setattr(
+        "agent_worktrees.registry_paths.registry_root",
+        lambda: selected_root,
+    )
 
     class Anchor:
         calls = 0
 
         @staticmethod
-        def _repos_yaml(home):
+        def _repos_yaml(root):
+            seen_roots.append(root)
             return registry
 
         @classmethod
-        def load_worktree_anchors(cls, home):
+        def load_worktree_anchors(cls, root):
+            seen_roots.append(root)
             cls.calls += 1
             return [{"name": str(cls.calls), "path": "/repo"}]
 
@@ -581,6 +589,7 @@ def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path):
     assert policy.anchors()[0]["name"] == "1"
     registry.write_text("two-two", encoding="utf-8")
     assert policy.anchors()[0]["name"] == "2"
+    assert seen_roots and set(seen_roots) == {selected_root}
 
 
 def test_resident_agent_bridge_policy_denies_guarded_write(
