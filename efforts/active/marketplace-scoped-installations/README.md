@@ -973,9 +973,9 @@ See [`design.md`](design.md).
   directory-entry file identities. Shared bootstrap guards now exercise the
   operative Agent Machines boundary and explicitly assert that retired Agent
   Index compatibility hooks remain non-mutating.
-- Acceptance passed the full non-smoke Linux scenario: all nine stages, including
-  every historical runtime/snapshot removal and peer-cell availability. The
-  complete shared foundation suite in a fresh policy-free Linux container passed
+- Acceptance passed the full non-smoke Linux scenario: phase 0's fixture check
+  plus all eight numbered stages, including every historical runtime/snapshot
+  removal and peer-cell availability. The complete shared foundation suite in a fresh policy-free Linux container passed
   502 tests (163 platform/portfolio skips, including clean-room harness checks).
   The full Agent Machines suite passed 478 tests (17 skips); the Windows shared
   smoke/parity lane passed 22 tests (one platform skip), and the dedicated

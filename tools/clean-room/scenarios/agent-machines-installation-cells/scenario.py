@@ -19,7 +19,11 @@ ROOT = Path(
 ).resolve()
 RESULTS = Path(os.environ["CR_REPORT"]).resolve().parent
 # Build and hash on the disposable machine's filesystem, not a host bind mount.
-WORK = Path(tempfile.gettempdir()) / "agent-machines-installation-cells"
+# Namespace by RESULTS so concurrent runs (distinct -NameSuffix invocations
+# sharing one container, or overlapping docker exec into the same container)
+# never delete or corrupt each other's build fixtures under a shared tmp path.
+_WORK_TAG = hashlib.sha256(str(RESULTS).encode("utf-8")).hexdigest()[:16]
+WORK = Path(tempfile.gettempdir()) / f"agent-machines-installation-cells-{_WORK_TAG}"
 STATE = RESULTS / "agent-machines-installation-cells-state.json"
 CONTEXT_TOOL = ROOT / "libs" / "installation-context" / "installation_context.py"
 CONTEXT_TOOL_PS = ROOT / "libs" / "installation-context" / "installation-context.ps1"

@@ -16,7 +16,8 @@ this effort; deterministic PowerShell parity remains required. Issue
 [#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122) supplies
 receipt-only reservation release, derived-only repair, and state-preserving
 removal of all owned historical slots and snapshots. The full Linux Agent
-Machines scenario passes all nine stages.
+Machines scenario passes phase 0's fixture check plus all eight numbered
+stages.
 
 ## Goals
 
