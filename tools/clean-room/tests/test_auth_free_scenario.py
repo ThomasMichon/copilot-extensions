@@ -79,8 +79,10 @@ def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(t
     body = source[source.index("start_container() {"):]
     # Slice up to (not including) the first line after the auth/image-selection
     # if/elif/else/fi block -- a stable anchor, unlike brace-matching against a
-    # block that closes with `fi`, not `}`.
-    body = body[: body.index('docker rm -f "$CONTAINER"')] + "\n}\n"
+    # block that closes with `fi`, not `}`. Print $img *inside* the function,
+    # before the synthetic close: it is `local` to start_container, so a
+    # top-level echo after the call returns would see it as unbound.
+    body = body[: body.index('docker rm -f "$CONTAINER"')] + '\n    echo "img=$img"\n}\n'
     probe = tmp_path / "probe.sh"
     probe.write_text(
         "#!/bin/sh\nset -eu\n"
@@ -90,7 +92,7 @@ def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(t
         "do_build() { :; }\n"
         f'SCENARIO_DIR="{scenario}"\nBASE_TAG=base-image\n'
         + body
-        + "\nstart_container\necho \"img=$img\"\n",
+        + "\nstart_container\n",
         encoding="utf-8",
     )
     # Restrict PATH to the fake bin only so `_py()` cannot find a real python3
