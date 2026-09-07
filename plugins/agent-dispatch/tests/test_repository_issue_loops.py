@@ -15,8 +15,10 @@ from agent_dispatch.registrar import RegistrarError
 from agent_dispatch.registrar_discovery import read_declaration_file_set
 from agent_dispatch.queue import TaskError
 from agent_dispatch.repository_issue_loops import (
+    AzureDevOpsProvider,
     GitHubProvider,
     Issue,
+    _forge_provider_for,
     _latest_reservations,
     _marker,
     expand_repository_issue_loop,
@@ -1414,7 +1416,7 @@ def test_loser_release_removes_only_its_distinct_label():
     [
         ({"source": ""}, "source"),
         ({"batch_size": 0}, "batch_size"),
-        ({"forge": {"provider": "other"}}, "only 'github'"),
+        ({"forge": {"provider": "other"}}, "only \\['azure-devops', 'github'\\]"),
         ({"forge": {"provider": "github"}}, "producer_login"),
         ({"reservation": {"label": "x", "comment": False}}, "must be true"),
         ({"pool": {"max_active_processes": 2}}, "concurrency must be 1"),
@@ -1454,3 +1456,208 @@ def test_inline_worker_guidance_still_supported_without_identity():
     config = validate_config(_config(worker_guidance="be nice"))
     assert config["worker_identity"] == ""
     assert config["worker_guidance"] == "be nice"
+
+
+def test_validate_config_accepts_azure_devops_provider():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={"provider": "azure-devops", "producer_login": "issue-bot"},
+        )
+    )
+    assert config["forge"] == {
+        "provider": "azure-devops",
+        "producer_login": "issue-bot",
+    }
+
+
+def test_forge_provider_for_selects_github():
+    config = validate_config(_config())
+    provider = _forge_provider_for(config)
+    assert isinstance(provider, GitHubProvider)
+    assert provider.expected_login == "issue-bot"
+
+
+def test_forge_provider_for_selects_azure_devops():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={"provider": "azure-devops", "producer_login": "issue-bot"},
+        )
+    )
+    provider = _forge_provider_for(config)
+    assert isinstance(provider, AzureDevOpsProvider)
+    assert provider.expected_login == "issue-bot"
+
+
+def _ado_work_item(
+    number,
+    *,
+    tags="ready",
+    created="2026-01-01T00:00:00Z",
+    updated="2026-01-01T00:00:00Z",
+):
+    return {
+        "fields": {
+            "System.Title": f"Work item {number}",
+            "System.Tags": tags,
+            "System.CreatedDate": created,
+            "System.ChangedDate": updated,
+        }
+    }
+
+
+class TestAzureDevOpsProvider:
+    def test_list_open_issues_resolves_tags_and_comments(self):
+        responses = iter(
+            [
+                SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "authenticatedUser": {
+                                "providerDisplayName": "issue-bot"
+                            }
+                        }
+                    ),
+                    stderr="",
+                ),
+                SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps({"name": "example-project"}),
+                    stderr="",
+                ),
+                SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps([{"id": 42}]),
+                    stderr="",
+                ),
+                SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(_ado_work_item(42)),
+                    stderr="",
+                ),
+                SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "comments": [
+                                {
+                                    "text": (
+                                        "marked reserved\n\n"
+                                        + _marker(
+                                            {
+                                                "loop": "backlog",
+                                                "occurrence": 100,
+                                                "state": "reserved",
+                                                "at": 100,
+                                                "label": "agent-reserved",
+                                                "issue": 42,
+                                            }
+                                        )
+                                    ),
+                                    "createdBy": {
+                                        "displayName": "issue-bot"
+                                    },
+                                }
+                            ]
+                        }
+                    ),
+                    stderr="",
+                ),
+            ]
+        )
+
+        def runner(*args, **kwargs):
+            del args, kwargs
+            return next(responses)
+
+        provider = AzureDevOpsProvider("issue-bot", runner=runner)
+        (issue,) = provider.list_open_issues("example-org/example-project")
+
+        assert issue.number == 42
+        assert issue.title == "Work item 42"
+        assert issue.labels == ("ready",)
+        assert len(issue.reservations) == 1
+        assert _latest_reservations(issue)["backlog"]["state"] == "reserved"
+
+    def test_rejects_wrong_authenticated_identity(self):
+        responses = iter(
+            [
+                SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "authenticatedUser": {
+                                "providerDisplayName": "someone-else"
+                            }
+                        }
+                    ),
+                    stderr="",
+                ),
+            ]
+        )
+
+        def runner(*args, **kwargs):
+            del args, kwargs
+            return next(responses)
+
+        provider = AzureDevOpsProvider("issue-bot", runner=runner)
+        with pytest.raises(RuntimeError, match="identity mismatch"):
+            provider.list_open_issues("example-org/example-project")
+
+    def test_reserve_comments_and_tags_the_work_item(self):
+        calls = []
+        identity_responses = [
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {"authenticatedUser": {"providerDisplayName": "issue-bot"}}
+                ),
+                stderr="",
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"name": "example-project"}),
+                stderr="",
+            ),
+        ]
+        responses = iter(
+            [
+                *identity_responses,
+                SimpleNamespace(returncode=0, stdout="", stderr=""),
+                *identity_responses,
+                SimpleNamespace(returncode=0, stdout="", stderr=""),
+            ]
+        )
+
+        def runner(*args, **kwargs):
+            calls.append(args[0])
+            return next(responses)
+
+        provider = AzureDevOpsProvider("issue-bot", runner=runner)
+        issue = Issue(
+            number=42,
+            title="Work item 42",
+            url="https://dev.azure.com/example-org/_workitems/edit/42",
+            labels=("ready",),
+            created_at=100,
+            updated_at=100,
+        )
+        provider.reserve(
+            "example-org/example-project",
+            issue,
+            {
+                "loop": "backlog",
+                "occurrence": 100,
+                "state": "reserved",
+                "at": 100,
+                "label": "agent-reserved",
+            },
+        )
+
+        tag_call = next(args for args in calls if "update" in args)
+        fields_arg = tag_call[tag_call.index("--fields") + 1]
+        assert "agent-reserved" in fields_arg
+        assert "ready" in fields_arg
+
