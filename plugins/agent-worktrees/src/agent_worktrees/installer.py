@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as cfg
+from . import registry_paths
 from . import output
 
 
@@ -378,8 +379,8 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                  "session-machine.ps1", "session-machine.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py",
-                 "anchor_write_guard.py", "nudge_status.py", "bind_nudge.py",
-                 "hook_client.py"):
+                 "anchor_write_guard.py", "registry_root.py",
+                 "nudge_status.py", "bind_nudge.py", "hook_client.py"):
         src = scripts / name
         if src.exists():
             shutil.copy2(src, bd / name)
@@ -1501,8 +1502,8 @@ def show_install_status() -> None:
 
 
 def projects_yaml_path() -> Path:
-    """Path to the projects registry at ~/.agent-worktrees/projects.yaml."""
-    return install_dir() / "projects.yaml"
+    """Path to the projects registry in the validated registry root."""
+    return registry_paths.registry_path("projects.yaml", legacy_root=install_dir())
 
 
 def read_projects_registry() -> dict:

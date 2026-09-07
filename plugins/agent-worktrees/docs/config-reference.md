@@ -7,6 +7,13 @@ Every configuration option for a repo adopted by agent-worktrees.
 agent-worktrees merges configuration from the layers below at load time.
 **Highest precedence wins**, per key (deep merge):
 
+The three machine-local global files (`config.yaml`, `projects.yaml`, and
+`repos.yaml`) always share one validated registry root. With no explicit
+installation context that root is `~/.agent-worktrees`. An explicit context
+selects the validated agent-worktrees cell plugin root; invalid or foreign
+context fails without reading the legacy files. Per-project
+`~/.{project}/config.yaml` remains legacy machine-local state in this phase.
+
 | Precedence | Source | Path | Scope | Committed? |
 |------------|--------|------|-------|-----------|
 | **Highest** | **Machine-local** | `~/.{project}/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
@@ -481,11 +488,13 @@ profile_assignment:
 
 ---
 
-## Global config — `~/.agent-worktrees/config.yaml`
+## Global config — `<validated-registry-root>/config.yaml`
 
 The **user-owned base tier**: machine-wide settings shared across **every**
-project on the machine. The installer **scaffolds it once when missing**, then
-**never overwrites it** — not even with `--force` (which targets installer-owned
+project adopted by that registry root. Legacy/default operation uses
+`~/.agent-worktrees/config.yaml`; namespaced operation uses the validated
+cell plugin root. The installer **scaffolds it once when missing**, then **never
+overwrites it** — not even with `--force` (which targets installer-owned
 artifacts). Only a deliberate schema migration should rewrite it. Profiles are
 user-authored.
 

@@ -52,6 +52,8 @@ from dropin_registry import (
 )
 from plugin_activation import ActivationReport, ActivePlugin, resolve_active_plugins
 
+from .. import registry_paths
+
 #: Environment override for the manifest directory (used by tests for hermetic
 #: isolation, and available as an operator escape hatch).
 PIVOTS_DIR_ENV = "AGENT_WORKTREES_PIVOTS_DIR"
@@ -73,6 +75,17 @@ _KNOWN_LEGACY_PIVOTS = {
 }
 
 log = logging.getLogger("agent-worktrees")
+
+
+def _resolve_activation() -> ActivationReport:
+    """Resolve legacy activation or stand down after validating cell context."""
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        registry_paths.registry_root()
+        return ActivationReport(
+            authority=ScanAuthority.COMPLETE,
+            decisions={},
+        )
+    return resolve_active_plugins()
 
 
 @dataclass(frozen=True)
@@ -1761,7 +1774,7 @@ def scan_pivot_registry(
 ) -> PivotRegistryReport:
     """Scan, classify, reconcile, and de-duplicate Picker contributions."""
     directory = pivots_dir(base)
-    activation = activation_report or resolve_active_plugins()
+    activation = activation_report or _resolve_activation()
     if materialize:
         _materialize_active_pivots(directory, activation)
     entry_classes: dict[str, str] = {}
@@ -1973,7 +1986,7 @@ def ensure_pivots(
     activation = (
         _activation_from_plugins_root(Path(plugins_root))
         if plugins_root is not None
-        else resolve_active_plugins()
+        else _resolve_activation()
     )
     return _materialize_active_pivots(pivots_dir(base), activation)
 

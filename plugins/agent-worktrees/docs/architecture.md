@@ -40,18 +40,26 @@ the legacy runtime. The session-start bootstrap hook stands down whenever an
 explicit context is present so it cannot recreate legacy state before the
 payload command validates the selected cell.
 
-This is the first Phase 4 installation-cell slice. The machine-global
-`projects.yaml`/`repos.yaml` registries, per-project `~/.{project}` state,
-project binstubs, pivots, sessions, leases, and other harness state remain on
-their legacy paths until their ownership contracts move in later slices.
-Namespaced activation remains opt-in and clean-room-only during the migration.
+The global `config.yaml`, `projects.yaml`, and `repos.yaml` files form one
+coupled registry boundary. Legacy/default operation keeps all three beneath
+`~/.agent-worktrees`; an explicit context validates the exact agent-worktrees
+payload and selects the cell's plugin root for all three. Ambient runtime,
+home, plugin-root, or per-file override variables cannot independently select
+a cell, and invalid or foreign context never falls back to the legacy files.
+
+Per-project `~/.{project}` state, project binstubs, pivots, sessions, leases,
+and other harness state remain on their legacy paths until their ownership
+contracts move in later slices. Pivot activation and session-end deregistration
+stand down under explicit context rather than consulting legacy registries or
+lifecycle state. Namespaced activation remains opt-in and clean-room-only
+during the migration.
 
 ## Installed Layout
 
 After full installation and project registration:
 
 ```
-~/.agent-worktrees/                 # Shared runtime (one per machine)
+~/.agent-worktrees/                 # Legacy/default runtime + registry root
   versions/<v>/                     #   Immutable per-version venv slots
   current-version                   #   Plain-text marker -> the active slot
   bin/                              #   Shell wrappers
@@ -63,6 +71,12 @@ After full installation and project registration:
   repos.yaml                        #   Repos catalog + source roots
   pivots/                           #   Cross-plugin picker pivot manifests
   deploy-manifest.json              #   Provenance (commit, timestamp)
+
+~/.copilot-extensions/marketplaces/<id>/plugins/agent-worktrees/
+                                      # Namespaced runtime + registry root
+  config.yaml                         #   Machine-wide defaults
+  projects.yaml                       #   Registry of adopted projects
+  repos.yaml                          #   Repos catalog + source roots
 
 ~/.{project}/                       # Per-project config + state
   config.yaml                       #   Machine, repos, launch commands

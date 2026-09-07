@@ -66,6 +66,18 @@ def test_bootstrap_stands_down_for_explicit_installation_context() -> None:
     )
 
 
+def test_register_nudge_stands_down_before_legacy_registry_reads() -> None:
+    sh = (PLUGIN / "scripts" / "register-nudge.sh").read_text(encoding="utf-8")
+    ps1 = (PLUGIN / "scripts" / "register-nudge.ps1").read_text(encoding="utf-8")
+
+    assert sh.index("COPILOT_EXTENSIONS_CONTEXT") < sh.index(
+        '$HOME/.agent-worktrees/projects.yaml'
+    )
+    assert ps1.index("COPILOT_EXTENSIONS_CONTEXT") < ps1.index(
+        ".agent-worktrees\\projects.yaml"
+    )
+
+
 def test_windows_binstub_resolves_complete_slots_and_serializes_provision() -> None:
     ps1 = (PLUGIN / "bin" / "agent-worktrees.ps1").read_text(encoding="utf-8")
     cmd = (PLUGIN / "bin" / "agent-worktrees.cmd").read_text(encoding="utf-8")

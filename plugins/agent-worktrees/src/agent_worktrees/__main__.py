@@ -8985,9 +8985,12 @@ class _ResidentHookPolicy:
         return self._plugin_related_anchors
 
     def anchors(self) -> list[dict]:
+        from . import registry_paths
+
         now = time.monotonic()
         module = self._module("anchor_write_guard.py")
-        source = module._repos_yaml(Path.home()) if module else None
+        registry_root = registry_paths.registry_root()
+        source = module._repos_yaml(registry_root) if module else None
         try:
             stat = source.stat() if source else None
             identity = (stat.st_mtime_ns, stat.st_size) if stat else None
@@ -8995,7 +8998,7 @@ class _ResidentHookPolicy:
             identity = None
         if now - self._anchors[0] < self.ttl and identity == self._anchors[1]:
             return self._anchors[2]
-        value = module.load_worktree_anchors(Path.home()) if module else []
+        value = module.load_worktree_anchors(registry_root) if module else []
         self._anchors = (now, identity, value)
         return value
 
@@ -23349,13 +23352,13 @@ def cmd_anchor_check(args: argparse.Namespace) -> int:
 def cmd_config_migrate(args: argparse.Namespace) -> int:
     """Migrate machine-local config schemas in place (install/update eager path).
 
-    Stamps/upgrades the ``schema_version`` on ``~/.agent-worktrees/{config,repos,
-    projects}.yaml``. Idempotent and atomic per file; machine-local only (never
-    touches repo-committed config -- that is an ``adopt`` concern). A per-file
-    problem (malformed YAML, a file newer than this build) is reported, not
-    fatal. Safe no-op when the vendored ``config_migrate`` library is absent.
+    Stamps/upgrades ``config.yaml``, ``repos.yaml``, and ``projects.yaml`` in the
+    validated registry root. Idempotent and atomic per file; machine-local only
+    (never touches repo-committed config -- that is an ``adopt`` concern). A
+    per-file problem (malformed YAML, a file newer than this build) is reported,
+    not fatal. Safe no-op when the vendored ``config_migrate`` library is absent.
     """
-    from . import config, config_migrations
+    from . import config_migrations
 
     quiet = getattr(args, "quiet", False)
     if not config_migrations.available():
@@ -23363,7 +23366,7 @@ def cmd_config_migrate(args: argparse.Namespace) -> int:
             output.warn("config-migrate: migration library unavailable; skipping")
         return 0
 
-    results = config_migrations.run_migrations(config.install_dir())
+    results = config_migrations.run_migrations()
     if not quiet:
         print(config_migrations.summarize(results))
     return 0

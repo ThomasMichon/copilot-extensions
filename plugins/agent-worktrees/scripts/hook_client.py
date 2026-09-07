@@ -437,6 +437,14 @@ def _version_key(version: str) -> tuple:
 
 def _runtime_python(home: Path) -> Path | None:
     runtime = home / ".agent-worktrees"
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        helper = _load_sibling("registry_root.py")
+        if helper is None:
+            return None
+        runtime = helper.resolve_registry_root(
+            legacy_root=runtime,
+            environment=os.environ,
+        )
     for marker_name in ("current-version", "last-known-good"):
         try:
             version = (runtime / marker_name).read_text("utf-8").strip()
@@ -596,8 +604,11 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
 
 
 def _fallback_session_start(payload: dict, home: Path) -> dict:
+    contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     python = _runtime_python(home)
     if python is None:
+        if contextual:
+            return {}
         return _bootstrap_first_install(payload)
     metadata = payload.get("_agentWorktrees")
     payload_version = (
@@ -611,7 +622,7 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
         and payload_version
         and _version_key(runtime_version) < _version_key(payload_version)
     ):
-        return _fallback_legacy_session_start(payload)
+        return {} if contextual else _fallback_legacy_session_start(payload)
     try:
         environment = os.environ.copy()
         environment["PYTHONPATH"] = ""
@@ -635,13 +646,13 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
     except (OSError, subprocess.SubprocessError):
         return {}
     if result.returncode != 0:
-        return _fallback_legacy_session_start(payload)
+        return {} if contextual else _fallback_legacy_session_start(payload)
     if result.stderr:
         sys.stderr.write(result.stderr)
     try:
         value = json.loads(result.stdout or "{}")
     except (TypeError, ValueError):
-        return _fallback_legacy_session_start(payload)
+        return {} if contextual else _fallback_legacy_session_start(payload)
     return value if isinstance(value, dict) else {}
 
 
@@ -685,6 +696,28 @@ def _merge_pre_decisions(current: dict, new: dict) -> dict:
 
 
 def _fallback_pre(payload: dict, home: Path) -> dict:
+    contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
+    if contextual:
+        helper = _load_sibling("registry_root.py")
+        if helper is None:
+            return {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "agent-worktrees installation context cannot be validated"
+                ),
+            }
+        try:
+            helper.resolve_registry_root(
+                legacy_root=home / ".agent-worktrees",
+                environment=os.environ,
+            )
+        except Exception:
+            return {
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "agent-worktrees installation context is invalid"
+                ),
+            }
     deadline = time.monotonic() + _FALLBACK_PRE_BUDGET_S
     combined: dict = {}
     for name in (
@@ -702,6 +735,14 @@ def _fallback_pre(payload: dict, home: Path) -> dict:
             )
             decision = module.decide(payload, home=home, **kwargs)
         except Exception:
+            if contextual:
+                return {
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "agent-worktrees installation context changed during "
+                        "policy evaluation"
+                    ),
+                }
             continue
         if isinstance(decision, dict) and decision:
             combined = _merge_pre_decisions(combined, decision)
@@ -736,15 +777,16 @@ def _fallback_post(payload: dict, home: Path) -> dict:
 
 def decide(kind: str, payload: dict, *, home: Path | None = None) -> dict:
     home = home or Path.home()
+    contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     if (
         kind == "sessionStart"
         and not isinstance(payload.get("_agentWorktrees"), dict)
     ):
         payload = _enrich_session_payload(payload)
-    remote = _request(kind, payload, home)
+    remote = None if contextual else _request(kind, payload, home)
     if remote is not None:
         return remote
-    if kind == "sessionStart" and _resident_started(payload, home):
+    if kind == "sessionStart" and not contextual and _resident_started(payload, home):
         return {}
     if kind == "preToolUse":
         return _fallback_pre(payload, home)

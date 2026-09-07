@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import socket
 import sys
 import threading
@@ -791,8 +792,135 @@ def test_windows_session_hook_rejects_windowsapps_python_alias():
     command = hooks["hooks"]["sessionStart"][0]["powershell"]
     assert "WindowsApps" in command
     assert "$ran = ($LASTEXITCODE -eq 0)" in command
+    assert "-not $env:COPILOT_EXTENSIONS_CONTEXT" in command
     bash = hooks["hooks"]["sessionStart"][0]["bash"]
     assert 'if python3 "$s" sessionStart; then ran=true; fi' in bash
+    assert '[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]' in bash
+
+
+def test_explicit_context_pre_and_post_hooks_use_payload_client_only():
+    hooks = json.loads(
+        (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
+    )
+    for kind in ("preToolUse", "postToolUse"):
+        entry = hooks["hooks"][kind][0]
+        assert "COPILOT_EXTENSIONS_CONTEXT" in entry["powershell"]
+        assert "COPILOT_PLUGIN_ROOT" in entry["powershell"]
+        assert "COPILOT_EXTENSIONS_CONTEXT" in entry["bash"]
+        assert "COPILOT_PLUGIN_ROOT" in entry["bash"]
+
+
+def test_explicit_context_bypasses_legacy_resident(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(tmp_path / "cell" / "install.json"),
+    )
+    monkeypatch.setattr(
+        hook_client,
+        "_request",
+        lambda *_args, **_kwargs: pytest.fail("legacy resident must not be called"),
+    )
+    monkeypatch.setattr(
+        hook_client,
+        "_fallback_pre",
+        lambda *_args, **_kwargs: {"permissionDecision": "allow"},
+    )
+
+    result = hook_client.decide("preToolUse", {}, home=tmp_path)
+
+    assert result == {"permissionDecision": "allow"}
+
+
+def test_explicit_context_session_start_selects_cell_runtime(
+    monkeypatch, tmp_path
+):
+    cell = tmp_path / "cell"
+    version = "1.2.3-dev4"
+    slot = cell / "versions" / version
+    executable = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": version}),
+        encoding="utf-8",
+    )
+    (cell / "current-version").write_text(version, encoding="utf-8")
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(cell / "install.json"),
+    )
+
+    class RegistryRoot:
+        @staticmethod
+        def resolve_registry_root(**_kwargs):
+            return cell
+
+    monkeypatch.setattr(
+        hook_client,
+        "_load_sibling",
+        lambda name: RegistryRoot if name == "registry_root.py" else None,
+    )
+
+    assert hook_client._runtime_python(tmp_path) == executable
+
+
+def test_explicit_context_session_start_never_uses_legacy_fallback(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(tmp_path / "cell" / "install.json"),
+    )
+    python = tmp_path / "cell" / "versions" / "1.0.0" / "bin" / "python"
+    monkeypatch.setattr(hook_client, "_runtime_python", lambda _home: python)
+    monkeypatch.setattr(
+        hook_client,
+        "_fallback_legacy_session_start",
+        lambda _payload: pytest.fail("legacy lifecycle must not run"),
+    )
+    payload = {
+        "_agentWorktrees": {"pluginVersion": "1.0.1"},
+    }
+
+    assert hook_client._fallback_session_start(payload, tmp_path) == {}
+
+
+def test_invalid_explicit_context_denies_before_guard_fallback(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_CONTEXT",
+        str(tmp_path / "invalid" / "install.json"),
+    )
+
+    class InvalidRegistryRoot:
+        @staticmethod
+        def resolve_registry_root(**_kwargs):
+            raise ValueError("invalid")
+
+    monkeypatch.setattr(
+        hook_client,
+        "_load_sibling",
+        lambda name: (
+            InvalidRegistryRoot
+            if name == "registry_root.py"
+            else pytest.fail("guard ran before context validation")
+        ),
+    )
+
+    result = hook_client._fallback_pre({}, tmp_path)
+
+    assert result["permissionDecision"] == "deny"
+    assert "invalid" in result["permissionDecisionReason"]
+
+
+def test_explicit_context_session_end_stands_down():
+    hooks = json.loads(
+        (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
+    )
+    entry = hooks["hooks"]["sessionEnd"][0]
+    assert "-not $env:COPILOT_EXTENSIONS_CONTEXT" in entry["powershell"]
+    assert '[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]' in entry["bash"]
 
 
 def test_started_resident_lifecycle_suppresses_duplicate_fallback(

@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from . import config_migrations
+from . import config_migrations, registry_paths
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
@@ -814,7 +814,9 @@ def default_config_path() -> Path:
 
 def global_config_path() -> Path:
     """Return the global, machine-wide config path (lowest config tier)."""
-    return install_dir() / GLOBAL_CONFIG_FILENAME
+    return registry_paths.registry_path(
+        GLOBAL_CONFIG_FILENAME, legacy_root=install_dir()
+    )
 
 
 def inrepo_config_path(anchor: str | Path) -> Path:
@@ -1012,7 +1014,7 @@ def load_config(
         raise ValueError(
             f"No repo could be resolved for project {repo_name or '?'!r}.\n"
             f"Checked machine-local config ({path}) and the repos registry "
-            f"({install_dir() / 'repos.yaml'}).\n"
+            f"({registry_paths.registry_path('repos.yaml', legacy_root=install_dir())}).\n"
             "Run the installer / register the repo first:\n"
             "  pwsh -File <repo>/plugins/agent-worktrees/scripts/install.ps1 install"
         )
