@@ -4353,6 +4353,18 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     return _emit(report)
 
 
+def _cmd_charter_show(args: argparse.Namespace) -> int:
+    from .worker_charter import charter_text
+
+    try:
+        text = charter_text(args.name)
+    except KeyError as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    print(text)
+    return 0
+
+
 def _cmd_recipes_list(args: argparse.Namespace) -> int:
     from .recipes import list_recipes
 
@@ -6105,6 +6117,17 @@ def build_parser() -> argparse.ArgumentParser:
              "peer discovery)",
     )
     pe.set_defaults(func=_cmd_print_endpoint)
+
+    # -- Worker charter: on-demand full behavioral policy prose -----------
+    cp = sub.add_parser(
+        "charter",
+        help="the shared 'how to behave as an agent-dispatch worker' policy "
+             "prose, pulled on demand instead of always inlined in a seed",
+    )
+    csub = cp.add_subparsers(dest="charter_command", required=True)
+    csp = csub.add_parser("show", help="print a named charter's full text")
+    csp.add_argument("name", help="charter name, e.g. 'autopilot'")
+    csp.set_defaults(func=_cmd_charter_show)
 
     # -- Loop recipes: list / describe / render / kick --------------------
     rp = sub.add_parser(

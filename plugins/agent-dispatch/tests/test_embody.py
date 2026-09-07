@@ -227,6 +227,47 @@ def test_autopilot_prompt_carries_goal_loop_contract():
     assert "one-shot" in prompt.lower()
 
 
+def test_autopilot_prompt_concise_pulls_charter_instead_of_inlining_it():
+    from agent_dispatch.worker_charter import AUTOPILOT_CHARTER_NAME, charter_text
+
+    default_prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9")
+    concise_prompt = embody.autopilot_worker_prompt(
+        "abc123", worker_id="w9", concise=True
+    )
+    # Much shorter: the behavioral essay is pulled on demand, not inlined.
+    assert len(concise_prompt) < len(default_prompt) / 2
+    assert f"agent-dispatch charter show {AUTOPILOT_CHARTER_NAME}" in concise_prompt
+    # Still carries the task-specific mechanics a worker needs immediately.
+    assert "abc123" in concise_prompt
+    assert "agent-dispatch show abc123" in concise_prompt
+    assert "agent-dispatch claim --task abc123 --evaluation" in concise_prompt
+    assert "agent-dispatch complete abc123" in concise_prompt
+    # None of the discursive policy prose (now charter-only) leaks in.
+    assert "DUPLICATE check" not in concise_prompt
+    assert "IS-THIS-FOR-ME" not in concise_prompt
+    # The charter itself still documents that same policy prose.
+    charter = charter_text(AUTOPILOT_CHARTER_NAME)
+    assert "contract-net" in charter.lower()
+    assert "DUPLICATE check" in charter
+
+
+def test_autopilot_prompt_concise_respects_route_and_explicit_identity():
+    prompt = embody.autopilot_worker_prompt(
+        "abc123",
+        worker_id="headless-1234",
+        route=" --shared",
+        explicit_worker_identity=True,
+        concise=True,
+    )
+    assert "agent-dispatch --shared charter show autopilot" in prompt
+    assert "agent-dispatch --shared show abc123" in prompt
+    assert (
+        "agent-dispatch --shared claim --task abc123 --evaluation "
+        "--worker headless-1234" in prompt
+    )
+    assert "http://" not in prompt
+
+
 def test_embody_available_false_without_cli(monkeypatch):
     monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: None)
     assert embody.embody_available() is False
