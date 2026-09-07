@@ -3232,6 +3232,16 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> None:
     sibling's cleanup, without weakening the gate for a pair that genuinely
     hasn't been carved yet.
 
+    Note this tombstone is intentionally never later fully deleted by peeking
+    at the sibling's ``status`` -- a *live, not-yet-reaped* worktree can
+    legitimately carry ``status == "finalized"`` well before ``cleanup``
+    ever removes its directory (see ``finalize``'s own doc: content merge-safe
+    and folder removal are separate steps). Treating that status as "sibling
+    already reaped, safe to hard-delete both" would delete live tracking
+    metadata for a worktree that still exists on disk. So a paired record
+    always tombstones, without exception, on the (safe) assumption that it
+    might still be needed.
+
     Fail-safe: if the tombstone write raises for any reason, falls back to a
     plain unlink -- a reap must never be blocked by this bookkeeping.
     """
