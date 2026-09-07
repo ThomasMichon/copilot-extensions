@@ -11,6 +11,7 @@ PLUGINS = ROOT / "plugins"
 SCHEMA = "copilot-extensions.session-context-contributors"
 EXPECTED = {
     "agent-bridge": {"command-catalog"},
+    "budget-guidance": {"command-catalog"},
     "agent-codespaces": {
         "runtime-readiness",
         "command-catalog",
@@ -116,7 +117,7 @@ def test_every_session_start_plugin_has_a_complete_declaration() -> None:
             }
 
     assert discovered == set(EXPECTED)
-    assert len(MIXED) == 11
+    assert len(MIXED) == 12
     assert len(CONTEXT_ONLY) == 4
 
 
