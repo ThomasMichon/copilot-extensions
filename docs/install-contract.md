@@ -223,17 +223,30 @@ may not regress below the pinned values.
 
 Python and PowerShell publication prepare a hidden
 `<versionsRoot-parent>/.runtime-slot-<slot-digest>-<nonce>/` sibling outside
-`versionsRoot` and use an OS-native atomic no-replace directory rename. If
+`versionsRoot`, write `.runtime-slot-reservation.json` before ownership, and
+use an OS-native atomic no-replace directory rename. If
 another slot appears first, publication fails and preserves it. An interruption
 outside normal in-process cleanup may leave the hidden sibling; it is inert,
 lies outside canonical version-slot enumeration, and requires explicit
-reconciliation rather than automatic deletion. Dependency-light Bash reserves
-the final slot with atomic `mkdir`, then publishes the marker with a no-replace
-hard link from a completed temporary file within that reserved slot. Ordinary
-in-process failures remove the still-empty reservation they own; an interruption
-between reservation and marker publication can leave a markerless slot. That
-visible slot is ambiguous, remains untouched, and fails closed until an explicit
-repair/release transaction.
+receipt-checked release rather than automatic deletion. Dependency-light Bash
+reserves the final slot with atomic `mkdir`, writes the reservation receipt as
+its first entry, then publishes ownership with a no-replace hard link.
+Successful publication removes reservation evidence. A Bash interruption before
+the first entry can still leave a markerless slot; it is never releasable.
+
+The reservation has the exact ownership identity fields, changes `schema` to
+`copilot-extensions.runtime-slot-reservation`, retains `version: 1`, and adds
+`generation`, a random non-negative signed-64-bit integer. `slot-release`
+requires explicit context, durable home, marketplace/plugin/runtime identity,
+current namespace/install generations, the exact reservation root, reservation
+generation, and SHA-256 of the observed receipt bytes. The root may be the
+canonical final slot or its digest-qualified hidden sibling. Both shared locks
+cover receipt, path, identity, contents, and current/LKG revalidation before
+each deletion. Only a directory containing exactly that receipt is removed.
+Completed, selected, LKG, non-empty, markerless, malformed, linked/reparsed,
+foreign, and replaced targets fail closed. Generation drift returns
+`revalidation-required`; absent replay returns `ready` with `released: false`,
+without claiming that the absent target was previously owned.
 
 Slot ownership is non-activating. Publication does not write payload content,
 `.install-complete.json`, `current-version`, `last-known-good`,
@@ -244,9 +257,8 @@ repair, and uninstall transactions remain separately gated.
 `status: "ready"` means the ownership record is attributable, not that the
 current installation is active; results expose `namespaceState`, `installState`,
 and `slotEmpty` for later callers. A runtime version is an immutable build
-identity and cannot be reassigned to another snapshot. Markerless or conflicting
-slots require an explicit future repair/release transaction; this foundation
-does not delete or reclaim them.
+identity and cannot be reassigned to another snapshot. Markerless or conflicting slots remain protected; only receipt-only
+reservations are eligible for explicit release.
 
 Slot provisioning allows up to 30 seconds to serialize under the shared
 genesis and installation locks so slower dependency-light runners retain the
@@ -348,7 +360,33 @@ publish immutable completion, and cut over only inside an already-active cell;
 neither path creates activation. Its fixed-identity `slot-cutover` installer
 adapter supplies exact payload, marketplace, plugin, generation, and
 current-marker expectations for forward update or explicit historical rollback.
-Repair/release and uninstall remain separate lifecycle boundaries.
+Its explicit `cell-repair` and `cell-uninstall` actions are separate lifecycle
+boundaries; neither accepts ambient authorization. Both shell adapters delegate
+to one payload-local stdlib Python engine, require exact caller-supplied
+payload/snapshot/runtime identity, namespace/install generations, and both
+current/LKG expectations, and join the outer provisioning lock plus both receipt
+locks.
+
+Repair derives only schema-4 deploy metadata and the intended current/LKG
+selection from existing validated immutable completion. It preserves
+receipt-defined source provenance separately from historical runtime selection.
+Agent Machines has no additional cell-local launch metadata to reconstruct.
+Missing ownership/completion or snapshot evidence refuses repair; no payload,
+snapshot, receipt, state/run/log/cache, service/task/endpoint, or external
+resource is recreated.
+
+Uninstall first preflights every artifact and refuses active activation, live
+owned processes, or ambiguous evidence. Explicit deactivation is a separate
+transaction. It clears selection by exact CAS before removing every validated
+owned historical slot and snapshot, then derived deploy/launcher/run/log/cache
+artifacts. Each deletion revalidates receipt generations, selection, ownership,
+and the exact captured target and ancestors. POSIX venv interpreter links and
+the exact `lib64 -> lib` scaffolding are removed as links, never followed;
+other linked/reparsed artifacts refuse removal. Durable `state/`,
+`namespace.json`, `install.json`, activation evidence, locks, and attributable
+empty directory structure remain. Namespace GC stays separate. Repeated
+uninstall returns `preserved`; drift returns `revalidation-required`, never
+permission to delete a changed target.
 
 ### Installation-mode governance
 

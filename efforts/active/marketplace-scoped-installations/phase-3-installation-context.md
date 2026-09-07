@@ -6,15 +6,17 @@
 ## Status
 
 **Command-only and service-bearing exemplars operative on the accepted Linux
-arm; repair/release and uninstall design accepted, implementation pending.**
+arm; Agent Machines repair/release and uninstall implemented and accepted.**
 The reviewed contract, cross-platform resolver, immutable runtime-slot
 ownership/completion/cutover, Agent Machines payload/runtime flow, and Agent
 Index service/runtime implementation are in place. Each path may use only its
 own already-active validated cell; absent/false policy remains legacy. Agent
 Index passed its full Linux lifecycle. Windows clean-room arms are waived for
 this effort; deterministic PowerShell parity remains required. Issue
-[#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122) carries
-the remaining Agent Machines repair/release and uninstall implementation.
+[#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122) supplies
+receipt-only reservation release, derived-only repair, and state-preserving
+removal of all owned historical slots and snapshots. The full Linux Agent
+Machines scenario passes all nine stages.
 
 ## Goals
 
@@ -488,13 +490,13 @@ uninstall behavior.
   immutable snapshot and stable cell identity while rejecting generation
   regression, so update and state transitions do not strand rollback slots.
 - Python and PowerShell publication use a reserved hidden sibling outside
-  `versionsRoot` and an OS-native atomic no-replace rename. Interrupted hidden siblings
-  are inert, remain outside canonical slot enumeration, and require explicit
-  reconciliation. Bash uses atomic final-slot `mkdir` reservation followed by
-  no-replace hard-link marker publication from within the reserved slot.
-  Ordinary failures remove their still-empty owned reservation; an interruption
-  between those steps leaves a markerless slot that remains untouched and fails
-  closed pending explicit repair/release.
+  `versionsRoot`, publish reservation evidence there, and use an OS-native atomic
+  no-replace rename. Interrupted hidden siblings are inert and remain outside
+  canonical slot enumeration. Bash uses atomic final-slot `mkdir`, publishes
+  reservation evidence as its first entry, then no-replace hard-link ownership
+  publication. Successful ownership publication removes reservation evidence.
+  Receipt-only interruptions require explicit release; legacy markerless slots
+  and mixed reservation/ownership evidence remain protected.
 - Results distinguish attributable ownership from lifecycle readiness with
   `namespaceState`, `installState`, and `slotEmpty`. Runtime versions remain
   immutable build identities; conflicting slots await a separate explicit
@@ -630,7 +632,9 @@ uninstall behavior.
 - The shared Python, dependency-light Bash, and PowerShell primitives expose
   `slot-release` (the release half of the repair/release lifecycle). It requires
   explicit context, marketplace/plugin ids, runtime version, reservation
-  generation, current namespace/install generations, and durable home. Under
+  generation, current namespace/install generations, and durable home. The exact
+  reservation root and SHA-256 of the caller-observed receipt pin target and
+  receipt identity. Under
   the marketplace genesis lock and plugin install lock it revalidates the
   receipt and target immediately before deletion.
 - `slot-release` removes only a slot containing the exact matching reservation
@@ -640,7 +644,8 @@ uninstall behavior.
 - Agent Machines exposes `cell-repair` as an explicit installer action requiring
   caller-supplied context, marketplace id, payload root/version, snapshot id,
   runtime version, receipt generations, and an exact current-selection CAS.
-  Ambient context never authorizes repair.
+  Both current and LKG expectations are explicit. Ambient context never
+  authorizes repair.
 - Repair is derived-only. It may recreate missing or invalid
   `deploy-manifest.json` and Agent Machines cell-local launch metadata only
   from a validated completed slot, snapshot, payload, and receipt chain. It may
@@ -652,7 +657,8 @@ uninstall behavior.
   refusal, not repairable evidence.
 - Agent Machines exposes `cell-uninstall` as an explicit installer action
   requiring caller-supplied context, marketplace id, receipt generations, and
-  exact current/LKG expectations. Ambient context never authorizes uninstall.
+  exact current/LKG expectations, with payload/snapshot/runtime identity for the
+  selected completed target. Ambient context never authorizes uninstall.
 - Uninstall acquires the same two locks and revalidates `namespace.json`,
   `install.json`, canonical roots, generations, and the exact target immediately
   before every destructive step. It clears current and LKG markers by CAS,

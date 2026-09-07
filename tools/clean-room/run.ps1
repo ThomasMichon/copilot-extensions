@@ -338,9 +338,18 @@ function Resolve-CopilotToken {
 # (no interactive step; runs against the plain unauthed image). Fall back to the
 # committed device-code :authed image only when no token is available.
 function Start-Container {
-    $token = Resolve-CopilotToken
+    $manifestPath = Join-Path $ScenarioDir 'manifest.json'
+    $noScenarioAuth = $false
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        $scenarioManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $noScenarioAuth = $scenarioManifest.tier -eq 'P' -and $scenarioManifest.auth.copilot -eq 'none'
+    }
+    $token = if ($noScenarioAuth) { $null } else { Resolve-CopilotToken }
     $tokenArgs = @()
-    if ($token) {
+    if ($noScenarioAuth) {
+        if (-not (Test-Image $BaseTag)) { Invoke-Build }
+        $img = $BaseTag
+    } elseif ($token) {
         if (-not (Test-Image $BaseTag)) { Invoke-Build }
         $img = $BaseTag
         $acct = if ($TokenAccount) { $TokenAccount } else { 'active gh account' }

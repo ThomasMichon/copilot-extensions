@@ -2483,6 +2483,8 @@ validate_runtime_slot_ownership() {
     local context="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
     local snapshot_id="$5" runtime_version="$6"
     local expected_payload_root="${7:-}" expected_payload_version="${8:-}"
+    local reservation_root="${9:-}" reservation_generation="${10:-}"
+    local expected_schema=copilot-extensions.runtime-slot-ownership property_count=10
     local ownership actual ownership_document schema version
     local marketplace_id plugin_id source_fingerprint runtime_recorded_version
     local runtime_root snapshot_recorded_id snapshot_root snapshot_provenance
@@ -2508,8 +2510,16 @@ validate_runtime_slot_ownership() {
     validate_snapshot_provenance \
         "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" \
         "$snapshot_id" false "$expected_payload_root" "$expected_payload_version"
-    resolve_runtime_slot_paths "$runtime_version" true
+    resolve_runtime_slot_paths "$runtime_version" "$(if [[ -n "$reservation_root" ]]; then echo false; else echo true; fi)"
     ownership="$RUNTIME_OWNERSHIP_PATH"
+    if [[ -n "$reservation_root" ]]; then
+        ownership="$reservation_root/.runtime-slot-reservation.json"
+        expected_schema=copilot-extensions.runtime-slot-reservation
+        property_count=11
+    elif [[ -e "$RUNTIME_SLOT_ROOT/.runtime-slot-reservation.json" ||
+            -L "$RUNTIME_SLOT_ROOT/.runtime-slot-reservation.json" ]]; then
+        fail "Runtime slot retains unfinished reservation evidence."
+    fi
     [[ -e "$ownership" ]] || fail "Runtime slot ownership must exist."
     actual="$(canonical_path "$ownership" true)"
     paths_equal "$actual" "$ownership" ||
@@ -2518,7 +2528,7 @@ validate_runtime_slot_ownership() {
         fail "Runtime slot ownership must be an ordinary file."
     capture_json_for_validation ownership_document "$actual" "Runtime slot ownership"
 
-    assert_json_object_length "$ownership_document" "" 10 "Runtime slot ownership"
+    assert_json_object_length "$ownership_document" "" "$property_count" "Runtime slot ownership"
     assert_json_object_length "$ownership_document" runtime 2 "Runtime slot ownership runtime identity"
     assert_json_object_length "$ownership_document" snapshot 4 "Runtime slot ownership snapshot identity"
     assert_json_object_length "$ownership_document" namespaceReceipt 2 "Runtime slot ownership namespace receipt"
@@ -2528,8 +2538,16 @@ validate_runtime_slot_ownership() {
     version="$(json_optional_path "$ownership_document" version)"
     assert_json_type "$ownership_document" schema string "runtime slot ownership schema"
     assert_json_type "$ownership_document" version number "runtime slot ownership version"
-    [[ "$schema" == copilot-extensions.runtime-slot-ownership && "$version" == 1 ]] ||
+    [[ "$schema" == "$expected_schema" && "$version" == 1 ]] ||
         fail "Runtime slot ownership has an unsupported schema or version."
+    if [[ -n "$reservation_root" ]]; then
+        local generation
+        assert_json_type "$ownership_document" generation number "reservation generation"
+        generation="$(json_optional_path "$ownership_document" generation)"
+        [[ "$generation" =~ ^(0|[1-9][0-9]*)$ ]] || fail "Invalid reservation generation."
+        normalize_expected_generation_into generation "$generation" reservation
+        [[ "$generation" == "$reservation_generation" ]] || fail "Reservation generation changed."
+    fi
     json_optional_string_into marketplace_id "$ownership_document" marketplaceId
     json_optional_string_into plugin_id "$ownership_document" pluginId
     json_optional_string_into source_fingerprint "$ownership_document" sourceFingerprint
@@ -2580,6 +2598,7 @@ validate_runtime_slot_ownership() {
         paths_equal "$install_path" "$SNAPSHOT_INSTALL_RECEIPT" ||
         fail "Runtime slot ownership does not match the validated snapshot and installation receipts."
 
+    [[ -z "$reservation_root" ]] || return 0
     json_optional_string_into namespace_state "$CTX_NAMESPACE_RECEIPT" state
     shopt -s nullglob dotglob
     entries=("$RUNTIME_SLOT_ROOT"/*)
@@ -2660,13 +2679,6 @@ provision_runtime_slot() {
         "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION"
     ensure_versions_root_chain
     resolve_runtime_slot_paths "$RUNTIME_VERSION" false
-    if ! mkdir -- "$RUNTIME_SLOT_ROOT" 2>/dev/null; then
-        if [[ -e "$RUNTIME_SLOT_ROOT" || -L "$RUNTIME_SLOT_ROOT" ]]; then
-            fail "Runtime slot appeared during publication; refusing replacement."
-        fi
-        fail "Cannot reserve runtime slot '$RUNTIME_SLOT_ROOT'."
-    fi
-    TEMP_DIRS+=("$RUNTIME_SLOT_ROOT")
     now="$(utc_now)"
     provenance_sha="$(digest_file "$SNAPSHOT_PROVENANCE")"
     desired="{
@@ -2695,8 +2707,21 @@ provision_runtime_slot() {
   },
   \"createdAt\":$(json_quote "$now")
 }"
+    local reservation generation
+    generation="$(( (RANDOM << 30) | (RANDOM << 15) | RANDOM ))"
+    reservation="${desired/copilot-extensions.runtime-slot-ownership/copilot-extensions.runtime-slot-reservation}"
+    reservation="${reservation%\}},\"generation\":$generation}"
+    if ! mkdir -- "$RUNTIME_SLOT_ROOT" 2>/dev/null; then
+        fail "Runtime slot appeared during publication; refusing replacement."
+    fi
+    TEMP_DIRS+=("$RUNTIME_SLOT_ROOT")
+    # The first final-slot entry is evidence, never an unattributed temporary file.
+    (set -o noclobber; printf '%s\n' "$reservation" >"$RUNTIME_SLOT_ROOT/.runtime-slot-reservation.json") ||
+        fail "Cannot publish runtime slot reservation."
     publish_json_no_replace \
         "$RUNTIME_OWNERSHIP_PATH" "$desired" "$RUNTIME_SLOT_ROOT"
+    assert_all_locks_owned
+    rm -- "$RUNTIME_SLOT_ROOT/.runtime-slot-reservation.json"
     slot_changed=true
     validate_runtime_slot_ownership \
         "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
@@ -3073,6 +3098,108 @@ complete_runtime_slot() {
     fi
     COMPLETION_JSON="${COMPLETION_JSON%\}},\"created\":$created}"
     printf '%s\n' "$COMPLETION_JSON"
+}
+
+lifecycle_path_evidence() {
+    local path="$1"
+    if [[ ! -e "$path" && ! -L "$path" ]]; then printf absent; return; fi
+    [[ ! -L "$path" && ( -f "$path" || -d "$path" ) ]] ||
+        fail "Lifecycle evidence may not be linked or non-regular."
+    stat_file_metadata "$path" || fail "Cannot inspect lifecycle evidence."
+    if [[ -f "$path" ]]; then digest_file "$path"; fi
+}
+
+resolve_reservation_target() {
+    resolve_runtime_slot_paths "$RUNTIME_VERSION" false
+    local digest parent name
+    digest="$(digest_record "$RUNTIME_SLOT_ROOT")"
+    digest="${digest:0:16}"
+    parent="$(dirname -- "$RUNTIME_VERSIONS_ROOT")"
+    name="$(basename -- "$RESERVATION_ROOT")"
+    is_absolute "$RESERVATION_ROOT" && [[ ! -L "$RESERVATION_ROOT" ]] ||
+        fail "Reservation root must be absolute and may not be linked."
+    if ! paths_equal "$RESERVATION_ROOT" "$RUNTIME_SLOT_ROOT"; then
+        paths_equal "$(dirname -- "$RESERVATION_ROOT")" "$parent" &&
+            [[ "$name" =~ ^\.runtime-slot-$digest-([0-9a-f]{16}|[0-9a-f]{32})$ ]] ||
+            fail "Reservation root must be the exact slot or its attributable hidden sibling."
+    fi
+    [[ "$(canonical_path "$RESERVATION_ROOT")" == "$RESERVATION_ROOT" ]] ||
+        fail "Reservation root must retain its exact canonical spelling."
+    RESERVATION_MARKER_ROOT="$parent"
+}
+
+release_runtime_slot() {
+    [[ "$CONTEXT_SUPPLIED" == true && -n "$CONTEXT" && -n "$EXPECTED_MARKETPLACE_ID" &&
+       -n "$EXPECTED_PLUGIN_ID" && -n "$RUNTIME_VERSION" && -n "$RESERVATION_ROOT" &&
+       "$DURABLE_HOME_SUPPLIED" == true && -n "$EXPECTED_NAMESPACE_GENERATION" &&
+       -n "$EXPECTED_INSTALL_GENERATION" && -n "$EXPECTED_RESERVATION_GENERATION" &&
+       "$EXPECTED_RESERVATION_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+        fail "slot-release requires explicit context, identities, reservation root/digest and all generations."
+    normalize_expected_generation_into EXPECTED_NAMESPACE_GENERATION "$EXPECTED_NAMESPACE_GENERATION" namespace
+    normalize_expected_generation_into EXPECTED_INSTALL_GENERATION "$EXPECTED_INSTALL_GENERATION" install
+    normalize_expected_generation_into EXPECTED_RESERVATION_GENERATION "$EXPECTED_RESERVATION_GENERATION" reservation
+    assert_marketplace_id "$EXPECTED_MARKETPLACE_ID"
+    assert_plugin_id "$EXPECTED_PLUGIN_ID"
+    assert_runtime_version "$RUNTIME_VERSION"
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" ""
+    acquire_lock "$DURABLE_HOME/marketplaces/.locks/$EXPECTED_MARKETPLACE_ID.genesis" genesis "$EXPECTED_MARKETPLACE_ID" "" "$RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS"
+    acquire_lock "$CTX_CELL_ROOT/.locks/$EXPECTED_PLUGIN_ID.install.lock" install "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "$RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS"
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" ""
+    resolve_reservation_target
+    local status=ready reason=runtime-slot-reservation-absent released=false
+    local current lkg receipt snapshot_id entry i directory_identity
+    local evidence_paths=() evidence=() entries=()
+    if [[ "$CTX_NAMESPACE_GENERATION" != "$EXPECTED_NAMESPACE_GENERATION" ||
+          "$CTX_INSTALL_GENERATION" != "$EXPECTED_INSTALL_GENERATION" ]]; then
+        status=revalidation-required; reason=generation-changed
+    else
+        local current_path="$RESERVATION_MARKER_ROOT/current-version" lkg_path="$RESERVATION_MARKER_ROOT/last-known-good"
+        read_runtime_marker_into current "$current_path" "Current version marker"
+        read_runtime_marker_into lkg "$lkg_path" "Last-known-good marker"
+        [[ "$current" != "$RUNTIME_VERSION" && "$lkg" != "$RUNTIME_VERSION" ]] ||
+            fail "A current or last-known-good reservation cannot be released."
+        if [[ -e "$RESERVATION_ROOT" || -L "$RESERVATION_ROOT" ]]; then
+            [[ -d "$RESERVATION_ROOT" && ! -L "$RESERVATION_ROOT" ]] || fail "Reservation must be an ordinary directory."
+            receipt="$RESERVATION_ROOT/.runtime-slot-reservation.json"
+            evidence_paths=("$CTX_NAMESPACE_RECEIPT" "$CTX_INSTALL_RECEIPT" "$current_path" "$lkg_path" "$RESERVATION_ROOT" "$receipt")
+            for entry in "${evidence_paths[@]}"; do evidence+=("$(lifecycle_path_evidence "$entry")"); done
+            directory_identity="$(stat_file_metadata "$RESERVATION_ROOT" | cut -d '|' -f 2,3)"
+            [[ -f "$receipt" && ! -L "$receipt" && "$(digest_file "$receipt")" == "$EXPECTED_RESERVATION_SHA256" ]] ||
+                fail "Runtime slot reservation receipt changed."
+            json_optional_string_into snapshot_id "$receipt" "$(path_join snapshot id)"
+            validate_runtime_slot_ownership "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" \
+                "$snapshot_id" "$RUNTIME_VERSION" "" "" "$RESERVATION_ROOT" "$EXPECTED_RESERVATION_GENERATION"
+            COPILOT_PLUGIN_ROOT="" validate_context_receipt "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" ""
+            resolve_reservation_target
+            shopt -s nullglob dotglob
+            entries=("$RESERVATION_ROOT"/*)
+            shopt -u nullglob dotglob
+            [[ "${#entries[@]}" == 1 && "${entries[0]}" == "$receipt" ]] ||
+                fail "Release requires exactly one matching reservation receipt and no other entries."
+            assert_all_locks_owned
+            for ((i=0; i<${#evidence_paths[@]}; i++)); do
+                [[ "$(lifecycle_path_evidence "${evidence_paths[$i]}")" == "${evidence[$i]}" ]] ||
+                    fail "Runtime slot release evidence changed or was replaced."
+            done
+            rm -- "$receipt"
+            COPILOT_PLUGIN_ROOT="" validate_context_receipt "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" ""
+            resolve_reservation_target
+            assert_all_locks_owned
+            for ((i=0; i<${#evidence_paths[@]}-2; i++)); do
+                [[ "$(lifecycle_path_evidence "${evidence_paths[$i]}")" == "${evidence[$i]}" ]] ||
+                    fail "Runtime slot release evidence changed before directory removal."
+            done
+            [[ "$(stat_file_metadata "$RESERVATION_ROOT" | cut -d '|' -f 2,3)" == "$directory_identity" ]] ||
+                fail "Runtime reservation directory was replaced."
+            rmdir -- "$RESERVATION_ROOT" || fail "Runtime reservation directory is no longer empty."
+            released=true; reason=runtime-slot-reservation-released
+        fi
+    fi
+    printf '{"action":"slot-release","status":%s,"reason":%s,"released":%s,"slotRoot":%s,"runtimeVersion":%s,"reservationGeneration":%s,"namespaceGeneration":%s,"installGeneration":%s,"activated":false,"operative":false}\n' \
+        "$(json_quote "$status")" "$(json_quote "$reason")" "$released" "$(json_quote "$RESERVATION_ROOT")" "$(json_quote "$RUNTIME_VERSION")" \
+        "$EXPECTED_RESERVATION_GENERATION" "$CTX_NAMESPACE_GENERATION" "$CTX_INSTALL_GENERATION"
+    release_lock
+    release_lock
 }
 
 read_runtime_marker_into() {
@@ -4615,8 +4742,8 @@ run_status_action() {
 }
 
 ACTION="${1:-}"
-[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == slot-cutover || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
-    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover|status|probe-legacy} [options]"
+[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-release || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == slot-cutover || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-release|slot-complete|slot-completion-validate|slot-cutover|status|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
@@ -4627,6 +4754,10 @@ PAYLOAD_ROOT=""
 COPILOT_HOME="${HOME}/.copilot"
 PROJECT_ROOT=""
 DURABLE_HOME="${HOME}/.copilot-extensions"
+DURABLE_HOME_SUPPLIED=false
+RESERVATION_ROOT=""
+EXPECTED_RESERVATION_GENERATION=""
+EXPECTED_RESERVATION_SHA256=""
 CONTEXT=""
 CONTEXT_SUPPLIED=false
 EXPECTED_MARKETPLACE_ID=""
@@ -4668,7 +4799,10 @@ while (($#)); do
         --payload-root) need_value "$@"; PAYLOAD_ROOT="$2"; shift 2 ;;
         --copilot-home) need_value "$@"; COPILOT_HOME="$2"; shift 2 ;;
         --project-root) need_value "$@"; PROJECT_ROOT="$2"; shift 2 ;;
-        --durable-home) need_value "$@"; DURABLE_HOME="$2"; shift 2 ;;
+        --durable-home) need_value "$@"; DURABLE_HOME="$2"; DURABLE_HOME_SUPPLIED=true; shift 2 ;;
+        --reservation-root) need_value "$@"; RESERVATION_ROOT="$2"; shift 2 ;;
+        --expected-reservation-generation) need_value "$@"; EXPECTED_RESERVATION_GENERATION="$2"; shift 2 ;;
+        --expected-reservation-sha256) need_value "$@"; EXPECTED_RESERVATION_SHA256="$2"; shift 2 ;;
         --context) need_value "$@"; CONTEXT="$2"; CONTEXT_SUPPLIED=true; shift 2 ;;
         --expected-marketplace-id) need_value "$@"; EXPECTED_MARKETPLACE_ID="$2"; shift 2 ;;
         --expected-plugin-id) need_value "$@"; EXPECTED_PLUGIN_ID="$2"; shift 2 ;;
@@ -4775,6 +4909,11 @@ if [[ "$ACTION" == source-id ]]; then
     normalize_source "$SOURCE_FILE" ""
     derive_identity "${MARKETPLACE_KEY:-marketplace}"
     emit_source_identity
+    exit 0
+fi
+
+if [[ "$ACTION" == slot-release ]]; then
+    release_runtime_slot
     exit 0
 fi
 

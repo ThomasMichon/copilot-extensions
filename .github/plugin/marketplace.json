@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev25"
+    "version": "1.7.7-dev26"
   },
   "plugins": [
     {
@@ -102,13 +102,13 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev140",
+      "version": "0.1.0-dev141",
       "source": "plugins/agent-index"
     },
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.1.0-dev94",
+      "version": "0.1.0-dev96",
       "source": "plugins/agent-machines"
     },
     {

@@ -2674,7 +2674,7 @@ def test_runtime_slot_rejects_snapshot_provenance_tampering(
 
 
 @pytest.mark.skipif(BASH is None, reason="Bash is unavailable")
-def test_posix_slot_publication_failure_releases_owned_empty_reservation(
+def test_posix_slot_publication_failure_retains_receipt_until_explicit_release(
     tmp_path: Path,
 ) -> None:
     posix = next(runner for runner in ALL_RUNNERS if runner[0] == "posix")
@@ -2697,6 +2697,19 @@ def test_posix_slot_publication_failure_releases_owned_empty_reservation(
 
     assert failed.returncode != 0
     assert "Cannot publish runtime slot ownership" in failed.stderr
+    receipt = slot / ".runtime-slot-reservation.json"
+    assert {path.name for path in slot.iterdir()} == {receipt.name}
+    assert _run_slot(posix, "slot-provision", layout, check=False).returncode != 0
+    record = json.loads(receipt.read_bytes())
+    released = _load_python_module().release_runtime_slot(
+        context=layout["install"], durable_home=layout["durable"],
+        expected_marketplace_id=layout["marketplace_id"], expected_plugin_id=layout["plugin_id"],
+        runtime_version="3.4.5", reservation_root=slot,
+        expected_reservation_generation=record["generation"],
+        expected_reservation_sha256=hashlib.sha256(receipt.read_bytes()).hexdigest(),
+        expected_namespace_generation=1, expected_install_generation=2,
+    )
+    assert released["released"] is True
     assert not slot.exists()
     assert json.loads(_run_slot(posix, "slot-provision", layout).stdout)["slotChanged"]
 
