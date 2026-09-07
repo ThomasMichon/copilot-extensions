@@ -916,13 +916,42 @@ def test_invalid_explicit_context_denies_before_guard_fallback(
     assert "invalid" in result["permissionDecisionReason"]
 
 
-def test_explicit_context_session_end_stands_down():
+def test_explicit_context_session_end_uses_payload_client():
     hooks = json.loads(
         (Path(__file__).resolve().parents[1] / "hooks.json").read_text("utf-8")
     )
     entry = hooks["hooks"]["sessionEnd"][0]
-    assert "-not $env:COPILOT_EXTENSIONS_CONTEXT" in entry["powershell"]
-    assert '[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]' in entry["bash"]
+    assert "COPILOT_PLUGIN_ROOT" in entry["powershell"]
+    assert "hook_client.py" in entry["powershell"]
+    assert "WindowsApps" in entry["powershell"]
+    assert "COPILOT_PLUGIN_ROOT" in entry["bash"]
+    assert 'python3 "$s" sessionEnd' in entry["bash"]
+
+
+def test_explicit_context_session_end_uses_cell_runtime(
+    monkeypatch, tmp_path
+):
+    python = tmp_path / "cell" / "versions" / "1.0.0" / "bin" / "python"
+    seen = {}
+    monkeypatch.setattr(hook_client, "_runtime_python", lambda _home: python)
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, kwargs=kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(hook_client.subprocess, "run", run)
+    payload = {"sessionId": "session-1", "cwd": str(tmp_path)}
+
+    assert hook_client._fallback_session_end(payload, tmp_path) == {}
+    assert seen["argv"] == [
+        str(python),
+        "-m",
+        "agent_worktrees",
+        "deregister-session",
+        "--stdin",
+    ]
+    assert json.loads(seen["kwargs"]["input"]) == payload
+    assert seen["kwargs"]["timeout"] == hook_client._SESSION_END_TIMEOUT_S
 
 
 def test_started_resident_lifecycle_suppresses_duplicate_fallback(

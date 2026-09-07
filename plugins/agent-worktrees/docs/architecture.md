@@ -47,12 +47,19 @@ payload and selects the cell's plugin root for all three. Ambient runtime,
 home, plugin-root, or per-file override variables cannot independently select
 a cell, and invalid or foreign context never falls back to the legacy files.
 
-Per-project `~/.{project}` state, project binstubs, pivots, sessions, leases,
-and other harness state remain on their legacy paths until their ownership
-contracts move in later slices. Pivot activation and session-end deregistration
-stand down under explicit context rather than consulting legacy registries or
-lifecycle state. Namespaced activation remains opt-in and clean-room-only
-during the migration.
+Per-project config and agent-worktrees tracking/session records now follow the
+same installation boundary. Legacy/default operation preserves
+`~/.{project}`. A namespaced project resolves its registered remote to a stable
+repository ID, validates `<cell>/repos/<repository-id>/identity.json`, and uses
+that repository's `agent-worktrees/` child for `config.yaml`, worktree records,
+histories, and session bindings. Aliases for the same normalized remote share a
+repository ID, while the same repository in another cell remains isolated.
+
+Project binstubs remain global but route every invocation through their pinned
+payload before runtime or launcher selection. Pivots, leases, service identity,
+and the host-owned `~/.copilot/session-state` database remain separate later
+boundaries. Namespaced activation remains opt-in and clean-room-only during the
+migration.
 
 ## Installed Layout
 
@@ -77,6 +84,12 @@ After full installation and project registration:
   config.yaml                         #   Machine-wide defaults
   projects.yaml                       #   Registry of adopted projects
   repos.yaml                          #   Repos catalog + source roots
+
+~/.copilot-extensions/marketplaces/<id>/repos/<repository-id>/
+  identity.json                       # Stable normalized-remote ownership
+  agent-worktrees/
+    config.yaml                       # Cell-local per-project config
+    worktrees/                        # Cell-local tracking/session records
 
 ~/.{project}/                       # Per-project config + state
   config.yaml                       #   Machine, repos, launch commands

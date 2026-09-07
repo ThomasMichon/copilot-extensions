@@ -12,11 +12,15 @@ The three machine-local global files (`config.yaml`, `projects.yaml`, and
 installation context that root is `~/.agent-worktrees`. An explicit context
 selects the validated agent-worktrees cell plugin root; invalid or foreign
 context fails without reading the legacy files. Per-project
-`~/.{project}/config.yaml` remains legacy machine-local state in this phase.
+Per-project config also follows the selected installation boundary:
+legacy/default mode keeps `~/.{project}/config.yaml`; namespaced mode validates
+the repository's normalized-remote identity receipt and uses
+`<cell>/repos/<repository-id>/agent-worktrees/config.yaml`. The host-owned
+Copilot session database remains outside this path.
 
 | Precedence | Source | Path | Scope | Committed? |
 |------------|--------|------|-------|-----------|
-| **Highest** | **Machine-local** | `~/.{project}/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
+| **Highest** | **Machine-local** | legacy `~/.{project}/config.yaml`; namespaced `<cell>/repos/<repository-id>/agent-worktrees/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
 | *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`, `new_picker`). Machine-specifics and the binding never graft. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. | Yes |
 | **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`, `session_backend`. | No |

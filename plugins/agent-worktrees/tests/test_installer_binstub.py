@@ -60,11 +60,11 @@ def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
     if platform.system() == "Windows":
         assert "bin\\payload\\agent-worktrees.cmd" in content
         assert "--project demoproj" in content
-        assert "launch-session.cmd\" --project demoproj" in content
+        assert "launch-session.cmd" not in content
     else:
         assert "bin/payload/agent-worktrees" in content
         assert "--project demoproj" in content
-        assert "launch-session.sh\" --project demoproj" in content
+        assert "launch-session.sh" not in content
         assert ".local/bin/agent-worktrees" not in content
 
 
@@ -139,7 +139,7 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
         assert "picker-launches.jsonl" in content
         assert "binstub_start" in content
         assert "timestamp_local" not in content
-        assert "launch-session" in content
+        assert "launch-session" not in content
         assert "--project" in content
         assert "agent-worktrees.exe" not in content
 
@@ -248,8 +248,8 @@ def test_posix_binstub_launch_trace_uses_portable_date(monkeypatch, tmp_path: Pa
     assert "picker-launches.jsonl" in content
     assert "$RANDOM-$(date +%s)" in content
     assert "date -u +%Y-%m-%dT%H:%M:%SZ" in content
-    assert "if [[ $# -eq 0 ]]" in content
-    assert "launch-session.sh" in content
+    assert "if [[ $# -eq 0 ]]" not in content
+    assert "bin/payload/agent-worktrees" in content.replace("\\", "/")
     assert "%N" not in content
 
 
@@ -786,6 +786,24 @@ def test_payload_shims_propagate_ownership_root() -> None:
         PLUGIN / "scripts" / "invoke-payload-runtime.ps1"
     ).read_text(encoding="utf-8")
     assert "[Environment]::GetEnvironmentVariable" in dispatcher
+
+
+def test_project_binstubs_never_launch_through_legacy_runtime(
+    monkeypatch, tmp_path
+):
+    payload = tmp_path / "payload"
+    (payload / "plugin.json").parent.mkdir(parents=True)
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-worktrees","version":"1.0.0"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
+    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
+
+    for _path, content in inst._project_binstub_specs("example"):
+        normalized = content.replace("\\", "/")
+        assert ".agent-worktrees/bin/launch-session" not in normalized
+        assert "bin/payload/agent-worktrees" in normalized
 
 
 def test_hook_deployment_includes_registry_root_helper() -> None:
