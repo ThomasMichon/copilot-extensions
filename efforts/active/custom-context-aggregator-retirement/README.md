@@ -5,7 +5,8 @@
 - **Branch(es):** sequenced plan, upstream retirement, and adopter-migration changes
 - **Created:** 2026-09-07
 - **Status:** Draft
-- **Vision:** closes `visions/harness-guidance`
+- **Vision:** closes
+  [`visions/harness-guidance`](../../../visions/harness-guidance/README.md)
   §Non-Goals/`no-custom-cross-plugin-aggregation-authority`
 - **Umbrella issue:** [#2173](https://github.com/ThomasMichon/copilot-extensions/issues/2173)
 
