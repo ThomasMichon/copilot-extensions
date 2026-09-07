@@ -26,6 +26,9 @@ param(
     [switch]$ExpectCurrentAbsent,
     [string]$SnapshotId,
     [string]$RuntimeVersion,
+    [string]$ReservationRoot,
+    [object]$ExpectedReservationGeneration,
+    [string]$ExpectedReservationSha256,
     [string]$NamespaceState = 'active',
     [string]$InstallState = 'active',
     [string]$ActivationMode,
@@ -4885,9 +4888,15 @@ function New-RuntimeSlotOwnership(
 function Validate-RuntimeSlotOwnershipCore(
     $Validated,
     $Snapshot,
-    [string]$RequestedRuntimeVersion
+    [string]$RequestedRuntimeVersion,
+    [string]$ReservationPath = '',
+    [object]$ReservationGeneration = $null
 ) {
-    $paths = Resolve-RuntimeSlotPaths $Validated $RequestedRuntimeVersion $true
+    $paths = Resolve-RuntimeSlotPaths $Validated $RequestedRuntimeVersion (-not $ReservationPath)
+    if ($ReservationPath) { $paths.ownership = Join-Path $ReservationPath '.runtime-slot-reservation.json' }
+    elseif ($null -ne (Get-Item -LiteralPath (Join-Path $paths.slotRoot '.runtime-slot-reservation.json') -Force -ErrorAction SilentlyContinue)) {
+        Fail 'Runtime slot retains unfinished reservation evidence.'
+    }
     if (-not (Test-Path -LiteralPath $paths.ownership)) {
         Fail 'Runtime slot ownership must exist.'
     }
@@ -4901,7 +4910,8 @@ function Validate-RuntimeSlotOwnershipCore(
         Fail 'Runtime slot ownership must be an ordinary file.'
     }
     $ownership = Read-Json $actualOwnership
-    Assert-ExactPropertyCount $ownership 10 'Runtime slot ownership'
+    $propertyCount = if ($ReservationPath) { 11 } else { 10 }
+    Assert-ExactPropertyCount $ownership $propertyCount 'Runtime slot ownership'
     $runtime = Get-PropertyValue $ownership 'runtime'
     $recordedSnapshot = Get-PropertyValue $ownership 'snapshot'
     $namespaceReference = Get-PropertyValue $ownership 'namespaceReceipt'
@@ -4913,10 +4923,17 @@ function Validate-RuntimeSlotOwnershipCore(
 
     $ownershipVersion = Get-PropertyValue $ownership 'version'
     Assert-PositiveInteger $ownershipVersion 'runtime slot ownership version'
-    if ((Get-StringProperty $ownership 'schema') -cne
-            'copilot-extensions.runtime-slot-ownership' -or
+    $schema = if ($ReservationPath) { 'copilot-extensions.runtime-slot-reservation' } else { 'copilot-extensions.runtime-slot-ownership' }
+    if ((Get-StringProperty $ownership 'schema') -cne $schema -or
         $ownershipVersion -ne 1) {
         Fail 'Runtime slot ownership has an unsupported schema or version.'
+    }
+    if ($ReservationPath) {
+        $generation = Get-PropertyValue $ownership 'generation'
+        if (($generation -isnot [int] -and $generation -isnot [long]) -or $generation -lt 0) {
+            Fail 'Reservation generation must be a non-negative signed 64-bit integer.'
+        }
+        if ($generation -ne $ReservationGeneration) { Fail 'Reservation generation changed.' }
     }
     [void](Read-ExactUtcTimestampValue (
         Get-PropertyValue $ownership 'createdAt'
@@ -4959,6 +4976,7 @@ function Validate-RuntimeSlotOwnershipCore(
         }
     }
 
+    if ($ReservationPath) { return $ownership }
     $namespace = Read-Json ([string]$Validated.namespaceReceipt)
     $slotContent = @(
         Get-ChildItem -LiteralPath $paths.slotRoot -Force |
@@ -4986,6 +5004,141 @@ function Validate-RuntimeSlotOwnershipCore(
         slotEmpty = ($slotContent.Count -eq 0)
         activated = $false
         operative = $false
+    }
+}
+
+function Get-LifecyclePathEvidence([string]$Path) {
+    $entry = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $entry) { return 'absent' }
+    if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Fail 'Lifecycle evidence may not be linked or reparsed.'
+    }
+    if ($entry.PSIsContainer) {
+        $state = Get-SnapshotDirectoryState $Path $Path
+        return "$($state.identity)|$($state.metadata)"
+    }
+    $capture = Read-RegularFileBytes $Path 'Lifecycle evidence' -RequireSameIdentity
+    return "$($capture.identity)|$($capture.metadata)|$(Get-FileSha256 $Path -RequireSameIdentity)"
+}
+
+function Resolve-ReservationTarget($Validated) {
+    $paths = Resolve-RuntimeSlotPaths $Validated $RuntimeVersion $false
+    if (-not (Test-FullyQualifiedPath $ReservationRoot)) {
+        Fail 'Reservation root must be absolute.'
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = ([BitConverter]::ToString($sha.ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes([string]$paths.slotRoot)
+        ))).Replace('-', '').ToLowerInvariant().Substring(0, 16)
+    } finally { $sha.Dispose() }
+    $parent = Split-Path -Parent $paths.versionsRoot
+    $hidden = (Paths-Equal (Split-Path -Parent $ReservationRoot) $parent) -and (
+        (Split-Path -Leaf $ReservationRoot) -cmatch "^\.runtime-slot-$digest-(?:[0-9a-f]{16}|[0-9a-f]{32})$"
+    )
+    if (-not (Paths-Equal $ReservationRoot $paths.slotRoot) -and -not $hidden) {
+        Fail 'Reservation root must be the exact slot or its attributable hidden sibling.'
+    }
+    if ((Canonical-Path $ReservationRoot) -cne $ReservationRoot) {
+        Fail 'Reservation root must retain its exact canonical spelling.'
+    }
+    [void](Get-LifecyclePathEvidence $ReservationRoot)
+    return $parent
+}
+
+function Invoke-SlotRelease([string]$ResolvedDurableHome) {
+    if (-not $Context -or -not $ExpectedMarketplaceId -or -not $ExpectedPluginId -or
+        -not $RuntimeVersion -or -not $ReservationRoot -or
+        $null -eq $ExpectedNamespaceGeneration -or $null -eq $ExpectedInstallGeneration -or
+        $null -eq $ExpectedReservationGeneration -or $ExpectedReservationSha256 -cnotmatch '^[0-9a-f]{64}$') {
+        Fail 'slot-release requires explicit context, identities, reservation root/digest and all generations.'
+    }
+    Assert-MarketplaceId $ExpectedMarketplaceId
+    Assert-PluginId $ExpectedPluginId
+    Assert-RuntimeVersion $RuntimeVersion
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+    }
+    $startingLockCount = $script:HeldLocks.Count
+    try {
+        Acquire-Lock (Join-Path $ResolvedDurableHome "marketplaces/.locks/$ExpectedMarketplaceId.genesis") `
+            'genesis' $ExpectedMarketplaceId '' $script:RuntimeSlotLockTimeoutSeconds
+        Acquire-Lock (Join-Path $validated.cellRoot ".locks/$ExpectedPluginId.install.lock") `
+            'install' $ExpectedMarketplaceId $ExpectedPluginId $script:RuntimeSlotLockTimeoutSeconds
+        $validated = Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+        }
+        $markerRoot = Resolve-ReservationTarget $validated
+        $result = [ordered]@{
+            action = 'slot-release'; status = 'ready'; reason = 'runtime-slot-reservation-absent'
+            released = $false; slotRoot = $ReservationRoot; runtimeVersion = $RuntimeVersion
+            reservationGeneration = $ExpectedReservationGeneration
+            namespaceGeneration = $validated.namespaceGeneration; installGeneration = $validated.generation
+            activated = $false; operative = $false
+        }
+        if ($validated.namespaceGeneration -ne $ExpectedNamespaceGeneration -or
+            $validated.generation -ne $ExpectedInstallGeneration) {
+            $result.status = 'revalidation-required'; $result.reason = 'generation-changed'
+            return $result
+        }
+        $currentPath = Join-Path $markerRoot 'current-version'
+        $lkgPath = Join-Path $markerRoot 'last-known-good'
+        $current = Read-RuntimeMarker $currentPath 'Current version marker'
+        $lkg = Read-RuntimeMarker $lkgPath 'Last-known-good marker'
+        if ($current -ceq $RuntimeVersion -or $lkg -ceq $RuntimeVersion) {
+            Fail 'A current or last-known-good reservation cannot be released.'
+        }
+        if (-not (Test-Path -LiteralPath $ReservationRoot)) { return $result }
+        $receipt = Join-Path $ReservationRoot '.runtime-slot-reservation.json'
+        $evidencePaths = @($validated.namespaceReceipt, $validated.installReceipt, $currentPath, $lkgPath, $ReservationRoot, $receipt)
+        $evidence = @($evidencePaths | ForEach-Object { Get-LifecyclePathEvidence $_ })
+        $directoryIdentity = (Get-SnapshotDirectoryState $ReservationRoot $ReservationRoot).identity
+        if ((Get-FileSha256 $receipt -RequireSameIdentity) -cne $ExpectedReservationSha256) {
+            Fail 'Runtime slot reservation receipt changed.'
+        }
+        $record = Read-Json $receipt
+        $snapshotIdValue = Get-StringProperty (Get-PropertyValue $record 'snapshot') 'id'
+        $snapshot = Validate-SnapshotProvenance $Context $ResolvedDurableHome `
+            $ExpectedMarketplaceId $ExpectedPluginId $snapshotIdValue $false '' ''
+        [void](Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion `
+            $ReservationRoot $ExpectedReservationGeneration)
+        [void](Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+        })
+        [void](Resolve-ReservationTarget $validated)
+        $entries = @(Get-ChildItem -LiteralPath $ReservationRoot -Force)
+        if ($entries.Count -ne 1 -or $entries[0].Name -cne '.runtime-slot-reservation.json') {
+            Fail 'Release requires exactly one matching reservation receipt and no other entries.'
+        }
+        Assert-AllLocksOwned
+        for ($i = 0; $i -lt $evidencePaths.Count; $i++) {
+            if ((Get-LifecyclePathEvidence $evidencePaths[$i]) -cne $evidence[$i]) {
+                Fail 'Runtime slot release evidence changed or was replaced.'
+            }
+        }
+        if ((Read-RuntimeMarker $currentPath 'Current version marker') -cne $current -or
+            (Read-RuntimeMarker $lkgPath 'Last-known-good marker') -cne $lkg) {
+            Fail 'Runtime selection changed during release.'
+        }
+        [IO.File]::Delete($receipt)
+        [void](Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+        })
+        [void](Resolve-ReservationTarget $validated)
+        Assert-AllLocksOwned
+        for ($i = 0; $i -lt ($evidencePaths.Count - 2); $i++) {
+            if ((Get-LifecyclePathEvidence $evidencePaths[$i]) -cne $evidence[$i]) {
+                Fail 'Runtime slot release evidence changed before directory removal.'
+            }
+        }
+        if ((Get-SnapshotDirectoryState $ReservationRoot $ReservationRoot).identity -cne $directoryIdentity) {
+            Fail 'Runtime reservation directory was replaced.'
+        }
+        [IO.Directory]::Delete($ReservationRoot, $false)
+        $result.released = $true; $result.reason = 'runtime-slot-reservation-released'
+        return $result
+    } finally {
+        while ($script:HeldLocks.Count -gt $startingLockCount) { Release-Lock }
     }
 }
 
@@ -5101,6 +5254,10 @@ function Invoke-SlotProvision([string]$ResolvedDurableHome) {
             $RuntimeVersion `
             ([string]$paths.slotRoot) `
             (Get-UtcTimestamp)
+        $reservation = New-RuntimeSlotOwnership $validated $snapshot $RuntimeVersion ([string]$paths.slotRoot) ([string]$ownership.createdAt)
+        $reservation.schema = 'copilot-extensions.runtime-slot-reservation'
+        $reservation.generation = [long]([BitConverter]::ToUInt64([guid]::NewGuid().ToByteArray(), 0) -band [long]::MaxValue)
+        Write-AtomicJson (Join-Path $temporarySlot '.runtime-slot-reservation.json') $reservation
         Write-AtomicJson $temporaryOwnership $ownership
         Assert-AllLocksOwned
         try {
@@ -5139,6 +5296,8 @@ function Invoke-SlotProvision([string]$ResolvedDurableHome) {
         if ($moveResult -eq 0) {
             Fail 'Runtime slot appeared during publication; refusing replacement.'
         }
+        Assert-AllLocksOwned
+        [IO.File]::Delete((Join-Path $paths.slotRoot '.runtime-slot-reservation.json'))
         $temporarySlot = ''
         $temporaryOwnership = ''
         $result = Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion
@@ -5154,6 +5313,12 @@ function Invoke-SlotProvision([string]$ResolvedDurableHome) {
     finally {
         $cleanupError = $null
         try {
+            if ($temporarySlot) {
+                $reservationPath = Join-Path $temporarySlot '.runtime-slot-reservation.json'
+                if (Test-Path -LiteralPath $reservationPath -PathType Leaf) {
+                    [IO.File]::Delete($reservationPath)
+                }
+            }
             if ($temporaryOwnership -and
                 (Test-Path -LiteralPath $temporaryOwnership -PathType Leaf)) {
                 [IO.File]::Delete($temporaryOwnership)
@@ -6162,6 +6327,7 @@ try {
         'slot-complete',
         'slot-completion-validate',
         'slot-cutover',
+        'slot-release',
         'status',
         'probe-legacy'
     ) 'Action'
@@ -6225,7 +6391,8 @@ try {
         'stamp',
         'activation-cas',
         'snapshot-stamp',
-        'slot-cutover'
+        'slot-cutover',
+        'slot-release'
     )) {
         $ExpectedNamespaceGeneration = ConvertTo-ExpectedGeneration `
             $ExpectedNamespaceGeneration `
@@ -6233,6 +6400,10 @@ try {
         $ExpectedInstallGeneration = ConvertTo-ExpectedGeneration `
             $ExpectedInstallGeneration `
             'install.json'
+    }
+    if ($Action -ceq 'slot-release') {
+        if (-not $DurableHome) { Fail 'slot-release requires -DurableHome.' }
+        $ExpectedReservationGeneration = ConvertTo-ExpectedGeneration $ExpectedReservationGeneration 'reservation'
     }
     if ($Action -ceq 'activation-cas') {
         $ExpectedActivationGeneration = ConvertTo-ExpectedGeneration `
@@ -6285,6 +6456,9 @@ try {
     }
     elseif ($Action -eq 'slot-provision') {
         $result = Invoke-SlotProvision $resolvedDurableHome
+    }
+    elseif ($Action -eq 'slot-release') {
+        $result = Invoke-SlotRelease $resolvedDurableHome
     }
     elseif ($Action -eq 'slot-validate') {
         $result = Invoke-SlotValidate $resolvedDurableHome

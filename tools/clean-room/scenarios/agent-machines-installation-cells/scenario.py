@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -16,8 +18,13 @@ ROOT = Path(
     os.environ.get("CR_PARTNER_PATH") or os.environ["CR_HARNESS_MOUNT"]
 ).resolve()
 RESULTS = Path(os.environ["CR_REPORT"]).resolve().parent
-WORK = RESULTS / "agent-machines-installation-cells-state"
-STATE = WORK / "state.json"
+# Build and hash on the disposable machine's filesystem, not a host bind mount.
+# Namespace by RESULTS so concurrent runs (distinct -NameSuffix invocations
+# sharing one container, or overlapping docker exec into the same container)
+# never delete or corrupt each other's build fixtures under a shared tmp path.
+_WORK_TAG = hashlib.sha256(str(RESULTS).encode("utf-8")).hexdigest()[:16]
+WORK = Path(tempfile.gettempdir()) / f"agent-machines-installation-cells-{_WORK_TAG}"
+STATE = RESULTS / "agent-machines-installation-cells-state.json"
 CONTEXT_TOOL = ROOT / "libs" / "installation-context" / "installation_context.py"
 CONTEXT_TOOL_PS = ROOT / "libs" / "installation-context" / "installation-context.ps1"
 GENERATOR = ROOT / "libs" / "payload-invocation" / "generate.py"
@@ -101,6 +108,14 @@ def save_state(value: dict[str, object]) -> None:
 
 def plugin_version(payload: Path) -> str:
     return str(json.loads((payload / "plugin.json").read_text(encoding="utf-8"))["version"])
+
+
+def reports_version(output: str, expected: str) -> bool:
+    # Installed package metadata normalizes the manifest's PEP 440 dev spelling.
+    return any(
+        line.strip().replace("-dev", ".dev") == f"agent-machines {expected}".replace("-dev", ".dev")
+        for line in output.splitlines()
+    )
 
 
 def next_dev_version(version: str) -> str:
@@ -537,7 +552,7 @@ def stage_2() -> None:
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(lambda _: invocation(payload, install), range(2)))
         for result in results:
-            if result.returncode != 0 or plugin_version(payload) not in result.stdout:
+            if result.returncode != 0 or not reports_version(result.stdout, plugin_version(payload)):
                 raise RuntimeError(
                     f"cell {name} concurrent invocation failed ({result.returncode})\n"
                     f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -625,8 +640,14 @@ def stage_3() -> None:
         int(stamped["generation"]),
         int(cell_a["activation_generation"]),
     )
+    reconciled = cell_provision(payload_v2, install, str(cell_a["marketplace_id"]))
+    if reconciled.returncode != 0:
+        raise RuntimeError(
+            f"explicit cell update failed ({reconciled.returncode})\n"
+            f"stdout:\n{reconciled.stdout}\nstderr:\n{reconciled.stderr}"
+        )
     result = invocation(payload_v2, install)
-    if result.returncode != 0 or new_version not in result.stdout:
+    if result.returncode != 0 or not reports_version(result.stdout, new_version):
         raise RuntimeError(
             f"updated cell invocation failed ({result.returncode})\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -746,7 +767,7 @@ def stage_4() -> None:
     ).resolve() != payload_v1:
         raise RuntimeError("rollback manifest lost the selecting payload")
     invoked = invocation(Path(str(cell_a["payload_v2"])), install)
-    if invoked.returncode != 0 or str(cell_a["version_v1"]) not in invoked.stdout:
+    if invoked.returncode != 0 or not reports_version(invoked.stdout, str(cell_a["version_v1"])):
         raise RuntimeError("payload invocation did not follow the rolled-back slot")
     bootstrapped = bootstrap(Path(str(cell_a["payload_v2"])), install)
     if bootstrapped.returncode != 0:
@@ -878,12 +899,211 @@ def stage_5() -> None:
     print("blocked-states=pass")
 
 
+def lifecycle_command(cell, action, *, absent=False):
+    payload = Path(str(cell.get("payload_v2", cell["payload_v1"])))
+    values = {
+        "context": cell["install"], "durable-home": str(DURABLE),
+        "expected-marketplace-id": cell["marketplace_id"],
+        "expected-payload-root": cell["payload_v1"], "expected-payload-version": cell["version_v1"],
+        "snapshot-id": cell["version_v1"], "runtime-version": cell["version_v1"],
+        "expected-namespace-generation": str(cell["namespace_generation"]),
+        "expected-install-generation": str(cell["install_generation"]),
+    }
+    if os.name == "nt":
+        command = ["powershell.exe", "-NoProfile", "-File", str(payload / "scripts" / "init.ps1"), "-Action", action]
+        flag = lambda name: "-" + "".join(part.capitalize() for part in name.split("-"))
+    else:
+        command = ["bash", str(payload / "scripts" / "init.sh"), action]
+        flag = lambda name: "--" + name
+    for name, value in values.items():
+        command += [flag(name), str(value)]
+    for marker in ("current", "last-known-good"):
+        command += ([flag(f"expect-{marker}-absent")] if absent else
+                    [flag(f"expected-{marker}-version"), str(cell["version_v1"])])
+    return command
+
+
+def tree_digests(root):
+    return {p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in root.rglob("*") if p.is_file() and p.name != ".payload-provision.lock"}
+
+
+def stage_6():
+    cell = read_state()["cells"]["a"]
+    root = Path(str(cell["plugin_root"]))
+    version = "99.0.0-reservation"
+    # Fail actual Bash ownership publication after its first reservation entry.
+    # Normal unwinding releases locks; stale-lock repair is a separate contract.
+    if os.name == "nt":
+        code = """
+import importlib.util, pathlib, sys
+spec=importlib.util.spec_from_file_location('ic',sys.argv[1])
+ic=importlib.util.module_from_spec(spec); sys.modules['ic']=ic; spec.loader.exec_module(ic)
+original_write=ic._write_private_json
+original_unlink=pathlib.Path.unlink
+def interrupted(path,value):
+    original_write(path,value)
+    if path.name==ic.RUNTIME_SLOT_RESERVATION_FILE: raise RuntimeError('publication interrupted')
+def preserve_reservation(path,*args,**kwargs):
+    if path.name==ic.RUNTIME_SLOT_RESERVATION_FILE: raise PermissionError('cleanup interrupted')
+    return original_unlink(path,*args,**kwargs)
+ic._write_private_json=interrupted
+pathlib.Path.unlink=preserve_reservation
+try:
+    ic.provision_runtime_slot(context=sys.argv[2],durable_home=sys.argv[3],
+        expected_marketplace_id=sys.argv[4],expected_plugin_id='agent-machines',
+        snapshot_id=sys.argv[5],runtime_version=sys.argv[6],environment={})
+except RuntimeError:
+    sys.exit(73)
+"""
+        produced = run([sys.executable, "-c", code, str(CONTEXT_TOOL), str(cell["install"]),
+                        str(DURABLE), str(cell["marketplace_id"]), str(cell["version_v2"]), version], check=False)
+        receipts = list(root.glob(".runtime-slot-*/.runtime-slot-reservation.json"))
+    else:
+        fault_bin = WORK / "reservation-fault"
+        fault_bin.mkdir()
+        link = shutil.which("ln")
+        if link is None:
+            raise RuntimeError("reservation fixture requires the system ln command")
+        wrapper = fault_bin / "ln"
+        wrapper.write_text(
+            "#!/usr/bin/env bash\n"
+            'case "${@: -1}" in */.runtime-slot-ownership.json) exit 73 ;; esac\n'
+            f'exec "{link}" "$@"\n', encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        environment = os.environ.copy()
+        environment["PATH"] = str(fault_bin) + os.pathsep + environment["PATH"]
+        produced = run([
+            "bash", str(CONTEXT_TOOL.with_name("installation-context.sh")), "slot-provision",
+            "--context", str(cell["install"]), "--durable-home", str(DURABLE),
+            "--expected-marketplace-id", str(cell["marketplace_id"]), "--expected-plugin-id", "agent-machines",
+            "--snapshot-id", str(cell["version_v2"]), "--runtime-version", version,
+        ], env=environment, check=False)
+        receipts = list((root / "versions" / version).glob(".runtime-slot-reservation.json"))
+    if produced.returncode == 0:
+        raise RuntimeError("reservation interruption unexpectedly published ownership")
+    if len(receipts) != 1:
+        raise RuntimeError(f"interrupted producer did not preserve exactly one reservation receipt: {produced.stderr}")
+    receipt = receipts[0]
+    record = json.loads(receipt.read_bytes())
+    arguments = [
+        "slot-release", "--context", str(cell["install"]), "--durable-home", str(DURABLE),
+        "--expected-marketplace-id", str(cell["marketplace_id"]), "--expected-plugin-id", "agent-machines",
+        "--runtime-version", version, "--reservation-root", str(receipt.parent),
+        "--expected-reservation-generation", str(record["generation"]),
+        "--expected-reservation-sha256", hashlib.sha256(receipt.read_bytes()).hexdigest(),
+        "--expected-namespace-generation", str(cell["namespace_generation"]),
+        "--expected-install-generation", str(cell["install_generation"]),
+    ]
+    if context(*arguments)["released"] is not True or receipt.parent.exists():
+        raise RuntimeError("receipt-only reservation was not released")
+    if context(*arguments)["released"] is not False:
+        raise RuntimeError("reservation release replay was not idempotent")
+    protected = root / "versions" / version
+    protected.mkdir()
+    arguments[arguments.index("--reservation-root") + 1] = str(protected)
+    refused = run([sys.executable, str(CONTEXT_TOOL), *arguments], check=False)
+    if refused.returncode == 0 or not protected.is_dir():
+        raise RuntimeError("legacy markerless reservation was not protected")
+    protected.rmdir()
+    print("receipt-only-release-and-markerless-protection=pass")
+
+
+def stage_7():
+    cells = read_state()["cells"]
+    cell = cells["a"]
+    root = Path(str(cell["plugin_root"]))
+    peer = Path(str(cells["b"]["plugin_root"]))
+    peer_before = tree_digests(peer)
+    immutable_before = {p: p.read_bytes() for p in root.rglob("*.json") if p.name != "deploy-manifest.json"}
+    for name in ("deploy-manifest.json", "current-version", "last-known-good"):
+        (root / name).unlink()
+    result = json.loads(run(lifecycle_command(cell, "cell-repair", absent=True)).stdout)
+    if result["reason"] != "cell-repaired":
+        raise RuntimeError(f"derived repair failed: {result}")
+    again = json.loads(run(lifecycle_command(cell, "cell-repair")).stdout)
+    if again["reason"] != "cell-repair-healthy":
+        raise RuntimeError("repair replay was not already healthy")
+    if any(path.read_bytes() != value for path, value in immutable_before.items()):
+        raise RuntimeError("repair rewrote immutable evidence")
+    completion = root / "versions" / str(cell["version_v1"]) / ".runtime-slot-completion.json"
+    saved = completion.with_suffix(".saved")
+    completion.rename(saved)
+    try:
+        refused = run(lifecycle_command(cell, "cell-repair"), check=False)
+        if refused.returncode == 0 or completion.exists():
+            raise RuntimeError("repair recreated missing immutable completion")
+    finally:
+        saved.rename(completion)
+    if tree_digests(peer) != peer_before:
+        raise RuntimeError("repair changed the peer cell")
+    if invocation(Path(str(cell["payload_v2"])), Path(str(cell["install"]))).returncode != 0:
+        raise RuntimeError("repaired historical selection does not launch")
+    bootstrapped = bootstrap(Path(str(cell["payload_v2"])), Path(str(cell["install"])))
+    if bootstrapped.returncode != 0 or "reconciling in background" in bootstrapped.stdout + bootstrapped.stderr:
+        raise RuntimeError("repaired rollback lost source/runtime separation")
+    print("derived-repair-and-immutable-refusal=pass")
+
+
+def deactivate_cell(cell):
+    context(
+        "activation-cas", "--context", str(cell["install"]), "--durable-home", str(DURABLE),
+        "--expected-marketplace-id", str(cell["marketplace_id"]), "--expected-plugin-id", "agent-machines",
+        "--expected-namespace-generation", str(cell["namespace_generation"]),
+        "--expected-install-generation", str(cell["install_generation"]),
+        "--expected-activation-generation", str(cell["activation_generation"]),
+        "--activation-mode", "legacy", "--activation-state", "deactivated",
+        "--legacy-disposition", "absent", "--legacy-root", str(LEGACY),
+        "--legacy-probe-json", '{"declared":true,"result":"absent","checkedAt":"2026-01-01T00:00:00Z"}',
+    )
+
+
+def stage_8():
+    cells = read_state()["cells"]
+    peer = Path(str(cells["b"]["plugin_root"]))
+    peer_before = tree_digests(peer)
+    for name in ("a", "b"):
+        cell = cells[name]
+        root = Path(str(cell["plugin_root"]))
+        write_json(root / "state" / "retained.json", {"retained": name})
+        for derived in ("launchers", "run", "logs", "cache"):
+            write_json(root / derived / "derived.json", {"derived": True})
+        refused = run(lifecycle_command(cell, "cell-uninstall"), check=False)
+        if refused.returncode == 0:
+            raise RuntimeError("uninstall accepted a still-active installation")
+        deactivate_cell(cell)
+        receipt_bytes = (root / "install.json").read_bytes()
+        result = json.loads(run(lifecycle_command(cell, "cell-uninstall")).stdout)
+        if result["reason"] != "cell-uninstalled" or result["removed"][:2] != ["current-version", "last-known-good"]:
+            raise RuntimeError(f"uninstall did not clear selection before removal: {result}")
+        if list((root / "versions").iterdir()) or list((root / "snapshots").iterdir()):
+            raise RuntimeError("uninstall retained an owned historical slot or snapshot")
+        if (root / "install.json").read_bytes() != receipt_bytes or not (root / "state" / "retained.json").is_file():
+            raise RuntimeError("uninstall lost durable state or attribution")
+        if any((root / p).exists() for p in ("deploy-manifest.json", "launchers", "run", "logs", "cache")):
+            raise RuntimeError("uninstall retained derived artifacts")
+        replay = json.loads(run(lifecycle_command(cell, "cell-uninstall", absent=True)).stdout)
+        if replay["status"] != "preserved":
+            raise RuntimeError("uninstall replay was not preserved")
+        if name == "a":
+            if tree_digests(peer) != peer_before:
+                raise RuntimeError("uninstall changed the peer cell")
+            if invocation(Path(str(cells["b"]["payload_v1"])), Path(str(cells["b"]["install"]))).returncode != 0:
+                raise RuntimeError("peer cell stopped working after uninstall")
+    assert_no_legacy_runtime()
+    print("all-owned-history-uninstall-preservation-isolation-replay=pass")
+
+
 STAGES = {
     1: stage_1,
     2: stage_2,
     3: stage_3,
     4: stage_4,
     5: stage_5,
+    6: stage_6,
+    7: stage_7,
+    8: stage_8,
 }
 
 

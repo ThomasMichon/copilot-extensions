@@ -56,6 +56,14 @@ robust across `copilot` versions and records the CLI surface + full logs it saw.
 - A `gh` login (or a `COPILOT_GITHUB_TOKEN`/PAT) for a **Copilot-entitled**
   account — injected automatically so no in-container login is needed.
 
+Tier-P scenarios whose manifest explicitly declares `auth.copilot: "none"`
+use the unauthenticated base image without looking up or injecting host
+credentials. The Agent Machines installation-cell scenario keeps build and
+hashing fixtures on the disposable machine's native temporary filesystem;
+reports and the cross-stage state record remain in the runner-owned results
+directory. It covers release, derived-only repair, and state-preserving
+uninstall in addition to install, explicit update, rollback, and isolation.
+
 > **Setting this up on a new machine?** Follow **[`SETUP.md`](SETUP.md)** — a
 > step-by-step to install Docker (per OS), verify it, build the image, wire auth,
 > and smoke-test the rig end-to-end. The notes below are the quick reference;

@@ -22,13 +22,16 @@ if [[ ! -f "$driver" ]]; then
 fi
 pass "mounted source and scenario driver are present"
 
-for stage in 1 2 3 4 5; do
+for stage in 1 2 3 4 5 6 7 8; do
     case "$stage" in
         1) title="operative eligibility and full cell-provision locking hold" ;;
         2) title="two active Agent Machines cells install and run independently" ;;
         3) title="one cell updates without changing its peer" ;;
         4) title="historical owned slot rolls back without changing its peer" ;;
         5) title="blocked governance states fail closed without legacy fallback" ;;
+        6) title="interrupted receipt-only reservations release without claiming markerless slots" ;;
+        7) title="derived-only repair preserves immutable evidence and peer selection" ;;
+        8) title="uninstall removes all owned history while preserving state and the peer cell" ;;
     esac
     phase "$stage" "$title"
     if capture "stage-$stage" -- python3 "$driver" "$stage"; then

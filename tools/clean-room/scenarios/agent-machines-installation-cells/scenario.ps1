@@ -43,8 +43,11 @@ $titles = @{
     3 = 'one cell updates without changing its peer'
     4 = 'historical owned slot rolls back without changing its peer'
     5 = 'blocked governance states fail closed without legacy fallback'
+    6 = 'interrupted receipt-only reservations release without claiming markerless slots'
+    7 = 'derived-only repair preserves immutable evidence and peer selection'
+    8 = 'uninstall removes all owned history while preserving state and the peer cell'
 }
-foreach ($stage in 1..5) {
+foreach ($stage in 1..8) {
     phase $stage $titles[$stage]
     $rc = capture "stage-$stage" { & $python.Source $driver $stage }
     if ($rc -eq 0) {

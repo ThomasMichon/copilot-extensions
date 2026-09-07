@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -28,11 +28,45 @@ param(
     [string]$ExpectedInstallGeneration,
     [string]$ExpectedCurrentVersion,
     [switch]$ExpectCurrentAbsent,
+    [string]$ExpectedLastKnownGoodVersion,
+    [switch]$ExpectLastKnownGoodAbsent,
+    [string]$ExpectedPayloadRoot,
+    [string]$ExpectedPayloadVersion,
+    [string]$SnapshotId,
+    [string]$RuntimeVersion,
     [switch]$Force
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($Action -in @('cell-repair', 'cell-uninstall')) {
+    $lifecycleArgs = @($Action)
+    $names = @{
+        Context = 'context'; DurableHome = 'durable-home'; ExpectedMarketplaceId = 'expected-marketplace-id'
+        ExpectedNamespaceGeneration = 'expected-namespace-generation'; ExpectedInstallGeneration = 'expected-install-generation'
+        ExpectedCurrentVersion = 'expected-current-version'; ExpectCurrentAbsent = 'expect-current-absent'
+        ExpectedLastKnownGoodVersion = 'expected-last-known-good-version'; ExpectLastKnownGoodAbsent = 'expect-last-known-good-absent'
+        ExpectedPayloadRoot = 'expected-payload-root'; ExpectedPayloadVersion = 'expected-payload-version'
+        SnapshotId = 'snapshot-id'; RuntimeVersion = 'runtime-version'
+    }
+    foreach ($key in $PSBoundParameters.Keys) {
+        if ($key -eq 'Action') { continue }
+        if (-not $names.ContainsKey($key)) { throw "Unsupported cell lifecycle parameter: $key" }
+        $value = $PSBoundParameters[$key]
+        if ($value -is [Management.Automation.SwitchParameter]) {
+            if ($value.IsPresent) { $lifecycleArgs += "--$($names[$key])" }
+        } else {
+            $lifecycleArgs += @("--$($names[$key])", [string]$value)
+        }
+    }
+    $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $python) { throw 'Cell lifecycle management requires an existing Python 3.10+ interpreter' }
+    Set-Location -LiteralPath $env:USERPROFILE
+    [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+    & $python.Source -I (Join-Path $PSScriptRoot 'cell_lifecycle.py') @lifecycleArgs
+    exit $LASTEXITCODE
+}
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {

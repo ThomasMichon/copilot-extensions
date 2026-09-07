@@ -13,11 +13,9 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 CONTEXT_TOOL = REPO / "libs" / "installation-context" / "installation_context.py"
 PLUGINS = ("agent-machines", "agent-index")
-BEHAVIOR_PLUGINS = (
-    PLUGINS
-    if os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
-    else ("agent-index",)
-)
+# Agent Index's compatibility hooks are now unconditional no-ops; exercise
+# context refusal at the remaining operative bootstrap boundary instead.
+BEHAVIOR_PLUGINS = ("agent-machines",)
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 
@@ -502,6 +500,29 @@ def test_selected_missing_manifest_does_not_stamp_legacy_runtime(
         assert "selected context has no deploy manifest" in combined
         assert "namespaced install remains non-operative" in combined
     assert not (home / f".{plugin}").exists()
+
+
+@pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
+@pytest.mark.parametrize("receipt", ["missing", "malformed", "foreign"])
+def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(tmp_path, runner, receipt):
+    home = tmp_path / "home"
+    home.mkdir()
+    context = home / "install.json"
+    if receipt != "missing":
+        context.write_text("{" if receipt == "malformed" else '{"pluginId":"foreign"}', encoding="utf-8")
+    def evidence():
+        # PowerShell itself writes startup profiling data in the redirected
+        # profile; that is not plugin installation state.
+        return {
+            path: path.read_bytes() for path in home.rglob("*")
+            if path.is_file() and path.relative_to(home).parts[:4] != ("AppData", "Local", "Microsoft", "PowerShell")
+        }
+    before = evidence()
+    result = runner("agent-index", _environment(home, context))
+    assert result.returncode == 0
+    assert result.stdout == result.stderr == ""
+    assert evidence() == before
+    assert not (home / ".agent-index").exists()
 
 
 @pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)

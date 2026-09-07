@@ -147,9 +147,24 @@ start_container() {
     # Auth: prefer a host-grabbed Copilot token (COPILOT_GITHUB_TOKEN) -- no
     # interactive step, runs against the plain unauthed image. Fall back to the
     # committed device-code :authed image only when no token is available.
-    local token img; token="$(resolve_token)"
+    local token="" img no_scenario_auth=false
+    if [ -f "$SCENARIO_DIR/manifest.json" ]; then
+        # A malformed manifest must fail closed to "auth required", never
+        # abort the rig: 2>/dev/null suppresses the traceback and `|| ...`
+        # keeps `set -e` from treating the parse failure as fatal.
+        no_scenario_auth="$("$(_py)" -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    manifest = json.load(stream)
+print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("copilot") == "none" else "false")
+' "$SCENARIO_DIR/manifest.json" 2>/dev/null)" || no_scenario_auth=false
+    fi
+    if [ "$no_scenario_auth" != true ]; then token="$(resolve_token)"; fi
     local token_args=()
-    if [ -n "$token" ]; then
+    if [ "$no_scenario_auth" = true ]; then
+        img_exists "$BASE_TAG" || do_build
+        img="$BASE_TAG"
+    elif [ -n "$token" ]; then
         img_exists "$BASE_TAG" || do_build
         img="$BASE_TAG"
         echo "auth: injecting COPILOT_GITHUB_TOKEN from host gh (${TOKEN_ACCOUNT:-active gh account}) -- no device-code needed"

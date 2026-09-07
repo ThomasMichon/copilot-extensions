@@ -42,6 +42,8 @@ SNAPSHOT_PROVENANCE_SCHEMA = "copilot-extensions.snapshot-provenance"
 SNAPSHOT_PROVENANCE_FILE = "snapshot-provenance.json"
 RUNTIME_SLOT_OWNERSHIP_SCHEMA = "copilot-extensions.runtime-slot-ownership"
 RUNTIME_SLOT_OWNERSHIP_FILE = ".runtime-slot-ownership.json"
+RUNTIME_SLOT_RESERVATION_SCHEMA = "copilot-extensions.runtime-slot-reservation"
+RUNTIME_SLOT_RESERVATION_FILE = ".runtime-slot-reservation.json"
 WINDOWS_ERROR_ACCESS_DENIED = 5
 RUNTIME_SLOT_COMPLETION_SCHEMA = "copilot.extensions/runtime-slot-completion/v1"
 RUNTIME_SLOT_COMPLETION_FILE = ".runtime-slot-completion.json"
@@ -349,6 +351,7 @@ def _read_regular_file(
     *,
     label: str,
     require_stable_identity: bool = False,
+    consume_chunk: Callable[[bytes], Any] | None = None,
 ) -> tuple[bytes, os.stat_result]:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
@@ -384,7 +387,10 @@ def _read_regular_file(
             chunk = os.read(descriptor, 1024 * 1024)
             if not chunk:
                 break
-            chunks.append(chunk)
+            if consume_chunk is None:
+                chunks.append(chunk)
+            else:
+                consume_chunk(chunk)
         final_stat = os.fstat(descriptor)
         if require_stable_identity and (
             _stat_identity(opened_stat) != _stat_identity(final_stat)
@@ -406,10 +412,15 @@ def _read_regular_file(
         _fail(f"{label} must be an ordinary file.")
     if require_stable_identity and (
         _stat_identity(current_stat) != _stat_identity(final_stat)
-        or _stat_metadata(current_stat) != _stat_metadata(final_stat)
+        or stat.S_IFMT(current_stat.st_mode) != stat.S_IFMT(final_stat.st_mode)
+        or (current_stat.st_size, current_stat.st_mtime_ns) != (final_stat.st_size, final_stat.st_mtime_ns)
+        # Some Windows Python versions expose creation time via lstat but
+        # change time via fstat; executable permission synthesis also differs.
+        # Compare each API's complete metadata only with that same API.
+        or _stat_metadata(current_stat) != _stat_metadata(named_stat)
     ):
         _fail(f"{label} changed while it was being read.")
-    return b"".join(chunks), final_stat
+    return b"".join(chunks), current_stat
 
 
 def _read_regular_file_bytes(
@@ -858,7 +869,8 @@ def _snapshot_content_sha256(
                                 f"or reparse points: '{relative_text}'."
                             )
                         try:
-                            entry_stat = entry.stat(follow_symlinks=False)
+                            # Windows DirEntry.stat may report zero device/inode.
+                            entry_stat = os.lstat(path)
                         except OSError as error:
                             _fail(
                                 f"Cannot inspect snapshot content '{path}': {error}"
@@ -962,7 +974,7 @@ def _snapshot_content_sha256(
                                 "Snapshot content may not contain symbolic links "
                                 f"or reparse points: '{relative_text}'."
                             )
-                        entry_stat = entry.stat(follow_symlinks=False)
+                        entry_stat = os.lstat(entry.path)
                         final_manifest.append(
                             (
                                 relative_bytes(relative_text),
@@ -3031,12 +3043,19 @@ def _validated_runtime_slot_ownership(
     validated: Mapping[str, Any],
     snapshot: Mapping[str, Any],
     runtime_version: str,
+    *,
+    reservation_root: Path | None = None,
+    reservation_generation: int | None = None,
 ) -> dict[str, Any]:
     _, slot_root, ownership_path = _runtime_slot_paths(
         validated,
         runtime_version,
-        require_existing=True,
+        require_existing=reservation_root is None,
     )
+    if reservation_root is not None:
+        ownership_path = reservation_root / RUNTIME_SLOT_RESERVATION_FILE
+    elif os.path.lexists(slot_root / RUNTIME_SLOT_RESERVATION_FILE):
+        _fail("Runtime slot retains unfinished reservation evidence.")
     if not ownership_path.exists():
         _fail("Runtime slot ownership must exist.")
     actual_ownership = canonical_path(ownership_path, must_exist=True)
@@ -3052,7 +3071,10 @@ def _validated_runtime_slot_ownership(
         _fail("Runtime slot ownership must be a JSON object.")
     ownership_version = _property(ownership, "version")
     if (
-        _string_property(ownership, "schema") != RUNTIME_SLOT_OWNERSHIP_SCHEMA
+        _string_property(ownership, "schema") != (
+            RUNTIME_SLOT_RESERVATION_SCHEMA
+            if reservation_root is not None else RUNTIME_SLOT_OWNERSHIP_SCHEMA
+        )
         or isinstance(ownership_version, bool)
         or not isinstance(ownership_version, int)
         or ownership_version != 1
@@ -3067,6 +3089,10 @@ def _validated_runtime_slot_ownership(
         slot_root,
         created_at=created_at,
     )
+    if reservation_root is not None:
+        _assert_nonnegative_generation(ownership.get("generation"), "reservation generation")
+        expected["schema"] = RUNTIME_SLOT_RESERVATION_SCHEMA
+        expected["generation"] = reservation_generation
     runtime = _property(ownership, "runtime")
     recorded_snapshot = _property(ownership, "snapshot")
     namespace_reference = _property(ownership, "namespaceReceipt")
@@ -3131,6 +3157,8 @@ def _validated_runtime_slot_ownership(
             "Runtime slot ownership does not match the validated snapshot "
             "and installation receipts."
         )
+    if reservation_root is not None:
+        return expected
     namespace = read_json(_string_property(validated, "namespaceReceipt"))
     if not isinstance(namespace, Mapping):
         _fail("namespace.json must be a JSON object.")
@@ -3333,6 +3361,7 @@ def provision_runtime_slot(
             f".runtime-slot-{slot_digest}-{secrets.token_hex(8)}"
         )
         temporary_ownership = temporary_slot / RUNTIME_SLOT_OWNERSHIP_FILE
+        temporary_reservation = temporary_slot / RUNTIME_SLOT_RESERVATION_FILE
         try:
             temporary_slot.mkdir(mode=0o700)
             ownership = _runtime_slot_ownership_value(
@@ -3344,10 +3373,19 @@ def provision_runtime_slot(
             )
             genesis_lock.assert_owned()
             install_lock.assert_owned()
+            reservation = {
+                **ownership,
+                "schema": RUNTIME_SLOT_RESERVATION_SCHEMA,
+                "generation": secrets.randbits(63),
+            }
+            _write_private_json(temporary_reservation, reservation)
             _write_private_json(temporary_ownership, ownership)
             genesis_lock.assert_owned()
             install_lock.assert_owned()
             _rename_directory_no_replace(temporary_slot, slot_root)
+            genesis_lock.assert_owned()
+            install_lock.assert_owned()
+            (slot_root / RUNTIME_SLOT_RESERVATION_FILE).unlink()
             if os.name != "nt":
                 for parent in (versions_root.parent, versions_root):
                     directory = os.open(parent, os.O_RDONLY)
@@ -3358,6 +3396,10 @@ def provision_runtime_slot(
         except BaseException:
             try:
                 temporary_ownership.unlink()
+            except OSError:
+                pass
+            try:
+                temporary_reservation.unlink()
             except OSError:
                 pass
             try:
@@ -3374,6 +3416,175 @@ def provision_runtime_slot(
         result["reason"] = "runtime-slot-ownership-published"
         result["slotChanged"] = True
         return result
+
+
+def _path_evidence(path: Path) -> tuple[Any, ...] | None:
+    """Capture no-follow identity and bytes for a lifecycle CAS."""
+    if not os.path.lexists(path):
+        return None
+    info = path.lstat()
+    if _is_link_or_junction(path) or not (
+        stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)
+    ):
+        _fail(f"Lifecycle target must be an ordinary file or directory: '{path}'.")
+    digest = None
+    if stat.S_ISREG(info.st_mode):
+        hasher = hashlib.sha256()
+        _, info = _read_regular_file(
+            path, label="Lifecycle evidence", require_stable_identity=True,
+            consume_chunk=hasher.update,
+        )
+        digest = hasher.hexdigest()
+    return (_stat_identity(info), _stat_metadata(info), digest)
+
+
+def _assert_nonnegative_generation(value: Any, label: str) -> None:
+    if type(value) is not int or not 0 <= value <= MAX_RECEIPT_GENERATION:
+        _fail(f"{label} must be an integer from 0 through {MAX_RECEIPT_GENERATION}.")
+
+
+def _reservation_target(
+    validated: Mapping[str, Any], runtime_version: str, reservation_root: str | os.PathLike[str]
+) -> tuple[Path, Path]:
+    versions, slot, _ = _runtime_slot_paths(validated, runtime_version, require_existing=False)
+    target = Path(reservation_root)
+    if not _path_is_fully_qualified(target) or _is_link_or_junction(target):
+        _fail("Reservation root must be absolute and may not be linked or reparsed.")
+    digest = hashlib.sha256(str(slot).encode("utf-8")).hexdigest()[:16]
+    hidden = (
+        paths_equal(target.parent, versions.parent)
+        and re.fullmatch(rf"\.runtime-slot-{digest}-(?:[0-9a-f]{{16}}|[0-9a-f]{{32}})", target.name)
+    )
+    if not paths_equal(target, slot) and not hidden:
+        _fail("Reservation root must be the exact slot or its attributable hidden sibling.")
+    if str(canonical_path(target)) != str(target):
+        _fail("Reservation root must retain its exact canonical spelling.")
+    return target, versions.parent
+
+
+@_validation_scope
+def release_runtime_slot(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    runtime_version: str,
+    reservation_root: str | os.PathLike[str],
+    expected_reservation_generation: int,
+    expected_reservation_sha256: str,
+    expected_namespace_generation: int,
+    expected_install_generation: int,
+    durable_home: str | os.PathLike[str],
+) -> dict[str, Any]:
+    """Release only an exact receipt-only reservation, never an owned runtime."""
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_runtime_version(runtime_version)
+    for name, generation in (
+        ("reservation", expected_reservation_generation),
+        ("namespace", expected_namespace_generation),
+        ("install", expected_install_generation),
+    ):
+        _assert_nonnegative_generation(generation, f"expected {name} generation")
+    if not LOWER_SHA256.fullmatch(expected_reservation_sha256):
+        _fail("Expected reservation SHA-256 must be lowercase 64-hex.")
+    if not _path_is_fully_qualified(context) or not _path_is_fully_qualified(durable_home):
+        _fail("Release requires explicit absolute context and durable home.")
+    durable = canonical_path(durable_home)
+
+    def validate() -> dict[str, Any]:
+        return validate_context_receipt(
+            context, durable, expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id, environment={},
+        )
+
+    validated = validate()
+    locks = (
+        _DirectoryLock(
+            durable / "marketplaces" / ".locks" / f"{expected_marketplace_id}.genesis",
+            kind="genesis", marketplace_id=expected_marketplace_id,
+            timeout_seconds=RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS,
+        ),
+        _DirectoryLock(
+            Path(validated["cellRoot"]) / ".locks" / f"{expected_plugin_id}.install.lock",
+            kind="install", marketplace_id=expected_marketplace_id,
+            plugin_id=expected_plugin_id, timeout_seconds=RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS,
+        ),
+    )
+    with locks[0], locks[1]:
+        validated = validate()
+        target, marker_root = _reservation_target(validated, runtime_version, reservation_root)
+        result = {
+            "action": "slot-release", "status": "ready", "reason": "runtime-slot-reservation-absent",
+            "released": False, "slotRoot": str(target), "runtimeVersion": runtime_version,
+            "reservationGeneration": expected_reservation_generation,
+            "namespaceGeneration": validated["namespaceGeneration"],
+            "installGeneration": validated["generation"], "activated": False, "operative": False,
+        }
+        if (validated["namespaceGeneration"], validated["generation"]) != (
+            expected_namespace_generation, expected_install_generation
+        ):
+            return {**result, "status": "revalidation-required", "reason": "generation-changed"}
+        markers = [marker_root / CURRENT_VERSION_FILE, marker_root / LAST_KNOWN_GOOD_FILE]
+        selected = [_read_runtime_marker(path, path.name) for path in markers]
+        if runtime_version in selected:
+            _fail("A current or last-known-good reservation cannot be released.")
+        if not os.path.lexists(target):
+            return result
+        receipt = target / RUNTIME_SLOT_RESERVATION_FILE
+        if not target.is_dir() or {p.name for p in target.iterdir()} != {receipt.name}:
+            _fail("Release requires exactly one matching reservation receipt and no other entries.")
+        evidence_paths = [
+            Path(validated["namespaceReceipt"]), Path(validated["installReceipt"]),
+            *markers, target, receipt,
+        ]
+        evidence = [_path_evidence(path) for path in evidence_paths]
+        record, digest = _read_regular_json_object(
+            receipt, label="Runtime slot reservation",
+            required_keys={
+                "schema", "version", "marketplaceId", "pluginId", "sourceFingerprint",
+                "runtime", "snapshot", "namespaceReceipt", "installReceipt", "createdAt", "generation",
+            }, require_stable_identity=True,
+        )
+        if digest != expected_reservation_sha256:
+            _fail("Runtime slot reservation receipt changed.")
+        snapshot_id = _string_property(_property(record, "snapshot"), "id")
+
+        def revalidate() -> None:
+            current = validate()
+            if current != validated:
+                _fail("Installation context changed during release.")
+            _reservation_target(current, runtime_version, reservation_root)
+            snapshot = _validate_snapshot_provenance(
+                context=context, expected_marketplace_id=expected_marketplace_id,
+                expected_plugin_id=expected_plugin_id, snapshot_id=snapshot_id,
+                durable_home=durable, environment={}, require_current_receipts=False,
+            )
+            _validated_runtime_slot_ownership(
+                current, snapshot, runtime_version, reservation_root=target,
+                reservation_generation=expected_reservation_generation,
+            )
+            for lock in locks:
+                lock.assert_owned()
+            if [_path_evidence(path) for path in evidence_paths] != evidence:
+                _fail("Runtime slot release evidence changed or was replaced.")
+            if {p.name for p in target.iterdir()} != {receipt.name}:
+                _fail("Runtime slot reservation contents changed.")
+            if [_read_runtime_marker(path, path.name) for path in markers] != selected:
+                _fail("Runtime selection changed during release.")
+
+        revalidate()
+        receipt.unlink()
+        # Non-recursive removal cannot consume any concurrently added content.
+        _reservation_target(validate(), runtime_version, reservation_root)
+        for lock in locks:
+            lock.assert_owned()
+        if [_path_evidence(path) for path in evidence_paths[:-2]] != evidence[:-2]:
+            _fail("Runtime slot release evidence changed before directory removal.")
+        if _is_link_or_junction(target) or _stat_identity(target.lstat()) != evidence[-2][0]:
+            _fail("Runtime reservation directory was replaced.")
+        target.rmdir()
+        return {**result, "released": True, "reason": "runtime-slot-reservation-released"}
 
 
 def _runtime_slot_completion_paths(
@@ -5791,6 +6002,13 @@ def _build_parser() -> argparse.ArgumentParser:
     slot_validate_parser.add_argument("--expected-payload-version")
     slot_validate_parser.add_argument("--durable-home")
 
+    release_parser = subparsers.add_parser("slot-release")
+    for name in ("context", "expected-marketplace-id", "expected-plugin-id",
+                 "runtime-version", "reservation-root", "expected-reservation-sha256", "durable-home"):
+        release_parser.add_argument(f"--{name}", required=True)
+    for name in ("expected-reservation-generation", "expected-namespace-generation", "expected-install-generation"):
+        release_parser.add_argument(f"--{name}", required=True, type=_parse_cli_generation)
+
     slot_complete_parser = subparsers.add_parser("slot-complete")
     slot_complete_parser.add_argument("--context", required=True)
     slot_complete_parser.add_argument("--expected-marketplace-id", required=True)
@@ -5973,6 +6191,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_payload_version=arguments.expected_payload_version,
                 durable_home=arguments.durable_home,
             )
+        elif arguments.action == "slot-release":
+            result = release_runtime_slot(**{
+                key: value for key, value in vars(arguments).items() if key != "action"
+            })
         elif arguments.action == "slot-validate":
             result = validate_runtime_slot_ownership(
                 context=arguments.context,

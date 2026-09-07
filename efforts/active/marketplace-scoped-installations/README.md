@@ -211,7 +211,7 @@ because they provide tools or services.
         namespaced first use/update publish owned build completion and cut over
         cell-local runtime markers, and fixed-identity cutover supports historical
         rollback without legacy fallback.
-      - [ ] Add ownership-checked Agent Machines repair/release and uninstall
+      - [x] Add ownership-checked Agent Machines repair/release and uninstall
         ([#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122)).
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
     simultaneous marketplace cells in disposable clean-room environments before
@@ -247,7 +247,7 @@ because they provide tools or services.
       - [x] Windows clean-room arm waived by operator decision on 2026-09-05.
         Earlier attempts stopped before scenario execution because the local
         engine ran Linux containers and the remote Windows-agent launch failed.
-    - [ ] Run the Agent Machines scenario in a disposable Linux clean-room arm.
+    - [x] Run the Agent Machines scenario in a disposable Linux clean-room arm.
     - [x] Windows Agent Machines clean-room arm waived by operator decision on
       2026-09-05; deterministic PowerShell parity tests remain required.
 
@@ -941,3 +941,43 @@ See [`design.md`](design.md).
   remain protected. Repair is derived-only and never recreates immutable
   completion evidence. Uninstall removes all validated owned runtime slots and
   snapshots but preserves durable state plus plugin and namespace receipts.
+
+### 2026-09-05 — Agent Machines receipt-owned retirement implementation
+
+- Implemented [#2122](https://github.com/ThomasMichon/copilot-extensions/issues/2122)
+  as a vision-closing slice of independent installation lifecycle. Shared Python,
+  Bash, and PowerShell provisioning publish reservation evidence before ownership;
+  explicit release pins the reservation root, generation, and receipt-byte digest
+  under both receipt locks. Markerless reservations remain protected.
+- Added explicit Agent Machines derived-only repair and all-owned-history
+  uninstall through one payload-local management engine and both installer
+  adapters. Exact current/LKG and generation CAS, per-delete identity checks,
+  full inventory preflight, and active-process refusal protect retirement.
+  Durable state, namespace/install/activation evidence, and attributable
+  directory structure remain; no namespace garbage collection is implicit.
+- Real Linux acceptance exposed uv hardlinks between immutable version slots:
+  unlinking one changes another link's ctime without changing its content.
+  Retirement now advances only metadata changes caused by its own unlink,
+  after rechecking inode, content digest, mode, size, and modification time.
+  External cache links remain untouched, and a deterministic regression covers
+  historical-slot removal with a surviving external hardlink.
+- Corrected the clean-room harness rather than reducing its assertions:
+  auth-free Tier-P manifests no longer borrow credentials; the version witness
+  accepts the equivalent installed PEP 440 development spelling; update drives
+  the explicit cell installer; build fixtures use native disposable storage.
+  The scenario now includes interrupted receipt release, repair/refusal, and
+  all-history uninstall with retention, replay, and dual-cell isolation.
+- Preserved deterministic PowerShell coverage for the waived Windows
+  clean-room arm. Windows file validation compares named and opened metadata
+  using consistent APIs, including executable permission synthesis and
+  directory-entry file identities. Shared bootstrap guards now exercise the
+  operative Agent Machines boundary and explicitly assert that retired Agent
+  Index compatibility hooks remain non-mutating.
+- Acceptance passed the full non-smoke Linux scenario: phase 0's fixture check
+  plus all eight numbered stages, including every historical runtime/snapshot
+  removal and peer-cell availability. The complete shared foundation suite in a fresh policy-free Linux container passed
+  502 tests (163 platform/portfolio skips, including clean-room harness checks).
+  The full Agent Machines suite passed 478 tests (17 skips); the Windows shared
+  smoke/parity lane passed 22 tests (one platform skip), and the dedicated
+  reservation corpus passed 15 tests. Required lint, install-contract,
+  documentation, version-consistency/bump, and vendoring checks passed.

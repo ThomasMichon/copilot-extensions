@@ -28,7 +28,10 @@
     {"n": 2, "title": "two active Agent Machines cells install and run independently"},
     {"n": 3, "title": "one cell updates without changing its peer"},
     {"n": 4, "title": "historical owned slot rolls back without changing its peer"},
-    {"n": 5, "title": "blocked governance states fail closed without legacy fallback"}
+    {"n": 5, "title": "blocked governance states fail closed without legacy fallback"},
+    {"n": 6, "title": "interrupted receipt-only reservations release without claiming markerless slots"},
+    {"n": 7, "title": "derived-only repair preserves immutable evidence and peer selection"},
+    {"n": 8, "title": "uninstall removes all owned history while preserving state and the peer cell"}
   ],
   "notes": [
     "All namespaced receipts, runtimes, policies, and scenario output live in the disposable clean-room account or the runner-owned results directory.",
