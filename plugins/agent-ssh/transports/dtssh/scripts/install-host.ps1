@@ -634,21 +634,33 @@ function Start-HostLauncher {
     $args = @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$LauncherDst`"", '-Alias', $Alias, '-Port', "$Port")
     if ($Tunnel) { $args += @('-Tunnel', $Tunnel) }
     if ($User) { $args += @('-User', $User) }
-    if ($Foreground) {
-        Push-Location $InstallDir
-        try {
-            & (Get-Command pwsh).Source @args
-        } finally {
-            Pop-Location
-        }
-        return
-    }
     # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
     # handoff and can flash a console (windows-launch-hardening #786).
-    Start-Process -FilePath 'conhost.exe' `
+    $launcherProc = Start-Process -FilePath 'conhost.exe' `
         -ArgumentList (@('--headless', 'pwsh') + $args) `
         -WorkingDirectory $InstallDir `
-        -WindowStyle Hidden
+        -WindowStyle Hidden `
+        -PassThru
+    if ($Foreground) {
+        $deadline = (Get-Date).AddSeconds(40)
+        do {
+            if ($launcherProc.HasExited) {
+                throw "dtssh host did not stay running; check $InstallDir\dtssh-host.log"
+            }
+            if (Get-HostProcess) {
+                Wait-DtsshHostIdentity
+                $launcherProc.WaitForExit()
+                return
+            }
+            Start-Sleep -Seconds 2
+        } while ((Get-Date) -lt $deadline)
+        try {
+            if (-not $launcherProc.HasExited) {
+                Stop-Process -Id $launcherProc.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
+        throw "dtssh host did not stay running; check $InstallDir\dtssh-host.log"
+    }
     # Poll instead of a single fixed-delay check: a binary that `Install-Dtssh`
     # just downloaded/replaced, or a cold tunnel negotiation, can take longer
     # than a blind 8s wait to report a running host process -- which produced a

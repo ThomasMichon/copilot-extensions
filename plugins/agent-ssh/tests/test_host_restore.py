@@ -538,18 +538,20 @@ def test_dtssh_host_identity_is_synced_before_stop_and_after_start():
     switch = script[script.index("switch ($Action)") :]
     update = switch[switch.index("{ $_ -in @('install', 'update') }") :]
     start = switch[switch.index("'start' {") :]
+    start_launcher = script[script.index("function Start-HostLauncher") :]
 
     first_sync = update.index("Sync-DtsshHostIdentity")
     stop_launcher = update.index("Stop-Launcher")
     write_config = update.index("Write-DispatchCompanionConfig")
-    start_launcher = update.index("Start-HostLauncher")
+    start_host_launcher = update.index("Start-HostLauncher")
     wait_identity = update.index("Wait-DtsshHostIdentity")
     start_write_config = start.index("Write-DispatchCompanionConfig")
     foreground_start = start.index("Start-HostLauncher -Foreground")
+    foreground_branch = start_launcher[start_launcher.index("if ($Foreground) {") :]
 
     assert "OneDriveCommercial" in script
     assert "AGENT_SSH_DTSSH_HOST_KEY_BACKUP_ROOT" in script
-    assert first_sync < stop_launcher < write_config < start_launcher < wait_identity
+    assert first_sync < stop_launcher < write_config < start_host_launcher < wait_identity
     assert start_write_config < foreground_start
     assert "Assert-MatchingHostIdentity" in script
     assert "Protect-PrivateKey" in script
@@ -557,6 +559,11 @@ def test_dtssh_host_identity_is_synced_before_stop_and_after_start():
     assert '"`"$InstallerDst`""' in script
     assert "[switch]$ForegroundLauncher" in script
     assert "dispatch companion config: $CompanionConfigPath" in script
+    assert "$launcherProc = Start-Process -FilePath 'conhost.exe'" in start_launcher
+    assert "-PassThru" in start_launcher
+    assert "Wait-DtsshHostIdentity" in foreground_branch
+    assert "$launcherProc.WaitForExit()" in foreground_branch
+    assert "& (Get-Command pwsh).Source @args" not in script
 
 
 def test_dispatch_companion_config_persists_effective_backup_root():
