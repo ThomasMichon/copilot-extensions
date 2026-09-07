@@ -3,6 +3,32 @@
     {
       "applyTo": "**",
       "customizationKind": "instructions",
+      "destination": ".github/instructions/agent-dispatch/session-guidance.instructions.md",
+      "plugin": "agent-dispatch@copilot-extensions",
+      "pluginVersion": "0.1.2-dev36",
+      "renderedBytes": 984,
+      "renderedSha256": "968368dd74b78a9c718cb75a0af07db4ed865995d796470de86abb62ceff8d72",
+      "sourceId": "session-guidance",
+      "template": "instructions/session-guidance.instructions.md",
+      "templateBytes": 444,
+      "templateSha256": "6335aaf6994816c3bcab1ddc48a16208106e491fc33022317e377e9f40dd6696"
+    },
+    {
+      "applyTo": "**",
+      "customizationKind": "instructions",
+      "destination": ".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md",
+      "plugin": "copilot-extensions-harness@copilot-extensions",
+      "pluginVersion": "0.1.0-dev38",
+      "renderedBytes": 1019,
+      "renderedSha256": "aa9404f8110c88526f720f05e92ca1cdcb632c5a72984d6a89f932db1bf42641",
+      "sourceId": "contribution-boundary",
+      "template": "instructions/contribution-boundary.instructions.md",
+      "templateBytes": 439,
+      "templateSha256": "88b65373a8ca0daf6d1f03f68b7460969741ee4216de6d5fde3439dbbd356e73"
+    },
+    {
+      "applyTo": "**",
+      "customizationKind": "instructions",
       "destination": ".github/instructions/efforts/completion-gate.instructions.md",
       "plugin": "efforts@copilot-extensions",
       "pluginVersion": "0.1.0-dev18",

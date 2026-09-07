@@ -162,8 +162,8 @@ def test_empty_emission_has_no_record_separator(capsys):
 def test_main_uses_one_managed_agent_worktrees_start(monkeypatch, capsys):
     calls = []
 
-    def fake_aw(*args):
-        calls.append(args)
+    def fake_aw(*args, **kwargs):
+        calls.append((args, kwargs.get("cwd")))
         return json.dumps({"related": RELATED})
 
     monkeypatch.setattr(mod, "_aw", fake_aw)
@@ -172,7 +172,7 @@ def test_main_uses_one_managed_agent_worktrees_start(monkeypatch, capsys):
     mod.main()
 
     assert calls == [
-        ("related", "list", "--json", "--require-managed"),
+        (("related", "list", "--json", "--require-managed"), None),
     ]
     assert "example-web(role=product,locus=codespace)" in json.loads(
         capsys.readouterr().out
@@ -182,8 +182,8 @@ def test_main_uses_one_managed_agent_worktrees_start(monkeypatch, capsys):
 def test_main_is_empty_when_managed_related_query_is_rejected(monkeypatch, capsys):
     calls = []
 
-    def fake_aw(*args):
-        calls.append(args)
+    def fake_aw(*args, **kwargs):
+        calls.append((args, kwargs.get("cwd")))
         return None
 
     monkeypatch.setattr(mod, "_aw", fake_aw)
@@ -191,8 +191,27 @@ def test_main_is_empty_when_managed_related_query_is_rejected(monkeypatch, capsy
     with pytest.raises(SystemExit):
         mod.main()
 
-    assert calls == [("related", "list", "--json", "--require-managed")]
+    assert calls == [(("related", "list", "--json", "--require-managed"), None)]
     assert capsys.readouterr().out == "{}"
+
+
+def test_main_forwards_authoritative_cwd_argument(monkeypatch, capsys):
+    calls = []
+
+    def fake_aw(*args, **kwargs):
+        calls.append((args, kwargs.get("cwd")))
+        return json.dumps({"related": RELATED})
+
+    monkeypatch.setattr(mod, "_aw", fake_aw)
+    monkeypatch.setattr(
+        mod.sys, "argv", ["emit_codespace_map.py", "--cwd", "/repo/worktree"]
+    )
+
+    mod.main()
+
+    assert calls == [
+        (("related", "list", "--json", "--require-managed"), "/repo/worktree"),
+    ]
 
 
 def test_powershell_wrapper_preserves_newline_free_output():

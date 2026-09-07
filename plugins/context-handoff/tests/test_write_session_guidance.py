@@ -180,6 +180,7 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
 def test_hook_and_projection_contracts():
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     entries = hooks["hooks"]["sessionStart"]
+    assert len(entries) == 1
     writer_entries = [
         entry
         for entry in entries
@@ -187,6 +188,8 @@ def test_hook_and_projection_contracts():
     ]
     assert len(writer_entries) == 1
     writer_entry = writer_entries[0]
+    assert "invoke-context-contributor" not in writer_entry["bash"]
+    assert "--aggregate" not in writer_entry["bash"]
     assert "write-session-guidance" in writer_entry["powershell"]
     assert writer_entry["timeoutSec"] == 30
     for shell in ("bash", "powershell"):
@@ -204,3 +207,12 @@ def test_hook_and_projection_contracts():
     assert "COPILOT_AGENT_SESSION_ID" in pointer
     assert "instructions/context-handoff/session-guidance.instructions.md" in pointer
     assert "~/.copilot/session-state" not in pointer
+
+    session_context = json.loads(
+        (_PLUGIN / "session-context.json").read_text(encoding="utf-8")
+    )
+    assert session_context["contributors"] == []
+    assert session_context["sessionStart"] == {
+        "sideEffects": "restart-safe-idempotent",
+        "context": "none",
+    }

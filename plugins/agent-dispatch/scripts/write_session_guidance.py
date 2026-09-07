@@ -2,15 +2,10 @@
 """Write the agent-dispatch session-scoped guidance file as a sessionStart
 side effect.
 
-This is a raw `hooks.json` entry, not a declared `session-context.json`
-contributor: it performs the atomic session-folder-file write from
-`docs/patterns/session-scoped-dynamic-guidance.md` and always emits `{}` --
-it never contributes `additionalContext`, so it composes independently of
-the `context-injection` authority. The existing `focus-guidance` /
-`command-catalog` contributors remain unchanged as a best-effort
-supplementary channel; this writer invokes the same underlying scripts
-fresh (there is no persisted registration snapshot to reuse here) to
-compose the richer, primary session-scoped guidance.
+This raw ``hooks.json`` entry performs the atomic session-folder-file write
+from ``docs/patterns/session-scoped-dynamic-guidance.md`` and always emits
+``{}``. It invokes the focus and command-catalog producers fresh to compose
+the primary session-scoped guidance.
 """
 
 from __future__ import annotations

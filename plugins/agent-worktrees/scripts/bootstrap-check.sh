@@ -44,39 +44,44 @@ if [[ ! -x "$VENV_PYTHON" ]] && ! _aw_provisioned; then
     _installer="${ScriptDir:+$ScriptDir/install.sh}"
     if [[ -n "$_installer" && -f "$_installer" ]] && grep -qE '^[[:space:]]*stamp\)' "$_installer" 2>/dev/null; then
         bash "$_installer" stamp >/dev/null 2>&1 || true
+        printf '{}'
         exit 0
     fi
-    # Deployed-copy fallback on a still-unprovisioned box -> setup hint.
-    echo ''
-    echo -e '\033[33m[agent-worktrees] Runtime not installed.\033[0m'
-    echo -e "\033[90m  Ask Copilot to 'set up agent-worktrees' to bootstrap the runtime.\033[0m"
-    echo ''
+    # Deployed-copy fallback on a still-unprovisioned box -> setup hint. Every
+    # sessionStart invocation of this fallback (including hooks.json's direct,
+    # no-python last resort) must emit exactly `{}`; the hint is diagnostic,
+    # not model-facing, so it goes to stderr only.
+    echo "[agent-worktrees] Runtime not installed. Ask Copilot to 'set up agent-worktrees' to bootstrap the runtime." >&2
+    printf '{}'
     exit 0
 fi
 
 # Provisioned via the tools-half (versioned slot) but the full-launcher resolver
 # isn't deployed -> nothing to reconcile via the legacy lib-copy path; no-op.
 if [[ ! -x "$VENV_PYTHON" ]]; then
+    printf '{}'
     exit 0
 fi
 
 # --- Installed: check if package is stale ---
-if [[ ! -f "$MANIFEST" ]]; then exit 0; fi
+if [[ ! -f "$MANIFEST" ]]; then printf '{}'; exit 0; fi
 plugin_dir="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('plugin_source',''))" "$MANIFEST" 2>/dev/null || true)"
-if [[ -z "$plugin_dir" || ! -d "$plugin_dir" ]]; then exit 0; fi
+if [[ -z "$plugin_dir" || ! -d "$plugin_dir" ]]; then printf '{}'; exit 0; fi
 
 PKG_SRC="$plugin_dir/src/agent_worktrees"
-if [[ ! -d "$PKG_SRC" ]]; then exit 0; fi
+if [[ ! -d "$PKG_SRC" ]]; then printf '{}'; exit 0; fi
 
 deployed_commit="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('commit',''))" "$MANIFEST" 2>/dev/null || true)"
 current_commit="$(git -C "$plugin_dir" rev-parse HEAD 2>/dev/null || true)"
 
 if [[ -z "$deployed_commit" || -z "$current_commit" || "$deployed_commit" == "$current_commit" ]]; then
+    printf '{}'
     exit 0
 fi
 
-# Stale -- re-deploy package
-echo -e '\033[90m[agent-worktrees] Updating runtime payload...\033[0m'
+# Stale -- re-deploy package. Progress notices are diagnostics, not model
+# context: route them to stderr and keep stdout a single JSON object.
+echo -e '\033[90m[agent-worktrees] Updating runtime payload...\033[0m' >&2
 rm -rf "$PKG_DST"
 mkdir -p "$LIB_DIR"
 cp -r "$PKG_SRC" "$PKG_DST"
@@ -110,5 +115,6 @@ m['dirty'] = False
 json.dump(m, open(sys.argv[1], 'w'), indent=2)
 " "$MANIFEST" "$current_commit" 2>/dev/null || true
 
-echo -e '\033[90m[agent-worktrees] Runtime updated.\033[0m'
+echo -e '\033[90m[agent-worktrees] Runtime updated.\033[0m' >&2
+printf '{}'
 exit 0

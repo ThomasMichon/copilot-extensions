@@ -1,7 +1,7 @@
 # Emit the ai-attribution ambient policy for the session-start repository.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$script:PluginVersion = '0.1.0-dev11'
+$script:PluginVersion = '0.1.0-dev12'
 $script:MaxPayloadBytes = 65536
 $script:MaxConfigBytes = 65536
 $script:MaxConfigLines = 200
@@ -467,22 +467,6 @@ function Invoke-Policy {
     }
 
     Read-PolicyConfig (Join-Path $script:RepoRoot '.github/ai-attribution.conf') 'repo'
-
-    if ($args -contains '--aggregate') {
-        $Kernel = "[owner: ai-attribution@$script:PluginVersion] " +
-            'Before publishing, classify audience and repository ownership. ' +
-            'Disclose AI assistance prominently for third-party contributions ' +
-            'and whenever operator policy requires; ' +
-            'ownership hints are not proof and apply only to the session-start ' +
-            'repository. Public artifacts must be persona-neutral and scrub ' +
-            'credentials, private identifiers, hosts, paths, accounts, record ' +
-            'IDs, and private rationale; follow target conventions and audit ' +
-            'the live surface. Use the `ai-attribution` skill for details.'
-        [Console]::Out.Write(
-            '{"additionalContext":"' + (ConvertTo-JsonString $Kernel) + '"}'
-        )
-        return
-    }
 
     $Kernel = "[owner: ai-attribution@$script:PluginVersion] Before publishing, determine the audience and repository ownership. "
     if ($script:Disclosure -eq 'always') {

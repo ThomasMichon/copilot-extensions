@@ -69,8 +69,8 @@ Current reusable surfaces:
 
 - `delegation-guidance` owns direct/delegate strategy, the concise context
   kernel, and the detailed delegation skill;
-- `context-injection` owns attributable first-turn composition, progressive
-  disclosure, trust gating, and fail-open delivery;
+- the session-scoped dynamic-guidance pattern owns attributable first-turn
+  delivery, progressive disclosure, trust gating, and fail-open behavior;
 - `config-migrate` provides versioned inert configuration migration;
 - agent-worktrees profile assignment provides prior art for deterministic
   selection and terminal assignment state;
@@ -148,9 +148,9 @@ Public formulation from issue #2014:
 
 ### Phase 4 - Integration, delivery, and adoption
 
-- [ ] Preserve the current context-injection contributor contract and kernel
-  budget; defer audience-gating changes unless behavioral evidence proves the
-  on-demand pointer insufficient.
+- [ ] Preserve the current exact-session guidance contract and kernel budget;
+  defer audience-gating changes unless behavioral evidence proves the
+  checked-in pointer insufficient.
 - [ ] Prove a Task-capable coordinator receives the compact cue before its first
   delegation and a non-delegating worker does not load the complete registry.
 - [ ] Document configuration, diagnostics, trial arming, fallback, and safe

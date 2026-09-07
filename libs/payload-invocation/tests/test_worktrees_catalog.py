@@ -68,13 +68,26 @@ def test_powershell_catalog_uses_nested_payload_command() -> None:
 def test_hooks_emit_payload_command_catalog() -> None:
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     session_start = hooks["hooks"]["sessionStart"]
-    catalog = next(
+    direct = [
         hook for hook in session_start if "emit-command-catalog" in hook["bash"]
+    ]
+    if direct:
+        catalog = direct[0]
+        assert "COPILOT_PLUGIN_ROOT" in catalog["bash"]
+        assert "COPILOT_PLUGIN_ROOT" in catalog["powershell"]
+        assert "printf '{}'" in catalog["bash"]
+        assert "Write('{}')" in catalog["powershell"]
+        return
+    # Exact-session-writer wiring: hook_client.py composes emit-command-catalog
+    # internally (see hook_client.py's _command_catalog_context) rather than
+    # the sessionStart hook emitting it directly.
+    writer = next(
+        hook for hook in session_start if "hook_client.py" in hook["bash"]
     )
-    assert "COPILOT_PLUGIN_ROOT" in catalog["bash"]
-    assert "COPILOT_PLUGIN_ROOT" in catalog["powershell"]
-    assert "printf '{}'" in catalog["bash"]
-    assert "Write('{}')" in catalog["powershell"]
+    assert "COPILOT_PLUGIN_ROOT" in writer["bash"]
+    assert "COPILOT_PLUGIN_ROOT" in writer["powershell"]
+    client = (PLUGIN / "scripts" / "hook_client.py").read_text(encoding="utf-8")
+    assert "emit-command-catalog" in client
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")

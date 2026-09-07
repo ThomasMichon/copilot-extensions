@@ -56,7 +56,7 @@ def _aw_binstub() -> str | None:
     return None
 
 
-def _aw(*args: str) -> str | None:
+def _aw(*args: str, cwd: str | None = None) -> str | None:
     """Run ``agent-worktrees`` via its own binstub and return stdout."""
     exe = _aw_binstub()
     if not exe:
@@ -65,6 +65,7 @@ def _aw(*args: str) -> str | None:
         proc = subprocess.run(
             [exe, *args],
             capture_output=True, text=True, timeout=20,
+            cwd=cwd or None,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -161,8 +162,19 @@ def _serialize_context(context: str) -> str:
     )
 
 
+def _cwd_arg() -> str | None:
+    argv = sys.argv[1:]
+    for index, value in enumerate(argv):
+        if value == "--cwd" and index + 1 < len(argv):
+            return argv[index + 1]
+        if value.startswith("--cwd="):
+            return value.split("=", 1)[1]
+    return None
+
+
 def main() -> None:
-    raw = _aw("related", "list", "--json", "--require-managed")
+    cwd = _cwd_arg()
+    raw = _aw("related", "list", "--json", "--require-managed", cwd=cwd)
     if not raw:
         _emit_empty()
     try:

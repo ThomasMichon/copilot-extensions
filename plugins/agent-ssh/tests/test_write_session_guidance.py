@@ -39,7 +39,7 @@ def test_combines_catalog_and_mesh_pointer(monkeypatch, tmp_path):
     monkeypatch.setattr(
         writer,
         "_run_contributor",
-        lambda root, stem, payload: (
+        lambda root, stem, payload, **kwargs: (
             "## agent-ssh session command catalog\n\ncatalog"
             if stem == "emit-command-catalog"
             else "## SSH machine mesh available for this repo\n\nmesh"
@@ -54,7 +54,7 @@ def test_combines_catalog_and_mesh_pointer(monkeypatch, tmp_path):
 
 
 def test_no_content_replaces_stale_guidance(monkeypatch, tmp_path):
-    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "")
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args, **kwargs: "")
     target = _target(tmp_path)
     target.parent.mkdir(parents=True)
     target.write_text("stale guidance", encoding="utf-8")
@@ -68,7 +68,9 @@ def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     monkeypatch.setattr(
         writer,
         "_run_contributor",
-        lambda root, stem, payload: "x" * 5000 if stem == "emit-command-catalog" else "",
+        lambda root, stem, payload, **kwargs: (
+            "x" * 5000 if stem == "emit-command-catalog" else ""
+        ),
     )
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     assert "omitted because" in _target(tmp_path).read_text(encoding="utf-8")
@@ -79,7 +81,7 @@ def test_rejects_unsafe_session_ids(monkeypatch, tmp_path, session_id):
     monkeypatch.setattr(
         writer,
         "_run_contributor",
-        lambda *args: pytest.fail("must not run for an unsafe session id"),
+        lambda *args, **kwargs: pytest.fail("must not run for an unsafe session id"),
     )
     assert not writer.write_session_guidance({"sessionId": session_id}, home=tmp_path)
     assert not (tmp_path / ".copilot").exists()
@@ -87,7 +89,7 @@ def test_rejects_unsafe_session_ids(monkeypatch, tmp_path, session_id):
 
 @pytest.mark.parametrize("component", (".copilot", "session-state", "session-1"))
 def test_rejects_ancestor_escape(monkeypatch, tmp_path, component):
-    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "guidance")
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args, **kwargs: "guidance")
     outside = tmp_path / "outside"
     outside.mkdir()
     if component == ".copilot":
@@ -110,7 +112,7 @@ def test_rejects_ancestor_escape(monkeypatch, tmp_path, component):
 
 
 def test_resolve_runtime_error_fails_open(monkeypatch, tmp_path):
-    monkeypatch.setattr(writer, "_run_contributor", lambda *args: "guidance")
+    monkeypatch.setattr(writer, "_run_contributor", lambda *args, **kwargs: "guidance")
     original_resolve = Path.resolve
 
     def resolve(path, *args, **kwargs):
@@ -122,6 +124,89 @@ def test_resolve_runtime_error_fails_open(monkeypatch, tmp_path):
     assert not writer.write_session_guidance(
         {"sessionId": "session-1"}, home=tmp_path
     )
+
+
+def test_validated_payload_cwd_accepts_absolute_existing_directory(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    raw = json.dumps({"cwd": str(repo)}).encode("utf-8")
+    assert writer._validated_payload_cwd(raw) == repo.resolve()
+
+
+@pytest.mark.parametrize(
+    "raw_cwd",
+    (None, "", "relative/path", "does-not-exist-anywhere"),
+)
+def test_validated_payload_cwd_rejects_missing_relative_or_nonexistent(
+    tmp_path, raw_cwd
+):
+    value = raw_cwd
+    if raw_cwd == "does-not-exist-anywhere":
+        value = str(tmp_path / raw_cwd)
+    raw = json.dumps({"cwd": value}).encode("utf-8")
+    assert writer._validated_payload_cwd(raw) is None
+
+
+def test_validated_payload_cwd_rejects_unrelated_file_path(tmp_path):
+    unrelated_file = tmp_path / "not-a-directory"
+    unrelated_file.write_text("x", encoding="utf-8")
+    raw = json.dumps({"cwd": str(unrelated_file)}).encode("utf-8")
+    assert writer._validated_payload_cwd(raw) is None
+
+
+def test_run_contributor_skips_subprocess_when_cwd_required_but_missing(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        writer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail(
+            "subprocess must not run without a validated cwd"
+        ),
+    )
+    result = writer._run_contributor(
+        _PLUGIN,
+        "emit-mesh-pointer",
+        b'{"sessionId":"session-1"}',
+        cwd=None,
+        require_cwd=True,
+    )
+    assert result == ""
+
+
+def test_mesh_pointer_is_invoked_with_require_cwd_flag(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_contributor(root, stem, payload, *, cwd=None, require_cwd=False):
+        calls.append((stem, cwd, require_cwd))
+        return "context"
+
+    monkeypatch.setattr(writer, "_run_contributor", fake_contributor)
+    assert writer.write_session_guidance(
+        {"sessionId": "session-1"}, home=tmp_path
+    )
+    require_flags = {stem: require for stem, _cwd, require in calls}
+    assert require_flags["emit-mesh-pointer"] is True
+    assert require_flags["emit-command-catalog"] is False
+
+
+def test_mesh_pointer_receives_validated_cwd_when_present(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    seen = {}
+
+    def fake_contributor(root, stem, payload, *, cwd=None, require_cwd=False):
+        if stem == "emit-mesh-pointer":
+            seen["cwd"] = cwd
+            seen["require_cwd"] = require_cwd
+        return "context"
+
+    monkeypatch.setattr(writer, "_run_contributor", fake_contributor)
+    assert writer.write_session_guidance(
+        {"sessionId": "session-1", "cwd": str(repo)}, home=tmp_path
+    )
+    assert seen["cwd"] == repo.resolve()
+    assert seen["require_cwd"] is True
 
 
 def test_reparse_detection_without_link_creation():
@@ -168,7 +253,7 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
             "-File",
             str(_PLUGIN / "scripts" / "write-session-guidance.ps1"),
         ],
-        cwd=repo,
+        cwd=home,
         env=env,
         input=payload,
         capture_output=True,
@@ -181,6 +266,50 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     assert "## agent-ssh session command catalog" in content
     assert "## SSH machine mesh available for this repo" in content
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
+
+
+def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_path):
+    """A missing/invalid payload cwd must never fall back to the process cwd.
+
+    The process cwd here IS a repo with machines.yaml; the payload omits cwd
+    entirely, so the repository-sensitive mesh pointer must be skipped rather
+    than leaking this unrelated repo's mesh via ambient process cwd.
+    """
+    shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    if not shell:
+        pytest.skip("PowerShell is unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "machines.yaml").write_text("version: 1\nmachines: {}\n", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = json.dumps({"sessionId": "session-1", "source": "copilot-cli"})
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+    }
+    for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
+        env.pop(name, None)
+    result = subprocess.run(
+        [
+            shell,
+            "-NoProfile",
+            "-File",
+            str(_PLUGIN / "scripts" / "write-session-guidance.ps1"),
+        ],
+        cwd=repo,
+        env=env,
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == "{}"
+    content = _target(home).read_text(encoding="utf-8")
+    assert "## SSH machine mesh available for this repo" not in content
 
 
 def test_hook_and_projection_contracts():

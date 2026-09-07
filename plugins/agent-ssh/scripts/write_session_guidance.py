@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Write agent-ssh guidance as a sessionStart side effect.
 
-The existing command-catalog and mesh-pointer contributors remain best-effort
-additionalContext channels. This writer invokes both producers fresh and
-atomically writes their ordered output to the session-scoped guidance file.
+The command-catalog and mesh-pointer producers are invoked fresh and their
+ordered output is atomically written to the exact session's guidance file.
 """
 
 from __future__ import annotations
@@ -61,9 +60,33 @@ def _contributor_argv(root: Path, stem: str) -> list[str] | None:
     return [shell, str(script)]
 
 
-def _run_contributor(root: Path, stem: str, payload: bytes) -> str:
+def _validated_payload_cwd(payload: bytes) -> Path | None:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (TypeError, UnicodeError, ValueError):
+        return None
+    raw_cwd = value.get("cwd") if isinstance(value, dict) else None
+    if not isinstance(raw_cwd, str) or not raw_cwd or not os.path.isabs(raw_cwd):
+        return None
+    try:
+        candidate = Path(raw_cwd).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return candidate if candidate.is_dir() else None
+
+
+def _run_contributor(
+    root: Path,
+    stem: str,
+    payload: bytes,
+    *,
+    cwd: Path | None,
+    require_cwd: bool = False,
+) -> str:
     argv = _contributor_argv(root, stem)
     if argv is None:
+        return ""
+    if require_cwd and cwd is None:
         return ""
     try:
         completed = subprocess.run(
@@ -73,6 +96,7 @@ def _run_contributor(root: Path, stem: str, payload: bytes) -> str:
             timeout=_SUBPROCESS_TIMEOUT_S,
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
+            cwd=cwd,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -103,11 +127,18 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
 
     root = _plugin_root()
     raw_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    cwd = _validated_payload_cwd(raw_payload)
     contexts = [
         context
         for context in (
-            _run_contributor(root, "emit-command-catalog", raw_payload),
-            _run_contributor(root, "emit-mesh-pointer", raw_payload),
+            _run_contributor(root, "emit-command-catalog", raw_payload, cwd=cwd),
+            _run_contributor(
+                root,
+                "emit-mesh-pointer",
+                raw_payload,
+                cwd=cwd,
+                require_cwd=True,
+            ),
         )
         if context
     ]
