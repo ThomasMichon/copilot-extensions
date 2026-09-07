@@ -341,8 +341,15 @@ function Start-Container {
     $manifestPath = Join-Path $ScenarioDir 'manifest.json'
     $noScenarioAuth = $false
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
-        $scenarioManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        $noScenarioAuth = $scenarioManifest.tier -eq 'P' -and $scenarioManifest.auth.copilot -eq 'none'
+        try {
+            $scenarioManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $noScenarioAuth = $scenarioManifest.tier -eq 'P' -and $scenarioManifest.auth.copilot -eq 'none'
+        } catch {
+            # A malformed manifest must fail closed to "auth required", never
+            # abort the rig -- this is a best-effort auth-mode inference, not a
+            # manifest-schema gate (that belongs to the scenario's own checks).
+            $noScenarioAuth = $false
+        }
     }
     $token = if ($noScenarioAuth) { $null } else { Resolve-CopilotToken }
     $tokenArgs = @()

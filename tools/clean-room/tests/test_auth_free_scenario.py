@@ -14,11 +14,14 @@ POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 
 @pytest.mark.skipif(not POWERSHELL, reason="PowerShell is unavailable")
-@pytest.mark.parametrize("auth", ["none", "required"])
+@pytest.mark.parametrize("auth", ["none", "required", "malformed"])
 def test_powershell_uses_manifest_auth_contract(tmp_path, auth):
     scenario = tmp_path / "scenario"
     scenario.mkdir()
-    (scenario / "manifest.json").write_text(json.dumps({"tier": "P", "auth": {"copilot": auth}}), encoding="utf-8")
+    if auth == "malformed":
+        (scenario / "manifest.json").write_text("{not valid json", encoding="utf-8")
+    else:
+        (scenario / "manifest.json").write_text(json.dumps({"tier": "P", "auth": {"copilot": auth}}), encoding="utf-8")
     source = (RIG / "run.ps1").read_text(encoding="utf-8")
     start = source.index("function Start-Container {")
     function = source[start:source.index("\nfunction Ensure-Container", start)]
@@ -41,6 +44,9 @@ def test_powershell_uses_manifest_auth_contract(tmp_path, auth):
         assert result.returncode == 0, result.stderr
         assert "selected=base-image" in result.stdout
     else:
+        # "required" and "malformed" both fail closed to requiring auth: a
+        # scenario manifest that cannot be parsed must never be silently
+        # treated as auth-free, and must not crash the rig either.
         assert result.returncode != 0
         assert "authentication-requested" in result.stderr
 
@@ -49,8 +55,42 @@ def test_powershell_uses_manifest_auth_contract(tmp_path, auth):
 def test_bash_auth_free_branch_precedes_token_lookup():
     source = (RIG / "run.sh").read_text(encoding="utf-8")
     body = source.split("start_container() {", 1)[1]
-    assert body.index('no_scenario_auth="$(python3') < body.index('token="$(resolve_token)"')
+    assert body.index('no_scenario_auth="$("$(_py)"') < body.index('token="$(resolve_token)"')
     assert 'if [ "$no_scenario_auth" = true ]; then' in body
+
+
+@pytest.mark.skipif(os.name == "nt" or not shutil.which("bash"), reason="POSIX Bash required")
+def test_bash_manifest_parsing_uses_host_python_fallback_not_hardcoded_python3(tmp_path):
+    # A host with only `python` (no `python3` binary) must still resolve the
+    # Tier-P auth-free contract instead of hard-failing on a missing binary.
+    scenario = tmp_path / "scenario"
+    scenario.mkdir()
+    (scenario / "manifest.json").write_text(json.dumps({"tier": "P", "auth": {"copilot": "none"}}), encoding="utf-8")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    real_python = shutil.which("python3") or shutil.which("python")
+    assert real_python, "a Python interpreter is required to run this probe"
+    (fake_bin / "python").write_text(f'#!/bin/sh\nexec "{real_python}" "$@"\n', encoding="utf-8")
+    os.chmod(fake_bin / "python", 0o755)
+    source = (RIG / "run.sh").read_text(encoding="utf-8")
+    body = source[source.index("start_container() {"):]
+    body = body[: body.index("\n}\n", body.index("if [ -n \"$token\" ]"))] + "\n}\n"
+    probe = tmp_path / "probe.sh"
+    probe.write_text(
+        "#!/bin/sh\nset -eu\n"
+        "_py() { command -v python3 || command -v python; }\n"
+        "resolve_token() { :; }\n"
+        "img_exists() { return 1; }\n"
+        "do_build() { :; }\n"
+        f'SCENARIO_DIR="{scenario}"\nBASE_TAG=base-image\n'
+        + body
+        + "\nstart_container\necho \"img=$img\"\n",
+        encoding="utf-8",
+    )
+    env = {**os.environ, "PATH": f"{fake_bin}"}
+    result = subprocess.run(["bash", str(probe)], capture_output=True, text=True, timeout=30, env=env)
+    assert result.returncode == 0, result.stderr
+    assert "img=base-image" in result.stdout
 
 
 def test_version_witness_normalizes_only_dev_spelling():

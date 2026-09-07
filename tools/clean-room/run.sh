@@ -149,7 +149,7 @@ start_container() {
     # committed device-code :authed image only when no token is available.
     local token="" img no_scenario_auth=false
     if [ -f "$SCENARIO_DIR/manifest.json" ]; then
-        no_scenario_auth="$(python3 -c '
+        no_scenario_auth="$("$(_py)" -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     manifest = json.load(stream)
