@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-09-05
+- **Last revised:** 2026-09-07
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -73,14 +73,11 @@ harness genuinely depends on should therefore reach the agent through a
 checked-in static pointer instruction plus a hook-written session-scoped file
 the agent is directed to read (see
 `docs/patterns/session-scoped-dynamic-guidance.md`), not through
-`additionalContext` aggregation alone. When the host cannot compose
-independent hook outputs, one attributable authority should compute the kernel
-and every proven producer should return the same bytes, so host result
-selection cannot discard guidance — but this composition is a best-effort
-supplement, not the sole channel, until upstream delivery is proven reliable.
-When repeating the complete aggregate through every hook would exceed a host
-budget, those identical bytes should instead be a compact critical kernel plus
-an exact session-scoped pointer to the full attributable context.
+`additionalContext` aggregation alone. When the host natively composes every
+independent hook output and that behavior is proven at the supported version
+floor, direct plugin-owned `additionalContext` should become the preferred
+perfectly dynamic path. Until then, the checked-in pointer plus exact-session
+guidance file remains authoritative.
 
 ### portable-operator-policy
 
@@ -223,6 +220,17 @@ otherwise-usable session start. A session-scoped dynamic guidance file that has
 not yet been written (or whose owning hook could not run, e.g. an untrusted
 repository-level hook path) is an explicit no-op for the reader, never a
 blocker.
+
+## Non-Goals / Boundaries
+
+### no-custom-cross-plugin-aggregation-authority
+
+The harness must not depend on a custom plugin that discovers other plugins,
+invokes their context producers, coordinates a session rendezvous, caches or
+spills their aggregate, or becomes the shared authority for their guidance.
+Cross-plugin dynamic composition belongs to the native host. Compatibility
+paths may preserve reliable plugin-owned files and static fail-safes, but must
+not recreate a second composition runtime beside the host.
 
 ### recovery-revalidates-authority
 
