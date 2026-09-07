@@ -14,9 +14,10 @@ Subcommands:
   call <bridge> <tool> [args]   One-shot: invoke one upstream tool, print result.
   source-digest <bridge>        Print the keyed effective source fingerprint.
   materialize <bridge>          Project the upstream catalog into a CLI stub fleet.
-                                Consults a resident ``serve`` daemon first when
-                                one already holds the bridge warm; ``--no-serve``
-                                always spawns the upstream cold.
+                                Consults a reachable resident ``serve`` daemon
+                                first (it opens/reuses the bridge session as
+                                needed, avoiding a redundant fresh upstream
+                                spawn); ``--no-serve`` always spawns cold.
   serve                         Resident warmth daemon: keep upstreams warm over a socket.
 
 Heavy imports (the bridge tree: config, credential injectors, decorators,
@@ -380,9 +381,10 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
         print(f"agent-mcp: {exc}", file=sys.stderr)
         return 1
 
-    # Fast path: a running serve daemon already holds this bridge's upstream
-    # warm. Falls through to the cold spawn when the daemon is absent, not
-    # warm for this bridge yet, or reports an error.
+    # Fast path: a reachable serve daemon can service this without spawning a
+    # redundant fresh upstream process -- it opens/reuses the bridge's warm
+    # session as needed, not only when one already exists. Falls through to
+    # the cold spawn when no daemon is reachable or it reports an error.
     tools = _try_serve_materialize(args.name, no_serve=args.no_serve)
     if tools is None:
         try:
