@@ -30,6 +30,9 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
 CONTEXTUAL_INSTALL=false
+context_governance_unchanged() {
+    return 0
+}
 __aw_action="${1:-status}"
 __aw_install_dir_arg=""
 __aw_args=("$@")
@@ -93,6 +96,87 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             "ERROR: --install-dir does not match validated installation context" >&2
         exit 1
     }
+    __aw_context_value() {
+        LC_ALL=C awk -f "$__aw_json_query" -v mode=get -v "query_path=$2" <<<"$1"
+    }
+    __aw_status_args=(
+        status
+        --payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+        --plugin-id agent-worktrees
+        --legacy-root "$HOME/.agent-worktrees"
+        --context "$COPILOT_EXTENSIONS_CONTEXT"
+        --durable-home "$__aw_durable_home"
+    )
+    __aw_context_status="$(
+        bash "$__aw_context_helper" "${__aw_status_args[@]}"
+    )" || exit $?
+    __aw_status="$(__aw_context_value "$__aw_context_status" status)"
+    __aw_reason="$(__aw_context_value "$__aw_context_status" reason)"
+    __aw_actual_mode="$(__aw_context_value "$__aw_context_status" actualMode)"
+    __aw_status_root="$(__aw_context_value "$__aw_context_status" runtimeRoot)"
+    __aw_status_context="$(__aw_context_value "$__aw_context_status" context)"
+    if [[ "$__aw_actual_mode" != namespaced ||
+          "$__aw_status_root" != "$__aw_install_root" ||
+          "$__aw_status_context" != "$COPILOT_EXTENSIONS_CONTEXT" ]] ||
+       { [[ "$__aw_status" != ready || "$__aw_reason" != namespaced-active ]] &&
+         [[ "$__aw_status" != deactivation-required ]]; }; then
+        printf '%s\n' \
+            "ERROR: installation governance does not authorize this context runtime" >&2
+        exit 1
+    fi
+    __aw_activation_generation="$(
+        __aw_context_value "$__aw_context_status" activationGeneration
+    )"
+    __aw_namespace_generation="$(
+        __aw_context_value "$__aw_validated_context" namespaceGeneration
+    )"
+    __aw_install_generation="$(
+        __aw_context_value "$__aw_validated_context" generation
+    )"
+    [[ "$(
+        __aw_context_value "$__aw_context_status" installGeneration
+    )" == "$__aw_install_generation" ]] || {
+        printf '%s\n' \
+            "ERROR: installation receipt generation does not match governance" >&2
+        exit 1
+    }
+    context_governance_unchanged() {
+        local current current_status current_reason current_mode current_root
+        local current_context current_activation current_namespace current_install
+        local current_validated current_validated_install
+        current="$(bash "$__aw_context_helper" "${__aw_status_args[@]}")" ||
+            return 1
+        current_status="$(__aw_context_value "$current" status)"
+        current_reason="$(__aw_context_value "$current" reason)"
+        current_mode="$(__aw_context_value "$current" actualMode)"
+        current_root="$(__aw_context_value "$current" runtimeRoot)"
+        current_context="$(__aw_context_value "$current" context)"
+        current_activation="$(__aw_context_value "$current" activationGeneration)"
+        current_namespace="$(__aw_context_value "$current" namespaceGeneration)"
+        current_install="$(__aw_context_value "$current" installGeneration)"
+        current_validated="$(
+            bash "$__aw_context_helper" validate \
+                --context "$COPILOT_EXTENSIONS_CONTEXT" \
+                --durable-home "$__aw_durable_home" \
+                --expected-plugin-id agent-worktrees \
+                --expected-payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+        )" || return 1
+        current_namespace="$(
+            __aw_context_value "$current_validated" namespaceGeneration
+        )"
+        current_validated_install="$(
+            __aw_context_value "$current_validated" generation
+        )"
+        [[ "$current_status" == "$__aw_status" &&
+           "$current_reason" == "$__aw_reason" &&
+           "$current_mode" == namespaced &&
+           "$current_root" == "$__aw_install_root" &&
+           "$current_context" == "$COPILOT_EXTENSIONS_CONTEXT" &&
+           "$current_activation" == "$__aw_activation_generation" &&
+           "$current_namespace" == "$__aw_namespace_generation" &&
+           "$current_install" == "$__aw_install_generation" &&
+           "$current_validated_install" == "$__aw_install_generation" ]]
+    }
 
     # The standard self-stage block is intentionally byte-identical across
     # plugins and stages beneath the legacy root. Context installs stage here
@@ -131,6 +215,22 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         ) &
         __aw_child=$!
         set +m
+        __aw_watcher=""
+        __aw_stop_context_child() {
+            local __aw_signal_rc="$1"
+            kill -- -"$__aw_child" 2>/dev/null ||
+                kill "$__aw_child" 2>/dev/null || true
+            wait "$__aw_child" 2>/dev/null || true
+            if [[ -n "$__aw_watcher" ]]; then
+                kill "$__aw_watcher" 2>/dev/null || true
+                wait "$__aw_watcher" 2>/dev/null || true
+            fi
+            rm -rf "$__aw_stage"
+            trap - INT TERM
+            exit "$__aw_signal_rc"
+        }
+        trap '__aw_stop_context_child 130' INT
+        trap '__aw_stop_context_child 143' TERM
         if [[ "$__aw_deadline" -gt 0 ]]; then
             (
                 __aw_waited=0
@@ -163,6 +263,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             __aw_rc=124
         fi
         rm -rf "$__aw_stage"
+        trap - INT TERM
         exit "$__aw_rc"
     fi
 fi
@@ -1827,12 +1928,18 @@ case "$ACTION" in
             echo "  Project:  (none - runtime only; pass --project-name to adopt a repo)"
         fi
 
-        # Prereq checks
-        missing_prereqs=()
-        command -v git >/dev/null 2>&1 || missing_prereqs+=("git")
-        command -v uv >/dev/null 2>&1 || missing_prereqs+=("uv")
-        if [[ ${#missing_prereqs[@]} -gt 0 ]]; then
-            err "Missing prerequisites: ${missing_prereqs[*]}"
+        # Prereq checks. A cell-local first use has no earlier legacy
+        # `provision` pass, so it must acquire uv here just as the lean
+        # self-provisioning path does.
+        command -v git >/dev/null 2>&1 || {
+            err "Missing prerequisite: git"
+            exit 1
+        }
+        if $CONTEXTUAL_INSTALL; then
+            _ensure_uv || exit 1
+            _ensure_uv_index
+        elif ! command -v uv >/dev/null 2>&1; then
+            err "Missing prerequisite: uv"
             exit 1
         fi
 
@@ -1854,6 +1961,10 @@ case "$ACTION" in
             deploy_package || exit 1
         fi
         deploy_wrappers || exit 1
+        if $CONTEXTUAL_INSTALL && ! context_governance_unchanged; then
+            err "Installation governance changed before runtime cutover"
+            exit 1
+        fi
         _versioned_activate || exit 1
         if $CONTEXTUAL_INSTALL; then
             remove_legacy_scripts
@@ -2116,6 +2227,8 @@ case "$ACTION" in
         header "Updating $SERVICE_NAME"
 
         if $CONTEXTUAL_INSTALL; then
+            _ensure_uv || exit 1
+            _ensure_uv_index
             mkdir -p "$INSTALL_DIR" "$BIN_DIR"
             if _test_slot_already_complete; then
                 skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
@@ -2124,6 +2237,10 @@ case "$ACTION" in
                 deploy_package || exit 1
             fi
             deploy_wrappers || exit 1
+            if ! context_governance_unchanged; then
+                err "Installation governance changed before runtime cutover"
+                exit 1
+            fi
             _versioned_activate || exit 1
             remove_legacy_scripts
             write_deploy_manifest

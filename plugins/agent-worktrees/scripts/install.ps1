@@ -48,6 +48,39 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function ConvertTo-NativeArgument {
+    param([AllowEmptyString()][string]$Value)
+
+    if ($null -eq $Value) { $Value = '' }
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
+
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes += 1
+            continue
+        }
+        if ($character -eq '"') {
+            [void]$builder.Append(('\' * (($backslashes * 2) + 1)))
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes) {
+            [void]$builder.Append(('\' * $backslashes))
+            $backslashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashes) {
+        [void]$builder.Append(('\' * ($backslashes * 2)))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -128,16 +161,96 @@ if ($ContextualInstall) {
         Write-Error '-InstallDir does not match validated installation context.'
         exit 1
     }
+    $contextStatusArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $contextHelper,
+        'status',
+        '-PayloadRoot', $contextPayload,
+        '-PluginId', 'agent-worktrees',
+        '-LegacyRoot', (Join-Path $env:USERPROFILE '.agent-worktrees'),
+        '-Context', $contextPath,
+        '-DurableHome', $contextDurableHome
+    )
+    $contextStatusJson = @(& $hostExe @contextStatusArgs)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error 'Installation governance could not be resolved.'
+        exit 1
+    }
+    try {
+        $contextStatus = ($contextStatusJson -join "`n") | ConvertFrom-Json
+    } catch {
+        Write-Error 'Installation governance returned invalid output.'
+        exit 1
+    }
+    if (
+        [string]$contextStatus.actualMode -cne 'namespaced' -or
+        (
+            (
+                [string]$contextStatus.status -cne 'ready' -or
+                [string]$contextStatus.reason -cne 'namespaced-active'
+            ) -and
+            [string]$contextStatus.status -cne 'deactivation-required'
+        ) -or
+        [string]$contextStatus.runtimeRoot -cne $InstallDir -or
+        [string]$contextStatus.context -cne $contextPath
+    ) {
+        Write-Error 'Installation governance does not authorize this context runtime.'
+        exit 1
+    }
+    $contextActivationGeneration = [string]$contextStatus.activationGeneration
+    $contextNamespaceGeneration = [string]$validatedContext.namespaceGeneration
+    $contextInstallGeneration = [string]$validatedContext.generation
+    if ([string]$contextStatus.installGeneration -cne $contextInstallGeneration) {
+        Write-Error 'Installation receipt generation does not match governance.'
+        exit 1
+    }
+
+    function Test-ContextGovernanceUnchanged {
+        $currentJson = @(& $hostExe @contextStatusArgs)
+        if ($LASTEXITCODE -ne 0) { return $false }
+        try {
+            $current = ($currentJson -join "`n") | ConvertFrom-Json
+        } catch {
+            return $false
+        }
+        $currentValidationJson = & $hostExe -NoProfile -ExecutionPolicy Bypass `
+            -File $contextHelper validate `
+            -Context $contextPath `
+            -DurableHome $contextDurableHome `
+            -ExpectedPluginId 'agent-worktrees' `
+            -ExpectedPayloadRoot $contextPayload
+        if ($LASTEXITCODE -ne 0) { return $false }
+        try {
+            $currentValidated = $currentValidationJson | ConvertFrom-Json
+        } catch {
+            return $false
+        }
+        return (
+            [string]$current.status -ceq [string]$contextStatus.status -and
+            [string]$current.reason -ceq [string]$contextStatus.reason -and
+            [string]$current.actualMode -ceq 'namespaced' -and
+            [string]$current.runtimeRoot -ceq $InstallDir -and
+            [string]$current.context -ceq $contextPath -and
+            [string]$current.activationGeneration -ceq $contextActivationGeneration -and
+            [string]$current.installGeneration -ceq $contextInstallGeneration -and
+            [string]$currentValidated.namespaceGeneration -ceq
+                $contextNamespaceGeneration -and
+            [string]$currentValidated.generation -ceq $contextInstallGeneration
+        )
+    }
 
     # The standard self-stage block is byte-identical across plugins and uses
-    # the legacy root. Stage context installs inside their selected root first,
-    # then mark the child staged so the standard block remains inert.
+    # the legacy root. Context cell paths are already deep enough to exceed the
+    # Windows legacy path limit once a copied payload and vendored build tree
+    # are nested below them, so use one shallow temp staging root instead.
+    # Mark the child staged so the standard block remains inert.
     if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
         try {
             Set-Location -LiteralPath $env:USERPROFILE
             [System.IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
         } catch {}
-        $contextStageRoot = Join-Path $InstallDir '.install-stage'
+        $contextStageRoot = Join-Path (
+            Join-Path ([IO.Path]::GetTempPath()) 'copilot-extensions-install'
+        ) 'agent-worktrees'
         $contextStage = Join-Path $contextStageRoot (
             (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID"
         )
@@ -184,22 +297,41 @@ if ($ContextualInstall) {
             $contextDeadlineRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC
         }
         if ($contextDeadlineRaw) {
-            [void][int]::TryParse(
+            $parsedContextDeadline = 0
+            $parsedContextDeadlineOk = [int]::TryParse(
                 [string]$contextDeadlineRaw,
-                [ref]$contextDeadline
+                [ref]$parsedContextDeadline
             )
+            if ($parsedContextDeadlineOk) {
+                $contextDeadline = $parsedContextDeadline
+            }
         }
-        $contextChild = Start-Process -FilePath $hostExe -PassThru -NoNewWindow `
-            -WorkingDirectory $contextStagedPayload `
-            -ArgumentList (
-                @(
-                    '-NoProfile',
-                    '-ExecutionPolicy',
-                    'Bypass',
-                    '-File',
-                    $contextStagedEntry
-                ) + $contextForward
-            )
+        $contextArguments = @(
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $contextStagedEntry
+        ) + $contextForward
+        $contextStart = [Diagnostics.ProcessStartInfo]::new()
+        $contextStart.FileName = $hostExe
+        if ($contextStart.PSObject.Properties.Name -contains 'ArgumentList') {
+            foreach ($argument in $contextArguments) {
+                [void]$contextStart.ArgumentList.Add([string]$argument)
+            }
+        } else {
+            $contextStart.Arguments = (($contextArguments | ForEach-Object {
+                ConvertTo-NativeArgument ([string]$_)
+            }) -join ' ')
+        }
+        $contextStart.WorkingDirectory = $contextStagedPayload
+        $contextStart.UseShellExecute = $false
+        $contextStart.CreateNoWindow = $true
+        $contextChild = [Diagnostics.Process]::Start($contextStart)
+        if (-not $contextChild) {
+            Write-Error 'Context installer child could not be started.'
+            exit 1
+        }
         if (
             $contextDeadline -gt 0 -and
             -not $contextChild.WaitForExit($contextDeadline * 1000)
@@ -3094,6 +3226,10 @@ switch ($Action) {
             if (-not (Deploy-Package)) { exit 1 }
         }
         if (-not (Deploy-Wrappers)) { exit 1 }
+        if ($ContextualInstall -and -not (Test-ContextGovernanceUnchanged)) {
+            Write-ServiceErr 'Installation governance changed before runtime cutover'
+            exit 1
+        }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         if ($ContextualInstall) {
             Write-V3Manifest
@@ -3417,6 +3553,8 @@ switch ($Action) {
         Write-ServiceHeader "Updating $ServiceName"
 
         if ($ContextualInstall) {
+            if (-not (Ensure-Uv)) { exit 1 }
+            Ensure-UvIndex
             foreach ($dir in @($InstallDir, $BinDir)) {
                 Ensure-InstallDir $dir
             }
@@ -3427,6 +3565,10 @@ switch ($Action) {
                 if (-not (Deploy-Package)) { exit 1 }
             }
             if (-not (Deploy-Wrappers)) { exit 1 }
+            if (-not (Test-ContextGovernanceUnchanged)) {
+                Write-ServiceErr 'Installation governance changed before runtime cutover'
+                exit 1
+            }
             if (-not (Invoke-VersionedActivate)) { exit 1 }
             Write-V3Manifest
             Write-ServiceOk "Context runtime updated at $InstallDir"

@@ -43,6 +43,8 @@ def _powershell() -> str:
     for name in ("pwsh", "powershell.exe", "powershell"):
         executable = shutil.which(name)
         if executable is not None:
+            if os.name != "nt" and Path(executable).suffix.lower() == ".exe":
+                continue
             return executable
     pytest.skip("PowerShell is not available")
 
