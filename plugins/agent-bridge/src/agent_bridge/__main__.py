@@ -4870,10 +4870,15 @@ def _cmd_handoff_request(args: argparse.Namespace) -> None:
     """Request an externally-seeded in-place handoff for a worktree session.
 
     This is the best-effort control-plane ping used by context-handoff after it
-    already stored the durable baton elsewhere. The caller names both the
+    already stored the durable baton elsewhere from an extension-enabled
+    session outside the ACP-hosted child itself. The caller names both the
     worktree and the ACP/bridge session it believes currently owns that
     worktree; agent-bridge only acts when that session still matches the
     worktree's current head.
+
+    Agent-bridge's own proactive ACP auto-handoff remains self-contained and
+    does not require this command; it still derives context pressure internally
+    and asks the retiring child to author its own continuation brief.
     """
     from .client import BridgeClientError
 

@@ -912,13 +912,19 @@ async def handoff_worktree_request(
     """Perform an externally-seeded in-place handoff for a worktree session.
 
     This is the control-plane seam used by ``context-handoff``'s best-effort
-    `agent-bridge handoff-request` ping. The caller already composed and stored
-    the durable baton, so it supplies the exact successor opening turn
-    (``seed_text``) plus the session it believes currently owns the worktree.
-    The route resolves the worktree's current bridge session, verifies it still
-    matches the requested session id, and then reuses
-    ``SessionManager.handoff_session`` with the external seed instead of asking
-    the predecessor to author a new brief.
+    `agent-bridge handoff-request` ping from some OTHER extension-enabled
+    session. The caller already composed and stored the durable baton, so it
+    supplies the exact successor opening turn (``seed_text``) plus the session
+    it believes currently owns the worktree. The route resolves the worktree's
+    current bridge session, verifies it still matches the requested session id,
+    and then reuses ``SessionManager.handoff_session`` with the external seed
+    instead of asking the predecessor to author a new brief.
+
+    This route is additive only: agent-bridge's own ACP-hosted sessions do not
+    rely on it for proactive/usage-driven handoff. Those sessions remain fully
+    self-contained under ``SessionManager``'s internal context-pressure +
+    self-authored-brief flow, which does not depend on Copilot CLI extensions
+    being active in the hosted child.
 
     Errors: 404 (no current session for the worktree / requested session no
     longer matches it), 409 (single-checkout agent or mid-turn), 502 (successor

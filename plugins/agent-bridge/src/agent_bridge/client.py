@@ -1248,7 +1248,9 @@ class BridgeClient:
 
         The caller already composed the successor's exact opening turn
         (``seed_text``) and identifies the session it believes currently owns
-        the worktree. Returns the successor's SessionInfo on success.
+        the worktree. This supplements, but does not replace, agent-bridge's
+        internal ACP auto-handoff path. Returns the successor's SessionInfo on
+        success.
         """
         body: dict[str, Any] = {
             "session_id": session_id,

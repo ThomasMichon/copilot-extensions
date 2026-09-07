@@ -6428,6 +6428,14 @@ class SessionManager:
         Ordering is spawn-then-retire so a failed successor spawn leaves the
         predecessor untouched and current -- a handoff never orphans the
         worktree. Returns the successor session.
+
+        The self-authored-brief path is the normal and currently only
+        self-contained route for agent-bridge's own ACP-hosted sessions,
+        including usage-driven auto-handoff. ``seed_text`` is optional
+        enrichment for an external caller that already composed the exact
+        successor opening turn; it does not change the default ACP behavior or
+        create any dependency on Copilot CLI extensions being active in the
+        hosted child.
         """
         if self._draining:
             raise DaemonDrainingError("handoff")

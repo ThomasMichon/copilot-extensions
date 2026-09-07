@@ -116,7 +116,9 @@ class WorktreeHandoffRequest(BaseModel):
     """External control-plane request to hand off a worktree's current session.
 
     Used by callers that already composed the successor's exact opening turn and
-    want agent-bridge to perform only the in-place session swap.
+    want agent-bridge to perform only the in-place session swap. This is an
+    optional integration point, not the mechanism agent-bridge's own
+    ACP-hosted sessions depend on for auto-handoff.
     """
 
     session_id: str = Field(

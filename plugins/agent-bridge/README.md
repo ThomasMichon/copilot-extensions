@@ -343,10 +343,13 @@ Start with [Getting Started](docs/getting-started.md) for the standalone install
 and first health check. Then use the [`agent-bridge` skill](skills/agent-bridge/SKILL.md)
 and [CLI reference](skills/agent-bridge/references/cli-commands.md) for
 day-to-day dispatch, live-session messaging, handoff, and service control.
-`agent-bridge handoff-request` is the external control-plane seam: a caller
-that already stored a durable baton can ask the bridge to roll a worktree's
-current ACP session in place and seed the successor with an exact supplied
-opening prompt.
+`agent-bridge handoff-request` is an additional external control-plane seam: a
+different extension-enabled session that already stored a durable baton can ask
+the bridge to roll a worktree's current ACP session in place and seed the
+successor with an exact supplied opening prompt. This does **not** replace or
+power agent-bridge's own ACP auto-handoff path: ACP-hosted children still rely
+on the bridge's internal context-pressure detection and self-authored brief
+flow, independent of Copilot CLI extension activation.
 Use [`agent-bridge-troubleshooting`](skills/agent-bridge-troubleshooting/SKILL.md)
 for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 
