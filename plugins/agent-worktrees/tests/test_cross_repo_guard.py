@@ -273,6 +273,32 @@ def test_run_related_warns_once_when_runtime_unresolved(tmp_path, monkeypatch, c
     assert capsys.readouterr().err == ""
 
 
+def test_run_related_suppresses_console_when_resolver_falls_back_to_cmd(
+    tmp_path, monkeypatch
+):
+    # _runtime_argv's own docstring documents a rare last-resort fallback to
+    # the PATH .cmd binstub, which Windows must interpret through a fresh
+    # cmd.exe -- CREATE_NO_WINDOW must be set so that console never flashes.
+    monkeypatch.setattr(
+        guard, "_runtime_argv", lambda: [r"C:\bin\agent-worktrees.CMD"]
+    )
+    captured = {}
+
+    def fake_run(argv, *, cwd, capture_output, text, timeout, **kwargs):
+        captured.update(argv=argv, kwargs=kwargs)
+
+        class _Result:
+            returncode = 0
+            stdout = "{}"
+
+        return _Result()
+
+    monkeypatch.setattr(guard.subprocess, "run", fake_run)
+    monkeypatch.setattr(guard, "_IS_WIN", True)
+    assert guard._run_related(["list", "--json"], str(tmp_path)) == "{}"
+    assert captured["kwargs"].get("creationflags") == 0x08000000
+
+
 # --- empty guarded set / fail-open --------------------------------------------
 
 def test_no_guarded_repos_allows(tmp_path):
