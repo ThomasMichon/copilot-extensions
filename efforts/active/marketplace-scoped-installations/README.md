@@ -260,16 +260,19 @@ because they provide tools or services.
     repository identity, project config/tracking/session records, hooks,
     launchers, and project-command arbitration are installation-attributable.
   - [x] Blocked; transferred to `#1110`
-    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1110)):
+    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1110);
+    transfer completed):
     cell-qualified Git-ref leases require the Phase 6 maintenance/migration
     gate so old and new clients cannot hold split-brain leases during version
     skew.
   - [x] Deferred to `#1108`
-    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1108)):
+    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1108);
+    deferral completed):
     Worktree Manager supervision and any remaining fixed service/process
     identity belong to the service-bearing rollout.
   - [x] Deferred to `#1107`
-    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1107)):
+    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1107);
+    deferral completed):
     remote consumers must carry the selected installation and repository
     identity across venue/transport boundaries.
 - [ ] Convert service-free runtimes in low-risk batches
