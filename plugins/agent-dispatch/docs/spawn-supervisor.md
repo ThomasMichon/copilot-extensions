@@ -129,7 +129,7 @@ POST /spawn-reservations/{key}/cold
 POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/{key}/conclusion {conclusion_state, conclusion_detail, claim_token?}
 POST /spawn-reservations/{key}/conclusion/claim
-POST /spawn-reservations/{key}/conclusion/validate {cleanup_claim_token}
+POST /spawn-reservations/{key}/conclusion/validate {claim_token}
 POST /spawn-reservations/tasks/{task_id}/rearm {permitted, reason, min_failures}
 GET  /spawn-reservations                ?task_id&state&limit
 GET  /spawn-reservations/{key}

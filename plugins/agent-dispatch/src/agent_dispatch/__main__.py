@@ -1130,7 +1130,30 @@ def _release_failed_created_spawn(
             session_id,
             key,
         )
-    except embody.DisposableConclusionError:
+    except embody.DisposableConclusionError as exc:
+        outcome = {
+            "action": "failed",
+            "reason": str(exc)[:300],
+        }
+        conclusion_detail = json.dumps(
+            outcome,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if body_absent:
+            client.retire_spawn(
+                key,
+                exact_absence=True,
+                detail=f"{detail}; attempt conclusion failed",
+                conclusion_state="pending",
+                conclusion_detail=conclusion_detail,
+            )
+        else:
+            client.record_spawn_conclusion(
+                key,
+                conclusion_state="pending",
+                conclusion_detail=conclusion_detail,
+            )
         return
     state = Supervisor._conclusion_state(outcome)
     conclusion_detail = json.dumps(
@@ -1138,7 +1161,7 @@ def _release_failed_created_spawn(
         sort_keys=True,
         separators=(",", ":"),
     )
-    if not body_absent or state == "pending":
+    if not body_absent:
         client.record_spawn_conclusion(
             key,
             conclusion_state=state,

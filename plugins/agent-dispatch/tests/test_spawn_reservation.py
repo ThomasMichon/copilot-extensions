@@ -1728,3 +1728,92 @@ def test_no_spawn_mechanism_can_retire_held_cleanup(monkeypatch, q):
     retired = q.latest_reservation(task.id)
     assert retired.state == SpawnState.FAILED
     assert retired.conclusion_state == "held"
+
+
+def test_no_spawn_mechanism_retires_pending_cleanup_with_metadata(
+    monkeypatch, q
+):
+    task = q.create("work")
+    monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: {
+            "action": "skipped",
+            "reason": "live-session",
+        },
+    )
+    monkeypatch.setattr(m, "_do_spawn", lambda *_args, **_kwargs: None)
+    args = types.SimpleNamespace(url=None, token=None)
+
+    m._spawn_worker_for(args, {"id": task.id})
+
+    retired = q.latest_reservation(task.id)
+    assert retired.state == SpawnState.FAILED
+    assert retired.conclusion_state == "pending"
+    assert "live-session" in (retired.conclusion_detail or "")
+    replacement, acquired = q.reserve_spawn(task.id)
+    assert acquired is True
+    assert replacement.attempt == 2
+    assert replacement.worktree is None
+
+
+@pytest.mark.parametrize(
+    ("body_absent", "expected_state"),
+    [
+        (True, SpawnState.FAILED),
+        (False, SpawnState.RELEASING),
+    ],
+)
+def test_conclusion_exception_respects_independent_body_absence(
+    monkeypatch, q, body_absent, expected_state
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-created",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            embody.DisposableConclusionError("bounded cleanup failure")
+        ),
+    )
+    client = _QueueBackedClient(q)
+
+    m._release_failed_created_spawn(
+        client,
+        reservation.key,
+        worktree="wt-created",
+        session_id=None,
+        detail="spawn failed",
+        body_absent=body_absent,
+    )
+
+    result = q.get_reservation(reservation.key)
+    assert result.state == expected_state
+    assert result.conclusion_state == "pending"
+    payload = json.loads(result.conclusion_detail or "{}")
+    assert payload == {
+        "action": "failed",
+        "reason": "bounded cleanup failure",
+    }
+    if body_absent:
+        replacement, acquired = q.reserve_spawn(task.id)
+        assert acquired is True
+        assert replacement.attempt == 2
+        assert replacement.worktree is None
+    else:
+        blocked, acquired = q.reserve_spawn(task.id)
+        assert acquired is False
+        assert blocked.key == reservation.key
