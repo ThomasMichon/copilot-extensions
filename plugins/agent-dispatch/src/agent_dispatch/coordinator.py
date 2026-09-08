@@ -121,6 +121,89 @@ def _self_retire_settings() -> tuple[bool, float, int]:
     return enabled, poll, k
 
 
+# Live self-update: a coordinator that notices its own running version has
+# been superseded by a newer, fully-installed one (the ``current-version``
+# marker -- see ``self_update.py``) spawns a self-triggered ``deploy`` and
+# lets the existing self-retire loop above own its own graceful exit once
+# that spawned deploy flips the routing table to the new generation.
+#
+# Opt-in (default-OFF), unlike self-retire: self-retire only ever *reacts* to
+# a cutover someone else already committed, so it is safe to arm everywhere.
+# This loop *initiates* one on its own, so a first release stays opt-in
+# (``AGENT_DISPATCH_SELF_UPDATE=1``) until it has soaked in the field.
+_SELF_UPDATE_DEFAULT_POLL_S = 60.0
+_SELF_UPDATE_DEFAULT_CONFIRMATIONS = 3
+_SELF_UPDATE_DEFAULT_COOLDOWN_S = 900.0
+
+
+def _self_update_settings() -> tuple[bool, float, int, float]:
+    """``(enabled, poll_seconds, confirmations, cooldown_seconds)``.
+
+    ``enabled`` is False unless ``AGENT_DISPATCH_SELF_UPDATE`` is explicitly
+    truthy (opt-in). Poll cadence, confirmation count, and the cooldown
+    between spawn attempts (so a deploy that silently fails to land doesn't
+    get re-triggered every poll) are overridable via
+    ``AGENT_DISPATCH_SELF_UPDATE_POLL_S``,
+    ``AGENT_DISPATCH_SELF_UPDATE_CONFIRMATIONS``, and
+    ``AGENT_DISPATCH_SELF_UPDATE_COOLDOWN_S``.
+    """
+    import os
+
+    enabled = os.environ.get("AGENT_DISPATCH_SELF_UPDATE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    try:
+        poll = float(
+            os.environ.get("AGENT_DISPATCH_SELF_UPDATE_POLL_S", "")
+            or _SELF_UPDATE_DEFAULT_POLL_S
+        )
+        poll = max(1.0, poll)
+    except ValueError:
+        poll = _SELF_UPDATE_DEFAULT_POLL_S
+    try:
+        k = int(
+            os.environ.get("AGENT_DISPATCH_SELF_UPDATE_CONFIRMATIONS", "")
+            or _SELF_UPDATE_DEFAULT_CONFIRMATIONS
+        )
+        k = max(1, k)
+    except ValueError:
+        k = _SELF_UPDATE_DEFAULT_CONFIRMATIONS
+    try:
+        cooldown = float(
+            os.environ.get("AGENT_DISPATCH_SELF_UPDATE_COOLDOWN_S", "")
+            or _SELF_UPDATE_DEFAULT_COOLDOWN_S
+        )
+        cooldown = max(0.0, cooldown)
+    except ValueError:
+        cooldown = _SELF_UPDATE_DEFAULT_COOLDOWN_S
+    return enabled, poll, k, cooldown
+
+
+def _spawn_self_deploy(python_path: Any) -> None:
+    """Fire-and-forget a self-triggered ``deploy`` using *python_path*.
+
+    ``python_path`` is the newer version's own interpreter (resolved by
+    :func:`agent_dispatch.self_update.stale_target`), so the spawned process's
+    own ``deploy`` runs the newly-installed code -- the same shape as an
+    installer invoking ``deploy``/``_cutover`` right after publishing a new
+    slot, just triggered by the running coordinator instead of externally.
+    Never raises to the caller's polling loop; a spawn failure is left for
+    the next poll to retry.
+    """
+    import subprocess
+
+    from agent_procutil import detached_kwargs, windowless_python
+
+    cmd = [windowless_python(python_path), "-m", "agent_dispatch", "deploy", "--json"]
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    kwargs.update(detached_kwargs())
+    subprocess.Popen(cmd, **kwargs)  # noqa: S603
+
+
 class DrainGate:
     """Process-wide drain state for the graceful daemon cutover.
 
@@ -876,6 +959,88 @@ def create_app(
                 "self-retire-on-supersession armed (K=%d, poll=%.0fs)",
                 _sr_confirmations, _sr_poll,
             )
+
+        # Live self-update: periodically checks whether a newer, fully
+        # installed version is now published (``current-version`` marker) and,
+        # once confirmed stale at a safe cutover point, spawns a self-triggered
+        # ``deploy`` from that version's own interpreter. Opt-in
+        # (``AGENT_DISPATCH_SELF_UPDATE=1``) -- see ``_self_update_settings``.
+        self_update_task = None
+        _su_enabled, _su_poll, _su_confirmations, _su_cooldown = _self_update_settings()
+        if _su_enabled:
+            async def _self_update_loop() -> None:
+                import os as _os
+
+                from zdd import routing
+                from zdd.routing import Endpoint
+
+                from .config import routing_dir
+                from .self_retire import is_superseded
+                from .self_update import stale_target
+
+                my_pid = _os.getpid()
+                my_gen: int | None = None
+                for _ in range(600):  # ~5 min ceiling to see our own publish
+                    await asyncio.sleep(0.5)
+                    data = await asyncio.to_thread(routing.read_table, routing_dir())
+                    raw = data.get("active") if isinstance(data, dict) else None
+                    ep = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+                    if ep is not None and ep.pid == my_pid:
+                        my_gen = ep.generation
+                        break
+                if my_gen is None:
+                    return
+                gate = getattr(_app.state, "drain_gate", None)
+                confirms = 0
+                last_trigger = 0.0
+                while True:
+                    await asyncio.sleep(_su_poll)
+                    try:
+                        if await asyncio.to_thread(
+                            is_superseded, routing_dir(), my_pid, my_gen
+                        ):
+                            # A newer generation is already live -- either our
+                            # own prior trigger landed, or someone else
+                            # redeployed. Self-retire above owns our exit.
+                            return
+                        target = await asyncio.to_thread(
+                            stale_target, routing_dir(), __version__
+                        )
+                        at_safe_point = target is not None and (
+                            gate is None or gate.claims == 0
+                        )
+                    except Exception:
+                        confirms = 0
+                        log.debug("self-update staleness check failed", exc_info=True)
+                        continue
+                    if not at_safe_point:
+                        confirms = 0
+                        continue
+                    confirms += 1
+                    if confirms < _su_confirmations:
+                        continue
+                    now = time.monotonic()
+                    if now - last_trigger < _su_cooldown:
+                        continue
+                    last_trigger = now
+                    confirms = 0
+                    try:
+                        _spawn_self_deploy(target)
+                        log.info(
+                            "detected a newer installed version at %s -- "
+                            "spawned a self-triggered deploy (pid %d, gen %d)",
+                            target, my_pid, my_gen,
+                        )
+                    except Exception:
+                        log.warning(
+                            "failed to spawn self-triggered deploy", exc_info=True
+                        )
+
+            self_update_task = asyncio.create_task(_self_update_loop())
+            log.info(
+                "self-update armed (K=%d, poll=%.0fs, cooldown=%.0fs)",
+                _su_confirmations, _su_poll, _su_cooldown,
+            )
         async with contextlib.AsyncExitStack() as stack:
             if coordinator_mcp is not None:
                 # mcp 2.0: a mounted sub-app's own lifespan doesn't run, so drive
@@ -895,6 +1060,12 @@ def create_app(
                     self_retire_task.cancel()
                     try:
                         await self_retire_task
+                    except asyncio.CancelledError:
+                        pass
+                if self_update_task is not None:
+                    self_update_task.cancel()
+                    try:
+                        await self_update_task
                     except asyncio.CancelledError:
                         pass
                 if sweeper is not None:

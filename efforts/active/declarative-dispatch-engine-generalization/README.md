@@ -393,3 +393,58 @@ other phases actually land in.
   copying the already-edited `-k` worktree declaration onto the live
   `dotfiles` anchor.
 
+### 2026-09-07 (cont. 2) - Built agent-dispatch live self-update + a public `deploy` verb
+
+- Root cause of the recurring "daemon-version gate" gotcha above: the
+  coordinator had no way to notice, on its own, that a newer version had
+  been installed -- the only trigger was an external one (a new Copilot CLI
+  session's launch-time reconcile, or an operator noticing and restarting
+  the service). Investigated `agent-bridge`'s existing `deploy` verb and
+  found `agent-dispatch` already vendors the *same* `zdd` zero-downtime
+  cutover primitive (`CutoverOrchestrator`, routing table, self-retire) via
+  a hidden, installer-only `_cutover` CLI seam -- the missing pieces were
+  purely (a) an operator-facing name for it, and (b) live staleness
+  detection.
+- Added `plugins/agent-dispatch/src/agent_dispatch/self_update.py`: a
+  fail-safe, fully-injectable `stale_target()` predicate (mirrors
+  `self_retire.is_superseded`'s style) that reads the `current-version`
+  marker file `versioned_runtime.py` already publishes and resolves the
+  interpreter path for that version's slot -- returns `None` (stay put) for
+  every ambiguous state (no marker, marker matches running version, or the
+  named slot has no installed interpreter yet).
+- Wired a new opt-in (`AGENT_DISPATCH_SELF_UPDATE=1`) background loop into
+  `coordinator.py`'s lifespan, directly alongside the existing self-retire
+  loop: polls `stale_target()`, and once K-confirmed stale at a safe cutover
+  point (`DrainGate` reports no in-flight claim), spawns a detached
+  self-triggered `agent-dispatch deploy --json` using the *newer* version's
+  own interpreter (not `sys.executable`, which would still be the stale
+  one). The existing self-retire loop then owns the old coordinator's
+  graceful exit once that spawned deploy flips the routing table -- no new
+  exit logic needed.
+- Added a public `deploy` subcommand in `__main__.py` (same handler as
+  `_cutover`, which stays as a hidden back-compat alias): documented,
+  non-suppressed help, parity with `agent-bridge deploy`.
+- Found `docs/patterns/graceful-daemon-cutover.md`'s binding invariant #1
+  ("there is NO externally-driven `deploy` command") is already violated in
+  practice by agent-bridge's real `deploy` verb, and is now also violated by
+  this change -- added an interim-reality footnote to that invariant plus an
+  updated agent-dispatch row in its per-plugin adoption table, rather than
+  silently landing a contradiction. The doc's target end-state (fully
+  installer-driven, no manual verb) is unchanged; `install.ps1
+  -ZeroDowntime` wiring (`zeroDowntimeUpdate` in `plugin.json`) to close that
+  gap is flagged as a follow-up, not done this leg.
+- Added `test_self_update.py` (11 cases for the pure predicate + marker/slot
+  readers), `test_self_update_coordinator.py` (7 cases for the opt-in env-var
+  settings parsing), and `test_deploy_cli.py` (3 cases: `deploy`/`_cutover`
+  route to the same handler, accept the same flags, and `deploy` is
+  documented while `_cutover` stays suppressed). Full targeted suite (470
+  tests: coordinator, supervisor x2, self_retire, cli, lifecycle_wiring, plus
+  the three new files) passes.
+- **Not yet done:** this was NOT exercised against the live daemon this
+  leg (too risky to trigger a real self-update against the daemon this very
+  session runs on top of) -- it lands via the normal PR flow and will only
+  arm once an operator/session opts in with `AGENT_DISPATCH_SELF_UPDATE=1`.
+  Once it has soaked, consider flipping the default to on (mirroring
+  self-retire's already-validated default-on stance) and closing the
+  `install.ps1 -ZeroDowntime` gap noted above.
+
