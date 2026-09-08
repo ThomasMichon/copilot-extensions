@@ -53,6 +53,49 @@ _REQUEST_OVERRIDES_KEY = "_agent_bridge_request_overrides"
 _MAX_RESUME_ROUNDS = 3
 
 
+class _AcpLaunchTiming:
+    """Collect low-noise ACP launch sub-step timings for one session launch."""
+
+    def __init__(self, *, session_id: str, mode: str, boundary: str) -> None:
+        self.session_id = session_id
+        self.mode = mode
+        self.boundary = boundary
+        self._started = time.monotonic()
+        self._steps: list[tuple[str, float]] = []
+
+    def add(self, label: str, elapsed_s: float) -> None:
+        self._steps.append((label, max(0.0, float(elapsed_s))))
+
+    def total_s(self) -> float:
+        return max(0.0, time.monotonic() - self._started)
+
+    def step_map_ms(self) -> dict[str, int]:
+        return {
+            label: int(round(elapsed_s * 1000.0))
+            for label, elapsed_s in self._steps
+        }
+
+    def summary(self) -> str:
+        parts = [
+            f"session={self.session_id}",
+            f"mode={self.mode}",
+            f"boundary={self.boundary}",
+        ]
+        parts.extend(
+            f"{label}={int(round(elapsed_s * 1000.0))}ms"
+            for label, elapsed_s in self._steps
+        )
+        parts.append(f"total={int(round(self.total_s() * 1000.0))}ms")
+        return " ".join(parts)
+
+
+def _format_optional_hours(value_s: float | None) -> str:
+    """Render an optional age in hours for compact GC observability."""
+    if value_s is None:
+        return "-"
+    return f"{value_s / 3600.0:.1f}h"
+
+
 def _resolve_relay_launch_env(
     codespace_name: str, relay_port: int | None
 ) -> tuple[str, int | None]:
@@ -1560,15 +1603,28 @@ class SessionManager:
             "enabled": ret.enabled,
             "pruned": [],
             "pruned_count": 0,
+            "terminal_count": 0,
+            "eligible_count": 0,
+            "oldest_terminal_age_hours": None,
             "vacuumed": False,
             "reclaimed_bytes": 0,
+            "free_bytes_before_vacuum": 0,
+            "vacuum_threshold_bytes": int(ret.vacuum_min_free_mb * 1024 * 1024),
         }
         if not ret.enabled:
             return result
 
         now = now if now is not None else time.time()
         cutoff = now - ret.max_age_hours * 3600.0
+        retained = self._db.gc_status_summary(ret.statuses)
+        result["terminal_count"] = int(retained["count"])
+        oldest_terminal = retained["oldest_updated_at"]
+        if oldest_terminal is not None:
+            result["oldest_terminal_age_hours"] = (
+                max(0.0, now - float(oldest_terminal)) / 3600.0
+            )
         eligible = self._db.gc_eligible_session_ids(ret.statuses, cutoff)
+        result["eligible_count"] = len(eligible)
 
         pruned: list[str] = []
         for sid in eligible:
@@ -1588,9 +1644,10 @@ class SessionManager:
         result["pruned"] = pruned
         result["pruned_count"] = len(pruned)
 
+        info = self._db.db_size_info()
+        result["free_bytes_before_vacuum"] = info["free_bytes"]
         if ret.vacuum:
             try:
-                info = self._db.db_size_info()
                 if info["free_bytes"] >= ret.vacuum_min_free_mb * 1024 * 1024:
                     before = info["total_bytes"]
                     self._db.vacuum()
@@ -1602,14 +1659,23 @@ class SessionManager:
                 # next sweep -- never fatal.
                 log.warning("GC: VACUUM skipped/failed", exc_info=True)
 
-        if pruned or result["vacuumed"]:
-            log.info(
-                "GC (%s): pruned %d session(s), reclaimed %.1f MB%s",
-                reason,
-                len(pruned),
-                result["reclaimed_bytes"] / 1e6,
-                " (vacuumed)" if result["vacuumed"] else "",
-            )
+        log.info(
+            "GC (%s): terminal=%d eligible=%d pruned=%d oldest_terminal=%s "
+            "free=%.1fMB threshold=%.1fMB vacuumed=%s reclaimed=%.1fMB",
+            reason,
+            result["terminal_count"],
+            result["eligible_count"],
+            len(pruned),
+            _format_optional_hours(
+                None
+                if result["oldest_terminal_age_hours"] is None
+                else float(result["oldest_terminal_age_hours"]) * 3600.0
+            ),
+            result["free_bytes_before_vacuum"] / (1024.0 * 1024.0),
+            result["vacuum_threshold_bytes"] / (1024.0 * 1024.0),
+            "yes" if result["vacuumed"] else "no",
+            result["reclaimed_bytes"] / 1e6,
+        )
         return result
 
     def _find_active_session(self, ws_key: tuple) -> Session | None:
@@ -1666,6 +1732,12 @@ class SessionManager:
                 ready_timeout=self._timeouts.session_host_ready,
             )
 
+        timing = _AcpLaunchTiming(
+            session_id=session_id,
+            mode="session-host",
+            boundary=getattr(spawner, "boundary", "unknown"),
+        )
+
         if remote_child_argv is not None:
             # Remote boundary (CodeSpace/mesh): the child runs on the FAR side,
             # so there is no local worktree to resolve -- the Spawner is handed
@@ -1693,9 +1765,11 @@ class SessionManager:
             # stands up an -L forward so the frontend below still dials
             # 127.0.0.1:<local_port>. spawn() blocks briefly on host readiness,
             # so it is already off-loop.
+            step_started = time.monotonic()
             spawned = await spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
             )
+            timing.add("host_spawn", time.monotonic() - step_started)
             # Retain a remote-boundary forward so reattach can refresh it and
             # teardown can cancel it.
             if getattr(spawned, "forward", None) is not None:
@@ -1707,9 +1781,15 @@ class SessionManager:
                 relays = list(relays)
                 if relays:
                     self._relays[session_id] = relays
+            step_started = time.monotonic()
             sock = await SessionHostClient.connect(port=spawned.local_port)
+            timing.add("host_connect", time.monotonic() - step_started)
+            step_started = time.monotonic()
             await sock.attach(0, nonce=spawned.nonce.encode())
+            timing.add("host_attach", time.monotonic() - step_started)
+            step_started = time.monotonic()
             streams = await open_acp_streams(sock)
+            timing.add("host_streams", time.monotonic() - step_started)
 
             async def _closer() -> None:
                 await streams.aclose()
@@ -1731,6 +1811,7 @@ class SessionManager:
             if permission_callback:
                 client.auto_approve = False
             try:
+                step_started = time.monotonic()
                 await asyncio.wait_for(
                     client.start_streams(
                         streams.reader, streams.writer,
@@ -1738,6 +1819,7 @@ class SessionManager:
                     ),
                     timeout=self._timeouts.session_start,
                 )
+                timing.add("acp_initialize", time.monotonic() - step_started)
                 if streams.child_exit_code is not None:
                     client.mark_host_child_exited(streams.child_exit_code)
                     raise ConnectionError(
@@ -1746,19 +1828,29 @@ class SessionManager:
                     )
                 session_cwd = remote_cwd or target.cwd or _default_cwd(target)
                 if load_session_id:
+                    step_started = time.monotonic()
                     await asyncio.wait_for(
                         client.load_session(
                             cwd=session_cwd,
                             session_id=load_session_id,
+                            timing_callback=timing.add,
                         ),
                         timeout=self._timeouts.session_new,
                     )
+                    timing.add("session_load_total", time.monotonic() - step_started)
                     acp_sid = load_session_id
                 else:
+                    step_started = time.monotonic()
                     acp_sid = await asyncio.wait_for(
-                        client.new_session(cwd=session_cwd, mcp_servers=mcp_servers),
+                        client.new_session(
+                            cwd=session_cwd,
+                            mcp_servers=mcp_servers,
+                            timing_callback=timing.add,
+                        ),
                         timeout=self._timeouts.session_new,
                     )
+                    timing.add("session_new_total", time.monotonic() - step_started)
+                log.info("ACP launch timing: result=ok %s", timing.summary())
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 # Leave a queryable marker so a stalled session-host resume/launch
                 # is not a silent [starting]->[stopped] (#1468). The child's
@@ -1770,7 +1862,9 @@ class SessionManager:
                         "mode": "session-host",
                         "handshake_timeout_s": self._timeouts.session_start,
                         "session_new_timeout_s": self._timeouts.session_new,
+                        "timing_ms": timing.step_map_ms(),
                     })
+                log.warning("ACP launch timing: result=timeout %s", timing.summary())
                 cleanup_confirmed = await self._rollback_failed_host_launch(
                     spawner,
                     spawned,
@@ -1801,6 +1895,11 @@ class SessionManager:
                     cause=exc,
                 ) from exc
             except Exception as exc:
+                log.warning(
+                    "ACP launch timing: result=error error=%s %s",
+                    type(exc).__name__,
+                    timing.summary(),
+                )
                 cleanup_confirmed = await self._rollback_failed_host_launch(
                     spawner,
                     spawned,
@@ -4433,6 +4532,11 @@ class SessionManager:
                 # Stage 7: launch + initialize Copilot in ACP mode. Should be
                 # fast; bound it so a hung launch fails fast.
                 with tracker.stage(ConnectStage.LAUNCH_ACP):
+                    timing = _AcpLaunchTiming(
+                        session_id=session_id,
+                        mode="process",
+                        boundary=getattr(target, "type", "unknown"),
+                    )
                     client = AcpClient(
                         on_event=on_acp_event,
                         on_permission=permission_callback,
@@ -4442,10 +4546,12 @@ class SessionManager:
                     if permission_callback:
                         client.auto_approve = False
                     try:
+                        step_started = time.monotonic()
                         await asyncio.wait_for(
                             client.start(agent_proc.proc),
                             timeout=self._timeouts.session_start,
                         )
+                        timing.add("acp_initialize", time.monotonic() - step_started)
                         # Create ACP session -- binstub agents resolve CWD
                         # remotely, so target.cwd may be None.  The ACP spec
                         # requires an absolute path.  Prefer the venue's concrete
@@ -4457,12 +4563,17 @@ class SessionManager:
                             or target.cwd
                             or _default_cwd(target)
                         )
+                        step_started = time.monotonic()
                         acp_sid = await asyncio.wait_for(
                             client.new_session(
-                                cwd=session_cwd, mcp_servers=mcp_servers,
+                                cwd=session_cwd,
+                                mcp_servers=mcp_servers,
+                                timing_callback=timing.add,
                             ),
                             timeout=self._timeouts.session_new,
                         )
+                        timing.add("session_new_total", time.monotonic() - step_started)
+                        log.info("ACP launch timing: result=ok %s", timing.summary())
                     except (TimeoutError, asyncio.TimeoutError) as exc:
                         # Leave a queryable marker so a stalled launch is not a
                         # silent [starting]->[stopped] (#1468). The process-owned
@@ -4475,7 +4586,9 @@ class SessionManager:
                                 "handshake_timeout_s": self._timeouts.session_start,
                                 "session_new_timeout_s": self._timeouts.session_new,
                                 "stderr_tail": client.stderr_tail(),
+                                "timing_ms": timing.step_map_ms(),
                             })
+                        log.warning("ACP launch timing: result=timeout %s", timing.summary())
                         raise ConnectError(
                             ConnectStage.LAUNCH_ACP,
                             f"Copilot ACP launch timed out "
@@ -4487,6 +4600,13 @@ class SessionManager:
                             retryable=False,
                             cause=exc,
                         ) from exc
+                    except Exception as exc:
+                        log.warning(
+                            "ACP launch timing: result=error error=%s %s",
+                            type(exc).__name__,
+                            timing.summary(),
+                        )
+                        raise
 
             session.client = client
             session.acp_session_id = acp_sid
