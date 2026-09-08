@@ -2448,7 +2448,11 @@ def _passive_daemon_stdio_kwargs() -> tuple[dict, list]:
     from .config import config_dir
 
     log_out = open(config_dir() / "agent-bridge.log", "ab")
-    log_err = open(config_dir() / "agent-bridge-err.log", "ab")
+    try:
+        log_err = open(config_dir() / "agent-bridge-err.log", "ab")
+    except OSError:
+        log_out.close()
+        raise
     kwargs = {"stdout": log_out, "stderr": log_err, "stdin": subprocess.DEVNULL}
     return kwargs, [log_out, log_err]
 

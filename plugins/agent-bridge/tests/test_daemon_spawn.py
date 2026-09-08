@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import subprocess
 
+import pytest
+
 from agent_bridge import __main__ as main
 
 # Win32 process-creation constants, resolved with a getattr fallback so this
@@ -58,3 +60,33 @@ def test_passive_daemon_stdio_kwargs_redirects_to_log_files(tmp_path, monkeypatc
     finally:
         for stream in opened_streams:
             stream.close()
+
+
+def test_passive_daemon_stdio_kwargs_closes_first_handle_if_second_open_fails(
+    tmp_path, monkeypatch,
+):
+    """If opening the second log file fails (e.g. a permission/IO error), the
+    first handle must not leak -- important because this helper runs during
+    deploy/cutover, where a leak would accumulate across retries."""
+    import agent_bridge.config as config_module
+    monkeypatch.setattr(config_module, "config_dir", lambda: tmp_path)
+
+    import builtins
+    real_open = builtins.open
+    opened = []
+
+    def fake_open(path, mode="r", *a, **kw):
+        f = real_open(path, mode, *a, **kw)
+        opened.append(f)
+        if str(path).endswith("agent-bridge-err.log"):
+            raise OSError("permission denied (simulated)")
+        return f
+
+    monkeypatch.setattr(main, "open", fake_open, raising=False)
+    with pytest.raises(OSError, match="permission denied"):
+        main._passive_daemon_stdio_kwargs()
+
+    # The first (stdout) handle must have been closed by the failure path,
+    # not left dangling.
+    assert opened[0].closed
+
