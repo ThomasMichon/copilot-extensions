@@ -319,9 +319,9 @@ other phases actually land in.
 
 - Edited the `-k` dotfiles worktree's live declaration to
   `worker_identity: odsp-web-harness-backlog` and validated it against the
-  running daemon's own installed code
-  (`C:\Users\tmichon\.agent-dispatch\versions\0.1.2-dev34\...\repository_issue_loops.validate_config`)
-  before actually deploying the change. It failed:
+  running daemon's own installed code (the local per-user
+  `.agent-dispatch\versions\0.1.2-dev34\...\repository_issue_loops.validate_config`
+  runtime slot) before actually deploying the change. It failed:
   `RegistrarError: worker_identity 'odsp-web-harness-backlog': no identity
   file found`. Root cause: `worker_identities._BUILTIN_DIR` was computed as
   `Path(__file__).resolve().parents[2] / "identities"`, which only resolves
