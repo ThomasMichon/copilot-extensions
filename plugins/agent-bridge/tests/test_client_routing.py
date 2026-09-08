@@ -56,11 +56,17 @@ def test_end_stop_thread_force_query_param(cfg_dir: Path, monkeypatch):
     client.end_session("s2", force=True)
     client.stop_session("s3")
     client.stop_session("s4", force=True)
+    client.stop_session("s5", force=True, reap_host=True)
     assert calls == [
         ("DELETE", "/api/v1/sessions/s1", {"params": None}),
         ("DELETE", "/api/v1/sessions/s2", {"params": {"force": "true"}}),
         ("POST", "/api/v1/sessions/s3/stop", {"params": None}),
         ("POST", "/api/v1/sessions/s4/stop", {"params": {"force": "true"}}),
+        (
+            "POST",
+            "/api/v1/sessions/s5/stop",
+            {"params": {"force": "true", "reap_host": "true"}},
+        ),
     ]
 
 

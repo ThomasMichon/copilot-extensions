@@ -1710,6 +1710,17 @@ class TestBackgroundTaskTeardownGate:
             "whatever", force=False, reap_host=False
         )
 
+    def test_stop_reap_host_composes_with_force(self, client, app) -> None:
+        mgr: SessionManager = app.state.session_manager
+        mgr.stop_session = AsyncMock()
+        resp = client.post(
+            "/api/v1/sessions/whatever/stop?force=true&reap_host=true"
+        )
+        assert resp.status_code == 204
+        mgr.stop_session.assert_awaited_once_with(
+            "whatever", force=True, reap_host=True
+        )
+
     def test_force_delete_succeeds_when_busy(self, client, app) -> None:
         self._inject_busy_session(app)
         resp = client.delete("/api/v1/sessions/bg-sess-1?force=true")

@@ -358,8 +358,9 @@ class SpawnState:
     #: replacement until an explicit resume request releases it.
     COLD = "cold"
     #: The body has stopped or failed and this reservation is concluding the
-    #: exact allocation it created. A replacement stays fenced until cleanup
-    #: completes or the allocation is explicitly held for attention.
+    #: exact allocation it created. The reservation remains active only until
+    #: exact body absence is proven; allocation cleanup then remains visible as
+    #: conclusion metadata without fencing replacement capacity.
     RELEASING = "releasing"
     #: The reserved (task, attempt) reached a terminal outcome and needs no
     #: further spawning.
@@ -390,6 +391,63 @@ class SpawnState:
 def spawn_key(task_id: str, attempt: int) -> str:
     """The canonical reservation key for a (task, attempt) spawn."""
     return f"dispatch-task:{task_id}:{attempt}"
+
+
+def _conclusion_payload(raw: object) -> dict[str, object]:
+    if not isinstance(raw, str) or not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _validate_conclusion_claim(
+    stored_token: object,
+    stored_expires_at: object,
+    supplied_token: str | None,
+    *,
+    now: float,
+    required: bool = False,
+) -> None:
+    if required and not stored_token:
+        raise TaskError("cleanup claim token is required")
+    if isinstance(stored_token, str) and stored_token:
+        if supplied_token is None:
+            raise TaskError("cleanup claim token is required")
+        if supplied_token != stored_token:
+            raise TaskError("cleanup claim changed")
+        try:
+            claim_expires_at = float(stored_expires_at or 0)
+        except (TypeError, ValueError):
+            claim_expires_at = 0.0
+        if claim_expires_at <= now:
+            raise TaskError("cleanup claim expired")
+    elif supplied_token is not None:
+        raise TaskError("cleanup claim changed")
+
+
+def _newer_worktree_reservation(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    key: str,
+) -> sqlite3.Row | None:
+    if not row["worktree"]:
+        return None
+    return conn.execute(
+        "SELECT key FROM spawn_reservations "
+        "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
+        "AND reserved_at > ? ORDER BY reserved_at DESC LIMIT 1",
+        (
+            key,
+            row["worktree"],
+            row["worktree"],
+            row["reserved_at"],
+        ),
+    ).fetchone()
 
 
 @dataclass(frozen=True)
@@ -666,6 +724,7 @@ class SpawnReservation:
     reserved_by: str | None = None
     session_handle: str | None = None
     worktree: str | None = None
+    inherited_worktree: str | None = None
     worktree_ownership: str | None = None
     creating_host: str | None = None
     driver: str | None = None
@@ -674,6 +733,8 @@ class SpawnReservation:
     detail: str | None = None
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
+    cleanup_claim_token: str | None = None
+    cleanup_claim_expires_at: float | None = None
     reserved_at: float = 0.0
     updated_at: float = 0.0
 
@@ -688,6 +749,7 @@ class SpawnReservation:
             reserved_by=row["reserved_by"],
             session_handle=row["session_handle"],
             worktree=row["worktree"],
+            inherited_worktree=row["inherited_worktree"],
             worktree_ownership=row["worktree_ownership"],
             creating_host=row["creating_host"],
             driver=row["driver"],
@@ -696,6 +758,8 @@ class SpawnReservation:
             detail=row["detail"],
             conclusion_state=row["conclusion_state"],
             conclusion_detail=row["conclusion_detail"],
+            cleanup_claim_token=row["cleanup_claim_token"],
+            cleanup_claim_expires_at=row["cleanup_claim_expires_at"],
             reserved_at=row["reserved_at"],
             updated_at=row["updated_at"],
         )
@@ -1125,6 +1189,7 @@ class TaskQueue:
                 "  reserved_by TEXT,"
                 "  session_handle TEXT,"
                 "  worktree TEXT,"
+                "  inherited_worktree TEXT,"
                 "  worktree_ownership TEXT,"
                 "  creating_host TEXT,"
                 "  driver TEXT,"
@@ -1133,6 +1198,8 @@ class TaskQueue:
                 "  detail TEXT,"
                 "  conclusion_state TEXT,"
                 "  conclusion_detail TEXT,"
+                "  cleanup_claim_token TEXT,"
+                "  cleanup_claim_expires_at REAL,"
                 "  reserved_at REAL NOT NULL,"
                 "  updated_at REAL NOT NULL"
                 ")"
@@ -1198,6 +1265,21 @@ class TaskQueue:
                     "PRAGMA table_info(spawn_reservations)"
                 ).fetchall()
             }
+            for column in ("worktree_ownership", "creating_host", "driver"):
+                if column not in reservation_columns:
+                    try:
+                        conn.execute(
+                            f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT"
+                        )
+                    except sqlite3.OperationalError as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            raise
+            reservation_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(spawn_reservations)"
+                ).fetchall()
+            }
             if "conclusion_state" not in reservation_columns:
                 try:
                     conn.execute(
@@ -1216,6 +1298,38 @@ class TaskQueue:
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
+            if "cleanup_claim_token" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN cleanup_claim_token TEXT"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            if "cleanup_claim_expires_at" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN cleanup_claim_expires_at REAL"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            if "inherited_worktree" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN inherited_worktree TEXT"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            conn.execute(
+                "UPDATE spawn_reservations SET inherited_worktree = worktree "
+                "WHERE inherited_worktree IS NULL "
+                "AND worktree_ownership = 'reused' AND worktree IS NOT NULL"
+            )
             if "exclusive_key" not in reservation_columns:
                 try:
                     conn.execute(
@@ -1243,15 +1357,20 @@ class TaskQueue:
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
-            for column in ("worktree_ownership", "creating_host", "driver"):
-                if column not in reservation_columns:
-                    try:
-                        conn.execute(
-                            f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT"
-                        )
-                    except sqlite3.OperationalError as exc:
-                        if "duplicate column name" not in str(exc).lower():
-                            raise
+            conn.execute(
+                "UPDATE spawn_reservations SET state = ?, "
+                "release_disposition = COALESCE(release_disposition, ?), "
+                "conclusion_state = COALESCE(conclusion_state, ?) "
+                "WHERE release_requested = 1 AND state IN (?, ?, ?)",
+                (
+                    SpawnState.RELEASING,
+                    "settled",
+                    "pending",
+                    SpawnState.RESERVING,
+                    SpawnState.SPAWNED,
+                    SpawnState.COLD,
+                ),
+            )
             conn.execute(
                 "UPDATE spawn_reservations SET exclusive_key = ("
                 " SELECT exclusive_key FROM tasks"
@@ -4986,10 +5105,16 @@ class TaskQueue:
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
             if release_spawn:
                 conn.execute(
-                    "UPDATE spawn_reservations SET release_requested = 1, "
+                    "UPDATE spawn_reservations SET state = ?, "
+                    "release_requested = 1, "
+                    "release_disposition = COALESCE(release_disposition, ?), "
+                    "conclusion_state = COALESCE(conclusion_state, ?), "
                     "updated_at = ?, detail = COALESCE(detail, ?) WHERE task_id = ?"
                     " AND state IN (?, ?, ?)",
                     (
+                        SpawnState.RELEASING,
+                        "settled",
+                        "pending",
                         ts,
                         release_spawn_detail,
                         task_id,
@@ -5261,21 +5386,40 @@ class TaskQueue:
                         retired = conn.execute(
                             "SELECT 1 FROM spawn_reservations "
                             "WHERE exclusive_key = ? AND session_handle = ? "
-                            "AND release_requested = 1 AND state = ? LIMIT 1",
+                            "AND release_requested = 1 AND state IN (?, ?) LIMIT 1",
                             (
                                 task.exclusive_key,
                                 carried_session,
                                 SpawnState.SETTLED,
+                                SpawnState.FAILED,
                             ),
                         ).fetchone()
                         if retired is not None:
                             carried_session = None
                     worktree_ownership = "reused"
+            if carried_worktree is not None:
+                cleanup_claims = conn.execute(
+                    "SELECT key FROM spawn_reservations "
+                    "WHERE worktree = ? AND state IN (?, ?) "
+                    "AND conclusion_state = ?",
+                    (
+                        carried_worktree,
+                        SpawnState.FAILED,
+                        SpawnState.SETTLED,
+                        "pending",
+                    ),
+                ).fetchall()
+                for cleanup_claim in cleanup_claims:
+                    carried_worktree = None
+                    carried_session = None
+                    worktree_ownership = None
+                    break
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
-                "session_handle, worktree, worktree_ownership, reserved_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "session_handle, worktree, inherited_worktree, "
+                "worktree_ownership, reserved_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     key,
                     task_id,
@@ -5284,6 +5428,7 @@ class TaskQueue:
                     SpawnState.RESERVING,
                     reserved_by,
                     carried_session,
+                    carried_worktree,
                     carried_worktree,
                     worktree_ownership,
                     ts,
@@ -5717,6 +5862,17 @@ class TaskQueue:
                     f"{', '.join(active)}"
                 )
             failed = [row for row in rows if row["state"] == SpawnState.FAILED]
+            pending_cleanup = [
+                row["key"]
+                for row in failed
+                if row["conclusion_state"] == "pending"
+            ]
+            if pending_cleanup:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} has pending spawn cleanup: "
+                    f"{', '.join(pending_cleanup)}"
+                )
             if len(failed) < min_failures:
                 conn.execute("COMMIT")
                 raise TaskError(
@@ -5764,6 +5920,7 @@ class TaskQueue:
         detail: str | None = None,
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
+        claim_token: str | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
         with self._connect() as conn:
@@ -5780,15 +5937,72 @@ class TaskQueue:
                     f"reservation {key} is {row['state']!r}, not one of "
                     f"{sorted(allowed_from)} (cannot -> {to_state!r})"
                 )
+            if to_state == SpawnState.DEFERRED and row["release_requested"]:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"reservation {key} has pending release "
+                    "(cannot defer)"
+                )
+            if (
+                conclusion_state is not None
+                or conclusion_detail is not None
+                or claim_token is not None
+            ):
+                _validate_conclusion_claim(
+                    row["cleanup_claim_token"],
+                    row["cleanup_claim_expires_at"],
+                    claim_token,
+                    now=ts,
+                    required=(
+                        row["state"] in {
+                            SpawnState.FAILED,
+                            SpawnState.SETTLED,
+                        }
+                        and row["conclusion_state"] == "pending"
+                    ),
+                )
+                if claim_token is not None:
+                    newer = _newer_worktree_reservation(conn, row, key)
+                    if newer is not None:
+                        conn.execute("COMMIT")
+                        raise TaskError(
+                            "worktree carried by newer reservation "
+                            f"{newer['key']}"
+                        )
+            if worktree is not None:
+                cleanup_claims = conn.execute(
+                    "SELECT key FROM spawn_reservations "
+                    "WHERE key <> ? AND worktree = ? AND state IN (?, ?) "
+                    "AND conclusion_state = ?",
+                    (
+                        key,
+                        worktree,
+                        SpawnState.FAILED,
+                        SpawnState.SETTLED,
+                        "pending",
+                    ),
+                ).fetchall()
+                for cleanup_claim in cleanup_claims:
+                    conn.execute("COMMIT")
+                    raise TaskError(
+                        f"worktree {worktree!r} has in-flight cleanup "
+                        f"{cleanup_claim['key']}"
+                    )
             conn.execute(
                 "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
                 "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
                 "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
+                "inherited_worktree = CASE "
+                "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
+                "WHEN worktree_ownership = 'reused' THEN worktree "
+                "ELSE inherited_worktree END, "
                 "detail = COALESCE(?, detail), "
                 "conclusion_state = CASE WHEN ? IS NOT NULL THEN ? "
                 "ELSE conclusion_state END, "
                 "conclusion_detail = CASE WHEN ? IS NOT NULL THEN ? "
-                "ELSE conclusion_detail END WHERE key = ?",
+                "ELSE conclusion_detail END, "
+                "cleanup_claim_expires_at = CASE WHEN ? IS NOT NULL THEN 0 "
+                "ELSE cleanup_claim_expires_at END WHERE key = ?",
                 (
                     to_state,
                     ts,
@@ -5801,15 +6015,25 @@ class TaskQueue:
                     conclusion_state,
                     conclusion_detail,
                     conclusion_detail,
+                    claim_token,
                     key,
                 ),
             )
-            if to_state in SpawnState.RELEASABLE:
-                conn.execute(
-                    "UPDATE tasks SET activity = NULL, activity_updated_at = ? "
-                    "WHERE id = ?",
-                    (ts, row["task_id"]),
-                )
+            if (
+                to_state in SpawnState.RELEASABLE
+                and row["state"] in SpawnState.ACTIVE
+            ):
+                latest = conn.execute(
+                    "SELECT key FROM spawn_reservations WHERE task_id = ? "
+                    "ORDER BY attempt DESC LIMIT 1",
+                    (row["task_id"],),
+                ).fetchone()
+                if latest is not None and latest["key"] == key:
+                    conn.execute(
+                        "UPDATE tasks SET activity = NULL, activity_updated_at = ? "
+                        "WHERE id = ?",
+                        (ts, row["task_id"]),
+                    )
             row = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
             ).fetchone()
@@ -5868,7 +6092,8 @@ class TaskQueue:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT state FROM spawn_reservations WHERE key = ?",
+                "SELECT state, worktree, worktree_ownership, inherited_worktree "
+                "FROM spawn_reservations WHERE key = ?",
                 (key,),
             ).fetchone()
             if row is None:
@@ -5880,11 +6105,33 @@ class TaskQueue:
                     f"reservation {key} is {row['state']!r}, not "
                     f"{SpawnState.RESERVING!r}"
                 )
+            cleanup_claims = conn.execute(
+                "SELECT key FROM spawn_reservations "
+                "WHERE key <> ? AND worktree = ? AND state IN (?, ?) "
+                "AND conclusion_state = ?",
+                (
+                    key,
+                    worktree,
+                    SpawnState.FAILED,
+                    SpawnState.SETTLED,
+                    "pending",
+                ),
+            ).fetchall()
+            for cleanup_claim in cleanup_claims:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"worktree {worktree!r} has in-flight cleanup "
+                    f"{cleanup_claim['key']}"
+                )
             conn.execute(
                 "UPDATE spawn_reservations SET "
                 "session_handle = CASE "
                 "WHEN worktree IS NULL OR worktree <> ? THEN NULL "
                 "ELSE session_handle END, "
+                "inherited_worktree = CASE "
+                "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
+                "WHEN worktree_ownership = 'reused' THEN worktree "
+                "ELSE inherited_worktree END, "
                 "worktree = ?, worktree_ownership = ?, creating_host = ?, "
                 "driver = ?, updated_at = ? WHERE key = ?",
                 (
@@ -5916,15 +6163,33 @@ class TaskQueue:
         )
 
     def fail_spawn(
-        self, key: str, *, detail: str | None = None, now: float | None = None
+        self,
+        key: str,
+        *,
+        detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
+        claim_token: str | None = None,
+        now: float | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``failed`` (spawn failed or lost), releasing the
-        task so a fresh attempt may be reserved."""
+        task so a fresh attempt may be reserved.
+
+        Repeating the call on an already-failed row is an idempotent metadata
+        update, allowing allocation cleanup to remain inspectable after body
+        release.
+        """
         return self._update_reservation(
             key,
             to_state=SpawnState.FAILED,
-            allowed_from=SpawnState.ACTIVE,
+            allowed_from=(
+                SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})
+            )
+            | frozenset({SpawnState.FAILED}),
             detail=detail,
+            conclusion_state=conclusion_state,
+            conclusion_detail=conclusion_detail,
+            claim_token=claim_token,
             now=now,
         )
 
@@ -5939,10 +6204,81 @@ class TaskQueue:
         return self._update_reservation(
             key,
             to_state=SpawnState.DEFERRED,
-            allowed_from=SpawnState.ACTIVE,
+            allowed_from=(
+                SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})
+            ),
             detail=detail,
             now=now,
         )
+
+    def retire_spawn(
+        self,
+        key: str,
+        *,
+        exact_absence: bool,
+        detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
+        now: float | None = None,
+    ) -> SpawnReservation:
+        """Atomically retire a RELEASING reservation on exact absence proof."""
+        if not exact_absence:
+            raise TaskError("spawn retirement requires exact absence proof")
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such reservation: {key}")
+            if row["state"] != SpawnState.RELEASING:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"reservation {key} is {row['state']!r}, not releasing"
+                )
+            to_state = (
+                SpawnState.SETTLED
+                if row["release_disposition"] == "settled"
+                else SpawnState.FAILED
+            )
+            conn.execute(
+                "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
+                "detail = COALESCE(?, detail), "
+                "conclusion_state = CASE WHEN ? IS NOT NULL THEN ? "
+                "ELSE conclusion_state END, "
+                "conclusion_detail = CASE WHEN ? IS NOT NULL THEN ? "
+                "ELSE conclusion_detail END WHERE key = ?",
+                (
+                    to_state,
+                    ts,
+                    detail,
+                    conclusion_state,
+                    conclusion_state,
+                    conclusion_detail,
+                    conclusion_detail,
+                    key,
+                ),
+            )
+            latest = conn.execute(
+                "SELECT key FROM spawn_reservations WHERE task_id = ? "
+                "ORDER BY attempt DESC LIMIT 1",
+                (row["task_id"],),
+            ).fetchone()
+            if latest is not None and latest["key"] == key:
+                conn.execute(
+                    "UPDATE tasks SET activity = NULL, activity_updated_at = ? "
+                    "WHERE id = ?",
+                    (ts, row["task_id"]),
+                )
+            updated = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(updated)
 
     def request_spawn_release(
         self,
@@ -5952,7 +6288,7 @@ class TaskQueue:
         disposition: str = "failed",
         now: float | None = None,
     ) -> SpawnReservation:
-        """Fence a failed attempt until its exact allocation is concluded."""
+        """Fence an attempt until exact body absence is proven."""
         if disposition not in {"failed", "settled"}:
             raise TaskError(f"invalid spawn release disposition: {disposition!r}")
         ts = self._now(now)
@@ -5986,7 +6322,8 @@ class TaskQueue:
                 conn.execute(
                     "UPDATE spawn_reservations SET state = ?, "
                     "release_requested = 1, release_disposition = ?, "
-                    "detail = COALESCE(?, detail), conclusion_state = ?, "
+                    "detail = COALESCE(?, detail), "
+                    "conclusion_state = COALESCE(conclusion_state, ?), "
                     "updated_at = ? WHERE key = ?",
                     (
                         SpawnState.RELEASING,
@@ -6010,22 +6347,27 @@ class TaskQueue:
         detail: str | None = None,
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
+        claim_token: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``settled`` (its task reached a terminal outcome).
 
         Repeating the call on an already-settled row is an idempotent detail
-        update. Provenance-bearing allocations remain ``releasing`` until
-        ground-layer conclusion is complete or deliberately held; legacy
-        disposable-CLI settlement may record conclusion after settlement.
+        update. Once exact body absence is proven, allocation cleanup may remain
+        ``pending`` or ``held`` here as inspectable conclusion metadata without
+        retaining an active spawn fence.
         """
         return self._update_reservation(
             key,
             to_state=SpawnState.SETTLED,
-            allowed_from=SpawnState.ACTIVE | frozenset({SpawnState.SETTLED}),
+            allowed_from=(
+                SpawnState.ACTIVE - frozenset({SpawnState.RELEASING})
+            )
+            | frozenset({SpawnState.SETTLED}),
             detail=detail,
             conclusion_state=conclusion_state,
             conclusion_detail=conclusion_detail,
+            claim_token=claim_token,
             now=now,
         )
 
@@ -6035,28 +6377,66 @@ class TaskQueue:
         *,
         conclusion_state: str,
         conclusion_detail: str,
+        detail: str | None = None,
+        claim_token: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
-        """Persist conclusion progress without releasing an active reservation."""
+        """Persist conclusion progress on an active or retired reservation."""
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT state FROM spawn_reservations WHERE key = ?",
+                "SELECT state, conclusion_state, conclusion_detail, "
+                "cleanup_claim_token, cleanup_claim_expires_at, "
+                "worktree, reserved_at "
+                "FROM spawn_reservations WHERE key = ?",
                 (key,),
             ).fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
-            if row["state"] not in SpawnState.ACTIVE:
+            mutable_states = SpawnState.ACTIVE | frozenset(
+                {SpawnState.FAILED, SpawnState.SETTLED}
+            )
+            if row["state"] not in mutable_states:
                 conn.execute("COMMIT")
                 raise TaskError(
-                    f"reservation {key} is {row['state']!r}, not active"
+                    f"reservation {key} is {row['state']!r}, not mutable"
                 )
+            _validate_conclusion_claim(
+                row["cleanup_claim_token"],
+                row["cleanup_claim_expires_at"],
+                claim_token,
+                now=ts,
+                required=(
+                    row["state"] in {
+                        SpawnState.FAILED,
+                        SpawnState.SETTLED,
+                    }
+                    and row["conclusion_state"] == "pending"
+                ),
+            )
+            if claim_token is not None:
+                newer = _newer_worktree_reservation(conn, row, key)
+                if newer is not None:
+                    conn.execute("COMMIT")
+                    raise TaskError(
+                        f"worktree carried by newer reservation {newer['key']}"
+                    )
             conn.execute(
                 "UPDATE spawn_reservations SET updated_at = ?, "
-                "conclusion_state = ?, conclusion_detail = ? WHERE key = ?",
-                (ts, conclusion_state, conclusion_detail, key),
+                "detail = COALESCE(?, detail), conclusion_state = ?, "
+                "conclusion_detail = ?, "
+                "cleanup_claim_expires_at = CASE WHEN ? IS NOT NULL THEN 0 "
+                "ELSE cleanup_claim_expires_at END WHERE key = ?",
+                (
+                    ts,
+                    detail,
+                    conclusion_state,
+                    conclusion_detail,
+                    claim_token,
+                    key,
+                ),
             )
             updated = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?",
@@ -6064,6 +6444,139 @@ class TaskQueue:
             ).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(updated)
+
+    def claim_spawn_conclusion_retry(
+        self,
+        key: str,
+        *,
+        claim_seconds: float = 300.0,
+        now: float | None = None,
+    ) -> tuple[SpawnReservation, bool, str | None]:
+        """Claim a retired cleanup retry without racing worktree reuse."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such reservation: {key}")
+            if (
+                row["state"] not in {SpawnState.FAILED, SpawnState.SETTLED}
+                or row["conclusion_state"] != "pending"
+            ):
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"reservation {key} has no retired pending cleanup"
+                )
+            try:
+                current_expiry = float(row["cleanup_claim_expires_at"] or 0)
+            except (TypeError, ValueError):
+                current_expiry = 0.0
+            if (
+                row["cleanup_claim_token"]
+                and current_expiry > ts
+            ):
+                conn.execute("COMMIT")
+                return SpawnReservation._from_row(row), False, None
+            blocker = None
+            if row["worktree"]:
+                blocker = conn.execute(
+                    "SELECT key FROM spawn_reservations "
+                    "WHERE key <> ? AND (worktree = ? OR inherited_worktree = ?) "
+                    "AND reserved_at > ? "
+                    "ORDER BY reserved_at DESC LIMIT 1",
+                    (
+                        key,
+                        row["worktree"],
+                        row["worktree"],
+                        row["reserved_at"],
+                    ),
+                ).fetchone()
+            claim_token = None
+            if blocker is not None:
+                payload: dict[str, object] = {
+                    "action": "preserved",
+                    "reason": "worktree-carried-by-newer-reservation",
+                    "prior": row["conclusion_detail"],
+                }
+                conclusion_state = "held"
+            else:
+                claim_token = uuid.uuid4().hex
+                payload = {
+                    **_conclusion_payload(row["conclusion_detail"]),
+                    "action": "pending",
+                    "reason": "cleanup-retry-claimed",
+                    "claim_token": claim_token,
+                    "claim_expires_at": ts + max(1.0, claim_seconds),
+                }
+                conclusion_state = "pending"
+            if blocker is not None:
+                payload["blocking_reservation_key"] = blocker["key"]
+            conn.execute(
+                "UPDATE spawn_reservations SET updated_at = ?, "
+                "conclusion_state = ?, conclusion_detail = ?, "
+                "cleanup_claim_token = ?, cleanup_claim_expires_at = ? "
+                "WHERE key = ?",
+                (
+                    ts,
+                    conclusion_state,
+                    json.dumps(
+                        payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    claim_token,
+                    (
+                        ts + max(1.0, claim_seconds)
+                        if claim_token is not None
+                        else None
+                    ),
+                    key,
+                ),
+            )
+            updated = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(updated), blocker is None, claim_token
+
+    def validate_spawn_conclusion_claim(
+        self,
+        key: str,
+        claim_token: str,
+        *,
+        now: float | None = None,
+    ) -> SpawnReservation:
+        """Revalidate a cleanup lease and worktree fence before side effects."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such reservation: {key}")
+            _validate_conclusion_claim(
+                row["cleanup_claim_token"],
+                row["cleanup_claim_expires_at"],
+                claim_token,
+                now=ts,
+            )
+            newer = _newer_worktree_reservation(conn, row, key)
+            if newer is not None:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"worktree carried by newer reservation {newer['key']}"
+                )
+            updated = SpawnReservation._from_row(row)
+            conn.execute("COMMIT")
+        return updated
 
     def get_reservation(self, key: str) -> SpawnReservation | None:
         """Return one reservation by key, or ``None``."""

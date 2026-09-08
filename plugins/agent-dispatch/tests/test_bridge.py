@@ -205,7 +205,7 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     assert result.returncode == 0
 
 
-def test_stop_worker_preserves_session(monkeypatch):
+def test_stop_worker_reaps_owned_session_host(monkeypatch):
     calls = {}
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
@@ -217,7 +217,61 @@ def test_stop_worker_preserves_session(monkeypatch):
 
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     assert bridge.stop_worker("session-1") is True
-    assert calls["cmd"] == ["/usr/bin/agent-bridge", "stop", "session-1"]
+    assert calls["cmd"] == [
+        "/usr/bin/agent-bridge",
+        "stop",
+        "session-1",
+        "--reap-host",
+    ]
+
+
+def test_stop_worker_falls_back_for_unsupported_reap_host(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if "--reap-host" in cmd:
+            return subprocess.CompletedProcess(
+                cmd,
+                2,
+                "",
+                "agent-bridge: error: unrecognized arguments: --reap-host",
+            )
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    assert bridge.stop_worker("session-1") is True
+    assert calls == [
+        ["/usr/bin/agent-bridge", "stop", "session-1", "--reap-host"],
+        ["/usr/bin/agent-bridge", "stop", "session-1"],
+    ]
+
+
+def test_stop_worker_does_not_fallback_for_general_failure(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd,
+            1,
+            "",
+            "session teardown failed",
+        )
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    assert bridge.stop_worker("session-1") is False
+    assert calls == [
+        ["/usr/bin/agent-bridge", "stop", "session-1", "--reap-host"],
+    ]
 
 
 def test_end_worker_requires_atomic_idle_state(monkeypatch):

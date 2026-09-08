@@ -594,11 +594,20 @@ class ReservationDetailBody(BaseModel):
     detail: str | None = None
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
+    claim_token: str | None = None
 
 
 class RequestSpawnReleaseBody(BaseModel):
     detail: str | None = None
     disposition: str = "failed"
+
+
+class RetireSpawnBody(ReservationDetailBody):
+    exact_absence: bool = False
+
+
+class ValidateConclusionClaimBody(BaseModel):
+    claim_token: str
 
 
 class RearmSpawnBody(BaseModel):
@@ -1920,9 +1929,31 @@ def create_app(
         bus.publish({"type": "spawn.release_requested", "reservation": result})
         return result
 
+    @app.post("/spawn-reservations/{key}/retire")
+    def retire_spawn(key: str, body: RetireSpawnBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.retire_spawn(
+                key,
+                exact_absence=body.exact_absence,
+                detail=body.detail,
+                conclusion_state=body.conclusion_state,
+                conclusion_detail=body.conclusion_detail,
+            )
+        )
+        bus.publish({"type": "spawn.retired", "reservation": result})
+        return result
+
     @app.post("/spawn-reservations/{key}/fail")
     def fail_spawn(key: str, body: ReservationDetailBody) -> dict:
-        result = _reservation_guard(lambda: queue.fail_spawn(key, detail=body.detail))
+        result = _reservation_guard(
+            lambda: queue.fail_spawn(
+                key,
+                detail=body.detail,
+                conclusion_state=body.conclusion_state,
+                conclusion_detail=body.conclusion_detail,
+                claim_token=body.claim_token,
+            )
+        )
         bus.publish({"type": "spawn.failed", "reservation": result})
         return result
 
@@ -1946,6 +1977,7 @@ def create_app(
                 detail=body.detail,
                 conclusion_state=body.conclusion_state,
                 conclusion_detail=body.conclusion_detail,
+                claim_token=body.claim_token,
             )
         )
         bus.publish({"type": "spawn.settled", "reservation": result})
@@ -1963,9 +1995,42 @@ def create_app(
                 key,
                 conclusion_state=body.conclusion_state or "",
                 conclusion_detail=body.conclusion_detail or "",
+                detail=body.detail,
+                claim_token=body.claim_token,
             )
         )
         bus.publish({"type": "spawn.conclusion", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/conclusion/claim")
+    def claim_spawn_conclusion_retry(key: str) -> dict:
+        try:
+            reservation, claimed, claim_token = (
+                queue.claim_spawn_conclusion_retry(key)
+            )
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such reservation") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+        result = {
+            "claimed": claimed,
+            "claim_token": claim_token,
+            "reservation": _reservation_dict(reservation),
+        }
+        bus.publish({"type": "spawn.conclusion_claimed", **result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/conclusion/validate")
+    def validate_spawn_conclusion_claim(
+        key: str,
+        body: ValidateConclusionClaimBody,
+    ) -> dict:
+        result = _reservation_guard(
+            lambda: queue.validate_spawn_conclusion_claim(
+                key,
+                body.claim_token,
+            )
+        )
         return result
 
     @app.post("/spawn-reservations/tasks/{task_id}/rearm")

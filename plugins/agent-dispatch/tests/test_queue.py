@@ -543,8 +543,9 @@ def test_release_suspended_clears_owner_and_requests_spawn_release(q):
     assert released.owner_session_id is None
     assert released.claimed_at is None
     active = q.get_reservation(reservation.key)
-    assert active.state == "spawned"
+    assert active.state == "releasing"
     assert active.release_requested is True
+    assert active.release_disposition == "settled"
     replacement = q.claim_one("host-b/wt-2", task_id=t.id)
     assert replacement is not None
     assert replacement.owner == "host-b/wt-2"
@@ -754,6 +755,36 @@ def test_set_activity_rejects_stale_or_wrong_reservation(q):
     assert q.get(t.id).activity_updated_at is not None
     with pytest.raises(TaskError, match="active spawned reservation"):
         q.set_activity(t.id, "ACTIVE", reservation_key=reservation.key)
+
+
+@pytest.mark.parametrize("terminal_state", [SpawnState.FAILED, SpawnState.SETTLED])
+def test_old_terminal_metadata_does_not_clear_successor_activity(q, terminal_state):
+    task = q.create("observed")
+    first, _ = q.reserve_spawn(task.id)
+    q.record_spawn(first.key, session_handle="local-body:first")
+    if terminal_state == SpawnState.FAILED:
+        q.fail_spawn(first.key)
+    else:
+        q.settle_spawn(first.key)
+    second, _ = q.reserve_spawn(task.id)
+    q.record_spawn(second.key, session_handle="local-body:second")
+    q.set_activity(task.id, "ACTIVE", reservation_key=second.key)
+
+    if terminal_state == SpawnState.FAILED:
+        q.fail_spawn(
+            first.key,
+            conclusion_state="held",
+            conclusion_detail='{"action":"preserved","reason":"cleanup-held"}',
+        )
+    else:
+        q.settle_spawn(
+            first.key,
+            conclusion_state="held",
+            conclusion_detail='{"action":"preserved","reason":"cleanup-held"}',
+        )
+
+    assert q.get(task.id).activity == "ACTIVE"
+    assert q.get_reservation(second.key).state == SpawnState.SPAWNED
 
 
 # -- progress beats ----------------------------------------------------------

@@ -2755,6 +2755,34 @@ class TestBackgroundTaskGate:
         assert session.client is None
 
     @pytest.mark.asyncio
+    async def test_reaping_stop_retires_owned_session_host(
+        self,
+        session_manager,
+        spawn_target,
+        _patch_spawn,
+        _patch_acp,
+        monkeypatch,
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        record = HostRecord(
+            session_id=session.session_id,
+            port=49555,
+            host_pid=123,
+            child_pid=456,
+        )
+        session_manager._host_index.register(record)
+        reap = MagicMock()
+        monkeypatch.setattr(session_manager, "_reap_host_record", reap)
+
+        await session_manager.stop_session(
+            session.session_id,
+            reap_host=True,
+        )
+
+        reap.assert_called_once_with(record, "idle reap (#1826)")
+        assert session.status == SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
     async def test_force_end_overrides_background_tasks(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:

@@ -676,9 +676,25 @@ class DispatchClient:
             )
         )
 
-    def fail_spawn(self, key: str, *, detail: str | None = None) -> dict:
+    def fail_spawn(
+        self,
+        key: str,
+        *,
+        detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
+        claim_token: str | None = None,
+    ) -> dict:
         return self._unwrap(
-            self._http.post(f"/spawn-reservations/{key}/fail", json={"detail": detail})
+            self._http.post(
+                f"/spawn-reservations/{key}/fail",
+                json={
+                    "detail": detail,
+                    "conclusion_state": conclusion_state,
+                    "conclusion_detail": conclusion_detail,
+                    "claim_token": claim_token,
+                },
+            )
         )
 
     def defer_spawn(self, key: str, *, detail: str | None = None) -> dict:
@@ -700,6 +716,27 @@ class DispatchClient:
             )
         )
 
+    def retire_spawn(
+        self,
+        key: str,
+        *,
+        exact_absence: bool,
+        detail: str | None = None,
+        conclusion_state: str | None = None,
+        conclusion_detail: str | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/retire",
+                json={
+                    "exact_absence": exact_absence,
+                    "detail": detail,
+                    "conclusion_state": conclusion_state,
+                    "conclusion_detail": conclusion_detail,
+                },
+            )
+        )
+
     def record_cold(self, key: str) -> dict:
         return self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/cold")
@@ -712,6 +749,7 @@ class DispatchClient:
         detail: str | None = None,
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
+        claim_token: str | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -720,6 +758,7 @@ class DispatchClient:
                     "detail": detail,
                     "conclusion_state": conclusion_state,
                     "conclusion_detail": conclusion_detail,
+                    "claim_token": claim_token,
                 },
             )
         )
@@ -730,6 +769,8 @@ class DispatchClient:
         *,
         conclusion_state: str,
         conclusion_detail: str,
+        detail: str | None = None,
+        claim_token: str | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -737,7 +778,28 @@ class DispatchClient:
                 json={
                     "conclusion_state": conclusion_state,
                     "conclusion_detail": conclusion_detail,
+                    "detail": detail,
+                    "claim_token": claim_token,
                 },
+            )
+        )
+
+    def claim_spawn_conclusion_retry(self, key: str) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/conclusion/claim",
+            )
+        )
+
+    def validate_spawn_conclusion_claim(
+        self,
+        key: str,
+        claim_token: str,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/{key}/conclusion/validate",
+                json={"claim_token": claim_token},
             )
         )
 
