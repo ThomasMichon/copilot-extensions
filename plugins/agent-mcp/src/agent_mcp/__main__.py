@@ -477,7 +477,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     from . import cutover as _cutover
     result = _cutover.run_cutover(
         health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
-        force=args.force, json_out=args.json,
+        force=args.force,
     )
     if args.json:
         print(json.dumps(result))

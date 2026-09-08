@@ -104,7 +104,48 @@ def test_passive_server_skips_lease_acquisition():
     assert server._lease is None  # never even constructed a SingleInstance
 
 
+@pytest.mark.asyncio
+async def test_passive_server_never_self_publishes_to_routing_table(tmp_path):
+    """Regression test: a --passive daemon must NOT publish itself as the
+    zdd-routing-table's active control endpoint. The orchestrator's own
+    CutoverOrchestrator.run() already does that at the flip step, using the
+    exact port it chose -- a passive daemon publishing itself first would
+    race ahead of health-gating (a crash between self-publish and a failed
+    health check leaves the table pointing at a dead daemon) and corrupt the
+    demote-to-`previous` bookkeeping (the orchestrator would see the
+    passive's own premature entry as "old" and demote that, not the real
+    predecessor)."""
+    from zdd import routing
+
+    server = Server(str(tmp_path / "serve-g9.sock"), enable_lease=False,
+                    passive=True, control_port=0)
+    await server._start_control_listener()
+    try:
+        assert routing.read_active_endpoint(tmp_path, verify_listener=False) is None
+    finally:
+        await server._stop_control_listener()
+
+
+@pytest.mark.asyncio
+async def test_non_passive_server_self_publishes_to_routing_table(tmp_path):
+    """The positive case: a plain (non-passive) daemon DOES self-publish, so
+    the very first cutover ever run has something to discover (agent-mcp has
+    no static/well-known control port to fall back on)."""
+    from zdd import routing
+
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False,
+                    control_port=0, version="9.9.9")
+    await server._start_control_listener()
+    try:
+        active = routing.read_active_endpoint(tmp_path, verify_listener=False)
+        assert active is not None
+        assert active.version == "9.9.9"
+    finally:
+        await server._stop_control_listener()
+
+
 # ── cleanup must never destroy a handle a flip already repointed ─────────
+
 
 
 @pytest.mark.skipif(not _HAS_AF_UNIX, reason="POSIX symlink ownership check")
@@ -145,6 +186,35 @@ def test_cleanup_endpoint_removes_its_own_unflipped_socket(tmp_path):
     server._cleanup_endpoint()
 
     assert not own.exists()
+
+
+# ── CutoverClient.drain() must not mistake a rejected reply for "drained" ──
+
+
+@pytest.mark.asyncio
+async def test_drain_client_treats_unauthorized_reply_as_not_drained(tmp_path):
+    """Regression test: a falsy/missing `busy_sessions` (which an
+    unauthorized or malformed reply naturally has, since only a successful
+    `{"ok": true, ...}` drain response carries it) must never be read as
+    "cleanly drained" -- the orchestrator would otherwise proceed as if the
+    old daemon actually drained when it in fact just rejected the request."""
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False,
+                    control_port=0, control_token="right-token")
+    await server._start_control_listener()
+    try:
+        port = server._control_server.sockets[0].getsockname()[1]
+        ctx = _cutover._CutoverContext(
+            data_root=tmp_path, new_socket_path=tmp_path / "x.sock",
+            new_log_path=tmp_path / "x.log", new_control_token="wrong-token",
+            old_control_token=None, token_by_port={port: "wrong-token"},
+        )
+        client = _cutover.CutoverClient(f"http://127.0.0.1:{port}", ctx)
+        result = client.drain(timeout=0.5, poll=0.1, force=False)
+        assert result["drained"] is False
+        assert result["clean"] is False
+        assert "error" in result
+    finally:
+        await server._stop_control_listener()
 
 
 # ── token-path pid keying (the cross-attempt collision fix) ───────────────

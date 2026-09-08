@@ -203,6 +203,15 @@ class CutoverClient:
             except ControlError as exc:
                 return {"drained": False, "clean": False, "forced": False,
                        "busy_sessions": busy_sessions, "error": str(exc)}
+            if not resp.get("ok"):
+                # An application-level failure (unauthorized, malformed) is
+                # *not* the same thing as "0 attached sessions" -- a falsy/
+                # missing busy_sessions here must never be read as "cleanly
+                # drained". Surface it plainly instead of proceeding as if
+                # the old daemon actually drained.
+                return {"drained": False, "clean": False, "forced": False,
+                       "busy_sessions": busy_sessions,
+                       "error": resp.get("error") or "drain request failed"}
             busy_sessions = resp.get("busy_sessions")
             if not busy_sessions:
                 return {"drained": True, "clean": True, "forced": False,
@@ -215,6 +224,7 @@ class CutoverClient:
                    "busy_sessions": busy_sessions}
         return {"drained": False, "clean": False, "forced": False,
                "busy_sessions": busy_sessions}
+
 
     def undrain(self) -> dict[str, Any]:
         return self._request({"op": "undrain"})
@@ -229,9 +239,9 @@ class CutoverClient:
 
 
 def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
-               force: bool = False, json_out: bool = False) -> dict:
-    """Drive one cutover of the resident ``serve`` daemon. Returns a result dict
-    (also the shape printed when ``json_out``)."""
+               force: bool = False) -> dict:
+    """Drive one cutover of the resident ``serve`` daemon. Returns a result
+    dict; the CLI (`_cmd_cutover` in `__main__.py`) owns how it's printed."""
     from zdd import routing
     from zdd.cutover import CutoverOrchestrator
 

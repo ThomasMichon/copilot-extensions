@@ -561,20 +561,31 @@ class Server:
 
     async def _start_control_listener(self) -> None:
         """Bind the always-on lifecycle control listener (loopback TCP),
-        publish it to the ``zdd`` routing table for cutover discovery, and
-        write its auth token to an owner-only sidecar so an orchestrator that
-        did *not* spawn this daemon (i.e. the currently-active generation
-        being cut over away from) can still authenticate to it.
+        publish it to the ``zdd`` routing table for cutover discovery (unless
+        ``--passive``), and write its auth token to an owner-only sidecar so
+        an orchestrator that did *not* spawn this daemon (i.e. the
+        currently-active generation being cut over away from) can still
+        authenticate to it.
 
         Separate from the data-plane transport above (AF_UNIX on POSIX, or the
         same-purpose loopback TCP on Windows): the control channel exists purely
         so a `cutover` orchestrator can health/drain/undrain/shutdown *this*
         generation without needing to speak agent-mcp's full data-plane op set,
-        and without requiring the data transport to be TCP. Every daemon --
-        passive or promoted -- binds one and publishes it, so the very next
-        cutover after this ships can always find and drive it. (The first
-        cutover ever run against a pre-existing daemon that predates this
-        feature has nothing to dial here -- see docs/patterns/
+        and without requiring the data transport to be TCP. A **plain** (non-
+        ``--passive``) daemon self-publishes on start, so the very first
+        cutover after this ships has something to discover (agent-mcp has no
+        static/well-known control port to fall back on the way agent-bridge's
+        data port does). A **passive** daemon must NOT self-publish: the
+        orchestrator's own ``CutoverOrchestrator.run()`` already calls
+        ``routing.publish_active`` at the flip step, using the exact port it
+        chose and passed to ``spawn_passive`` -- a passive daemon publishing
+        *itself* first would race ahead of health-gating (a crash between
+        self-publish and a failed health check would leave the table pointing
+        at a dead daemon) and corrupt the orchestrator's own demote-to-
+        ``previous`` bookkeeping (it would see the passive's own premature
+        entry as "old" and demote *that*, not the real predecessor). (The
+        first cutover ever run against a pre-existing daemon that predates
+        this feature has nothing to dial here -- see docs/patterns/
         graceful-daemon-cutover.md and the agent-mcp cutover effort for that
         one-time bootstrap boundary.)
         """
@@ -588,11 +599,17 @@ class Server:
         token_path.write_text(self._control_token, encoding="utf-8")
         with contextlib.suppress(OSError):
             os.chmod(token_path, 0o600)
-        with contextlib.suppress(Exception):
-            routing.publish_active(
-                self._config_dir(), bind=_TCP_HOST, port=control_port,
-                pid=os.getpid(), version=self._version, demote_existing=True,
-            )
+        if not self._passive:
+            try:
+                routing.publish_active(
+                    self._config_dir(), bind=_TCP_HOST, port=control_port,
+                    pid=os.getpid(), version=self._version, demote_existing=True,
+                )
+            except Exception:
+                log.warning(
+                    "serve: failed to publish control endpoint to the "
+                    "routing table; a future `agent-mcp cutover` may not "
+                    "find this daemon", exc_info=True)
         log.info("serve: control channel on tcp:%s:%d", _TCP_HOST, control_port)
 
     async def _stop_control_listener(self) -> None:
