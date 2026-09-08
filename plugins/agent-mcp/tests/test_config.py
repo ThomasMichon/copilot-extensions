@@ -292,6 +292,16 @@ def test_selected_marketplace_root_scopes_duplicate_plugin_bridges(
     assert resolve_config_path("demo") == expected
 
 
+def test_selected_marketplace_root_trims_surrounding_whitespace(
+    tmp_path, monkeypatch
+):
+    market = tmp_path / "market-a"
+    expected = _make_plugin_bridge(market, ".", "plug-a", "demo.mcp.yaml")
+    monkeypatch.setenv("AGENT_MCP_MARKETPLACE_ROOT", f"  {market}  ")
+    monkeypatch.delenv("AGENT_MCP_PLUGIN_ROOTS", raising=False)
+    assert resolve_config_path("demo") == expected
+
+
 def test_selected_marketplace_root_does_not_fall_back_to_global_scan(
     tmp_path, monkeypatch
 ):

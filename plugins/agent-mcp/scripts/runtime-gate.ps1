@@ -199,38 +199,65 @@ if ($env:AGENT_MCP_NO_SELFPROVISION) {
 
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 $statusPath = Join-Path $runtimeRoot '.provision-status'
-[Console]::Error.WriteLine(
-    '[agent-mcp] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
-)
-[Console]::Error.WriteLine(
-    "::agent-provisioning:: plugin=agent-mcp eta_seconds=120 reason=first-use status=$statusPath"
-)
-try {
-    "provisioning $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-        Set-Content -LiteralPath $statusPath -Encoding utf8
-} catch {}
-
-& $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
-    ForEach-Object { [Console]::Error.WriteLine($_) }
-$provisionExit = $LASTEXITCODE
-if ($provisionExit -ne 0) {
+$_lockPath = Join-Path $runtimeRoot '.provision.lock'
+$_lock = $null
+while (-not $_lock) {
     try {
-        "failed rc=$provisionExit $((Get-Date).ToUniversalTime().ToString('s'))Z" |
+        $_lock = [IO.File]::Open(
+            $_lockPath,
+            [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None
+        )
+    } catch {
+        Start-Sleep -Milliseconds 200
+    }
+}
+
+$_provisionedPy = $null
+$_provisionRc = 0
+try {
+    $_provisionedPy = Resolve-RuntimePython
+    if (-not $_provisionedPy) {
+        [Console]::Error.WriteLine(
+            '[agent-mcp] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
+        )
+        [Console]::Error.WriteLine(
+            "::agent-provisioning:: plugin=agent-mcp eta_seconds=120 reason=first-use status=$statusPath"
+        )
+        try {
+            "provisioning $((Get-Date).ToUniversalTime().ToString('s'))Z" |
+                Set-Content -LiteralPath $statusPath -Encoding utf8
+        } catch {}
+
+        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
+            ForEach-Object { [Console]::Error.WriteLine($_) }
+        $_provisionRc = $LASTEXITCODE
+        if ($_provisionRc -eq 0) {
+            $_provisionedPy = Resolve-RuntimePython
+        }
+    }
+} finally {
+    if ($_lock) { $_lock.Dispose() }
+}
+
+if ($_provisionRc -ne 0) {
+    try {
+        "failed rc=$_provisionRc $((Get-Date).ToUniversalTime().ToString('s'))Z" |
             Set-Content -LiteralPath $statusPath -Encoding utf8
     } catch {}
     [Console]::Error.WriteLine(
         "[agent-mcp] provisioning FAILED. See the log above; retry, or run: $installer provision -InstallDir $runtimeRoot"
     )
-    exit $provisionExit
+    exit $_provisionRc
 }
 
-$runtimePython = Resolve-RuntimePython
-if ($runtimePython) {
+if ($_provisionedPy) {
     try {
         "ready $((Get-Date).ToUniversalTime().ToString('s'))Z" |
             Set-Content -LiteralPath $statusPath -Encoding utf8
     } catch {}
-    Invoke-Runtime -Python $runtimePython
+    Invoke-Runtime -Python $_provisionedPy
 }
 
 try {

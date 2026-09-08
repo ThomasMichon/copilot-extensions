@@ -76,7 +76,7 @@ def _marketplace_roots() -> list[Path]:
     raw = os.environ.get("AGENT_MCP_MARKETPLACE_ROOT")
     if not raw:
         return []
-    return [Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip()]
+    return [Path(p.strip()).expanduser() for p in raw.split(os.pathsep) if p.strip()]
 
 # Plugin-shipped bridge configs. A Copilot CLI plugin may ship its bridge config
 # *inside the plugin* (``<plugin>/agents/<name>.mcp.yaml``) instead of requiring a

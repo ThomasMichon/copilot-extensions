@@ -86,6 +86,13 @@ def test_materialized_stubs_remain_explicit_management_boundaries() -> None:
     )
 
 
+def test_runtime_gates_keep_first_use_provisioning_lock() -> None:
+    posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "runtime-gate.ps1").read_text(encoding="utf-8")
+    assert ".provision.lock" in posix
+    assert ".provision.lock" in powershell
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer test")
 def test_posix_bootstrap_stamps_the_compatibility_wrapper(
     tmp_path: Path,

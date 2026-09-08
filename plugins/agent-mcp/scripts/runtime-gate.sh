@@ -159,6 +159,42 @@ fi
 
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
+_lock_link=""
+_unlock_provision() {
+    if [[ -n "$_lock_link" ]]; then
+        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
+        [[ "$_owner" == "$$" ]] && rm -f "$_lock_link"
+        _lock_link=""
+    else
+        flock -u 9 2>/dev/null || true
+        exec 9>&-
+    fi
+}
+if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
+    exec 9>"$RUNTIME_ROOT/.provision.lock"
+    flock 9
+else
+    _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
+    until ln -s "$$" "$_lock_link" 2>/dev/null; do
+        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
+        case "$_owner" in
+            *[!0-9]*|"") _live=0 ;;
+            *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
+        esac
+        if [[ "$_live" == 0 && "$(readlink "$_lock_link" 2>/dev/null || true)" == "$_owner" ]]; then
+            rm -f "$_lock_link"
+        else
+            sleep 1
+        fi
+    done
+fi
+trap '_unlock_provision' EXIT INT TERM
+resolve_runtime
+if [[ -n "$AGENT_RT_PY" ]]; then
+    _unlock_provision
+    trap - EXIT INT TERM
+    run_runtime "$@"
+fi
 printf '%s\n' '[agent-mcp] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.' >&2
 printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
     'agent-mcp' "$STATUS_PATH" >&2
@@ -178,9 +214,13 @@ fi
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
+    _unlock_provision
+    trap - EXIT INT TERM
     run_runtime "$@"
 fi
 
+_unlock_provision
+trap - EXIT INT TERM
 printf 'failed rc=1 %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
 printf '[agent-mcp] provisioning reported success but no runtime slot resolved.\n' >&2
 exit 1
