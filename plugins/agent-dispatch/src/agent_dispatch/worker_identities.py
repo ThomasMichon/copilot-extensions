@@ -12,8 +12,10 @@ Resolution order for a named identity (first hit wins):
 1. A repo-local override: ``<repo>/.agent-dispatch/identities/<name>.identity.md``
    under the current working directory, so an adopting repository can carry
    its own private identity without touching this package.
-2. The packaged built-in identities shipped alongside this plugin:
-   ``plugins/agent-dispatch/identities/<name>.identity.md``.
+2. The packaged built-in identities shipped inside this package:
+   ``agent_dispatch/identities/<name>.identity.md`` -- included as package
+   data so they resolve the same way from an editable checkout and an
+   installed wheel/venv.
 """
 
 from __future__ import annotations
@@ -27,8 +29,11 @@ from .registrar import RegistrarError
 
 _FRONTMATTER = "---"
 _REPO_LOCAL_SUBDIR = Path(".agent-dispatch") / "identities"
-# plugins/agent-dispatch/src/agent_dispatch/worker_identities.py -> plugins/agent-dispatch/identities
-_BUILTIN_DIR = Path(__file__).resolve().parents[2] / "identities"
+# Package data: src/agent_dispatch/worker_identities.py -> src/agent_dispatch/identities.
+# Must live *inside* the agent_dispatch package (not a plugin-root sibling of
+# src/) so it is actually included in the built wheel and resolves identically
+# from an editable checkout and an installed venv.
+_BUILTIN_DIR = Path(__file__).resolve().parent / "identities"
 
 
 @dataclass(frozen=True)

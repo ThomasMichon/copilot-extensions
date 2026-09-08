@@ -88,8 +88,9 @@ and the parent agent-dispatch vision:
 - [x] Extract at least one existing declaration's inline prose (the
   `odsp-web-harness-backlog` loop is the live candidate) into such an
   identity, proving the declaration shrinks to policy/eligibility only.
-  Extracted verbatim into the packaged built-in
-  `plugins/agent-dispatch/identities/odsp-web-harness-backlog.identity.md`.
+  Extracted verbatim into the packaged built-in identity, now shipped from
+  `plugins/agent-dispatch/src/agent_dispatch/identities/odsp-web-harness-backlog.identity.md`
+  (see 2026-09-07 journal entry below for why it moved there).
   **Not yet applied to the live `dotfiles` declaration** -- that requires the
   running agent-dispatch daemon to have this PR's code deployed first (an
   older daemon would reject `worker_identity` as an unknown key and break the
@@ -313,4 +314,53 @@ other phases actually land in.
   unused, ready for whoever picks up the switch (edit
   `dotfiles/.agent-dispatch/registrar/odsp-web-harness-issue-loop.json` from
   its `-k` worktree, never the dotfiles anchor).
+
+### 2026-09-07 (cont.) - Found and fixed a packaging bug blocking the dotfiles switch
+
+- Edited the `-k` dotfiles worktree's live declaration to
+  `worker_identity: odsp-web-harness-backlog` and validated it against the
+  running daemon's own installed code
+  (`C:\Users\tmichon\.agent-dispatch\versions\0.1.2-dev34\...\repository_issue_loops.validate_config`)
+  before actually deploying the change. It failed:
+  `RegistrarError: worker_identity 'odsp-web-harness-backlog': no identity
+  file found`. Root cause: `worker_identities._BUILTIN_DIR` was computed as
+  `Path(__file__).resolve().parents[2] / "identities"`, which only resolves
+  correctly in the **editable/dev src layout**
+  (`plugins/agent-dispatch/src/agent_dispatch/worker_identities.py` ->
+  `plugins/agent-dispatch/identities/`). The `identities/` directory lived
+  as a **sibling of `src/`**, outside the `agent_dispatch` package, so
+  standard `setuptools` package discovery never included it in the built
+  wheel at all -- an installed venv (like the live daemon's) has no
+  `identities/` directory anywhere under its site-packages, regardless of
+  version. This bug was latent since Phase 2 landed (2026-09-06); the
+  daemon-version gate masked it because no leg had gotten a clean daemon
+  version *and* actually attempted the switch until now.
+- Fixed by moving the identity file **inside** the installable package
+  (`plugins/agent-dispatch/src/agent_dispatch/identities/`), changing
+  `_BUILTIN_DIR` to `Path(__file__).resolve().parent / "identities"`, and
+  adding `[tool.setuptools.package-data] agent_dispatch =
+  ["identities/*.identity.md"]` to `pyproject.toml` so the file actually
+  ships in the wheel. Verified by building a wheel
+  (`pip wheel . --no-deps`) and inspecting its contents: the `.identity.md`
+  file is now present at `agent_dispatch/identities/...` inside the zip
+  (it was absent before this fix, confirmed by inspecting an unfixed
+  build). Targeted suite (`test_worker_identities.py`,
+  `test_repository_issue_loops.py`, `test_worker_charter.py`,
+  `test_embody.py`, `test_build_info.py`, `test_supervisor.py`,
+  `test_agent_index_managed.py` -- 311 tests) passes unchanged. Bumped
+  agent-dispatch to `0.1.2-dev37` across all three version surfaces
+  (`pyproject.toml`, `plugin.json`, `.github/plugin/marketplace.json`).
+- **The dotfiles switch is still blocked** -- now on a *new* daemon-version
+  gate: this fix must deploy to the live daemon (a version at or above the
+  one carrying this PR) before the `-k` worktree's edited declaration file
+  can be copied over to `dotfiles/.agent-dispatch/registrar/...` live,
+  because even a `worker_identity`-aware daemon without this packaging fix
+  will still fail to resolve the identity file. Re-verify the daemon version
+  next leg the same way as this leg did (`agent-dispatch --version` plus
+  confirming `agent_dispatch.worker_identities.load_worker_identity(
+  "odsp-web-harness-backlog")` actually resolves, not just imports) before
+  retrying the switch. Left the edited-but-not-yet-live declaration change
+  in the `-k` worktree (`dotfiles.worktrees\...-8451-k`) uncommitted for
+  whoever verifies the new gate is clear; do not copy it into the live
+  `dotfiles` anchor until then.
 
