@@ -598,7 +598,11 @@ def _project_identity(project: str, repo_dir: str | Path | None = None) -> dict[
 
 
 def _command_arbitration_dir() -> Path:
-    """Shared command ledger rooted beside the shared global bin directory."""
+    """Shared command ledger rooted beside the real global bin directory.
+
+    Deliberately ignores ``AGENT_HOME``: that override isolates harness state,
+    while every cell still arbitrates the same real ``~/.local/bin`` commands.
+    """
     if platform.system() == "Windows":
         home = Path(os.environ.get("USERPROFILE", str(Path.home())))
     else:
