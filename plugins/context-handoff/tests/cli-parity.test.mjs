@@ -15,7 +15,7 @@ test("payload-local CLI exposes the extension fallback flow", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  for (const command of ["facts", "save", "cutover", "continue", "retry", "consume"]) {
+  for (const command of ["facts", "save", "trigger", "consume"]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
   assert.match(result.stdout, /--locator/);
@@ -23,6 +23,18 @@ test("payload-local CLI exposes the extension fallback flow", () => {
   assert.match(result.stdout, /"file:<id>"/);
   assert.match(result.stdout, /--task-id/);
   assert.match(result.stdout, /--handoff-token/);
+  assert.doesNotMatch(result.stdout, /\bcontinue\b/);
+  assert.doesNotMatch(result.stdout, /\bretry\b/);
+});
+
+test("trigger requires either markdown input or a stored handoff token", () => {
+  const missing = spawnSync(
+    process.execPath,
+    [cli, "trigger", "--session-id", "predecessor-session"],
+    { encoding: "utf8" },
+  );
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /pass --prompt-file\/--prompt\/stdin or --handoff-token/);
 });
 
 test("consume requires exactly one recovery target", () => {
@@ -68,24 +80,19 @@ test("consume requires exactly one recovery target", () => {
   assert.match(deferredFile.stderr, /only valid with a task target/);
 });
 
-test("extension and CLI delegate lifecycle behavior to the same core", () => {
+test("extension and CLI delegate storage, signaling, and consumption to the same core", () => {
   const source = readFileSync(cli, "utf8");
   for (const shared of [
     "storeHandoff",
     "buildSeedForStored",
-    "runHandoffCutover",
+    "triggerHandoff",
     "consumeFileHandoff",
     "consumeDispatchHandoffTask",
-    "retryStoredHandoffCutover",
     "formatConsumeResult",
   ]) {
     assert.match(source, new RegExp(`\\b${shared}\\b`));
   }
-  assert.match(
-    source,
-    /parsed\.kind === "task"[\s\S]*deferComplete = true/,
-  );
-  assert.doesNotMatch(source, /function (?:completeHandoffLifecycle|makeHandoffMetadata)/);
+  assert.doesNotMatch(source, /runHandoffCutover|retryStoredHandoffCutover/);
 });
 
 test("fallback remains payload-only with no installed runtime", () => {

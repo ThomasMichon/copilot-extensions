@@ -22,10 +22,20 @@ def _powershell() -> str | None:
     return shutil.which("pwsh")
 
 
-def _bash() -> str:
+def _bash() -> str | None:
     executable = shutil.which("bash")
-    assert executable
-    return executable
+    if not executable:
+        return None
+    try:
+        result = subprocess.run(
+            [executable, "-lc", "exit 0"],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return executable if result.returncode == 0 else None
 
 
 def _run(
@@ -50,7 +60,10 @@ def _run_bash(
     *args: str,
     plugin_root: Path | None = PLUGIN,
 ) -> subprocess.CompletedProcess[str]:
-    return _run([_bash(), str(BASH_PRODUCER), *args], plugin_root=plugin_root)
+    bash = _bash()
+    if not bash:
+        pytest.skip("a conformant Bash is unavailable")
+    return _run([bash, str(BASH_PRODUCER), *args], plugin_root=plugin_root)
 
 
 def _run_powershell(
@@ -100,15 +113,18 @@ def test_manifest_registers_output_free_session_writer() -> None:
 
 def test_bash_emits_owned_bounded_continuity_guidance() -> None:
     version = json.loads(MANIFEST.read_text(encoding="utf-8"))["version"]
-    context = _context(_run_native())
+    context = _context(_run_bash())
     assert context.startswith(f"[owner: context-handoff@{version}]\n")
     assert "When you own the active objective, it can span multiple agent sessions" in context
     assert "do not narrow investigation, planning, implementation" in context
-    assert "begin execution immediately, subject to any required safety" in context
+    assert "compose and store the baton safely" in context
+    assert "trigger_handoff" in context
+    assert "do not ask first" in context
+    assert "ending the turn with proposed follow-ups" in context
+    assert "only signals pickup and never performs process management" in context
     assert "Consuming or producing a handoff is setup or progress, never completion" in context
-    assert "transfer it through the available handoff path" in context
+    assert "one slice of the larger effort" in context
     assert "Bounded delegates remain within their assigned scope" in context
-    assert "a session superseded by cutover stops work" in context
     assert "The session owning the objective stops only" in context
     assert "Use the `context-handoff` skill" in context
     kernel = context.split("\n\n## agent-worktrees session command catalog", 1)[0]
@@ -137,6 +153,21 @@ def test_bash_own_only_mode_excludes_adjacent_catalog() -> None:
 
     if _powershell():
         assert _context(_run_powershell("--own-only")) == context
+
+
+def test_aggregate_mode_is_owned_compact_and_cross_platform() -> None:
+    context = _context(_run_bash("--aggregate"))
+    assert context.startswith("[owner: context-handoff@")
+    assert "handoff is progress, never completion" in context
+    assert "trigger_handoff" in context
+    assert "Near token pressure" in context
+    assert "Only the turn-end follow-up path asks" in context
+    assert "one slice" in context
+    assert "Use the `context-handoff` skill" in context
+    assert len(context.encode("utf-8")) <= 700
+
+    if _powershell():
+        assert _context(_run_powershell("--aggregate")) == context
 
 
 def test_bash_reports_incomplete_adjacent_payload_as_unavailable(
@@ -211,10 +242,7 @@ def test_bash_falls_back_to_script_location() -> None:
     )
 
 
-@pytest.mark.skipif(
-    os.name == "nt" or _powershell() is None,
-    reason="Cross-shell parity requires POSIX Bash and PowerShell",
-)
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell is not installed")
 def test_powershell_matches_bash_guidance() -> None:
     bash_context = _context(_run_bash())
     powershell_context = _context(_run_powershell())
