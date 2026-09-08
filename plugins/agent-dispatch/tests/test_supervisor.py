@@ -3763,6 +3763,7 @@ def test_yielded_created_worktree_is_concluded_before_respawn(q, client):
         machine="host-a",
         local_body_verdict_fn=lambda _sid: "gone",
         local_acp_session_fn=lambda _sid: "acp-session-1",
+        local_end_fn=lambda _sid: True,
         attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
             "action": "primed",
             "reason": "managed-gc-candidate",
@@ -4636,6 +4637,7 @@ def test_terminal_created_worktree_uses_attempt_cleanup_without_label(
         machine="host-a",
         local_body_verdict_fn=lambda _sid: "gone",
         local_acp_session_fn=lambda _sid: "acp-session-1",
+        local_end_fn=lambda _sid: True,
         attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
             "action": "primed",
             "reason": "managed-gc-candidate",
