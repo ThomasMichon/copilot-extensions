@@ -196,7 +196,10 @@ def _spawn_self_deploy(python_path: Any) -> None:
     installer invoking ``deploy``/``_cutover`` right after publishing a new
     slot, just triggered by the running coordinator instead of externally.
     Never raises to the caller's polling loop; a spawn failure is left for
-    the next poll to retry.
+    the next poll to retry. Uses ``breakaway=True`` so the deploy survives a
+    Job-contained launch mode (a coordinator started from a session-start
+    hook lives in a Windows Job the OS can tear down as a whole tree) --
+    this spawn must outlive that teardown to actually complete the cutover.
     """
     import subprocess
 
@@ -208,7 +211,7 @@ def _spawn_self_deploy(python_path: Any) -> None:
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
     }
-    kwargs.update(detached_kwargs())
+    kwargs.update(detached_kwargs(breakaway=True))
     subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
 
