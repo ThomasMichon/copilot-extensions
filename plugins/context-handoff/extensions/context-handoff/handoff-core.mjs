@@ -395,6 +395,82 @@ export function handoffDirFor(cwd, sid, get = agentWorktreesGet) {
   return stateDir ? join(stateDir, "handoff") : null;
 }
 
+function normalizeRegisteredRepoPath(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  if (!raw.startsWith("~")) return raw;
+  const suffix = raw.slice(1).replace(/^[\\/]+/, "");
+  return suffix ? join(homedir(), suffix) : homedir();
+}
+
+function registeredRepoPaths(paths = {}) {
+  const candidates = [];
+  for (const raw of Object.values(paths || {})) {
+    const candidate = normalizeRegisteredRepoPath(raw);
+    if (candidate && existsSync(candidate)) candidates.push(candidate);
+  }
+  return candidates;
+}
+
+function knownHandoffSearchRoots(cwd, execute = runCli) {
+  let reposJson;
+  try {
+    reposJson = cliJson(
+      "agent-worktrees",
+      ["repos", "list", "--class", "worktree", "--json"],
+      cwd,
+      AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+      execute,
+    );
+  } catch {
+    return [];
+  }
+  const roots = new Set();
+  for (const repo of reposJson?.repos || []) {
+    for (const anchorPath of registeredRepoPaths(repo?.paths)) {
+      roots.add(anchorPath);
+      try {
+        const listed = cliJson(
+          "agent-worktrees",
+          ["list", "--all", "--json"],
+          anchorPath,
+          AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+          execute,
+        );
+        for (const worktree of listed?.worktrees || []) {
+          if (worktree?.path) roots.add(worktree.path);
+        }
+      } catch {
+        // Best-effort enumeration: the anchor namespace still covers adopted
+        // anchors even when the per-project worktree listing is unavailable.
+      }
+    }
+  }
+  return [...roots];
+}
+
+function discoverFileHandoffPath(
+  cwd,
+  handoffId,
+  execute = runCli,
+) {
+  const filename = `${safePathSegment(handoffId)}.json`;
+  const visitedStateDirs = new Set();
+  for (const root of knownHandoffSearchRoots(cwd, execute)) {
+    const resolution = agentWorktreesGetResult(
+      "worktree-state-dir",
+      root,
+      null,
+      execute,
+    );
+    const stateDir = resolution.value;
+    if (!stateDir || visitedStateDirs.has(stateDir)) continue;
+    visitedStateDirs.add(stateDir);
+    const candidate = join(stateDir, "handoff", filename);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function writeJsonAtomic(path, value) {
   const tmp = `${path}.${process.pid}.tmp`;
   try {
@@ -436,11 +512,23 @@ export function saveFileHandoff(promptText, sid, cwd, title) {
   }
 }
 
-export function readFileHandoff(cwd, sid, handoffId, explicitPath = null) {
-  const path = explicitPath || (() => {
-    const dir = handoffDirFor(cwd, sid);
-    return dir ? join(dir, `${safePathSegment(handoffId)}.json`) : null;
+export function readFileHandoff(
+  cwd,
+  sid,
+  handoffId,
+  explicitPath = null,
+  { get = agentWorktreesGet, execute = runCli } = {},
+) {
+  const filename = `${safePathSegment(handoffId)}.json`;
+  let path = explicitPath || (() => {
+    const dir = handoffDirFor(cwd, sid, get);
+    return dir ? join(dir, filename) : null;
   })();
+  if ((!path || !existsSync(path)) && !explicitPath) {
+    // A recovery locator must remain usable from a bare/HOME resume or any
+    // other cwd that is outside the adopted project that stored the handoff.
+    path = discoverFileHandoffPath(cwd, handoffId, execute) || path;
+  }
   if (!path || !existsSync(path)) return null;
   try {
     return { path, record: JSON.parse(readFileSync(path, "utf-8")) };
@@ -462,8 +550,9 @@ export function markFileHandoffConsumed(path, record, sid) {
 
 export function consumeFileHandoffOnce(
   cwd, sid, handoffId, explicitPath = null,
+  options = {},
 ) {
-  const found = readFileHandoff(cwd, sid, handoffId, explicitPath);
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, options);
   if (!found) {
     return { ok: false, message: "File-backed handoff was not found." };
   }
@@ -578,7 +667,9 @@ export function consumeFileHandoffOnce(
     }
   }
   try {
-    const current = readFileHandoff(cwd, sid, handoffId, found.path);
+    const current = readFileHandoff(
+      cwd, sid, handoffId, found.path, options,
+    );
     if (!current) {
       return { ok: false, message: "File-backed handoff disappeared before consumption." };
     }
@@ -1095,9 +1186,10 @@ export function consumeFileHandoff(
   sid,
   handoffId,
   explicitPath = null,
+  options = {},
 ) {
   const consumed = consumeFileHandoffOnce(
-    cwd, sid, handoffId, explicitPath,
+    cwd, sid, handoffId, explicitPath, options,
   );
   if (!consumed.ok) return consumed;
   const record = consumed.record;

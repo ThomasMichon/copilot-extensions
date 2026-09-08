@@ -46,6 +46,45 @@ function withTempHome(fn) {
   }
 }
 
+function makeLocatorLookupSeams({
+  anchorPath = null,
+  worktrees = [],
+  stateDirs = {},
+  repoPaths = null,
+}) {
+  return {
+    get: (key, cwd) => {
+      if (key !== "worktree-state-dir") return null;
+      return stateDirs[cwd] || null;
+    },
+    execute: (_bin, argv, opts = {}) => {
+      if (
+        argv[0] === "repos"
+        && argv[1] === "list"
+        && argv.includes("--class")
+        && argv.includes("worktree")
+        && argv.includes("--json")
+      ) {
+        return JSON.stringify({
+          repos: [{
+            name: "wt-repo",
+            paths: repoPaths || (anchorPath ? { windows: anchorPath } : {}),
+          }],
+        });
+      }
+      if (
+        argv[0] === "list"
+        && argv.includes("--all")
+        && argv.includes("--json")
+        && opts.cwd === anchorPath
+      ) {
+        return JSON.stringify({ worktrees });
+      }
+      throw new Error(`unexpected command: ${argv.join(" ")} @ ${opts.cwd || ""}`);
+    },
+  };
+}
+
 test("encode/decode round-trips metadata + text", () => {
   const meta = { kind: "context-handoff", id: "handoff-sid1", title: "Fix X" };
   const body = "## Session Continuation\nline two\nline three";
@@ -178,6 +217,199 @@ test("file-backed consume marks the predecessor session-state request consumed",
     const stateRecord = readSessionStateHandoff("predecessor-1");
     assert.equal(stateRecord.record.consumed, true);
     assert.equal(stateRecord.record.consumedBySession, "successor-1");
+  });
+});
+
+test("file-backed locator consume uses registered repo paths even when the key does not match the local platform guess", () => {
+  withTempHome((home) => {
+    const anchorPath = join(home, "wt-repo");
+    const resumeCwd = join(home, "resume-home");
+    const stateDir = join(home, "wt-state");
+    const handoffPath = join(stateDir, "handoff", "handoff-predecessor-wsl.json");
+    mkdirSync(anchorPath, { recursive: true });
+    mkdirSync(resumeCwd, { recursive: true });
+    mkdirSync(join(stateDir, "handoff"), { recursive: true });
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-predecessor-wsl",
+      storage: "file",
+      sessionId: "predecessor-wsl",
+      cwd: anchorPath,
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+
+    const consumed = consumeFileHandoff(
+      resumeCwd,
+      "successor-wsl",
+      "handoff-predecessor-wsl",
+      null,
+      makeLocatorLookupSeams({
+        anchorPath,
+        repoPaths: { wsl: anchorPath },
+        stateDirs: { [anchorPath]: stateDir },
+      }),
+    );
+    assert.equal(consumed.ok, true);
+    assert.equal(consumed.path, handoffPath);
+  });
+});
+
+test("file-backed locator consume succeeds when cwd is outside the adopted project", () => {
+  withTempHome((home) => {
+    const anchorPath = join(home, "wt-repo");
+    const resumeCwd = join(home, "resume-home");
+    const stateDir = join(home, "wt-state");
+    const handoffPath = join(stateDir, "handoff", "handoff-predecessor-1.json");
+    mkdirSync(anchorPath, { recursive: true });
+    mkdirSync(resumeCwd, { recursive: true });
+    mkdirSync(join(stateDir, "handoff"), { recursive: true });
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-predecessor-1",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: anchorPath,
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+
+    const seams = makeLocatorLookupSeams({
+      anchorPath,
+      stateDirs: { [anchorPath]: stateDir },
+    });
+    const consumed = consumeFileHandoff(
+      resumeCwd,
+      "successor-1",
+      "handoff-predecessor-1",
+      null,
+      seams,
+    );
+    assert.equal(consumed.ok, true);
+    assert.equal(consumed.path, handoffPath);
+    assert.equal(consumed.payload, "stored markdown");
+  });
+});
+
+test("file-backed locator consume still succeeds when cwd is the adopted project", () => {
+  withTempHome((home) => {
+    const anchorPath = join(home, "wt-repo");
+    const stateDir = join(home, "wt-state");
+    const handoffPath = join(stateDir, "handoff", "handoff-predecessor-2.json");
+    mkdirSync(anchorPath, { recursive: true });
+    mkdirSync(join(stateDir, "handoff"), { recursive: true });
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-predecessor-2",
+      storage: "file",
+      sessionId: "predecessor-2",
+      cwd: anchorPath,
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+
+    const consumed = consumeFileHandoff(
+      anchorPath,
+      "successor-2",
+      "handoff-predecessor-2",
+      null,
+      {
+        get: (key, cwd) => (
+          key === "worktree-state-dir" && cwd === anchorPath ? stateDir : null
+        ),
+        execute: () => {
+          throw new Error("locator fallback should not run when cwd already resolves");
+        },
+      },
+    );
+    assert.equal(consumed.ok, true);
+    assert.equal(consumed.path, handoffPath);
+  });
+});
+
+test("file-backed locator still fails honestly when no matching handoff exists", () => {
+  withTempHome((home) => {
+    const anchorPath = join(home, "wt-repo");
+    const resumeCwd = join(home, "resume-home");
+    const stateDir = join(home, "wt-state");
+    mkdirSync(anchorPath, { recursive: true });
+    mkdirSync(resumeCwd, { recursive: true });
+    mkdirSync(join(stateDir, "handoff"), { recursive: true });
+
+    const seams = makeLocatorLookupSeams({
+      anchorPath,
+      stateDirs: { [anchorPath]: stateDir },
+    });
+    const consumed = consumeFileHandoff(
+      resumeCwd,
+      "successor-1",
+      "handoff-missing",
+      null,
+      seams,
+    );
+    assert.equal(consumed.ok, false);
+    assert.equal(consumed.message, "File-backed handoff was not found.");
+  });
+});
+
+test("file-backed locator preserves consume-once semantics across cwd-independent discovery", () => {
+  withTempHome((home) => {
+    const anchorPath = join(home, "wt-repo");
+    const resumeCwd = join(home, "resume-home");
+    const stateDir = join(home, "wt-state");
+    const handoffPath = join(stateDir, "handoff", "handoff-predecessor-3.json");
+    mkdirSync(anchorPath, { recursive: true });
+    mkdirSync(resumeCwd, { recursive: true });
+    mkdirSync(join(stateDir, "handoff"), { recursive: true });
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-predecessor-3",
+      storage: "file",
+      sessionId: "predecessor-3",
+      cwd: anchorPath,
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+
+    const seams = makeLocatorLookupSeams({
+      anchorPath,
+      stateDirs: { [anchorPath]: stateDir },
+    });
+    const first = consumeFileHandoff(
+      resumeCwd,
+      "successor-3",
+      "handoff-predecessor-3",
+      null,
+      seams,
+    );
+    assert.equal(first.ok, true);
+
+    const second = consumeFileHandoff(
+      resumeCwd,
+      "replay-3",
+      "handoff-predecessor-3",
+      null,
+      seams,
+    );
+    assert.equal(second.ok, false);
+    assert.equal(second.alreadyConsumed, true);
+    assert.match(second.message, /already consumed/);
   });
 });
 
