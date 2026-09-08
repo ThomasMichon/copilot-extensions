@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock
 
+import pytest
+
 from agent_bridge.db import Database
 from agent_bridge.models import RetentionConfig
 from agent_bridge.session_manager import SessionManager
@@ -41,6 +43,22 @@ class TestDbGcPrimitives:
     def test_eligible_ids_empty_statuses(self, tmp_db: Database) -> None:
         _mk(tmp_db, "s1", "stopped", 0.0)
         assert tmp_db.gc_eligible_session_ids([], time.time()) == []
+
+    def test_status_summary_reports_population_bounds(self, tmp_db: Database) -> None:
+        now = time.time()
+        old = now - 10 * 86400
+        recent = now - 60
+        _mk(tmp_db, "old-stopped", "stopped", old)
+        _mk(tmp_db, "recent-failed", "failed", recent)
+        _mk(tmp_db, "live-idle", "idle", now)
+
+        summary = tmp_db.gc_status_summary(["stopped", "failed", "ended"])
+
+        assert summary == pytest.approx({
+            "count": 2,
+            "oldest_updated_at": old,
+            "newest_updated_at": recent,
+        })
 
     def test_db_size_info_shape(self, tmp_db: Database) -> None:
         info = tmp_db.db_size_info()
@@ -106,6 +124,21 @@ class TestManagerGc:
         assert res["enabled"] is False
         assert res["pruned_count"] == 0
         assert tmp_db.get_session("old-stopped") is not None
+
+    def test_noop_reports_eligibility_and_vacuum_metrics(self, tmp_db: Database) -> None:
+        mgr = SessionManager(tmp_db, retention=RetentionConfig(vacuum=True))
+        now = time.time()
+        old = now - 6 * 86400
+        _mk(tmp_db, "recent-stopped", "stopped", old)
+
+        res = mgr.gc(now=now)
+
+        assert res["terminal_count"] == 1
+        assert res["eligible_count"] == 0
+        assert res["oldest_terminal_age_hours"] == pytest.approx(6 * 24, rel=0.01)
+        assert res["vacuumed"] is False
+        assert res["free_bytes_before_vacuum"] >= 0
+        assert res["vacuum_threshold_bytes"] == int(128.0 * 1024 * 1024)
 
     def test_vacuum_triggered_when_threshold_met(self, tmp_db: Database) -> None:
         now = time.time()
