@@ -1,9 +1,10 @@
-"""Tests for the in-place handoff control surface (HTTP endpoints).
+"""Tests for the in-place handoff control surfaces (HTTP endpoints).
 
 The manager-level primitive is covered by ``test_handoff.py``; here we verify
 the route wiring and error mapping for ``POST /sessions/{id}/handoff`` and
-``POST /worktrees/{id}/handoff`` -- the explicit control surface a UI consumer
-(or the CLI ``handoff`` verb) drives.
+``POST /worktrees/{id}/handoff`` plus the external-seed
+``POST /worktrees/{id}/handoff-request`` variant -- the explicit control
+surfaces a UI consumer or CLI verb drives.
 """
 
 from __future__ import annotations
@@ -141,3 +142,62 @@ class TestWorktreeHandoffRoute:
         assert resp.json()["session_id"] == "sess-2"
         # The worktree handle resolved to its current session before handoff.
         assert seen["session_id"] == "sess-1"
+
+
+class TestWorktreeHandoffRequestRoute:
+    def test_no_session_404(self, client, app) -> None:
+        resp = client.post(
+            "/api/v1/worktrees/ghost-wt/handoff-request",
+            json={"session_id": "sess-1", "seed_text": "/consume-handoff task:1"},
+        )
+        assert resp.status_code == 404
+
+    def test_session_mismatch_404(self, client, app) -> None:
+        _seed_session(app, sid="sess-1", worktree_id="wt-1")
+        resp = client.post(
+            "/api/v1/worktrees/wt-1/handoff-request",
+            json={"session_id": "other", "seed_text": "/consume-handoff task:1"},
+        )
+        assert resp.status_code == 404
+        assert "matching other" in resp.json()["detail"]
+
+    def test_threads_external_seed_and_token(
+        self, client, app, monkeypatch
+    ) -> None:
+        mgr = _seed_session(app, sid="sess-1", worktree_id="wt-1")
+        succ = _fake_successor(worktree_id="wt-1")
+        seen = {}
+
+        async def _fake_handoff(
+            session_id,
+            *,
+            reason=None,
+            seed=True,
+            seed_text=None,
+            handoff_token=None,
+        ):
+            seen["session_id"] = session_id
+            seen["reason"] = reason
+            seen["seed"] = seed
+            seen["seed_text"] = seed_text
+            seen["handoff_token"] = handoff_token
+            return succ
+
+        monkeypatch.setattr(mgr, "handoff_session", _fake_handoff)
+        resp = client.post(
+            "/api/v1/worktrees/wt-1/handoff-request",
+            json={
+                "session_id": "sess-1",
+                "seed_text": "/consume-handoff task:1",
+                "handoff_token": "task:1",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["session_id"] == "sess-2"
+        assert seen == {
+            "session_id": "sess-1",
+            "reason": "context-handoff-request",
+            "seed": True,
+            "seed_text": "/consume-handoff task:1",
+            "handoff_token": "task:1",
+        }

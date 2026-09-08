@@ -59,6 +59,39 @@ class TestHandoffPrimitive:
     """The bridge-native in-place handoff of a hosted session."""
 
     @pytest.mark.asyncio
+    async def test_handoff_uses_external_seed_verbatim(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp,
+        mock_acp_client,
+    ) -> None:
+        mock_acp_client.send_prompt = AsyncMock(return_value={
+            "response_text": "ok",
+            "stop_reason": "end_turn",
+        })
+        pred = await session_manager.start_session(
+            spawn_target, caller_id="wt-ext"
+        )
+
+        succ = await session_manager.handoff_session(
+            pred.session_id,
+            reason="context-handoff-request",
+            seed_text="/consume-handoff task:123",
+            handoff_token="task:123",
+        )
+
+        if succ._prompt_task is not None:
+            await succ._prompt_task
+        user_msgs = _events(succ, "user_message")
+        assert user_msgs
+        assert user_msgs[0].data["content"] == "/consume-handoff task:123"
+        prompts = [call.args[0] for call in mock_acp_client.send_prompt.await_args_list]
+        assert prompts == ["/consume-handoff task:123"]
+        pred_ho = _events(pred, "session_handoff")
+        assert pred_ho
+        assert pred_ho[0].data["reason"] == "context-handoff-request"
+        assert pred_ho[0].data["handoff_token"] == "task:123"
+        assert pred_ho[0].data["seed_source"] == "external"
+
+    @pytest.mark.asyncio
     async def test_handoff_spawns_seeded_successor(
         self, session_manager, spawn_target, _patch_spawn, _patch_acp,
         mock_acp_client,
@@ -95,6 +128,34 @@ class TestHandoffPrimitive:
         assert user_msgs
         assert "CONTINUATION BRIEF" in user_msgs[0].data["content"]
         assert "Ship the thing" in user_msgs[0].data["content"]
+
+    @pytest.mark.asyncio
+    async def test_handoff_without_external_seed_still_self_authors_brief(
+        self, session_manager, spawn_target, _patch_spawn, _patch_acp,
+        mock_acp_client,
+    ) -> None:
+        mock_acp_client.send_prompt = AsyncMock(side_effect=[
+            {
+                "response_text": "## Objective\nShip the thing\n## Next steps\nDo X",
+                "stop_reason": "end_turn",
+            },
+            {
+                "response_text": "seeded",
+                "stop_reason": "end_turn",
+            },
+        ])
+        pred = await session_manager.start_session(
+            spawn_target, caller_id="wt-default"
+        )
+
+        succ = await session_manager.handoff_session(pred.session_id)
+
+        if succ._prompt_task is not None:
+            await succ._prompt_task
+        prompts = [call.args[0] for call in mock_acp_client.send_prompt.await_args_list]
+        assert "Author a CONTINUATION BRIEF" in prompts[0]
+        assert "CONTINUATION BRIEF" in prompts[1]
+        assert "Ship the thing" in prompts[1]
 
     @pytest.mark.asyncio
     async def test_handoff_persists_two_way_link(
