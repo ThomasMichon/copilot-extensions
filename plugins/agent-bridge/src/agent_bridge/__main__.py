@@ -4897,7 +4897,11 @@ def _cmd_result(args: argparse.Namespace) -> None:
 def _cmd_stop(args: argparse.Namespace) -> None:
     """Stop a session."""
     client = _get_client()
-    client.stop_session(args.session_id, force=getattr(args, "force", False))
+    client.stop_session(
+        args.session_id,
+        force=getattr(args, "force", False),
+        reap_host=getattr(args, "reap_host", False),
+    )
     print(f"[OK] Session {args.session_id} stopped")
 
 
@@ -6172,6 +6176,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help="Tear down even with active background sub-agent tasks (kills "
              "them). Prefer waiting for them to finish.",
+    )
+    stop_p.add_argument(
+        "--reap-host",
+        action="store_true",
+        help=(
+            "Also retire the owned Session Host child instead of preserving "
+            "it for reattachment"
+        ),
     )
     stop_p.set_defaults(func=_cmd_stop)
 
