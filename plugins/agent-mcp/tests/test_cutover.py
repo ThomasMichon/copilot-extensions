@@ -104,6 +104,49 @@ def test_passive_server_skips_lease_acquisition():
     assert server._lease is None  # never even constructed a SingleInstance
 
 
+# ── cleanup must never destroy a handle a flip already repointed ─────────
+
+
+@pytest.mark.skipif(not _HAS_AF_UNIX, reason="POSIX symlink ownership check")
+def test_cleanup_endpoint_leaves_a_flipped_symlink_alone(tmp_path):
+    """Regression test (caught by CI on the first PR revision, not by any
+    local run -- a timing-dependent race): the old daemon's own socket_path
+    IS the fixed, client-facing handle when it was never started with
+    --socket. If a cutover flips that exact path into a symlink pointing at
+    the newly-promoted generation *before* this (correctly retiring) old
+    daemon's cleanup runs, an unconditional unlink would destroy the new
+    generation's handle moments after the cutover committed. A symlink here
+    is never this daemon's own artifact (it only ever binds a plain file/
+    real socket), so cleanup must detect one and leave it alone."""
+    fixed = tmp_path / "serve.sock"
+    other_gen = tmp_path / "serve-g2.sock"
+    other_gen.touch()
+    flip_data_handle(other_gen, legacy_path=fixed)
+    assert fixed.is_symlink()
+
+    server = Server(str(fixed), enable_lease=False)
+    server._cleanup_endpoint()
+
+    assert fixed.is_symlink(), "cleanup must not remove a handle it doesn't own"
+    assert os.readlink(fixed) == str(other_gen)
+
+
+@pytest.mark.skipif(not _HAS_AF_UNIX, reason="POSIX symlink ownership check")
+def test_cleanup_endpoint_removes_its_own_unflipped_socket(tmp_path):
+    """The positive case: a plain (never-flipped) socket file is still this
+    daemon's own -- cleanup must still remove it normally."""
+    own = tmp_path / "serve.sock"
+    real_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    real_sock.bind(str(own))
+    real_sock.close()
+    assert own.exists() and not own.is_symlink()
+
+    server = Server(str(own), enable_lease=False)
+    server._cleanup_endpoint()
+
+    assert not own.exists()
+
+
 # ── token-path pid keying (the cross-attempt collision fix) ───────────────
 
 

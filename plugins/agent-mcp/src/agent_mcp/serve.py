@@ -262,6 +262,11 @@ class Server:
         # Per-daemon auth token, minted only for the loopback-TCP transport
         # (``None`` on AF_UNIX, where filesystem permissions gate access).
         self._token: str | None = None
+        # The port this daemon itself bound for the Windows data-plane
+        # transport (``None`` on AF_UNIX, or before that bind completes) --
+        # lets _cleanup_endpoint() tell "my own still-current handle" apart
+        # from "a cutover flip already repointed this path elsewhere".
+        self._token_port: int | None = None
         # Attached-session refcount + last-activity clock drive the host's own
         # idle self-eviction (distinct from the WarmPool's per-session idle).
         self._attached = 0
@@ -536,6 +541,7 @@ class Server:
                 self._server = await asyncio.start_server(
                     self._handle, host=_TCP_HOST, port=0)
                 port = self._server.sockets[0].getsockname()[1]
+                self._token_port = port
                 self._write_endpoint(port, self._token)
                 log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
                          self.socket_path)
@@ -671,8 +677,37 @@ class Server:
             os.chmod(ep, 0o600)
 
     def _cleanup_endpoint(self) -> None:
-        """Remove the transport's on-disk handle on clean shutdown."""
-        target = self.socket_path if _HAS_AF_UNIX else _endpoint_path(self.socket_path)
+        """Remove the transport's on-disk handle on clean shutdown -- but
+        only if it is still genuinely **this daemon's own** handle.
+
+        Guarded against a real hazard: this daemon's own ``socket_path`` may
+        be the **fixed, client-facing handle** (any non-``--passive`` daemon
+        uses it directly, never a generation-suffixed one) -- and if a
+        cutover has meanwhile flipped that exact path to the newly-promoted
+        generation, a naive unconditional cleanup here would destroy the
+        *new* generation's handle out from under it right after commit, the
+        moment this (correctly retired) old daemon finishes shutting down.
+
+        * **POSIX** -- the flip repoints the path via a **symlink**. This
+          daemon always bound a plain file/real socket, never a symlink, so
+          finding one here means "someone else's flip owns this path now";
+          leave it alone.
+        * **Windows** -- the flip **rewrites the sidecar's content** in
+          place (no symlink concept). Re-read it and compare the port: if it
+          no longer matches the port *this* daemon actually bound, someone
+          else's flip owns it now; leave it alone. Matches on port only
+          (not token) since the port is the durable per-generation identity
+          the flip carries.
+        """
+        if _HAS_AF_UNIX:
+            target = self.socket_path
+            if target.is_symlink():
+                return
+        else:
+            target = _endpoint_path(self.socket_path)
+            current = _read_endpoint(self.socket_path)
+            if current is not None and current.get("port") != self._token_port:
+                return
         try:
             if target.exists():
                 target.unlink()
