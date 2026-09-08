@@ -490,18 +490,15 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
     _cutover_json="$("$VENV_PYTHON" -I -X utf8 -m agent_mcp cutover \
         --require-live --force --json 2>/dev/null || true)"
     if [[ -n "$_cutover_json" ]]; then
-        _cutover_skipped="$("$VENV_PYTHON" -c 'import sys,json
+        _cutover_parsed="$("$VENV_PYTHON" -I -X utf8 -c 'import sys,json
 try:
     d = json.loads(sys.argv[1])
 except Exception:
     d = {}
-print(d.get("skipped") or "")' "$_cutover_json" 2>/dev/null || true)"
-        _cutover_ok="$("$VENV_PYTHON" -c 'import sys,json
-try:
-    d = json.loads(sys.argv[1])
-except Exception:
-    d = {}
-print("1" if d.get("ok") else "0")' "$_cutover_json" 2>/dev/null || echo 0)"
+print(d.get("skipped") or "")
+print("1" if d.get("ok") else "0")' "$_cutover_json" 2>/dev/null || printf '\n0\n')"
+        _cutover_skipped="$(printf '%s\n' "$_cutover_parsed" | sed -n '1p')"
+        _cutover_ok="$(printf '%s\n' "$_cutover_parsed" | sed -n '2p')"
         if [[ -n "$_cutover_skipped" ]]; then
             _skip "Cutover skipped: $_cutover_skipped"
         elif [[ "$_cutover_ok" == "1" ]]; then
