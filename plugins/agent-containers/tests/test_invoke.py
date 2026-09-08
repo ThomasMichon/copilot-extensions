@@ -45,6 +45,12 @@ def test_payload_command_argv_prefers_payload_local_shim(tmp_path, monkeypatch):
     assert _invoke.payload_command_argv() == [str(shim)]
 
 
+def test_payload_binstub_returns_none_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(_invoke, "payload_root", lambda: tmp_path / "payload")
+
+    assert _invoke.payload_binstub() is None
+
+
 def test_runtime_root_honors_agent_containers_home(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(tmp_path / "cell" / "agent-containers"))
 

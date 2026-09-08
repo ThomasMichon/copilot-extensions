@@ -282,8 +282,8 @@ def test_profile_spec_can_describe_project_scoped_picker_source(monkeypatch, tmp
     monkeypatch.setattr(provider_ssh, "get_lease", lambda _name: _lease())
     monkeypatch.setattr(
         provider_ssh,
-        "payload_command_argv",
-        lambda: ["/payload/bin/agent-containers"],
+        "payload_binstub",
+        lambda: Path("/payload/bin/agent-containers"),
     )
 
     result = provider_ssh.ssh_profile_spec(
@@ -331,7 +331,9 @@ def test_profile_spec_can_describe_project_scoped_picker_source(monkeypatch, tmp
     }
     assert source["capabilities"]["messages"] is True
     assert source["capabilities"]["resume"] is False
-    assert result["registry"]["proxy_command_binary"] == "/payload/bin/agent-containers"
+    assert Path(result["registry"]["proxy_command_binary"]) == Path(
+        "/payload/bin/agent-containers"
+    )
 
 
 def test_provider_launcher_executes_active_isolated_runtime(monkeypatch, tmp_path):

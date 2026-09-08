@@ -13,6 +13,9 @@ def _runtime_root() -> Path:
     override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
     if override:
         return Path(override).expanduser()
+    sandbox = os.environ.get("AGENT_HOME", "").strip()
+    if sandbox:
+        return Path(sandbox).expanduser() / ".agent-codespaces"
     return Path.home() / ".agent-codespaces"
 
 

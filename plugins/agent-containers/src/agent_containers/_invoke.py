@@ -20,10 +20,15 @@ def payload_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def payload_command_argv() -> list[str]:
+def payload_binstub() -> Path | None:
     name = "agent-containers.cmd" if sys.platform == "win32" else "agent-containers"
     shim = payload_root() / "bin" / name
-    if shim.is_file():
+    return shim if shim.is_file() else None
+
+
+def payload_command_argv() -> list[str]:
+    shim = payload_binstub()
+    if shim is not None:
         return [str(shim)]
     return module_argv()
 

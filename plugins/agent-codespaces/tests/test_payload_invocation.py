@@ -59,6 +59,15 @@ def test_runtime_dir_honors_agent_codespaces_home(monkeypatch, tmp_path) -> None
     assert config._runtime_dir() == tmp_path / "cell" / "plugins" / "agent-codespaces"
 
 
+def test_invoke_runtime_root_falls_back_to_agent_home(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("AGENT_CODESPACES_HOME", raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "sandbox-home"))
+
+    from agent_codespaces import _invoke
+
+    assert _invoke._runtime_root() == tmp_path / "sandbox-home" / ".agent-codespaces"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")
 def test_posix_payload_command_ignores_shadow_path_and_selects_cell_runtime(
     tmp_path: Path,
