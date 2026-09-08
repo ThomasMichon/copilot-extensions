@@ -528,8 +528,14 @@ class Server:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             if _HAS_AF_UNIX:
-                # Clear a stale socket from a previous run (safe: we hold the lease).
-                if self.socket_path.exists():
+                # Clear a stale socket from a previous run (safe: we hold the
+                # lease). Path.exists() follows symlinks and returns False for
+                # a BROKEN one -- if this socket path is the fixed cutover
+                # handle and the promoted daemon it pointed at already exited
+                # (idle-evicted, crashed), the symlink itself still exists on
+                # disk but dangles; is_symlink() catches that case too, so a
+                # fresh bind here always starts from a clean path.
+                if self.socket_path.exists() or self.socket_path.is_symlink():
                     self.socket_path.unlink()
                 self._server = await asyncio.start_unix_server(
                     self._handle, path=str(self.socket_path))

@@ -260,6 +260,33 @@ class CutoverClient:
         return {}
 
 
+def _fixed_handle_has_live_listener(data_root: Path) -> bool:
+    """Probe the fixed data socket path itself for an actual live listener.
+
+    A genuinely pre-cutover-feature daemon never calls ``routing.
+    publish_active()`` at all (that whole subsystem didn't exist yet), so it
+    leaves NO routing-table entry -- meaning ``read_active_endpoint()``
+    returns ``None`` for it, identically to true "nothing running here."
+    ``run_cutover()`` must not conflate the two: a live pre-feature daemon is
+    still holding the single-instance lease and the fixed socket, and
+    blindly proceeding down the cold-start path would spawn a *second*
+    daemon and flip the fixed handle to point at it while the old one keeps
+    running -- exactly the bootstrap-boundary hazard this check exists to
+    prevent. A real OS-level connect (no bytes sent) distinguishes "a live
+    process is listening" from "an artifact (stale socket file/sidecar) is
+    present but dead" -- the latter is the normal, safe cold-start case.
+    """
+    from . import sockio
+
+    path = sockio.default_socket_path()
+    try:
+        sock, _token = sockio._connect(path)
+    except sockio.HostUnreachableError:
+        return False
+    sockio._close(sock)
+    return True
+
+
 def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
                force: bool = False) -> dict:
     """Drive one cutover of the resident ``serve`` daemon. Returns a result
@@ -282,6 +309,25 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
     # daemon (whose token file just happens to be missing/gone).
     current = routing.read_active_endpoint(data_root)
     next_gen = (current.generation + 1) if current else 1
+
+    if current is None and _fixed_handle_has_live_listener(data_root):
+        # A genuinely pre-cutover-feature daemon never publishes to the
+        # routing table (that subsystem didn't exist yet), so it looks
+        # identical to "nothing running" by routing-table state alone. But
+        # it IS actually listening on the fixed socket and holding the
+        # single-instance lease -- proceeding down the cold-start path
+        # would spawn a second daemon and flip the fixed handle to it while
+        # this one keeps running. Refuse with the same bootstrap-boundary
+        # error as the "routing entry present but no token" case below.
+        return {
+            "ok": False,
+            "error": "a serve daemon is already listening on the fixed "
+                     "socket but has no routing-table entry (it predates "
+                     "the cutover feature) -- this is a one-time bootstrap "
+                     "boundary; stop it and let the next call/materialize/"
+                     "attach respawn the new version normally, or restart "
+                     "it manually",
+        }
 
     # Resolve the OLD daemon's control token *now*, keyed on its own pid --
     # never a single shared filename, so a stale token left behind by an

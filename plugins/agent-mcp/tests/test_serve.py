@@ -641,3 +641,30 @@ async def test_detach_decrements_refcount_even_if_aclose_raises(tmp_path, monkey
         if not task.done():
             await request_via_socket(sock, {"op": "shutdown"})
             await asyncio.wait_for(task, timeout=5)
+
+
+@pytest.mark.skipif(not _HAS_AF_UNIX, reason="POSIX broken-symlink bind")
+async def test_serve_forever_binds_over_a_broken_symlink(tmp_path):
+    """Regression test: on POSIX the fixed cutover handle is a symlink to a
+    generation-specific socket. If the promoted daemon it pointed at later
+    exits (idle-evicted, crashed) and its generation socket is gone, the
+    fixed handle becomes a *broken* symlink. Path.exists() follows symlinks
+    and returns False for a broken one, so a naive `if path.exists():
+    unlink()` guard would leave the dangling symlink in place and
+    asyncio.start_unix_server() would then fail to bind over it -- wedging
+    respawn. serve_forever() must clear a broken symlink too."""
+    sock = tmp_path / "serve.sock"
+    # A symlink to a target that never existed -- broken by construction.
+    sock.symlink_to(tmp_path / "serve-g-does-not-exist.sock")
+    assert sock.is_symlink()
+    assert not sock.exists()  # confirms it's genuinely broken
+
+    server = Server(sock)
+    task = asyncio.create_task(server.serve_forever())
+    try:
+        await _await_socket(sock)
+        assert not sock.is_symlink(), "bind must replace the broken symlink"
+        assert (await request_via_socket(sock, {"op": "ping"}))["ok"] is True
+    finally:
+        await request_via_socket(sock, {"op": "shutdown"})
+        await asyncio.wait_for(task, timeout=5)

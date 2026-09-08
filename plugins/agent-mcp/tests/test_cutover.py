@@ -396,6 +396,46 @@ def test_run_cutover_treats_dead_routing_entry_as_no_active_daemon(
     assert current is None, "a dead entry must self-heal to None"
 
 
+@pytest.mark.skipif(not _HAS_AF_UNIX, reason="AF_UNIX fixed-handle probe")
+def test_run_cutover_refuses_when_pre_feature_daemon_holds_fixed_socket(
+    tmp_path, monkeypatch,
+):
+    """Regression test: a genuinely pre-cutover-feature daemon never calls
+    routing.publish_active() (that subsystem didn't exist yet for it), so it
+    has NO routing-table entry -- identical, by routing state alone, to
+    "nothing running here". But it IS actually listening on the fixed
+    socket and holding the single-instance lease. run_cutover() must not
+    conflate the two: blindly proceeding down the cold-start path would
+    spawn a second daemon and flip the fixed handle to point at it while
+    the pre-feature daemon keeps running untouched -- exactly the
+    bootstrap-boundary hazard this check exists to prevent."""
+    import socket as _socket
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    fixed = tmp_path / "serve.sock"
+    listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    listener.bind(str(fixed))
+    listener.listen(1)
+    try:
+        result = _cutover.run_cutover()
+        assert result["ok"] is False
+        assert "predates the cutover feature" in result["error"]
+    finally:
+        listener.close()
+
+
+def test_run_cutover_proceeds_cold_start_when_fixed_socket_truly_absent(
+    tmp_path, monkeypatch,
+):
+    """The negative case: no routing entry AND nothing listening on the
+    fixed socket at all (the path doesn't even exist) is a genuine cold
+    start, not a pre-feature daemon -- must NOT hit the bootstrap-boundary
+    error."""
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    assert not (tmp_path / "serve.sock").exists()
+    assert _cutover._fixed_handle_has_live_listener(tmp_path) is False
+
+
 # ── flip_data_handle ───────────────────────────────────────────────────────
 
 
