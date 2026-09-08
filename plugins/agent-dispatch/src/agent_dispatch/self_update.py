@@ -8,7 +8,7 @@ operator running ``deploy`` by hand. A version bump that lands between
 sessions (``copilot plugin update`` bumps the payload; a later
 ``install.ps1 update`` publishes a new ``versions/<version>`` slot and flips
 the ``current-version`` marker) left the *running* coordinator lagging until
-something external noticed and redeployed it (dotfiles #533 Part C).
+something external noticed and redeployed it.
 
 This module supplies the missing piece: a fail-safe, fully-injectable
 predicate -- :func:`stale_target` -- that a coordinator's own background loop

@@ -1006,8 +1006,16 @@ def create_app(
                         target = await asyncio.to_thread(
                             stale_target, routing_dir(), __version__
                         )
+                        # Not a safe point if a claim is in flight, OR if a
+                        # cutover (ours or an externally-triggered one) is
+                        # already draining -- `gate.claims` can already read 0
+                        # early in that window, before the routing-table flip
+                        # commits and `is_superseded` above starts saying
+                        # True, so relying on `is_superseded` alone lets this
+                        # loop race a second, redundant deploy on top of one
+                        # already in flight.
                         at_safe_point = target is not None and (
-                            gate is None or gate.claims == 0
+                            gate is None or (gate.claims == 0 and not gate.draining)
                         )
                     except Exception:
                         confirms = 0
