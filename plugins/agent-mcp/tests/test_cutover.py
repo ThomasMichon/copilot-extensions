@@ -279,6 +279,26 @@ async def test_drain_client_treats_unauthorized_reply_as_not_drained(tmp_path):
         await server._stop_control_listener()
 
 
+def test_drain_client_treats_missing_busy_sessions_on_ok_reply_as_not_drained(
+    monkeypatch,
+):
+    """Regression test: a reply that says ``{"ok": true, ...}`` but omits
+    ``busy_sessions`` entirely (a malformed-but-"successful" reply -- e.g. a
+    future control-op version skew) must not be read as "0 busy, therefore
+    drained". ``None`` is not ``0``; only an *explicit* zero counts."""
+    ctx = _cutover._CutoverContext(
+        data_root=None, new_socket_path=None, new_log_path=None,
+        new_control_token="tok", old_control_token=None, token_by_port={},
+    )
+    client = _cutover.CutoverClient("http://127.0.0.1:1", ctx)
+    monkeypatch.setattr(client, "_request", lambda payload: {"ok": True})
+    result = client.drain(timeout=0.1, poll=0.05, force=False)
+    assert result["drained"] is False
+    assert result["clean"] is False
+    assert result["busy_sessions"] is None
+    assert "error" in result
+
+
 # ── token-path pid keying (the cross-attempt collision fix) ───────────────
 
 
@@ -303,17 +323,57 @@ def test_run_cutover_treats_empty_token_file_as_missing(tmp_path, monkeypatch):
     valid empty-string token. Otherwise run_cutover() bypasses the intended
     bootstrap-boundary check and would go on to send an unauthorized drain/
     shutdown, a failure mode that's much harder to diagnose than the clear
-    "predates the cutover feature" error this path is supposed to give."""
+    "predates the cutover feature" error this path is supposed to give.
+
+    Binds a real listener on the published port so the routing entry reads
+    as genuinely live (verify_listener's safe default) -- a *dead* entry
+    must instead self-heal to "no active daemon" and take the normal
+    cold-start path (a separate concern; see the stale-routing-entry fix)."""
     from zdd import routing
 
     monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
-    routing.publish_active(tmp_path, bind="127.0.0.1", port=12345, pid=999999,
-                           version="0.0.0")
-    _control_token_path(tmp_path, 999999).write_text("   \n", encoding="utf-8")
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    try:
+        port = listener.getsockname()[1]
+        routing.publish_active(tmp_path, bind="127.0.0.1", port=port,
+                               pid=os.getpid(), version="0.0.0")
+        _control_token_path(tmp_path, os.getpid()).write_text(
+            "   \n", encoding="utf-8")
 
-    result = _cutover.run_cutover()
-    assert result["ok"] is False
-    assert "predates the cutover feature" in result["error"]
+        result = _cutover.run_cutover()
+        assert result["ok"] is False
+        assert "predates the cutover feature" in result["error"]
+    finally:
+        listener.close()
+
+
+# ── run_cutover() stale routing entry must self-heal to cold-start ────────
+
+
+def test_run_cutover_treats_dead_routing_entry_as_no_active_daemon(
+    tmp_path, monkeypatch,
+):
+    """Regression test: a stale active.json entry left by a crashed daemon
+    (no live listener, pid confirmed dead) must self-heal to "no active
+    daemon" -- the same as an empty table -- so a cold-start cutover
+    proceeds normally. Reading it with verify_listener=False (a prior draft
+    of this code) would instead treat the dead entry as "current" and, since
+    a dead daemon's token file is often missing/gone too, incorrectly hit
+    the bootstrap-boundary error meant for a genuinely *live* pre-feature
+    daemon -- blocking a perfectly legitimate cold-start recovery."""
+    from zdd import routing
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    # A pid that (almost certainly) does not exist, and no listener at all on
+    # this port -- a stale entry with nothing backing it, exactly what a
+    # crash leaves behind.
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=1, pid=999999,
+                           version="0.0.0")
+
+    current = routing.read_active_endpoint(tmp_path)
+    assert current is None, "a dead entry must self-heal to None"
 
 
 # ── flip_data_handle ───────────────────────────────────────────────────────
@@ -385,10 +445,14 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
     # would block the child's write() -- and the test waiting on it -- in a
     # real deadlock.
     log_path = tmp_path / "old.log"
-    old = subprocess.Popen(
-        [sys.executable, "-m", "agent_mcp", "serve", "--idle-timeout", "0"],
-        env=env, stdout=open(log_path, "ab"), stderr=subprocess.STDOUT,
-    )
+    with open(log_path, "ab") as log_fh:
+        old = subprocess.Popen(
+            [sys.executable, "-m", "agent_mcp", "serve", "--idle-timeout", "0"],
+            env=env, stdout=log_fh, stderr=subprocess.STDOUT,
+        )
+    # Popen() dup()s the fd for the child on POSIX; closing our copy here
+    # (via the `with` block above) avoids leaking it in the parent process
+    # -- the child keeps its own independent copy and keeps writing fine.
     try:
         deadline = time.monotonic() + 10
         fixed = tmp_path / "serve.sock"

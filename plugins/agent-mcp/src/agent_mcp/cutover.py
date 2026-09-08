@@ -213,7 +213,15 @@ class CutoverClient:
                        "busy_sessions": busy_sessions,
                        "error": resp.get("error") or "drain request failed"}
             busy_sessions = resp.get("busy_sessions")
-            if not busy_sessions:
+            if busy_sessions is None:
+                # ok:true but the field is missing entirely -- a malformed
+                # reply, not a real "0 busy" observation. Treating it as
+                # drained would let a genuinely-busy old daemon get shut
+                # down anyway; surface it as a failure instead.
+                return {"drained": False, "clean": False, "forced": False,
+                       "busy_sessions": None,
+                       "error": "drain reply missing busy_sessions"}
+            if busy_sessions == 0:
                 return {"drained": True, "clean": True, "forced": False,
                        "busy_sessions": 0}
             if time.monotonic() >= deadline:
@@ -265,7 +273,14 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
     data_root = ipc.default_socket_path().parent
     data_root.mkdir(parents=True, exist_ok=True)
 
-    current = routing.read_active_endpoint(data_root, verify_listener=False)
+    # verify_listener=True (the safe default) is deliberate here: a stale
+    # active.json entry left by a crashed daemon (no live listener, pid
+    # confirmed dead) must self-heal to "no active daemon" -- the same as an
+    # empty table -- so a cold-start cutover proceeds normally instead of
+    # incorrectly reading the dead entry as "current" and then hitting the
+    # bootstrap-boundary error meant for a genuinely *live* pre-feature
+    # daemon (whose token file just happens to be missing/gone).
+    current = routing.read_active_endpoint(data_root)
     next_gen = (current.generation + 1) if current else 1
 
     # Resolve the OLD daemon's control token *now*, keyed on its own pid --
