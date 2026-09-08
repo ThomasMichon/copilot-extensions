@@ -107,13 +107,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-request.json",
-          "sha256": "cabed29436e496098474bfba640d6e19fa592a602d6d4097489566a1370c31af",
+          "sha256": "c12313ad80ddb5cfcc6b8670c9c3a46a4fac60eed473945ce531e59d43a7f0c9",
           "role": "current session-create request with unknown-field tolerance",
           "generation": 14
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "64199d6fdd95d754eadb1f497c2487b0162d67ae827b28215cb393ff9d78cf37",
+          "sha256": "a0611733dc87456e4402898cc13683c256a0140eb07fcd116864f3ab46c9857c",
           "role": "current session-create response",
           "generation": 14
         },
@@ -180,7 +180,7 @@
           "capture_method": "Invoke the health route with a controlled empty runtime state and zeroed carrier diagnostics."
         },
         {
-          "commit": "6bf5270d3abefed771961856efaab3a94efd56c8",
+          "commit": "52ad065519d1f0a213ba5e3a472d7851bff643d9",
           "plugin_version": "0.4.0-dev447",
           "generation": 14,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
