@@ -112,6 +112,45 @@ fresh, resume, non-interactive, and ACP paths. That future activation replaces
 the compatibility path deliberately; it is not a redundant second mechanism
 enabled in advance.
 
+### 2a. Only the computed part belongs in the session-folder file
+
+A plugin's per-session content is rarely *all* dynamic. Splitting it wrong --
+writing explainer prose, field-meaning documentation, or "run this command for
+more" boilerplate into the session-folder file alongside the genuinely
+computed values -- silently reintroduces the cost this pattern exists to
+avoid: identical static text gets regenerated and rewritten on every single
+session start, burns budget that should go to live facts, and (worse) can't
+be reviewed or diffed as checked-in guidance.
+
+The rule: the session-folder file carries **only** the values that had to be
+computed this session -- resolved paths, current bindings, a live command's
+`argv`, a config-derived summary. Everything else -- what a field means, why
+it's bounded/curated rather than exhaustive, and which live commands to run
+for the complete picture -- is a second, ordinary static projection (its own
+`instructions/<topic>.instructions.md` template plus an
+`instruction-projections.json` entry), checked in and reviewed like any other
+static fail-safe. Both files load independently and automatically; there is no
+ordering dependency between them, and either can be absent without breaking
+the other.
+
+`agent-worktrees` is the reference example: its session-folder file carries
+only the current checkout's `Checkout:`/`State:`/`Related:` facts (resolved
+this session, by reading config and walking the related-repo registry); the
+static, checked-in `worktree-context-guide.instructions.md` explains what
+those fields mean, that `Related:` is a deliberately bounded/curated subset,
+and which `agent-worktrees` commands to run live for the complete picture.
+None of that explainer text is regenerated per session.
+
+> **Known follow-up, not yet applied everywhere:** the session command-catalog
+> emitted by every `libs/payload-invocation`-based plugin still bundles a
+> static explainer ("Invoke the exact `argv` below...") into the same
+> `additionalContext` string as the computed catalog JSON, so that boilerplate
+> is currently rewritten into every session-folder file that includes a
+> command catalog. Splitting it requires care: at least one consumer
+> (`agent-worktrees`' `hook_client.py`) uses the explainer heading as an
+> internal de-duplication marker between its registration and catalog
+> contexts, so the fix isn't a pure deletion. Tracked for a dedicated pass.
+
 ### 3. Folder trust is a hard prerequisite for repository-level hooks
 
 A repository-level `.github/hooks/*.json` hook (as opposed to an installed
@@ -150,8 +189,11 @@ review mechanism is needed -- only a documented content convention.
 - [`agent-worktrees`](../../plugins/agent-worktrees/) projects
   `instructions/session-guidance.instructions.md` and writes the matching
   session-scoped file from its payload-local `sessionStart` hook client. The
-  file combines the attributable command catalog with the current worktree
-  binding.
+  session-folder file combines the attributable command catalog with the
+  current worktree/topology facts (`Checkout:`/`State:`/`Related:`); the
+  static, checked-in `instructions/worktree-context-guide.instructions.md`
+  (its own separate projection) carries the field-meaning explainer and the
+  live commands to run for the complete picture -- see §2a above.
 - Runtime command plugins such as
   [`agent-bridge`](../../plugins/agent-bridge/),
   [`agent-codespaces`](../../plugins/agent-codespaces/),
