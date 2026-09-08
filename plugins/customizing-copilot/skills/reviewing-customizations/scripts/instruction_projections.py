@@ -506,10 +506,28 @@ def _forbidden_content(raw: bytes) -> list[str]:
     return [label for label, pattern in DYNAMIC_CONTENT if pattern.search(text)]
 
 
+def _declares_projections(payload_root: Path) -> bool:
+    """Return whether a payload root has a projection declaration present.
+
+    Uses a bare ``lstat`` (not ``_safe_existing_file``): this only decides
+    whether the plugin is *participating* at all, before its manifest or
+    declaration content is trusted/read. A ``payload_root`` that does not
+    exist on disk simply reports no declaration, which is the common case for
+    an enabled plugin this scan cannot resolve a source for.
+    """
+    try:
+        (payload_root / DECLARATION_FILE).lstat()
+    except OSError:
+        return False
+    return True
+
+
 def _load_specs(
     repo_root: Path,
     sources: Iterable[object],
     result: Result,
+    *,
+    locked_plugins: frozenset[str] = frozenset(),
 ) -> tuple[list[ProjectionSpec], set[str]]:
     specs: list[ProjectionSpec] = []
     unknown_plugins: set[str] = set()
@@ -556,13 +574,25 @@ def _load_specs(
                 manifest = candidate_manifest
                 break
         if manifest_path is None:
-            result.add(
-                BLOCKING,
-                "projection-source-unavailable",
-                payload_root,
-                "enabled plugin has no supported readable manifest",
-            )
-            unknown_plugins.add(plugin_identity)
+            # An enabled plugin whose manifest can't be resolved only matters
+            # to the projection stack if it actually participates: either it
+            # visibly declares a projection at this payload root, or it is
+            # already a locked participant (its source going unavailable is a
+            # regression -- the projection can no longer be verified or
+            # regenerated). Otherwise this plugin simply isn't part of the
+            # instruction-projections system (a common, benign case for a
+            # plugin whose source this settings-derived scan cannot resolve,
+            # e.g. a directory-marketplace mapping declared only in a
+            # settings layer this scan intentionally excludes for
+            # reproducibility), so it is skipped rather than blocked.
+            if _declares_projections(payload_root) or plugin_identity in locked_plugins:
+                result.add(
+                    BLOCKING,
+                    "projection-source-unavailable",
+                    payload_root,
+                    "enabled plugin has no supported readable manifest",
+                )
+                unknown_plugins.add(plugin_identity)
             continue
         declaration_path = payload_root / DECLARATION_FILE
         try:
@@ -1277,7 +1307,12 @@ def scan_repository(
     _scan_orphan_files(root, lock, result)
 
     if sources is not None:
-        specs, unknown_plugins = _load_specs(root, sources, result)
+        locked_plugins = frozenset(
+            str(entry.get("plugin", "")) for entry in lock.values()
+        )
+        specs, unknown_plugins = _load_specs(
+            root, sources, result, locked_plugins=locked_plugins
+        )
         desired = {spec.destination: spec for spec in specs}
         _scan_legacy_regions(root, specs, result)
         for destination, spec in sorted(desired.items()):
@@ -1513,7 +1548,12 @@ def _sync_repository_locked(
 ) -> Result:
     lock, lock_exists, lock_preimage = _load_lock(root, result)
     aggregate_budget = _load_aggregate_budget(root, result)
-    specs, _unknown_plugins = _load_specs(root, sources, result)
+    locked_plugins = frozenset(
+        str(entry.get("plugin", "")) for entry in lock.values()
+    )
+    specs, _unknown_plugins = _load_specs(
+        root, sources, result, locked_plugins=locked_plugins
+    )
     _scan_legacy_regions(root, specs, result)
     rendered: dict[str, RenderedProjection] = {}
     projection_preimages: dict[str, bytes | None] = {}
