@@ -82,7 +82,7 @@ and the parent agent-dispatch vision:
   identity is a `<name>.identity.md` file in the same frontmatter (`name`,
   `description`) plus markdown-body (`rules`) shape as an in-session
   `*.agent.md` sub-agent, resolved repo-local-first then from the plugin's
-  packaged `plugins/agent-dispatch/identities/`. A declaration's new
+  packaged `plugins/agent-dispatch/src/agent_dispatch/identities/`. A declaration's new
   `worker_identity` field is mutually exclusive with inline
   `worker_guidance`; `validate_config` resolves it at validation time.
 - [x] Extract at least one existing declaration's inline prose (the
@@ -305,7 +305,7 @@ other phases actually land in.
   `worker_identity: odsp-web-harness-backlog`. Unlike prior legs, this time
   the check found the running daemon HAS auto-updated: `agent-dispatch
   --version` -> `0.1.2-dev34` (was `0.1.2-dev29`), and its own venv
-  (`C:\Users\tmichon\.agent-dispatch\versions\0.1.2-dev34\Scripts\python.exe`)
+  (`%USERPROFILE%\.agent-dispatch\versions\0.1.2-dev34\Scripts\python.exe`)
   successfully imports `agent_dispatch.worker_identities`. The daemon-version
   gate for the dotfiles switch is now clear -- this is the next slice, not a
   re-check. A paired `odsp-web-harness` + `dotfiles` knowledge worktree
