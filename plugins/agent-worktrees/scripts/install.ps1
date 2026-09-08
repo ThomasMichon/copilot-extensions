@@ -1966,8 +1966,7 @@ function Deploy-RuntimeResolvers {
 
 function Deploy-Binstub {
     <# Generate the project-specific binstub in ~/.local/bin/.
-       Routes through the Python CLI for subcommand dispatch.
-       Falls back to launch-session.cmd if the venv is missing. #>
+       Every path routes through this payload's attributable command. #>
     Ensure-InstallDir $LocalBin
 
     # Reserved-name guard (belt-and-suspenders with the ProjectName resolution
@@ -1979,72 +1978,30 @@ function Deploy-Binstub {
         return
     }
 
+    $payloadCmd = Join-Path $PluginDir 'bin\payload\agent-worktrees.cmd'
+    $payloadPs1 = Join-Path $PluginDir 'bin\payload\agent-worktrees.ps1'
     $content = @"
 @echo off
 rem agent-worktrees project binstub
 set "PYTHONUTF8=1"
 set "AGENT_WORKTREES_LAUNCH_ID=$ProjectName-%RANDOM%-%RANDOM%"
-set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"
-set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\.agent-worktrees\logs\picker-launches.jsonl"
-if not exist "%USERPROFILE%\.agent-worktrees\logs" mkdir "%USERPROFILE%\.agent-worktrees\logs" >nul 2>&1
-(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"$ProjectName"}) 2>nul
-set "AGENT_WORKTREES_BINSTUB_TRACED=1"
-if "%~1"=="" (
-  call "%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" --project $ProjectName
-  exit /b %ERRORLEVEL%
-)
-rem Context resolves from CWD / --project (git-like); the binstub names its
-rem project via --project, not an ambient env var.
-set "_PSHOST="
-for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
-if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0$ProjectName.ps1" %*
+call "$payloadCmd" --project $ProjectName %*
 exit /b %ERRORLEVEL%
 "@
     $dst = Join-Path $LocalBin "$ProjectName.cmd"
     Set-Content -Path $dst -Value $content -NoNewline
 
-    # Primary .ps1 (PowerShell prefers it over the .cmd in the same dir; @args
-    # forwards argv verbatim so quoting/&&/|/;/! survive). The .cmd above stays
-    # as a fallback for cmd.exe, `cmd /c` Windows Terminal profiles, and ssh
-    # launchers. Both route through the signed venv python via -m, falling back
-    # to launch-session when the venv is missing (recovery).
+    # Primary .ps1 (PowerShell prefers it over .cmd); both pin the payload.
     $ps1Content = (@'
 # agent-worktrees project binstub
 $env:PYTHONUTF8 = '1'
-if (-not $env:AGENT_WORKTREES_BINSTUB_TRACED) {
-    $env:AGENT_WORKTREES_LAUNCH_ID = '%%PROJECT%%-' + [guid]::NewGuid().ToString('N')
-    $env:AGENT_WORKTREES_BINSTUB_STARTED = [DateTime]::UtcNow.ToString('o')
-    $_awTraceDir = Join-Path $env:USERPROFILE '.agent-worktrees\logs'
-    $env:AGENT_WORKTREES_LAUNCH_TRACE = Join-Path $_awTraceDir 'picker-launches.jsonl'
-    try {
-        [IO.Directory]::CreateDirectory($_awTraceDir) | Out-Null
-        $_awEvent = [ordered]@{ event = 'binstub_start'; timestamp = $env:AGENT_WORKTREES_BINSTUB_STARTED; launch_id = $env:AGENT_WORKTREES_LAUNCH_ID; project = '%%PROJECT%%' }
-        [IO.File]::AppendAllText($env:AGENT_WORKTREES_LAUNCH_TRACE, ($_awEvent | ConvertTo-Json -Compress) + [Environment]::NewLine)
-    } catch {}
-}
-if ($args.Count -eq 0) {
-    & "$env:USERPROFILE\.agent-worktrees\bin\launch-session.ps1" --project '%%PROJECT%%'
-    exit $LASTEXITCODE
-}
-# Context resolves from CWD / --project (git-like). This .ps1 runs in-process in
-# the caller's session, so it names its project via --project (not an ambient
-# env var), leaving the live session env untouched. Recovery (venv missing)
-# uses the same explicit launcher argument.
-# Resolve the runtime slot python via the junction-free current-version marker
-# (the .venv junction is retired -- #637/#1085/#1106).
-$_root = Join-Path $env:USERPROFILE '.agent-worktrees'
-$AwPy = $null
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-if (Test-Path -LiteralPath $_resolver -PathType Leaf) { . $_resolver }
-$_py = $AwPy
-if (Test-Path $_py) {
-    & $_py -m agent_worktrees --project '%%PROJECT%%' @args
-    exit $LASTEXITCODE
-}
-& "$env:USERPROFILE\.agent-worktrees\bin\launch-session.cmd" --project '%%PROJECT%%' @args
+$env:AGENT_WORKTREES_LAUNCH_ID = '%%PROJECT%%-' + [guid]::NewGuid().ToString('N')
+& '%%PAYLOAD%%' --project '%%PROJECT%%' @args
 exit $LASTEXITCODE
-'@).Replace('%%PROJECT%%', $ProjectName)
+'@).Replace('%%PROJECT%%', $ProjectName).Replace(
+        '%%PAYLOAD%%',
+        $payloadPs1.Replace("'", "''")
+    )
     $ps1Dst = Join-Path $LocalBin "$ProjectName.ps1"
     [System.IO.File]::WriteAllText($ps1Dst, $ps1Content, (New-Object System.Text.UTF8Encoding($false)))
     Write-ServiceOk "Binstub: $ps1Dst (+ .cmd fallback)"

@@ -46,6 +46,8 @@ coupled registry boundary. Legacy/default operation keeps all three beneath
 payload and selects the cell's plugin root for all three. Ambient runtime,
 home, plugin-root, or per-file override variables cannot independently select
 a cell, and invalid or foreign context never falls back to the legacy files.
+The same selected root owns runtime manifests, version slots, wrapper support,
+logs, pivots, monitor state, and other plugin-global mutable artifacts.
 
 Per-project config and agent-worktrees tracking/session records now follow the
 same installation boundary. Legacy/default operation preserves
@@ -56,8 +58,11 @@ histories, and session bindings. Aliases for the same normalized remote share a
 repository ID, while the same repository in another cell remains isolated.
 
 Project binstubs remain global but route every invocation through their pinned
-payload before runtime or launcher selection. Pivots, leases, service identity,
-and the host-owned `~/.copilot/session-state` database remain separate later
+payload before runtime or launcher selection. Their shared ownership receipts
+and locks remain beside the shared `~/.local/bin` command space and bind the
+validated marketplace installation identity, so independent cells cannot
+arbitrate the same command under separate locks. Leases, service identity, and
+the host-owned `~/.copilot/session-state` database remain separate later
 boundaries. Namespaced activation remains opt-in and clean-room-only during the
 migration.
 
