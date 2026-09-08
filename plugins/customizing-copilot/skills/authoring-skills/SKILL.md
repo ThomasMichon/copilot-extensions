@@ -508,6 +508,18 @@ Discipline (context is a **shared, intentionally budgeted** resource):
 - **Inline only what every turn needs**; for the rest, inject a short pointer -- a
   one-line summary plus a **backtick faux-link** to a file the agent reads on
   demand (`` `~/.my-tool/notes.md` ``) -- rather than pasting the whole document.
+- **Split the exact-session file itself: computed facts only, explainer stays
+  static.** A writer's content is rarely all dynamic. Field meanings, why a
+  summary is bounded/curated rather than exhaustive, and which live commands to
+  run for the complete picture are **not** computed this session -- they're
+  identical every time. Put that prose in a second, ordinary static projection
+  (its own `instructions/<topic>.instructions.md` + `instruction-projections.json`
+  entry, checked in and reviewed like any other static fail-safe); let the
+  exact-session file carry only the values that had to be resolved this session
+  (paths, bindings, a live command's `argv`, a config-derived summary). Both
+  files load independently and automatically -- neither depends on the other's
+  presence. See `docs/patterns/session-scoped-dynamic-guidance.md` §2a for the
+  worked example.
 - **Mark ownership.** Begin every injected kernel with a stable owner marker:
   the plugin name, preferably plus its version. Budget reports and diagnostics
   need to attribute the emitted bytes.
