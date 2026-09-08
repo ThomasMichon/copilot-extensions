@@ -1,20 +1,19 @@
 // handoff-core.mjs -- SDK-free store/trigger core for context handoffs.
 //
-// Everything the handoff store + live-cutover trigger needs, WITHOUT importing
-// the Copilot SDK or the session extension. This is the same rationale that
-// extracted `cutover-seed.mjs` (the seed builders): keep the load-bearing logic
-// importable from anywhere -- a unit test, the clean-room, and (the reason this
-// module exists) a standalone CLI (`handoff-cli.mjs`) an agent can invoke
-// DIRECTLY when the context-handoff extension does not resolve or fails to load
-// (e.g. a Bare-resumed session where no extensions load at all).
+// Everything the handoff store + pending-pickup trigger needs, WITHOUT
+// importing the Copilot SDK or the session extension. This is the same
+// rationale that extracted `cutover-seed.mjs` (the seed builders): keep the
+// load-bearing logic importable from anywhere -- a unit test, the clean-room,
+// and (the reason this module exists) a standalone CLI (`handoff-cli.mjs`) an
+// agent can invoke DIRECTLY when the context-handoff extension does not resolve
+// or fails to load (e.g. a Bare-resumed session where no extensions load at
+// all).
 //
 // The functions here are ported faithfully from extension.mjs's store/trigger
 // helpers. They shell out to the SAME `agent-worktrees` / `agent-dispatch`
 // binstubs and write the SAME on-disk handoff format, so a handoff stored via
 // this core is byte-compatible with the extension's `consume_handoff` /
-// `/resume-handoff` path. (Follow-up: extension.mjs should import these from
-// here to retire the duplicate definitions, under the node --test + clean-room
-// context-handoff-cutover guardrails.)
+// `/resume-handoff` path.
 
 import {
   writeFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync,
@@ -23,6 +22,7 @@ import {
 import { join, basename, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import {
   CONTINUATION_DIRECTIVE,
   leadFrom,
@@ -268,23 +268,6 @@ export function normalizeHandoffTitle(value) {
     .trim();
 }
 
-export function currentPaneId() {
-  return process.env.TMUX_PANE || process.env.PSMUX_PANE || null;
-}
-
-export function currentMuxSession(pane = currentPaneId(), execute = runCli) {
-  if (!pane) return null;
-  try {
-    return execute(
-      process.platform === "win32" ? "psmux" : "tmux",
-      ["display-message", "-p", "-t", pane, "#{session_name}"],
-      { timeout: 5000 },
-    ).trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 export function sessionBindingForSession(
   sessionId, cwd, execute = runCli,
 ) {
@@ -359,23 +342,11 @@ export function collectCliHandoffFacts(cwd, sid) {
   };
 }
 
-function validatedEnvironmentBinding(worktree, execute = runCli) {
-  const pane = currentPaneId();
-  const muxSession = currentMuxSession(pane, execute);
-  if (!pane || !muxSession) return null;
-  if (worktree && muxSession !== `wt-${worktree}`) return null;
-  return { pane_id: pane, mux_session: muxSession };
-}
-
 export function makeHandoffMetadata(
   { sid, cwd, title, storage, taskId = null },
-  execute = runCli,
   get = agentWorktreesGet,
 ) {
   const { wtDir, worktree, stateDir } = worktreeInfo(cwd, sid, get);
-  const authority = sessionBindingForSession(sid, cwd, execute);
-  const envBinding = validatedEnvironmentBinding(worktree, execute);
-  const binding = authority.found ? authority : envBinding || {};
   const id = `handoff-${safePathSegment(sid)}`;
   return {
     kind: "context-handoff",
@@ -386,22 +357,8 @@ export function makeHandoffMetadata(
     sessionId: sid,
     cwd,
     title: title || "",
-    worktree: authority.worktree_id || worktree,
+    worktree,
     worktreeDir: wtDir,
-    oldPane: binding.pane_id || null,
-    muxSession: binding.mux_session || null,
-    predecessor: {
-      sessionId: sid,
-      paneId: binding.pane_id || null,
-      panePid: binding.pane_pid || null,
-      paneStartTime: binding.pane_start_time || null,
-      copilotPid: binding.copilot_pid || null,
-      copilotStartTime: binding.copilot_start_time || null,
-      muxSession: binding.mux_session || null,
-      source: authority.found ? "session-binding" : (
-        envBinding ? "validated-environment" : null
-      ),
-    },
     stateDir,
     createdAt: new Date().toISOString(),
   };
@@ -704,36 +661,6 @@ export function runAgentDispatchConsume(cwd, taskId, deferComplete) {
   return runCli("agent-dispatch", argv, { cwd, timeout: 20000 });
 }
 
-export function taskOwnedBySuccessor(
-  cwd,
-  taskId,
-  sid,
-  metadata,
-  stateReader = agentDispatchJson,
-  get = agentWorktreesGet,
-) {
-  const task = stateReader(["show", taskId], cwd);
-  if (!task || !sid) return { confirmed: false, task };
-  const status = String(task.status || "");
-  const ownerSession = task.owner_session_id || null;
-  const owner = task.owner || null;
-  const machine = get("machine", cwd, sid);
-  const worktree = metadata?.worktree || null;
-  const expectedOwner = machine && worktree ? `${machine}/${worktree}` : null;
-  const ownerMatches = expectedOwner
-    ? owner === expectedOwner
-    : Boolean(worktree && owner && owner.endsWith(`/${worktree}`));
-  return {
-    confirmed: (
-      ["started", "suspended", "completed"].includes(status)
-      && ownerSession === sid
-      && ownerMatches
-    ),
-    task,
-    expectedOwner,
-  };
-}
-
 export function dispatchHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
@@ -765,560 +692,330 @@ export function dispatchHandoff(promptText, sid, cwd, title) {
   }
 }
 
-function checkpointPath(metadata, token) {
-    const stateDir = metadata?.stateDir;
-    if (!stateDir || !token) return null;
-    return join(
-      stateDir,
-      "handoff",
-      `cutover-${safePathSegment(token)}.json`,
+function describeCliError(error) {
+  return (
+    error?.stderr
+    || error?.stdout
+    || error?.message
+    || String(error)
+  ).toString().trim();
+}
+
+function cliJson(bin, argv, cwd, timeout = 15000, execute = runCli) {
+  try {
+    return JSON.parse(execute(bin, argv, { cwd, timeout }));
+  } catch (error) {
+    const stdout = error?.stdout?.toString().trim();
+    if (stdout) {
+      try {
+        return JSON.parse(stdout);
+      } catch {
+        // Preserve the original command failure when stdout is not JSON.
+      }
+    }
+    throw error;
+  }
+}
+
+function sessionStateDirFor(sessionId) {
+  const safe = safePathSegment(sessionId);
+  return join(homedir(), ".copilot", "session-state", safe);
+}
+
+export function sessionStateHandoffPath(sessionId) {
+  return join(sessionStateDirFor(sessionId), "handoff-request.json");
+}
+
+export function readSessionStateHandoff(sessionId) {
+  const path = sessionStateHandoffPath(sessionId);
+  if (!existsSync(path)) return null;
+  try {
+    return { path, record: JSON.parse(readFileSync(path, "utf-8")) };
+  } catch {
+    return null;
+  }
+}
+
+export function writeSessionStateHandoff(
+  { sid, promptText, stored, seed },
+) {
+  if (!sid) return { ok: false, path: null, error: "session id is unavailable" };
+  const path = sessionStateHandoffPath(sid);
+  const record = {
+    kind: "context-handoff-session-request",
+    version: 1,
+    sessionId: sid,
+    storage: stored.storage,
+    handoffId: stored.id,
+    taskId: stored.taskId || null,
+    handoffPath: stored.path || null,
+    worktree: stored.metadata?.worktree || null,
+    worktreeDir: stored.metadata?.worktreeDir || null,
+    stateDir: stored.metadata?.stateDir || null,
+    title: stored.metadata?.title || "",
+    seed,
+    promptText,
+    consumed: false,
+    consumedAt: null,
+    consumedBySession: null,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeJsonAtomic(path, record);
+    return { ok: true, path, record };
+  } catch (error) {
+    return {
+      ok: false,
+      path,
+      error:
+        `resolved session-state directory ${dirname(path)}, but the handoff ` +
+        `request write failed: ${error?.message || String(error)}`,
+    };
+  }
+}
+
+export function markSessionStateHandoffConsumed(
+  predecessorSessionId,
+  { consumedBySession = null, handoffId = null } = {},
+) {
+  if (!predecessorSessionId) return null;
+  const found = readSessionStateHandoff(predecessorSessionId);
+  if (!found?.record) return null;
+  const current = found.record;
+  if (handoffId && current.handoffId && current.handoffId !== handoffId) {
+    return current;
+  }
+  const consumed = {
+    ...current,
+    consumed: true,
+    consumedAt: current.consumedAt || new Date().toISOString(),
+    consumedBySession: consumedBySession || current.consumedBySession || null,
+  };
+  writeJsonAtomic(found.path, consumed);
+  return consumed;
+}
+
+function deliveryCheckpointPath(metadata, token) {
+  const stateDir = metadata?.stateDir;
+  if (!stateDir || !token) return null;
+  return join(
+    stateDir,
+    "handoff",
+    `delivery-${safePathSegment(token)}.json`,
+  );
+}
+
+function readDeliveryCheckpoint(path) {
+  if (!path || !existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeDeliveryCheckpoint(checkpoint) {
+  if (!checkpoint?.path) return checkpoint;
+  mkdirSync(dirname(checkpoint.path), { recursive: true });
+  checkpoint.updatedAt = new Date().toISOString();
+  writeJsonAtomic(checkpoint.path, checkpoint);
+  return checkpoint;
+}
+
+function checkpointStep(checkpoint, name, detail = null) {
+  if (!checkpoint) return;
+  checkpoint.steps = checkpoint.steps || {};
+  checkpoint.steps[name] = true;
+  checkpoint.stepTimes = checkpoint.stepTimes || {};
+  checkpoint.stepTimes[name] = new Date().toISOString();
+  if (detail !== null) {
+    checkpoint.details = checkpoint.details || {};
+    checkpoint.details[name] = detail;
+  }
+  writeDeliveryCheckpoint(checkpoint);
+}
+
+function prepareTaskDeliveryCheckpoint(
+  cwd, taskId, sid, decoded = null, stateDirResolver = agentWorktreesGet,
+) {
+  const source = decoded || decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId));
+  const metadata = source.metadata || {};
+  if (!metadata.stateDir) {
+    metadata.stateDir = stateDirResolver(
+      "worktree-state-dir", cwd, sid,
     );
   }
-
-  function readCheckpoint(path) {
-    if (!path || !existsSync(path)) return null;
-    try {
-      return JSON.parse(readFileSync(path, "utf-8"));
-    } catch {
-      return null;
-    }
-  }
-
-  export function findTaskCutoverCheckpoint(cwd, sid) {
-    const root = handoffDirFor(cwd, sid);
-    if (!root || !existsSync(root)) return null;
-    let newest = null;
-    let newestMtime = 0;
-    let files;
-    try {
-      files = readdirSync(root);
-    } catch {
-      return null;
-    }
-    for (const file of files) {
-      if (!file.startsWith("cutover-") || !file.endsWith(".json")) continue;
-      const path = join(root, file);
-      try {
-        const checkpoint = JSON.parse(readFileSync(path, "utf-8"));
-        if (
-          checkpoint.kind !== "context-handoff-cutover"
-          || checkpoint.successorSession !== sid
-          || checkpoint.steps?.predecessorRetired
-        ) continue;
-        const mtime = statSync(path).mtimeMs;
-        if (mtime > newestMtime) {
-          newestMtime = mtime;
-          newest = checkpoint;
-        }
-      } catch {
-        // Ignore malformed or concurrently replaced checkpoints.
-      }
-    }
-    return newest;
-  }
-
-  function writeCheckpoint(checkpoint) {
-    if (!checkpoint?.path) return checkpoint;
-    mkdirSync(dirname(checkpoint.path), { recursive: true });
-    checkpoint.updatedAt = new Date().toISOString();
-    writeJsonAtomic(checkpoint.path, checkpoint);
-    return checkpoint;
-  }
-
-  export function prepareTaskCutoverCheckpoint(
-    cwd, taskId, sid, decoded = null, stateDirResolver = agentWorktreesGet,
-  ) {
-    const source = decoded || decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId));
-    const metadata = source.metadata || {};
-    if (!metadata.stateDir) {
-      metadata.stateDir = stateDirResolver(
-        "worktree-state-dir", cwd, sid,
-      );
-    }
-    const path = checkpointPath(metadata, taskId);
-    const existing = readCheckpoint(path);
-    if (existing) {
-      if (existing.successorSession && existing.successorSession !== sid) {
-        return {
-          ok: false,
-          message:
-            `Handoff ${taskId} is already assigned to successor ` +
-            `${existing.successorSession}; refusing replay in ${sid || "unknown"}.`,
-        };
-      }
-      return { ok: true, checkpoint: existing };
-    }
-    if (!path) {
+  const path = deliveryCheckpointPath(metadata, taskId);
+  const existing = readDeliveryCheckpoint(path);
+  if (existing) {
+    if (existing.consumerSession && existing.consumerSession !== sid) {
       return {
         ok: false,
-        message: "Task-backed handoff metadata has no durable worktree state path.",
+        message:
+          `Handoff ${taskId} is already being delivered to ` +
+          `${existing.consumerSession}; refusing replay in ${sid || "unknown"}.`,
       };
     }
-    const checkpoint = {
-      kind: "context-handoff-cutover",
-      version: 1,
-      path,
-      handoffToken: taskId,
-      predecessorSession:
-        metadata?.predecessor?.sessionId || metadata.sessionId || null,
-      successorSession: sid || null,
-      metadata,
-      payload: source.text || "",
-      steps: {
-        payloadStored: true,
-        consumeAttempted: false,
-        taskConsumed: false,
-        successorBound: false,
-        successionLinked: false,
-        headVerified: false,
-        titleUpdated: false,
-        predecessorRetired: false,
-      },
-      createdAt: new Date().toISOString(),
-    };
-    writeCheckpoint(checkpoint);
-    return { ok: true, checkpoint };
+    return { ok: true, checkpoint: existing };
   }
-
-  function checkpointStep(checkpoint, name, detail = null) {
-    if (!checkpoint) return;
-    checkpoint.steps = checkpoint.steps || {};
-    checkpoint.steps[name] = true;
-    checkpoint.stepTimes = checkpoint.stepTimes || {};
-    checkpoint.stepTimes[name] = new Date().toISOString();
-    if (detail !== null) {
-      checkpoint.details = checkpoint.details || {};
-      checkpoint.details[name] = detail;
-    }
-    writeCheckpoint(checkpoint);
-  }
-
-  function cliJson(bin, argv, cwd, timeout = 15000, execute = runCli) {
-    try {
-      return JSON.parse(execute(bin, argv, { cwd, timeout }));
-    } catch (error) {
-      const stdout = error?.stdout?.toString().trim();
-      if (stdout) {
-        try {
-          return JSON.parse(stdout);
-        } catch {
-          // Preserve the original command failure when stdout is not JSON.
-        }
-      }
-      throw error;
-    }
-  }
-
-  function predecessorIdentity(metadata) {
-    const predecessor = metadata?.predecessor || {};
+  if (!path) {
     return {
-      sessionId: predecessor.sessionId || metadata?.sessionId || null,
-      paneId: predecessor.paneId || metadata?.oldPane || null,
-      muxSession: predecessor.muxSession || metadata?.muxSession || null,
-      copilotPid: predecessor.copilotPid || null,
-      copilotStartTime: predecessor.copilotStartTime || null,
+      ok: false,
+      message: "Task-backed handoff metadata has no durable worktree state path.",
     };
   }
-
-  export function completeHandoffLifecycle(
-    cwd,
+  const checkpoint = {
+    kind: "context-handoff-delivery",
+    version: 1,
+    path,
+    handoffToken: taskId,
+    predecessorSession: metadata.sessionId || null,
+    consumerSession: sid || null,
     metadata,
-    sid,
-    handoffToken,
-    {
-      checkpoint = null,
-      log = null,
-      execute = runCli,
-    } = {},
-  ) {
-    const emit = typeof log === "function" ? log : () => {};
-    const result = {
-      bound: false,
-      linked: false,
-      headVerified: false,
-      titled: false,
-      retired: false,
-      retireResult: null,
-      manualCleanup: null,
-    };
-    const worktree = metadata?.worktree;
-    if (!worktree || !sid) {
-      result.manualCleanup =
-        "Successor session/worktree identity is unavailable; predecessor was preserved.";
-      return result;
-    }
-    if (!checkpoint?.steps?.successorBound) {
-      const bindArgv = [
-        "bind-session",
-        "--session-id", sid,
-        "--worktree-id", worktree,
-        "--handoff-token", handoffToken,
-      ];
-      let bound;
-      let tokenBound = true;
-      try {
-        bound = cliJson(
-          "agent-worktrees", bindArgv, cwd, 10000, execute,
-        );
-      } catch {
-        tokenBound = false;
-        const tokenIndex = bindArgv.indexOf("--handoff-token");
-        if (tokenIndex < 0) throw new Error("successor bind failed");
-        bindArgv.splice(tokenIndex, 2);
-        bound = cliJson(
-          "agent-worktrees", bindArgv, cwd, 10000, execute,
-        );
-      }
-      result.bound = Boolean(bound?.bound);
-      if (!result.bound) return result;
-      checkpointStep(checkpoint, "successorBound", bound);
-      if (tokenBound && bound?.head_session === sid) {
-        result.linked = true;
-        result.headVerified = true;
-        checkpointStep(checkpoint, "successionLinked", bound);
-        checkpointStep(checkpoint, "headVerified", bound);
-      }
-    } else {
-      result.bound = true;
-      result.linked = Boolean(checkpoint?.steps?.successionLinked);
-      result.headVerified = Boolean(checkpoint?.steps?.headVerified);
-    }
+    payload: source.text || "",
+    steps: {
+      payloadStored: true,
+      consumeAttempted: false,
+      taskConsumed: false,
+      promptInjected: false,
+    },
+    createdAt: new Date().toISOString(),
+  };
+  writeDeliveryCheckpoint(checkpoint);
+  return { ok: true, checkpoint };
+}
 
-    const predecessor = predecessorIdentity(metadata);
-    if (
-      !result.linked
-      && predecessor.sessionId
-      && predecessor.sessionId !== sid
-    ) {
-      if (!checkpoint?.steps?.successionLinked) {
-        const linked = cliJson("agent-worktrees", [
-          "link-succession",
-          "--worktree", worktree,
-          "--predecessor", predecessor.sessionId,
-          "--successor", sid,
-          "--handoff-token", handoffToken,
-          "--json",
-        ], cwd, 10000, execute);
-        result.linked = linked?.head_session === sid;
-        if (!result.linked) return result;
-        checkpointStep(checkpoint, "successionLinked", linked);
-      } else {
-        result.linked = true;
-      }
-    } else {
-      if (!result.linked) {
-        result.linked = true;
-        checkpointStep(checkpoint, "successionLinked", { compatibility: true });
-      }
-    }
-
-    if (!result.headVerified) {
-      const head = cliJson(
-        "agent-worktrees",
-        ["head-session", "--worktree", worktree, "--json"],
-        cwd,
-        10000,
-        execute,
-      );
-      result.headVerified = head?.head_session === sid;
-      if (!result.headVerified) return result;
-      checkpointStep(checkpoint, "headVerified", head);
-    }
-
-    if (metadata?.title) {
-      execute("agent-worktrees", [
-        "status", "--worktree-id", worktree, "--title", metadata.title, "--json",
-      ], {
-        cwd: metadata.worktreeDir || cwd,
-        timeout: 10000,
-      });
-      result.titled = true;
-    } else {
-      result.titled = true;
-    }
-    checkpointStep(checkpoint, "titleUpdated", { title: metadata?.title || null });
-
-    if (
-      !predecessor.paneId
-      || !predecessor.muxSession
-      || !predecessor.copilotPid
-      || !predecessor.copilotStartTime
-    ) {
-      result.manualCleanup =
-        "Predecessor creation identity is unavailable; it was preserved for manual cleanup.";
-      checkpointStep(checkpoint, "predecessorPreserved", {
-        reason: "creation-identity-unavailable",
-      });
-      return result;
-    }
-
-    emit(
-      `[Context Handoff] Retiring verified predecessor session ` +
-      `${predecessor.sessionId} (pane ${predecessor.paneId}).`,
-    );
-    const retire = cliJson("agent-worktrees", [
-      "handoff-cutover",
-      "--retire-pane", predecessor.paneId,
-      "--successor-verified",
-      "--retire-reason", "handoff-consume",
-      "--require-mux-identity",
-      "--worktree-id", worktree,
-      "--session-id", predecessor.sessionId,
-      "--mux-session", predecessor.muxSession,
-      "--expected-copilot-pid", String(predecessor.copilotPid),
-      "--expected-copilot-start-time", String(predecessor.copilotStartTime),
-      "--json",
-    ], cwd, 30000, execute);
-    result.retireResult = retire;
-    result.retired = Boolean(retire?.ok);
-    if (result.retired) {
-      checkpointStep(checkpoint, "predecessorRetired", retire);
-    } else {
-      result.manualCleanup =
-        "Verified predecessor retirement did not complete; it remains available for manual cleanup.";
-    }
-    return result;
+export function findTaskDeliveryCheckpoint(cwd, sid) {
+  const root = handoffDirFor(cwd, sid);
+  if (!root || !existsSync(root)) return null;
+  let newest = null;
+  let newestMtime = 0;
+  let files;
+  try {
+    files = readdirSync(root);
+  } catch {
+    return null;
   }
-
-  export function consumeDispatchHandoffTask(
-    cwd,
-    taskId,
-    sid,
-    deferComplete = false,
-    {
-      deferRetire = false,
-      log = null,
-      readPayload = readTaskPayloadRaw,
-      consumeTask = runAgentDispatchConsume,
-      execute = runCli,
-      stateDirResolver = agentWorktreesGet,
-      taskStateReader = agentDispatchJson,
-      worktreeGet = agentWorktreesGet,
-    } = {},
-  ) {
-    const before = decodeHandoffPayload(readPayload(cwd, taskId));
-    const prepared = prepareTaskCutoverCheckpoint(
-      cwd, taskId, sid, before, stateDirResolver,
-    );
-    if (!prepared.ok) return { ok: false, id: taskId, message: prepared.message };
-    const checkpoint = prepared.checkpoint;
-    const checkpointPayload = decodeHandoffPayload(checkpoint.payload || "");
-    let decoded = {
-      metadata: {
-        ...(before.metadata || {}),
-        ...(checkpointPayload.metadata || {}),
-        ...(checkpoint.metadata || {}),
-      },
-      text: checkpointPayload.metadata
-        ? checkpointPayload.text
-        : checkpoint.payload || before.text || "",
-    };
-    if (!checkpoint.steps?.taskConsumed) {
-      const retryingConsume = Boolean(checkpoint.steps?.consumeAttempted);
-      if (!retryingConsume) checkpointStep(checkpoint, "consumeAttempted");
-      try {
-        const consumed = consumeTask(cwd, taskId, deferComplete);
-        const fromConsume = decodeHandoffPayload(consumed);
-        if (fromConsume.text) decoded.text = fromConsume.text;
-        if (fromConsume.metadata) decoded.metadata = fromConsume.metadata;
-        checkpoint.payload = decoded.text;
-        checkpoint.metadata = decoded.metadata;
-        checkpointStep(checkpoint, "taskConsumed");
-      } catch (error) {
-        const detail = (error?.stdout || error?.message || "")
-          .toString().trim();
-        const ownership = retryingConsume
-          ? taskOwnedBySuccessor(
-              cwd,
-              taskId,
-              sid,
-              checkpoint.metadata,
-              taskStateReader,
-              worktreeGet,
-            )
-          : { confirmed: false };
-        if (!retryingConsume || !checkpoint.payload || !ownership.confirmed) {
-          return {
-            ok: false,
-            id: taskId,
-            message: detail || "Could not consume handoff task.",
-            ownershipConfirmed: false,
-          };
-        }
-        checkpointStep(checkpoint, "taskConsumed", {
-          recoveredAfterConsume: true,
-          authoritativeTask: {
-            status: ownership.task.status,
-            owner: ownership.task.owner,
-            owner_session_id: ownership.task.owner_session_id,
-          },
-        });
-      }
-    }
-    const retire = deferRetire
-      ? { retired: false }
-      : completeHandoffLifecycle(
-          cwd, decoded.metadata, sid, taskId, {
-            checkpoint, log, execute,
-          },
-        );
-    return {
-      ok: true,
-      id: taskId,
-      payload: String(decoded.text || "").trim(),
-      metadata: decoded.metadata,
-      checkpoint: checkpoint.path,
-      checkpointState: checkpoint,
-      retire,
-    };
-  }
-
-  export function consumeFileHandoff(
-    cwd,
-    sid,
-    handoffId,
-    explicitPath = null,
-    {
-      deferRetire = false,
-      log = null,
-      execute = runCli,
-    } = {},
-  ) {
-    const consumeStartedAt = new Date().toISOString();
-    const consumed = consumeFileHandoffOnce(
-      cwd, sid, handoffId, explicitPath,
-    );
-    if (!consumed.ok) return consumed;
-    const record = consumed.record;
-    const path = checkpointPath(record, record.id);
-    let checkpoint = readCheckpoint(path);
-    if (!checkpoint && path) {
-      checkpoint = {
-        kind: "context-handoff-cutover",
-        version: 1,
-        path,
-        handoffToken: record.id,
-        predecessorSession:
-          record?.predecessor?.sessionId || record.sessionId || null,
-        successorSession: sid || null,
-        metadata: record,
-        payload: String(record.promptText || ""),
-        steps: {
-          payloadStored: true,
-          consumeAttempted: true,
-          taskConsumed: true,
-          successorBound: false,
-          successionLinked: false,
-          headVerified: false,
-          titleUpdated: false,
-          predecessorRetired: false,
-        },
-        stepTimes: {
-          consumeAttempted: consumeStartedAt,
-          taskConsumed: new Date().toISOString(),
-        },
-        createdAt: consumeStartedAt,
-      };
-      writeCheckpoint(checkpoint);
-    }
-    const retire = deferRetire
-      ? { retired: false }
-      : completeHandoffLifecycle(
-          cwd, record, sid, record.id, { checkpoint, log, execute },
-        );
-    return {
-      ok: true,
-      id: record.id,
-      path: consumed.path,
-      payload: String(record.promptText || "").trim(),
-      metadata: record,
-      checkpoint: checkpoint?.path || null,
-      checkpointState: checkpoint,
-      resumedDelivery: consumed.resumedDelivery,
-      retire,
-    };
-  }
-
-  export function formatConsumeResult(
-    result, { deferComplete = false } = {},
-  ) {
-    if (!result?.ok) {
-      return (
-        `${result?.message || "Handoff could not be consumed."}\n\n` +
-        "Handoff consumption is blocked. Do not treat the missing brief as " +
-        "completion or reconstruct a different objective from session history."
-      );
-    }
-    const lifecycle = result.retire || {};
-    return [
-      "## Handoff Consumed",
-      "",
-      result.id ? `**Handoff:** ${result.id}` : null,
-      lifecycle.headVerified
-        ? "**Successor lifecycle:** bound, linked, and verified as worktree head"
-        : "**Successor lifecycle:** incomplete; predecessor preserved",
-      lifecycle.retired
-        ? "**Predecessor:** verified and retired"
-        : `**Predecessor:** ${lifecycle.manualCleanup || "no verified predecessor identity"}`,
-      deferComplete && result.id
-        ? `**Completion:** when the handoff goal is reached, run \`agent-dispatch complete ${result.id}\`.`
-        : null,
-      "",
-      CONTINUATION_DIRECTIVE,
-      "",
-      "---",
-      "",
-      result.payload || "(The handoff payload was empty.)",
-    ].filter(Boolean).join("\n");
-  }
-
-  export function findHandoffFile(cwd, sid) {
-    const root = handoffDirFor(cwd, sid);
-    if (!root || !existsSync(root)) return null;
-    let best = null;
-    let bestScore = 0;
-    let files;
+  for (const file of files) {
+    if (!file.startsWith("delivery-") || !file.endsWith(".json")) continue;
+    const path = join(root, file);
     try {
-      files = readdirSync(root);
-    } catch {
-      return null;
-    }
-
-    for (const file of files) {
-      if (!file.endsWith(".json") || file.startsWith("cutover-")) continue;
-      const path = join(root, file);
-      try {
-        const record = JSON.parse(readFileSync(path, "utf-8"));
-        if (record.consumed && record.consumedBySession !== sid) continue;
-        const score = statSync(path).mtimeMs
-          + ((record.cwd === cwd) ? 1e15 : 0);
-        if (score > bestScore) {
-          bestScore = score;
-          best = { path, record };
-        }
-      } catch {
-        // Ignore malformed or concurrently replaced records.
+      const checkpoint = JSON.parse(readFileSync(path, "utf-8"));
+      if (
+        checkpoint.kind !== "context-handoff-delivery"
+        || checkpoint.consumerSession !== sid
+        || checkpoint.steps?.promptInjected
+      ) continue;
+      const mtime = statSync(path).mtimeMs;
+      if (mtime > newestMtime) {
+        newestMtime = mtime;
+        newest = checkpoint;
       }
+    } catch {
+      // Ignore malformed or concurrently replaced checkpoints.
     }
-    return best;
+  }
+  return newest;
+}
+
+export function markDeliveryPromptInjected(pathOrCheckpoint) {
+  const checkpoint = typeof pathOrCheckpoint === "string"
+    ? readDeliveryCheckpoint(pathOrCheckpoint)
+    : pathOrCheckpoint;
+  if (!checkpoint?.path) return null;
+  checkpointStep(checkpoint, "promptInjected");
+  return checkpoint;
+}
+
+export function findHandoffFile(cwd, sid) {
+  const root = handoffDirFor(cwd, sid);
+  if (!root || !existsSync(root)) return null;
+  let best = null;
+  let bestScore = 0;
+  let files;
+  try {
+    files = readdirSync(root);
+  } catch {
+    return null;
   }
 
-export function recoverStoredHandoff(cwd, sid) {
+  for (const file of files) {
+    if (
+      !file.endsWith(".json")
+      || file.startsWith("delivery-")
+    ) continue;
+    const path = join(root, file);
+    try {
+      const record = JSON.parse(readFileSync(path, "utf-8"));
+      if (record.consumed && record.consumedBySession !== sid) continue;
+      const score = statSync(path).mtimeMs
+        + ((record.cwd === cwd) ? 1e15 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = { path, record };
+      }
+    } catch {
+      // Ignore malformed or concurrently replaced records.
+    }
+  }
+  return best;
+}
+
+function loadStoredTaskHandoff(cwd, taskId) {
+  const raw = readTaskPayloadRaw(cwd, taskId);
+  const decoded = decodeHandoffPayload(raw);
+  if (!decoded.text && !decoded.metadata) return null;
+  return {
+    storage: "agent-dispatch",
+    id: taskId,
+    taskId,
+    metadata: decoded.metadata || null,
+    promptText: decoded.text || "",
+  };
+}
+
+function loadStoredFileHandoff(cwd, sid, handoffId) {
+  const found = readFileHandoff(cwd, sid, handoffId);
+  if (!found?.record) return null;
+  return {
+    storage: "file",
+    id: found.record.id,
+    path: found.path,
+    metadata: found.record,
+    promptText: String(found.record.promptText || ""),
+  };
+}
+
+export function recoverStoredHandoff(cwd, sid, handoffToken = null) {
+  const explicitKinds = handoffToken && handoffToken.startsWith("handoff-")
+    ? ["file", "agent-dispatch"]
+    : ["agent-dispatch", "file"];
+
+  if (handoffToken) {
+    for (const kind of explicitKinds) {
+      const loaded = kind === "agent-dispatch"
+        ? loadStoredTaskHandoff(cwd, handoffToken)
+        : loadStoredFileHandoff(cwd, sid, handoffToken);
+      if (loaded) return loaded;
+    }
+    return null;
+  }
+
   const { wtDir, worktree } = worktreeInfo(cwd, sid);
   if (worktree) {
     const task = findHandoffTask(cwd, worktree);
     if (task?.id) {
-      const decoded = decodeHandoffPayload(readTaskPayloadRaw(cwd, task.id));
-      return {
-        storage: "agent-dispatch",
-        id: task.id,
-        metadata: decoded.metadata || {
+      const loaded = loadStoredTaskHandoff(cwd, task.id);
+      if (loaded) {
+        loaded.metadata = loaded.metadata || {
           title: task.title || task.name || "",
           worktree,
           worktreeDir: wtDir,
           sessionId: sid,
-        },
-      };
+        };
+        return loaded;
+      }
     }
   }
   const file = findHandoffFile(cwd, sid);
@@ -1328,32 +1025,123 @@ export function recoverStoredHandoff(cwd, sid) {
     id: file.record.id,
     path: file.path,
     metadata: file.record,
+    promptText: String(file.record.promptText || ""),
   };
 }
 
-export function retryStoredHandoffCutover(
-  cwd, sid, execute = runCli,
+export function consumeDispatchHandoffTask(
+  cwd,
+  taskId,
+  sid,
+  deferComplete = false,
+  {
+    readPayload = readTaskPayloadRaw,
+    consumeTask = runAgentDispatchConsume,
+    stateDirResolver = agentWorktreesGet,
+  } = {},
 ) {
-  const stored = recoverStoredHandoff(cwd, sid);
-  if (!stored) {
-    return {
-      ok: false,
-      reason: "not-found",
-      error: "No saved handoff was found for this worktree.",
-    };
-  }
-  const seed = buildSeedForStored(stored);
-  const cutover = runHandoffCutover(
-    cwd,
-    seed,
-    sid,
-    execute,
-    {
-      handoffToken: stored.id,
-      worktreeId: stored.metadata?.worktree || null,
-    },
+  const before = decodeHandoffPayload(readPayload(cwd, taskId));
+  const prepared = prepareTaskDeliveryCheckpoint(
+    cwd, taskId, sid, before, stateDirResolver,
   );
-  return { ...cutover, stored, seed };
+  if (!prepared.ok) return { ok: false, id: taskId, message: prepared.message };
+  const checkpoint = prepared.checkpoint;
+  const checkpointPayload = decodeHandoffPayload(checkpoint.payload || "");
+  let decoded = {
+    metadata: {
+      ...(before.metadata || {}),
+      ...(checkpointPayload.metadata || {}),
+      ...(checkpoint.metadata || {}),
+    },
+    text: checkpointPayload.metadata
+      ? checkpointPayload.text
+      : checkpoint.payload || before.text || "",
+  };
+  if (!checkpoint.steps?.taskConsumed) {
+    checkpointStep(checkpoint, "consumeAttempted");
+    try {
+      const consumed = consumeTask(cwd, taskId, deferComplete);
+      const fromConsume = decodeHandoffPayload(consumed);
+      if (fromConsume.text) decoded.text = fromConsume.text;
+      if (fromConsume.metadata) decoded.metadata = fromConsume.metadata;
+      checkpoint.payload = decoded.text;
+      checkpoint.metadata = decoded.metadata;
+      checkpointStep(checkpoint, "taskConsumed");
+    } catch (error) {
+      return {
+        ok: false,
+        id: taskId,
+        message: describeCliError(error) || "Could not consume handoff task.",
+      };
+    }
+  }
+  markSessionStateHandoffConsumed(
+    decoded.metadata?.sessionId || checkpoint.predecessorSession || null,
+    { consumedBySession: sid, handoffId: taskId },
+  );
+  return {
+    ok: true,
+    id: taskId,
+    payload: String(decoded.text || "").trim(),
+    metadata: decoded.metadata,
+    checkpoint: checkpoint.path,
+    checkpointState: checkpoint,
+    resumedDelivery: Boolean(checkpoint.steps?.promptInjected),
+  };
+}
+
+export function consumeFileHandoff(
+  cwd,
+  sid,
+  handoffId,
+  explicitPath = null,
+) {
+  const consumed = consumeFileHandoffOnce(
+    cwd, sid, handoffId, explicitPath,
+  );
+  if (!consumed.ok) return consumed;
+  const record = consumed.record;
+  markSessionStateHandoffConsumed(
+    record.sessionId || null,
+    { consumedBySession: sid, handoffId: record.id },
+  );
+  return {
+    ok: true,
+    id: record.id,
+    path: consumed.path,
+    payload: String(record.promptText || "").trim(),
+    metadata: record,
+    resumedDelivery: consumed.resumedDelivery,
+  };
+}
+
+export function formatConsumeResult(
+  result, { deferComplete = false } = {},
+) {
+  if (!result?.ok) {
+    return (
+      `${result?.message || "Handoff could not be consumed."}\n\n` +
+      "Handoff consumption is blocked. Do not treat the missing brief as " +
+      "completion or reconstruct a different objective from session history."
+    );
+  }
+  return [
+    "## Handoff Consumed",
+    "",
+    result.id ? `**Handoff:** ${result.id}` : null,
+    result.resumedDelivery
+      ? "**Delivery:** resumed after a prior same-session pickup"
+      : "**Delivery:** claimed exactly once",
+    deferComplete && result.id
+      ? `**Completion:** when the handoff goal is reached, run \`agent-dispatch complete ${result.id}\`.`
+      : null,
+    "",
+    CONTINUATION_DIRECTIVE,
+    "",
+    "---",
+    "",
+    result.payload || "(The handoff payload was empty.)",
+  ].filter(Boolean).join("\n");
 }
 
 export function buildResumePrompt(
@@ -1385,65 +1173,142 @@ export function noteHandoffInRecord(cwd, sid, ref, title) {
   } catch { /* history is advisory */ }
 }
 
-// --- live-cutover trigger -------------------------------------------------
-// The mux choreography itself lives in `agent-worktrees handoff-cutover`; this
-// is the thin trigger. Returns:
-//   { ok: true, old_pane, new_pane }
-//   { ok: false, reason: "no-worktree" | "no-mux" | "error", error }
-export function runHandoffCutover(
+function logHandoffActivity(
   cwd,
-  seed,
-  sessionId,
+  sid,
+  worktreeId,
+  stored,
+  sessionStatePath,
   execute = runCli,
-  { handoffToken = null, worktreeId = null } = {},
 ) {
-  const argv = ["handoff-cutover", "--seed", seed];
-  const binding = sessionBindingForSession(sessionId, cwd, execute);
-  const ownPane = binding.found
-    ? binding.pane_id
-    : validatedEnvironmentBinding(null, execute)?.pane_id || "";
-  if (ownPane) argv.push("--old-pane", ownPane);
-  if (sessionId) argv.push("--session-id", sessionId);
-  if (handoffToken) argv.push("--handoff-token", handoffToken);
-  if (worktreeId) argv.push("--worktree-id", worktreeId);
+  if (!worktreeId) return { logged: false };
   try {
-    const result = JSON.parse(execute(
-      "agent-worktrees", argv, { cwd, timeout: 20000 },
-    ));
-    const details = result && typeof result === "object" && !Array.isArray(result)
-      ? result
-      : {};
-    return result?.ok
-      ? result
-      : {
-          ...details,
-          ok: false,
-          reason: "error",
-          error: result?.error || null,
-        };
-  } catch (e) {
-    const status = typeof e?.status === "number" ? e.status : null;
-    let error = null;
-    let parsed = null;
-    try {
-      const stdout = (e?.stdout || "").toString();
-      parsed = stdout ? JSON.parse(stdout) : null;
-      error = parsed?.error || null;
-    } catch { /* stdout was not JSON */ }
-    const reason = status === 2 ? "no-worktree" : status === 3 ? "no-mux" : "error";
-    const details = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed
-      : {};
+    execute("agent-worktrees", [
+      "activity-log",
+      "handoff_requested",
+      "--worktree-id", worktreeId,
+      "--session-id", sid || "",
+      "--source", "context-handoff",
+      "--field", `handoff_id=${stored.id}`,
+      "--field", `storage=${stored.storage}`,
+      "--field", `session_state=${sessionStatePath}`,
+    ], {
+      cwd,
+      timeout: 5000,
+      stdio: "ignore",
+    });
+    return { logged: true };
+  } catch (error) {
+    return { logged: false, error: describeCliError(error) };
+  }
+}
+
+function worktreeHeadState(cwd, worktreeId, execute = runCli) {
+  if (!worktreeId) return null;
+  try {
+    return cliJson(
+      "agent-worktrees",
+      ["head-session", "--worktree", worktreeId, "--json"],
+      cwd,
+      10000,
+      execute,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function worktreeSuccessorRecorded(cwd, stored, predecessorSessionId, execute = runCli) {
+  const worktreeId = stored.metadata?.worktree || null;
+  const head = worktreeHeadState(cwd, worktreeId, execute);
+  if (!head || !head.tracked) return { pickedUp: false, worktreeId, head };
+  const pending = Array.isArray(head.pending_handoffs) ? head.pending_handoffs : [];
+  const matching = pending.find((item) => item?.token === stored.id) || null;
+  const headSession = head.head_session || null;
+  const candidate = matching?.candidate || null;
+  return {
+    pickedUp:
+      Boolean(candidate)
+      || Boolean(headSession && headSession !== predecessorSessionId),
+    worktreeId,
+    head,
+    candidate,
+    headSession,
+  };
+}
+
+function dispatchTaskConsumed(cwd, taskId) {
+  if (!taskId) return { consumed: false, task: null };
+  const task = agentDispatchJson(["show", taskId], cwd);
+  const status = String(task?.status || "");
+  return {
+    consumed: Boolean(task && !["proposed", "queued"].includes(status)),
+    task,
+  };
+}
+
+function requestAgentBridgeHandoff(
+  cwd,
+  sid,
+  stored,
+  seed,
+  execute = runCli,
+) {
+  const worktreeId = stored.metadata?.worktree || null;
+  if (!worktreeId) {
+    return { attempted: false, accepted: false, reason: "no-worktree" };
+  }
+  try {
+    const response = cliJson(
+      "agent-bridge",
+      [
+        "handoff-request",
+        "--worktree-id", worktreeId,
+        "--session-id", sid || "",
+        "--handoff-token", stored.id,
+        "--seed", seed,
+        "--json",
+      ],
+      cwd,
+      5000,
+      execute,
+    );
+    return { attempted: true, accepted: true, response };
+  } catch (error) {
     return {
-      ...details,
-      ok: false,
-      reason,
-      error,
+      attempted: true,
+      accepted: false,
+      error: describeCliError(error),
     };
   }
 }
 
-// --- high-level orchestration (what the CLI + extension both want) ---------
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
+  const found = readSessionStateHandoff(sid);
+  const sessionConsumed = Boolean(found?.record?.consumed);
+  const worktree = worktreeSuccessorRecorded(cwd, stored, sid, execute);
+  const dispatch = stored.storage === "agent-dispatch"
+    ? dispatchTaskConsumed(cwd, stored.id)
+    : { consumed: false, task: null };
+  const via = [];
+  if (sessionConsumed) via.push("session-state-consumed");
+  if (worktree.pickedUp) via.push("worktree-successor");
+  if (dispatch.consumed) via.push("dispatch-consumed");
+  return {
+    pickedUp: via.length > 0,
+    via,
+    sessionState: {
+      path: sessionStatePath,
+      consumed: sessionConsumed,
+    },
+    worktree,
+    dispatch,
+  };
+}
 
 // Store a handoff, preferring an agent-dispatch task (durable/browsable) when a
 // coordinator is reachable, else a one-time worktree-state file. Mirrors the
@@ -1455,20 +1320,29 @@ export function storeHandoff({ promptText, sid, cwd, title, preferTask = true })
     const task = dispatchHandoff(promptText, sid, cwd, title);
     if (task) {
       noteHandoffInRecord(cwd, sid, task.id, title);
-      return { storage: "agent-dispatch", id: task.id, taskId: task.id, metadata: task.metadata };
+      return {
+        storage: "agent-dispatch",
+        id: task.id,
+        taskId: task.id,
+        metadata: task.metadata,
+      };
     }
   }
   const file = saveFileHandoff(promptText, sid, cwd, title);
   if (!file?.path) {
-    return { storage: null, id: null, metadata: null, error: file?.error || "unknown file-store failure" };
+    return {
+      storage: null,
+      id: null,
+      metadata: null,
+      error: file?.error || "unknown file-store failure",
+    };
   }
   noteHandoffInRecord(cwd, sid, file.id, title);
   return { storage: "file", id: file.id, path: file.path, metadata: file.metadata };
 }
 
-// Compose the same short locator seed for live launch and manual recovery.
-export function buildSeedForStored(stored, { retry = true } = {}) {
-  void retry;
+// Compose the same short locator seed for manual recovery and external pickup.
+export function buildSeedForStored(stored) {
   const md = stored.metadata || {};
   const kind = stored.storage === "agent-dispatch" ? "task" : "file";
   const lead = leadFrom(md.title);
@@ -1480,45 +1354,134 @@ export function manualFallbackInstructions(stored, seed) {
     ? `agent-dispatch task ${stored.id}`
     : `file handoff ${stored.id}`;
   return (
-    `Handoff stored as ${location}. Automatic cutover did not run; the stored ` +
-    "task/file and worktree handoff pointer remain available.\n\n" +
-    "Copy only the following short locator prompt into the successor session. " +
-    "If `/consume-handoff` is unavailable, the successor should use the " +
+    `Handoff stored as ${location}. No control system acknowledged the request ` +
+    "during the grace window, so continue manually: open the successor session " +
+    "in this worktree (or ask your control plane to pick up the pending handoff), " +
+    "then run `/consume-handoff`. If that command is unavailable, use the " +
     "context-handoff payload-local CLI and pass only the trailing `task:<id>` " +
-    "or `file:<id>` token to `consume --locator`:\n\n" +
+    "or `file:<id>` token to `consume --locator`.\n\n" +
+    "Copy only the following short handoff prompt/seed:\n\n" +
     "```text\n" +
     `${seed}\n` +
     "```"
   );
 }
 
-// Store + build seed + (optionally) trigger the live cutover in one call --
-// the standalone equivalent of save_handoff_prompt followed by continue_handoff.
-// Returns { stored, seed, pastePrompt, cutover? }.
-export function saveAndCutover({ promptText, sid, cwd, title, preferTask = true, cutover = true }) {
-  const stored = storeHandoff({ promptText, sid, cwd, title, preferTask });
-  if (!stored?.storage) {
+export async function triggerHandoff(
+  {
+    promptText = null,
+    sid,
+    cwd,
+    title = "",
+    preferTask = true,
+    handoffToken = null,
+    waitMs = 30000,
+    execute = runCli,
+    store = storeHandoff,
+    writeSessionState = writeSessionStateHandoff,
+    noteHandoff = noteHandoffInRecord,
+    logActivity = logHandoffActivity,
+    requestBridge = requestAgentBridgeHandoff,
+    readPickupSignals = pickupSignals,
+    sleepFn = sleep,
+  },
+) {
+  const normalizedPrompt = String(promptText || "").trim();
+  let stored;
+  let handoffBody;
+  let justStored = false;
+
+  if (normalizedPrompt) {
+    stored = store({
+      promptText: normalizedPrompt,
+      sid,
+      cwd,
+      title,
+      preferTask,
+    });
+    if (!stored?.storage) {
+      return {
+        ok: false,
+        reason: "store-failed",
+        error: stored?.error || "No safe handoff store resolved.",
+      };
+    }
+    handoffBody = normalizedPrompt;
+    justStored = true;
+  } else {
+    const loaded = recoverStoredHandoff(cwd, sid, handoffToken);
+    if (!loaded) {
+      return {
+        ok: false,
+        reason: "not-found",
+        error: "No saved handoff was found for this worktree.",
+      };
+    }
+    stored = {
+      storage: loaded.storage,
+      id: loaded.id,
+      taskId: loaded.taskId || null,
+      path: loaded.path || null,
+      metadata: loaded.metadata || null,
+    };
+    handoffBody = String(loaded.promptText || "").trim();
+  }
+
+  const seed = buildSeedForStored(stored);
+  const sessionState = writeSessionState({
+    sid,
+    promptText: handoffBody,
+    stored,
+    seed,
+  });
+  if (!sessionState.ok) {
     return {
-      stored: null,
-      seed: null,
-      pastePrompt: null,
-      error: stored?.error || "No safe handoff store resolved.",
+      ok: false,
+      reason: "session-state-write-failed",
+      stored,
+      seed,
+      error: sessionState.error,
     };
   }
-  const seed = buildSeedForStored(stored, { retry: true });
-  const pastePrompt = buildSeedForStored(stored, { retry: false });
-  const result = { stored, seed, pastePrompt };
-  if (cutover) {
-    result.cutover = runHandoffCutover(
-      cwd,
-      seed,
-      sid,
-      runCli,
-      {
-        handoffToken: stored.id,
-        worktreeId: stored.metadata?.worktree || null,
-      },
-    );
+
+  if (!justStored) {
+    noteHandoff(cwd, sid, stored.id, stored.metadata?.title || title);
   }
-  return result;
+  const activity = logActivity(
+    cwd,
+    sid,
+    stored.metadata?.worktree || null,
+    stored,
+    sessionState.path,
+    execute,
+  );
+  const bridge = requestBridge(
+    cwd, sid, stored, seed, execute,
+  );
+
+  const start = Date.now();
+  let status = readPickupSignals(cwd, sid, stored, sessionState.path, execute);
+  while (!status.pickedUp && (Date.now() - start) < waitMs) {
+    await sleepFn(1000);
+    status = readPickupSignals(cwd, sid, stored, sessionState.path, execute);
+  }
+
+  return {
+    ok: true,
+    stored,
+    seed,
+    sessionState,
+    worktreeSignal: {
+      noted: true,
+      activity,
+    },
+    bridge,
+    pickup: {
+      ...status,
+      waitedMs: Date.now() - start,
+    },
+    manualInstructions: status.pickedUp
+      ? null
+      : manualFallbackInstructions(stored, seed),
+  };
 }
