@@ -188,6 +188,59 @@ def test_cleanup_endpoint_removes_its_own_unflipped_socket(tmp_path):
     assert not own.exists()
 
 
+# ── CutoverClient.shutdown() must flip the data handle BEFORE the wire op ──
+
+
+@pytest.mark.skipif(not _HAS_AF_UNIX, reason="POSIX symlink flip")
+@pytest.mark.asyncio
+async def test_shutdown_flips_data_handle_before_sending_the_op(tmp_path, monkeypatch):
+    """Regression test (Copilot review): zdd's orchestrator requests the old
+    daemon's shutdown at the commit point *inside* CutoverOrchestrator.run().
+    Flipping the fixed data handle only *after* run() returns leaves a real
+    window where the old daemon has already been told to stop while the
+    handle still points at it -- undermining the whole zero-downtime intent.
+    CutoverClient.shutdown() must flip the handle before it even sends the
+    op, so by the time shutdown() returns (regardless of how fast the old
+    daemon reacts), the fixed handle already resolves to the new
+    generation."""
+    # shutdown() always flips ipc.default_socket_path() (the real fixed
+    # handle, matching production's run_cutover -- ctx.data_root is always
+    # derived from it there); point that at tmp_path for this test.
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    fixed = tmp_path / "serve.sock"
+    old_gen = tmp_path / "serve-g1.sock"
+    new_gen = tmp_path / "serve-g2.sock"
+    old_gen.touch()
+    new_gen.touch()
+    flip_data_handle(old_gen, legacy_path=fixed)  # simulate the old daemon's own generation
+
+    server = Server(str(fixed), enable_lease=False, control_port=0,
+                    control_token="tok")
+    await server._start_control_listener()
+    try:
+        port = server._control_server.sockets[0].getsockname()[1]
+        ctx = _cutover._CutoverContext(
+            data_root=tmp_path, new_socket_path=new_gen,
+            new_log_path=tmp_path / "x.log", new_control_token="tok",
+            old_control_token=None, token_by_port={port: "tok"},
+        )
+        client = _cutover.CutoverClient(f"http://127.0.0.1:{port}", ctx)
+        # shutdown() makes a blocking (sync) socket call; run it on a worker
+        # thread so this test's own event loop stays free to service the
+        # control listener concurrently (a real cutover never has this
+        # problem -- client and server are always separate OS processes).
+        import asyncio
+        await asyncio.to_thread(client.shutdown)
+
+        assert os.readlink(fixed) == str(new_gen), (
+            "the fixed handle must already point at the new generation "
+            "once shutdown() returns, before the old daemon has necessarily "
+            "finished reacting to the shutdown op"
+        )
+    finally:
+        await server._stop_control_listener()
+
+
 # ── CutoverClient.drain() must not mistake a rejected reply for "drained" ──
 
 
@@ -209,7 +262,16 @@ async def test_drain_client_treats_unauthorized_reply_as_not_drained(tmp_path):
             old_control_token=None, token_by_port={port: "wrong-token"},
         )
         client = _cutover.CutoverClient(f"http://127.0.0.1:{port}", ctx)
-        result = client.drain(timeout=0.5, poll=0.1, force=False)
+        # A blocking (sync) socket call -- run it on a worker thread so this
+        # test's own event loop stays free to service the control listener
+        # concurrently (a real cutover never has this problem -- client and
+        # server are always separate OS processes). Without this, the first
+        # request blocks the loop entirely and only "succeeds" via its own
+        # 5s socket timeout -- which happens to look like a rejection too,
+        # silently testing the wrong thing.
+        import asyncio
+        result = await asyncio.to_thread(
+            client.drain, timeout=0.5, poll=0.1, force=False)
         assert result["drained"] is False
         assert result["clean"] is False
         assert "error" in result

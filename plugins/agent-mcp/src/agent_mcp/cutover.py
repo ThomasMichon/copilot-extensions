@@ -230,6 +230,20 @@ class CutoverClient:
         return self._request({"op": "undrain"})
 
     def shutdown(self) -> dict[str, Any]:
+        """The cutover's actual commit point (``zdd.cutover`` calls this
+        exactly once, on the *old* client, right after its final pre-retire
+        health re-check passes and before returning). The fixed, client-
+        facing data handle MUST be flipped to the new generation here --
+        before sending the shutdown op, not after ``CutoverOrchestrator.run()``
+        returns in ``run_cutover()`` -- or there is a real window where the
+        old daemon has already been told to stop (and may unlink/stop
+        serving its socket) while the fixed handle still points at it,
+        undermining the whole point of a zero-downtime cutover."""
+        from . import ipc
+        from . import serve as _serve
+
+        _serve.flip_data_handle(
+            self._ctx.new_socket_path, legacy_path=ipc.default_socket_path())
         return self._request({"op": "shutdown"})
 
     def adopt_relay(self) -> dict[str, Any]:
@@ -300,6 +314,13 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
     res = orch.run(health_timeout=health_timeout, drain_timeout=drain_timeout, force=force)
     result = res.to_dict()
     if res.ok:
-        _serve.flip_data_handle(ctx.new_socket_path, legacy_path=ipc.default_socket_path())
         result["data_socket"] = str(ctx.new_socket_path)
+        if current is None:
+            # Cold start: zdd's cutover never calls old_client.shutdown() when
+            # there was no prior active daemon to retire (nothing to drain),
+            # so CutoverClient.shutdown()'s flip -- the normal trigger -- never
+            # ran. Flip explicitly here; there is no race to close in this
+            # branch (no old daemon was ever serving the fixed handle).
+            _serve.flip_data_handle(
+                ctx.new_socket_path, legacy_path=ipc.default_socket_path())
     return result
