@@ -145,8 +145,12 @@ def _self_update_settings() -> tuple[bool, float, int, float]:
     get re-triggered every poll) are overridable via
     ``AGENT_DISPATCH_SELF_UPDATE_POLL_S``,
     ``AGENT_DISPATCH_SELF_UPDATE_CONFIRMATIONS``, and
-    ``AGENT_DISPATCH_SELF_UPDATE_COOLDOWN_S``.
+    ``AGENT_DISPATCH_SELF_UPDATE_COOLDOWN_S``. A value that fails to parse,
+    or parses to a non-finite float (``nan``/``inf`` -- valid input to
+    ``float()`` but not to ``asyncio.sleep()`` or the cooldown comparison),
+    falls back to the default.
     """
+    import math
     import os
 
     enabled = os.environ.get("AGENT_DISPATCH_SELF_UPDATE", "").strip().lower() in (
@@ -157,6 +161,8 @@ def _self_update_settings() -> tuple[bool, float, int, float]:
             os.environ.get("AGENT_DISPATCH_SELF_UPDATE_POLL_S", "")
             or _SELF_UPDATE_DEFAULT_POLL_S
         )
+        if not math.isfinite(poll):
+            raise ValueError(poll)
         poll = max(1.0, poll)
     except ValueError:
         poll = _SELF_UPDATE_DEFAULT_POLL_S
@@ -173,6 +179,8 @@ def _self_update_settings() -> tuple[bool, float, int, float]:
             os.environ.get("AGENT_DISPATCH_SELF_UPDATE_COOLDOWN_S", "")
             or _SELF_UPDATE_DEFAULT_COOLDOWN_S
         )
+        if not math.isfinite(cooldown):
+            raise ValueError(cooldown)
         cooldown = max(0.0, cooldown)
     except ValueError:
         cooldown = _SELF_UPDATE_DEFAULT_COOLDOWN_S

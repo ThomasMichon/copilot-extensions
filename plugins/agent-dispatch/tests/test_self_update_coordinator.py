@@ -63,3 +63,15 @@ def test_self_update_invalid_overrides_fall_back_to_defaults(monkeypatch):
     assert poll == 60.0
     assert k == 3
     assert cooldown == 900.0
+
+
+def test_self_update_non_finite_overrides_fall_back_to_defaults(monkeypatch):
+    # float("nan")/float("inf") parse successfully but are invalid here: nan
+    # breaks the cooldown comparison and inf/nan both break asyncio.sleep().
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_UPDATE", "1")
+    for bad in ("nan", "inf", "-inf", "Infinity"):
+        monkeypatch.setenv("AGENT_DISPATCH_SELF_UPDATE_POLL_S", bad)
+        monkeypatch.setenv("AGENT_DISPATCH_SELF_UPDATE_COOLDOWN_S", bad)
+        enabled, poll, k, cooldown = _self_update_settings()
+        assert poll == 60.0, bad
+        assert cooldown == 900.0, bad
