@@ -1528,7 +1528,9 @@ class TestRetireRecord:
     tell "sibling never carved" apart from "sibling already reaped", because
     both looked identical (no record file). A paired record must instead be
     retired to a minimal ``finalized`` tombstone that :func:`find_paired_record`
-    can still resolve.
+    can still resolve. Once BOTH halves have gone through their own reap (each
+    observing the other's ``reaped_at``-stamped tombstone), both records are
+    hard-deleted instead of leaving two dangling tombstones behind forever.
     """
 
     def _rec(self, wt_id: str, **overrides) -> WorktreeRecord:
@@ -1569,6 +1571,7 @@ class TestRetireRecord:
         tombstoned = load_record(path)
         assert tombstoned.status == "finalized"
         assert tombstoned.completed_at is not None
+        assert tombstoned.reaped_at is not None
 
     def test_reaping_knowledge_side_first_unblocks_harness_side(
         self, tmp_path: Path, monkeypatch
@@ -1608,6 +1611,61 @@ class TestRetireRecord:
         # even though the sibling is legitimately settled.
         # Fix: the tombstone resolves and reports finalized -> True.
         assert prune.default_paired_sibling_final(harness) is True
+
+        # Now the harness side is itself reaped. Its sibling (knowledge) is a
+        # confirmed reap tombstone (reaped_at set), so both records are safe
+        # to hard-delete -- no tombstones linger forever.
+        retire_record(harness, harness_dir)
+        assert not (harness_dir / "wt-harness.yaml").exists()
+        assert not (knowledge_dir / "wt-k.yaml").exists()
+
+    def test_live_finalized_sibling_is_not_mistaken_for_reaped(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Regression: a live, not-yet-cleaned sibling must never be treated
+        as "already reaped" merely because it reads status == "finalized" --
+        that status is set well before a worktree's directory is ever removed
+        (see finalize's own contract). Only ``reaped_at`` proves an actual
+        reap. Getting this wrong would hard-delete tracking metadata for a
+        worktree that is still fully alive on disk.
+        """
+        harness_dir = tmp_path / ".citadel-harness" / "worktrees"
+        knowledge_dir = tmp_path / ".citadel-knowledge" / "worktrees"
+        monkeypatch.setattr(
+            "agent_worktrees.config.project_dir",
+            lambda name=None: tmp_path / f".{name}",
+        )
+
+        # The harness side is finalized (merge-safe) but NOT reaped: no
+        # reaped_at, and (in reality) its worktree directory still exists.
+        harness = self._rec(
+            "wt-harness", pair_id="p1", pair_role="harness",
+            pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
+            status="finalized",
+        )
+        knowledge = self._rec(
+            "wt-k", pair_id="p1", pair_role="knowledge",
+            pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
+            status="active",
+        )
+        save_record(harness, harness_dir / "wt-harness.yaml")
+        save_record(knowledge, knowledge_dir / "wt-k.yaml")
+
+        # Reaping the knowledge side must NOT hard-delete the harness side's
+        # live record just because it already reads "finalized".
+        retire_record(knowledge, knowledge_dir)
+
+        assert (harness_dir / "wt-harness.yaml").exists()
+        reloaded_harness = load_record(harness_dir / "wt-harness.yaml")
+        assert reloaded_harness.status == "finalized"
+        assert reloaded_harness.reaped_at is None
+
+        # The knowledge side itself was correctly tombstoned (not deleted).
+        path = knowledge_dir / "wt-k.yaml"
+        assert path.exists()
+        tombstoned = load_record(path)
+        assert tombstoned.status == "finalized"
+        assert tombstoned.reaped_at is not None
 
 
 class TestCascadeAndOrphans:
