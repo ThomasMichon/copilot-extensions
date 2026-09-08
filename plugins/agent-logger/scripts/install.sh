@@ -155,8 +155,42 @@ fi
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
+shift || true
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --install-dir)
+            INSTALL_DIR="${2:?--install-dir requires a directory}"
+            shift 2
+            ;;
+        *)
+            printf 'ERROR: unknown option: %s\n' "$1" >&2
+            exit 2
+            ;;
+    esac
+done
+if [[ "$INSTALL_DIR" != /* ]]; then
+    INSTALL_DIR="$PWD/$INSTALL_DIR"
+fi
+LEGACY_INSTALL_DIR="$HOME/.agent-logger"
+legacy_cmp="$(printf '%s' "$LEGACY_INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
+install_cmp="$(printf '%s' "$INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
+PUBLISH_GLOBAL_BINSTUBS=1
+SERVICE_SUFFIX=""
+if [[ "$install_cmp" != "$legacy_cmp" ]]; then
+    PUBLISH_GLOBAL_BINSTUBS=0
+    if command -v sha256sum >/dev/null 2>&1; then
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | sha256sum | awk '{print substr($1,1,12)}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+    else
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | cksum | awk '{print $1}')"
+    fi
+fi
+VENV="${INSTALL_DIR}/.venv"
+
 UNIT_DIR="${HOME}/.config/systemd/user"
-TIMER_NAME="agent-logger-sync"
+TIMER_NAME="agent-logger-sync${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"
+export AGENT_LOGGER_HOME="$INSTALL_DIR"
 
 log()  { printf '  [%s] %s\n' "$1" "$2"; }
 ok()   { log "OK" "$1"; }
@@ -537,11 +571,7 @@ _ensure_uv_index() {
 # auxiliary console-script binstubs (session-sync, collate-session, ...) are plain
 # symlinks created only by a full provision.
 deploy_binstub() {
-    mkdir -p "${LOCAL_BIN}" "${INSTALL_DIR}/bin"
-    # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "${SCRIPT_DIR}/$r" ] && cp -f "${SCRIPT_DIR}/$r" "${INSTALL_DIR}/bin/$r"
-    done
+    mkdir -p "${LOCAL_BIN}"
     # A pre-versioned install may leave this as a symlink into the retired
     # .venv tree. Remove the path itself so the redirect creates a regular file
     # instead of following a dangling legacy target.
@@ -601,6 +631,13 @@ exit "$_rc"
 STUBEOF
     chmod +x "${LOCAL_BIN}/agent-logger"
     ok "binstub: ${LOCAL_BIN}/agent-logger (self-provisioning)"
+}
+
+deploy_runtime_helpers() {
+    mkdir -p "${INSTALL_DIR}/bin"
+    for r in resolve-runtime.sh resolve-runtime.ps1; do
+        [ -f "${SCRIPT_DIR}/$r" ] && cp -f "${SCRIPT_DIR}/$r" "${INSTALL_DIR}/bin/$r"
+    done
 }
 
 deploy_auxiliary_compatibility_binstubs() {
@@ -677,9 +714,14 @@ publish_payload_snapshot() {
 do_stamp() {
     mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}"
     publish_payload_snapshot
-    deploy_binstub
-    deploy_auxiliary_compatibility_binstubs
-    ok "stamped: agent-logger command family on PATH; runtime provisions on first use."
+    deploy_runtime_helpers
+    if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+        deploy_binstub
+        deploy_auxiliary_compatibility_binstubs
+        ok "stamped: agent-logger command family on PATH; runtime provisions on first use."
+    else
+        ok "stamped: installation-scoped payload snapshot published without global PATH wrappers."
+    fi
 }
 
 install_package() {
@@ -698,30 +740,46 @@ install_package() {
     fi
     chg "created venv at ${VENV}"
   fi
-  # Vendored config-schema-migration lib (agent-config-migrate / module
-  # config_migrate): plugin-vendored (marketplace) or repo-root (git checkout).
+  uv pip install --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet
+  # Install vendored first-party dependencies from their local paths before the
+  # main package, then install agent-logger itself with --no-deps so deep
+  # staged payload paths do not force uv to rebuild the same path dependency
+  # graph inside the main wheel build.
   local cfg_migrate_dir="${PLUGIN_DIR}/libs/config-migrate"
   if [ ! -f "${cfg_migrate_dir}/pyproject.toml" ]; then
     cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
   fi
   if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    uv pip install --python "${VENV}/bin/python" --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet
+    uv pip install --python "${VENV}/bin/python" --no-build-isolation "${cfg_migrate_dir}" --quiet
   fi
-  uv pip install --python "${VENV}/bin/python" "${PLUGIN_DIR}" --quiet
+  local procutil_dir="${PLUGIN_DIR}/libs/agent-procutil"
+  if [ ! -f "${procutil_dir}/pyproject.toml" ]; then
+    procutil_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/agent-procutil"
+  fi
+  if [ -f "${procutil_dir}/pyproject.toml" ]; then
+    uv pip install --python "${VENV}/bin/python" --no-build-isolation "${procutil_dir}" --quiet
+  fi
+  uv pip install --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet
   ok "installed agent-logger package"
+
+  deploy_runtime_helpers
 
   # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
   _versioned_activate || exit 1
 
-  # Keep auxiliary PATH fallbacks payload-attributed after provisioning. The
-  # scheduled service uses the runtime directly; interactive compatibility
-  # commands continue through their owning payload shims.
   publish_payload_snapshot
-  deploy_auxiliary_compatibility_binstubs
-  # The primary `agent-logger` entrypoint is a self-provisioning binstub (not a
-  # plain symlink) so it can rebuild the runtime on first use in a confined host.
-  deploy_binstub
-  ok "published compatibility binstubs into ${LOCAL_BIN}"
+  if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+    # Keep auxiliary PATH fallbacks payload-attributed after provisioning. The
+    # scheduled service uses the runtime directly; interactive compatibility
+    # commands continue through their owning payload shims.
+    deploy_auxiliary_compatibility_binstubs
+    # The primary `agent-logger` entrypoint is a self-provisioning binstub (not a
+    # plain symlink) so it can rebuild the runtime on first use in a confined host.
+    deploy_binstub
+    ok "published compatibility binstubs into ${LOCAL_BIN}"
+  else
+    ok "scoped install keeps runtime helpers inside ${INSTALL_DIR}"
+  fi
 
   # Machine-local config schema migration (idempotent + atomic). Non-fatal.
   if PYTHONUTF8=1 "${VENV}/bin/agent-logger" config-migrate 2>/dev/null; then
@@ -741,6 +799,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}
 ExecStart=${VENV}/bin/session-sync run --prune
 # Generous start timeout: the FIRST sync cold-copies the entire session
 # history (potentially thousands of sessions over a CIFS mount) and can take
@@ -796,10 +855,14 @@ case "${ACTION}" in
     rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
     systemctl --user daemon-reload || true
     chg "timer removed (config at ${INSTALL_DIR} kept)"
-    for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
-      rm -f "${LOCAL_BIN}/${name}"
-    done
-    chg "binstubs removed from ${LOCAL_BIN}"
+    if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+      for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
+        rm -f "${LOCAL_BIN}/${name}"
+      done
+      chg "binstubs removed from ${LOCAL_BIN}"
+    else
+      chg "scoped install left legacy global binstubs unchanged"
+    fi
     ;;
   status)
     if _rt_py="$(_rt_python)"; then
@@ -807,6 +870,9 @@ case "${ACTION}" in
       "$_rt_py" -m agent_logger.sync.engine status || true
     else
       warn "not installed (run: bash scripts/install.sh install)"
+    fi
+    if [[ "$PUBLISH_GLOBAL_BINSTUBS" != 1 ]]; then
+      ok "global compatibility binstubs suppressed for installation-scoped runtime"
     fi
     systemctl --user is-active "${TIMER_NAME}.timer" 2>/dev/null \
       && ok "timer active" || warn "timer not active"

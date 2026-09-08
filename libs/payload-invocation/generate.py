@@ -391,6 +391,12 @@ def render(
                 else ""
             )
             + (
+                'export COPILOT_EXTENSIONS_PAYLOAD_COMMAND="$_command"\n'
+                f'export COPILOT_EXTENSIONS_PAYLOAD_MODULE="{selected["module"]}"\n'
+                if data["multiCommandManifest"]
+                else ""
+            )
+            + (
                 "if ! command -v bash >/dev/null 2>&1; then\n"
                 f"    printf '[{selected['command']}] required payload "
                 "dispatcher needs bash.\\n' >&2\n"
@@ -407,6 +413,12 @@ def render(
             (
                 f"$env:{data['payloadRootEnv']} = $_payloadRoot\n"
                 if data["payloadRootEnv"]
+                else ""
+            )
+            + (
+                "$env:COPILOT_EXTENSIONS_PAYLOAD_COMMAND = $_command\n"
+                f"$env:COPILOT_EXTENSIONS_PAYLOAD_MODULE = '{selected['module']}'\n"
+                if data["multiCommandManifest"]
                 else ""
             )
             + "$_payloadDispatcher = Join-Path $_payloadRoot "

@@ -98,6 +98,25 @@ def _required_context_manifest(tmp_path: Path) -> Path:
     return path
 
 
+def _required_context_multi_manifest(tmp_path: Path) -> Path:
+    path = _required_context_manifest(tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    primary = {
+        field: data.pop(field) for field in ("command", "module", "purpose")
+    }
+    data["plugin"] = "agent-machines"
+    data["commands"] = [
+        primary,
+        {
+            "command": "agent-machines-helper",
+            "module": "agent_machines.helper",
+            "purpose": "Exercise an example helper",
+        },
+    ]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -269,6 +288,32 @@ def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) ->
     assert 'exec bash "$_payload_root/scripts/invoke-payload-runtime.sh" "$@"' in posix
     assert "$env:AGENT_MACHINES_PAYLOAD_ROOT = $_payloadRoot" in powershell
     assert "Resolve-PayloadRuntime" not in powershell
+
+
+def test_required_multi_command_dispatchers_export_command_metadata(
+    tmp_path: Path,
+) -> None:
+    manifest = _required_context_multi_manifest(tmp_path)
+
+    generated = generator.expected_files(manifest)
+
+    posix = generated[manifest.parent / "bin" / "agent-machines-helper"]
+    powershell = generated[
+        manifest.parent / "bin" / "agent-machines-helper.ps1"
+    ]
+    assert (
+        'export COPILOT_EXTENSIONS_PAYLOAD_COMMAND="$_command"' in posix
+    )
+    assert (
+        'export COPILOT_EXTENSIONS_PAYLOAD_MODULE="agent_machines.helper"' in posix
+    )
+    assert (
+        "$env:COPILOT_EXTENSIONS_PAYLOAD_COMMAND = $_command" in powershell
+    )
+    assert (
+        "$env:COPILOT_EXTENSIONS_PAYLOAD_MODULE = 'agent_machines.helper'"
+        in powershell
+    )
 
 
 @pytest.mark.parametrize("version", [True, False])
