@@ -195,8 +195,12 @@ def _spawn_self_deploy(python_path: Any) -> None:
     own ``deploy`` runs the newly-installed code -- the same shape as an
     installer invoking ``deploy``/``_cutover`` right after publishing a new
     slot, just triggered by the running coordinator instead of externally.
-    Never raises to the caller's polling loop; a spawn failure is left for
-    the next poll to retry. Uses ``breakaway=True`` so the deploy survives a
+    Does **not** itself swallow failures -- a bad *python_path* or a
+    ``Popen``/exec error raises straight out of this function. The polling
+    loop that calls it catches and logs any such exception and lets the
+    cooldown throttle the next attempt, so a spawn failure is effectively
+    retried on a later poll, but that retry/no-raise behavior lives in the
+    caller, not here. Uses ``breakaway=True`` so the deploy survives a
     Job-contained launch mode (a coordinator started from a session-start
     hook lives in a Windows Job the OS can tear down as a whole tree) --
     this spawn must outlive that teardown to actually complete the cutover.
