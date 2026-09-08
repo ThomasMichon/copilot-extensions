@@ -229,8 +229,7 @@ def host_payload_dir(
 
 
 def _leaf(source: str) -> str:
-    parsed = parse_source(source)
-    base = parsed[0] if parsed else (source or "").strip()
+    base = (source or "").strip()
     return re.sub(r"[^\w.-]", "_", base) or "plugin"
 
 

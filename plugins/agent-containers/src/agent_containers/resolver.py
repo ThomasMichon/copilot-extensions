@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from agent_procutil import no_window_flags
 
 from . import lifecycle
-from ._invoke import module_argv
+from ._invoke import payload_command_argv
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
@@ -151,11 +151,10 @@ def build_wrapper_command(name: str) -> list[str]:
     injects it into the container's environment, so the token NEVER lands in
     the SpawnTarget (which agent-bridge persists to its SQLite DB) or in any log.
 
-    Invokes the module directly (``python -m agent_containers``), never the
-    ``.cmd`` binstub, so agent-bridge does not route the spawn through
-    cmd.exe and mangle forwarded arguments (see ``._invoke``).
+    Uses the exact payload-local shim instead of a machine-global command so the
+    same selected installation cell owns local and remote execution.
     """
-    return [*module_argv(), "exec", "--stdio", name]
+    return [*payload_command_argv(), "exec", "--stdio", name]
 
 
 def resolve_live_exec_target(
@@ -389,7 +388,7 @@ class ContainerResolver:
                 "user": user,
                 "acp_command": config.acp_command_for(fleet),
                 "ssh": asdict(ssh_config),
-                "provider_command": module_argv(),
+                "provider_command": payload_command_argv(),
                 "relay_remote_port": (
                     config.relay_port if relay_enabled else None
                 ),

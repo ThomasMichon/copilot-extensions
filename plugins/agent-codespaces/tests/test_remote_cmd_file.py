@@ -21,9 +21,9 @@ from agent_codespaces.__main__ import _normalize_remote_cmd_file
 
 
 class TestDispatchArgv:
-    def test_prefers_binstub_when_present(self, monkeypatch):
-        monkeypatch.setattr(_invoke, "binstub", lambda: "/x/.local/bin/agent-codespaces")
-        assert _invoke.dispatch_argv() == ["/x/.local/bin/agent-codespaces"]
+    def test_prefers_payload_local_shim_when_present(self, monkeypatch):
+        monkeypatch.setattr(_invoke, "binstub", lambda: "/payload/bin/agent-codespaces")
+        assert _invoke.dispatch_argv() == ["/payload/bin/agent-codespaces"]
 
     def test_falls_back_to_module_argv_when_absent(self, monkeypatch):
         monkeypatch.setattr(_invoke, "binstub", lambda: None)
@@ -31,7 +31,7 @@ class TestDispatchArgv:
         assert _invoke.dispatch_argv() == ["py", "-m", "agent_codespaces"]
 
     def test_binstub_returns_none_when_missing(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(_invoke, "_BIN_DIR", tmp_path / "bin")
+        monkeypatch.setattr(_invoke, "_payload_root", lambda: tmp_path / "payload")
         assert _invoke.binstub() is None
 
 
@@ -70,7 +70,7 @@ class TestWriteRemoteCmdFile:
 class TestBuildSpawnCommand:
     def test_uses_remote_cmd_file_not_string(self, tmp_path, monkeypatch):
         monkeypatch.setattr(resolver, "_DISPATCH_DIR", tmp_path / "dispatch")
-        monkeypatch.setattr(resolver, "dispatch_argv", lambda: ["agent-codespaces.cmd"])
+        monkeypatch.setattr(resolver, "dispatch_argv", lambda: ["/payload/bin/agent-codespaces"])
         payload = "cd /workspaces/x && copilot --acp --stdio"
 
         cmd = resolver._build_spawn_command("cs-1", payload, stage_plugins=["p@m"])
@@ -82,7 +82,7 @@ class TestBuildSpawnCommand:
 
         assert Path(cmd[idx + 1]).read_text(encoding="utf-8") == payload
         # routes through the (stubbed) version-stable dispatcher + keeps flags
-        assert cmd[0] == "agent-codespaces.cmd"
+        assert cmd[0] == "/payload/bin/agent-codespaces"
         assert cmd[1:5] == ["ssh", "cs-1", "--stdio", "--force"]
         assert "--stage-plugin" in cmd and "p@m" in cmd
 

@@ -281,9 +281,9 @@ def test_profile_spec_can_describe_project_scoped_picker_source(monkeypatch, tmp
     monkeypatch.setattr(provider_ssh.ContainerResolver, "resolve_spec", resolve_spec)
     monkeypatch.setattr(provider_ssh, "get_lease", lambda _name: _lease())
     monkeypatch.setattr(
-        provider_ssh.shutil,
-        "which",
-        lambda name: f"/bin/{name}",
+        provider_ssh,
+        "payload_command_argv",
+        lambda: ["/payload/bin/agent-containers"],
     )
 
     result = provider_ssh.ssh_profile_spec(
@@ -331,6 +331,7 @@ def test_profile_spec_can_describe_project_scoped_picker_source(monkeypatch, tmp
     }
     assert source["capabilities"]["messages"] is True
     assert source["capabilities"]["resume"] is False
+    assert result["registry"]["proxy_command_binary"] == "/payload/bin/agent-containers"
 
 
 def test_provider_launcher_executes_active_isolated_runtime(monkeypatch, tmp_path):
@@ -405,7 +406,7 @@ def test_emit_profile_persists_registry_and_delegates_to_agent_ssh(
         "module": str(tmp_path / "module.yaml"),
         "registry": {
             "transport": "provider-exec",
-            "proxy_command_binary": "/bin/agent-containers",
+            "proxy_command_binary": "/payload/bin/agent-containers",
             "machines": [{"name": "restricted-worker"}],
         },
     }
@@ -449,7 +450,7 @@ def test_emit_profile_persists_registry_and_delegates_to_agent_ssh(
     )
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     assert registry["transport"] == "provider-exec"
-    assert registry["proxy_command_binary"] == "/bin/agent-containers"
+    assert registry["proxy_command_binary"] == "/payload/bin/agent-containers"
     assert [machine["name"] for machine in registry["machines"]] == [
         "existing-worker",
         "restricted-worker",
@@ -473,7 +474,7 @@ def test_emit_profile_publishes_picker_source_after_ssh_profile(
         "module": str(tmp_path / "module.yaml"),
         "registry": {
             "transport": "provider-exec",
-            "proxy_command_binary": "/bin/agent-containers",
+            "proxy_command_binary": "/payload/bin/agent-containers",
             "machines": [{"name": "restricted-worker"}],
         },
         "worktree_source": {
@@ -485,7 +486,7 @@ def test_emit_profile_publishes_picker_source_after_ssh_profile(
             "alias": "restricted-worker",
             "shell": "bash",
             "resolve": [
-                "/bin/agent-containers",
+                "/payload/bin/agent-containers",
                 "ssh-profile",
                 "sandbox-1",
                 "--alias",
@@ -728,7 +729,7 @@ def test_emit_profile_fails_when_agent_ssh_is_unavailable(monkeypatch):
             "module": "/module.yaml",
             "registry": {
                 "transport": "provider-exec",
-                "proxy_command_binary": "/bin/agent-containers",
+                "proxy_command_binary": "/payload/bin/agent-containers",
                 "machines": [{"name": "sandbox-1"}],
             },
         },
@@ -749,7 +750,7 @@ def test_print_profile_does_not_invalidate_published_registry(monkeypatch, tmp_p
     registry_path = tmp_path / "provider-exec.json"
     published = {
         "transport": "provider-exec",
-        "proxy_command_binary": "/bin/agent-containers",
+        "proxy_command_binary": "/payload/bin/agent-containers",
         "machines": [{"name": "existing-worker", "hostname": "sandbox-0"}],
     }
     registry_path.write_text(json.dumps(published), encoding="utf-8")
@@ -760,7 +761,7 @@ def test_print_profile_does_not_invalidate_published_registry(monkeypatch, tmp_p
             "module": str(tmp_path / "module.yaml"),
             "registry": {
                 "transport": "provider-exec",
-                "proxy_command_binary": "/bin/agent-containers",
+                "proxy_command_binary": "/payload/bin/agent-containers",
                 "machines": [{"name": "preview-worker", "hostname": "sandbox-1"}],
             },
         },

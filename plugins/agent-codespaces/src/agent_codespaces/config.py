@@ -40,16 +40,16 @@ log = logging.getLogger("agent-codespaces")
 def _home() -> Path:
     """Root under which agent-codespaces state lives, with a sandbox override.
 
-    ``AGENT_HOME`` (when set) replaces ``~/`` as the state root -- the same
-    fabric-wide override agent-worktrees honors -- so an isolated test deployment
-    relocates ``~/.agent-codespaces`` (leases, sockets, logs) without touching the
-    real home (``gh``/``ssh``/git auth still resolve from the actual ``~/``).
-    Read at import so a freshly-spawned ``agent-codespaces`` subprocess inside a
-    sandbox picks it up.
+    ``AGENT_CODESPACES_HOME`` (when set) selects this plugin's runtime root.
+    ``AGENT_HOME`` remains the suite-wide sandbox override so isolated test
+    deployments can relocate ``~/.agent-codespaces`` (leases, sockets, logs)
+    without touching the real home (``gh``/``ssh``/git auth still resolve from
+    the actual ``~/``). Read at import so a freshly-spawned
+    ``agent-codespaces`` subprocess inside a sandbox picks it up.
     """
-    import os
-
-    override = os.environ.get("AGENT_HOME", "").strip()
+    override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
+    if not override:
+        override = os.environ.get("AGENT_HOME", "").strip()
     return Path(override) if override else Path.home()
 
 
