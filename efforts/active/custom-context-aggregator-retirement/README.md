@@ -307,3 +307,32 @@ There is no third, custom composition authority between plugins and the host.
   Copilot startup handshake. Until that bridge path succeeds, the Phase 3
   launch-path checkbox and the cross-platform validation-plan checkbox remain
   intentionally unchecked and the effort stays Active.
+
+### 2026-09-07 (later) — Bridge blocker root-caused (partially); WSL proof deferred, not dropped
+
+- A deeper dig instrumented `agent-bridge`'s ACP launch stage (merged
+  `ThomasMichon/copilot-extensions#2216`, `d39bfaba1`, bumping `agent-bridge`
+  to `0.4.0-dev446`) and confirmed: (1) an isolated daemon launched directly
+  on the target WSL host completes a full ACP `session/new` handshake in
+  ~12.5 seconds — the local launch path is not slow; and (2) the daemon's
+  retention/GC sweep is correctly self-scheduled and running (a suspected
+  `sessions.db` growth defect was a false lead — nothing had yet crossed the
+  7-day retention cutoff).
+- However, re-attempting the actual cross-machine dispatch (the normal
+  operator path: a Windows `agent-bridge send <wsl-host>` invocation) still
+  timed out identically a 4th time, even against the fixed daemon. This
+  isolates the unexplained cost to the Windows-to-WSL relay/dispatch path
+  itself (SSH tunnel, credential relay, or cross-machine `session_host`
+  attach) — a distinct failure mode from the local-launch timing just fixed
+  and validated. Tracked as a new issue in the private aperture-labs tracker
+  (cross-repo infra, not this repo's own code) since the reproduction so far
+  is specific to this facility's SSH mesh topology.
+- Given four consecutive failures across two sessions and the now-isolated
+  root cause living in cross-machine transport rather than in this effort's
+  own retirement work, the operator elected to defer rather than keep
+  debugging inline: the WSL/bash launch-path proof (Phase 3 checkbox) and the
+  cross-platform validation-plan item remain intentionally unchecked, and
+  Status remains **Active**, pending that separate infra fix. This is a
+  deferral, not a scope drop — the two checkboxes stay open until a working
+  WSL dispatch actually proves the bash-shell writer paths, per this effort's
+  own Validation Plan.
