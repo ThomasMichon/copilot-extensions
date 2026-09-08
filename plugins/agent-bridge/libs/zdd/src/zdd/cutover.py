@@ -177,7 +177,7 @@ class CutoverOrchestrator:
         return self.bind
 
     def _base_url(self, port: int) -> str:
-        return f"http://{self._client_host()}:{port}"
+        return f"http://{routing.format_authority(self._client_host(), port)}"
 
     def _await_health(self, port: int, timeout: float, poll: float) -> bool:
         deadline = self.clock() + timeout
