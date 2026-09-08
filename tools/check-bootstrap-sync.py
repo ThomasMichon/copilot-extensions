@@ -52,7 +52,6 @@ FAMILIES: dict[str, list[str]] = {
         "agent-containers",
         "agent-dispatch",
         "agent-logger",
-        "agent-mcp",
         "agent-vault",
     ],
     # budget-guidance can stamp its payload-local command before Python exists.
@@ -61,6 +60,12 @@ FAMILIES: dict[str, list[str]] = {
     # service-bearing installation-cell exemplar. Its bootstrap can inspect an
     # explicitly selected, validated context without making that root operative.
     "versioned-venv/context-selected-agent-index": ["agent-index"],
+    # agent-mcp keeps the shared versioned-venv model but is scoped by
+    # installation cell (#2225): its bootstrap early-exits when
+    # COPILOT_EXTENSIONS_CONTEXT is set, deferring the reconcile decision to
+    # the selected cell rather than the plugin root -- the same rationale as
+    # agent-index's split above, a genuinely distinct variant, not drift.
+    "versioned-venv/context-selected-agent-mcp": ["agent-mcp"],
     # agent-bridge reference: the psscriptroot model plus reconcile observability
     # (reconcile.log / reconcile-status.json) and a venv-or-.venv guard (its
     # stable link is 'venv', not '.venv'). Kept distinct until the observability
