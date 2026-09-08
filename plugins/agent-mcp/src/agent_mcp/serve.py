@@ -61,6 +61,23 @@ from .ipc import (
 )
 from .session import BridgeSession
 
+
+def _control_token_path(config_dir: str | Path, pid: int) -> Path:
+    """Owner-only, **pid-keyed** sidecar carrying one generation's control-
+    channel auth token -- lets a cutover orchestrator authenticate to a
+    daemon it did not itself spawn (the currently-active one, being cut over
+    away from).
+
+    Keyed by pid (not a single shared filename) so that a *second* cutover
+    attempt in the same home can never read a stale/wrong token left behind
+    by an unrelated generation (e.g. a passive daemon from a prior, rolled-
+    back cutover attempt that also started a control listener and would
+    otherwise clobber a single shared file). The cutover script always reads
+    this keyed on the *specific* pid it just resolved from the routing
+    table, so there is nothing to disambiguate.
+    """
+    return Path(config_dir) / f"serve-control-{pid}.token"
+
 try:
     from single_instance_lease import AlreadyRunningError, SingleInstance
 except ImportError:  # pragma: no cover - the vendored lib is always installed
@@ -82,10 +99,12 @@ __all__ = [
     "Server",
     "WarmPool",
     "_connect",
+    "_control_token_path",
     "_endpoint_path",
     "_read_endpoint",
     "call_via_socket",
     "default_socket_path",
+    "flip_data_handle",
     "open_attached_session",
     "request_via_socket",
     "serve_socket_if_available",
@@ -230,7 +249,11 @@ class Server:
     def __init__(self, socket_path: str | Path, *, pool: WarmPool | None = None,
                  idle_timeout: float = _DEFAULT_IDLE_TIMEOUT,
                  enable_lease: bool = True,
-                 lease_service: str = "agent-mcp-serve") -> None:
+                 lease_service: str = "agent-mcp-serve",
+                 passive: bool = False,
+                 control_port: int | None = None,
+                 control_token: str | None = None,
+                 version: str | None = None) -> None:
         self.socket_path = Path(socket_path)
         self.pool = pool or WarmPool(idle_timeout=idle_timeout)
         self._idle_timeout = idle_timeout
@@ -244,15 +267,42 @@ class Server:
         self._attached = 0
         self._last_active = time.monotonic()
         # Single-instance lease: one host per AGENT_MCP_HOME. Disabled only in
-        # tests that intentionally run two hosts on one home.
+        # tests that intentionally run two hosts on one home, and permanently
+        # for a ``--passive`` cutover instance (see ``passive`` below).
         self._enable_lease = enable_lease and SingleInstance is not None
         self._lease_service = lease_service
         self._lease = None
+        # Zero-downtime cutover state (docs/patterns/graceful-daemon-cutover.md,
+        # libs/zdd). ``passive`` marks a daemon spawned *beside* an already-active
+        # one during a cutover: it must bind its own distinct socket_path (the
+        # caller's job, e.g. ``serve-g<N>.sock``) and never contend for the
+        # home-wide single-instance lease -- the routing flip that promotes it,
+        # not a lease, is what makes it the one real clients reach. ``draining``
+        # is armed by the ``drain`` control op (refuse new ``attach`` sessions;
+        # already-attached ones and in-flight ``call``/``list`` requests are
+        # unaffected) and cleared by ``undrain`` (cutover rollback).
+        self._passive = passive
+        self._draining = False
+        self._control_port_request = control_port
+        self._control_server: asyncio.AbstractServer | None = None
+        # A caller-supplied token (the cutover CLI injects one via
+        # AGENT_MCP_CONTROL_TOKEN so it knows the token of a daemon it spawns
+        # *before* that daemon publishes anything) always wins; otherwise mint
+        # one so a plain, non-cutover ``serve`` still has a control channel a
+        # future cutover attempt can authenticate to via the token sidecar
+        # (see ``_start_control_listener``).
+        self._control_token = control_token or secrets.token_hex(16)
+        self._version = version
 
     @property
     def attached(self) -> int:
         """Number of live attached multiplexer sessions (test/diagnostic hook)."""
         return self._attached
+
+    @property
+    def draining(self) -> bool:
+        """Whether this generation is refusing new attach sessions (test hook)."""
+        return self._draining
 
     def _touch(self) -> None:
         """Mark host activity so the idle self-eviction clock resets."""
@@ -274,6 +324,20 @@ class Server:
                 # resident BridgeSession (the work-coalescing multiplexer, #744):
                 # after this the stream carries raw MCP JSON-RPC, not ops.
                 if isinstance(req, dict) and req.get("op") == "attach":
+                    if self._draining:
+                        # Cutover in progress: refuse new long-lived sessions so
+                        # this generation trends to idle (the safe cutover point,
+                        # see docs/patterns/graceful-daemon-cutover.md). The
+                        # client's existing fallback (a live host that refuses an
+                        # attach -> direct in-process bridge, no respawn) already
+                        # covers this refusal correctly; already-attached sessions
+                        # are untouched and keep running to their natural close.
+                        await self._send(writer, {
+                            "ok": False, "attached": False,
+                            "error": "serve: draining for cutover, "
+                                     "reconnect to pick up the new generation",
+                        })
+                        return
                     await self._run_session(req, reader, writer)
                     return
                 resp = await self._dispatch(req)
@@ -425,8 +489,14 @@ class Server:
         host runs per home. A second host that loses the race returns ``False``
         and must exit **before** binding the socket, so it never disturbs the live
         host's handle.
+
+        A ``--passive`` cutover instance skips this entirely: it binds its own
+        distinct ``socket_path`` (the caller's job -- e.g. a generation-suffixed
+        path), so it never contends with the active daemon's lease at all. What
+        makes it the daemon real clients reach is the routing flip the cutover
+        orchestrator performs after health-gating it, not lease ownership.
         """
-        if not self._enable_lease:
+        if self._passive or not self._enable_lease:
             return True
         self._lease = SingleInstance(
             self.socket_path.parent, service=self._lease_service, logger=log)
@@ -469,6 +539,7 @@ class Server:
                 self._write_endpoint(port, self._token)
                 log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
                          self.socket_path)
+            await self._start_control_listener()
             sweeper = asyncio.create_task(self._sweep_loop())
             try:
                 await self._stop.wait()
@@ -476,10 +547,119 @@ class Server:
                 sweeper.cancel()
                 self._server.close()
                 await self._server.wait_closed()
+                await self._stop_control_listener()
                 await self.pool.close_all()
                 self._cleanup_endpoint()
         finally:
             self._release_lease()
+
+    async def _start_control_listener(self) -> None:
+        """Bind the always-on lifecycle control listener (loopback TCP),
+        publish it to the ``zdd`` routing table for cutover discovery, and
+        write its auth token to an owner-only sidecar so an orchestrator that
+        did *not* spawn this daemon (i.e. the currently-active generation
+        being cut over away from) can still authenticate to it.
+
+        Separate from the data-plane transport above (AF_UNIX on POSIX, or the
+        same-purpose loopback TCP on Windows): the control channel exists purely
+        so a `cutover` orchestrator can health/drain/undrain/shutdown *this*
+        generation without needing to speak agent-mcp's full data-plane op set,
+        and without requiring the data transport to be TCP. Every daemon --
+        passive or promoted -- binds one and publishes it, so the very next
+        cutover after this ships can always find and drive it. (The first
+        cutover ever run against a pre-existing daemon that predates this
+        feature has nothing to dial here -- see docs/patterns/
+        graceful-daemon-cutover.md and the agent-mcp cutover effort for that
+        one-time bootstrap boundary.)
+        """
+        from zdd import routing
+
+        self._control_server = await asyncio.start_server(
+            self._handle_control, host=_TCP_HOST,
+            port=self._control_port_request or 0)
+        control_port = self._control_server.sockets[0].getsockname()[1]
+        token_path = _control_token_path(self._config_dir(), os.getpid())
+        token_path.write_text(self._control_token, encoding="utf-8")
+        with contextlib.suppress(OSError):
+            os.chmod(token_path, 0o600)
+        with contextlib.suppress(Exception):
+            routing.publish_active(
+                self._config_dir(), bind=_TCP_HOST, port=control_port,
+                pid=os.getpid(), version=self._version, demote_existing=True,
+            )
+        log.info("serve: control channel on tcp:%s:%d", _TCP_HOST, control_port)
+
+    async def _stop_control_listener(self) -> None:
+        if self._control_server is None:
+            return
+        self._control_server.close()
+        with contextlib.suppress(Exception):
+            await self._control_server.wait_closed()
+        from zdd import routing
+        with contextlib.suppress(Exception):
+            routing.clear_if_owner(self._config_dir(), os.getpid())
+        with contextlib.suppress(OSError):
+            _control_token_path(self._config_dir(), os.getpid()).unlink()
+
+
+    def _config_dir(self) -> Path:
+        """Where the ``zdd`` control routing table + cutover breadcrumb live.
+
+        Deliberately the socket handle's own directory (``AGENT_MCP_HOME``),
+        matching every other per-home artifact (the lease, the data endpoint
+        sidecar) -- one home, one place to look.
+        """
+        return self.socket_path.parent
+
+    async def _handle_control(self, reader: asyncio.StreamReader,
+                              writer: asyncio.StreamWriter) -> None:
+        """Serve the lifecycle control op set: ``ping``, ``drain``, ``undrain``,
+        ``shutdown``. Deliberately does not carry ``call``/``list``/``attach`` --
+        those stay data-plane-only; control exists purely for cutover signaling."""
+        try:
+            while not reader.at_eof():
+                line = await reader.readline()
+                if not line:
+                    break
+                try:
+                    req = json.loads(line)
+                except (ValueError, TypeError):
+                    await self._send(writer, {"ok": False, "error": "invalid JSON"})
+                    continue
+                resp = self._control_dispatch(req)
+                await self._send(writer, resp)
+                if req.get("op") == "shutdown" and resp.get("ok"):
+                    self._stop.set()
+                    break
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+    def _control_dispatch(self, req: dict) -> dict:
+        if req.get("token") != self._control_token:
+            return {"ok": False, "error": "unauthorized"}
+        op = req.get("op")
+        if op in ("ping", "health"):
+            return {"ok": True, "pong": True, "draining": self._draining,
+                    "attached": self._attached, "sessions": self.pool.size}
+        if op == "drain":
+            self._draining = True
+            # Only attached (long-lived multiplexer) sessions are "in-flight,
+            # non-resumable work" in this daemon's sense -- a warm WarmPool
+            # entry is just a cached one-shot connection with no undelivered
+            # state, safe to drop on retire (pool.close_all() at shutdown).
+            # ``busy_sessions`` is the exact key zdd.cutover's orchestrator
+            # reads for both its busy-oracle poll and its failure message.
+            return {"ok": True, "busy_sessions": self._attached,
+                    "sessions": self.pool.size}
+        if op == "undrain":
+            self._draining = False
+            return {"ok": True}
+        if op == "shutdown":
+            return {"ok": True}
+        return {"ok": False, "error": f"unknown control op: {op!r}"}
 
     def _write_endpoint(self, port: int, token: str) -> None:
         """Publish the loopback port + token to the endpoint sidecar (owner-only)."""
@@ -532,3 +712,50 @@ class Server:
             log.info("serve: idle for %.0fs with no attached sessions; "
                      "evicting host", self._idle_timeout)
             self._stop.set()
+
+
+def flip_data_handle(new_data_socket_path: str | Path, *,
+                     legacy_path: str | Path | None = None) -> None:
+    """Atomically repoint the **fixed, client-facing** data handle at a newly
+    promoted generation's real socket -- the actual "cutover" clients feel.
+
+    Deliberately separate from the ``zdd`` control-plane routing table (which
+    only the cutover orchestrator and control ops consult): every existing data
+    client -- :func:`serve_socket_if_available`, the forwarder's ``attach``, one-
+    shot ``call``/``materialize`` -- already re-resolves the *fixed* handle fresh
+    on every invocation and needs **zero code changes** to follow a cutover,
+    because that fixed handle is what this function repoints:
+
+    * **POSIX** -- the fixed handle is a **symlink** to the real, generation-
+      suffixed socket file. Repointing is ``os.symlink`` to a temp name +
+      ``os.replace`` (atomic rename), so a reader never observes a missing or
+      half-written link. Upgrades the very first cutover's fixed path in place
+      even when it is still a plain (pre-cutover) socket file, not yet a link.
+    * **Windows** -- the fixed handle has no real socket at all, only its
+      ``<fixed>.endpoint`` sidecar (port + token). Repointing copies the new
+      generation's own ``<new_data_socket_path>.endpoint`` content over the
+      fixed sidecar, atomically (temp file + ``os.replace``).
+
+    Called by the ``cutover`` CLI after ``CutoverOrchestrator`` commits -- never
+    by the daemon itself (a promoted daemon does not know or care that it was
+    promoted; it just keeps answering requests on the socket it already bound).
+    """
+    from .ipc import default_socket_path
+    fixed = Path(legacy_path) if legacy_path is not None else default_socket_path()
+    new_path = Path(new_data_socket_path)
+    fixed.parent.mkdir(parents=True, exist_ok=True)
+    if _HAS_AF_UNIX:
+        tmp_link = fixed.with_name(fixed.name + f".tmp-{os.getpid()}")
+        with contextlib.suppress(OSError):
+            tmp_link.unlink()
+        os.symlink(new_path, tmp_link)
+        os.replace(tmp_link, fixed)
+        return
+    new_ep = _endpoint_path(new_path)
+    fixed_ep = _endpoint_path(fixed)
+    data = new_ep.read_text(encoding="utf-8")
+    tmp_ep = fixed_ep.with_name(fixed_ep.name + f".tmp-{os.getpid()}")
+    tmp_ep.write_text(data, encoding="utf-8")
+    with contextlib.suppress(OSError):
+        os.chmod(tmp_ep, 0o600)
+    os.replace(tmp_ep, fixed_ep)

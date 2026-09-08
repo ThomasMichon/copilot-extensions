@@ -18,7 +18,14 @@ Subcommands:
                                 first (it opens/reuses the bridge session as
                                 needed, avoiding a redundant fresh upstream
                                 spawn); ``--no-serve`` always spawns cold.
-  serve                         Resident warmth daemon: keep upstreams warm over a socket.
+  serve                         Resident warmth daemon: keep upstreams warm over a
+                                socket. ``--passive``/``--control-port`` are
+                                internal seams `cutover` uses to spawn a new
+                                generation beside a live one.
+  cutover                       Zero-downtime replace the resident `serve` daemon:
+                                spawn the installed version beside the running
+                                one, health-gate it, flip the client-facing
+                                handle, drain the old generation, retire it.
 
 Heavy imports (the bridge tree: config, credential injectors, decorators,
 transports, the upstream client, the serve daemon) are deferred into each command
@@ -31,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -441,17 +449,45 @@ def _cmd_source_digest(args: argparse.Namespace) -> int:
 def _cmd_serve(args: argparse.Namespace) -> int:
     import asyncio
 
-    from . import ipc
+    from . import __version__, ipc
     from . import serve as _serve
     socket_path = args.socket or str(ipc.default_socket_path())
-    server = _serve.Server(socket_path, idle_timeout=args.idle_timeout)
-    print(f"agent-mcp serve: listening on {socket_path} "
+    control_token = os.environ.get("AGENT_MCP_CONTROL_TOKEN") or None
+    server = _serve.Server(
+        socket_path, idle_timeout=args.idle_timeout,
+        passive=args.passive, control_port=args.control_port,
+        control_token=control_token, version=__version__,
+    )
+    mode = "passive (cutover-spawned)" if args.passive else "active"
+    print(f"agent-mcp serve: listening on {socket_path} [{mode}] "
           f"(idle-timeout {args.idle_timeout:g}s; Ctrl-C to stop)", file=sys.stderr)
     try:
         asyncio.run(server.serve_forever())
     except KeyboardInterrupt:
         print("agent-mcp serve: stopped", file=sys.stderr)
     return 0
+
+
+def _cmd_cutover(args: argparse.Namespace) -> int:
+    """``cutover`` -- zero-downtime replace the resident ``serve`` daemon.
+
+    See docs/patterns/graceful-daemon-cutover.md and agent_mcp.cutover's module
+    docstring for the full design; this is a thin CLI dispatch.
+    """
+    from . import cutover as _cutover
+    result = _cutover.run_cutover(
+        health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
+        force=args.force, json_out=args.json,
+    )
+    if args.json:
+        print(json.dumps(result))
+        return 0 if result.get("ok") else 1
+    if result.get("ok"):
+        print(f"agent-mcp cutover: committed -> {result.get('data_socket')}")
+        return 0
+    print(f"agent-mcp cutover: {result.get('error') or 'failed'}", file=sys.stderr)
+    return 1
+
 
 
 class _LazyVersionAction(argparse.Action):
@@ -540,7 +576,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--idle-timeout", type=float, default=300.0,
                          help="evict a warm session unused this many seconds "
                               "(default: 300)")
+    p_serve.add_argument("--passive", action="store_true",
+                         help="cutover-spawned: bind --socket without taking "
+                              "the home-wide single-instance lease or "
+                              "touching the fixed client-facing handle "
+                              "(internal seam for `agent-mcp cutover`)")
+    p_serve.add_argument("--control-port", type=int, default=None,
+                         help="bind the lifecycle control listener on this "
+                              "exact port instead of an OS-assigned one "
+                              "(internal seam for `agent-mcp cutover`)")
     p_serve.set_defaults(func=_cmd_serve)
+
+    p_cutover = sub.add_parser(
+        "cutover",
+        help="zero-downtime replace the resident 'serve' daemon (spawn the "
+             "installed version beside the running one, health-gate, flip "
+             "the client-facing handle, drain, retire)")
+    p_cutover.add_argument("--health-timeout", type=float, default=60.0,
+                           help="seconds to wait for the new generation to "
+                                "answer a control-channel ping (default: 60)")
+    p_cutover.add_argument("--drain-timeout", type=float, default=300.0,
+                           help="seconds to wait for the old generation to "
+                                "reach 0 attached sessions before retiring "
+                                "it (default: 300)")
+    p_cutover.add_argument("--force", action="store_true",
+                           help="retire the old generation even if it never "
+                                "finished draining (attached sessions are "
+                                "cut off; only after the timeout)")
+    p_cutover.add_argument("--json", action="store_true",
+                           help="print the result as JSON")
+    p_cutover.set_defaults(func=_cmd_cutover)
 
     p_mat = sub.add_parser(
         "materialize", help="project an upstream MCP catalog into a CLI stub fleet")

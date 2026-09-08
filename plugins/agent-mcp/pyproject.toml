@@ -17,6 +17,7 @@ dependencies = [
     "agent-credential-relay",
     "agent-procutil",
     "agent-single-instance-lease",
+    "agent-zdd",
 ]
 
 [tool.uv.sources]
@@ -32,6 +33,11 @@ agent-procutil = { path = "libs/agent-procutil" }
 # one warm multiplexer host runs per AGENT_MCP_HOME, making it safe for the thin
 # forwarders to race-spawn it on demand (#744).
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
+# zero-downtime cutover primitive (module ``zdd``). Vendored per plugin;
+# byte-identical src across copies (see docs/patterns/graceful-daemon-cutover.md).
+# Drives the `serve --passive` / `cutover` control-plane handoff so a version
+# update never leaves callers with no live daemon to reach.
+agent-zdd = { path = "libs/zdd" }
 
 [project.scripts]
 agent-mcp = "agent_mcp.__main__:main"
