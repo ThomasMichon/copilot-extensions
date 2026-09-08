@@ -277,3 +277,33 @@ There is no third, custom composition authority between plugins and the host.
   proof (Phase 3) and the cross-platform determinism/resume-safety validation
   item remain unchecked below.
 
+### 2026-09-07 — Windows launch-path proof passed; WSL parity blocked
+
+- Ran blind `sessionStart` probes against the actual `hook_client.py` /
+  `write_session_guidance.py` entrypoints for `agent-worktrees`,
+  `agent-codespaces`, `agent-index`, and `agent-ssh`, using synthetic
+  session IDs plus hidden high-entropy canaries injected through the
+  payload-sensitive guidance contributors and pre-seeded stale guidance files.
+  The Windows/PowerShell path proved fresh-launch session scoping, resume
+  overwrite of stale guidance, payload-`cwd` ownership (no ambient `cwd`
+  reuse), and fail-open behavior when no prior guidance file or matching
+  session snapshot existed. The same entrypoint reads also confirmed no
+  launch-mode branch skips guidance writing for fresh, resume, prompt, or ACP
+  shapes: each path consumes the same `sessionStart` payload and emits `{}` on
+  stdout.
+- The proof uncovered one real regression outside the writer logic:
+  `agent-index`'s compatibility `bootstrap-check.{ps1,sh}` still exited with an
+  empty stdout stream instead of the required single JSON object. Fixed both
+  wrappers to emit exactly `{}` and added a regression test covering the bash
+  and PowerShell entrypoints.
+- Re-ran the Windows-side wrapper checks after that fix. `bootstrap-check.ps1`
+  passed for all four plugins, and the `agent-codespaces`
+  `register-bridge-provider.ps1` plus `agent-index` / `agent-ssh`
+  `register-dispatch-companion.ps1` wrappers remained deterministic, contained,
+  and idempotent across repeated runs.
+- The remaining cross-platform/bash validation is still blocked. Two attempts to
+  run the WSL parity pass through the configured bridge failed before the remote
+  session processed any turn: ACP session launch timed out during the remote
+  Copilot startup handshake. Until that bridge path succeeds, the Phase 3
+  launch-path checkbox and the cross-platform validation-plan checkbox remain
+  intentionally unchecked and the effort stays Active.

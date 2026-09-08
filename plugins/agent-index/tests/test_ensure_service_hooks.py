@@ -31,6 +31,30 @@ def test_legacy_session_entrypoints_do_not_execute_python() -> None:
         assert "install." not in source
 
 
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_bootstrap_check_emits_exact_empty_object(
+    tmp_path: Path, shell: str
+) -> None:
+    suffix = "sh" if shell == "bash" else "ps1"
+    result = subprocess.run(
+        _shell_command(shell, PLUGIN / "scripts" / f"bootstrap-check.{suffix}"),
+        env={
+            **os.environ,
+            "HOME": str(tmp_path),
+            "USERPROFILE": str(tmp_path),
+            "PYTHONUTF8": "1",
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "{}"
+
+
 def _shell_command(shell: str, script: Path) -> list[str]:
     if shell == "bash":
         if os.name == "nt":
