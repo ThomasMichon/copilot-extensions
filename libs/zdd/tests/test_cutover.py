@@ -210,6 +210,23 @@ def test_cold_start_no_old_daemon(tmp_path: Path):
     assert routing.read_table(tmp_path)["active"]["port"] == 9290
 
 
+def test_base_url_brackets_ipv6_bind(tmp_path: Path):
+    """Regression test: an orchestrator bound to a wildcard IPv6 address
+    (client_host "::1") must bracket it when forming the client base URL --
+    unbracketed ("http://::1:1234") is not a valid URL and breaks
+    make_client()/urlparse on the host's own colons."""
+    orch = CutoverOrchestrator(
+        tmp_path, bind="::", version="1.0.0",
+        spawn_passive=lambda p: FakeHandle(),
+        health_check=lambda host, p: True,
+        make_client=lambda base_url: base_url,
+        pick_free_port=lambda: 9290,
+        sleep=lambda _s: None,
+        clock=_fake_clock(),
+    )
+    assert orch._base_url(9290) == "http://[::1]:9290"
+
+
 # -- drain RAISES after the flip, old daemon now dead -> commit forward -------
 
 

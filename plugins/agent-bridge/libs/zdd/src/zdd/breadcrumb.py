@@ -42,6 +42,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from zdd.routing import format_authority
+
 log = logging.getLogger("zdd")
 
 _BREADCRUMB_FILENAME = "cutover.json"
@@ -192,7 +194,7 @@ def recover_stale_cutover(
             "old_port": port,
         }
 
-    base_url = f"http://{host}:{port}"
+    base_url = f"http://{format_authority(host, port)}"
     try:
         make_client(base_url).undrain()
         undrained = True
