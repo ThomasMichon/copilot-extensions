@@ -2426,6 +2426,37 @@ def _passive_daemon_creationflags() -> int:
     return 0
 
 
+def _passive_daemon_stdio_kwargs() -> tuple[dict, list]:
+    """Build the stdout/stderr/stdin redirect ``Popen`` kwargs for a detached
+    passive daemon spawn, plus the file handles the caller must close after
+    ``Popen`` returns (the child keeps its own duplicated fds).
+
+    Redirecting to the daemon's own log files -- rather than inheriting the
+    launcher's fds -- is required on every platform, not just Windows. On
+    POSIX, a child that doesn't get an explicit stdio redirect inherits
+    whatever fds the launching process happened to hold open at spawn time
+    (e.g. a deploy script's own stdout piped through ``| tail``).
+    ``start_new_session=True`` alone only detaches the process group/session
+    (so the daemon survives the parent's exit and doesn't receive its
+    terminal signals) -- it does not close or redirect fds. A long-running
+    passive daemon that inherited a pipe write-end that way holds it open
+    indefinitely, so the *launcher's* pipe never sees EOF even long after the
+    launcher's own visible work finished (observed: a deploy's
+    ``update | tail`` hung for hours after ``spawn_passive`` promoted the new
+    generation, even though the update itself had long since completed).
+    """
+    from .config import config_dir
+
+    log_out = open(config_dir() / "agent-bridge.log", "ab")
+    try:
+        log_err = open(config_dir() / "agent-bridge-err.log", "ab")
+    except OSError:
+        log_out.close()
+        raise
+    kwargs = {"stdout": log_out, "stderr": log_err, "stdin": subprocess.DEVNULL}
+    return kwargs, [log_out, log_err]
+
+
 def _cmd_deploy(args: argparse.Namespace) -> None:
     """Active/passive zero-downtime cutover.
 
@@ -2458,19 +2489,13 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     def spawn_passive(port: int):
         # Launch the *currently installed* code (this interpreter's venv) as a
         # passive instance with one hidden console root for its recurring SSH
-        # descendants. Redirect stdio to the daemon logs and break away from the
-        # deploy process's job so the promoted generation survives cutover.
+        # descendants. Redirect stdio to the daemon logs (see
+        # _passive_daemon_stdio_kwargs) and break away from the deploy
+        # process's job so the promoted generation survives cutover.
         cmd = [sys.executable, "-m", "agent_bridge", "start",
                "--port", str(port), "--passive"]
-        kwargs: dict = {}
-        opened_streams = []
+        kwargs, opened_streams = _passive_daemon_stdio_kwargs()
         if sys.platform == "win32":
-            log_out = open(config_dir() / "agent-bridge.log", "ab")
-            log_err = open(config_dir() / "agent-bridge-err.log", "ab")
-            opened_streams.extend((log_out, log_err))
-            kwargs["stdout"] = log_out
-            kwargs["stderr"] = log_err
-            kwargs["stdin"] = subprocess.DEVNULL
             kwargs["creationflags"] = _passive_daemon_creationflags()
         else:
             kwargs["start_new_session"] = True
