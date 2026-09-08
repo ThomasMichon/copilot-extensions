@@ -21,32 +21,32 @@ spawn.
 The ``current-version`` marker file and the per-version slot layout
 (``versions/<version>/{bin/python,Scripts/python.exe}``) are owned by
 ``scripts/versioned_runtime.py`` (a stdlib-only bootstrap helper kept out of
-every runtime venv, so it cannot be imported from here) -- this module reads
-the same on-disk convention directly instead of importing it.
+every runtime venv, so it cannot be imported from here) -- this module reuses
+:mod:`agent_dispatch.procutil`'s marker/slot readers (which already mirror
+that on-disk convention for resolving a sibling plugin's runtime) instead of
+re-implementing them a third time.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from .procutil import _read_marker, _slot_python
+
 CURRENT_VERSION_FILE = "current-version"
-# Mirrors versioned_runtime.SLOT_PYTHON_SUBPATHS -- POSIX then Windows layout.
-_SLOT_PYTHON_SUBPATHS = ("bin/python", "Scripts/python.exe")
 
 
 def read_current_version(root: Path) -> str | None:
     """The version published by the ``current-version`` marker, or ``None``.
 
     Missing file, empty content, or any read error is treated as "no marker"
-    (fail-safe: the caller stays on its running version).
+    (fail-safe: the caller stays on its running version). Thin wrapper over
+    :func:`agent_dispatch.procutil._read_marker` -- the slot-python resolver
+    (:func:`agent_dispatch.procutil.resolve_runtime_python`) already reads
+    this same marker convention; reusing it here keeps exactly one place that
+    knows the on-disk layout.
     """
-    try:
-        text = (root / CURRENT_VERSION_FILE).read_text(encoding="utf-8").strip()
-    except (OSError, ValueError):
-        # ValueError covers UnicodeDecodeError -- a torn/binary-corrupt marker
-        # write must fail safe exactly like a missing file, not raise.
-        return None
-    return text or None
+    return _read_marker(root, CURRENT_VERSION_FILE)
 
 
 def slot_python(root: Path, version: str) -> Path | None:
@@ -54,14 +54,10 @@ def slot_python(root: Path, version: str) -> Path | None:
 
     A present-but-incomplete install (e.g. an interrupted venv build) has no
     interpreter binary at this path yet, so this doubles as a lightweight
-    completeness check.
+    completeness check. Thin wrapper over
+    :func:`agent_dispatch.procutil._slot_python`.
     """
-    base = root / "versions" / version
-    for sub in _SLOT_PYTHON_SUBPATHS:
-        candidate = base / sub
-        if candidate.is_file():
-            return candidate
-    return None
+    return _slot_python(root, version)
 
 
 def stale_target(
