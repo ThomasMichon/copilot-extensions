@@ -4,14 +4,13 @@
 - **Repo:** copilot-extensions (primary) + aperture-labs (consumer-side audit)
 - **Branch(es):** `worktree/lambda-core-win-20260906-234309-1aa0`
 - **Created:** 2026-09-08
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** vision-closing on the `session-scoped-dynamic-guidance` pattern
   (`docs/patterns/session-scoped-dynamic-guidance.md`) and the harness-guidance
   intent it codifies: hookless-safe, budget-bounded, provenance-locked ambient
   guidance. This effort enforces a rule the pattern already implies but never
   mechanically checks.
-- **Umbrella issue:** TBD — file on `github/copilot-extensions` before Phase 1
-  starts executing (see Plan Phase 0).
+- **Umbrella issue:** ThomasMichon/copilot-extensions#2256
 - **Related work:** successor/sibling of the now-archived
   `custom-context-aggregator-retirement` (copilot-extensions, still **Active**
   with 2 remaining launch-path validation items — see correction note in the
@@ -67,7 +66,7 @@ instructions file" turned up a concrete counter-example:
   `AW_CONDUCT_RELATED` (cross-repo related-guidance resolution), and
   `AW_CONDUCT_HISTORY` (this worktree's effort binding / succession chain) —
   but the static prose rides along with them for no architectural reason; it
-  was migrated to the hook (per `dotfiles#1054`/`#1053`) specifically to keep
+  was migrated to the hook (per `dotfiles#1054`/`dotfiles#1053`) specifically to keep
   the *dynamic* additions fresh, and the static half came along by omission,
   not by design.
 - By contrast, `plugins/agent-worktrees/scripts/emit-command-catalog.{sh,ps1}`
@@ -120,9 +119,10 @@ was "the point of this effort, or so I thought":
   roster a given adopting repo happens to enable. Confirm the ~19-plugin list
   above and record the exact source (script vs. declared manifest) each hook
   resolves to.
-- [ ] File the umbrella GitHub issue on `github/copilot-extensions` (and link
-  it here) before starting Phase 1 execution, per this repo's own
-  `planning-efforts` tracking convention.
+- [x] File the umbrella GitHub issue on `ThomasMichon/copilot-extensions` (and
+  link it here) before starting Phase 1 execution, per this repo's own
+  `planning-efforts` tracking convention. **2026-09-08:** filed as
+  ThomasMichon/copilot-extensions#2256 (see Umbrella issue field above).
 - [ ] Land this effort README through copilot-extensions' own review/contribution
   gate before executing (see `contributing-to-copilot-extensions`), mirroring
   the "propose before you do" rule the decontamination effort's cross-repo work
@@ -305,4 +305,21 @@ initial sweep exist._
   and checked in.
 - Re-scoped Phase 2 to two high-priority migration targets plus one
   low-priority generator-dedupe cleanup, in that order.
+
+### 2026-09-08 — Reconciliation pass (coordination + status)
+
+- Filed the umbrella GitHub issue,
+  ThomasMichon/copilot-extensions#2256, closing the outstanding Phase 0 gap;
+  the effort README's Umbrella issue field and the `efforts/README.md` index
+  row now reference it in place of the prior `TBD` placeholder.
+- Fully qualified the cross-repo `dotfiles` reference in the Context section
+  (`dotfiles#1053` instead of a bare `#1053`, which would otherwise resolve to
+  this repo per the fully-qualify-other-repos convention).
+- Corrected **Status: Draft → Active** here and in the effort index: Phase 1's
+  full marketplace sweep already executed and its findings
+  (`sweep-findings.md`) are included in this PR, so `Draft` no longer
+  accurately described the effort's state. Updated the PR description to
+  match.
+- Rebased onto current `main` to reconcile; no plugin payload changed, so no
+  version-bump triplet applies.
 
