@@ -8747,7 +8747,7 @@ def _start_project_session_hook(
         else {
             "creationflags": getattr(
                 subprocess,
-                "CREATE_NEW_PROCESS_GROUP",
+                "CREATE_NEW_PROCESS_GROUP",  # headless-guard: allow bounded hook child in its own process group while stdout/stderr stay piped
                 0,  # headless-guard: allow: bounded hook process group plus the resident headless-child guard
             )
         }
