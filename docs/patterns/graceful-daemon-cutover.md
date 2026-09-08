@@ -245,7 +245,7 @@ passive daemon that is never promoted never satisfies it and arms nothing.
 | **agent-index** | (a) service shell; (b) indexing worker subprocesses; (c) warm embedding **engine** daemon | ✅ **Service cutover already installer-driven** — `install.ps1 update`'s `Invoke-ServiceCutover` already runs `agent_index deploy` (the zdd active/passive flip) unconditionally whenever a live, healthy service is running -- no flag, no opt-in; `plugin.json` declares `"zeroDowntimeUpdate": true` and `install.ps1` accepts (and ignores) a back-compat `-ZeroDowntime` switch. **Worker re-adoption** already works too (workers are detached, persist progress to `tasks.db`, and are re-adopted after a service restart). The **engine daemon is left untouched by a service update by design** | service: between task dispatches; worker: `run_reindex` checkpoints `path_index` per flush, `resume_since` skips stored files (the only non-resumable slice is the current unflushed batch) | Give the **engine daemon** an explicit *outlive + reconnect* story (it is the [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md) warm runtime): confirm it survives a service cutover and the new service reconnects to it; the installer version- + health-gates its own engine cutover |
 | **agent-dispatch** | coordinator (`serve`, FastAPI); supervisor (`supervise` spawn loop); spawned embodied/headless workers; detached `run` waiters | ✅ **Cutover already the default** — `install.ps1 update`/`install.sh update` already run `Invoke-CoordinatorCutover`/`_coordinator_cutover` unconditionally whenever a live, routed coordinator is running (Thread B; parity with agent-bridge's Invariant #1, no flag involved on either platform), falling back to stop-and-swap only for a pre-Thread-B coordinator or a failed cutover. `plugin.json` now also declares `"zeroDowntimeUpdate": true` and `install.ps1` accepts (and ignores) a back-compat `-ZeroDowntime` switch, so the reconcile-at-launch path's redundant flag-pass no longer needs a special case. The coordinator also has a live self-update loop (opt-in, `AGENT_DISPATCH_SELF_UPDATE=1`) that notices a newer `current-version` slot between launches and self-triggers the same cutover; a public `deploy` verb exists (parity with agent-bridge's) for the same cutover run by hand | coordinator: between task **claims** (drain = stop claiming, let a claimed-but-unstarted task settle to a resumable state in the queue DB); supervisor: between spawn reservations | **Repossess** the supervisor + spawned workers: let them **outlive** the coordinator swap and re-adopt via the durable SQLite queue DB + `running-version.json` (they already run detached). Add `stamp`/`provision` (Thread A) at the same time. Consider flipping `AGENT_DISPATCH_SELF_UPDATE`'s default to on once it has soaked, mirroring self-retire |
 | **agent-vault** | `agent_vault.service` (owns the in-memory unlocked KeePass master + credential cache; serves loopback/pipe/TCP) | ❌ **None** — update re-registers the task + starts; the unlocked master + cache **die on restart** | no in-flight secret request in flight (requests are short) | **Lightest tier** (connection-owner, dotfiles#1333): the "connection" is the *authenticated in-memory session*. Make **`install.ps1 update`/activation** adopt `zdd` routing (clients follow the new daemon) and perform the flip automatically, and define **reconnect** as re-establishing the auth state on the new daemon — either (a) hand off via the opt-in **encrypted persistent cache** (`credential-cache.enc` + wrapped key) so the new daemon warms without a re-prompt, or (b) accept a single re-unlock prompt on first post-cutover use. Drain = finish the in-flight request; never cut over mid-request |
-| **agent-mcp** | `serve` (resident warmth daemon: one-shot `call`/`materialize`/`list`, plus long-lived multiplexed `bridge`/`forward` attach sessions) | ⚠️ **Partial** — `zdd` vendored + adopted for a manually-triggered `agent-mcp cutover` (spawn passive → health-gate over a small control-plane TCP listener → flip the fixed data handle → drain → retire); not yet installer-driven (see Work) | one-shot ops: unaffected by drain, finish normally; attach sessions: drain refuses *new* attaches (the client's existing "live host refuses attach → direct in-process bridge" fallback already covers this) and lets already-attached sessions ride out to natural close before the old generation retires | Make `cutover` **installer-driven** once agent-mcp has an install/activation script of its own to wire it into (today it has none, unlike agent-bridge/agent-dispatch). Add the **generation self-retire** backstop (deferred in v1, matching the reference implementation's own optional status for it). See effort `agent-mcp-graceful-cutover` |
+| **agent-mcp** | `serve` (resident warmth daemon: one-shot `call`/`materialize`/`list`, plus long-lived multiplexed `bridge`/`forward` attach sessions) | ✅ **Cutover already the default on activation** — `zdd` vendored + adopted; `init.ps1`/`init.sh` (agent-mcp's installer, named `init` rather than `install`) now invoke `agent-mcp cutover --require-live --force --json` unconditionally on every activation, right before the existing stale-slot process reap. `--require-live` makes this safe with no opt-in: it never starts a resident daemon where none was running (`serve` stays optional, on-demand warmth) and no-ops when the live daemon is already on the target version; only a genuinely live, differently-versioned daemon actually cuts over. A public `cutover` verb also remains for a manual/operator-triggered run | one-shot ops: unaffected by drain, finish normally; attach sessions: drain refuses *new* attaches (the client's existing "live host refuses attach → direct in-process bridge" fallback already covers this) and lets already-attached sessions ride out to natural close before the old generation retires | Add the **generation self-retire** backstop (deferred in v1, matching the reference implementation's own optional status for it). If agent-mcp's installer is ever renamed `install.ps1`/`install.sh` to converge with the other plugins' naming convention, also set `"zeroDowntimeUpdate": true` (inert today since the launch-time reconciler only wires that flag onto a script named `install.ps1`). See effort `agent-mcp-graceful-cutover` |
 
 ### Classification note
 
@@ -333,22 +333,27 @@ Consequences of this equivalence:
 
 ## Rollout sequencing
 
-1. **agent-dispatch** — highest value, currently kill-and-restart. Vendor `zdd`,
-   make `install.ps1 update`/activation **auto-cutover in-process** (internal
-   `drain`/`undrain` seams over the FastAPI app — no operator `deploy` verb),
-   repossess the supervisor/workers via the queue DB, and add Thread-A
-   `stamp`/`provision`.
+1. **agent-dispatch** — ~~highest value, currently kill-and-restart~~ **done**:
+   vendored `zdd`, `install.ps1 update`/`install.sh update` auto-cutover
+   in-process unconditionally (no operator `deploy` verb required, though one
+   exists as an escape hatch), supervisor/workers already outlive the
+   coordinator swap via the queue DB. Thread-A `stamp`/`provision` remains
+   open.
 2. **agent-vault** — installer-driven routing flip + auth-state reconnect
    (persistent-cache hand-off or re-unlock). Add Thread-A `stamp`/`provision`.
 3. **agent-index engine daemon** — the outlive + reconnect gap (installer-driven
-   engine cutover / re-adoption guarantee).
-4. **agent-bridge** — fold cutover fully into the installer (retire the
-   `-ZeroDowntime` opt-in and demote/retire the `deploy` subcommand), and fold
-   any newly-shared shapes back into `zdd` (keep it the single source).
-5. **agent-mcp** — core mechanism landed (manually-triggered `agent-mcp
-   cutover`, effort `agent-mcp-graceful-cutover`); remaining work is making it
-   installer-driven once agent-mcp has its own install/activation script, and
-   the generation self-retire backstop.
+   engine cutover / re-adoption guarantee). The *service* cutover itself is
+   already installer-driven and unconditional (see the per-plugin table).
+4. **agent-bridge** — cutover is already unconditional in the installer
+   (invariant #1's automatic-activation half is done); only the `deploy`
+   subcommand's eventual demotion/retirement (the invariant's stricter
+   "no operator verb at all" half) and folding any newly-shared shapes back
+   into `zdd` remain.
+5. **agent-mcp** — **done**: core mechanism (`agent-mcp cutover`) plus
+   installer-driven activation (`init.ps1`/`init.sh` calling
+   `cutover --require-live` unconditionally, effort
+   `agent-mcp-graceful-cutover`); the generation self-retire backstop remains
+   open (Phase 3 of that effort).
 
 Each lands so the installer's own `update`/activation path performs the cutover
 automatically, is `check-install-contract`-clean, and — per the `install-contract`

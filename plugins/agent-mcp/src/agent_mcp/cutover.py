@@ -327,9 +327,22 @@ def _fixed_handle_has_live_listener(data_root: Path) -> bool:
 
 
 def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
-               force: bool = False) -> dict:
+               force: bool = False, require_live_daemon: bool = False) -> dict:
     """Drive one cutover of the resident ``serve`` daemon. Returns a result
-    dict; the CLI (`_cmd_cutover` in `__main__.py`) owns how it's printed."""
+    dict; the CLI (`_cmd_cutover` in `__main__.py`) owns how it's printed.
+
+    ``require_live_daemon=True`` is the installer-safe mode (Phase 2,
+    ``agent-mcp-graceful-cutover``): `serve` is optional, on-demand warmth,
+    never a registered service, so an installer/reconcile pass invoking
+    `cutover` unconditionally on every activation must NOT be the thing that
+    starts a resident daemon where none was running. With this set, a call
+    that would otherwise take the "cold start" path (no live daemon at all)
+    or would cut over a daemon that is already running this exact version
+    instead returns ``{"ok": True, "skipped": "<reason>"}`` without spawning
+    anything. A live daemon on a genuinely different (or pre-feature) version
+    still cuts over / reports its usual error exactly as before -- this flag
+    only suppresses the *unconditional* spawn-from-nothing and no-op-repeat
+    cases, never the bootstrap-boundary or mid-version-mismatch fixes."""
     from zdd import routing
     from zdd.cutover import CutoverOrchestrator
 
@@ -348,6 +361,13 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
     # daemon (whose token file just happens to be missing/gone).
     current = routing.read_active_endpoint(data_root)
     next_gen = (current.generation + 1) if current else 1
+
+    if require_live_daemon:
+        live = current is not None or _fixed_handle_has_live_listener(data_root)
+        if not live:
+            return {"ok": True, "skipped": "no live daemon to cut over"}
+        if current is not None and current.version == __version__:
+            return {"ok": True, "skipped": "already on this version"}
 
     if current is None and _fixed_handle_has_live_listener(data_root):
         # A genuinely pre-cutover-feature daemon never publishes to the
