@@ -610,6 +610,13 @@ class Server:
                 finally:
                     sweeper.cancel()
                     late_lease.cancel()
+                    # Await both after cancelling: under asyncio.run() an
+                    # unawaited cancelled task can log "Task was destroyed
+                    # but it is pending" and skip any cleanup inside the
+                    # coroutine (e.g. a late_lease retry mid-acquire). Errors
+                    # from cancellation itself are expected and swallowed.
+                    await asyncio.gather(sweeper, late_lease,
+                                        return_exceptions=True)
             finally:
                 self._server.close()
                 await self._server.wait_closed()

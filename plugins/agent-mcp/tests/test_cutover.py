@@ -672,3 +672,109 @@ def _reap_promoted(config_dir) -> None:
         os.kill(active.pid, 15)
     except OSError:
         pass
+
+
+# ── CLI guard: --passive requires an explicit --socket ─────────────────────
+
+
+def test_cmd_serve_refuses_passive_without_explicit_socket(monkeypatch):
+    """Regression test: `agent-mcp serve --passive` is an internal cutover
+    seam (spawn_passive_daemon() always passes an explicit generation-
+    specific --socket) and must never be usable without one. Falling back
+    to the fixed client-facing handle would, combined with --passive's
+    lease bypass, let it unlink/bind over a live daemon's handle -- an
+    avoidable outage. Must fail fast with a non-zero exit and never start
+    a server."""
+    from agent_mcp.__main__ import build_parser
+
+    started = []
+    monkeypatch.setattr(
+        "agent_mcp.serve.Server",
+        lambda *a, **k: started.append((a, k)) or None)
+
+    parser = build_parser()
+    args = parser.parse_args(["serve", "--passive"])
+    assert args.socket is None
+
+    exit_code = args.func(args)
+    assert exit_code != 0
+    assert started == [], "must never construct a Server at all"
+
+
+def test_cmd_serve_allows_passive_with_explicit_socket(tmp_path, monkeypatch):
+    """The positive case: --passive WITH an explicit --socket (exactly how
+    spawn_passive_daemon() always invokes it) must not be refused."""
+    from agent_mcp.__main__ import build_parser
+
+    constructed = []
+
+    class _FakeServer:
+        def __init__(self, *a, **k):
+            constructed.append((a, k))
+
+        async def serve_forever(self):
+            return None
+
+    monkeypatch.setattr("agent_mcp.serve.Server", _FakeServer)
+
+    parser = build_parser()
+    args = parser.parse_args(
+        ["serve", "--passive", "--socket", str(tmp_path / "serve-g2.sock")])
+
+    exit_code = args.func(args)
+    assert exit_code == 0
+    assert len(constructed) == 1
+
+
+# ── serve_forever() awaits its cancelled background tasks ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_serve_forever_awaits_cancelled_background_tasks(tmp_path):
+    """Regression test: sweeper/late_lease must be awaited after cancel, not
+    just cancelled and abandoned -- an unawaited cancelled task under
+    asyncio.run() can log "Task was destroyed but it is pending" and skip
+    any cleanup inside the coroutine. Verified indirectly: shutting the
+    server down cleanly must not leave either task un-done."""
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False)
+    task = asyncio.create_task(server.serve_forever())
+    for _ in range(50):
+        if server._server is not None:
+            break
+        await asyncio.sleep(0.02)
+    server._stop.set()
+    await asyncio.wait_for(task, timeout=5)
+    # serve_forever() returned cleanly -- if the background tasks were
+    # merely cancelled and never awaited, asyncio would have logged an
+    # "un-retrieved exception"/"destroyed but pending" warning that
+    # pytest-asyncio's default strict mode surfaces as a test failure here.
+
+
+# ── CutoverClient.shutdown() must not swallow a rejected reply ─────────────
+
+
+@pytest.mark.asyncio
+async def test_shutdown_raises_on_rejected_reply(tmp_path, monkeypatch):
+    """Regression test: shutdown() must raise ControlError when the old
+    daemon rejects the shutdown request (e.g. unauthorized/malformed reply)
+    instead of returning the reply as-is. zdd.cutover's own shutdown() call
+    site never inspects the return value at all -- silently returning an
+    {"ok": false, ...} dict there would let a rejected shutdown be reported
+    as "old daemon shutdown requested" (success) even though the old
+    generation never actually agreed to stop."""
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False,
+                    control_port=0, control_token="right-token")
+    await server._start_control_listener()
+    try:
+        port = server._control_server.sockets[0].getsockname()[1]
+        ctx = _cutover._CutoverContext(
+            data_root=tmp_path, new_socket_path=tmp_path / "x.sock",
+            new_log_path=tmp_path / "x.log", new_control_token="wrong-token",
+            old_control_token=None, token_by_port={port: "wrong-token"},
+        )
+        client = _cutover.CutoverClient(f"http://127.0.0.1:{port}", ctx)
+        with pytest.raises(_cutover.ControlError):
+            await asyncio.to_thread(client.shutdown)
+    finally:
+        await server._stop_control_listener()

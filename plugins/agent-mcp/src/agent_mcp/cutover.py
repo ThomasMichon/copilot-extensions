@@ -263,7 +263,21 @@ class CutoverClient:
 
         _serve.flip_data_handle(
             self._ctx.new_socket_path, legacy_path=ipc.default_socket_path())
-        return self._request({"op": "shutdown"})
+        resp = self._request({"op": "shutdown"})
+        if not resp.get("ok"):
+            # zdd.cutover treats a returned dict (any dict) from shutdown()
+            # as success -- it never inspects the reply's contents. A
+            # rejected shutdown (unauthorized/malformed) must not be
+            # silently read as "old daemon retired": the fixed handle was
+            # ALREADY flipped above (this is the true commit point), so
+            # zdd will report a committed cutover even though the old
+            # generation is still running. Raise instead, so the
+            # orchestrator records this as a post-commit error rather than
+            # a clean success.
+            raise ControlError(
+                f"shutdown request rejected by old daemon: "
+                f"{resp.get('error') or resp!r}")
+        return resp
 
     def adopt_relay(self) -> dict[str, Any]:
         # agent-mcp has no credential relay to hand off; no-op, matching the
@@ -390,7 +404,31 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
         make_client=lambda base_url: CutoverClient(base_url, ctx),
         pick_free_port=pick_free_port,
     )
-    res = orch.run(health_timeout=health_timeout, drain_timeout=drain_timeout, force=force)
+    try:
+        res = orch.run(health_timeout=health_timeout, drain_timeout=drain_timeout,
+                       force=force)
+    except ControlError as exc:
+        # CutoverClient.shutdown() raises this when the old daemon rejects
+        # the shutdown request (unauthorized/malformed reply). By this point
+        # the fixed handle has ALREADY been flipped to the new generation
+        # (shutdown() does that before sending the op -- the true commit
+        # point) and zdd has already set result.committed = True internally,
+        # so the new generation genuinely IS the live daemon now. What did
+        # NOT happen is confirmed retirement of the old one -- report that
+        # plainly instead of letting zdd's caller-ignores-the-return-value
+        # design silently read this as a clean success.
+        return {
+            "ok": False, "committed": True, "rolled_back": False,
+            "new_port": None, "old_port": None,
+            "data_socket": str(ctx.new_socket_path),
+            "error": f"cutover committed to the new generation, but the old "
+                     f"daemon's shutdown request was rejected -- it may "
+                     f"still be running and must be checked/stopped "
+                     f"manually: {exc}",
+            "steps": ["routing table flipped -> new active",
+                     f"old daemon shutdown REJECTED: {exc}"],
+            "drain": None,
+        }
     result = res.to_dict()
     if res.ok:
         result["data_socket"] = str(ctx.new_socket_path)

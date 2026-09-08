@@ -451,6 +451,20 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     from . import __version__, ipc
     from . import serve as _serve
+
+    if args.passive and not args.socket:
+        # --passive is an internal cutover seam, never a user-facing entry
+        # point. Without an explicit generation-specific --socket it would
+        # default to the SAME fixed client-facing handle a real active
+        # daemon binds -- and since --passive also skips the single-instance
+        # lease, it would unlink/bind over that live handle (a POSIX symlink
+        # or socket file) with nothing to stop it, causing an avoidable
+        # outage. Fail fast rather than let that happen silently.
+        print("agent-mcp serve: --passive requires an explicit --socket "
+              "(a generation-specific path) -- refusing to default to the "
+              "fixed client-facing handle", file=sys.stderr)
+        return 2
+
     socket_path = args.socket or str(ipc.default_socket_path())
     control_token = os.environ.get("AGENT_MCP_CONTROL_TOKEN") or None
     server = _serve.Server(
