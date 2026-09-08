@@ -18,7 +18,6 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-<<<<<<< HEAD
       "version": "0.4.0-dev447",
       "source": "plugins/agent-bridge"
     },
