@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .config import home_dir
 from .coredelegation import delegate
 
 #: Explicit endpoint override for a wired core (a ``"<transport>:<address>"`` spec).
@@ -68,7 +69,7 @@ def core_runtime_dir() -> Path:
     override = os.environ.get("AGENT_VAULT_CORE_RUN_DIR")
     if override:
         return Path(override)
-    return Path.home() / ".agent-vault" / "core"
+    return home_dir() / "core"
 
 
 def _core_timeout(requested: float | None) -> float:

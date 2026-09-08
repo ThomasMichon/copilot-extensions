@@ -11,6 +11,10 @@ from typing import Any
 
 IS_WINDOWS = platform.system() == "Windows"
 DEFAULT_TCP_PORT = 19999
+HOME_ENV = "AGENT_VAULT_HOME"
+INSTALLATION_ID_ENV = "AGENT_VAULT_INSTALLATION_ID"
+SYSTEMD_UNIT_ENV = "AGENT_VAULT_SYSTEMD_UNIT"
+TASK_NAME_ENV = "AGENT_VAULT_TASK_NAME"
 
 # Runtime endpoint paths. Each honors an environment override so a deployment can
 # run the daemon at custom paths (e.g. a branded service, or several named vaults
@@ -47,9 +51,22 @@ RUN_DIR_ENV = "AGENT_VAULT_RUN_DIR"
 ENDPOINT_ENV = "AGENT_VAULT_ENDPOINT"
 
 
+def home_dir() -> Path:
+    """Return the runtime root for the active vault installation."""
+    return Path(os.environ.get(HOME_ENV) or (Path.home() / ".agent-vault"))
+
+
+def installation_id() -> str | None:
+    value = os.environ.get(INSTALLATION_ID_ENV)
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
 def run_dir() -> Path:
     """Return the service runtime dir that holds the rendezvous (endpoint) file."""
-    return Path(os.environ.get(RUN_DIR_ENV) or (Path.home() / ".agent-vault" / "run"))
+    return Path(os.environ.get(RUN_DIR_ENV) or (home_dir() / "run"))
 
 
 CONFIG_ENV = "AGENT_VAULT_CONFIG"
@@ -303,10 +320,11 @@ def resolve_context(
         _validate_config_data(ext_data, "extension vault configuration")
         env_port = os.environ.get("AGENT_VAULT_PORT")
         if env_port is not None:
-            _validate_config_data(
-                {"port": env_port},
-                "AGENT_VAULT_PORT environment override",
-            )
+            if not (env_port.strip() == "0" and installation_id()):
+                _validate_config_data(
+                    {"port": env_port},
+                    "AGENT_VAULT_PORT environment override",
+                )
 
     vault_name, vault_source = _pick_vault_name(registry, repo_data, global_data, ext_data)
     named_base = registry.get(vault_name or "")

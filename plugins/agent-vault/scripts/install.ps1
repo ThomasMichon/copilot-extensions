@@ -247,13 +247,31 @@ $PkgSrcDir = Join-Path $PluginDir 'src\agent_vault'
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-vault'
 }
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-vault'))
+$serviceSuffix = if ([StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)) {
+    ''
+} else {
+    ([BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+        )
+    )).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+}
+$installationId = [string]$env:AGENT_VAULT_INSTALLATION_ID
+$RunDir = Join-Path $InstallDir 'run'
+$SocketPath = Join-Path $RunDir 'agent-vault.sock'
+$PipePath = if ($serviceSuffix) { "\\.\pipe\agent-vault-$serviceSuffix" } else { "\\.\pipe\agent-vault" }
+$PidFile = Join-Path $RunDir 'agent-vault-service.pid'
+$LogFile = Join-Path (Join-Path $InstallDir 'logs') 'agent-vault-service.log'
 $VenvDir     = Join-Path $InstallDir '.venv'
 $LocalBin    = Join-Path $env:USERPROFILE '.local\bin'
 $VenvPython  = Join-Path $VenvDir 'Scripts\python.exe'
 $BinstubPs1  = Join-Path $LocalBin 'agent-vault.ps1'
 $BinstubCmd  = Join-Path $LocalBin 'agent-vault.cmd'
 $Binstub     = $BinstubPs1
-$TaskName    = 'AgentVault'
+$TaskName    = if ($serviceSuffix) { "AgentVault-$serviceSuffix" } else { 'AgentVault' }
+$TaskLauncher = Join-Path $InstallDir 'service.ps1'
 $utf8NoBom   = New-Object System.Text.UTF8Encoding $false
 
 # === install-contract:v3 versioned-venv (agent-vault: .venv-as-junction) ===
@@ -856,9 +874,31 @@ function Register-AgentVaultTask {
     $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
     if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver; $taskPy = $AgentRtPy }
     if (-not ($taskPy -and (Test-Path -LiteralPath $taskPy))) { $taskPy = $LinkPython }
+    New-Item -ItemType Directory -Force -Path $RunDir, (Join-Path $InstallDir 'logs') | Out-Null
+    $portDirective = if ($installationId) {
+        "`$env:AGENT_VAULT_PORT = '0'"
+    } else {
+        "Remove-Item Env:AGENT_VAULT_PORT -ErrorAction SilentlyContinue"
+    }
+    [System.IO.File]::WriteAllText($TaskLauncher, @"
+`$env:PYTHONUTF8 = '1'
+`$env:AGENT_VAULT_HOME = '$($InstallDir -replace "'","''")'
+`$env:AGENT_VAULT_RUN_DIR = '$($RunDir -replace "'","''")'
+`$env:AGENT_VAULT_CORE_RUN_DIR = '$((Join-Path $InstallDir 'core') -replace "'","''")'
+`$env:AGENT_VAULT_CACHE_DIR = '$((Join-Path $InstallDir 'cache') -replace "'","''")'
+`$env:AGENT_VAULT_SOCKET = '$($SocketPath -replace "'","''")'
+`$env:AGENT_VAULT_PIPE = '$($PipePath -replace "'","''")'
+`$env:AGENT_VAULT_PID = '$($PidFile -replace "'","''")'
+`$env:AGENT_VAULT_LOG = '$($LogFile -replace "'","''")'
+`$env:AGENT_VAULT_TASK_NAME = '$($TaskName -replace "'","''")'
+`$env:AGENT_VAULT_INSTALLATION_ID = '$($installationId -replace "'","''")'
+$portDirective
+& '$($taskPy -replace "'","''")' -m agent_vault.service --foreground --persistent
+exit `$LASTEXITCODE
+"@, $utf8NoBom)
     $action = New-ScheduledTaskAction `
         -Execute 'conhost.exe' `
-        -Argument "--headless `"$taskPy`" -m agent_vault.service --foreground --persistent" `
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
         -WorkingDirectory $InstallDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $trigger.Delay = 'PT15S'

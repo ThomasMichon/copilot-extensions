@@ -171,28 +171,45 @@ def _discover_endpoint(
     exactly today's legacy dial (UDS->TCP / fixed port).
     """
     override = os.environ.get(config.ENDPOINT_ENV)
+    expected_installation = config.installation_id()
     if strict:
         if override is not None:
             endpoint = rendezvous.Endpoint.parse(override, source="env")
             rendezvous.validate_endpoint(endpoint)
             return endpoint
         endpoint = rendezvous.read_endpoint_strict(config.run_dir())
-        if endpoint is not None and not rendezvous.is_stale(
-            endpoint,
-            probe=rendezvous.connect_probe,
+        if (
+            endpoint is not None
+            and expected_installation
+            and endpoint.installation_id not in (None, expected_installation)
         ):
+            endpoint = None
+        if endpoint is not None and not rendezvous.is_stale(endpoint, probe=rendezvous.connect_probe):
             return endpoint
     else:
         try:
-            return rendezvous.resolve(
+            endpoint = rendezvous.resolve(
                 config.run_dir(),
                 override=override,
                 probe=rendezvous.connect_probe,
             )
+            if (
+                expected_installation
+                and endpoint.installation_id not in (None, expected_installation)
+            ):
+                return None
+            return endpoint
         except rendezvous.EndpointUnavailable:
             pass
     if IS_WSL:
-        return _read_windows_endpoint(strict=strict)
+        endpoint = _read_windows_endpoint(strict=strict)
+        if (
+            endpoint is not None
+            and expected_installation
+            and endpoint.installation_id not in (None, expected_installation)
+        ):
+            return None
+        return endpoint
     return None
 
 
@@ -310,15 +327,16 @@ def send_command(
 
 def _start_service_systemd() -> bool:
     """Start the vault service via systemd user unit if available."""
+    unit = os.environ.get(config.SYSTEMD_UNIT_ENV) or "agent-vault.service"
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "agent-vault.service"],
+            ["systemctl", "--user", "is-enabled", unit],
             capture_output=True, text=True, timeout=5,
         )
         if result.returncode != 0:
             return False
         subprocess.run(
-            ["systemctl", "--user", "start", "agent-vault.service"],
+            ["systemctl", "--user", "start", unit],
             capture_output=True, timeout=10,
         )
         for _ in range(20):
