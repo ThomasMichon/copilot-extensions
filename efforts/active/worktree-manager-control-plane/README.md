@@ -200,8 +200,22 @@ realized in `main`; unchecked items are the remaining delta.
       launch/reattach mechanics — while the launcher scripts and the
       restore/reattach *action* move. Reuses the #1478/#1491 remux design's
       safety invariants (refuse an existing live mux or ambiguous owner) under
-      the new ownership boundary. Reviewed, ordered plan:
+      the new ownership boundary. **Clean cutover, not indefinite dual-path:**
+      the migrated agent-worktrees implementation is canonical (no
+      reconciliation with Worktree Manager's earlier fledgling Picker-launch
+      prototype); absent Worktree Manager, `cmd_launch` falls back to a small,
+      new direct non-mux invocation, not a retained copy of the launcher
+      scripts. Reviewed, ordered plan:
       [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md).
+      - [x] Sub-slice 2a Step 1: copied `launch-session.{sh,ps1,cmd}` +
+            `pane-wrapper.{sh,ps1}` verbatim (hash-verified) into
+            `worktree-manager/bin/`; proved the existing `_copy_payload`
+            deployment mechanism ships them with zero packaging changes.
+      - [ ] Sub-slice 2a Step 2 (the actual cutover): repoint `cmd_launch`,
+            add the direct non-mux fallback, delete the old in-plugin scripts
+            — validated against the full Picker golden/screenshot suite.
+      - [ ] Sub-slice 2b: split `cmd_remux` (detection stays, relaunch action
+            moves).
 - [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
       assuming exactly one of them.
@@ -383,3 +397,31 @@ its issues; the public artifacts stay self-contained and general-purpose.
   that stays in agent-worktrees and a relaunch action that moves). Explicitly
   keeps `sessions.py`'s liveness reducers, `reclaim.py`, and `reclaim_one` in
   agent-worktrees as legitimate observation/generic-termination tooling.
+- **2026-09-05** — Operator directive: Mux gets a **clean, decisive cutover**
+  (one canonical implementation, no indefinitely-maintained pair), while
+  **AHP remains explicitly opt-in**; the migrated agent-worktrees
+  implementation is authoritative — Worktree Manager's own earlier, fledgling
+  Picker-launch prototype is retired scaffolding, not something to reconcile
+  with. Revised `phase-3b-mux-relocation.md` accordingly: reconciled "clean
+  cutover" against the already-published `installer` vision text ("muxing is
+  a capability this app provides ... run non-muxed when it is absent") —
+  the cutover deletes the old in-plugin launcher scripts in the same PR that
+  repoints `cmd_launch`, replacing them with a small, new **direct non-mux
+  fallback** rather than a retained duplicate launcher. Added the same
+  invariant explicitly to `phase-3b-ahp-relocation.md`'s design (AHP is never
+  auto-selected; the relocation must not introduce an implicit-selection
+  path). Landed Sub-slice 2a Step 1: copied `launch-session.{sh,ps1,cmd}` +
+  `pane-wrapper.{sh,ps1}` verbatim (hash-verified byte-identical) into
+  `worktree-manager/bin/`; proved with a new test
+  (`test_bin_directory_is_deployed_into_the_slot`) that the existing
+  `self_install._copy_payload` mechanism already deploys a payload-sibling
+  `bin/` directory with **zero packaging code changes**, since it
+  `shutil.copytree`s the whole payload dir and the bootstrap clones the whole
+  repo before `cd`-ing into `worktree-manager/`. Validated against the full
+  `test_picker_capture.py` golden/ANSI/SVG regression suite (21 targeted
+  tests, all passing) — the "visualizer-validator" regression gate the
+  operator called out. worktree-manager bumped to `0.1.0-dev33`. Noted (not
+  fixed, pre-existing, unrelated to this change): `tests/production_picker`'s
+  full suite hangs partway through `test_data_ssh_sources.py`/
+  `test_launch_trace.py`, likely a real-SSH-subprocess test with no mock/
+  timeout in this environment — a separate, pre-existing issue to file.
