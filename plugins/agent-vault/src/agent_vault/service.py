@@ -20,6 +20,7 @@ from .cache import get_cache
 from .config import (
     DEFAULT_TCP_PORT,
     ENDPOINT_ENV,
+    INSTALLATION_ID_ENV,
     IS_WINDOWS,
     LOG_FILE,
     PID_FILE,
@@ -1036,7 +1037,11 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     if advertised is not None:
         try:
             path = write_endpoint(
-                run_dir(), advertised[0], advertised[1], alt=advertised[2] or None
+                run_dir(),
+                advertised[0],
+                advertised[1],
+                installation_id=os.environ.get(INSTALLATION_ID_ENV),
+                alt=advertised[2] or None,
             )
             log.info("Advertised endpoint %s:%s at %s", advertised[0], advertised[1], path)
         except OSError as e:

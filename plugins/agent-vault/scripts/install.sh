@@ -174,12 +174,40 @@ while [[ $# -gt 0 ]]; do
 done
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-vault}"
+if [[ "$INSTALL_DIR" != /* ]]; then
+    INSTALL_DIR="$PWD/$INSTALL_DIR"
+fi
+LEGACY_INSTALL_DIR="$HOME/.agent-vault"
+legacy_cmp="$(printf '%s' "$LEGACY_INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
+install_cmp="$(printf '%s' "$INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
+if [[ "$install_cmp" == "$legacy_cmp" ]]; then
+    SERVICE_SUFFIX=""
+    SYSTEMD_UNIT="agent-vault.service"
+else
+    if command -v sha256sum >/dev/null 2>&1; then
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | sha256sum | awk '{print substr($1,1,12)}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+    else
+        SERVICE_SUFFIX="$(printf '%s' "$install_cmp" | cksum | awk '{print $1}')"
+    fi
+    SYSTEMD_UNIT="agent-vault-${SERVICE_SUFFIX}.service"
+fi
+INSTALLATION_ID="${AGENT_VAULT_INSTALLATION_ID:-}"
+RUN_DIR="$INSTALL_DIR/run"
+SOCKET_PATH="$RUN_DIR/agent-vault.sock"
+PIPE_PATH="\\\\.\\pipe\\agent-vault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"
+PID_FILE="$RUN_DIR/agent-vault-service.pid"
+LOG_FILE="$INSTALL_DIR/logs/agent-vault-service.log"
+PORT_ENV_LINE=""
+if [[ -n "$INSTALLATION_ID" ]]; then
+    PORT_ENV_LINE="Environment=AGENT_VAULT_PORT=0"
+fi
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-vault"
 ASKPASS="$LOCAL_BIN/vault-askpass"
-SYSTEMD_UNIT="agent-vault.service"
 UNIT_DIR="$HOME/.config/systemd/user"
 
 # === install-contract:v3 versioned-venv (agent-vault: .venv-as-symlink) ===
@@ -676,6 +704,18 @@ After=default.target
 [Service]
 Type=simple
 Environment=PYTHONUTF8=1
+Environment=AGENT_VAULT_HOME=$INSTALL_DIR
+Environment=AGENT_VAULT_RUN_DIR=$RUN_DIR
+Environment=AGENT_VAULT_CORE_RUN_DIR=$INSTALL_DIR/core
+Environment=AGENT_VAULT_CACHE_DIR=$INSTALL_DIR/cache
+Environment=AGENT_VAULT_SOCKET=$SOCKET_PATH
+Environment=AGENT_VAULT_PIPE=$PIPE_PATH
+Environment=AGENT_VAULT_PID=$PID_FILE
+Environment=AGENT_VAULT_LOG=$LOG_FILE
+Environment=AGENT_VAULT_SYSTEMD_UNIT=$SYSTEMD_UNIT
+Environment=AGENT_VAULT_TASK_NAME=AgentVault${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}
+Environment=AGENT_VAULT_INSTALLATION_ID=$INSTALLATION_ID
+$PORT_ENV_LINE
 ExecStart=$LINK_PYTHON -m agent_vault.service --foreground --persistent
 Restart=on-failure
 RestartSec=5

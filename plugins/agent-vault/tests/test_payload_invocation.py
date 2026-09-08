@@ -19,23 +19,61 @@ def test_payload_manifest_describes_agent_vault_runtime() -> None:
     )
     assert manifest == {
         "schema": "copilot-extensions.payload-invocation",
-        "version": 1,
+        "version": 2,
         "command": "agent-vault",
         "module": "agent_vault",
-        "runtimeRoot": ".agent-vault",
+        "legacyRuntimeRoot": ".agent-vault",
+        "installationContext": "required",
         "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
         "purpose": "Fetch and manage machine-local vault credentials",
         "installer": "install",
         "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
+        "payloadRootEnv": "AGENT_VAULT_PAYLOAD_ROOT",
+        "payloadDispatcher": {
+            "posix": "scripts/runtime-gate.sh",
+            "windows": "scripts/runtime-gate.ps1",
+        },
     }
 
     posix = (PLUGIN / "bin" / "agent-vault").read_text(encoding="utf-8")
     powershell = (PLUGIN / "bin" / "agent-vault.ps1").read_text(encoding="utf-8")
-    assert 'bash "$_installer" provision' in posix
+    assert "runtime-gate.sh" in posix
     assert "payload-dir" not in posix
-    assert "$_installer provision" in powershell
+    assert r"runtime-gate.ps1" in powershell
     assert "payload-dir" not in powershell
+
+
+def test_runtime_gates_scope_namespaced_service_environment() -> None:
+    posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "runtime-gate.ps1").read_text(encoding="utf-8")
+
+    for text in (posix, powershell):
+        assert "AGENT_VAULT_INSTALLATION_ID" in text
+        assert "AGENT_VAULT_RUN_DIR" in text
+        assert "AGENT_VAULT_CORE_RUN_DIR" in text
+        assert "AGENT_VAULT_CACHE_DIR" in text
+        assert "AGENT_VAULT_SOCKET" in text
+        assert "AGENT_VAULT_PIPE" in text
+        assert "AGENT_VAULT_PID" in text
+        assert "AGENT_VAULT_LOG" in text
+        assert "AGENT_VAULT_PORT" in text
+        assert "AGENT_VAULT_SYSTEMD_UNIT" in text
+        assert "AGENT_VAULT_TASK_NAME" in text
+
+
+def test_installers_scope_service_identity_by_install_root() -> None:
+    install_sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    install_ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert "SERVICE_SUFFIX" in install_sh
+    assert "agent-vault-${SERVICE_SUFFIX}.service" in install_sh
+    assert "AGENT_VAULT_INSTALLATION_ID" in install_sh
+    assert "AGENT_VAULT_PORT=0" in install_sh
+    assert "TaskLauncher" in install_ps1
+    assert "AgentVault-$serviceSuffix" in install_ps1
+    assert "AGENT_VAULT_INSTALLATION_ID" in install_ps1
+    assert "AGENT_VAULT_PORT = '0'" in install_ps1
 
 
 def test_session_catalog_producer_is_not_registered_as_a_hook() -> None:
