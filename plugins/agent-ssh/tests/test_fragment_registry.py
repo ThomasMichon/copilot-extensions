@@ -1176,7 +1176,7 @@ def test_verify_network_failure_does_not_reclassify_active_fragment(
     output = capsys.readouterr().out
     assert "host-a unreachable" in output
     assert "inactive managed SSH profile" not in output
-    assert calls and calls[0][-2:] == ["host-a", "true"]
+    assert calls and calls[0][-2:] == ["host-a", "exit 0"]
 
 
 def test_verify_fails_closed_on_unscoped_registry_uncertainty(

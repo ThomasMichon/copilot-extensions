@@ -98,7 +98,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                 "-o",
                 "StrictHostKeyChecking=accept-new",
                 name,
-                "true",
+                # A shell-agnostic no-op: "true" is a POSIX shell builtin that
+                # does not exist on a pwsh remote shell (the DefaultShell on
+                # every Windows/dtssh host in this mesh), so it made every such
+                # host register as a false-negative "unreachable" even though
+                # the SSH session itself authenticated and ran fine
+                # (copilot-extensions#2199). "exit 0" is valid, no-op syntax
+                # under both pwsh and POSIX shells (bash/sh).
+                "exit 0",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
