@@ -306,7 +306,9 @@ def test_sync_refuses_dangling_declaration_symlink(tmp_path: Path) -> None:
     assert result.changed == []
 
 
-def test_sync_refuses_partial_enabled_plugin_payload(tmp_path: Path) -> None:
+def test_sync_skips_partial_enabled_plugin_payload_when_not_participating(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     partial = tmp_path / "installed" / "market" / "policy"
@@ -315,6 +317,47 @@ def test_sync_refuses_partial_enabled_plugin_payload(tmp_path: Path) -> None:
 
     result = projections.sync_repository(repo, [source])
 
+    # This enabled plugin declares no instruction-projections.json and has
+    # never been locked, so an unreadable manifest is not a projection-stack
+    # problem -- it simply is not a participant.
+    assert result.blocking == 0
+    assert result.changed == []
+
+
+def test_sync_blocks_partial_enabled_plugin_payload_with_declaration(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    partial = tmp_path / "installed" / "market" / "policy"
+    partial.mkdir(parents=True)
+    (partial / "instruction-projections.json").write_text(
+        json.dumps(
+            {
+                "schema": projections.DECLARATION_SCHEMA,
+                "version": projections.DECLARATION_VERSION,
+                "projections": [
+                    {
+                        "id": "fallback",
+                        "template": "instructions/fallback.instructions.md",
+                        "destination": (
+                            ".github/instructions/policy/fallback.instructions.md"
+                        ),
+                        "customizationKind": "instructions",
+                        "applyTo": "**",
+                        "legacyMarkers": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = _source(partial, "market", "policy")
+
+    result = projections.sync_repository(repo, [source])
+
+    # A visible declaration means this plugin actively claims participation,
+    # so its unreadable manifest is still blocking even without a prior lock.
     assert any(
         finding.check == "projection-source-unavailable"
         and finding.severity == projections.BLOCKING
@@ -1172,7 +1215,9 @@ def test_cli_sync_blocks_malformed_committed_settings(
     assert payload["findings"][0]["check"] == "projection-settings"
 
 
-def test_sync_blocks_unavailable_enabled_plugin_payload(tmp_path: Path) -> None:
+def test_sync_skips_unavailable_enabled_plugin_payload_when_not_participating(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     missing = tmp_path / "installed" / "market" / "policy"
@@ -1180,12 +1225,36 @@ def test_sync_blocks_unavailable_enabled_plugin_payload(tmp_path: Path) -> None:
 
     result = projections.sync_repository(repo, [source])
 
+    # No declaration was ever visible for this plugin and it has never been
+    # locked, so its payload being entirely unresolvable is not itself a
+    # projection-stack problem.
+    assert result.blocking == 0
+    assert result.changed == []
+
+
+def test_scan_blocks_when_a_locked_plugin_payload_becomes_unavailable(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin, source = _write_plugin(tmp_path, "market", "policy")
+    synced = projections.sync_repository(repo, [source])
+    assert synced.blocking == 0
+    assert synced.changed == [".github/instructions/policy/fallback.instructions.md"]
+
+    # The plugin's payload has since vanished (e.g. uninstalled, or its
+    # source can no longer be resolved from this settings layer) while its
+    # projection is still locked in this repository -- that is a regression
+    # that must still block, unlike a never-locked, non-participating plugin.
+    vanished_source = _source(tmp_path / "gone" / "market" / "policy", "market", "policy")
+
+    result = projections.scan_repository(repo, [vanished_source])
+
     assert any(
         finding.check == "projection-source-unavailable"
         and finding.severity == projections.BLOCKING
         for finding in result.findings
     )
-    assert result.changed == []
 
 
 def test_self_host_source_supports_legacy_marketplace_manifest(
