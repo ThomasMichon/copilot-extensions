@@ -119,6 +119,24 @@ def test_wildcard_bind_maps_to_loopback(cfg_dir: Path):
     assert ep6.client_host == "::1"
 
 
+def test_base_url_brackets_ipv6_host():
+    """Regression test: an IPv6 client_host must be bracketed per RFC 3986
+    (``http://[::1]:1234``) -- unbracketed (``http://::1:1234``) is not a
+    valid URL and breaks urlparse/http clients on the host's own colons."""
+    ep6 = Endpoint(bind="::", port=9281)
+    assert ep6.base_url == "http://[::1]:9281"
+    ep4 = Endpoint(bind="127.0.0.1", port=9281)
+    assert ep4.base_url == "http://127.0.0.1:9281"
+
+
+def test_format_authority_brackets_ipv6_only():
+    assert routing.format_authority("::1", 1234) == "[::1]:1234"
+    assert routing.format_authority("127.0.0.1", 1234) == "127.0.0.1:1234"
+    assert routing.format_authority("example.com", 1234) == "example.com:1234"
+    # Already-bracketed input is passed through, not double-bracketed.
+    assert routing.format_authority("[::1]", 1234) == "[::1]:1234"
+
+
 # -- generation / flip / heal ------------------------------------------------
 
 

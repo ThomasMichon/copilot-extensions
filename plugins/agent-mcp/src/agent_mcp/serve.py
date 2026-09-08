@@ -605,9 +605,16 @@ class Server:
             port=self._control_port_request or 0)
         control_port = self._control_server.sockets[0].getsockname()[1]
         token_path = _control_token_path(self._config_dir(), os.getpid())
-        token_path.write_text(self._control_token, encoding="utf-8")
+        # Write via a temp file + os.replace() so a crash/interruption mid
+        # write can never leave a truncated/empty token file on disk -- the
+        # code and tests explicitly treat an empty token as "missing", and a
+        # torn write here would make a live, control-capable daemon look
+        # "pre-feature" to a subsequent `agent-mcp cutover`.
+        tmp_token_path = token_path.with_name(token_path.name + f".tmp{os.getpid()}")
+        tmp_token_path.write_text(self._control_token, encoding="utf-8")
         with contextlib.suppress(OSError):
-            os.chmod(token_path, 0o600)
+            os.chmod(tmp_token_path, 0o600)
+        os.replace(tmp_token_path, token_path)
         if not self._passive:
             try:
                 routing.publish_active(

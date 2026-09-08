@@ -144,6 +144,26 @@ async def test_non_passive_server_self_publishes_to_routing_table(tmp_path):
         await server._stop_control_listener()
 
 
+@pytest.mark.asyncio
+async def test_control_token_written_atomically_no_tmp_leftover(tmp_path):
+    """Regression test: the control-token sidecar must be written via a temp
+    file + os.replace(), never a direct Path.write_text(). A crash mid-write
+    with the non-atomic form could leave a truncated/empty token file on
+    disk -- and an empty token is explicitly treated as "missing" elsewhere
+    in this module, which would make a live, control-capable daemon look
+    "pre-feature" to a subsequent `agent-mcp cutover`. This asserts the
+    happy path leaves a full, valid token and no stray .tmp* file behind."""
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False,
+                    control_port=0)
+    await server._start_control_listener()
+    try:
+        token_path = _control_token_path(tmp_path, os.getpid())
+        assert token_path.read_text(encoding="utf-8") == server._control_token
+        assert not list(tmp_path.glob("*.tmp*"))
+    finally:
+        await server._stop_control_listener()
+
+
 # ── cleanup must never destroy a handle a flip already repointed ─────────
 
 

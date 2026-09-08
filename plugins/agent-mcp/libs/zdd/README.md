@@ -63,7 +63,7 @@ a hop watch the table and re-point at the live port.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 pytest
 ruff check .
 ```
