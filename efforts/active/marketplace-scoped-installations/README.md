@@ -1278,3 +1278,38 @@ See [`design.md`](design.md).
   `#1108` remains open only for the unlanded `agent-logger`, `agent-dispatch`,
   `agent-bridge`, and deferred `agent-worktrees` Worktree Manager supervision
   slices.
+
+### 2026-09-08 — Agent-logger service-boundary increment
+
+- Merged [#2253](https://github.com/ThomasMichon/copilot-extensions/pull/2253)
+  at `35740324db13e1deecd687591972f3461f75ad79`, landing the `agent-logger`
+  portion of `#1108`.
+- `agent-logger` now vendors the shared installation-context runtime support,
+  routes its full multi-command payload surface through installation-aware
+  runtime gates, and validates the selected cell before launch or first-use
+  provisioning. Helper entrypoints now carry explicit command metadata so
+  `collate-session`, `read-session-digest`, `prepare-session-log`,
+  `ramp-up-session`, and `session-sync` resolve the same cell-owned runtime as
+  `agent-logger`.
+- The same increment scopes the plugin's install and supervision boundaries by
+  the selected runtime root: scheduled sync now uses install-root-specific
+  Windows task and POSIX timer identities, scoped runtimes keep their state
+  under the selected root, and non-legacy installs no longer claim the
+  machine-global compatibility wrappers reserved for legacy fallback.
+- Validation:
+  direct changed-surface Windows tests passed
+  (`20 passed, 3 skipped`); shared payload-invocation generator tests passed
+  (`60 passed, 12 skipped`); focused WSL/POSIX payload coverage passed
+  (`19 passed, 4 skipped`); install-contract, version-consistency,
+  vendored-lib, installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, and changed-file ruff guards passed locally; and the
+  PR CI passed `guards + lint`, `agent-logger`, `Git hooks (Windows)`, both
+  test-runner jobs, and the out-of-plugin Worktree Manager lane.
+- Audit note:
+  the native Windows full `python tools/run-plugin-tests.py agent-logger` lane
+  still reproduces the pre-existing failures tracked by
+  [#2159](https://github.com/ThomasMichon/copilot-extensions/issues/2159)
+  (`chronicle`, `rescue-sync`, and contained `install-binstub` regressions), so
+  `#1108` remains open only for the unlanded `agent-dispatch`,
+  `agent-bridge`, and deferred `agent-worktrees` Worktree Manager supervision
+  slices.
