@@ -124,9 +124,9 @@ def spawn_worker(
 ) -> subprocess.CompletedProcess:
     """Spawn a worker agent via agent-bridge to claim + execute ``task_id``.
 
-    Runs ``agent-bridge [--json] create <agent> "<prompt>" [--no-wait]``. Raises
-    :class:`BridgeUnavailable` if the agent-bridge CLI is not on PATH; the caller
-    degrades by leaving the task queued.
+    Runs ``agent-bridge [--json] create <agent> "<prompt>" --caller <id>
+    [--no-wait]``. Raises :class:`BridgeUnavailable` if the agent-bridge CLI is
+    not on PATH; the caller degrades by leaving the task queued.
 
     ``prompt`` overrides the default worker seed (:func:`worker_prompt`). A caller
     embodying a task headlessly with richer semantics -- e.g. the supervisor's
@@ -141,6 +141,18 @@ def spawn_worker(
     of an orphaned reservation (see
     :func:`agent_dispatch.embody.parse_fleet_body_session` /
     :func:`agent_dispatch.embody.local_body_verdict`).
+
+    ``--caller`` (copilot-extensions#2202): without an explicit caller, `create`
+    derives one from the *current process's own* worktree context -- meaningless
+    for a long-running supervisor daemon that isn't itself running inside any
+    single worktree. That leaves ``caller_worktree`` unset on the spawned target,
+    so agent-worktrees' ``resolved_origin`` falls through to ``"user"`` (Picker-
+    visible, freely drivable) instead of ``"delegate"`` (Picker-hidden) -- every
+    autopilot worker this function spawns looked exactly like a worktree the
+    operator created themselves, inviting accidental manual takeover of a live,
+    task-owning worker. A stable, task-attempt-scoped synthetic identity here
+    (it need not resolve to a real worktree; the origin check is presence-only)
+    fixes that regardless of the daemon's own execution context.
     """
     exe = _agent_bridge_launch_prefix()
     if exe is None:
@@ -156,6 +168,7 @@ def spawn_worker(
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
     cmd += [agent, prompt]
+    cmd += ["--caller", f"agent-dispatch:{worker_id}"]
     if not wait:
         cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which

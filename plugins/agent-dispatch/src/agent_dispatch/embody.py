@@ -897,7 +897,16 @@ def spawn_fleet_headless_worker(
     # emit the created session_id as JSON, so the caller can record a recovery
     # handle (the pool host's agent-bridge session id) for liveness-gated
     # re-embody -- see parse_fleet_body_session / fleet_body_verdict.
-    remote_argv = ["agent-bridge", "--json", "create", agent, seed, "--no-wait"]
+    # `--caller owner` mirrors the primary LocalBridgeRemoteClient path above
+    # (copilot-extensions#2202): without it, the remote agent-bridge has no
+    # caller identity to stamp onto the spawned target, so the fleet body's
+    # worktree (if any) resolves to origin=user instead of delegate and shows
+    # up Picker-visible on the pool host, indistinguishable from a worktree a
+    # human started there.
+    remote_argv = [
+        "agent-bridge", "--json", "create", agent, seed, "--no-wait",
+        "--caller", owner,
+    ]
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
     # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.
