@@ -29,6 +29,8 @@ function Exit-SessionStart {
     exit 0
 }
 
+if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }
+
 $InstallDir = Join-Path $env:USERPROFILE '.agent-ssh'
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 

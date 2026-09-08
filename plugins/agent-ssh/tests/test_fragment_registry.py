@@ -1085,6 +1085,31 @@ def test_persistent_warning_recovery_is_fingerprint_based(tmp_path: Path) -> Non
     assert batch.emitted == ()
 
 
+def test_warning_state_file_uses_selected_runtime_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime_root = tmp_path / "cell-a" / "plugins" / "agent-ssh"
+    monkeypatch.delenv(fragment_registry.WARNING_STATE_ENV, raising=False)
+    monkeypatch.setenv("AGENT_SSH_HOME", str(runtime_root))
+
+    assert fragment_registry.warning_state_file() == (
+        runtime_root / "fragment-warning-state.json"
+    )
+
+
+def test_warning_state_file_ignores_relative_runtime_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.delenv(fragment_registry.WARNING_STATE_ENV, raising=False)
+    monkeypatch.setenv("AGENT_SSH_HOME", "relative-root")
+    monkeypatch.setattr(fragment_registry.Path, "home", lambda: home)
+
+    assert fragment_registry.warning_state_file() == (
+        home / ".agent-ssh" / "fragment-warning-state.json"
+    )
+
+
 def test_warning_state_lock_failure_falls_back_in_memory(tmp_path: Path) -> None:
     blocker = tmp_path / "not-a-directory"
     blocker.write_text("block parent creation", encoding="utf-8")

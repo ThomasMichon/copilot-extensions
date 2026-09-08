@@ -27,7 +27,13 @@ LEGACY_ENTRYPOINT_FILES = (
     "legacy-entrypoint-probe.sh",
     "legacy-entrypoint-probe.ps1",
 )
-ADOPTERS = ("agent-machines", "agent-index", "agent-mcp", "agent-worktrees")
+ADOPTERS = (
+    "agent-machines",
+    "agent-index",
+    "agent-mcp",
+    "agent-ssh",
+    "agent-worktrees",
+)
 LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
 
 

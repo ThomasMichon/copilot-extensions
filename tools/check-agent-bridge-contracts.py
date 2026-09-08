@@ -75,6 +75,8 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "remote_operations": "REMOTE_OPERATIONS_PROTOCOL_VERSION",
     "conditional_idle_end": "CONDITIONAL_IDLE_END_PROTOCOL_VERSION",
 }
+_FETCH_RECOVERY_ATTEMPTED = False
+_MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
 
 
 def _clean_git_environment() -> dict[str, str]:
@@ -164,13 +166,36 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _ensure_commit_available(commit: str) -> bool:
+    global _FETCH_RECOVERY_ATTEMPTED
+
+    if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
+        return True
+    if _FETCH_RECOVERY_ATTEMPTED:
+        return False
+    _FETCH_RECOVERY_ATTEMPTED = True
+    for fetch_args in (
+        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
+        ("fetch", "--quiet", "--unshallow", "origin"),
+        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
+    ):
+        _git(*fetch_args)
+        if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
+            return True
+    return False
+
+
 def _git_blob(commit: str, path: str) -> str | None:
+    if not _ensure_commit_available(commit):
+        return None
     result = _git("rev-parse", "--verify", f"{commit}:{path}")
     value = result.stdout.strip()
     return value if result.returncode == 0 and _GIT_OBJECT_RE.fullmatch(value) else None
 
 
 def _git_file_sha256(commit: str, path: str) -> str | None:
+    if not _ensure_commit_available(commit):
+        return None
     result = subprocess.run(
         ["git", "-C", str(REPO), "show", f"{commit}:{path}"],
         capture_output=True,
@@ -183,6 +208,8 @@ def _git_file_sha256(commit: str, path: str) -> str | None:
 
 
 def _plugin_version_at(commit: str) -> str | None:
+    if not _ensure_commit_available(commit):
+        return None
     result = _git("show", f"{commit}:plugins/agent-bridge/plugin.json")
     if result.returncode != 0:
         return None
@@ -195,6 +222,8 @@ def _plugin_version_at(commit: str) -> str | None:
 
 
 def _integer_constant_at(commit: str, path: str, name: str) -> int | None:
+    if not _ensure_commit_available(commit):
+        return None
     result = _git("show", f"{commit}:{path}")
     if result.returncode != 0:
         return None
