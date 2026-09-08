@@ -375,7 +375,8 @@ def _find_plugin_bridge(name: str) -> Path | None:
         return _single_plugin_bridge(name, live_unique)
 
     marketplace_matches: list[Path] = []
-    for root in _marketplace_roots():
+    marketplace_roots = _marketplace_roots()
+    for root in marketplace_roots:
         if not root.is_dir():
             continue
         for sub in ("agents", "mcp"):
@@ -385,7 +386,7 @@ def _find_plugin_bridge(name: str) -> Path | None:
                     sorted(root.glob(f"*/{sub}/{name}.mcp{ext}"))
                 )
     marketplace_unique = _unique_paths(marketplace_matches)
-    if marketplace_unique:
+    if marketplace_roots:
         return _single_plugin_bridge(name, marketplace_unique)
 
     matches: list[Path] = []
