@@ -129,31 +129,60 @@ was "the point of this effort, or so I thought":
   followed.
 
 ### Phase 1 — Sweep and classify every hook's emitted context
-- [ ] For each plugin from Phase 0, capture the hook's actual
+- [x] For each plugin from Phase 0, capture the hook's actual
   `additionalContext` output (or confirm `sessionStart.context: "none"`) across
   representative session states: fresh worktree, resumed worktree, no active
   effort, active effort bound, related-repo present/absent, hookless/App path.
-- [ ] Classify every distinct line/paragraph/field of each capture as
+  **2026-09-08:** completed for all 14 hook-registering plugins via three
+  parallel read-only sweeps; see
+  [sweep-findings.md](sweep-findings.md) for the full per-plugin breakdown.
+  (Representative-session-state variation, e.g. active-effort-bound vs. not,
+  was inferred from source tracing rather than literally re-run across live
+  sessions for every plugin — flagged as a residual gap, not blocking.)
+- [x] Classify every distinct line/paragraph/field of each capture as
   **STATIC** (byte-identical regardless of session/cwd/repo/state — a
   candidate for a checked-in instructions projection) or **DYNAMIC** (varies
   with session, cwd, repo, worktree, or install-layout state — a legitimate
   hook responsibility). Record the classification in a per-plugin table in a
   sibling sub-doc (`sweep-findings.md`) rather than inline here, per the
-  effort schema's decompose-liberally bias.
-- [ ] For any field that is dynamic **only** in the trivial "path differs per
+  effort schema's decompose-liberally bias. **Done, including a corrective
+  follow-up pass** — see [sweep-findings.md](sweep-findings.md) for the final
+  picture. Result: **2 confirmed high-severity violations**
+  (`agent-worktrees` conduct fragments — unconditional every session;
+  `agent-index` scope-binding usage essay — unconditional whenever the repo
+  is opted in), **1 low-severity shared finding** (a conditional
+  fallback-boilerplate duplication across all 11
+  `write_session_guidance.py`-using plugins, only rendering when a plugin has
+  no dynamic content to report), and **2 fully clean** (`budget-guidance`,
+  `ai-attribution`). The initial sweep pass overclaimed a flat "5 confirmed +
+  4 pending" split; a direct source-inspection follow-up corrected this to
+  the severity-ranked picture above — see the findings doc's Revision
+  history.
+- [x] For any field that is dynamic **only** in the trivial "path differs per
   machine" sense (like `emit-command-catalog`'s `argv[0]`), confirm it is
   already minimal (schema envelope + the one dynamic value) and needs no
-  further trimming — this is the reference-correct shape.
+  further trimming — this is the reference-correct shape. **Confirmed done:**
+  both the `emit-command-catalog` framing sentence and its per-command
+  `purpose` strings are correctly static-and-checked-in already (the latter
+  is baked into the generated, version-controlled script itself, not
+  recomputed per session) — no Phase 2 action needed for either.
 
 ### Phase 2 — Correct the found violations
-- [ ] For every hook found emitting non-trivial static prose (starting with
-  the confirmed `agent-worktrees` `worktree-conduct.md` / `account-conduct.md`
-  case): extract the static prose into a checked-in
-  `instructions/<topic>.instructions.md` projection (declared in that
-  plugin's `instruction-projections.json`, per the established pattern), and
-  trim the hook's `additionalContext` payload to the dynamic remainder plus
-  the minimal explanatory header/sub-text that frames it (e.g. a one-line
-  "Definition:" / "Related:" / "History:" label — not restated policy prose).
+- [ ] **High priority:** migrate `agent-worktrees`'s
+  `worktree-conduct.md`/`account-conduct.md` to a checked-in
+  `instructions/*.instructions.md` projection; trim the `session-conduct`
+  hook to emit only the dynamic definition/related/history remainder plus a
+  minimal explanatory header.
+- [ ] **High priority:** migrate `agent-index`'s `emit_scope_binding.py`
+  static usage-guidance essay to a checked-in, repo-opt-in-gated projection;
+  trim the hook's session-guidance-file write to the dynamic source-list
+  `rows` plus a minimal header.
+- [ ] **Low priority:** dedupe the shared `write_session_guidance.py`
+  generator template's conditional fallback/size-limit boilerplate (11
+  plugins) to one source location, since it is currently 11 near-identical
+  hand-copies rather than a genuine session-materialization violation
+  (it's conditional, not unconditional). Sequence after the two high-priority
+  items.
 - [ ] Verify no plugin regresses its budget, provenance lock, or
   `proven-output-free` classification as a result (rerun
   `scan-customizations.py --strict` and `manage-instruction-projections.py
@@ -242,3 +271,38 @@ initial sweep exist._
   archived aperture-labs effort's journal rather than reopening it, since the
   Phase 11 gate itself did not depend on the sibling effort's own remaining
   (unrelated) launch-path items.
+- Opened this effort as `copilot-extensions` PR #2236 (Draft-status plan) and
+  landed the aperture-labs correction as PR #6680 (merged).
+
+### 2026-09-08 — Phase 1 sweep executed, then corrected
+
+- Ran the full marketplace sweep across all 14 `sessionStart`-registering
+  plugins via three parallel read-only explore passes (4-5 plugins each),
+  plus the 2 already classified pre-effort (`agent-worktrees`,
+  `ai-attribution`).
+- Surfaced a methodological split worth keeping: **stdout output-freedom**
+  (what the existing `scan-customizations.py` `proven-output-free`
+  classification checks) is a different, weaker test than this effort's
+  **content-shape conformance** test. Every plugin passes test 1 (hook
+  stdout is always `{}`; real content, when present, is written to a
+  session-scoped guidance file instead) — but that alone doesn't prove test 2.
+- The initial sweep pass's raw verdicts ("5 confirmed + 4 pending, largely on
+  the strength of `write_session_guidance.py`'s fallback boilerplate")
+  turned out to be imprecise. A direct source-inspection follow-up found: (a)
+  that fallback boilerplate is shared identically across **all 11**
+  `write_session_guidance.py`-using plugins, not just the 4-7 originally
+  flagged, and (b) — the more important correction — it is **conditional**
+  (only renders when a plugin's own dynamic content is absent), which is a
+  materially weaker case than genuinely unconditional static prose.
+  Restructured [sweep-findings.md](sweep-findings.md) around severity:
+  **2 confirmed high-severity violations** (`agent-worktrees` conduct
+  fragments; `agent-index`'s `emit_scope_binding.py` usage essay — both
+  unconditional, every qualifying session), **1 low-severity shared finding**
+  (the 11-plugin conditional fallback duplication — real, but lower priority),
+  and **2 fully clean** (`budget-guidance`, `ai-attribution`). Also confirmed
+  both `emit-command-catalog` open questions (the framing sentence, the
+  per-command `purpose` strings) are non-issues — already correctly static
+  and checked in.
+- Re-scoped Phase 2 to two high-priority migration targets plus one
+  low-priority generator-dedupe cleanup, in that order.
+
