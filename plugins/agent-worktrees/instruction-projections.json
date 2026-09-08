@@ -9,6 +9,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "worktree-context-guide",
+      "template": "instructions/worktree-context-guide.instructions.md",
+      "destination": ".github/instructions/agent-worktrees/worktree-context-guide.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
