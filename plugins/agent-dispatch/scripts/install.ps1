@@ -1593,15 +1593,23 @@ try {
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
-    # -- Interactive-required host: the logon auto-start IS the service ----------
-    # On a box that requires an RDP/console logon before it is usable (and where
-    # Task Scheduler registration is admin-gated), an interactive logon always
-    # precedes dispatch, so the non-elevated HKCU logon auto-start is the
-    # first-class coordinator service -- no boot task, no elevation. See the
-    # interactive-service-mode design.
+    # -- Interactive-required host: prefer an Interactive-logon Scheduled Task --
+    # Same desktop access as the HKCU Run auto-start it replaces (an interactive
+    # logon always precedes dispatch on this class of host), PLUS Task
+    # Scheduler's own RestartCount/RestartInterval crash-restart policy, which
+    # HKCU Run cannot provide (copilot-extensions#2172). Degrade to the
+    # non-elevated logon auto-start only when elevation is unavailable (first
+    # install, non-elevated) -- see the interactive-service-mode design.
     if ((Get-ServiceMode) -eq 'interactive') {
         if ($Interactive) { Save-ServiceMode 'interactive' }
         Set-ServiceEnvLoopback
+        if ($haveSchedMod -and (Install-InteractiveScheduledTask -Name $TaskName -Launcher $launcher `
+                -Description 'agent-dispatch -- portable agent task-queue coordinator (interactive)' -NoStart:$NoStart)) {
+            if (Remove-CoordinatorAutostart) {
+                Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
+            }
+            return
+        }
         if ($haveSchedMod) {
             switch (Remove-CoordinatorTask) {
                 'removed' { Write-Step 'Removed prior boot Scheduled Task (interactive mode: logon auto-start owns startup)' }
@@ -1912,6 +1920,101 @@ function Remove-ProfileSupervisorTasks {
     } catch { }
 }
 
+function Install-InteractiveScheduledTask {
+    <#
+      Idempotent Interactive-logon-type Scheduled Task installer shared by the
+      coordinator and supervisor on an interactive-service-mode host. An
+      -AtLogOn task with LogonType Interactive/RunLevel Limited gets the SAME
+      desktop access as the historical HKCU Run auto-start it replaces (embody
+      CLI/mux sessions need an interactive station -- S4U's non-interactive
+      station, used by the headless boot-mode coordinator, cannot provide one),
+      but ALSO gets Task Scheduler's own RestartCount/RestartInterval
+      crash-restart policy, which HKCU Run cannot: closing the "who restarts
+      the watchdog after it dies mid-session" gap (copilot-extensions#2172).
+
+      Register-ONCE model, same as the boot-mode supervisor task below: a
+      non-elevated call that finds the task already registered (as an
+      Interactive-logon task -- a mismatched leftover, e.g. a stale S4U boot
+      task, is NOT treated as a match) must never re-register (Register -Force
+      needs elevation); it just cycles (stop/start) the task onto the freshly
+      activated launcher slot, which resolves the current version itself. First
+      registration needs ONE elevated run.
+
+      Returns $true when the task ends up registered+enabled (whether by this
+      call or a prior one); $false when elevation is unavailable (first
+      install, non-elevated) and the caller should fall back to its own
+      non-elevated logon auto-start path -- unchanged, degrade-gracefully
+      behavior for a host where elevation truly cannot be obtained. Also
+      returns $false (never throws) when the ScheduledTasks cmdlets themselves
+      are unavailable, so a caller that skips the `$haveSchedMod` guard still
+      degrades gracefully instead of crashing the install.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Launcher,
+        [Parameter(Mandatory)][string]$Description,
+        [string]$WorkingDirectory = $InstallDir,
+        [switch]$NoStart
+    )
+
+    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    $existingTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    $matchingType = $existingTask -and ($existingTask.Principal.LogonType -eq 'Interactive')
+    if ($matchingType -and (-not (Test-Elevated))) {
+        Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
+        if ($NoStart) {
+            # The caller explicitly asked not to (re)start anything right now
+            # (e.g. the coordinator's graceful-cutover path, where a NEW
+            # coordinator has already been brought up out-of-band and
+            # stopping/restarting this task would race or kill it) -- leave an
+            # already-running task's process completely untouched.
+            Write-Ok "$Description already registered (Scheduled Task '$Name'; left running as-is, -NoStart)"
+        } else {
+            # Start-ScheduledTask on an already-Running task is a no-op in Task
+            # Scheduler, so picking up a freshly activated launcher slot needs
+            # an explicit stop before the restart.
+            Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+            Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+            Write-Ok "$Description refreshed in place (Scheduled Task '$Name'; restarted onto the new build -- no re-register, no elevation)"
+        }
+        return $true
+    }
+
+    $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`"" `
+        -WorkingDirectory $WorkingDirectory
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $regOk = $false
+    try {
+        Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger `
+            -Settings $settings -Principal $principal -Force `
+            -Description $Description | Out-Null
+        $regOk = $?
+    } catch {
+        $regOk = $false
+    }
+    $ErrorActionPreference = $prevEAP
+    if (-not $regOk) {
+        return $false
+    }
+    Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
+    if (-not $NoStart) { Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue }
+    Write-Ok "$Description installed + started (Scheduled Task '$Name'; interactive logon, self-restarting)"
+    return $true
+}
+
 function Install-SupervisorLogonAutostart {
     # Interactive-mode supervisor: start it now (detached) and register an HKCU
     # Run key so it (re)starts at each interactive logon. An interactive logon
@@ -2179,21 +2282,37 @@ function Install-SupervisorTaskInstance {
     # unconditionally (no label opt-in); the direct loop stays label-gated.
     $mode = Get-SupervisorMode -EnvFile $EnvFile
 
-    # Interactive-required host: use the non-elevated logon auto-start (HKCU Run)
-    # instead of a Scheduled Task -- registration is admin-gated here, and an
-    # interactive station is the right fit for the supervisor anyway. Only when a
-    # label opt-in is configured (else stay inert, like the disabled-task case).
+    # Interactive-required host: prefer an Interactive-logon Scheduled Task (same
+    # desktop access as the HKCU Run auto-start it replaces, PLUS Task
+    # Scheduler's own crash-restart policy -- copilot-extensions#2172); degrade
+    # to the non-elevated logon auto-start only when elevation is unavailable.
+    # Only when a label opt-in is configured (else stay inert, like the
+    # disabled-task case).
     if ((Get-ServiceMode) -eq 'interactive') {
+        if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
+            if (Install-InteractiveScheduledTask -Name $Name -Launcher $Launcher `
+                    -Description 'agent-dispatch -- embody + companion supervisor (interactive)') {
+                if (Remove-SupervisorAutostart -Name $Name) {
+                    Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
+                }
+                return
+            }
+            # Elevation unavailable (first install, non-elevated): degrade to the
+            # non-elevated logon auto-start, exactly as before this task-based
+            # path existed.
+            switch (Remove-SupervisorTask -Name $Name) {
+                'removed' { Write-Step "Removed prior supervisor Scheduled Task '$Name' (interactive mode)" }
+                default   { }
+            }
+            Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher -EnvFile $EnvFile
+            return
+        }
         switch (Remove-SupervisorTask -Name $Name) {
             'removed' { Write-Step "Removed prior supervisor Scheduled Task '$Name' (interactive mode)" }
             default   { }
         }
-        if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
-            Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher -EnvFile $EnvFile
-        } else {
-            if (Remove-SupervisorAutostart -Name $Name) { Write-Step "Removed supervisor logon auto-start '$Name' (no opt-in label)" }
-            Write-Ok "$DisplayName INERT (no opt-in label). Set AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile + re-run update to enable."
-        }
+        if (Remove-SupervisorAutostart -Name $Name) { Write-Step "Removed supervisor logon auto-start '$Name' (no opt-in label)" }
+        Write-Ok "$DisplayName INERT (no opt-in label). Set AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile + re-run update to enable."
         return
     }
 
