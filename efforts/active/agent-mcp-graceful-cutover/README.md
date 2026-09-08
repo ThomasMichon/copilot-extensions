@@ -1,7 +1,7 @@
 # agent-mcp — Zero-Downtime Serve Cutover
 
 - **Slug:** `agent-mcp-graceful-cutover`
-- **Repo:** copilot-extensions (plugin home; direct-push `main`)
+- **Repo:** copilot-extensions
 - **Created:** 2026-09-07
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** closes [`visions/plugin-services`](../../../visions/plugin-services/README.md)

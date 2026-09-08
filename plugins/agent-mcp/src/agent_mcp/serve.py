@@ -53,6 +53,7 @@ from .ipc import (
     _connect,
     _endpoint_path,
     _read_endpoint,
+    aclose_writer,
     call_via_socket,
     default_socket_path,
     open_attached_session,
@@ -88,6 +89,7 @@ log = logging.getLogger("agent-mcp.serve")
 
 _SWEEP_INTERVAL = 30.0  # seconds between idle sweeps
 _DEFAULT_IDLE_TIMEOUT = 300.0  # evict a warm session unused this long
+_LATE_LEASE_RETRY_INTERVAL = 1.0  # seconds between promoted-passive lease retries
 
 # The serve IPC transport + client-attach primitives now live in agent_mcp.ipc
 # (stdlib-only) so the thin forwarder can import them without dragging in this
@@ -495,11 +497,14 @@ class Server:
         and must exit **before** binding the socket, so it never disturbs the live
         host's handle.
 
-        A ``--passive`` cutover instance skips this entirely: it binds its own
-        distinct ``socket_path`` (the caller's job -- e.g. a generation-suffixed
-        path), so it never contends with the active daemon's lease at all. What
-        makes it the daemon real clients reach is the routing flip the cutover
-        orchestrator performs after health-gating it, not lease ownership.
+        A ``--passive`` cutover instance skips this entirely at startup: it binds
+        its own distinct ``socket_path`` (the caller's job -- e.g. a generation-
+        suffixed path), so it never contends with the active daemon's lease while
+        it's still being health-gated. What makes it the daemon real clients reach
+        is the routing flip the cutover orchestrator performs, not lease
+        ownership. ``_late_lease_loop`` (started for passive daemons in
+        ``serve_forever``) retries acquiring this SAME lease in the background
+        once promoted, restoring the one-host-per-home invariant post-cutover.
         """
         if self._passive or not self._enable_lease:
             return True
@@ -519,6 +524,44 @@ class Server:
             with contextlib.suppress(Exception):
                 self._lease.release()
             self._lease = None
+
+    async def _late_lease_loop(self) -> None:
+        """Background retry: a promoted ``--passive`` daemon claims the
+        normal (un-suffixed) lease once the old generation actually retires.
+
+        ``_acquire_lease`` skips the lease entirely for a ``--passive``
+        daemon so it never contends with the still-live old generation while
+        health-gating is in progress. But if this generation is promoted
+        (the cutover commits), it keeps running indefinitely afterward with
+        NO lease held at all -- silently weakening the one-host-per-home
+        invariant ``forward._ensure_serve()`` depends on (a transient
+        connect failure + ``discard_stale_handle()`` could let a THIRD
+        ``serve`` spawn and bind the fixed handle while this one is still
+        serving, splitting attached sessions across two daemons).
+
+        Retries on a short interval (the old daemon's own shutdown after a
+        successful drain is typically sub-second) until it succeeds, then
+        stops -- from that point on this generation holds the lease exactly
+        like a plain daemon, and ``_release_lease`` at shutdown releases it
+        like normal. If this generation is instead rolled back (health check
+        failed, orchestrator kills it), the loop just dies with the process;
+        it never held anything to clean up.
+        """
+        if not self._passive or not self._enable_lease:
+            return
+        while not self._stop.is_set():
+            candidate = SingleInstance(
+                self.socket_path.parent, service=self._lease_service,
+                logger=log)
+            try:
+                candidate.acquire()
+            except AlreadyRunningError:
+                await asyncio.sleep(_LATE_LEASE_RETRY_INTERVAL)
+                continue
+            self._lease = candidate
+            log.info("serve: promoted passive daemon acquired the "
+                     "single-instance lease; one-host-per-home restored")
+            return
 
     async def serve_forever(self) -> None:
         # Take the single-instance lease before binding so a losing host never
@@ -561,10 +604,12 @@ class Server:
             try:
                 await self._start_control_listener()
                 sweeper = asyncio.create_task(self._sweep_loop())
+                late_lease = asyncio.create_task(self._late_lease_loop())
                 try:
                     await self._stop.wait()
                 finally:
                     sweeper.cancel()
+                    late_lease.cancel()
             finally:
                 self._server.close()
                 await self._server.wait_closed()
@@ -679,8 +724,7 @@ class Server:
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            with contextlib.suppress(Exception):
-                writer.close()
+            await aclose_writer(writer)
 
     def _control_dispatch(self, req: dict) -> dict:
         if req.get("token") != self._control_token:

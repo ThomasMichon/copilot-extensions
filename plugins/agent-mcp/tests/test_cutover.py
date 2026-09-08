@@ -12,6 +12,7 @@ handle now resolves to the new generation, and a plain data-plane client
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -183,6 +184,64 @@ async def test_non_passive_server_self_publishes_to_routing_table(tmp_path):
         assert active.version == "9.9.9"
     finally:
         await server._stop_control_listener()
+
+
+@pytest.mark.asyncio
+async def test_promoted_passive_daemon_acquires_lease_once_old_retires(tmp_path):
+    """Regression test: a --passive daemon skips the single-instance lease
+    entirely at startup (so it never contends with the still-live old
+    generation while being health-gated). But once promoted (the cutover
+    commits and the old generation retires), it must NOT keep running with
+    NO lease held forever -- that silently weakens the one-host-per-home
+    invariant forward._ensure_serve() depends on (a transient connect
+    failure + discard_stale_handle() could let a THIRD serve spawn and bind
+    the fixed handle while this one is still serving, splitting attached
+    sessions across two daemons). _late_lease_loop() must retry acquiring
+    the SAME (un-suffixed) lease in the background and succeed once the old
+    generation's lease is actually released."""
+    old = Server(str(tmp_path / "serve.sock"), enable_lease=True)
+    assert old._acquire_lease() is True  # simulates the still-live old daemon
+
+    promoted = Server(str(tmp_path / "serve-g2.sock"), enable_lease=True,
+                      passive=True)
+    assert promoted._acquire_lease() is True  # passive: skips the lease
+    assert promoted._lease is None
+
+    loop_task = asyncio.create_task(promoted._late_lease_loop())
+    try:
+        # Old generation still holds the lease -- the retry must not succeed.
+        await asyncio.sleep(0.2)
+        assert promoted._lease is None
+
+        # Old generation retires (the real trigger: CutoverClient.shutdown()
+        # calling old daemon's own _release_lease() via process exit).
+        old._release_lease()
+
+        # The promoted generation must now acquire it within a few retries.
+        for _ in range(50):
+            if promoted._lease is not None:
+                break
+            await asyncio.sleep(0.05)
+        assert promoted._lease is not None
+    finally:
+        loop_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loop_task
+        promoted._release_lease()
+
+
+@pytest.mark.asyncio
+async def test_late_lease_loop_is_noop_when_not_passive_or_lease_disabled(tmp_path):
+    """The loop must do nothing for a plain daemon (it already acquired the
+    lease normally in _acquire_lease) or when leasing is disabled entirely."""
+    plain = Server(str(tmp_path / "serve.sock"), enable_lease=True)
+    await plain._late_lease_loop()  # returns immediately; not --passive
+    assert plain._lease is None
+
+    disabled = Server(str(tmp_path / "serve2.sock"), enable_lease=False,
+                      passive=True)
+    await disabled._late_lease_loop()  # returns immediately; lease disabled
+    assert disabled._lease is None
 
 
 @pytest.mark.asyncio
