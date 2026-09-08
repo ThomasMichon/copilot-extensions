@@ -32,6 +32,7 @@ ADOPTERS = (
     "agent-containers",
     "agent-machines",
     "agent-index",
+    "agent-logger",
     "agent-mcp",
     "agent-ssh",
     "agent-worktrees",
