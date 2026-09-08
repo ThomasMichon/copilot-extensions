@@ -1,4 +1,4 @@
-"""Tests for `agent-bridge handoff` verb (session-or-worktree resolution).
+"""Tests for `agent-bridge handoff*` verbs.
 
 `handoff <target>` first tries an owned ACP session; on 404 it treats the
 target as a worktree handle and hands off that worktree's current session.
@@ -16,11 +16,15 @@ from agent_bridge.client import BridgeClientError
 
 
 class _FakeClient:
-    def __init__(self, *, session_handoff=None, worktree_handoff=None):
+    def __init__(
+        self, *, session_handoff=None, worktree_handoff=None, handoff_request=None
+    ):
         self._session_handoff = session_handoff
         self._worktree_handoff = worktree_handoff
+        self._handoff_request = handoff_request
         self.session_calls: list[tuple[str, str | None, bool]] = []
         self.worktree_calls: list[tuple[str, str | None, bool]] = []
+        self.request_calls: list[tuple[str, str, str, str | None]] = []
 
     def handoff_session(self, session_id, *, reason=None, seed=True):
         self.session_calls.append((session_id, reason, seed))
@@ -34,9 +38,36 @@ class _FakeClient:
             raise self._worktree_handoff
         return self._worktree_handoff
 
+    def handoff_request(
+        self, worktree_id, *, session_id, seed_text, handoff_token=None
+    ):
+        self.request_calls.append(
+            (worktree_id, session_id, seed_text, handoff_token)
+        )
+        if isinstance(self._handoff_request, Exception):
+            raise self._handoff_request
+        return self._handoff_request
+
 
 def _args(target, *, reason=None, no_seed=False):
     return argparse.Namespace(session_id=target, reason=reason, no_seed=no_seed)
+
+
+def _request_args(
+    *,
+    worktree_id="wt-1",
+    session_id="sess-1",
+    handoff_token="task:1",
+    seed="/consume-handoff task:1",
+    json=False,
+):
+    return argparse.Namespace(
+        worktree_id=worktree_id,
+        session_id=session_id,
+        handoff_token=handoff_token,
+        seed=seed,
+        json=json,
+    )
 
 
 def _patch_client(monkeypatch, client):
@@ -98,3 +129,44 @@ def test_worktree_not_found_reports_and_exits(monkeypatch, capsys):
         m._cmd_handoff(_args("ghost"))
     err = capsys.readouterr().err
     assert "neither a bridge-owned session nor a worktree" in err
+
+
+def test_handoff_request_json_round_trips(monkeypatch, capsys):
+    client = _FakeClient(
+        handoff_request={
+            "session_id": "succ-2",
+            "acp_session_id": "acp-succ-2",
+            "status": "idle",
+        }
+    )
+    _patch_client(monkeypatch, client)
+
+    m._cmd_handoff_request(_request_args(json=True))
+
+    assert client.request_calls == [
+        ("wt-1", "sess-1", "/consume-handoff task:1", "task:1")
+    ]
+    payload = m.json.loads(capsys.readouterr().out)
+    assert payload == {
+        "accepted": True,
+        "worktree_id": "wt-1",
+        "requested_session_id": "sess-1",
+        "handoff_token": "task:1",
+        "successor_session_id": "succ-2",
+        "successor_acp_session_id": "acp-succ-2",
+        "successor_status": "idle",
+    }
+
+
+def test_handoff_request_no_session_degrades_cleanly(monkeypatch, capsys):
+    client = _FakeClient(
+        handoff_request=BridgeClientError(
+            404, "No current session found for worktree wt-1 matching sess-1"
+        )
+    )
+    _patch_client(monkeypatch, client)
+
+    with pytest.raises(SystemExit):
+        m._cmd_handoff_request(_request_args())
+    err = capsys.readouterr().err
+    assert "No current session for worktree wt-1 matches sess-1" in err

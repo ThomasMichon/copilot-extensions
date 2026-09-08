@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
-from ..models import SessionInfo, SessionStatus
+from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
 from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
 
 log = logging.getLogger("agent-bridge")
@@ -892,6 +892,79 @@ async def handoff_worktree(
     except KeyError:
         raise HTTPException(
             status_code=404, detail=f"Session {session.session_id} not found"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return _session_info(successor)
+
+
+@router.post(
+    "/api/v1/worktrees/{worktree_id}/handoff-request",
+    response_model=SessionInfo,
+)
+async def handoff_worktree_request(
+    worktree_id: str,
+    handoff: WorktreeHandoffRequest,
+    request: Request,
+) -> SessionInfo:
+    """Perform an externally-seeded in-place handoff for a worktree session.
+
+    This is the control-plane seam used by ``context-handoff``'s best-effort
+    `agent-bridge handoff-request` ping from some OTHER extension-enabled
+    session. The caller already composed and stored the durable baton, so it
+    supplies the exact successor opening turn (``seed_text``) plus the session
+    it believes currently owns the worktree. The route resolves the worktree's
+    current bridge session, verifies it still matches the requested session id,
+    and then reuses ``SessionManager.handoff_session`` with the external seed
+    instead of asking the predecessor to author a new brief.
+
+    This route is additive only: agent-bridge's own ACP-hosted sessions do not
+    rely on it for proactive/usage-driven handoff. Those sessions remain fully
+    self-contained under ``SessionManager``'s internal context-pressure +
+    self-authored-brief flow, which does not depend on Copilot CLI extensions
+    being active in the hosted child.
+
+    Errors: 404 (no current session for the worktree / requested session no
+    longer matches it), 409 (single-checkout agent or mid-turn), 502 (successor
+    failed to spawn -- predecessor retained), 503 (draining).
+    """
+    from .sessions import _session_info
+
+    mgr = getattr(request.app.state, "session_manager", None)
+    session = _latest_session_for_worktree(mgr, worktree_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No session found for worktree {worktree_id}",
+        )
+    requested = mgr.get_session(handoff.session_id) if mgr is not None else None
+    if (
+        requested is None
+        or getattr(requested.target, "worktree_id", None) != worktree_id
+        or requested.session_id != session.session_id
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No current session found for worktree {worktree_id} "
+                f"matching {handoff.session_id}"
+            ),
+        )
+    try:
+        successor = await mgr.handoff_session(
+            session.session_id,
+            reason="context-handoff-request",
+            seed_text=handoff.seed_text,
+            handoff_token=handoff.handoff_token,
+        )
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session.session_id} not found",
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

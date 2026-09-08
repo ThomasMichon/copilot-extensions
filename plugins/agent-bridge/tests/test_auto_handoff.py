@@ -108,6 +108,32 @@ class TestProactiveHandoff:
     """The usage-driven trigger fires an in-place cutover when idle."""
 
     @pytest.mark.asyncio
+    async def test_fires_with_existing_self_authored_brief_path(
+        self, tmp_db, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
+    ) -> None:
+        mock_acp_client.send_prompt = AsyncMock(side_effect=[
+            {
+                "response_text": "## Objective\nShip it\n## Next steps\nGo",
+                "stop_reason": "end_turn",
+            },
+            {
+                "response_text": "seeded",
+                "stop_reason": "end_turn",
+            },
+        ])
+        sm = _sm(tmp_db, enabled=True)
+        pred = await sm.start_session(spawn_target, caller_id="wt-brief")
+        pred.subscriber_count = 0
+
+        _cross_critical(sm, pred)
+        await _drain_auto_tasks(sm)
+
+        prompts = [call.args[0] for call in mock_acp_client.send_prompt.await_args_list]
+        assert "Author a CONTINUATION BRIEF" in prompts[0]
+        assert "CONTINUATION BRIEF" in prompts[1]
+        assert pred.status == SessionStatus.STOPPED
+
+    @pytest.mark.asyncio
     async def test_fires_when_idle_and_unwatched(
         self, tmp_db, spawn_target, _patch_spawn, _patch_acp, mock_acp_client
     ) -> None:

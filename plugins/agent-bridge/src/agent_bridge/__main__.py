@@ -1,7 +1,7 @@
 """CLI entry point for agent-bridge.
 
 Server commands:  start, status, version
-Client commands:  agents, machines, sessions, session-usage, send, wait, stop, end, resume
+Client commands:  agents, machines, sessions, session-usage, send, wait, stop, end, resume, handoff-request
 Agent mode:       agent (run as ACP agent on stdio)
 """
 
@@ -4866,6 +4866,73 @@ def _cmd_handoff(args: argparse.Namespace) -> None:
     _report(result, "Worktree")
 
 
+def _cmd_handoff_request(args: argparse.Namespace) -> None:
+    """Request an externally-seeded in-place handoff for a worktree session.
+
+    This is the best-effort control-plane ping used by context-handoff after it
+    already stored the durable baton elsewhere from an extension-enabled
+    session outside the ACP-hosted child itself. The caller names both the
+    worktree and the ACP/bridge session it believes currently owns that
+    worktree; agent-bridge only acts when that session still matches the
+    worktree's current head.
+
+    Agent-bridge's own proactive ACP auto-handoff remains self-contained and
+    does not require this command; it still derives context pressure internally
+    and asks the retiring child to author its own continuation brief.
+    """
+    from .client import BridgeClientError
+
+    client = _get_client()
+    worktree_id = args.worktree_id
+    session_id = args.session_id
+    try:
+        successor = client.handoff_request(
+            worktree_id,
+            session_id=session_id,
+            seed_text=args.seed,
+            handoff_token=args.handoff_token,
+        )
+    except BridgeClientError as exc:
+        if exc.status == 404:
+            print(
+                f"[SKIP] No current session for worktree {worktree_id} matches "
+                f"{session_id}; agent-bridge left the worktree untouched.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if exc.status == 409:
+            print(
+                f"[FAIL] Cannot hand off worktree {worktree_id}: {exc.detail}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(
+            f"[FAIL] Could not request handoff for worktree {worktree_id}: "
+            f"{exc.detail}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    payload = {
+        "accepted": True,
+        "worktree_id": worktree_id,
+        "requested_session_id": session_id,
+        "handoff_token": args.handoff_token,
+        "successor_session_id": successor.get("session_id"),
+        "successor_acp_session_id": successor.get("acp_session_id"),
+        "successor_status": successor.get("status"),
+    }
+    if args.json:
+        _json_out(payload)
+        return
+    print(
+        f"[OK] agent-bridge accepted handoff request for worktree {worktree_id} "
+        f"session {session_id} -> successor "
+        f"{payload['successor_session_id'] or '(unknown)'} "
+        f"({payload['successor_status'] or 'unknown'})"
+    )
+
+
 def _cmd_session_usage(args: argparse.Namespace) -> None:
     """Show context window usage for a session."""
     client = _get_client()
@@ -5945,6 +6012,37 @@ def build_parser() -> argparse.ArgumentParser:
              "(the caller drives it instead)",
     )
     handoff_p.set_defaults(func=_cmd_handoff)
+
+    handoff_request_p = sub.add_parser(
+        "handoff-request",
+        help="Request an externally-seeded in-place handoff for a worktree",
+    )
+    handoff_request_p.add_argument(
+        "--worktree-id",
+        required=True,
+        help="Worktree handle whose current session should be handed off",
+    )
+    handoff_request_p.add_argument(
+        "--session-id",
+        required=True,
+        help="Current bridge or ACP session id expected to own the worktree",
+    )
+    handoff_request_p.add_argument(
+        "--handoff-token",
+        default=None,
+        help="Opaque handoff correlation token carried on the event/result",
+    )
+    handoff_request_p.add_argument(
+        "--seed",
+        required=True,
+        help="Exact opening-turn text to seed into the successor session",
+    )
+    handoff_request_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON.",
+    )
+    handoff_request_p.set_defaults(func=_cmd_handoff_request)
 
     usage_p = sub.add_parser(
         "session-usage", help="Show context window usage for a session"
