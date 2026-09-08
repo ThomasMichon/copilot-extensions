@@ -40,21 +40,26 @@ log = logging.getLogger("agent-codespaces")
 def _home() -> Path:
     """Root under which agent-codespaces state lives, with a sandbox override.
 
-    ``AGENT_CODESPACES_HOME`` (when set) selects this plugin's runtime root.
     ``AGENT_HOME`` remains the suite-wide sandbox override so isolated test
     deployments can relocate ``~/.agent-codespaces`` (leases, sockets, logs)
     without touching the real home (``gh``/``ssh``/git auth still resolve from
     the actual ``~/``). Read at import so a freshly-spawned
     ``agent-codespaces`` subprocess inside a sandbox picks it up.
     """
-    override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
-    if not override:
-        override = os.environ.get("AGENT_HOME", "").strip()
+    override = os.environ.get("AGENT_HOME", "").strip()
     return Path(override) if override else Path.home()
 
 
+def _runtime_dir() -> Path:
+    """The selected runtime root for this process."""
+    override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return _home() / ".agent-codespaces"
+
+
 # Canonical paths
-RUNTIME_DIR = _home() / ".agent-codespaces"
+RUNTIME_DIR = _runtime_dir()
 ADOPTED_REPOS_FILE = RUNTIME_DIR / "adopted-repos.yaml"
 SOCKET_DIR = RUNTIME_DIR / "sockets"
 LOG_FILE = RUNTIME_DIR / "agent-codespaces.log"

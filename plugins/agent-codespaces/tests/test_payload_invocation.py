@@ -47,6 +47,18 @@ def test_runtime_gates_keep_first_use_provisioning_lock() -> None:
     assert ".provision.lock" in powershell
 
 
+def test_runtime_dir_honors_agent_codespaces_home(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(
+        "AGENT_CODESPACES_HOME",
+        str(tmp_path / "cell" / "plugins" / "agent-codespaces"),
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "sandbox-home"))
+
+    from agent_codespaces import config
+
+    assert config._runtime_dir() == tmp_path / "cell" / "plugins" / "agent-codespaces"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")
 def test_posix_payload_command_ignores_shadow_path_and_selects_cell_runtime(
     tmp_path: Path,
