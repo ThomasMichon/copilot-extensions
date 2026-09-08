@@ -79,6 +79,10 @@ def test_passive_daemon_stdio_kwargs_closes_first_handle_if_second_open_fails(
         f = real_open(path, mode, *a, **kw)
         opened.append(f)
         if str(path).endswith("agent-bridge-err.log"):
+            # A real filesystem open() failure would raise before ever
+            # returning a handle; close this test double's own handle
+            # immediately so the simulation doesn't itself leak an fd.
+            f.close()
             raise OSError("permission denied (simulated)")
         return f
 
@@ -86,7 +90,8 @@ def test_passive_daemon_stdio_kwargs_closes_first_handle_if_second_open_fails(
     with pytest.raises(OSError, match="permission denied"):
         main._passive_daemon_stdio_kwargs()
 
-    # The first (stdout) handle must have been closed by the failure path,
-    # not left dangling.
+    # Both handles must be closed: the first by the production close-on-
+    # failure path, the second by this fake_open's own cleanup above.
     assert opened[0].closed
+    assert opened[1].closed
 
