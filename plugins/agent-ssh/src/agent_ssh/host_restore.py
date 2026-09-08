@@ -16,10 +16,20 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 
+def _selected_runtime_root() -> Path | None:
+    selected = os.environ.get("AGENT_SSH_HOME", "").strip()
+    if not selected:
+        return None
+    candidate = Path(selected).expanduser()
+    if not candidate.is_absolute():
+        return None
+    return candidate.resolve()
+
+
 def _runtime_root() -> Path:
-    selected = os.environ.get("AGENT_SSH_HOME")
-    if selected:
-        return Path(selected).expanduser().resolve()
+    selected = _selected_runtime_root()
+    if selected is not None:
+        return selected
     return (Path.home() / ".agent-ssh").resolve()
 
 
