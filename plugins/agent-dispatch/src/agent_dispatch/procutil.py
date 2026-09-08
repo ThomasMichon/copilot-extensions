@@ -78,7 +78,9 @@ def _read_marker(root: Path, name: str) -> str | None:
     """Read a plain-text marker file (``current-version`` / ``last-known-good``)."""
     try:
         return (root / name).read_text(encoding="utf-8").strip() or None
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError covers UnicodeDecodeError -- a torn/binary-corrupt marker
+        # write must fail safe (no marker) exactly like a missing file.
         return None
 
 
