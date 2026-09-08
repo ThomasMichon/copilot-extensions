@@ -1075,6 +1075,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                         worktree=str(spawn_task["spawn_worktree"]),
                         session_id=None,
                         detail="no spawn mechanism available",
+                        body_absent=True,
                     )
                 else:
                     c.fail_spawn(key, detail="no spawn mechanism available")
@@ -1089,6 +1090,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                             worktree=str(spawn_task["spawn_worktree"]),
                             session_id=handle.get("session"),
                             detail=detail,
+                            body_absent=False,
                         )
                     else:
                         c.fail_spawn(key, detail=detail)
@@ -1111,6 +1113,7 @@ def _release_failed_created_spawn(
     worktree: str,
     session_id: str | None,
     detail: str,
+    body_absent: bool,
 ) -> None:
     """Fence and synchronously conclude a one-shot spawn's created checkout."""
     from . import embody
@@ -1135,19 +1138,25 @@ def _release_failed_created_spawn(
         sort_keys=True,
         separators=(",", ":"),
     )
-    client.record_spawn_conclusion(
-        key,
-        conclusion_state=state,
-        conclusion_detail=conclusion_detail,
-    )
-    if state in {"pending", "held"}:
+    if not body_absent or state == "pending":
+        client.record_spawn_conclusion(
+            key,
+            conclusion_state=state,
+            conclusion_detail=conclusion_detail,
+        )
         return
     action = str(outcome.get("action") or "unknown")
     reason = str(outcome.get("reason") or "")
     suffix = f"attempt conclusion {action}"
     if reason:
         suffix += f" ({reason})"
-    client.fail_spawn(key, detail=f"{detail}; {suffix}")
+    client.retire_spawn(
+        key,
+        exact_absence=True,
+        detail=f"{detail}; {suffix}",
+        conclusion_state=state,
+        conclusion_detail=conclusion_detail,
+    )
 
 
 def _embody_handle(result) -> dict[str, str | None]:

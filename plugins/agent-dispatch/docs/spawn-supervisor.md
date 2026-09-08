@@ -71,10 +71,16 @@ that represent successive episodes for one logical resource.
   | `reserving` | this spawner owns the (task, attempt) spawn; embody not yet confirmed launched. A restart reconciles a pre-recorded worktree to `spawned`, `failed`, or held-unknown. |
   | `spawned`   | embody launched; the session/worktree handle is recorded.      |
   | `cold`      | the headless process is stopped while its resumable session, worktree, and task ownership remain bound. |
-  | `releasing` | the body is gone and its reservation-created worktree is being conservatively concluded; replacement remains fenced while cleanup is pending. |
-  | `settled`   | the reserved attempt reached a terminal outcome; no more spawning. Optional `conclusion_state` / structured `conclusion_detail` keep post-settlement disposable-worktree priming retryable and visible. |
-  | `failed`    | spawn failed or was lost; a fresh attempt may now be reserved.  |
+  | `releasing` | release is requested and exact body teardown or absence is not yet proven; replacement remains fenced. |
+  | `settled`   | the reserved attempt reached a terminal outcome or its body was released without a failed attempt. Optional `conclusion_state` / structured `conclusion_detail` keep worktree cleanup retryable and visible without retaining the active/exclusive-key fence. |
+  | `failed`    | spawn failed or was lost and exact body absence is proven; a fresh attempt may now be reserved. Cleanup may remain `pending` or `held` as explicit conclusion metadata. |
   | `rearmed`   | a failed attempt was retired by an audited operator rearm; preserved for history but excluded from the dead-letter count. |
+
+Operator rearm applies only to concluded failed history. If any failed
+reservation still has `conclusion_state=pending`, the entire rearm transaction
+is rejected: pending session/worktree cleanup remains durable and continues to
+fence that worktree until a claimed cleanup result reaches `complete` or
+`held`.
 
 - **Exactly-one invariant.** `reserve_spawn(task_id)` is a single
   `BEGIN IMMEDIATE` transaction: if any reservation for the task is **active**
@@ -90,6 +96,19 @@ that represent successive episodes for one logical resource.
   legitimate retry, but no two callers ever spawn the same attempt or exclusive
   resource.
 
+Retired reservations keep session and allocation cleanup as separate
+`conclusion_state`/`conclusion_detail` metadata. Positive body absence first
+retires the active reservation atomically; only then may the supervisor run the
+idempotent session end or worktree conclusion. A worktree cleanup retry takes an
+expiring tokenized claim before touching the recorded worktree. If any newer
+reservation has already inherited that worktree, the old cleanup becomes a
+visible held obligation and does not run, even after that successor settles. If
+the retry claims first, a concurrently reserved successor does not inherit that
+worktree. A supervisor crash leaves the claim pending; after its bounded lease
+expires another supervisor may safely reclaim it. Thus failed session-record
+retirement remains retryable without reasserting ownership of the body or its
+exclusive key.
+
 ### Where it lives
 
 The reservation table lives in the **coordinator's SQLite DB** — the coordinator
@@ -101,12 +120,18 @@ POST /spawn-reservations               {task_id, reserved_by} -> {reserved, rese
 POST /spawn-reservations/{key}/worktree {worktree, ownership, creating_host, driver}
 POST /spawn-reservations/{key}/spawned  {session_handle, worktree}
 POST /spawn-reservations/{key}/release  {detail, disposition}
+POST /spawn-reservations/{key}/retire   {exact_absence, detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/{key}/fail     {detail}
 POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/tasks/{task_id}/rearm {permitted, reason, min_failures}
 GET  /spawn-reservations                ?task_id&state&limit
 GET  /spawn-reservations/{key}
 ```
+
+`fail`, `settle`, and `defer` cannot move a `releasing` reservation. Only
+`retire` exits that state, and it requires an explicit exact-absence proof from
+the liveness/teardown owner. Public manual commands therefore cannot bypass an
+unresolved body or orphan pending cleanup.
 
 `DispatchClient` exposes each as a method. Events (`spawn.reserved`,
 `spawn.spawned`, `spawn.failed`, `spawn.settled`, `spawn.rearmed`) are published
@@ -818,9 +843,10 @@ live body. `--headless-agent AGENT` names the agent-bridge agent
 
 For local headless bodies, a settled ACP turn is an implicit suspension
 boundary. The supervisor publishes `IDLE`, suspends the task, and uses
-`agent-bridge stop` so the Copilot process releases capacity while the ACP
-session, task owner, worktree, and reservation remain durable. A later steer or
-Resume sends the next turn to that same session id and returns the cold
+`agent-bridge stop --reap-host` so both the Copilot process and its owned
+Session Host release capacity while the ACP session record, task owner,
+worktree, and reservation remain durable. A later steer or Resume sends the
+next turn to that same session id, starts a fresh child, and returns the cold
 reservation to `spawned`; it does not release the task for a new embodiment.
 Confirmed session loss still follows the ordinary liveness recovery path.
 

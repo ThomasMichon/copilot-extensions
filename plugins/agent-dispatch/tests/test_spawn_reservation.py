@@ -9,6 +9,7 @@ supervisor loop) can never double-spawn an autonomous worker.
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import sqlite3
 import threading
 import types
@@ -238,16 +239,78 @@ def test_exclusive_key_reuses_worktree_without_retired_session(q):
         worktree="wt-reviewer",
     )
     q.request_spawn_release(r1.key)
-    q.settle_spawn(r1.key)
+    q.retire_spawn(
+        r1.key,
+        exact_absence=True,
+        conclusion_state="complete",
+        conclusion_detail='{"action":"preserved","reason":"test-cleanup-complete"}',
+    )
 
     t2 = q.create("review new", exclusive_key="review:repo:42")
     r2, ok2 = q.reserve_spawn(t2.id)
 
     assert ok2 is True
     assert r2.worktree == "wt-reviewer"
+    assert r2.inherited_worktree == "wt-reviewer"
     assert r2.worktree_ownership == "reused"
     assert r2.session_handle is None
     assert r2.exclusive_key == "review:repo:42"
+    updated = q.record_spawn_worktree(
+        r2.key,
+        "wt-replacement",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    assert updated.worktree == "wt-replacement"
+    assert updated.inherited_worktree == "wt-reviewer"
+
+
+def test_migration_backfills_reused_worktree_lineage(q):
+    task = q.create("review", exclusive_key="review:repo:42")
+    reservation, _ = q.reserve_spawn(task.id)
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET worktree = ?, "
+            "worktree_ownership = 'reused', inherited_worktree = NULL "
+            "WHERE key = ?",
+            ("wt-inherited", reservation.key),
+        )
+
+    q._migrate()
+
+    migrated = q.get_reservation(reservation.key)
+    assert migrated.inherited_worktree == "wt-inherited"
+
+
+def test_legacy_spawn_schema_adds_ownership_before_lineage_backfill(tmp_path):
+    db = tmp_path / "legacy.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE spawn_reservations ("
+            "key TEXT PRIMARY KEY, task_id TEXT NOT NULL, "
+            "attempt INTEGER NOT NULL, state TEXT NOT NULL, "
+            "reserved_by TEXT, session_handle TEXT, worktree TEXT, "
+            "detail TEXT, reserved_at REAL NOT NULL, updated_at REAL NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO spawn_reservations "
+            "(key, task_id, attempt, state, worktree, reserved_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("dispatch-task:legacy:1", "legacy", 1, "failed", "wt-legacy", 1, 1),
+        )
+
+    migrated = TaskQueue(db)
+
+    with migrated._connect() as conn:
+        columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(spawn_reservations)"
+            ).fetchall()
+        }
+    assert {"worktree_ownership", "inherited_worktree"} <= columns
+    assert migrated.get_reservation("dispatch-task:legacy:1") is not None
 
 
 def test_retired_session_is_not_recarried_from_legacy_failed_attempt(q):
@@ -259,7 +322,12 @@ def test_retired_session_is_not_recarried_from_legacy_failed_attempt(q):
         worktree="wt-reviewer",
     )
     q.request_spawn_release(retired.key)
-    q.settle_spawn(retired.key)
+    q.retire_spawn(
+        retired.key,
+        exact_absence=True,
+        conclusion_state="complete",
+        conclusion_detail='{"action":"preserved","reason":"test-cleanup-complete"}',
+    )
 
     legacy, _ = q.reserve_spawn(task.id)
     with q._connect() as conn:
@@ -352,8 +420,33 @@ def test_yield_requests_release_without_settling_live_reservation(q):
     updated = q.get_reservation(reservation.key)
 
     assert yielded.status == "queued"
-    assert updated.state == SpawnState.SPAWNED
+    assert updated.state == SpawnState.RELEASING
     assert updated.release_requested is True
+    assert updated.release_disposition == "settled"
+    assert updated.conclusion_state == "pending"
+
+
+def test_equivalent_release_paths_enter_releasing_state(q):
+    yielded = q.create("yielded")
+    yielded_reservation, _ = q.reserve_spawn(yielded.id)
+    q.record_spawn(yielded_reservation.key, session_handle="session-yielded")
+    q.claim_one("worker-yielded", task_id=yielded.id)
+    q.start(yielded.id, "worker-yielded")
+    q.yield_task(yielded.id, "worker-yielded")
+
+    explicit = q.create("explicit")
+    explicit_reservation, _ = q.reserve_spawn(explicit.id)
+    q.record_spawn(explicit_reservation.key, session_handle="session-explicit")
+    q.request_spawn_release(
+        explicit_reservation.key,
+        disposition="settled",
+    )
+
+    released = q.get_reservation(yielded_reservation.key)
+    requested = q.get_reservation(explicit_reservation.key)
+    assert released.state == requested.state == SpawnState.RELEASING
+    assert released.release_disposition == requested.release_disposition == "settled"
+    assert released.conclusion_state == requested.conclusion_state == "pending"
 
 
 def test_failed_created_spawn_stays_fenced_until_cleanup(q):
@@ -463,6 +556,294 @@ def test_repeated_release_preserves_held_conclusion_and_upgrades_failure(q):
     assert upgraded.conclusion_detail == repeated.conclusion_detail
 
 
+@pytest.mark.parametrize("transition", ["fail", "settle", "defer"])
+def test_release_pending_reservation_rejects_direct_terminal_transition(
+    q, transition
+):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(reservation.key, session_handle="session-live")
+    q.request_spawn_release(reservation.key, disposition="failed")
+
+    with pytest.raises(TaskError):
+        getattr(q, f"{transition}_spawn")(reservation.key)
+
+    current = q.get_reservation(reservation.key)
+    assert current.state == SpawnState.RELEASING
+    assert current.conclusion_state == "pending"
+
+
+def test_retire_requires_exact_absence_and_uses_release_disposition(q):
+    failed_task = q.create("failed")
+    failed, _ = q.reserve_spawn(failed_task.id)
+    q.request_spawn_release(failed.key, disposition="failed")
+    with pytest.raises(TaskError, match="exact absence proof"):
+        q.retire_spawn(failed.key, exact_absence=False)
+    retired_failed = q.retire_spawn(failed.key, exact_absence=True)
+    assert retired_failed.state == SpawnState.FAILED
+
+    settled_task = q.create("settled")
+    settled, _ = q.reserve_spawn(settled_task.id)
+    q.request_spawn_release(settled.key, disposition="settled")
+    retired_settled = q.retire_spawn(settled.key, exact_absence=True)
+    assert retired_settled.state == SpawnState.SETTLED
+
+
+def test_claimed_cleanup_prevents_successor_worktree_reuse(q):
+    old = q.create("old", exclusive_key="stable:resource")
+    old_reservation, _ = q.reserve_spawn(old.id)
+    q.record_spawn_worktree(
+        old_reservation.key,
+        "wt-shared",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        old_reservation.key,
+        disposition="failed",
+    )
+    q.retire_spawn(
+        old_reservation.key,
+        exact_absence=True,
+        conclusion_state="pending",
+        conclusion_detail='{"action":"failed","reason":"lifecycle-lock-busy"}',
+    )
+
+    claimed, acquired, claim_token = q.claim_spawn_conclusion_retry(
+        old_reservation.key
+    )
+
+    assert acquired is True
+    assert claim_token
+    assert claimed.conclusion_state == "pending"
+    assert json.loads(claimed.conclusion_detail or "{}")["reason"] == (
+        "cleanup-retry-claimed"
+    )
+    successor = q.create("successor", exclusive_key="stable:resource")
+    successor_reservation, reserved = q.reserve_spawn(successor.id)
+    assert reserved is True
+    assert successor_reservation.worktree is None
+    assert successor_reservation.session_handle is None
+    with pytest.raises(TaskError, match="in-flight cleanup"):
+        q.record_spawn_worktree(
+            successor_reservation.key,
+            "wt-shared",
+            ownership="targeted",
+        )
+    with pytest.raises(TaskError, match="cleanup claim expired"):
+        q.record_spawn_conclusion(
+            old_reservation.key,
+            conclusion_state="complete",
+            conclusion_detail='{"action":"removed"}',
+            claim_token=claim_token,
+            now=(claimed.cleanup_claim_expires_at or 0) + 1,
+        )
+
+
+def test_tokenless_pending_cleanup_prevents_worktree_reuse(q):
+    old = q.create("old", exclusive_key="stable:resource")
+    old_reservation, _ = q.reserve_spawn(old.id)
+    q.record_spawn_worktree(
+        old_reservation.key,
+        "wt-shared",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(old_reservation.key, disposition="failed")
+    pending = q.retire_spawn(
+        old_reservation.key,
+        exact_absence=True,
+        conclusion_state="pending",
+        conclusion_detail='{"action":"failed","reason":"not-yet-claimed"}',
+    )
+    assert pending.cleanup_claim_token is None
+
+    successor = q.create("successor", exclusive_key="stable:resource")
+    successor_reservation, reserved = q.reserve_spawn(successor.id)
+
+    assert reserved is True
+    assert successor_reservation.worktree is None
+    assert successor_reservation.inherited_worktree is None
+    with pytest.raises(TaskError, match="in-flight cleanup"):
+        q.record_spawn_worktree(
+            successor_reservation.key,
+            "wt-shared",
+            ownership="targeted",
+        )
+
+
+def test_cleanup_claim_expires_and_is_reclaimable(q):
+    task = q.create("cleanup")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-cleanup",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(reservation.key, disposition="failed")
+    q.retire_spawn(
+        reservation.key,
+        exact_absence=True,
+        conclusion_state="pending",
+        conclusion_detail='{"action":"failed","reason":"lifecycle-lock-busy"}',
+    )
+    with pytest.raises(TaskError, match="cleanup claim token is required"):
+        q.record_spawn_conclusion(
+            reservation.key,
+            conclusion_state="complete",
+            conclusion_detail='{"action":"removed"}',
+            now=99,
+        )
+
+    first, claimed, first_token = q.claim_spawn_conclusion_retry(
+        reservation.key,
+        claim_seconds=10,
+        now=100,
+    )
+    assert claimed is True
+    assert first_token
+    assert first.conclusion_state == "pending"
+
+    still_claimed, claimed, token = q.claim_spawn_conclusion_retry(
+        reservation.key,
+        claim_seconds=10,
+        now=105,
+    )
+    assert claimed is False
+    assert token is None
+    assert still_claimed.conclusion_state == "pending"
+    with pytest.raises(TaskError, match="claim token is required"):
+        q.record_spawn_conclusion(
+            reservation.key,
+            conclusion_state="pending",
+            conclusion_detail='{"action":"pending","reason":"session-end"}',
+            now=106,
+        )
+    unchanged = q.get_reservation(reservation.key)
+    assert json.loads(unchanged.conclusion_detail or "{}")["claim_token"] == (
+        first_token
+    )
+    with pytest.raises(TaskError, match="claim token is required"):
+        q.record_spawn_conclusion(
+            reservation.key,
+            conclusion_state="pending",
+            conclusion_detail='{"action":"pending","reason":"session-end"}',
+            now=111,
+        )
+
+    reclaimed, claimed, second_token = q.claim_spawn_conclusion_retry(
+        reservation.key,
+        claim_seconds=10,
+        now=111,
+    )
+    assert claimed is True
+    assert second_token and second_token != first_token
+    assert reclaimed.conclusion_state == "pending"
+
+    with pytest.raises(TaskError, match="cleanup claim changed"):
+        q.record_spawn_conclusion(
+            reservation.key,
+            conclusion_state="complete",
+            conclusion_detail='{"action":"removed"}',
+            claim_token=first_token,
+            now=112,
+        )
+    completed = q.record_spawn_conclusion(
+        reservation.key,
+        conclusion_state="complete",
+        conclusion_detail='{"action":"removed"}',
+        claim_token=second_token,
+        now=112,
+    )
+    assert completed.conclusion_state == "complete"
+
+
+def test_expired_claim_still_fences_reuse_and_rejects_old_result(q):
+    old = q.create("old", exclusive_key="stable:resource")
+    old_reservation, _ = q.reserve_spawn(old.id)
+    q.record_spawn_worktree(
+        old_reservation.key,
+        "wt-shared",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(old_reservation.key, disposition="failed")
+    q.retire_spawn(
+        old_reservation.key,
+        exact_absence=True,
+        conclusion_state="pending",
+        conclusion_detail='{"action":"failed","reason":"lifecycle-lock-busy"}',
+    )
+    claimed, acquired, old_token = q.claim_spawn_conclusion_retry(
+        old_reservation.key,
+        claim_seconds=10,
+        now=100,
+    )
+    assert acquired is True
+
+    successor = q.create("successor", exclusive_key="stable:resource")
+    successor_reservation, reserved = q.reserve_spawn(successor.id, now=111)
+
+    assert reserved is True
+    assert successor_reservation.worktree is None
+    with pytest.raises(TaskError, match="in-flight cleanup"):
+        q.record_spawn_worktree(
+            successor_reservation.key,
+            "wt-shared",
+            ownership="targeted",
+            now=111,
+        )
+    with pytest.raises(TaskError, match="cleanup claim expired"):
+        q.record_spawn_conclusion(
+            old_reservation.key,
+            conclusion_state="complete",
+            conclusion_detail='{"action":"removed"}',
+            claim_token=old_token,
+            now=111,
+        )
+    assert q.get_reservation(old_reservation.key).conclusion_state == "pending"
+    assert q.get_reservation(old_reservation.key).cleanup_claim_token == (
+        claimed.cleanup_claim_token
+    )
+
+
+def test_http_cleanup_claim_returns_token(api):
+    task_id = _create_task(api)
+    reservation = api.post(
+        "/spawn-reservations",
+        json={"task_id": task_id},
+    ).json()["reservation"]
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/release",
+        json={"disposition": "failed"},
+    )
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/retire",
+        json={
+            "exact_absence": True,
+            "conclusion_state": "pending",
+            "conclusion_detail": (
+                '{"action":"failed","reason":"lifecycle-lock-busy"}'
+            ),
+        },
+    )
+
+    response = api.post(
+        f"/spawn-reservations/{reservation['key']}/conclusion/claim"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["claimed"] is True
+    assert body["claim_token"]
+    assert body["reservation"]["conclusion_state"] == "pending"
+
+
 def test_supersede_exclusive_key_abandons_only_queued_or_proposed(q):
     queued = q.create("old queued", exclusive_key="review:repo:42")
     held = q.create("old held", exclusive_key="review:repo:42")
@@ -544,6 +925,66 @@ def test_rearm_refuses_insufficient_or_active_history(q):
     with pytest.raises(TaskError, match="active spawn reservation"):
         q.rearm_spawn(t.id, permitted=True, reason="fixed", min_failures=3)
     assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_rearm_cannot_bypass_pending_cleanup_worktree_fence(q):
+    task = q.create("work", exclusive_key="stable:resource")
+    for _ in range(2):
+        failed, reserved = q.reserve_spawn(task.id)
+        assert reserved is True
+        q.fail_spawn(failed.key, detail="transport unavailable")
+    pending, reserved = q.reserve_spawn(task.id)
+    assert reserved is True
+    q.record_spawn_worktree(
+        pending.key,
+        "wt-pending",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(pending.key, disposition="failed")
+    q.retire_spawn(
+        pending.key,
+        exact_absence=True,
+        conclusion_state="pending",
+        conclusion_detail='{"action":"failed","reason":"cleanup-pending"}',
+    )
+
+    with pytest.raises(TaskError, match="pending spawn cleanup"):
+        q.rearm_spawn(
+            task.id,
+            permitted=True,
+            reason="transport repaired",
+            min_failures=3,
+        )
+
+    assert q.get_reservation(pending.key).state == SpawnState.FAILED
+    assert q.get_reservation(pending.key).conclusion_state == "pending"
+    successor = q.create("successor", exclusive_key="stable:resource")
+    successor_reservation, reserved = q.reserve_spawn(successor.id)
+    assert reserved is True
+    assert successor_reservation.worktree is None
+    with pytest.raises(TaskError, match="in-flight cleanup"):
+        q.record_spawn_worktree(
+            successor_reservation.key,
+            "wt-pending",
+            ownership="targeted",
+        )
+
+    _, claimed, claim_token = q.claim_spawn_conclusion_retry(pending.key)
+    assert claimed is True
+    q.record_spawn_conclusion(
+        pending.key,
+        conclusion_state="complete",
+        conclusion_detail='{"action":"removed"}',
+        claim_token=claim_token,
+    )
+    assigned = q.record_spawn_worktree(
+        successor_reservation.key,
+        "wt-pending",
+        ownership="targeted",
+    )
+    assert assigned.worktree == "wt-pending"
 
 
 def test_rearm_refuses_owned_task_without_mutation(q):
@@ -673,7 +1114,7 @@ def test_http_reserve_record_list(api):
     ).json()["reservation"]
     api.post(
         f"/spawn-reservations/{active['key']}/spawned",
-        json={"session_handle": "local-body:s", "worktree": "w"},
+        json={"session_handle": "local-body:s", "worktree": "w2"},
     )
     checkpoint = api.post(
         f"/spawn-reservations/{active['key']}/conclusion",
@@ -710,6 +1151,36 @@ def test_http_bad_transition_409(api):
     api.post(f"/spawn-reservations/{key}/settle", json={})
     r = api.post(f"/spawn-reservations/{key}/fail", json={})
     assert r.status_code == 409
+
+
+def test_http_releasing_requires_proof_gated_retire(api):
+    task_id = _create_task(api)
+    reservation = api.post(
+        "/spawn-reservations",
+        json={"task_id": task_id},
+    ).json()["reservation"]
+    api.post(
+        f"/spawn-reservations/{reservation['key']}/release",
+        json={"disposition": "failed"},
+    )
+
+    for operation in ("fail", "settle", "defer"):
+        response = api.post(
+            f"/spawn-reservations/{reservation['key']}/{operation}",
+            json={},
+        )
+        assert response.status_code == 409
+    refused = api.post(
+        f"/spawn-reservations/{reservation['key']}/retire",
+        json={"exact_absence": False},
+    )
+    assert refused.status_code == 409
+    retired = api.post(
+        f"/spawn-reservations/{reservation['key']}/retire",
+        json={"exact_absence": True},
+    )
+    assert retired.status_code == 200
+    assert retired.json()["state"] == SpawnState.FAILED
 
 
 def test_http_defer(api):
@@ -762,6 +1233,49 @@ def test_http_rearm(api):
     assert response.json()["rearmed"] == 3
 
 
+def test_http_rearm_rejects_pending_cleanup(api):
+    task_id = _create_task(api)
+    for _ in range(2):
+        reservation = api.post(
+            "/spawn-reservations",
+            json={"task_id": task_id},
+        ).json()["reservation"]
+        api.post(
+            f"/spawn-reservations/{reservation['key']}/fail",
+            json={"detail": "transport unavailable"},
+        )
+    pending = api.post(
+        "/spawn-reservations",
+        json={"task_id": task_id},
+    ).json()["reservation"]
+    api.post(
+        f"/spawn-reservations/{pending['key']}/release",
+        json={"disposition": "failed"},
+    )
+    api.post(
+        f"/spawn-reservations/{pending['key']}/retire",
+        json={
+            "exact_absence": True,
+            "conclusion_state": "pending",
+            "conclusion_detail": (
+                '{"action":"failed","reason":"cleanup-pending"}'
+            ),
+        },
+    )
+
+    response = api.post(
+        f"/spawn-reservations/tasks/{task_id}/rearm",
+        json={
+            "permitted": True,
+            "reason": "transport repaired",
+            "min_failures": 3,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "pending spawn cleanup" in response.json()["detail"]
+
+
 def test_reserve_refuses_nonqueued_task(q):
     task = q.propose("draft")
     with pytest.raises(TaskError, match="spawn reservation requires queued and unowned"):
@@ -802,6 +1316,59 @@ def test_cli_rearm_passes_operator_guardrails(monkeypatch):
     assert calls == [("task-1", True, "transport repaired", 4)]
 
 
+@pytest.mark.parametrize("command", ["fail", "settle", "defer"])
+def test_cli_release_pending_transition_is_rejected(
+    monkeypatch, q, command
+):
+    task = q.create("cleanup")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-cleanup",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.request_spawn_release(
+        reservation.key,
+        disposition="failed" if command == "fail" else "settled",
+    )
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def fail_spawn(self, key, *, detail=None):
+            from dataclasses import asdict
+
+            return asdict(q.fail_spawn(key, detail=detail))
+
+        def settle_spawn(self, key, *, detail=None):
+            from dataclasses import asdict
+
+            return asdict(q.settle_spawn(key, detail=detail))
+
+        def defer_spawn(self, key, *, detail=None):
+            from dataclasses import asdict
+
+            return asdict(q.defer_spawn(key, detail=detail))
+
+    monkeypatch.setattr(m, "_client", lambda _args: FakeClient())
+    args = m.build_parser().parse_args(
+        ["reservations", command, reservation.key]
+    )
+
+    with pytest.raises(TaskError):
+        args.func(args)
+    updated = q.get_reservation(reservation.key)
+    assert updated.state == SpawnState.RELEASING
+    assert updated.conclusion_state == "pending"
+    assert updated.cleanup_claim_token is None
+
+
 # -- create --spawn double-spawn guard ---------------------------------------
 
 
@@ -836,10 +1403,24 @@ class _QueueBackedClient:
 
         return asdict(self._q.record_spawn_worktree(key, worktree, **kwargs))
 
-    def fail_spawn(self, key, *, detail=None):
+    def fail_spawn(
+        self,
+        key,
+        *,
+        detail=None,
+        conclusion_state=None,
+        conclusion_detail=None,
+    ):
         from dataclasses import asdict
 
-        return asdict(self._q.fail_spawn(key, detail=detail))
+        return asdict(
+            self._q.fail_spawn(
+                key,
+                detail=detail,
+                conclusion_state=conclusion_state,
+                conclusion_detail=conclusion_detail,
+            )
+        )
 
     def defer_spawn(self, key, *, detail=None):
         from dataclasses import asdict
@@ -856,6 +1437,27 @@ class _QueueBackedClient:
                 key,
                 detail=detail,
                 disposition=disposition,
+            )
+        )
+
+    def retire_spawn(
+        self,
+        key,
+        *,
+        exact_absence,
+        detail=None,
+        conclusion_state=None,
+        conclusion_detail=None,
+    ):
+        from dataclasses import asdict
+
+        return asdict(
+            self._q.retire_spawn(
+                key,
+                exact_absence=exact_absence,
+                detail=detail,
+                conclusion_state=conclusion_state,
+                conclusion_detail=conclusion_detail,
             )
         )
 
@@ -912,8 +1514,10 @@ def test_create_spawn_never_double_spawns(monkeypatch, q):
     assert q.latest_reservation(t.id).state == SpawnState.SPAWNED
 
 
-def test_create_spawn_failure_cleans_up_before_retry(monkeypatch, q):
-    """A one-shot failed spawn concludes its created checkout synchronously."""
+def test_create_spawn_failure_without_absence_proof_remains_fenced(
+    monkeypatch, q
+):
+    """A failed launch with no parsed handle is not positive body absence."""
     t = q.create("work")
     calls: list[int] = []
 
@@ -936,11 +1540,11 @@ def test_create_spawn_failure_cleans_up_before_retry(monkeypatch, q):
 
     m._spawn_worker_for(args, {"id": t.id})
     first = q.latest_reservation(t.id)
-    assert first.state == SpawnState.FAILED
+    assert first.state == SpawnState.RELEASING
+    assert first.conclusion_state == "complete"
 
     m._spawn_worker_for(args, {"id": t.id})
-    assert len(calls) == 2
-    assert q.latest_reservation(t.id).attempt == 2
+    assert len(calls) == 1
 
 
 def test_create_spawn_failure_stays_fenced_when_cleanup_is_pending(
@@ -982,7 +1586,7 @@ def test_create_spawn_failure_stays_fenced_when_cleanup_is_pending(
     assert len(calls) == 1
 
 
-def test_create_spawn_failure_stays_fenced_when_cleanup_is_held(
+def test_create_spawn_failure_without_handle_stays_fenced_when_cleanup_is_held(
     monkeypatch, q
 ):
     t = q.create("work")
@@ -1019,3 +1623,108 @@ def test_create_spawn_failure_stays_fenced_when_cleanup_is_held(
 
     m._spawn_worker_for(args, {"id": t.id})
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("session_handle", [None, ""])
+@pytest.mark.parametrize("reason", ["live-session", "live-mux"])
+def test_create_spawn_failure_without_handle_stays_fenced_when_pending(
+    monkeypatch, q, session_handle, reason
+):
+    task = q.create("work")
+    calls = []
+    monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: {
+            "action": "skipped",
+            "reason": reason,
+        },
+    )
+
+    def failing_do_spawn(_args, spawn_task, *, route=""):
+        calls.append(spawn_task["id"])
+        return (
+            types.SimpleNamespace(returncode=1),
+            "fake",
+            {
+                "session": session_handle,
+                "worktree": spawn_task["spawn_worktree"],
+            },
+        )
+
+    monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
+    args = types.SimpleNamespace(url=None, token=None)
+
+    m._spawn_worker_for(args, {"id": task.id})
+    fenced = q.latest_reservation(task.id)
+    assert fenced.state == SpawnState.RELEASING
+    assert fenced.conclusion_state == "pending"
+    assert reason in (fenced.conclusion_detail or "")
+
+    m._spawn_worker_for(args, {"id": task.id})
+    assert calls == [task.id]
+
+
+def test_create_spawn_failure_without_handle_stays_fenced_when_cleanup_complete(
+    monkeypatch, q
+):
+    task = q.create("work")
+    monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: {
+            "action": "removed",
+            "reason": "managed-gc-removed",
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "_do_spawn",
+        lambda _args, spawn_task, *, route="": (
+            types.SimpleNamespace(returncode=1),
+            "fake",
+            {
+                "session": None,
+                "worktree": spawn_task["spawn_worktree"],
+            },
+        ),
+    )
+    args = types.SimpleNamespace(url=None, token=None)
+
+    m._spawn_worker_for(args, {"id": task.id})
+
+    fenced = q.latest_reservation(task.id)
+    assert fenced.state == SpawnState.RELEASING
+    assert fenced.conclusion_state == "complete"
+
+
+def test_no_spawn_mechanism_can_retire_held_cleanup(monkeypatch, q):
+    task = q.create("work")
+    monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
+    _mock_created_worktree(monkeypatch)
+    from agent_dispatch import embody
+
+    monkeypatch.setattr(
+        embody,
+        "conclude_dispatch_attempt",
+        lambda *_args, **_kwargs: {
+            "action": "preserved",
+            "reason": "dirty-worktree",
+        },
+    )
+    monkeypatch.setattr(m, "_do_spawn", lambda *_args, **_kwargs: None)
+    args = types.SimpleNamespace(url=None, token=None)
+
+    m._spawn_worker_for(args, {"id": task.id})
+
+    retired = q.latest_reservation(task.id)
+    assert retired.state == SpawnState.FAILED
+    assert retired.conclusion_state == "held"

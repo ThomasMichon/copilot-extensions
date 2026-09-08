@@ -79,7 +79,7 @@ RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
 ConclusionFn = Callable[[str, "str | None"], dict]
 AttemptConclusionFn = Callable[[str, str | None, str, str], dict]
 
-#: Stop a local headless bridge session while preserving it for later resume.
+#: Stop a local headless bridge session while preserving its durable record.
 LocalColdFn = Callable[[str], bool]
 
 #: Stop a remote fleet bridge session while preserving it for later resume.
@@ -1026,21 +1026,22 @@ class Supervisor:
     ) -> bool:
         if reservation.get("state") == SpawnState.RELEASING:
             # Release state retains resource ownership independently of process
-            # capacity. Only a positively live body still occupies a process slot.
+            # capacity. A process slot is released only after exact absence is
+            # proven; unknown or failed probes remain conservatively occupied.
             fleet = _parse_fleet_body_handle(reservation.get("session_handle"))
             if fleet is not None:
                 try:
-                    return self.fleet_verdict_fn(*fleet) == _tracking().LIVE
+                    return self.fleet_verdict_fn(*fleet) != _tracking().GONE
                 except Exception:
-                    return False
+                    return True
             local_sid = _parse_local_body_handle(
                 reservation.get("session_handle")
             )
             if local_sid is not None:
                 try:
-                    return self.local_body_verdict_fn(local_sid) == _tracking().LIVE
+                    return self.local_body_verdict_fn(local_sid) != _tracking().GONE
                 except Exception:
-                    return False
+                    return True
             worktree = _worktree_from_reservation(
                 reservation,
                 task.get("owner"),
@@ -1054,10 +1055,10 @@ class Supervisor:
                         _machine_from_owner(task.get("owner")),
                         task.get("owner_session_id"),
                     )
-                    == _tracking().LIVE
+                    != _tracking().GONE
                 )
             except Exception:
-                return False
+                return True
         if task.get("status") != Status.SUSPENDED:
             return True
         key = str(reservation.get("key") or "")
@@ -1575,8 +1576,209 @@ class Supervisor:
             outcome = {**outcome, "acp_session_id": session_id}
         return self._conclusion_state(outcome), outcome
 
-    def release_requested_bodies(self) -> int:
-        """Fulfill durable yield/release requests after safe body teardown."""
+    def _retired_cleanup_plan(
+        self,
+        reservation: dict,
+        *,
+        local_session_id: str | None = None,
+        conclusion_session: str | None = None,
+        target_missing: bool = False,
+        cleanup_kind: str = "attempt",
+    ) -> tuple[str, dict]:
+        prior = self._conclusion_retry_payload(reservation)
+        if target_missing:
+            worktree_cleanup = {
+                "state": _CONCLUSION_COMPLETE,
+                "outcome": {
+                    "action": "already-removed",
+                    "reason": "recorded-target-directory-missing",
+                },
+            }
+        elif reservation.get("conclusion_state") in {
+            _CONCLUSION_COMPLETE,
+            _CONCLUSION_HELD,
+        }:
+            worktree_cleanup = {
+                "state": reservation.get("conclusion_state"),
+                "outcome": prior,
+            }
+        elif reservation.get("worktree_ownership") in {"targeted", "reused"}:
+            worktree_cleanup = {
+                "state": _CONCLUSION_COMPLETE,
+                "outcome": {
+                    "action": "preserved",
+                    "reason": (
+                        f"{reservation.get('worktree_ownership')}-worktree"
+                    ),
+                },
+            }
+        elif reservation.get("worktree"):
+            worktree_cleanup = {"state": _CONCLUSION_PENDING}
+        else:
+            worktree_cleanup = {
+                "state": _CONCLUSION_COMPLETE,
+                "outcome": {
+                    "action": "skipped",
+                    "reason": "reservation-has-no-worktree",
+                },
+            }
+        payload: dict[str, object] = {
+            "action": "pending",
+            "reason": "retired-body-cleanup",
+            "cleanup_kind": cleanup_kind,
+            "worktree_cleanup": worktree_cleanup,
+        }
+        states = [worktree_cleanup["state"]]
+        if local_session_id is not None:
+            payload["session_end"] = {
+                "state": _CONCLUSION_PENDING,
+                "session_id": local_session_id,
+            }
+            states.append(_CONCLUSION_PENDING)
+        if conclusion_session:
+            payload["acp_session_id"] = conclusion_session
+        state = (
+            _CONCLUSION_PENDING
+            if _CONCLUSION_PENDING in states
+            else (
+                _CONCLUSION_HELD
+                if _CONCLUSION_HELD in states
+                else _CONCLUSION_COMPLETE
+            )
+        )
+        return state, payload
+
+    def _retire_release_for_cleanup(
+        self,
+        reservation: dict,
+        *,
+        conclusion_state: str,
+        cleanup_payload: dict,
+    ) -> dict:
+        encoded = json.dumps(
+            cleanup_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        detail = reservation.get("detail") or "spawn release requested"
+        return self.client.retire_spawn(
+            reservation["key"],
+            exact_absence=True,
+            detail=detail,
+            conclusion_state=conclusion_state,
+            conclusion_detail=encoded,
+        )
+
+    @staticmethod
+    def _bounded_cleanup_failure(
+        payload: dict,
+        *,
+        attempts: int,
+        now: float,
+    ) -> tuple[str, dict]:
+        attempts += 1
+        exhausted = attempts >= _CONCLUSION_MAX_ATTEMPTS
+        updated = {
+            **payload,
+            "attempts": attempts,
+            "next_attempt_at": (
+                0
+                if exhausted
+                else now + min(
+                    300,
+                    _CONCLUSION_RETRY_BASE_SECONDS
+                    * (2 ** max(0, attempts - 1)),
+                )
+            ),
+        }
+        if exhausted:
+            updated["action"] = "preserved"
+            updated["reason"] = "cleanup-retry-exhausted"
+        return (
+            _CONCLUSION_HELD if exhausted else _CONCLUSION_PENDING,
+            updated,
+        )
+
+    @staticmethod
+    def _component_retry_meta(component: object) -> tuple[int, float]:
+        if not isinstance(component, dict):
+            return 0, 0.0
+        try:
+            return (
+                max(0, int(component.get("attempts", 0))),
+                max(0.0, float(component.get("next_attempt_at", 0))),
+            )
+        except (TypeError, ValueError):
+            return 0, 0.0
+
+    @classmethod
+    def _bounded_component_failure(
+        cls,
+        component: dict,
+        *,
+        now: float,
+    ) -> tuple[str, dict]:
+        attempts, _ = cls._component_retry_meta(component)
+        attempts += 1
+        exhausted = attempts >= _CONCLUSION_MAX_ATTEMPTS
+        return (
+            _CONCLUSION_HELD if exhausted else _CONCLUSION_PENDING,
+            {
+                **component,
+                "state": (
+                    _CONCLUSION_HELD
+                    if exhausted
+                    else _CONCLUSION_PENDING
+                ),
+                "attempts": attempts,
+                "next_attempt_at": (
+                    0
+                    if exhausted
+                    else now + min(
+                        300,
+                        _CONCLUSION_RETRY_BASE_SECONDS
+                        * (2 ** max(0, attempts - 1)),
+                    )
+                ),
+            },
+        )
+
+    @staticmethod
+    def _hold_pending_cleanup(payload: dict) -> dict:
+        updated = {
+            **payload,
+            "action": "preserved",
+            "reason": "cleanup-retry-exhausted",
+            "next_attempt_at": 0,
+        }
+        for name in ("session_end", "worktree_cleanup"):
+            component = updated.get(name)
+            if (
+                isinstance(component, dict)
+                and component.get("state") == _CONCLUSION_PENDING
+            ):
+                updated[name] = {
+                    **component,
+                    "state": _CONCLUSION_HELD,
+                }
+        return updated
+
+    @staticmethod
+    def _cleanup_envelope_state(payload: dict) -> str:
+        states = []
+        for name in ("session_end", "worktree_cleanup"):
+            component = payload.get(name)
+            if isinstance(component, dict):
+                states.append(component.get("state"))
+        if _CONCLUSION_PENDING in states:
+            return _CONCLUSION_PENDING
+        if _CONCLUSION_HELD in states:
+            return _CONCLUSION_HELD
+        return _CONCLUSION_COMPLETE
+
+    def release_requested_bodies(self, *, now: float | None = None) -> int:
+        """Retire proven-absent bodies and preserve cleanup obligations."""
+        now = time.time() if now is None else now
         released = 0
         reservations = self._pool_reservations(
             state=(
@@ -1584,12 +1786,13 @@ class Supervisor:
                 f"{SpawnState.COLD},{SpawnState.RELEASING}"
             )
         )
+        reservations.extend(
+            self._pool_reservations(
+                state=(f"{SpawnState.FAILED},{SpawnState.SETTLED}"),
+                conclusion_state=_CONCLUSION_PENDING,
+            )
+        )
         for res in reservations:
-            if (
-                res.get("state") == SpawnState.RELEASING
-                and res.get("conclusion_state") == _CONCLUSION_HELD
-            ):
-                continue
             if not res.get("release_requested"):
                 continue
             try:
@@ -1598,11 +1801,139 @@ class Supervisor:
                 continue
             if not self._matches_pool(task):
                 continue
-            can_release = False
+            body_already_released = res.get("state") in SpawnState.RELEASABLE
+            can_release = body_already_released
             conclusion_session: str | None = None
             released_target_dir: str | None = None
+            retry_payload = self._conclusion_retry_payload(res)
+            recorded_acp = retry_payload.get("acp_session_id")
+            if recorded_acp:
+                conclusion_session = str(recorded_acp)
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
-            if fleet is not None:
+            local_sid = _parse_local_body_handle(res.get("session_handle"))
+            claim_token: str | None = None
+            session_end = retry_payload.get("session_end")
+            session_end_pending = (
+                isinstance(session_end, dict)
+                and session_end.get("state") == _CONCLUSION_PENDING
+            )
+            prior_attempts, next_attempt_at = self._conclusion_retry_meta(res)
+            cleanup_envelope = isinstance(
+                retry_payload.get("worktree_cleanup"),
+                dict,
+            )
+            stored_worktree = retry_payload.get("worktree_cleanup")
+            stored_worktree_state = (
+                stored_worktree.get("state")
+                if isinstance(stored_worktree, dict)
+                else None
+            )
+            stored_worktree_outcome = (
+                stored_worktree.get("outcome")
+                if isinstance(stored_worktree, dict)
+                else None
+            )
+            _, session_next_attempt = self._component_retry_meta(session_end)
+            _, worktree_next_attempt = self._component_retry_meta(
+                stored_worktree
+            )
+            session_due = (
+                body_already_released
+                and session_end_pending
+                and session_next_attempt <= now
+            )
+            worktree_due = (
+                body_already_released
+                and stored_worktree_state == _CONCLUSION_PENDING
+                and worktree_next_attempt <= now
+            )
+            if body_already_released and not cleanup_envelope:
+                if next_attempt_at > now:
+                    continue
+                if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
+                    try:
+                        claim = self.client.claim_spawn_conclusion_retry(
+                            res["key"]
+                        )
+                    except DispatchError:
+                        continue
+                    if not claim.get("claimed"):
+                        continue
+                    claim_token = claim.get("claim_token")
+                    held_payload = self._hold_pending_cleanup(retry_payload)
+                    try:
+                        self.client.record_spawn_conclusion(
+                            res["key"],
+                            conclusion_state=_CONCLUSION_HELD,
+                            conclusion_detail=json.dumps(
+                                held_payload,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                            claim_token=claim_token,
+                        )
+                    except DispatchError:
+                        pass
+                    continue
+            if body_already_released and cleanup_envelope:
+                if not session_due and not worktree_due:
+                    continue
+                try:
+                    claim = self.client.claim_spawn_conclusion_retry(
+                        res["key"]
+                    )
+                except DispatchError:
+                    log.exception(
+                        "failed to claim session cleanup retry for %s",
+                        res["key"],
+                    )
+                    continue
+                if not claim.get("claimed"):
+                    continue
+                claim_token = claim.get("claim_token")
+                try:
+                    self.client.validate_spawn_conclusion_claim(
+                        res["key"],
+                        claim_token,
+                    )
+                except DispatchError:
+                    continue
+            if session_due:
+                cleanup_sid = str(session_end.get("session_id") or local_sid or "")
+                try:
+                    session_ended = bool(
+                        cleanup_sid and self.local_end_fn(cleanup_sid)
+                    )
+                except Exception:
+                    session_ended = False
+                    log.exception(
+                        "failed to retry local session cleanup %s",
+                        cleanup_sid,
+                    )
+                if not session_ended:
+                    _, updated_session = (
+                        self._bounded_component_failure(
+                            session_end,
+                            now=now,
+                        )
+                    )
+                    retry_payload = {
+                        **retry_payload,
+                        "session_end": updated_session,
+                    }
+                completed_session_end = {
+                    **session_end,
+                    "state": _CONCLUSION_COMPLETE,
+                }
+                if session_ended:
+                    retry_payload = {
+                        **retry_payload,
+                        "session_end": completed_session_end,
+                    }
+            if body_already_released:
+                if conclusion_session is None:
+                    conclusion_session = task.get("owner_session_id")
+            elif fleet is not None:
                 try:
                     verdict = self.fleet_verdict_fn(*fleet)
                 except Exception:
@@ -1610,7 +1941,28 @@ class Supervisor:
                 if verdict == _tracking().UNKNOWN:
                     continue
                 if verdict == _tracking().GONE:
-                    can_release = True
+                    conclusion_state, cleanup_payload = (
+                        self._retired_cleanup_plan(
+                            res,
+                            conclusion_session=conclusion_session,
+                        )
+                    )
+                    try:
+                        retired = self._retire_release_for_cleanup(
+                            res,
+                            conclusion_state=conclusion_state,
+                            cleanup_payload=cleanup_payload,
+                        )
+                    except DispatchError:
+                        log.exception(
+                            "failed to retire absent fleet body %s",
+                            res["key"],
+                        )
+                        continue
+                    if conclusion_state == _CONCLUSION_PENDING:
+                        reservations.append(retired)
+                    released += 1
+                    continue
                 else:
                     try:
                         can_release = self.fleet_end_fn(*fleet)
@@ -1620,12 +1972,7 @@ class Supervisor:
                             fleet,
                         )
             else:
-                local_sid = _parse_local_body_handle(
-                    res.get("session_handle")
-                )
                 if local_sid is not None:
-                    retry_payload = self._conclusion_retry_payload(res)
-                    recorded_acp = retry_payload.get("acp_session_id")
                     try:
                         target_dir = self.local_body_target_dir_fn(local_sid)
                     except Exception:
@@ -1652,7 +1999,35 @@ class Supervisor:
                     if verdict == _tracking().UNKNOWN:
                         continue
                     if verdict == _tracking().GONE:
-                        can_release = True
+                        released_target_missing = (
+                            _target_directory_missing(released_target_dir) is True
+                            if released_target_dir is not None
+                            else False
+                        )
+                        conclusion_state, cleanup_payload = (
+                            self._retired_cleanup_plan(
+                                res,
+                                local_session_id=local_sid,
+                                conclusion_session=conclusion_session,
+                                target_missing=released_target_missing,
+                            )
+                        )
+                        try:
+                            retired = self._retire_release_for_cleanup(
+                                res,
+                                conclusion_state=conclusion_state,
+                                cleanup_payload=cleanup_payload,
+                            )
+                        except DispatchError:
+                            log.exception(
+                                "failed to retire absent local body %s",
+                                res["key"],
+                            )
+                            continue
+                        if conclusion_state == _CONCLUSION_PENDING:
+                            reservations.append(retired)
+                        released += 1
+                        continue
                     else:
                         try:
                             can_release = self.local_end_fn(local_sid)
@@ -1676,16 +2051,37 @@ class Supervisor:
                         )
                     else:
                         try:
-                            can_release = (
-                                self.verdict_fn(
-                                    worktree,
-                                    _machine_from_owner(task.get("owner")),
-                                    task.get("owner_session_id"),
-                                )
-                                == _tracking().GONE
+                            verdict = self.verdict_fn(
+                                worktree,
+                                _machine_from_owner(task.get("owner")),
+                                task.get("owner_session_id"),
                             )
                         except Exception:
-                            can_release = False
+                            verdict = _tracking().UNKNOWN
+                        if verdict == _tracking().GONE:
+                            conclusion_state, cleanup_payload = (
+                                self._retired_cleanup_plan(
+                                    res,
+                                    conclusion_session=conclusion_session,
+                                )
+                            )
+                            try:
+                                retired = self._retire_release_for_cleanup(
+                                    res,
+                                    conclusion_state=conclusion_state,
+                                    cleanup_payload=cleanup_payload,
+                                )
+                            except DispatchError:
+                                log.exception(
+                                    "failed to retire absent worktree body %s",
+                                    res["key"],
+                                )
+                                continue
+                            if conclusion_state == _CONCLUSION_PENDING:
+                                reservations.append(retired)
+                            released += 1
+                            continue
+                        can_release = False
             if not can_release:
                 continue
             released_target_missing = (
@@ -1693,59 +2089,175 @@ class Supervisor:
                 if released_target_dir is not None
                 else False
             )
-            if released_target_missing:
+            if cleanup_envelope and not worktree_due:
+                conclusion_state = str(
+                    stored_worktree_state or _CONCLUSION_COMPLETE
+                )
+                outcome = (
+                    stored_worktree_outcome
+                    if isinstance(stored_worktree_outcome, dict)
+                    else {
+                        "action": "pending",
+                        "reason": "worktree-cleanup-not-due",
+                    }
+                )
+            elif (
+                body_already_released
+                and stored_worktree_state in {
+                    _CONCLUSION_COMPLETE,
+                    _CONCLUSION_HELD,
+                }
+                and isinstance(stored_worktree_outcome, dict)
+            ):
+                conclusion_state = str(stored_worktree_state)
+                outcome = stored_worktree_outcome
+            elif released_target_missing:
                 outcome = {
                     "action": "already-removed",
                     "reason": "recorded-target-directory-missing",
                 }
                 conclusion_state = _CONCLUSION_COMPLETE
-            elif res.get("conclusion_state") == _CONCLUSION_COMPLETE:
-                outcome = self._conclusion_retry_payload(res) or {
+            elif (
+                res.get("conclusion_state") == _CONCLUSION_COMPLETE
+                and not session_end_pending
+            ):
+                outcome = retry_payload or {
                     "action": "already-removed",
                     "reason": "preconfirmed-before-release",
                 }
                 conclusion_state = _CONCLUSION_COMPLETE
+            elif (
+                res.get("conclusion_state") == _CONCLUSION_HELD
+                and not session_end_pending
+            ):
+                outcome = retry_payload or {
+                    "action": "preserved",
+                    "reason": "cleanup-held",
+                }
+                conclusion_state = _CONCLUSION_HELD
             else:
-                conclusion_state, outcome = self._conclude_released_attempt(
-                    res,
-                    session_id=conclusion_session,
+                if (
+                    body_already_released
+                    and res.get("worktree")
+                    and claim_token is None
+                ):
+                    try:
+                        claim = self.client.claim_spawn_conclusion_retry(
+                            res["key"]
+                        )
+                    except DispatchError:
+                        log.exception(
+                            "failed to claim cleanup retry for %s",
+                            res["key"],
+                        )
+                        continue
+                    if not claim.get("claimed"):
+                        continue
+                    claim_token = claim.get("claim_token")
+                    try:
+                        self.client.validate_spawn_conclusion_claim(
+                            res["key"],
+                            claim_token,
+                        )
+                    except DispatchError:
+                        continue
+                elif body_already_released and claim_token is not None:
+                    try:
+                        self.client.validate_spawn_conclusion_claim(
+                            res["key"],
+                            claim_token,
+                        )
+                    except DispatchError:
+                        continue
+                if retry_payload.get("cleanup_kind") == "terminal":
+                    outcome = self._conclude_terminal_worker(
+                        res,
+                        task,
+                        session_override=conclusion_session,
+                    ) or {
+                        "action": "skipped",
+                        "reason": "terminal-cleanup-not-configured",
+                    }
+                    conclusion_state = self._conclusion_state(outcome)
+                else:
+                    conclusion_state, outcome = self._conclude_released_attempt(
+                        res,
+                        session_id=conclusion_session,
+                    )
+            detail_outcome = outcome
+            cleanup_envelope = (
+                body_already_released
+                and isinstance(retry_payload.get("worktree_cleanup"), dict)
+            )
+            if cleanup_envelope:
+                worktree_state = conclusion_state
+                outcome = {
+                    **retry_payload,
+                    "reason": "retired-body-cleanup",
+                    "worktree_cleanup": {
+                        **retry_payload["worktree_cleanup"],
+                        "state": worktree_state,
+                        "outcome": detail_outcome,
+                    },
+                }
+                if (
+                    worktree_state == _CONCLUSION_PENDING
+                    and worktree_due
+                ):
+                    _, updated_worktree = (
+                        self._bounded_component_failure(
+                            outcome["worktree_cleanup"],
+                            now=now,
+                        )
+                    )
+                    outcome["worktree_cleanup"] = {
+                        **updated_worktree,
+                        "outcome": detail_outcome,
+                    }
+                conclusion_state = self._cleanup_envelope_state(outcome)
+                outcome["action"] = (
+                    "pending"
+                    if conclusion_state == _CONCLUSION_PENDING
+                    else (
+                        "preserved"
+                        if conclusion_state == _CONCLUSION_HELD
+                        else "complete"
+                    )
+                )
+            elif conclusion_state == _CONCLUSION_PENDING:
+                conclusion_state, outcome = self._bounded_cleanup_failure(
+                    outcome,
+                    attempts=prior_attempts,
+                    now=now,
                 )
             conclusion_detail = json.dumps(
                 outcome,
                 sort_keys=True,
                 separators=(",", ":"),
             )
-            if conclusion_state in {_CONCLUSION_PENDING, _CONCLUSION_HELD}:
-                try:
+            try:
+                detail = self._append_conclusion_detail(
+                    res.get("detail") or "spawn release requested",
+                    detail_outcome,
+                )
+                if body_already_released:
                     self.client.record_spawn_conclusion(
                         res["key"],
                         conclusion_state=conclusion_state,
                         conclusion_detail=conclusion_detail,
+                        detail=detail,
+                        claim_token=claim_token,
                     )
-                except DispatchError:
-                    log.exception(
-                        "failed to persist attempt conclusion for %s",
-                        res["key"],
-                    )
-                continue
-            try:
-                detail = self._append_conclusion_detail(
-                    res.get("detail") or "spawn release requested",
-                    outcome,
-                )
-                if (
-                    res.get("state") == SpawnState.RELEASING
-                    and res.get("release_disposition") != "settled"
-                ):
-                    self.client.fail_spawn(res["key"], detail=detail)
                 else:
-                    self.client.settle_spawn(
+                    self.client.retire_spawn(
                         res["key"],
+                        exact_absence=True,
                         detail=detail,
                         conclusion_state=conclusion_state,
                         conclusion_detail=conclusion_detail,
                     )
-                released += 1
+                if not body_already_released:
+                    released += 1
             except DispatchError:
                 log.exception(
                     "failed to settle release-requested reservation %s",
@@ -2217,6 +2729,7 @@ class Supervisor:
             except DispatchError:
                 continue  # task vanished; leave the reservation for a human
             if task.get("status") in _TERMINAL:
+                conclusion_claim_token: str | None = None
                 if (
                     res.get("worktree_ownership") == "created"
                     and res.get("state") != SpawnState.SETTLED
@@ -2333,6 +2846,112 @@ class Supervisor:
                 ):
                     ready, preconcluded = True, None
                 else:
+                    gone_local_sid: str | None = None
+                    gone_conclusion_session: str | None = None
+                    gone_target_missing = False
+                    exact_gone = False
+                    fleet = _parse_fleet_body_handle(
+                        res.get("session_handle")
+                    )
+                    if fleet is not None:
+                        try:
+                            exact_gone = (
+                                self.fleet_verdict_fn(*fleet)
+                                == _tracking().GONE
+                            )
+                        except Exception:
+                            exact_gone = False
+                    elif local_sid is not None:
+                        try:
+                            exact_gone = (
+                                self.local_body_verdict_fn(local_sid)
+                                == _tracking().GONE
+                            )
+                        except Exception:
+                            exact_gone = False
+                        if exact_gone:
+                            gone_local_sid = local_sid
+                            try:
+                                target_dir = self.local_body_target_dir_fn(
+                                    local_sid
+                                )
+                            except Exception:
+                                target_dir = None
+                            gone_target_missing = (
+                                _target_directory_missing(target_dir) is True
+                                if target_dir is not None
+                                else False
+                            )
+                            try:
+                                gone_conclusion_session = (
+                                    self.local_acp_session_fn(local_sid)
+                                    or task.get("owner_session_id")
+                                )
+                            except Exception:
+                                gone_conclusion_session = task.get(
+                                    "owner_session_id"
+                                )
+                    else:
+                        worktree = _worktree_from_reservation(
+                            res,
+                            task.get("owner"),
+                        )
+                        if worktree:
+                            try:
+                                exact_gone = (
+                                    self.verdict_fn(
+                                        worktree,
+                                        _machine_from_owner(task.get("owner")),
+                                        task.get("owner_session_id"),
+                                    )
+                                    == _tracking().GONE
+                                )
+                            except Exception:
+                                exact_gone = False
+                            if exact_gone:
+                                raw_session = res.get("session_handle")
+                                gone_conclusion_session = (
+                                    raw_session
+                                    if isinstance(raw_session, str)
+                                    else None
+                                )
+                    if exact_gone:
+                        try:
+                            releasing = self.client.request_spawn_release(
+                                res["key"],
+                                detail=self._completion_detail(task),
+                                disposition="settled",
+                            )
+                            conclusion_state, cleanup_payload = (
+                                self._retired_cleanup_plan(
+                                    releasing,
+                                    local_session_id=gone_local_sid,
+                                    conclusion_session=gone_conclusion_session,
+                                    target_missing=gone_target_missing,
+                                    cleanup_kind="terminal",
+                                )
+                            )
+                            self.client.retire_spawn(
+                                res["key"],
+                                exact_absence=True,
+                                detail=self._completion_detail(task),
+                                conclusion_state=conclusion_state,
+                                conclusion_detail=json.dumps(
+                                    cleanup_payload,
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ),
+                            )
+                        except DispatchError:
+                            log.exception(
+                                "failed to retire terminal absent body %s",
+                                res["key"],
+                            )
+                            continue
+                        settled += 1
+                        if conclusion_state == _CONCLUSION_PENDING:
+                            self.release_requested_bodies()
+                        continue
                     ready, preconcluded = self._exclusive_terminal_release_ready(
                         res,
                         task,
@@ -2376,11 +2995,22 @@ class Supervisor:
                         continue
                     if prior_attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         try:
-                            self.client.settle_spawn(
+                            claim = self.client.claim_spawn_conclusion_retry(
+                                res["key"]
+                            )
+                            if not claim.get("claimed"):
+                                continue
+                            claim_token = claim.get("claim_token")
+                            self.client.validate_spawn_conclusion_claim(
+                                res["key"],
+                                claim_token,
+                            )
+                            self.client.record_spawn_conclusion(
                                 res["key"],
                                 detail=detail,
                                 conclusion_state=_CONCLUSION_HELD,
                                 conclusion_detail=res.get("conclusion_detail"),
+                                claim_token=claim_token,
                             )
                         except DispatchError:
                             pass
@@ -2509,6 +3139,30 @@ class Supervisor:
                         settled += 1
                     except DispatchError:
                         continue
+                if (
+                    policy_applies
+                    and conclusion_claim_token is None
+                ):
+                    try:
+                        claim = self.client.claim_spawn_conclusion_retry(
+                            res["key"]
+                        )
+                    except DispatchError:
+                        log.exception(
+                            "failed to claim terminal cleanup retry for %s",
+                            res["key"],
+                        )
+                        continue
+                    if not claim.get("claimed"):
+                        continue
+                    conclusion_claim_token = claim.get("claim_token")
+                    try:
+                        self.client.validate_spawn_conclusion_claim(
+                            res["key"],
+                            conclusion_claim_token,
+                        )
+                    except DispatchError:
+                        continue
                 outcome = (
                     preconcluded
                     if preconcluded is not None
@@ -2535,16 +3189,26 @@ class Supervisor:
                     if attempts >= _CONCLUSION_MAX_ATTEMPTS:
                         conclusion_state = _CONCLUSION_HELD
                 try:
-                    self.client.settle_spawn(
-                        res["key"],
-                        detail=final_detail,
-                        conclusion_state=conclusion_state,
-                        conclusion_detail=json.dumps(
-                            conclusion_payload,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
+                    encoded_conclusion = json.dumps(
+                        conclusion_payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
                     )
+                    if conclusion_claim_token is not None:
+                        self.client.record_spawn_conclusion(
+                            res["key"],
+                            conclusion_state=conclusion_state,
+                            conclusion_detail=encoded_conclusion,
+                            detail=final_detail,
+                            claim_token=conclusion_claim_token,
+                        )
+                    else:
+                        self.client.settle_spawn(
+                            res["key"],
+                            detail=final_detail,
+                            conclusion_state=conclusion_state,
+                            conclusion_detail=encoded_conclusion,
+                        )
                 except DispatchError:
                     log.exception(
                         "could not record terminal conclusion outcome for %s",
@@ -3209,7 +3873,7 @@ class Supervisor:
         now = time.time() if now is None else now
         self.reconcile()
         self.reconcile_reserving()
-        self.release_requested_bodies()
+        self.release_requested_bodies(now=now)
         self.bind_headless_owner_sessions()
         self.suspend_idle_headless_tasks()
         self.cool_dormant_bodies()

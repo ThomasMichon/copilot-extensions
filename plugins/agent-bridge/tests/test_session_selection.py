@@ -523,6 +523,36 @@ def test_cmd_create_refuses_on_conflict(monkeypatch):
 # -- end is idempotent + quiet (#48) -----------------------------------------
 
 
+def test_cmd_stop_threads_reap_host(monkeypatch):
+    calls = []
+
+    class _C:
+        def stop_session(self, sid, *, force=False, reap_host=False):
+            calls.append((sid, force, reap_host))
+
+    monkeypatch.setattr(m, "_get_client", lambda: _C())
+    m._cmd_stop(
+        argparse.Namespace(
+            session_id="abc",
+            force=True,
+            reap_host=True,
+        )
+    )
+    m._cmd_stop(argparse.Namespace(session_id="def"))
+
+    assert calls == [
+        ("abc", True, True),
+        ("def", False, False),
+    ]
+
+
+def test_stop_parser_accepts_reap_host():
+    args = m.build_parser().parse_args(["stop", "abc", "--reap-host"])
+
+    assert args.session_id == "abc"
+    assert args.reap_host is True
+
+
 def test_cmd_end_treats_404_as_already_ended(monkeypatch, capsys):
     class _C:
         def end_session(self, sid, *, force=False):
