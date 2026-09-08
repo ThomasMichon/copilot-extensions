@@ -14,8 +14,6 @@
 #
 # Deployed to ~/.agent-ssh/bin/ by scripts/install.sh. Only reconciles staleness.
 
-InstallDir="$HOME/.agent-ssh"
-Manifest="$InstallDir/deploy-manifest.json"
 session_start_json_emitted=0
 emit_session_start_json() {
   if [ "${session_start_json_emitted:-0}" -eq 0 ]; then
@@ -24,6 +22,13 @@ emit_session_start_json() {
   fi
 }
 trap 'emit_session_start_json' EXIT
+
+if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+  exit 0
+fi
+
+InstallDir="$HOME/.agent-ssh"
+Manifest="$InstallDir/deploy-manifest.json"
 
 # FIRST install (no deploy manifest yet): do the cheap 'stamp' so the binstub is
 # on PATH THIS session and self-provisions the runtime on first use. Without this

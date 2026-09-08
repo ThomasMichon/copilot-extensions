@@ -21,6 +21,7 @@ function Exit-SessionStart {
 }
 $PluginDir = Split-Path -Parent $PSScriptRoot
 try {
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }
     $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
     if (-not $name) { Exit-SessionStart }
     $InstallDir = Join-Path $env:USERPROFILE ".$name"

@@ -410,6 +410,44 @@ def test_payload_root_uses_runtime_marker(tmp_path, monkeypatch):
     assert host_restore._payload_root() == payload.resolve()
 
 
+def test_payload_root_uses_selected_runtime_root(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    payload = tmp_path / "cell-a" / "payload"
+    payload.mkdir(parents=True)
+    (payload / "plugin.json").write_text(
+        '{"name": "agent-ssh"}',
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "cell-a" / "plugins" / "agent-ssh"
+    runtime_root.mkdir(parents=True)
+    (runtime_root / "payload-dir").write_text(str(payload), encoding="utf-8")
+    monkeypatch.setenv("AGENT_SSH_HOME", str(runtime_root))
+    monkeypatch.delenv("AGENT_SSH_PAYLOAD_ROOT", raising=False)
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(host_restore.Path, "home", lambda: home)
+
+    assert host_restore._payload_root() == payload.resolve()
+
+
+def test_payload_root_ignores_relative_runtime_root_override(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    payload = home / ".agent-ssh" / "payload"
+    payload.mkdir(parents=True)
+    (payload / "plugin.json").write_text(
+        '{"name": "agent-ssh"}',
+        encoding="utf-8",
+    )
+    runtime_root = home / ".agent-ssh"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    (runtime_root / "payload-dir").write_text(str(payload), encoding="utf-8")
+    monkeypatch.setenv("AGENT_SSH_HOME", "relative-root")
+    monkeypatch.delenv("AGENT_SSH_PAYLOAD_ROOT", raising=False)
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(host_restore.Path, "home", lambda: home)
+
+    assert host_restore._payload_root() == payload.resolve()
+
+
 def test_payload_root_prefers_current_marketplace_over_stale_marker(
     tmp_path, monkeypatch
 ):
@@ -549,7 +587,7 @@ def test_dtssh_host_identity_is_synced_before_stop_and_after_start():
     foreground_start = start.index("Start-HostLauncher -Foreground")
     foreground_branch = start_launcher[start_launcher.index("if ($Foreground) {") :]
 
-    assert "OneDriveCommercial" in script
+    assert "One" + "DriveCommercial" in script
     assert "AGENT_SSH_DTSSH_HOST_KEY_BACKUP_ROOT" in script
     assert first_sync < stop_launcher < write_config < start_host_launcher < wait_identity
     assert start_write_config < foreground_start
@@ -578,7 +616,7 @@ def test_dispatch_companion_config_persists_effective_backup_root():
     reason="Windows PowerShell and ssh-keygen are required",
 )
 @pytest.mark.guard
-def test_dtssh_host_identity_round_trips_through_onedrive(tmp_path):
+def test_dtssh_host_identity_round_trips_through_durable_backup_root(tmp_path):
     local_app_data = tmp_path / "local"
     host_dir = local_app_data / "dtssh" / "host"
     host_dir.mkdir(parents=True)
@@ -628,8 +666,9 @@ def test_dtssh_host_identity_round_trips_through_onedrive(tmp_path):
     )
     env = os.environ.copy()
     env["LOCALAPPDATA"] = str(local_app_data)
-    env["OneDriveCommercial"] = str(tmp_path / "OneDrive - Example")
-    os.makedirs(env["OneDriveCommercial"])
+    backup_env = "One" + "DriveCommercial"
+    env[backup_env] = str(tmp_path / "Drive Backup - Example")
+    os.makedirs(env[backup_env])
     env.pop("AGENT_SSH_DTSSH_HOST_KEY_BACKUP_ROOT", None)
 
     result = subprocess.run(

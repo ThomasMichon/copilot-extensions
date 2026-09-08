@@ -705,6 +705,11 @@ def warning_state_file() -> Path:
     override = os.environ.get(WARNING_STATE_ENV)
     if override:
         return Path(override).expanduser()
+    runtime_root = os.environ.get("AGENT_SSH_HOME", "").strip()
+    if runtime_root:
+        candidate = Path(runtime_root).expanduser()
+        if candidate.is_absolute():
+            return candidate.resolve() / "fragment-warning-state.json"
     return Path.home() / ".agent-ssh" / "fragment-warning-state.json"
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -63,6 +64,14 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def _load_checker():
+    spec = importlib.util.spec_from_file_location("check_agent_bridge_contracts", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _registry(repo: Path, commit: str, blob: str) -> dict[str, Any]:
@@ -286,6 +295,42 @@ def test_valid_registry_passes(repo: Path) -> None:
     result = _run(repo)
     assert result.returncode == 0, result.stderr
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
+
+
+def test_missing_provenance_commit_recovers_history_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checker = _load_checker()
+    commit = "a" * 40
+    calls: list[tuple[str, ...]] = []
+    state = {"available": False}
+
+    def fake_git(*args: str):
+        calls.append(args)
+        if args[:2] == ("cat-file", "-e"):
+            return subprocess.CompletedProcess(args, 0 if state["available"] else 1, "", "")
+        if args == (
+            "fetch",
+            "--quiet",
+            "origin",
+            checker._MAIN_REFSPEC,
+        ):
+            state["available"] = True
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args in {
+            ("fetch", "--quiet", "--unshallow", "origin"),
+        }:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        raise AssertionError(f"unexpected git call: {args}")
+
+    monkeypatch.setattr(checker, "_git", fake_git)
+    checker._FETCH_RECOVERY_ATTEMPTED = False
+
+    assert checker._ensure_commit_available(commit) is True
+    assert checker._ensure_commit_available(commit) is True
+    assert calls.count(
+        ("fetch", "--quiet", "origin", checker._MAIN_REFSPEC)
+    ) == 1
 
 
 @pytest.mark.parametrize(
