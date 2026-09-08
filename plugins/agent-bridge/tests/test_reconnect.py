@@ -206,22 +206,31 @@ def test_stream_feed_follows_worktree_handle_across_handoff(monkeypatch, capsys)
 
     class _Client:
         def __init__(self):
-            self.active_session = "s1"
             self.stream_calls: list[str] = []
             self.cursors = {"s1": 0, "s2": 0}
 
-        def resolve_live_session(self, handle):
-            assert handle == "wt-1"
-            return {"session_id": self.active_session}
-
         def get_cursor(self, sid, *, caller_id=None):
             return self.cursors[sid]
+
+        def get_session(self, sid):
+            if sid == "s1":
+                return {"session_id": "s1", "worktree_id": "wt-1", "status": "stopped"}
+            if sid == "s2":
+                return {"session_id": "s2", "worktree_id": "wt-1", "status": "idle"}
+            raise AssertionError(f"unexpected session lookup {sid}")
+
+        def list_sessions(self, *, status=None):
+            if self.stream_calls and self.stream_calls[-1] == "s1":
+                return [
+                    {"session_id": "s2", "worktree_id": "wt-1", "status": "idle"},
+                    {"session_id": "s1", "worktree_id": "wt-1", "status": "stopped"},
+                ]
+            return [{"session_id": "s1", "worktree_id": "wt-1", "status": "idle"}]
 
         def stream_events(self, sid, *, after=0, caller_id=None):
             self.stream_calls.append(sid)
             if sid == "s1":
                 yield {"event": "agent_message", "id": "1", "data": {"text": "before"}}
-                self.active_session = "s2"
                 yield {
                     "event": "session_handoff",
                     "id": "2",
@@ -241,9 +250,6 @@ def test_stream_feed_follows_worktree_handle_across_handoff(monkeypatch, capsys)
 
         def read_range(self, sid, *, start=0, end=None):
             return []
-
-        def get_session(self, sid):
-            return {"status": "stopped" if sid == "s1" else "idle"}
 
     result = m._stream_feed(
         _Client(),

@@ -3508,9 +3508,14 @@ def _resolve_read_target(
 ) -> tuple[str | None, str | None]:
     """Resolve ``read``'s target to a concrete session id when possible.
 
-    Mirrors ``send``'s live-target resolution step for represented sessions:
-    an exact live ``session_id`` resolves to itself, while a **worktree
-    handle** resolves to whichever session is live for that worktree right now.
+    ``read`` follows **bridge-managed** worktree sessions, not the separate
+    represented interactive ``live-sessions`` registry. Resolution order keeps
+    literal session-id semantics intact:
+
+    1. exact bridge-managed session id;
+    2. otherwise, a **worktree handle** resolved against ``list_sessions()``,
+       preferring the current live/starting owned session for that worktree and
+       falling back to its most recent session when nothing is live.
 
     Returns ``(session_id, follow_handle)``:
 
@@ -3519,17 +3524,6 @@ def _resolve_read_target(
       across session-id churn, or None for literal session ids.
     """
     from .client import BridgeClientError
-
-    resolve_live = getattr(client, "resolve_live_session", None)
-    if resolve_live is not None:
-        live = resolve_live(target)
-        if live:
-            session_id = str(live.get("session_id") or "")
-            if session_id:
-                # The live resolver treats an exact session id as an alias to
-                # itself, so only a different returned id implies durable
-                # worktree following semantics.
-                return session_id, (target if session_id != target else None)
 
     get_session = getattr(client, "get_session", None)
     if get_session is not None:
@@ -3542,19 +3536,60 @@ def _resolve_read_target(
             if session:
                 return target, None
 
-    try:
-        known_worktree = bool(
-            client.list_live_sessions(worktree_id=target, include_dead=True)
-        )
-    except Exception:
-        known_worktree = False
-    if known_worktree:
-        return None, target
+    worktree_session_id = _resolve_read_worktree_session(client, target)
+    if worktree_session_id:
+        return worktree_session_id, target
 
     return target, None
 
 
-def _wait_for_live_read_target(
+def _session_status_name(session: dict[str, Any]) -> str:
+    """Normalize a session-info status to its lowercase public string."""
+    status = session.get("status")
+    if hasattr(status, "value"):
+        status = status.value
+    return str(status or "").lower()
+
+
+def _resolve_read_worktree_session(
+    client,
+    worktree_id: str,
+    *,
+    exclude_session_id: str | None = None,
+) -> str | None:
+    """Resolve a worktree handle against bridge-managed sessions.
+
+    ``list_sessions()`` is already newest-first. Prefer an active/current owned
+    session (running/idle/starting/created) for the worktree; when nothing is
+    live, fall back to the newest remaining match so read-only history access
+    still works for a dormant worktree. ``exclude_session_id`` lets a follower
+    ignore the predecessor and pick up a successor after handoff.
+    """
+    list_sessions = getattr(client, "list_sessions", None)
+    if list_sessions is None:
+        return None
+    try:
+        sessions = list_sessions()
+    except Exception:
+        return None
+
+    fallback: str | None = None
+    for session in sessions:
+        session_id = str(session.get("session_id") or "")
+        if not session_id or session.get("worktree_id") != worktree_id:
+            continue
+        if exclude_session_id and session_id == exclude_session_id:
+            continue
+        if _session_status_name(session) in {
+            "created", "starting", "running", "idle",
+        }:
+            return session_id
+        if fallback is None:
+            fallback = session_id
+    return fallback
+
+
+def _wait_for_worktree_read_target(
     client,
     target: str,
     *,
@@ -3562,7 +3597,7 @@ def _wait_for_live_read_target(
     require_successor: bool = False,
     grace_s: float | None = None,
 ) -> str | None:
-    """Retry live-target resolution for a represented ``read`` target.
+    """Retry worktree-target resolution for a bridge-managed ``read`` target.
 
     Used both when a worktree handle is momentarily unregistered during initial
     attach, and mid-follow when a handoff or restart temporarily removes the
@@ -3576,11 +3611,12 @@ def _wait_for_live_read_target(
         grace_s = _STREAM_404_GRACE_S
     deadline = time.monotonic() + max(0.0, grace_s)
     while True:
-        live = client.resolve_live_session(target)
-        session_id = str(live.get("session_id") or "")
-        if session_id and (
-            not require_successor or session_id != prior_session_id
-        ):
+        session_id = _resolve_read_worktree_session(
+            client,
+            target,
+            exclude_session_id=(prior_session_id if require_successor else None),
+        )
+        if session_id:
             return session_id
         if time.monotonic() >= deadline:
             return None
@@ -4220,7 +4256,7 @@ def _stream_feed(
 
     def _follow_successor(*, require_successor: bool) -> bool:
         nonlocal session_id, cursor, turn_complete_seen, first_404_at
-        new_session_id = _wait_for_live_read_target(
+        new_session_id = _wait_for_worktree_read_target(
             client,
             follow_handle or "",
             prior_session_id=session_id,
@@ -4659,7 +4695,7 @@ def _cmd_read(args: argparse.Namespace) -> None:
     renderer = _make_renderer(args)
     session_id, follow_handle = _resolve_read_target(client, target)
     if follow_handle and session_id is None:
-        session_id = _wait_for_live_read_target(client, follow_handle)
+        session_id = _wait_for_worktree_read_target(client, follow_handle)
         if not session_id:
             _report_unavailable_read_target(follow_handle)
             sys.exit(1)
