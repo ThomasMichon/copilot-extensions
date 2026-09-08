@@ -18,6 +18,7 @@ emit_session_start_json() {
   fi
 }
 trap 'emit_session_start_json' EXIT
+if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then exit 0; fi
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
 name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || exit 0

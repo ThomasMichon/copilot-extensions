@@ -1,12 +1,18 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-mcp",
   "module": "agent_mcp",
-  "runtimeRoot": ".agent-mcp",
+  "legacyRuntimeRoot": ".agent-mcp",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_MCP_NO_SELFPROVISION",
   "purpose": "Wrap authenticate and materialize MCP servers",
   "installer": "init",
   "windowsCatalogShim": "cmd",
-  "provisionMode": "direct"
+  "provisionMode": "direct",
+  "payloadRootEnv": "AGENT_MCP_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  }
 }
