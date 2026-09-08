@@ -312,15 +312,13 @@ def test_missing_provenance_commit_recovers_history_once(
         if args == (
             "fetch",
             "--quiet",
-            "--depth=512",
             "origin",
             checker._MAIN_REFSPEC,
         ):
             state["available"] = True
             return subprocess.CompletedProcess(args, 0, "", "")
         if args in {
-            ("fetch", "--quiet", "--unshallow", "origin", checker._MAIN_REFSPEC),
-            ("fetch", "--quiet", "origin", checker._MAIN_REFSPEC),
+            ("fetch", "--quiet", "--unshallow", "origin"),
         }:
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(f"unexpected git call: {args}")
@@ -331,7 +329,7 @@ def test_missing_provenance_commit_recovers_history_once(
     assert checker._ensure_commit_available(commit) is True
     assert checker._ensure_commit_available(commit) is True
     assert calls.count(
-        ("fetch", "--quiet", "--depth=512", "origin", checker._MAIN_REFSPEC)
+        ("fetch", "--quiet", "origin", checker._MAIN_REFSPEC)
     ) == 1
 
 

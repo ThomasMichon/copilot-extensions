@@ -175,8 +175,8 @@ def _ensure_commit_available(commit: str) -> bool:
         return False
     _FETCH_RECOVERY_ATTEMPTED = True
     for fetch_args in (
-        ("fetch", "--quiet", "--depth=512", "origin", _MAIN_REFSPEC),
-        ("fetch", "--quiet", "--unshallow", "origin", _MAIN_REFSPEC),
+        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
+        ("fetch", "--quiet", "--unshallow", "origin"),
         ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
     ):
         _git(*fetch_args)
