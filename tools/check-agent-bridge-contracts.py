@@ -75,7 +75,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "remote_operations": "REMOTE_OPERATIONS_PROTOCOL_VERSION",
     "conditional_idle_end": "CONDITIONAL_IDLE_END_PROTOCOL_VERSION",
 }
-_UNSHALLOW_ATTEMPTED = False
+_FETCH_RECOVERY_ATTEMPTED = False
 
 
 def _clean_git_environment() -> dict[str, str]:
@@ -166,19 +166,22 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _ensure_commit_available(commit: str) -> bool:
-    global _UNSHALLOW_ATTEMPTED
+    global _FETCH_RECOVERY_ATTEMPTED
 
     if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
         return True
-    if _UNSHALLOW_ATTEMPTED:
+    if _FETCH_RECOVERY_ATTEMPTED:
         return False
-    shallow = _git("rev-parse", "--is-shallow-repository")
-    if shallow.returncode != 0 or shallow.stdout.strip() != "true":
-        return False
-    _UNSHALLOW_ATTEMPTED = True
-    if _git("fetch", "--quiet", "--unshallow", "origin").returncode != 0:
-        return False
-    return _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0
+    _FETCH_RECOVERY_ATTEMPTED = True
+    for fetch_args in (
+        ("fetch", "--quiet", "--depth=512", "origin", "main"),
+        ("fetch", "--quiet", "--unshallow", "origin"),
+        ("fetch", "--quiet", "origin", "main"),
+    ):
+        _git(*fetch_args)
+        if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
+            return True
+    return False
 
 
 def _git_blob(commit: str, path: str) -> str | None:
