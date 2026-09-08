@@ -906,15 +906,17 @@ function Install-Package {
     foreach ($lib in @(
         @{
             Name = 'config-migrate'
+            Package = 'agent-config-migrate'
             Path = Join-Path $PluginDir 'libs\config-migrate'
         },
         @{
             Name = 'agent-procutil'
+            Package = 'agent-procutil'
             Path = Join-Path $PluginDir 'libs\agent-procutil'
         }
     )) {
         if (-not (Test-Path (Join-Path $lib.Path 'pyproject.toml'))) { continue }
-        $libOut = & uv pip install --python $VenvPython --no-build-isolation $lib.Path --quiet 2>&1
+        $libOut = & uv pip install --python $VenvPython --no-build-isolation --reinstall-package $lib.Package $lib.Path --quiet 2>&1
         $libResult = $LASTEXITCODE
         if ($libResult -ne 0) {
             $ErrorActionPreference = $prevEAP

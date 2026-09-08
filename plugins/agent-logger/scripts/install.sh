@@ -155,7 +155,9 @@ fi
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
-shift || true
+if [[ $# -gt 0 ]]; then
+    shift
+fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --install-dir)
@@ -750,14 +752,14 @@ install_package() {
     cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
   fi
   if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    uv pip install --python "${VENV}/bin/python" --no-build-isolation "${cfg_migrate_dir}" --quiet
+    uv pip install --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet
   fi
   local procutil_dir="${PLUGIN_DIR}/libs/agent-procutil"
   if [ ! -f "${procutil_dir}/pyproject.toml" ]; then
     procutil_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/agent-procutil"
   fi
   if [ -f "${procutil_dir}/pyproject.toml" ]; then
-    uv pip install --python "${VENV}/bin/python" --no-build-isolation "${procutil_dir}" --quiet
+    uv pip install --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet
   fi
   uv pip install --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet
   ok "installed agent-logger package"
