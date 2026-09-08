@@ -1151,9 +1151,8 @@ deploy_binstub() {
         warn "Refusing to deploy project binstub for reserved runtime name 'agent-worktrees' (global command owned by deploy_tool_binstub)"
         return 0
     fi
-    # Generate project-specific binstub that routes through the Python CLI.
-    # The CLI dispatches: no args → launch session, known subcommand → handler.
-    # Falls back to launch-session.sh if venv is missing (recovery path).
+    # Generate a project entry point pinned to this payload. The payload owns
+    # runtime/context selection for both interactive and subcommand paths.
     local tmp
     tmp="$(mktemp "$LOCAL_BIN/$PROJECT_NAME.XXXXXX")"
     cat > "$tmp" <<'BINSTUB_HEAD'
@@ -1163,27 +1162,7 @@ BINSTUB_HEAD
     cat >> "$tmp" <<BINSTUB_BODY
 export PYTHONUTF8=1
 export AGENT_WORKTREES_LAUNCH_ID="$PROJECT_NAME-\$\$-\$RANDOM-\$(date +%s)"
-export AGENT_WORKTREES_BINSTUB_STARTED="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-export AGENT_WORKTREES_LAUNCH_TRACE="\$HOME/.agent-worktrees/logs/picker-launches.jsonl"
-mkdir -p "\$(dirname "\$AGENT_WORKTREES_LAUNCH_TRACE")" 2>/dev/null || true
-printf '%s\n' '{"event":"binstub_start","timestamp":"'"\$AGENT_WORKTREES_BINSTUB_STARTED"'","launch_id":"'"\$AGENT_WORKTREES_LAUNCH_ID"'","project":"$PROJECT_NAME"}' >>"\$AGENT_WORKTREES_LAUNCH_TRACE" 2>/dev/null || true
-if [[ \$# -eq 0 ]]; then
-    exec "\$HOME/.agent-worktrees/bin/launch-session.sh" --project "$PROJECT_NAME"
-fi
-# Context resolves from CWD / --project (git-like); the binstub names its
-# project via --project, not an ambient env var.
-# Resolve the active versioned runtime directly (the .venv junction is retired
-# -- #637/#1085/#1106); NEVER exec this binstub itself, which would recurse
-# into an unbounded process storm.
-_root="\$HOME/.agent-worktrees"
-AW_PY=""
-[[ -f "\$_root/bin/resolve-runtime.sh" ]] && source "\$_root/bin/resolve-runtime.sh"
-_py="\$AW_PY"
-if [[ -n "\$_py" && -x "\$_py" ]]; then
-    exec "\$_py" -m agent_worktrees --project "$PROJECT_NAME" "\$@"
-fi
-# Recovery (venv missing): preserve explicit project identity.
-exec "\$HOME/.agent-worktrees/bin/launch-session.sh" --project "$PROJECT_NAME" "\$@"
+exec "$PLUGIN_DIR/bin/payload/agent-worktrees" --project "$PROJECT_NAME" "\$@"
 BINSTUB_BODY
     chmod +x "$tmp"
     mv -f "$tmp" "$LOCAL_BIN/$PROJECT_NAME"

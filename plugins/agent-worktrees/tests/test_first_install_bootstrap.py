@@ -247,17 +247,21 @@ def test_installers_preserve_activation_during_inventory_bootstrap() -> None:
     assert "copilot plugin install agent-worktrees@copilot-extensions" not in ps1
 
 
-def test_generated_project_binstubs_use_shared_three_tier_resolvers() -> None:
+def test_generated_project_binstubs_use_payload_dispatchers() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
-
-    assert 'source "\\$_root/bin/resolve-runtime.sh"' in sh
-    assert "resolve-runtime.ps1" in ps1
-    assert "%SystemRoot%\\System32\\where.exe" in ps1
-    assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in ps1
-    assert "last-known-good" not in sh.split("deploy_binstub() {", 1)[1].split(
+    sh_binstub = sh.split("deploy_binstub() {", 1)[1].split(
         "deploy_global_config()", 1
     )[0]
+    ps1_binstub = ps1.split("function Deploy-Binstub {", 1)[1].split(
+        "function Deploy-GlobalBinstub {", 1
+    )[0]
+
+    assert "bin/payload/agent-worktrees" in sh_binstub
+    assert "resolve-runtime.sh" not in sh_binstub
+    assert "bin\\payload\\agent-worktrees" in ps1_binstub
+    assert "resolve-runtime.ps1" not in ps1_binstub
+    assert "last-known-good" not in sh_binstub
 
 
 def test_launch_session_cmd_preserves_windows_powershell_fallback() -> None:
@@ -363,7 +367,16 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
         / "copilot-extensions"
         / "agent-worktrees"
     )
-    shutil.copytree(PLUGIN, payload)
+    shutil.copytree(
+        PLUGIN,
+        payload,
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "*.pyc",
+            ".pytest_cache",
+            ".test-venvs",
+        ),
+    )
 
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
