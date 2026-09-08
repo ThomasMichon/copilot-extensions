@@ -2138,7 +2138,6 @@ class Supervisor:
             else:
                 if (
                     body_already_released
-                    and res.get("worktree")
                     and claim_token is None
                 ):
                     try:

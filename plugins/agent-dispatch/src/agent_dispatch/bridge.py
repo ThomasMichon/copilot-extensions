@@ -237,7 +237,13 @@ def spawn_or_resume_worker(
 
 
 def stop_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
-    """Stop one local headless body and reap its owned Session Host child."""
+    """Stop a local body and reap its host when the peer supports that option.
+
+    Independently installed older Agent Bridge builds do not know
+    ``--reap-host``. Only argparse's exact unsupported-option response permits
+    a compatibility retry with ordinary stop; every operational failure remains
+    a hard failure.
+    """
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
@@ -249,6 +255,22 @@ def stop_worker(session_id: str, *, timeout: float | None = 20.0) -> bool:
         timeout=timeout,
         **no_window_kwargs(),
     )
+    output = f"{completed.stderr or ''}\n{completed.stdout or ''}".lower()
+    if (
+        completed.returncode == 2
+        and (
+            "unrecognized arguments: --reap-host" in output
+            or "unrecognized argument: --reap-host" in output
+        )
+    ):
+        completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
+            [*exe, "stop", session_id],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
     return completed.returncode == 0
 
 

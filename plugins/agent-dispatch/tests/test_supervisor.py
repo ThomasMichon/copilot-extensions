@@ -4162,7 +4162,37 @@ def test_absent_local_release_calls_idempotent_end(q, client):
 
     assert sup.release_requested_bodies() == 1
     assert ended == ["session-stopped"]
-    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+    complete = q.get_reservation(reservation.key)
+    assert complete.state == SpawnState.SETTLED
+    assert complete.conclusion_state == "complete"
+    assert complete.cleanup_claim_token
+
+
+def test_retired_pending_without_worktree_claims_before_completion(q, client):
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.request_spawn_release(reservation.key, disposition="failed")
+    q.retire_spawn(
+        reservation.key,
+        exact_absence=True,
+        conclusion_state="pending",
+        conclusion_detail='{"action":"failed","reason":"legacy-cleanup"}',
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        nudge=False,
+    )
+
+    assert sup.release_requested_bodies() == 0
+    complete = q.get_reservation(reservation.key)
+    assert complete.state == SpawnState.FAILED
+    assert complete.conclusion_state == "complete"
+    assert complete.cleanup_claim_token
+    assert "reservation-has-no-worktree" in (
+        complete.conclusion_detail or ""
+    )
 
 
 def test_failed_absent_session_end_retries_after_exclusive_release(q, client):
