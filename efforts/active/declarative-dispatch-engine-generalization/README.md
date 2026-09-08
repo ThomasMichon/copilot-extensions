@@ -484,4 +484,59 @@ other phases actually land in.
   `check-docs-consistency.py` all pass. Bumped `agent-dispatch` to
   `0.1.2-dev41` across the three version surfaces.
 
+### 2026-09-08 - Extended "no opt-in" to every agent-* plugin with a real cutover
+
+- The operator broadened the ask: "We want *all* installs from agent-*
+  plugins to be zero-downtime, no 'opt-in' business" -- not just
+  agent-dispatch. Surveyed all 11 `agent-*` plugins
+  (agent-bridge/codespaces/containers/dispatch/index/logger/machines/mcp/ssh/
+  vault/worktrees) for (a) whether each runs a persistent daemon at all, and
+  (b) for those that do, whether the daemon's install-time update path is
+  unconditional, opt-in, or missing entirely.
+  - Only agent-bridge, agent-dispatch, agent-index, and agent-vault vendor
+    `zdd` / run a persistent daemon with real cutover relevance.
+    agent-codespaces/containers/logger/machines/mcp/ssh/worktrees are
+    CLI/hook-only or have no installer script at all -- not applicable.
+  - **agent-bridge** and **agent-dispatch** were already unconditional
+    (confirmed again by reading `Invoke-Update` directly) -- no work needed
+    beyond the doc corrections below.
+  - **agent-index** *looked* partial per the pattern doc, but reading its
+    actual `Invoke-ServiceCutover` showed the service cutover is **already
+    unconditional** too (`agent_index deploy` runs automatically whenever a
+    live, healthy service is running) -- it was just missing the same
+    `"zeroDowntimeUpdate": true` + back-compat `-ZeroDowntime` switch wiring
+    agent-dispatch got last leg. Fixed identically: added the plugin.json
+    flag and a deprecated no-op `[switch]$ZeroDowntime` param to its
+    `install.ps1`. Bumped `agent-index` to `0.1.0-dev147` across all four
+    version surfaces (plugin.json, pyproject.toml, marketplace.json, **and**
+    `src/agent_index/__init__.py`'s hardcoded fallback `__version__` --
+    agent-index has one more version surface than agent-dispatch does).
+  - **agent-vault** genuinely has **no** zdd-based cutover yet (its update is
+    a cooperative stop/drain/restart with credential-cache-based reconnect,
+    not an active/passive routing flip) -- this is not an "opt-in flag to
+    remove" situation, it is a real feature gap already tracked in the
+    pattern doc's own per-plugin table ("Lightest tier" work item). Left
+    untouched this leg: it is a bigger, security-sensitive lift (touches the
+    unlocked-credential-session handoff) that deserves its own dedicated
+    slice rather than being rushed in alongside a flag-wiring pass.
+  - **agent-mcp** has `zdd` adopted for a manually-triggered `cutover` verb
+    but has no install/activation script of its own yet to wire it into
+    (per the doc's own existing "Work" note) -- also out of scope here for
+    the same reason (no installer path exists to make unconditional).
+  - Corrected two more stale doc claims in the process (in addition to the
+    agent-dispatch one from last leg): the per-plugin table's agent-bridge
+    row still described `-ZeroDowntime` as an install-path opt-in and
+    "installer-driven" as future work, when `Invoke-Update` already runs it
+    unconditionally; the agent-index row said the same. Rewrote both rows,
+    and rewrote the Invariants section's "interim reality" footnote (which
+    only mentioned agent-bridge + agent-dispatch, and repeated the
+    now-corrected claim that agent-bridge's path "is not yet fully
+    installer-driven") to name all three plugins and explain why each still
+    keeps a public `deploy` verb despite its install path already being
+    fully automatic (manual escape hatch; for agent-dispatch, also the
+    self-update loop's spawn target).
+- Validated: `install.ps1` parses cleanly, `plugin.json` is valid JSON, and
+  `check-install-contract.py` / `check-version-consistency.py` /
+  `check-docs-consistency.py` all pass.
+
 

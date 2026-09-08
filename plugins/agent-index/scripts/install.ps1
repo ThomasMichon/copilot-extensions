@@ -28,7 +28,16 @@ param(
     # refuses scheduled-task CREATION without admin. Opt-in only; default is
     # user-mode with no elevation. Never elevates install/update -- only the
     # `register-tasks` action (see docs/install-contract.md § Hard rules).
-    [switch]$AllowTaskElevation
+    [switch]$AllowTaskElevation,
+
+    # DEPRECATED / no-op (Thread B): the graceful zdd cutover
+    # (Invoke-ServiceCutover -> `agent_index deploy`) is already the DEFAULT on
+    # `update` whenever a live, healthy service is running -- activation always
+    # cuts over automatically, so this opt-in is not required. The switch is
+    # still ACCEPTED (so a caller such as the launch-path reconciler, which
+    # appends it whenever a plugin declares `"zeroDowntimeUpdate": true`,
+    # doesn't break) but has no effect.
+    [switch]$ZeroDowntime
 )
 
 Set-StrictMode -Version 2.0
