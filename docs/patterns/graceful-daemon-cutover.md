@@ -264,11 +264,18 @@ agent-bridge needs.
    an operator CLI surface.
    > **Interim reality (not yet converged):** both agent-bridge and
    > agent-dispatch currently ship a public `deploy` verb as an operator
-   > escape hatch / self-update trigger, because neither's `install.ps1
-   > update` is fully installer-driven yet (see the per-plugin table). Once a
-   > plugin's `update`/activation path hands off via cutover automatically end
-   > to end, demote its `deploy` verb back to an installer-internal seam per
-   > this invariant -- don't treat its present existence as the target state.
+   > escape hatch / self-update trigger. agent-bridge's `update`/activation
+   > path is not yet fully installer-driven (see the per-plugin table).
+   > agent-dispatch's `install.ps1 update`/`install.sh update` **are**
+   > already fully installer-driven (unconditional cutover, no flag) -- its
+   > `deploy` verb is not filling an install-path gap, only serving as (a) a
+   > manual escape hatch and (b) the spawn target for its opt-in live
+   > self-update loop, which reacts to drift *between* installer runs, a case
+   > the installer-driven path does not cover by itself. Once agent-bridge's
+   > path converges too, and once agent-dispatch's self-update loop (or an
+   > equivalent between-launch trigger) is judged to make a *manual* `deploy`
+   > unnecessary, demote both verbs back to installer-internal seams per this
+   > invariant -- don't treat their present existence as the target state.
 2. **No stop-then-start for a routine version bump.** The default is a cutover
    (new slot beside old → flip → drain → retire). Stop-and-swap is the fallback
    only when a cutover cannot run or fails.
