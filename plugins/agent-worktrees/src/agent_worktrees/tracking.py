@@ -770,6 +770,19 @@ class WorktreeRecord:
     pair_role: str | None = None
     pair_ref: str | None = None
     pair_kind: str | None = None
+    # citadel paired-worktree reap tombstone (#220 follow-up): stamped ONLY by
+    # :func:`retire_record` when it tombstones (rather than deletes) a paired
+    # record on reap. Deliberately distinct from ``status``/``completed_at``:
+    # those can legitimately read ``finalized`` on a worktree that is still
+    # fully alive on disk (merge-safe and "already reaped" are different
+    # things -- see ``finalize``'s own contract). ``reaped_at`` being set is
+    # unambiguous, positive proof that THIS record's worktree has actually
+    # been removed, which lets the sibling's own later reap tell "my pair
+    # partner is a live finalized worktree" apart from "my pair partner was
+    # already reaped and is a pure tombstone" -- only the latter is safe to
+    # hard-delete instead of re-tombstoning. Emitted only when set, so an
+    # unpaired (or not-yet-reaped) record's YAML stays byte-identical.
+    reaped_at: str | None = None
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -2474,6 +2487,7 @@ def load_record(path: Path) -> WorktreeRecord:
         pair_ref=(str(data["pair_ref"]) if data.get("pair_ref") else None),
         pair_kind=(data["pair_kind"]
                    if data.get("pair_kind") in ("worktree", "anchor") else None),
+        reaped_at=(str(data["reaped_at"]) if data.get("reaped_at") else None),
     )
     return record
 
@@ -2969,6 +2983,10 @@ def _save_record_unlocked(
         content += f"pair_ref: {_yaml_scalar(record.pair_ref)}\n"
     if record.pair_kind in ("worktree", "anchor"):
         content += f"pair_kind: {record.pair_kind}\n"
+    # #220 follow-up: reap tombstone marker. Emitted only when set (a record
+    # that was tombstoned by retire_record's paired-reap path).
+    if record.reaped_at:
+        content += f"reaped_at: {_yaml_scalar(record.reaped_at)}\n"
     # agent-fabric resource-claims: the forward outbound list. Emitted only when
     # non-empty (the common case owns nothing), keeping legacy YAMLs identical.
     if record.resources:
@@ -3220,42 +3238,77 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> None:
 
     An ordinary (unpaired) record is deleted outright -- nothing else depends
     on it once its worktree is reaped. A **paired** -harness/-knowledge
-    record is instead rewritten as a minimal ``finalized`` tombstone rather
-    than unlinked: :func:`find_paired_record` resolves a sibling purely by
-    whether ``<id>.yaml`` exists in the *other* project's tracking directory,
-    so deleting it left the sibling side with no way to distinguish "this half
-    of the pair was never carved" from "this half was already reaped" --
-    :func:`default_paired_sibling_final` reports ``None`` ("unknown") either
-    way, and a `None` permanently spares the sibling's own paired-worktree
-    gate. Leaving a tombstoned ``finalized`` record instead lets that probe
-    resolve ``sibling.status == "finalized"`` -> ``True`` and unblock the
-    sibling's cleanup, without weakening the gate for a pair that genuinely
-    hasn't been carved yet.
+    record's fate depends on whether its sibling has ITSELF already been
+    reaped:
 
-    Note this tombstone is intentionally never later fully deleted by peeking
-    at the sibling's ``status`` -- a *live, not-yet-reaped* worktree can
-    legitimately carry ``status == "finalized"`` well before ``cleanup``
-    ever removes its directory (see ``finalize``'s own doc: content merge-safe
-    and folder removal are separate steps). Treating that status as "sibling
-    already reaped, safe to hard-delete both" would delete live tracking
-    metadata for a worktree that still exists on disk. So a paired record
-    always tombstones, without exception, on the (safe) assumption that it
-    might still be needed.
+    * If the sibling record is missing, not yet ``finalized``, or ``finalized``
+      but not marked :attr:`WorktreeRecord.reaped_at` (i.e. still a live,
+      merge-safe-but-not-yet-cleaned worktree), this record is instead
+      rewritten as a minimal ``finalized`` tombstone (with ``reaped_at``
+      stamped) rather than unlinked. :func:`find_paired_record` resolves a
+      sibling purely by whether ``<id>.yaml`` exists in the *other* project's
+      tracking directory, so deleting it outright would leave the sibling
+      side with no way to distinguish "this half of the pair was never
+      carved" from "this half was already reaped" --
+      :func:`default_paired_sibling_final` reports ``None`` ("unknown")
+      either way, and a `None` permanently spares the sibling's own
+      paired-worktree gate. A tombstoned ``finalized`` record lets that probe
+      resolve ``sibling.status == "finalized"`` -> ``True`` and unblock the
+      sibling's cleanup, without weakening the gate for a pair that
+      genuinely hasn't been carved yet.
+    * If the sibling record exists AND already carries ``reaped_at`` (proof
+      it is itself a tombstone left by this exact function, not a live
+      worktree that merely reads ``finalized``), nothing depends on
+      resolving *this* record any more: the sibling's own reap has already
+      happened and only ever needed to be observed once, by this reap. Both
+      records are deleted outright rather than leaving two dangling
+      tombstones behind forever.
 
-    Fail-safe: if the tombstone write raises for any reason, falls back to a
+      ``reaped_at`` -- rather than ``status`` -- is the signal this decision
+      keys on precisely because ``status == "finalized"`` alone is
+      ambiguous: a live, not-yet-cleaned worktree can legitimately carry it
+      for a long time before ``cleanup`` ever removes its directory (merge
+      -safe and already-reaped are different things -- see ``finalize``'s
+      own contract). Peeking at status alone to decide on a hard delete
+      would delete live tracking metadata for a worktree still on disk.
+      ``reaped_at`` is set in exactly one place (this function's tombstone
+      branch), so its presence is unambiguous, positive proof of an actual
+      reap.
+
+    Any resolution failure (an unreadable sibling record, a cross-machine
+    pair, etc.) is treated as "not confirmed reaped" and falls back to the
+    tombstone path -- the safe direction, matching
+    :func:`default_paired_sibling_final`'s own "unknown -> spare" philosophy.
+
+    Fail-safe: if a tombstone write raises for any reason, falls back to a
     plain unlink -- a reap must never be blocked by this bookkeeping.
     """
     path = tracking_path / f"{record.worktree_id}.yaml"
     if record.is_paired:
+        sibling: WorktreeRecord | None = None
         try:
+            sibling = find_paired_record(record)
+        except Exception:
+            sibling = None
+        if sibling is not None and sibling.reaped_at:
+            ref = record.pair_claim_ref
+            if ref is not None and ref.is_qualified and ref.project:
+                (cfg.project_dir(ref.project) / "worktrees"
+                 / f"{ref.worktree_id}.yaml").unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
+            return
+        try:
+            now = _now_iso()
             record.status = "finalized"
             if record.completed_at is None:
-                record.completed_at = _now_iso()
+                record.completed_at = now
+            record.reaped_at = now
             save_record(record, path=path)
             return
         except Exception:
             pass
     path.unlink(missing_ok=True)
+
 
 
 def find_worktree_id_by_session(session_id: str) -> str | None:
