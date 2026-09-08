@@ -55,12 +55,8 @@ def test_identical_resident_lifecycle_requests_coalesce():
     }
     claims = {}
 
-    launch_key, claimed = m._claim_resident_lifecycle(
-        payload, claims, now=10.0
-    )
-    duplicate_key, duplicate_claimed = m._claim_resident_lifecycle(
-        payload, claims, now=10.0
-    )
+    launch_key, claimed = m._claim_resident_lifecycle(payload, claims, now=10.0)
+    duplicate_key, duplicate_claimed = m._claim_resident_lifecycle(payload, claims, now=10.0)
 
     assert launch_key
     assert duplicate_key == launch_key
@@ -79,12 +75,8 @@ def test_distinct_resident_lifecycle_requests_do_not_coalesce():
     second = {**first, "timestamp": 1_800_000_000.5}
     claims = {}
 
-    first_key, first_claimed = m._claim_resident_lifecycle(
-        first, claims, now=10.0
-    )
-    second_key, second_claimed = m._claim_resident_lifecycle(
-        second, claims, now=10.0
-    )
+    first_key, first_claimed = m._claim_resident_lifecycle(first, claims, now=10.0)
+    second_key, second_claimed = m._claim_resident_lifecycle(second, claims, now=10.0)
 
     assert first_key != second_key
     assert first_claimed is True
@@ -99,17 +91,11 @@ def test_completed_resident_lifecycle_claim_expires():
         "timestamp": 1_800_000_000.25,
         "_agentWorktrees": {"pluginVersion": "1.5.3-dev759"},
     }
-    launch_key = m._session_lifecycle_launch_key(
-        payload, "1.5.3-dev759"
-    )
+    launch_key = m._session_lifecycle_launch_key(payload, "1.5.3-dev759")
     claims = {launch_key: 20.0}
 
-    duplicate_key, duplicate_claimed = m._claim_resident_lifecycle(
-        payload, claims, now=19.0
-    )
-    retried_key, retried_claimed = m._claim_resident_lifecycle(
-        payload, claims, now=20.0
-    )
+    duplicate_key, duplicate_claimed = m._claim_resident_lifecycle(payload, claims, now=19.0)
+    retried_key, retried_claimed = m._claim_resident_lifecycle(payload, claims, now=20.0)
 
     assert duplicate_key == launch_key
     assert duplicate_claimed is False
@@ -120,21 +106,15 @@ def test_completed_resident_lifecycle_claim_expires():
 def test_completed_resident_lifecycle_claim_is_retained():
     claims = {"launch-key": float("inf")}
 
-    m._release_resident_lifecycle(
-        "launch-key", claims, completed=True, now=10.0
-    )
+    m._release_resident_lifecycle("launch-key", claims, completed=True, now=10.0)
 
-    assert claims == {
-        "launch-key": 10.0 + m._RESIDENT_LIFECYCLE_DEDUPE_S
-    }
+    assert claims == {"launch-key": 10.0 + m._RESIDENT_LIFECYCLE_DEDUPE_S}
 
 
 def test_failed_resident_lifecycle_claim_is_released():
     claims = {"launch-key": float("inf")}
 
-    m._release_resident_lifecycle(
-        "launch-key", claims, completed=False, now=10.0
-    )
+    m._release_resident_lifecycle("launch-key", claims, completed=False, now=10.0)
 
     assert claims == {}
 
@@ -184,13 +164,16 @@ def test_reconcile_sessions_emits_one_bounded_pass(monkeypatch):
         lambda value: captured.update({"output": value}),
     )
 
-    assert m.cmd_reconcile_sessions(
-        argparse.Namespace(
-            record_budget=2,
-            session_budget=3,
-            projection_budget=4,
+    assert (
+        m.cmd_reconcile_sessions(
+            argparse.Namespace(
+                record_budget=2,
+                session_budget=3,
+                projection_budget=4,
+            )
         )
-    ) == 0
+        == 0
+    )
     assert captured["budgets"] == {
         "record_budget": 2,
         "session_budget": 3,
@@ -205,9 +188,18 @@ def test_reconcile_sessions_emits_one_bounded_pass(monkeypatch):
 
 @pytest.mark.parametrize(
     "val,expected",
-    [("1", True), ("true", True), ("YES", True), ("on", True), ("", True),
-     ("nope", True), ("0", False), ("false", False), ("no", False),
-     ("off", False)],
+    [
+        ("1", True),
+        ("true", True),
+        ("YES", True),
+        ("on", True),
+        ("", True),
+        ("nope", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("off", False),
+    ],
 )
 def test_enabled_env(monkeypatch, val, expected):
     monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", val)
@@ -224,14 +216,15 @@ def test_registry_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
     assert m._register_session_for_monitor("wt-a", "/w/a") is True
     assert m._register_session_for_monitor("wt-b", "/w/b") is True
-    assert m._register_session_for_monitor("", "/w/x") is False    # no session
+    assert m._register_session_for_monitor("", "/w/x") is False  # no session
     assert m._register_session_for_monitor("wt-c", None) is False  # no path
     reg = m._read_monitor_registry(tmp_path / "reg")
     assert reg == {"wt-a": "/w/a", "wt-b": "/w/b"}
 
 
 @pytest.mark.parametrize(
-    "bad", ["../evil", "wt-../../x", "/abs/path", "wt-a/b", "wt-a\\b", "notwt"])
+    "bad", ["../evil", "wt-../../x", "/abs/path", "wt-a/b", "wt-a\\b", "notwt"]
+)
 def test_registry_rejects_unsafe_session(tmp_path, monkeypatch, bad):
     """``--session`` is untrusted: a traversal / absolute / non-wt name must be
     rejected (never escape the registry dir), so it writes nothing."""
@@ -246,8 +239,10 @@ def test_registry_rejects_unsafe_session(tmp_path, monkeypatch, bad):
 def _capture_set(monkeypatch):
     calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        m, "_monitor_mux_set",
-        lambda mux_bin, sess, opt, val: calls.append((sess, opt, val)) or True)
+        m,
+        "_monitor_mux_set",
+        lambda mux_bin, sess, opt, val: calls.append((sess, opt, val)) or True,
+    )
     return calls
 
 
@@ -260,8 +255,8 @@ def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
 
     # wt-a + wt-b are live; wt-gone is not; a non-wt session is ignored.
     monkeypatch.setattr(
-        m, "_monitor_list_sessions",
-        lambda mux_bin: {"wt-a": 1, "wt-b": 0, "other": 1})
+        m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1, "wt-b": 0, "other": 1}
+    )
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -270,13 +265,13 @@ def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
     ctx_done: set[str] = set()
     served = m._monitor_sweep("tmux", "TOK", "PFX", ctx_done)
 
-    assert served == 2                                  # wt-a, wt-b
-    assert not (reg / "wt-gone").exists()               # pruned
+    assert served == 2  # wt-a, wt-b
+    assert not (reg / "wt-gone").exists()  # pruned
     for sess in ("wt-a", "wt-b"):
-        assert (sess, "@aw_updater", "TOK") in calls    # won the election
+        assert (sess, "@aw_updater", "TOK") in calls  # won the election
         assert (sess, "@aw_updater_prefix", "PFX") in calls
-        assert (sess, "@aw_ctx", "CTX") in calls        # identity once
-        assert (sess, "@aw_seg", "SEG") in calls        # disposition
+        assert (sess, "@aw_ctx", "CTX") in calls  # identity once
+        assert (sess, "@aw_seg", "SEG") in calls  # disposition
     assert ctx_done == {"wt-a", "wt-b"}
     # no work for the gone or non-wt sessions
     assert not any(s in ("wt-gone", "other") for s, _, _ in calls)
@@ -294,25 +289,22 @@ def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
 
     ctx_done: set[str] = set()
     m._monitor_sweep("tmux", "T", "P", ctx_done)
-    m._monitor_sweep("tmux", "T", "P", ctx_done)        # second pass
+    m._monitor_sweep("tmux", "T", "P", ctx_done)  # second pass
 
     ctx_sets = [c for c in calls if c[1] == "@aw_ctx"]
     seg_sets = [c for c in calls if c[1] == "@aw_seg"]
-    assert len(ctx_sets) == 1                            # identity: once
-    assert len(seg_sets) == 2                            # disposition: every pass
+    assert len(ctx_sets) == 1  # identity: once
+    assert len(seg_sets) == 2  # disposition: every pass
 
 
-def test_sweep_reuses_segment_and_skips_unchanged_mux_values(
-    tmp_path, monkeypatch
-):
+def test_sweep_reuses_segment_and_skips_unchanged_mux_values(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a")
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
-    monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     calls = _capture_set(monkeypatch)
 
     class Cache:
@@ -325,17 +317,11 @@ def test_sweep_reuses_segment_and_skips_unchanged_mux_values(
     cache = Cache()
     published = {}
     ctx_done = set()
-    m._monitor_sweep(
-        "tmux", "T", "P", ctx_done, segment_cache=cache,
-        published=published)
-    m._monitor_sweep(
-        "tmux", "T", "P", ctx_done, segment_cache=cache,
-        published=published)
+    m._monitor_sweep("tmux", "T", "P", ctx_done, segment_cache=cache, published=published)
+    m._monitor_sweep("tmux", "T", "P", ctx_done, segment_cache=cache, published=published)
 
     assert cache.count == 2
-    assert [call for call in calls if call[1] == "@aw_seg"] == [
-        ("wt-a", "@aw_seg", "SEG")
-    ]
+    assert [call for call in calls if call[1] == "@aw_seg"] == [("wt-a", "@aw_seg", "SEG")]
 
 
 def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
@@ -344,8 +330,7 @@ def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
     m._register_session_for_monitor("wt-a", "/w/a")
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
-    monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     monkeypatch.setattr(m, "_monitor_mux_set", lambda *a, **k: True)
     activations = []
 
@@ -363,12 +348,8 @@ def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
     prior = m.cfg.active_project()
     projects = {}
     try:
-        m._monitor_sweep(
-            "tmux", "T", "P", set(), segment_cache=Cache(),
-            session_projects=projects)
-        m._monitor_sweep(
-            "tmux", "T", "P", set(), segment_cache=Cache(),
-            session_projects=projects)
+        m._monitor_sweep("tmux", "T", "P", set(), segment_cache=Cache(), session_projects=projects)
+        m._monitor_sweep("tmux", "T", "P", set(), segment_cache=Cache(), session_projects=projects)
     finally:
         m.cfg.set_active_project(prior)
 
@@ -376,22 +357,22 @@ def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
     assert projects == {m.os.path.normcase(m.os.path.realpath("/w/a")): "repo-a"}
 
 
-def test_sweep_skips_invalid_paths_when_pruning_project_cache(
-    tmp_path, monkeypatch
-):
+def test_sweep_skips_invalid_paths_when_pruning_project_cache(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     reg.mkdir()
     (reg / "wt-a").write_text("bad\0path", encoding="utf-8")
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
     monkeypatch.setattr(m, "_monitor_mux_set", lambda *a, **k: True)
-    monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     projects = {"stale": "repo-a"}
 
-    assert m._monitor_sweep(
-        "tmux", "T", "P", set(), segment_cache=object(),
-        session_projects=projects) == 1
+    assert (
+        m._monitor_sweep(
+            "tmux", "T", "P", set(), segment_cache=object(), session_projects=projects
+        )
+        == 1
+    )
     assert projects == {}
 
 
@@ -403,8 +384,7 @@ def test_sweep_retries_failed_mux_publish(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
-    monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     attempts = []
 
     def publish(mux, session, option, value):
@@ -424,26 +404,19 @@ def test_sweep_republishes_for_recreated_mux_session(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a")
     incarnation = ["100"]
-    monkeypatch.setattr(
-        m, "_monitor_list_sessions",
-        lambda mux_bin: {"wt-a": (1, incarnation[0])})
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, incarnation[0])})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
-    monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     calls = _capture_set(monkeypatch)
     published = {}
     incarnations = {}
     ctx_done = set()
 
-    m._monitor_sweep(
-        "tmux", "T", "P", ctx_done, published=published,
-        incarnations=incarnations)
+    m._monitor_sweep("tmux", "T", "P", ctx_done, published=published, incarnations=incarnations)
     incarnation[0] = "200"
-    m._monitor_sweep(
-        "tmux", "T", "P", ctx_done, published=published,
-        incarnations=incarnations)
+    m._monitor_sweep("tmux", "T", "P", ctx_done, published=published, incarnations=incarnations)
 
     assert len([call for call in calls if call[1] == "@aw_seg"]) == 2
     assert len([call for call in calls if call[1] == "@aw_ctx"]) == 2
@@ -459,7 +432,8 @@ def test_segment_cache_throttles_and_invalidates(monkeypatch):
     )
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(
-        m, "_render_status_segment",
+        m,
+        "_render_status_segment",
         lambda path, **kwargs: renders.append(path) or f"SEG-{len(renders)}",
     )
     cache = m._StatusSegmentCache(ttl=60)
@@ -477,8 +451,7 @@ def test_segment_cache_reuses_canonical_target_before_record_lookup(monkeypatch)
     monkeypatch.setattr(
         m,
         "_find_record_for_path",
-        lambda path: lookups.append(path)
-        or types.SimpleNamespace(worktree_path="/w/a"),
+        lambda path: lookups.append(path) or types.SimpleNamespace(worktree_path="/w/a"),
     )
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(
@@ -538,21 +511,33 @@ def test_hook_mutation_targets_are_target_aware():
             return Guard
 
     policy = m._ResidentHookPolicy(Client())
-    assert policy.mutation_targets({
-        "toolName": "edit",
-        "cwd": "/w/a",
-        "toolArgs": {"path": "/w/b/file.py"},
-    }) == ["/w/b/file.py"]
-    assert policy.mutation_targets({
-        "toolName": "powershell",
-        "cwd": "/w/a",
-        "toolArgs": {"command": "git status --short"},
-    }) == []
-    assert policy.mutation_targets({
-        "toolName": "powershell",
-        "cwd": "/w/a",
-        "toolArgs": {"command": "git commit -m test"},
-    }) is None
+    assert policy.mutation_targets(
+        {
+            "toolName": "edit",
+            "cwd": "/w/a",
+            "toolArgs": {"path": "/w/b/file.py"},
+        }
+    ) == ["/w/b/file.py"]
+    assert (
+        policy.mutation_targets(
+            {
+                "toolName": "powershell",
+                "cwd": "/w/a",
+                "toolArgs": {"command": "git status --short"},
+            }
+        )
+        == []
+    )
+    assert (
+        policy.mutation_targets(
+            {
+                "toolName": "powershell",
+                "cwd": "/w/a",
+                "toolArgs": {"command": "git commit -m test"},
+            }
+        )
+        is None
+    )
 
 
 def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path, monkeypatch):
@@ -592,9 +577,7 @@ def test_anchor_policy_cache_reloads_when_registry_changes(tmp_path, monkeypatch
     assert seen_roots and set(seen_roots) == {selected_root}
 
 
-def test_resident_agent_bridge_policy_denies_guarded_write(
-    tmp_path, monkeypatch
-):
+def test_resident_agent_bridge_policy_denies_guarded_write(tmp_path, monkeypatch):
     from agent_worktrees import related, repos
 
     control = tmp_path / "control"
@@ -614,20 +597,20 @@ def test_resident_agent_bridge_policy_denies_guarded_write(
         "_related_config_source_anchors",
         lambda root, **_kwargs: [root],
     )
-    monkeypatch.setattr(
-        related, "list_related_grafted", lambda anchors: [entry])
-    monkeypatch.setattr(
-        repos, "resolve_path", lambda name: str(guarded))
+    monkeypatch.setattr(related, "list_related_grafted", lambda anchors: [entry])
+    monkeypatch.setattr(repos, "resolve_path", lambda name: str(guarded))
 
     hook_client = m._load_hook_client_module()
     assert hook_client is not None
     policy = m._ResidentHookPolicy(hook_client)
     monkeypatch.setattr(policy, "anchors", lambda: [])
-    decision = policy.pre({
-        "toolName": "edit",
-        "cwd": str(control),
-        "toolArgs": {"path": str(guarded / "file.py")},
-    })
+    decision = policy.pre(
+        {
+            "toolName": "edit",
+            "cwd": str(control),
+            "toolArgs": {"path": str(guarded / "file.py")},
+        }
+    )
     assert decision["permissionDecision"] == "deny"
     assert "agent-bridge send devbox" in decision["permissionDecisionReason"]
 
@@ -639,8 +622,8 @@ def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
     m._register_session_for_monitor("wt-b", "/p1/b")
     m._register_session_for_monitor("wt-c", "/p2/c")
     monkeypatch.setattr(
-        m, "_monitor_list_sessions",
-        lambda mux_bin: {"wt-a": 1, "wt-b": 1, "wt-c": 1})
+        m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1, "wt-b": 1, "wt-c": 1}
+    )
 
     project_by_path = {"/p1/a": "p1", "/p1/b": "p1", "/p2/c": "p2"}
 
@@ -649,8 +632,11 @@ def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
 
     warmed: list[str] = []
     monkeypatch.setattr(m, "_activate_project_for_path", _activate)
-    monkeypatch.setattr(m, "_warm_list_cache_for_active_project",
-                        lambda **kw: warmed.append(m.cfg.project_name()) or 1)
+    monkeypatch.setattr(
+        m,
+        "_warm_list_cache_for_active_project",
+        lambda **kw: warmed.append(m.cfg.project_name()) or 1,
+    )
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
     _capture_set(monkeypatch)
@@ -659,59 +645,53 @@ def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
     assert sorted(warmed) == ["p1", "p2"]
 
 
-def test_sweep_publishes_each_served_session_to_pane_reconciler(
-    tmp_path, monkeypatch
-):
+def test_sweep_publishes_each_served_session_to_pane_reconciler(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a")
     m._register_session_for_monitor("wt-b", "/w/b")
-    monkeypatch.setattr(
-        m, "_monitor_list_sessions", lambda mux: {"wt-a": 1, "wt-b": 1})
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux: {"wt-a": 1, "wt-b": 1})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
-    monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     _capture_set(monkeypatch)
     observed: list[tuple[str, str]] = []
 
-    assert m._monitor_sweep(
-        "tmux",
-        "T",
-        "P",
-        set(),
-        pane_observer=lambda session, path: observed.append((session, path)),
-    ) == 2
+    assert (
+        m._monitor_sweep(
+            "tmux",
+            "T",
+            "P",
+            set(),
+            pane_observer=lambda session, path: observed.append((session, path)),
+        )
+        == 2
+    )
     assert sorted(observed) == [("wt-a", "/w/a"), ("wt-b", "/w/b")]
 
 
-def test_sweep_picker_root_keeps_project_warm_without_sessions(
-    tmp_path, monkeypatch
-):
+def test_sweep_picker_root_keeps_project_warm_without_sessions(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {})
     warmed: list[str] = []
     monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project",
+        m,
+        "_warm_list_cache_for_active_project",
         lambda **kw: warmed.append(m.cfg.project_name()) or 1,
     )
 
-    served = m._monitor_sweep(
-        "tmux", "T", "P", set(), picker_projects={"picker-project"})
+    served = m._monitor_sweep("tmux", "T", "P", set(), picker_projects={"picker-project"})
 
     assert served == 0
     assert warmed == ["picker-project"]
 
 
-def test_sweep_without_mux_preserves_registered_sessions(
-    tmp_path, monkeypatch
-):
+def test_sweep_without_mux_preserves_registered_sessions(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(
-        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
 
     assert m._monitor_sweep(None, "T", "P", set()) == 0
     assert (reg / "wt-a").exists()
@@ -727,12 +707,238 @@ def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
 
     assert m._monitor_sweep("tmux", "T", "P", set()) == -1
     assert calls == []
-    assert (reg / "wt-a").exists()                       # registry untouched
+    assert (reg / "wt-a").exists()  # registry untouched
+
+
+def _wire_monitor_handoff_session(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(
+        m,
+        "_find_record_for_path",
+        lambda path: types.SimpleNamespace(
+            worktree_id="a",
+            pending_handoffs=[
+                types.SimpleNamespace(
+                    token="handoff-1",
+                    predecessor="session-1",
+                    candidate=None,
+                    successor=None,
+                )
+            ],
+        ),
+    )
+    _capture_set(monkeypatch)
+
+
+def test_monitor_pending_handoff_request_returns_actionable_request(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [
+                {
+                    "handoff_id": "handoff-1",
+                    "session_id": "session-1",
+                    "session_state": r"C:\state\handoff-request.json",
+                    "storage": "file",
+                }
+            ]
+        if event == "handoff_cutover_spawn":
+            return []
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+    monkeypatch.setattr(
+        m,
+        "_monitor_read_session_state_handoff",
+        lambda path: {
+            "handoffId": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree": "a",
+            "storage": "file",
+            "consumed": False,
+        },
+    )
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_request(record) == {
+        "token": "handoff-1",
+        "seed": "HANDOFF_SEED",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+        "session_state_path": r"C:\state\handoff-request.json",
+        "storage": "file",
+    }
+
+
+def test_monitor_pending_handoff_request_skips_already_triggered(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [
+                {
+                    "handoff_id": "handoff-1",
+                    "session_id": "session-1",
+                    "session_state": r"C:\state\handoff-request.json",
+                }
+            ]
+        if event == "handoff_cutover_spawn":
+            return [{"handoff_token": "handoff-1"}]
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+    monkeypatch.setattr(
+        m,
+        "_monitor_read_session_state_handoff",
+        lambda path: {
+            "handoffId": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree": "a",
+            "consumed": False,
+        },
+    )
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_request(record) is None
+
+
+def test_sweep_triggers_pending_handoff_cutover_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_monitor_handoff_session(tmp_path, monkeypatch)
+    request = {
+        "token": "handoff-1",
+        "seed": "HANDOFF_SEED",
+        "worktree_id": "a",
+        "predecessor_session_id": "session-1",
+        "session_state_path": r"C:\state\handoff-request.json",
+        "storage": "file",
+    }
+    triggered = []
+
+    monkeypatch.setattr(m, "_monitor_pending_handoff_request", lambda record: request)
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        lambda item: triggered.append(item),
+    )
+
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert triggered == [request]
+
+
+def test_sweep_does_not_double_trigger_same_pending_handoff(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_monitor_handoff_session(tmp_path, monkeypatch)
+    request = {"token": "handoff-1"}
+    triggered = []
+    seen = {"done": False}
+
+    def pending(record):
+        if seen["done"]:
+            return None
+        return request
+
+    monkeypatch.setattr(m, "_monitor_pending_handoff_request", pending)
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        lambda item: triggered.append(item) or seen.__setitem__("done", True),
+    )
+
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert triggered == [request]
+
+
+def test_sweep_leaves_sessions_without_pending_handoff_untouched(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    monkeypatch.setattr(
+        m,
+        "_find_record_for_path",
+        lambda path: types.SimpleNamespace(
+            worktree_id="a",
+            pending_handoffs=[],
+        ),
+    )
+    _capture_set(monkeypatch)
+    spawned = []
+    monkeypatch.setattr(
+        m,
+        "_monitor_pending_handoff_request",
+        lambda record: None,
+    )
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        lambda item: spawned.append(item),
+    )
+
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert spawned == []
+
+
+def test_sweep_monitor_opt_out_skips_proactive_handoff_cutover(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+    _wire_monitor_handoff_session(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        m,
+        "_monitor_pending_handoff_request",
+        lambda record: None,
+    )
+    _capture_set(monkeypatch)
+    spawned = []
+    monkeypatch.setattr(
+        m,
+        "_monitor_trigger_handoff_cutover",
+        lambda item: spawned.append(item),
+    )
+
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 1
+    assert spawned == []
 
 
 def test_ensure_monitor_noop_when_live(tmp_path, monkeypatch):
     """A live, current-runtime monitor lock suppresses a duplicate spawn."""
     from agent_worktrees import locks
+
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     spawned: list[list[str]] = []
@@ -742,16 +948,14 @@ def test_ensure_monitor_noop_when_live(tmp_path, monkeypatch):
     # slot, so _runtime_superseded() is False -> treated as a live current owner.
     locks.write_lock(lock, extra={"prefix": m.os.path.realpath(m.sys.prefix)})
     m._ensure_status_monitor()
-    assert spawned == []                                 # no duplicate
+    assert spawned == []  # no duplicate
 
     locks.remove_lock(lock)
     m._ensure_status_monitor()
-    assert len(spawned) == 1                             # spawned when absent
+    assert len(spawned) == 1  # spawned when absent
 
 
-def test_ensure_replaces_muxless_owner_when_mux_is_available(
-    tmp_path, monkeypatch
-):
+def test_ensure_replaces_muxless_owner_when_mux_is_available(tmp_path, monkeypatch):
     from agent_worktrees import locks
     import shutil
 
@@ -761,8 +965,7 @@ def test_ensure_replaces_muxless_owner_when_mux_is_available(
         lock,
         extra={"prefix": m.os.path.realpath(m.sys.prefix), "mux": False},
     )
-    monkeypatch.setattr(
-        shutil, "which", lambda name: "psmux" if name == "psmux" else None)
+    monkeypatch.setattr(shutil, "which", lambda name: "psmux" if name == "psmux" else None)
     spawned: list[list[str]] = []
     monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.append(argv) or True)
 
@@ -777,16 +980,18 @@ def test_status_updater_delegates_when_enabled(monkeypatch):
     registered: list[tuple[str, str]] = []
     ensured: list[bool] = []
     monkeypatch.setattr(
-        m, "_register_session_for_monitor",
-        lambda sess, path: registered.append((sess, path)) or True)
-    monkeypatch.setattr(
-        m, "_ensure_status_monitor", lambda: ensured.append(True) or True)
+        m,
+        "_register_session_for_monitor",
+        lambda sess, path: registered.append((sess, path)) or True,
+    )
+    monkeypatch.setattr(m, "_ensure_status_monitor", lambda: ensured.append(True) or True)
     # If it fell through to the real loop it would call _render_status_segment;
     # make that explode so a regression is loud.
     monkeypatch.setattr(m, "_render_status_segment", _boom)
 
     rc = m.cmd_status_updater(
-        argparse.Namespace(session="wt-a", mux="tmux", path="/w/a", interval=5))
+        argparse.Namespace(session="wt-a", mux="tmux", path="/w/a", interval=5)
+    )
     assert rc == 0
     assert registered == [("wt-a", "/w/a")]
     assert ensured == [True]
@@ -803,10 +1008,12 @@ def test_status_updater_falls_back_when_monitor_cannot_start(monkeypatch):
     # path) by short-circuiting it at its first self-retire check.
     reached = []
     monkeypatch.setattr(
-        m, "_runtime_superseded", lambda *a, **k: bool(reached.append(True)) or True)
+        m, "_runtime_superseded", lambda *a, **k: bool(reached.append(True)) or True
+    )
 
     rc = m.cmd_status_updater(
-        argparse.Namespace(session="wt-a", mux="tmux", path="/w/a", interval=5))
+        argparse.Namespace(session="wt-a", mux="tmux", path="/w/a", interval=5)
+    )
     assert rc == 0
     assert reached  # fell through into the per-session loop
 
@@ -815,11 +1022,12 @@ def test_activate_force_clears_prior_project_on_unresolved(monkeypatch):
     """Under force, an unresolved path must NOT leave a prior session's project
     active (else the monitor renders one session with another's context)."""
     from agent_worktrees import config as cfg
+
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)  # unresolved
     try:
         cfg.set_active_project("prev")
         m._activate_project_for_path("/no/repo", force=True)
-        assert cfg.active_project() is None                 # cleared under force
+        assert cfg.active_project() is None  # cleared under force
         # without force, an already-active project is left untouched
         cfg.set_active_project("prev")
         m._activate_project_for_path("/no/repo", force=False)
@@ -838,28 +1046,36 @@ def _boom(*a, **k):  # pragma: no cover - only fires on regression
 # one so a deploy never leaves live sessions' bars frozen.
 # ---------------------------------------------------------------------------
 
+
 def _wire_restart(monkeypatch, *, lock_data, live, superseded, spawn_ok=True):
     """Stub the lock read/liveness/supersession/spawn/terminate seams."""
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: "/tmp/mon.lock")
     import agent_worktrees.locks as _locks
+
     monkeypatch.setattr(_locks, "read_lock", lambda p: lock_data)
     monkeypatch.setattr(_locks, "lock_is_live", lambda d: live)
     removed = {"n": 0}
 
     def _rm(p):
         removed["n"] += 1
+
     monkeypatch.setattr(_locks, "remove_lock", _rm)
     monkeypatch.setattr(m, "_runtime_superseded", lambda **k: superseded)
     spawned = {"argv": None}
+
     def _spawn(argv):
         spawned["argv"] = argv
         return spawn_ok
+
     monkeypatch.setattr(m, "_spawn_detached", _spawn)
     import agent_worktrees.procs as _procs
+
     reaped = {"pid": None}
+
     def _term(pid):
         reaped["pid"] = pid
         return True
+
     monkeypatch.setattr(_procs, "terminate_pid", _term)
     return spawned, reaped, removed
 
@@ -876,12 +1092,12 @@ def test_restart_disabled_is_noop(monkeypatch):
 def test_restart_reaps_superseded_and_spawns(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     spawned, reaped, removed = _wire_restart(
-        monkeypatch, lock_data={"pid": 4242, "prefix": "/old/slot"},
-        live=True, superseded=True)
+        monkeypatch, lock_data={"pid": 4242, "prefix": "/old/slot"}, live=True, superseded=True
+    )
     r = m._restart_status_monitor()
-    assert r["reaped"] == 4242          # old monitor reaped
+    assert r["reaped"] == 4242  # old monitor reaped
     assert reaped["pid"] == 4242
-    assert removed["n"] >= 1            # stale lock cleared
+    assert removed["n"] >= 1  # stale lock cleared
     assert r["spawned"] is True
     assert spawned["argv"][-1] == "status-monitor"  # current one spawned
 
@@ -889,23 +1105,23 @@ def test_restart_reaps_superseded_and_spawns(monkeypatch):
 def test_restart_leaves_current_monitor_alone(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     spawned, reaped, _rm = _wire_restart(
-        monkeypatch, lock_data={"pid": 999, "prefix": "/cur/slot"},
-        live=True, superseded=False)
+        monkeypatch, lock_data={"pid": 999, "prefix": "/cur/slot"}, live=True, superseded=False
+    )
     r = m._restart_status_monitor()
     assert r["already_current"] is True
-    assert r["spawned"] is False        # no duplicate spawn
-    assert reaped["pid"] is None        # never reap a current monitor
+    assert r["spawned"] is False  # no duplicate spawn
+    assert reaped["pid"] is None  # never reap a current monitor
     assert spawned["argv"] is None
 
 
 def test_restart_clears_dead_lock_then_spawns(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     spawned, reaped, removed = _wire_restart(
-        monkeypatch, lock_data={"pid": 1, "prefix": "/x"},
-        live=False, superseded=False)  # lock present but dead
+        monkeypatch, lock_data={"pid": 1, "prefix": "/x"}, live=False, superseded=False
+    )  # lock present but dead
     r = m._restart_status_monitor()
-    assert removed["n"] >= 1            # dead lock cleared
-    assert reaped["pid"] is None        # nothing live to reap
+    assert removed["n"] >= 1  # dead lock cleared
+    assert reaped["pid"] is None  # nothing live to reap
     assert r["spawned"] is True
     assert spawned["argv"][-1] == "status-monitor"
 
@@ -923,12 +1139,14 @@ def test_installers_invoke_monitor_restart_at_cutover():
     # invoke `status-monitor-restart` at the version cutover, or a deploy silently
     # regresses to frozen bars. Pin it so an installer refactor can't drop it.
     from pathlib import Path
+
     scripts = Path(m.__file__).resolve().parents[2] / "scripts"
     for name in ("install.ps1", "install.sh"):
         text = (scripts / name).read_text("utf-8")
         assert "status-monitor-restart" in text, (
             f"{name} must invoke `status-monitor-restart` after activating the "
-            "new runtime slot (consolidated-status-daemon Phase 1, dotfiles#1696)")
+            "new runtime slot (consolidated-status-daemon Phase 1, dotfiles#1696)"
+        )
 
 
 # --- windowless daemon spawn (the "headed status-monitor" DefTerm bug) --------
@@ -984,11 +1202,11 @@ def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
     monkeypatch.setenv("SAFE_VALUE", "kept")
     monkeypatch.setattr(m.subprocess, "Popen", _fake_popen)
     monkeypatch.setattr(
-        m, "windowless_daemon_kwargs",
+        m,
+        "windowless_daemon_kwargs",
         lambda **_kw: {"windowless_daemon": True},
     )
-    assert m._spawn_detached(
-        [m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
+    assert m._spawn_detached([m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
     assert seen["argv"][0] == m.sys.executable
     assert seen["argv"][1:] == ["-m", "agent_worktrees", "status-monitor"]
     assert seen["kwargs"]["windowless_daemon"] is True
