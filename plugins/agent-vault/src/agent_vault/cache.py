@@ -42,7 +42,12 @@ def _truthy(value: str | None) -> bool:
 
 
 def default_cache_dir() -> Path:
-    """Return the default cache directory (alongside the config file)."""
+    """Return the default cache directory.
+
+    Legacy mode keeps the cache alongside the global config file. Namespaced
+    mode keeps it under the selected runtime root so two installation cells do
+    not share persistent cached credentials.
+    """
     if "AGENT_VAULT_HOME" in os.environ:
         return home_dir() / "cache"
     return default_config_path().parent / "cache"

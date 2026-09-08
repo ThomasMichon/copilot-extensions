@@ -252,11 +252,16 @@ $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-v
 $serviceSuffix = if ([StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)) {
     ''
 } else {
-    ([BitConverter]::ToString(
-        [Security.Cryptography.SHA256]::Create().ComputeHash(
-            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
-        )
-    )).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+    $serviceSha = [Security.Cryptography.SHA256]::Create()
+    try {
+        ([BitConverter]::ToString(
+            $serviceSha.ComputeHash(
+                [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+            )
+        )).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+    } finally {
+        $serviceSha.Dispose()
+    }
 }
 $installationId = [string]$env:AGENT_VAULT_INSTALLATION_ID
 $RunDir = Join-Path $InstallDir 'run'

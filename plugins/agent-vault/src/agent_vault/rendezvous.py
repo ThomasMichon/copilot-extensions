@@ -243,10 +243,8 @@ class Endpoint:
             pid=int(data["pid"]) if data.get("pid") is not None else None,
             started_at=(str(data["started_at"]) if data.get("started_at") is not None else None),
             installation_id=(
-                str(data["installation_id"]).strip()
-                if data.get("installation_id") is not None
-                else None
-            ),
+                value if (value := str(data["installation_id"]).strip()) else None
+            ) if data.get("installation_id") is not None else None,
             source=source,
             alt=alt,
         )
