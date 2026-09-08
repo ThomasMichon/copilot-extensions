@@ -2,7 +2,6 @@
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $_command = 'agent-containers'
-$_module = 'agent_containers'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 if ($env:COPILOT_PLUGIN_ROOT) {
@@ -37,103 +36,7 @@ if (
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
-$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-containers'
-$_resolver = Join-Path $_payloadRoot 'scripts\resolve-runtime.ps1'
-function Resolve-PayloadRuntime {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) {
-        $env:AGENT_RT_ROOT = $_runtimeRoot
-        . $_resolver
-    }
-    return $AgentRtPy
-}
-
-$_py = Resolve-PayloadRuntime
-if ($_py) {
-    & $_py -m $_module @args
-    exit $LASTEXITCODE
-}
-if (Test-Path "env:AGENT_CONTAINERS_NO_SELFPROVISION") {
-    [Console]::Error.WriteLine("[$_command] runtime not provisioned (AGENT_CONTAINERS_NO_SELFPROVISION set).")
-    exit 1
-}
-
-if (-not (Test-Path -LiteralPath $_runtimeRoot)) {
-    New-Item -ItemType Directory -Path $_runtimeRoot -Force | Out-Null
-}
-$_lockPath = Join-Path $_runtimeRoot '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open(
-            $_lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
-        )
-    } catch {
-        Start-Sleep -Milliseconds 200
-    }
-}
-
-$_provisionedPy = $null
-$_provisionRc = 0
-try {
-    $_provisionedPy = Resolve-PayloadRuntime
-    if (-not $_provisionedPy) {
-$_installer = Join-Path $_payloadRoot 'scripts\init.ps1'
-if (-not (Test-Path -LiteralPath $_installer)) {
-    [Console]::Error.WriteLine("[$_command] payload installer not found: $_installer")
-    exit 127
-}
-
-[Console]::Error.WriteLine("[$_command] runtime not provisioned -- provisioning from the owning payload.")
-[Console]::Error.WriteLine("::agent-provisioning:: plugin=$_command eta_seconds=120 reason=first-use")
-# Resolve pwsh/powershell by ABSOLUTE path only -- never ambient Get-Command/
-# PATH resolution, which can fail under the bridge daemon's restricted PATH
-# even when a usable host is installed (#2042). Mirrors the cmd shim's
-# %SystemRoot%\System32\where.exe lookup with the same WindowsPowerShell v1.0
-# absolute fallback, so both entry points resolve identically regardless of
-# the caller's PATH.
-$_hostExe = $null
-try {
-    $_whereExe = Join-Path $env:SystemRoot 'System32\where.exe'
-    if (Test-Path -LiteralPath $_whereExe) {
-        $_found = & $_whereExe pwsh 2>$null | Select-Object -First 1
-        if ($_found -and (Test-Path -LiteralPath $_found)) { $_hostExe = $_found }
-    }
-} catch {}
-if (-not $_hostExe) {
-    $_hostExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-}
-& $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_installer stamp 2>&1 |
-    ForEach-Object { [Console]::Error.WriteLine($_) }
-$_provisionRc = $LASTEXITCODE
-
-        if ($_provisionRc -eq 0) {
-            $_snapshot = ''
-            try { $_snapshot = ([IO.File]::ReadAllText((Join-Path $_runtimeRoot 'payload-dir'))).Trim() } catch {}
-            $_snapshotInstaller = if ($_snapshot) { Join-Path $_snapshot 'scripts\init.ps1' } else { '' }
-            if (-not ($_snapshotInstaller -and (Test-Path -LiteralPath $_snapshotInstaller))) {
-                [Console]::Error.WriteLine("[$_command] stamped snapshot installer not found: $_snapshotInstaller")
-                $_provisionRc = 127
-            } else {
-                & $_hostExe -NoProfile -ExecutionPolicy Bypass -File $_snapshotInstaller provision 2>&1 |
-                    ForEach-Object { [Console]::Error.WriteLine($_) }
-                $_provisionRc = $LASTEXITCODE
-            }
-        }
-        if ($_provisionRc -eq 0) {
-            $_provisionedPy = Resolve-PayloadRuntime
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
-}
-if ($_provisionRc -ne 0) { exit $_provisionRc }
-if ($_provisionedPy) {
-    & $_provisionedPy -m $_module @args
-    exit $LASTEXITCODE
-}
-[Console]::Error.WriteLine("[$_command] provisioning completed without a resolvable runtime.")
-exit 1
+$env:AGENT_CONTAINERS_PAYLOAD_ROOT = $_payloadRoot
+$_payloadDispatcher = Join-Path $_payloadRoot 'scripts\runtime-gate.ps1'
+& $_payloadDispatcher @args
+exit $LASTEXITCODE

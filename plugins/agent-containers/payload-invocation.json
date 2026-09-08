@@ -1,10 +1,16 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-containers",
   "module": "agent_containers",
-  "runtimeRoot": ".agent-containers",
+  "legacyRuntimeRoot": ".agent-containers",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_CONTAINERS_NO_SELFPROVISION",
   "purpose": "Manage local container fleets leases and dispatch",
-  "installer": "init"
+  "installer": "init",
+  "payloadRootEnv": "AGENT_CONTAINERS_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  }
 }

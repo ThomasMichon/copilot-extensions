@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import types
+from pathlib import Path
 
 import pytest
 from ssh_manager import SSHConfig
@@ -79,14 +80,22 @@ def test_build_wrapper_command():
     # no docker / token details leak into the wrapper command
     assert "docker" not in cmd
     assert "GH_TOKEN" not in cmd
+    assert Path(cmd[0]).name in {"agent-containers", "agent-containers.cmd"}
 
 
-def test_build_wrapper_command_uses_module_not_binstub():
-    """Spawn via ``python -m agent_containers``, never the .cmd binstub, so
-    agent-bridge does not route the spawn through cmd.exe and mangle args."""
+def test_build_wrapper_command_uses_payload_local_shim(monkeypatch, tmp_path):
+    from agent_containers import resolver as r
+
+    shim = tmp_path / "payload" / "bin" / (
+        "agent-containers.cmd" if sys.platform == "win32" else "agent-containers"
+    )
+    shim.parent.mkdir(parents=True)
+    shim.write_text("", encoding="utf-8")
+    monkeypatch.setattr(r, "payload_command_argv", lambda: [str(shim)])
+
     cmd = build_wrapper_command("myrepo-1")
-    assert cmd[1:3] == ["-m", "agent_containers"]
-    assert not cmd[0].lower().endswith((".cmd", ".bat"))
+
+    assert cmd == [str(shim), "exec", "--stdio", "myrepo-1"]
 
 
 def _stub_agent_bridge(monkeypatch):
@@ -233,6 +242,11 @@ def test_resolve_spec_exposes_trusted_session_host_transport(monkeypatch):
     monkeypatch.setattr(r, "get_lease", lambda name: None)
     monkeypatch.setattr(
         r,
+        "payload_command_argv",
+        lambda: ["/payload/bin/agent-containers"],
+    )
+    monkeypatch.setattr(
+        r,
         "prepare_ssh_config",
         lambda name, user: SSHConfig(
             host_alias=f"agent-container-{name}",
@@ -250,7 +264,7 @@ def test_resolve_spec_exposes_trusted_session_host_transport(monkeypatch):
     assert transport["security_profile"] == "trusted"
     assert transport["acp_command"] == "copilot --acp --stdio"
     assert transport["ssh"]["host_alias"] == "agent-container-myrepo-1"
-    assert transport["provider_command"][1:3] == ["-m", "agent_containers"]
+    assert transport["provider_command"] == ["/payload/bin/agent-containers"]
     assert spec["venue"]["target_id"] == "container:myrepo-1"
     assert spec["venue"]["transport"] == "ssh"
     assert spec["venue"]["capabilities"]["session_host"] is True

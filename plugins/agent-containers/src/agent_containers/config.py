@@ -30,8 +30,16 @@ from .private_state import ensure_private_dir
 
 log = logging.getLogger("agent-containers")
 
+
+def _runtime_home() -> Path:
+    override = os.environ.get("AGENT_CONTAINERS_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".agent-containers"
+
+
 # Canonical runtime paths.
-RUNTIME_DIR = Path.home() / ".agent-containers"
+RUNTIME_DIR = _runtime_home()
 # Windows/WSL installations that share one Docker provider can point only their
 # mutable coordination state at one filesystem-visible directory. Runtime venvs
 # and platform-specific installation artifacts remain under ``RUNTIME_DIR``.

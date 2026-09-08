@@ -102,7 +102,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(libs/installation-context/|plugins/(agent-index|agent-machines|agent-worktrees)/scripts/installation-context/|tools/sync-installation-context.py$)'; then
+            '^(libs/installation-context/|plugins/(agent-codespaces|agent-containers|agent-index|agent-machines|agent-worktrees)/scripts/installation-context/|tools/sync-installation-context.py$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

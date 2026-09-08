@@ -20,10 +20,10 @@ import asyncio
 import hashlib
 import logging
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 from ._invoke import dispatch_argv
 from .config import (
+    RUNTIME_DIR,
     _norm_repo as _config_norm_repo,
     _repo_matches_codespace as _config_repo_matches_codespace,
     load_merged_config,
@@ -109,7 +109,7 @@ def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
     return _config_repo_matches_codespace(repo, cs_repository)
 
 
-_DISPATCH_DIR = Path.home() / ".agent-codespaces" / "dispatch"
+_DISPATCH_DIR = RUNTIME_DIR / "dispatch"
 # A dispatch payload file is kept alive by use: its mtime is refreshed on every
 # launch that reads it (see the CLI's --remote-cmd-file handler), so mtime is the
 # LAST-LAUNCH time. One untouched past this window belongs to a session that is

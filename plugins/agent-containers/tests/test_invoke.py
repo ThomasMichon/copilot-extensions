@@ -33,6 +33,30 @@ def test_prefers_active_versioned_runtime(tmp_path, monkeypatch):
     assert _invoke.module_argv() == [str(py), "-m", "agent_containers"]
 
 
+def test_payload_command_argv_prefers_payload_local_shim(tmp_path, monkeypatch):
+    payload = tmp_path / "payload"
+    shim_name = "agent-containers.cmd" if sys.platform == "win32" else "agent-containers"
+    shim = payload / "bin" / shim_name
+    shim.parent.mkdir(parents=True)
+    shim.write_text("", encoding="utf-8")
+    monkeypatch.setattr(_invoke, "payload_root", lambda: payload)
+    monkeypatch.setattr(_invoke, "module_argv", lambda: ["py", "-m", "agent_containers"])
+
+    assert _invoke.payload_command_argv() == [str(shim)]
+
+
+def test_payload_binstub_returns_none_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(_invoke, "payload_root", lambda: tmp_path / "payload")
+
+    assert _invoke.payload_binstub() is None
+
+
+def test_runtime_root_honors_agent_containers_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(tmp_path / "cell" / "agent-containers"))
+
+    assert _invoke.runtime_root() == tmp_path / "cell" / "agent-containers"
+
+
 def test_does_not_prefer_stale_legacy_venv(tmp_path, monkeypatch):
     # Both a legacy .venv AND an active versioned runtime exist; the versioned
     # runtime must win (the legacy .venv is the stale one).

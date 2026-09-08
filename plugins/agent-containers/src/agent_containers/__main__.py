@@ -432,7 +432,7 @@ def _trusted_session_host_context(name: str):
 
 def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""
-    from ._invoke import module_argv
+    from ._invoke import payload_command_argv
     from .container_shims import (
         deploy as deploy_shims,
     )
@@ -492,7 +492,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         "remote_command": remote_command,
         "remote_env": remote_env,
         "reverse_forwards": reverse_forwards,
-        "state_command": [*module_argv(), "session-host-state", args.name],
+        "state_command": [*payload_command_argv(), "session-host-state", args.name],
     }))
     return 0
 

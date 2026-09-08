@@ -18,6 +18,7 @@ def test_bridge_provider_manifest_is_attributed_and_writers_stamp_root_atomicall
     )
     assert template["schema_version"] == 1
     assert template["plugin"] == "agent-codespaces@copilot-extensions"
+    assert template["namespace"] == "codespace"
 
     powershell = (PLUGIN / "scripts" / "register-bridge-provider.ps1").read_text(
         encoding="utf-8"
@@ -30,6 +31,8 @@ def test_bridge_provider_manifest_is_attributed_and_writers_stamp_root_atomicall
     assert "[System.IO.File]::Move($tmp, $out)" in powershell
     assert 'data["plugin_root"] = os.path.realpath(plugin_root)' in shell
     assert "os.replace(tmp, out)" in shell
+    assert 'Join-Path $PluginDir "bin\\$name.cmd"' in powershell
+    assert 'binstub="$PluginDir/bin/$name"' in shell
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
@@ -37,14 +40,9 @@ def test_powershell_51_writer_creates_and_replaces_manifest(tmp_path):
     powershell = shutil.which("powershell.exe")
     if not powershell:
         pytest.skip("Windows PowerShell 5.1 is unavailable")
-    home = tmp_path / "home"
-    binstub = home / ".local" / "bin" / "agent-codespaces.cmd"
-    binstub.parent.mkdir(parents=True)
-    binstub.write_text("@echo off\r\n", encoding="utf-8")
     registry = tmp_path / "providers.d"
     env = {
         **os.environ,
-        "USERPROFILE": str(home),
         "AGENT_BRIDGE_PROVIDERS_DIR": str(registry),
     }
     command = [
@@ -62,4 +60,4 @@ def test_powershell_51_writer_creates_and_replaces_manifest(tmp_path):
     )
     assert manifest["schema_version"] == 1
     assert Path(manifest["plugin_root"]).resolve() == PLUGIN.resolve()
-    assert manifest["command"] == [str(binstub)]
+    assert manifest["command"] == [str(PLUGIN / "bin" / "agent-codespaces.cmd")]

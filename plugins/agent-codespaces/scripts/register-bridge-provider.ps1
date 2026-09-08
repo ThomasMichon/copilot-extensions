@@ -30,10 +30,10 @@ if (-not $name) { Exit-SessionStart }
 $template = Join-Path $PluginDir 'references\bridge-provider.json'
 if (-not (Test-Path $template)) { Exit-SessionStart }
 
-# Binstub location is a fixed agent-* runtime convention
-# (%USERPROFILE%\.local\bin\<name>.cmd -- a .cmd is directly runnable by the
-# daemon's subprocess call, a .ps1 is not).
-$binstub = Join-Path $env:USERPROFILE ".local\bin\$name.cmd"
+# Use the payload-local shim, not the mutable machine-global compatibility
+# binstub, so providers stay bound to the exact payload root the current
+# installation context selected.
+$binstub = Join-Path $PluginDir "bin\$name.cmd"
 if (-not (Test-Path $binstub)) { Exit-SessionStart }
 
 if ($env:AGENT_BRIDGE_PROVIDERS_DIR) {

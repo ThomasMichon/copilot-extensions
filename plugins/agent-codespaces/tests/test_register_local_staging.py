@@ -68,7 +68,7 @@ async def test_local_specs_staged_remote_specs_registered(monkeypatch):
     async def _fake_stage(manager, name, sources, **kwargs):
         staged_sources.extend(sources)
         assert kwargs["repo_roots"] == ()
-        return [f"$HOME/.acp-staged-plugins/{s.split('@')[0]}" for s in sources]
+        return [f"$HOME/.acp-staged-plugins/{s.replace('@', '_')}" for s in sources]
 
     monkeypatch.setattr(m, "_stage_plugins", _fake_stage)
 
@@ -85,7 +85,7 @@ async def test_local_specs_staged_remote_specs_registered(monkeypatch):
     assert "agent-bridge@copilot-extensions" in mgr.commands[0]
     assert "figma@dotfiles-plugins" not in mgr.commands[0]
     # Combined --plugin-dir result carries BOTH lanes' dirs.
-    assert "$HOME/.acp-staged-plugins/figma" in dirs
+    assert "$HOME/.acp-staged-plugins/figma_dotfiles-plugins" in dirs
     assert any("copilot-extensions/agent-bridge" in d for d in dirs)
 
 
@@ -105,7 +105,7 @@ async def test_all_local_no_register_command(monkeypatch):
     )
 
     async def _fake_stage(manager, name, sources, **kwargs):
-        return ["$HOME/.acp-staged-plugins/figma"]
+        return ["$HOME/.acp-staged-plugins/figma_dotfiles-plugins"]
 
     monkeypatch.setattr(m, "_stage_plugins", _fake_stage)
 
@@ -115,4 +115,4 @@ async def test_all_local_no_register_command(monkeypatch):
     # No remote specs -> build_register_command returns None -> no exec_command
     # for the register lane.
     assert mgr.commands == []
-    assert dirs == ["$HOME/.acp-staged-plugins/figma"]
+    assert dirs == ["$HOME/.acp-staged-plugins/figma_dotfiles-plugins"]

@@ -28,6 +28,7 @@ from typing import BinaryIO, cast
 
 from agent_procutil import no_window_flags
 
+from ._invoke import payload_binstub
 from .config import RESTRICTED_PROFILE, RUNTIME_DIR, STATE_DIR
 from .lease import (
     ProviderAdmissionError,
@@ -225,9 +226,12 @@ def ssh_profile_spec(
             }
         ],
     }
-    provider_binary = shutil.which("agent-containers")
-    if provider_binary:
-        registry["proxy_command_binary"] = provider_binary
+    provider_binary = payload_binstub()
+    if provider_binary is None:
+        raise RuntimeError(
+            "agent-containers payload-local shim is unavailable; refusing provider-exec profile"
+        )
+    registry["proxy_command_binary"] = str(provider_binary)
     result = {
         "schema_version": 1,
         "module": str(provider_module_path()),
