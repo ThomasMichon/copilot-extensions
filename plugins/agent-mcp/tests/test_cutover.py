@@ -40,6 +40,47 @@ def _free_port() -> int:
         s.close()
 
 
+def test_spawn_passive_daemon_uses_standard_headless_detach_helpers(
+    tmp_path, monkeypatch,
+):
+    """Regression test: spawn_passive_daemon() must route through the repo's
+    standard agent_procutil headless/detached spawn helpers (the same
+    pattern as forward._spawn_serve_host), not a hand-rolled
+    `if sys.platform != "win32"` check. windowless_python() avoids a Windows
+    venv python.exe re-exec flashing a fresh console; detached_kwargs()
+    fully detaches the child so it outlives this short-lived cutover
+    process. A bespoke check drifts from that pattern and, on Windows,
+    would leave the child console-attached."""
+    import agent_procutil
+
+    captured: dict = {}
+
+    class _FakeProc:
+        pid = 99999
+
+    def _fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    expected_python = agent_procutil.windowless_python(sys.executable)
+    expected_detached = agent_procutil.detached_kwargs()
+
+    ctx = _cutover._CutoverContext(
+        data_root=tmp_path, new_socket_path=tmp_path / "g2.sock",
+        new_log_path=tmp_path / "g2.log", new_control_token="tok",
+        old_control_token=None, token_by_port={},
+    )
+    proc = _cutover.spawn_passive_daemon(ctx, 12345)
+
+    assert proc.pid == 99999
+    assert captured["cmd"][0] == expected_python
+    for key, value in expected_detached.items():
+        assert captured["kwargs"].get(key) == value, (
+            f"missing/mismatched detached_kwargs() key {key!r}")
+
+
 # ── control op dispatch (unit-level, no sockets) ─────────────────────────
 
 

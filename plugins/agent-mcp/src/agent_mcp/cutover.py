@@ -129,16 +129,27 @@ def _passive_stdio_kwargs(log_path: Path) -> tuple[dict, list]:
 
 def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.Popen:
     """``zdd`` ``spawn_passive`` callback: launch the installed code as a
-    passive ``serve`` instance on its own data socket + this control port."""
-    cmd = [sys.executable, "-m", "agent_mcp", "serve",
+    passive ``serve`` instance on its own data socket + this control port.
+
+    Uses the repo's standard headless/detached spawn helpers (the same
+    pattern as ``forward._spawn_serve_host``) rather than a hand-rolled
+    platform check: ``windowless_python()`` avoids a Windows venv
+    ``python.exe`` re-exec flashing a fresh console, and ``detached_kwargs()``
+    fully detaches the child (own session on POSIX, ``DETACHED_PROCESS |
+    CREATE_NEW_PROCESS_GROUP`` on Windows) so it outlives this short-lived
+    cutover process and its lifetime never drifts from the existing
+    detach pattern used elsewhere in this plugin.
+    """
+    from agent_procutil import detached_kwargs, windowless_python
+
+    cmd = [windowless_python(sys.executable), "-m", "agent_mcp", "serve",
           "--socket", str(ctx.new_socket_path),
           "--passive", "--control-port", str(control_port)]
     env = dict(os.environ)
     env["AGENT_MCP_CONTROL_TOKEN"] = ctx.new_control_token
     kwargs, opened = _passive_stdio_kwargs(ctx.new_log_path)
     kwargs["env"] = env
-    if sys.platform != "win32":
-        kwargs["start_new_session"] = True
+    kwargs.update(detached_kwargs())
     try:
         proc = subprocess.Popen(cmd, **kwargs)
     finally:
