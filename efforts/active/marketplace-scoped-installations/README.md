@@ -253,9 +253,28 @@ because they provide tools or services.
 
 ### Phase 4 — Runtime and state rollout
 
-- [ ] Convert agent-worktrees and its project/repo registries first
+- [x] Convert agent-worktrees and its project/repo registries first
   ([#1105](https://github.com/ThomasMichon/copilot-extensions/issues/1105)) so later
   reconciliation and project entry points are attributable.
+  - [x] Runtime, global registries, plugin-global mutable state, stable
+    repository identity, project config/tracking/session records, hooks,
+    launchers, and project-command arbitration are installation-attributable.
+  - [x] Blocked; transferred to `#1110`
+    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1110);
+    transfer completed):
+    cell-qualified Git-ref leases require the Phase 6 maintenance/migration
+    gate so old and new clients cannot hold split-brain leases during version
+    skew.
+  - [x] Deferred to `#1108`
+    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1108);
+    deferral completed):
+    Worktree Manager supervision and any remaining fixed service/process
+    identity belong to the service-bearing rollout.
+  - [x] Deferred to `#1107`
+    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1107);
+    deferral completed):
+    remote consumers must carry the selected installation and repository
+    identity across venue/transport boundaries.
 - [ ] Convert service-free runtimes in low-risk batches
   ([#1106](https://github.com/ThomasMichon/copilot-extensions/issues/1106)).
 - [ ] Convert remote venue and transport plugins, carrying installation identity
@@ -1097,3 +1116,29 @@ See [`design.md`](design.md).
 - Kept [#1105](https://github.com/ThomasMichon/copilot-extensions/issues/1105)
   open for cell-qualified distributed lease/resource identity and the remaining
   explicit disposition of host-owned session databases and service identity.
+
+### 2026-09-07 — Agent-worktrees Phase 4 boundary closure
+
+- Re-evaluated direct cell-qualified Git-ref lease activation after the runtime,
+  registry, project-state, and command-ownership slices landed. A new client can
+  use a cell-specific ref namespace, but an older client cannot observe or honor
+  it; immediate activation would permit split-brain ownership during version
+  skew. Nested cell refs also break strict legacy wildcard listing.
+- Withdrew the unsafe prototype without leaving source changes. Lease
+  qualification is blocked and transferred to `#1110`
+  ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1110)),
+  where maintenance admission, legacy ownership tombstones, and explicit
+  migration can prevent old clients from reacquiring while the new namespace
+  becomes authoritative.
+- Transferred remaining fixed Worktree Manager service/process identity to
+  `#1108` ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1108))
+  and remote venue propagation to `#1107`
+  ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1107)).
+  The host-owned Copilot session database remains outside plugin ownership;
+  cell-local agent-worktrees session bindings and worktree records are already
+  isolated.
+- Marked the `#1105` Phase 4 boundary complete through reviewed, merged PRs
+  [#2196](https://github.com/ThomasMichon/copilot-extensions/pull/2196),
+  [#2197](https://github.com/ThomasMichon/copilot-extensions/pull/2197),
+  [#2198](https://github.com/ThomasMichon/copilot-extensions/pull/2198), and
+  [#2215](https://github.com/ThomasMichon/copilot-extensions/pull/2215).
