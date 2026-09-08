@@ -108,8 +108,8 @@ explicit pre-authorization.
 
 ## Efforts + handoffs
 
-When both capabilities are present, use them to keep one session scoped to one
-slice of a larger effort:
+When both capabilities are present, use them to let one session own one slice
+of a larger effort:
 
 - the **effort** remains the durable source of truth and completion gate,
 - the **handoff** carries only the immediate relay delta,

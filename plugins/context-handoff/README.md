@@ -103,7 +103,7 @@ That is the routine, safe, non-committal step. It preserves the baton before
 context gets tighter, but it does **not** arm pickup or request that any
 external system create a successor.
 
-### 2. Context pressure triggers immediately
+### 2. Context-pressure-driven handoff: trigger directly
 
 If the reason for the handoff is **context pressure** and the objective still
 has more work left to do, the agent should call `trigger_handoff` directly

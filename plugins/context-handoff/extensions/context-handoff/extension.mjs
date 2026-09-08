@@ -666,9 +666,8 @@ const session = await joinSession({
                 markDeliveryPromptInjected(consumed.checkpointState);
               } catch {
                 await session.log(
-                  `Claimed handoff task ${task.id.slice(0, 8)}, but prompt ` +
-                    "injection failed. The task remains owned and the durable " +
-                    "delivery checkpoint can retry it in this same successor.",
+                  `Claimed handoff task ${task.id.slice(0, 8)}, but prompt injection failed. ` +
+                    "The task remains owned and the durable delivery checkpoint can retry it in this same successor.",
                   { level: "warning" },
                 );
                 return;
