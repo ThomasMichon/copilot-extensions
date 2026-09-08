@@ -992,7 +992,7 @@ def create_app(
                     return
                 gate = getattr(_app.state, "drain_gate", None)
                 confirms = 0
-                last_trigger = 0.0
+                last_trigger: float | None = None
                 while True:
                     await asyncio.sleep(_su_poll)
                     try:
@@ -1028,12 +1028,12 @@ def create_app(
                     if confirms < _su_confirmations:
                         continue
                     now = time.monotonic()
-                    if now - last_trigger < _su_cooldown:
+                    if last_trigger is not None and now - last_trigger < _su_cooldown:
                         continue
-                    last_trigger = now
                     confirms = 0
                     try:
                         _spawn_self_deploy(target)
+                        last_trigger = now
                         log.info(
                             "detected a newer installed version at %s -- "
                             "spawned a self-triggered deploy (pid %d, gen %d)",
