@@ -460,3 +460,100 @@ class TestWindowsSupervisorInstall:
         assert "emitter\\s+serve(?:\\s|$)" in helper
         assert "schedule\\s+serve(?:\\s|$)" in helper
         assert "Sort-Object { $depth[$_] } -Descending" not in helper
+
+    def test_interactive_hosts_get_a_self_restarting_scheduled_task(self):
+        """copilot-extensions#2172: an interactive-service-mode host used to run
+        the coordinator/supervisor via a bare HKCU Run auto-start, which has NO
+        crash-restart policy -- if the watchdog process died mid-session, nothing
+        ever brought it back until the next logon. Both must now prefer an
+        Interactive-logon Scheduled Task (RestartCount/RestartInterval), only
+        degrading to the historical HKCU Run auto-start when elevation is
+        unavailable."""
+        text = _ps1_text()
+
+        helper_idx = text.index("function Install-InteractiveScheduledTask")
+        helper = text[helper_idx : text.index("\nfunction ", helper_idx + 1)]
+        # Register-once: an already-registered Interactive task must be cycled in
+        # place (no re-register -> no elevation) on a non-elevated call.
+        assert "(-not (Test-Elevated))" in helper
+        assert "Stop-ScheduledTask -TaskName $Name" in helper
+        assert "Start-ScheduledTask -TaskName $Name" in helper
+        # A mismatched leftover (e.g. a stale S4U boot task) must NOT be treated
+        # as a match -- only a genuine Interactive-logon task short-circuits.
+        assert "$existingTask.Principal.LogonType -eq 'Interactive'" in helper
+        assert "-RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)" in helper
+        assert "-LogonType Interactive -RunLevel Limited" in helper
+        assert "return $false" in helper, (
+            "must return $false (not throw) when elevation is unavailable, so "
+            "callers can degrade gracefully to the HKCU Run fallback"
+        )
+
+        # Install-CoordinatorTask's generated launcher body is itself a
+        # here-string containing literal `function ...` text (e.g.
+        # Resolve-WritableLog), so bound by the next known top-level section
+        # instead of a blind "\nfunction " scan.
+        coord_idx = text.index("function Install-CoordinatorTask")
+        coord_end = text.index("# -- Embody supervisor Scheduled Task", coord_idx)
+        coord_body = text[coord_idx:coord_end]
+        interactive_coord = coord_body[coord_body.index("(Get-ServiceMode) -eq 'interactive'") :]
+        assert "Install-InteractiveScheduledTask -Name $TaskName" in interactive_coord
+        assert "Start-CoordinatorNonElevatedFallback -Launcher $launcher -Primary" in interactive_coord, (
+            "must still fall back to the HKCU Run path when the Scheduled Task "
+            "path returns $false (elevation unavailable)"
+        )
+
+        sup_idx = text.index("function Install-SupervisorTaskInstance")
+        sup_end = text.index("function Install-SupervisorTask {", sup_idx)
+        sup_body = text[sup_idx:sup_end]
+        interactive_sup = sup_body[sup_body.index("(Get-ServiceMode) -eq 'interactive'") :]
+        assert "Install-InteractiveScheduledTask -Name $Name" in interactive_sup
+        assert "Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher -EnvFile $EnvFile" in interactive_sup, (
+            "must still fall back to the HKCU Run path when the Scheduled Task "
+            "path returns $false (elevation unavailable)"
+        )
+        # The label-less safety gate (no opt-in label -> fully inert) must still
+        # be checked before ever attempting the Scheduled Task path.
+        assert "mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in interactive_sup
+
+    def test_interactive_scheduled_task_degrades_gracefully_without_cmdlets(self):
+        """Install-SupervisorTaskInstance's interactive branch calls
+        Install-InteractiveScheduledTask directly, without first checking
+        $haveSchedMod (unlike Install-CoordinatorTask's call site) -- so the
+        helper itself must guard against the ScheduledTasks cmdlets being
+        unavailable and return $false rather than throw, or a host without
+        that module would crash the install instead of degrading to the
+        HKCU Run fallback."""
+        text = _ps1_text()
+        helper_idx = text.index("function Install-InteractiveScheduledTask")
+        helper = text[helper_idx : text.index("\nfunction ", helper_idx + 1)]
+        guard_idx = helper.index("if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue))")
+        # The guard must be the first executable statement (before any
+        # Get-ScheduledTask/etc. call that would themselves throw/misbehave
+        # without the module loaded).
+        first_get_scheduled_task = helper.index("Get-ScheduledTask -TaskName $Name")
+        assert guard_idx < first_get_scheduled_task
+        guard_body = helper[guard_idx : helper.index("\n    }", guard_idx)]
+        assert "return $false" in guard_body
+
+    def test_interactive_scheduled_task_nostart_never_stops_a_running_task(self):
+        """Install-InteractiveScheduledTask's register-once/cycle-in-place fast
+        path used to call Stop-ScheduledTask unconditionally, even under
+        -NoStart -- so a caller like Install-CoordinatorTask's graceful-cutover
+        path (where a NEW coordinator has already been brought up out-of-band
+        and stopping this task would race or kill it) would have its running
+        task killed anyway. -NoStart must leave an already-running task
+        completely untouched."""
+        text = _ps1_text()
+        helper_idx = text.index("function Install-InteractiveScheduledTask")
+        helper = text[helper_idx : text.index("\nfunction ", helper_idx + 1)]
+        fast_path_idx = helper.index("if ($matchingType -and (-not (Test-Elevated)))")
+        fast_path = helper[fast_path_idx : helper.index("\n    }\n", fast_path_idx)]
+        assert "if ($NoStart) {" in fast_path
+        no_start_branch = fast_path[
+            fast_path.index("if ($NoStart) {") : fast_path.index("} else {")
+        ]
+        assert "Stop-ScheduledTask" not in no_start_branch
+        assert "Start-ScheduledTask" not in no_start_branch
+        else_branch = fast_path[fast_path.index("} else {") :]
+        assert "Stop-ScheduledTask -TaskName $Name" in else_branch
+        assert "Start-ScheduledTask -TaskName $Name" in else_branch
