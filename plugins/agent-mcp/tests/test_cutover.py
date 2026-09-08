@@ -778,3 +778,29 @@ async def test_shutdown_raises_on_rejected_reply(tmp_path, monkeypatch):
             await asyncio.to_thread(client.shutdown)
     finally:
         await server._stop_control_listener()
+
+
+@pytest.mark.asyncio
+async def test_undrain_raises_on_rejected_reply(tmp_path):
+    """Regression test: undrain() must raise ControlError when the old
+    daemon rejects the request, matching shutdown()'s validation.
+    zdd.cutover._undrain() (the only caller) wraps this in a try/except
+    that treats ANY raised exception as "undrain failed, non-fatal, but
+    record it" -- it never inspects a returned dict at all. Silently
+    returning a rejected reply would leave the old daemon stuck in
+    draining mode after a rollback with no trace of why."""
+    server = Server(str(tmp_path / "serve.sock"), enable_lease=False,
+                    control_port=0, control_token="right-token")
+    await server._start_control_listener()
+    try:
+        port = server._control_server.sockets[0].getsockname()[1]
+        ctx = _cutover._CutoverContext(
+            data_root=tmp_path, new_socket_path=tmp_path / "x.sock",
+            new_log_path=tmp_path / "x.log", new_control_token="wrong-token",
+            old_control_token=None, token_by_port={port: "wrong-token"},
+        )
+        client = _cutover.CutoverClient(f"http://127.0.0.1:{port}", ctx)
+        with pytest.raises(_cutover.ControlError):
+            await asyncio.to_thread(client.undrain)
+    finally:
+        await server._stop_control_listener()

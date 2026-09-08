@@ -246,7 +246,21 @@ class CutoverClient:
 
 
     def undrain(self) -> dict[str, Any]:
-        return self._request({"op": "undrain"})
+        """Best-effort rollback: release the old daemon's drain gate.
+
+        ``zdd.cutover._undrain()`` (the only caller) already wraps this in a
+        try/except that treats ANY raised exception as "undrain failed,
+        non-fatal, but record it" -- it never inspects a returned dict at
+        all. A rejected reply ({"ok": false, ...} -- unauthorized/malformed)
+        must therefore raise, not just return, or the old daemon could be
+        left stuck in draining mode after a rollback with no trace of why.
+        """
+        resp = self._request({"op": "undrain"})
+        if not resp.get("ok"):
+            raise ControlError(
+                f"undrain request rejected by old daemon: "
+                f"{resp.get('error') or resp!r}")
+        return resp
 
     def shutdown(self) -> dict[str, Any]:
         """The cutover's actual commit point (``zdd.cutover`` calls this
