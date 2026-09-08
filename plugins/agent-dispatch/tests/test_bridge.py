@@ -148,6 +148,31 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
 
 
+def test_spawn_worker_passes_caller_for_picker_origin(monkeypatch):
+    """copilot-extensions#2202: without --caller, the spawned worktree has no
+    caller_worktree stamped, so agent-worktrees' resolved_origin falls through
+    to "user" (Picker-visible) instead of "delegate" (Picker-hidden) -- every
+    autopilot worker looked exactly like an operator-created worktree. --caller
+    must ride every `create` invocation, keyed to this specific spawn attempt."""
+    calls = {}
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    bridge.spawn_worker("task42", agent="task-worker", worker_id="worker-abc123")
+
+    cmd = calls["cmd"]
+    assert "--caller" in cmd
+    caller_value = cmd[cmd.index("--caller") + 1]
+    assert caller_value == "agent-dispatch:worker-abc123"
+
+
 def test_spawn_worker_passes_no_window_kwargs(monkeypatch):
     """The console launcher runs windowless (CREATE_NO_WINDOW on Windows)."""
     calls = {}
