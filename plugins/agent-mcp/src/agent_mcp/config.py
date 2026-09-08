@@ -70,6 +70,14 @@ DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transfo
 
 BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
 
+
+def _marketplace_roots() -> list[Path]:
+    """Return explicit same-marketplace payload roots, when provided."""
+    raw = os.environ.get("AGENT_MCP_MARKETPLACE_ROOT")
+    if not raw:
+        return []
+    return [Path(p.strip()).expanduser() for p in raw.split(os.pathsep) if p.strip()]
+
 # Plugin-shipped bridge configs. A Copilot CLI plugin may ship its bridge config
 # *inside the plugin* (``<plugin>/agents/<name>.mcp.yaml``) instead of requiring a
 # copy under ``~/.agent-mcp/bridges/``. Copied plugins resolve from
@@ -366,6 +374,21 @@ def _find_plugin_bridge(name: str) -> Path | None:
     if live_unique:
         return _single_plugin_bridge(name, live_unique)
 
+    marketplace_matches: list[Path] = []
+    marketplace_roots = _marketplace_roots()
+    for root in marketplace_roots:
+        if not root.is_dir():
+            continue
+        for sub in ("agents", "mcp"):
+            for ext in (".yaml", ".yml", ".json"):
+                marketplace_matches.extend(sorted(root.glob(f"*/{sub}/{name}{ext}")))
+                marketplace_matches.extend(
+                    sorted(root.glob(f"*/{sub}/{name}.mcp{ext}"))
+                )
+    marketplace_unique = _unique_paths(marketplace_matches)
+    if marketplace_roots:
+        return _single_plugin_bridge(name, marketplace_unique)
+
     matches: list[Path] = []
     for root in _plugin_roots():
         if not root.is_dir():
@@ -429,6 +452,20 @@ def discover_plugin_bridge_candidates() -> list[tuple[str, Path]]:
     """
     candidates: list[tuple[str, Path]] = []
     seen: set[Path] = set()
+    marketplace_roots = _marketplace_roots()
+    if marketplace_roots:
+        for root in marketplace_roots:
+            if not root.is_dir():
+                continue
+            for sub in ("agents", "mcp"):
+                for ext in (".yaml", ".yml", ".json"):
+                    for path in sorted(root.glob(f"*/{sub}/*{ext}")):
+                        resolved = path.resolve()
+                        if resolved in seen:
+                            continue
+                        seen.add(resolved)
+                        candidates.append((normalize_bridge_name(path.name), path))
+        return candidates
     for root in _plugin_roots():
         if not root.is_dir():
             continue
