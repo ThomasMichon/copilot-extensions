@@ -91,8 +91,9 @@ and the parent agent-dispatch vision:
   Extracted verbatim into the packaged built-in identity, now shipped from
   `plugins/agent-dispatch/src/agent_dispatch/identities/odsp-web-harness-backlog.identity.md`
   (see 2026-09-07 journal entry below for why it moved there).
-  **Not yet applied to the live `dotfiles` declaration** -- that requires the
-  running agent-dispatch daemon to have this PR's code deployed first (an
+  The packaging fix landed on `main` via PR #2204. **Still not yet applied to
+  the live `dotfiles` declaration** -- that requires the running
+  agent-dispatch daemon to have this fix deployed first (an
   older daemon would reject `worker_identity` as an unknown key and break the
   live loop); see Gotchas.
 - [ ] Assess whether a named identity's structural boundaries (permitted
@@ -363,4 +364,32 @@ other phases actually land in.
   in the `-k` worktree (`dotfiles.worktrees\...-8451-k`) uncommitted for
   whoever verifies the new gate is clear; do not copy it into the live
   `dotfiles` anchor until then.
+
+### 2026-09-07 (cont.) - Landed the packaging fix; dotfiles switch still gated on daemon rollout
+
+- Addressed two rounds of automated Copilot PR review feedback on PR #2204
+  (both were identifier-neutrality nits, not correctness issues): replaced a
+  remaining personal `%USERPROFILE%`-style Windows path and a stale
+  pre-move `plugins/agent-dispatch/identities/` reference in this README's
+  own journal text with neutral wording. A third review round came back
+  clean (0 new findings; "Needs a closer look" badge, not a formal
+  approval -- this repo's flow profile is `pr-self-merge`, which doesn't
+  require a formal "approved" state, just green checks).
+- Merged PR #2204 via `pr-merge 2204 --now` and finalized its worktree.
+  The packaging fix (built-in identity now ships inside the
+  `agent_dispatch` package's wheel; see prior entry for the fix) is now on
+  `main`.
+- Re-checked the live daemon-version gate per the plan above: `agent-dispatch
+  --version` still reports `0.1.2-dev34` (no newer `versions/` directory
+  present) -- the daemon has **not yet auto-updated** to a build carrying
+  this fix. No manual "pull latest now" subcommand was found on the
+  `agent-dispatch` CLI; prior legs observed this daemon auto-update on its
+  own cadence (it moved `0.1.2-dev29` -> `0.1.2-dev34` between two earlier
+  legs without manual action), so the expectation is it will pick this fix
+  up the same way in a future cycle, not that it needs to be forced.
+  **Roster item #1 (the actual dotfiles switch) remains not-yet-done** --
+  next leg should re-check `agent-dispatch --version` / try resolving
+  `odsp-web-harness-backlog` from the daemon's own installed code before
+  copying the already-edited `-k` worktree declaration onto the live
+  `dotfiles` anchor.
 
