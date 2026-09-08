@@ -275,8 +275,14 @@ because they provide tools or services.
     deferral completed):
     remote consumers must carry the selected installation and repository
     identity across venue/transport boundaries.
-- [ ] Convert service-free runtimes in low-risk batches
+- [x] Convert service-free runtimes in low-risk batches
   ([#1106](https://github.com/ThomasMichon/copilot-extensions/issues/1106)).
+  - [x] Transferred to `#1107`
+    ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1107);
+    transfer completed):
+    agent-ssh's managed OpenSSH fragments, dtssh companion, dispatch registrar
+    drop-ins, and remote host restoration are transport-boundary work rather
+    than low-risk service-free runtime state.
 - [ ] Convert remote venue and transport plugins, carrying installation identity
   through SSH, CodeSpace, container, and staged-plugin boundaries
   ([#1107](https://github.com/ThomasMichon/copilot-extensions/issues/1107)).
@@ -1142,3 +1148,35 @@ See [`design.md`](design.md).
   [#2197](https://github.com/ThomasMichon/copilot-extensions/pull/2197),
   [#2198](https://github.com/ThomasMichon/copilot-extensions/pull/2198), and
   [#2215](https://github.com/ThomasMichon/copilot-extensions/pull/2215).
+
+### 2026-09-07 — Agent-mcp low-risk runtime closure
+
+- Merged [#2225](https://github.com/ThomasMichon/copilot-extensions/pull/2225)
+  at `7aa54ef2c801c6884360dc28cf9706de146a667b`, converting `agent-mcp` as the
+  remaining low-risk service-free runtime in `#1106`.
+- Payload-local invocation now routes through Windows and POSIX runtime gates
+  that validate the selected installation context before launch or first-use
+  provisioning. Namespaced operation exports the selected cell as
+  `AGENT_MCP_HOME`, scopes plugin-shipped bridge discovery to the owning
+  marketplace, and keeps session-start bootstrap quiescent under explicit
+  context so it cannot recreate legacy state.
+- The validated runtime root now owns agent-mcp's versioned slots, snapshots,
+  deploy manifest, token cache, storage stream buffer, materialized launchers,
+  serve socket/lease, and other mutable runtime state. Legacy operation with no
+  explicit active context remains exactly `~/.agent-mcp`.
+- Added two-cell same-name bridge isolation and invalid, foreign, and
+  spoofed-context negative coverage across both runtime-gate implementations,
+  plus regression checks that scoped bridge resolution fails closed and that the
+  runtime gates retain first-use provisioning locks.
+- Validation:
+  the full native Windows agent-mcp suite passed in two contained sub-suites
+  (`334 passed, 15 skipped` and `118 passed, 8 skipped`); WSL focused
+  payload-invocation/config coverage passed (`80 passed, 5 skipped`); and
+  install-contract, version-consistency, vendored-lib, installation-context,
+  payload-invocation, installer-readiness, and marketplace-isolation guards
+  passed.
+- Transferred the initial `agent-ssh` candidate to `#1107`
+  ([issue](https://github.com/ThomasMichon/copilot-extensions/issues/1107))
+  once inventory confirmed its managed OpenSSH fragments, dtssh companion,
+  dispatch registrar drop-ins, and remote host restoration carry transport
+  identity across remote boundaries.
