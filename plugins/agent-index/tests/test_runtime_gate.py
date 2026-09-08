@@ -52,7 +52,11 @@ def test_installer_readiness_uses_supported_update_arguments() -> None:
     )
     installer = runtime_module["installer"]
 
-    assert "zeroDowntimeUpdate" not in manifest
+    # zeroDowntimeUpdate:true is now declared (agent-index's update path is
+    # unconditionally cutover-driven; see docs/patterns/graceful-daemon-cutover.md).
+    # installer-readiness's own declared invocation is a separate readiness-probe
+    # concern and intentionally still doesn't pass the flag itself.
+    assert manifest.get("zeroDowntimeUpdate") is True
     assert installer["windows"]["arguments"] == ["update"]
     assert installer["linux"]["arguments"] == ["update"]
     assert installer["wsl"]["arguments"] == ["update"]
