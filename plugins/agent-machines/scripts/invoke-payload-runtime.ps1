@@ -183,6 +183,50 @@ function Invoke-AgentMachinesRuntime([string]$Python) {
     exit $LASTEXITCODE
 }
 
+function Invoke-AgentMachinesInstaller([string]$InstallerPath, [string]$Action) {
+    $installerArgs = @(
+        '-NoProfile', '-NonInteractive', '-OutputFormat', 'Text',
+        '-ExecutionPolicy', 'Bypass', '-File', "`"$InstallerPath`"",
+        '-Action', $Action
+    )
+    if ($Action -ceq 'cell-provision') {
+        $installerArgs += @(
+            '-Context', "`"$context`"",
+            '-ExpectedMarketplaceId', $marketplaceId
+        )
+    }
+    $stdoutPath = $null
+    $stderrPath = $null
+    try {
+        $stdoutPath = [IO.Path]::GetTempFileName()
+        $stderrPath = [IO.Path]::GetTempFileName()
+        # File redirection bypasses PS5's native-stream CLIXML/ErrorRecord parser.
+        $process = Start-Process -FilePath $hostExe -ArgumentList $installerArgs `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        # Keep command stdout clean and bound diagnostics from each installer stream.
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            # The child inherits the console code page, which need not be UTF-8.
+            $reader = [IO.StreamReader]::new($path, [Console]::OutputEncoding, $true)
+            try {
+                $tail = [Collections.Generic.Queue[string]]::new()
+                while ($null -ne ($line = $reader.ReadLine())) {
+                    $tail.Enqueue($line)
+                    if ($tail.Count -gt 200) { $null = $tail.Dequeue() }
+                }
+                foreach ($line in $tail) { [Console]::Error.WriteLine($line) }
+            } finally {
+                $reader.Dispose()
+            }
+        }
+        return $process.ExitCode
+    } finally {
+        foreach ($path in @($stdoutPath, $stderrPath)) {
+            if ($path) { Remove-Item -LiteralPath $path -Force }
+        }
+    }
+}
+
 $python = Resolve-AgentMachinesRuntime
 if ($python) { Invoke-AgentMachinesRuntime $python }
 if ($env:AGENT_MACHINES_NO_SELFPROVISION) {
@@ -217,12 +261,7 @@ if ($actualMode -ceq 'namespaced') {
         )
         exit 126
     }
-    & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer `
-        -Action cell-provision `
-        -Context $context `
-        -ExpectedMarketplaceId $marketplaceId 2>&1 |
-        ForEach-Object { [Console]::Error.WriteLine($_) }
-    $provisionStatus = $LASTEXITCODE
+    $provisionStatus = Invoke-AgentMachinesInstaller $installer 'cell-provision'
     if ($provisionStatus -ne 0) { exit $provisionStatus }
     $python = Resolve-AgentMachinesRuntime
     if ($python) { Invoke-AgentMachinesRuntime $python }
@@ -254,10 +293,8 @@ try {
     $python = Resolve-AgentMachinesRuntime
     if ($python) { Invoke-AgentMachinesRuntime $python }
 
-    & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer `
-        -Action stamp 2>&1 |
-        ForEach-Object { [Console]::Error.WriteLine($_) }
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $provisionStatus = Invoke-AgentMachinesInstaller $installer 'stamp'
+    if ($provisionStatus -ne 0) { exit $provisionStatus }
     $snapshot = ''
     try {
         $snapshot = ([IO.File]::ReadAllText(
@@ -279,10 +316,7 @@ try {
         )
         exit 127
     }
-    & $hostExe -NoProfile -ExecutionPolicy Bypass -File $snapshotInstaller `
-        -Action provision 2>&1 |
-        ForEach-Object { [Console]::Error.WriteLine($_) }
-    $provisionStatus = $LASTEXITCODE
+    $provisionStatus = Invoke-AgentMachinesInstaller $snapshotInstaller 'provision'
     if ($provisionStatus -ne 0) { exit $provisionStatus }
 
     $python = Resolve-AgentMachinesRuntime
