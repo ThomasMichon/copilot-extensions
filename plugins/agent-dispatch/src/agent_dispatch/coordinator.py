@@ -975,6 +975,7 @@ def create_app(
                 from zdd.routing import Endpoint
 
                 from .config import routing_dir
+                from .runtime_version import install_dir
                 from .self_retire import is_superseded
                 from .self_update import stale_target
 
@@ -1004,7 +1005,7 @@ def create_app(
                             # redeployed. Self-retire above owns our exit.
                             return
                         target = await asyncio.to_thread(
-                            stale_target, routing_dir(), __version__
+                            stale_target, install_dir(), __version__
                         )
                         # Not a safe point if a claim is in flight, OR if a
                         # cutover (ours or an externally-triggered one) is
