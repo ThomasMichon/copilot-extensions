@@ -30,3 +30,31 @@ def test_win32_uses_hidden_console_and_job_breakaway(monkeypatch):
 def test_non_windows_no_flags(monkeypatch):
     monkeypatch.setattr(main.sys, "platform", "linux")
     assert main._passive_daemon_creationflags() == 0
+
+
+def test_passive_daemon_stdio_kwargs_redirects_to_log_files(tmp_path, monkeypatch):
+    """Regression test: a passive daemon spawned without an explicit stdio
+    redirect inherits whatever fds the launcher held open at spawn time (on
+    POSIX, `start_new_session=True` alone does not close/redirect fds). A
+    long-running daemon holding onto an inherited pipe write-end (e.g. a
+    deploy script's own stdout piped through `| tail`) means that pipe never
+    sees EOF, even long after the deploy's own work finished. Every platform
+    must get real stdout/stderr/stdin redirects, not just Windows."""
+    import agent_bridge.config as config_module
+    monkeypatch.setattr(config_module, "config_dir", lambda: tmp_path)
+
+    kwargs, opened_streams = main._passive_daemon_stdio_kwargs()
+    try:
+        assert kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["stdout"] is not None
+        assert kwargs["stderr"] is not None
+        # Real, distinct file objects -- not None (which would mean "inherit
+        # the caller's fd", the exact bug this guards against) and not the
+        # same stream reused for both.
+        assert kwargs["stdout"] is not kwargs["stderr"]
+        assert kwargs["stdout"].name == str(tmp_path / "agent-bridge.log")
+        assert kwargs["stderr"].name == str(tmp_path / "agent-bridge-err.log")
+        assert set(opened_streams) == {kwargs["stdout"], kwargs["stderr"]}
+    finally:
+        for stream in opened_streams:
+            stream.close()
