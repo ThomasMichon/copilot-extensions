@@ -108,6 +108,26 @@ def test_status_reports_marker_and_binstub(tmp_path, monkeypatch):
     assert st.binstub is not None
 
 
+def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
+    """Phase 3b Slice 2 (Mux relocation): the versioned self-install copies the
+    WHOLE payload directory (``_copy_payload`` -> ``shutil.copytree``), so a
+    sibling ``bin/`` directory of launcher scripts -- like
+    ``worktree-manager/bin/launch-session.{sh,ps1,cmd}`` -- deploys to
+    ``<slot>/bin/`` with no self-install code change. This proves that
+    mechanism generically with a synthetic script, independent of the real
+    launcher scripts' content."""
+    pd = _fake_payload(tmp_path, "4.4.4")
+    (pd / "bin").mkdir()
+    (pd / "bin" / "launch-session.sh").write_text("#!/usr/bin/env bash\necho hi\n")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    slot = version_slot("4.4.4", root)
+    deployed = slot / "bin" / "launch-session.sh"
+    assert deployed.exists()
+    assert deployed.read_text() == (pd / "bin" / "launch-session.sh").read_text()
+
+
 def test_self_install_command_dry_run(capsys):
     rc = main(["self-install"])
     out = capsys.readouterr().out
