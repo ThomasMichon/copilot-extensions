@@ -164,9 +164,7 @@ def test_context_includes_pair_and_bounded_related_topology(
     assert "remote-tool(role=tooling,locus=machine:builder" in context
     assert "cloud-docs(role=docs,locus=codespace" in context
     assert "ordinary-local" not in context
-    assert "`agent-worktrees state-root --pair --json`" in context
-    assert "`agent-worktrees related list`" in context
-    assert "`agent-worktrees related resolve <name>`" in context
+    assert "Fresh queries" not in context
     assert len(context.encode("utf-8")) <= session_context.MAX_TOPOLOGY_BYTES
 
 
@@ -331,7 +329,7 @@ def test_context_fails_closed_when_state_and_pair_are_unavailable(
     assert str(tmp_path / "state-anchor") not in context
 
 
-def test_context_preserves_fresh_queries_under_path_pressure(
+def test_context_truncates_to_checkout_and_state_under_path_pressure(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -368,4 +366,3 @@ def test_context_preserves_fresh_queries_under_path_pressure(
 
     assert len(context.encode("utf-8")) <= session_context.MAX_TOPOLOGY_BYTES
     assert "[agent-worktrees context truncated]" in context
-    assert "`agent-worktrees related resolve <name>`" in context

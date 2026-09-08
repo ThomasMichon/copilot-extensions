@@ -72,7 +72,18 @@ def test_session_guidance_projection_points_to_hook_written_file():
                 "customizationKind": "instructions",
                 "applyTo": "**",
                 "legacyMarkers": [],
-            }
+            },
+            {
+                "id": "worktree-context-guide",
+                "template": "instructions/worktree-context-guide.instructions.md",
+                "destination": (
+                    ".github/instructions/agent-worktrees/"
+                    "worktree-context-guide.instructions.md"
+                ),
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+            },
         ],
     }
     template = (
@@ -86,6 +97,12 @@ def test_session_guidance_projection_points_to_hook_written_file():
         in template
     )
     assert "its absence is not an error" in template
+    guide = (
+        _PLUGIN / "instructions" / "worktree-context-guide.instructions.md"
+    ).read_text(encoding="utf-8")
+    assert "applyTo: \"**\"" in guide
+    assert "Related:" in guide
+    assert "agent-worktrees related list" in guide
 
 
 def _run(command: str, shell: str, home: Path, cwd: Path) -> subprocess.CompletedProcess[str]:

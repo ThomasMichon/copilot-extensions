@@ -22,11 +22,8 @@ def _clean(value: object, fallback: str = "-") -> str:
     return text or fallback
 
 
-def _bounded_prefix(prefix: str, required_suffix: str) -> str:
-    suffix = (
-        "\n[agent-worktrees context truncated]\n"
-        f"{required_suffix}"
-    )
+def _bounded_prefix(prefix: str) -> str:
+    suffix = "\n[agent-worktrees context truncated]"
     budget = MAX_TOPOLOGY_BYTES - len(suffix.encode("utf-8"))
     encoded = prefix.encode("utf-8")
     kept = encoded[: max(0, budget)].decode("utf-8", errors="ignore").rstrip()
@@ -168,16 +165,11 @@ def render_registry_context(
     if entries:
         related_line += f"; important={entries}"
     related_line += "."
-    fresh = (
-        "Fresh queries: `agent-worktrees state-root --pair --json`; "
-        "`agent-worktrees related list`; "
-        "`agent-worktrees related resolve <name>`."
-    )
 
-    required = "\n".join((checkout, state, fresh))
-    candidate = "\n".join((checkout, state, related_line, fresh))
+    required = "\n".join((checkout, state))
+    candidate = "\n".join((checkout, state, related_line))
     if len(candidate.encode("utf-8")) <= MAX_TOPOLOGY_BYTES:
         return candidate
     if len(required.encode("utf-8")) <= MAX_TOPOLOGY_BYTES:
         return required
-    return _bounded_prefix("\n".join((checkout, state)), fresh)
+    return _bounded_prefix("\n".join((checkout, state)))
