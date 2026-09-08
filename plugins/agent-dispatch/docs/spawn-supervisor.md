@@ -117,12 +117,19 @@ atomic-under-concurrency guarantee with no new locking. HTTP surface:
 
 ```
 POST /spawn-reservations               {task_id, reserved_by} -> {reserved, reservation}
+POST /spawn-reservations/{key}/routing-assignment {purpose, selected_model, eligibility_state, selection_reason, execution_surface, decision_ref, ...}
+POST /routing-assignments/{assignment_id}/transition {event_type, actor_role, ...}
 POST /spawn-reservations/{key}/worktree {worktree, ownership, creating_host, driver}
 POST /spawn-reservations/{key}/spawned  {session_handle, worktree}
 POST /spawn-reservations/{key}/release  {detail, disposition}
 POST /spawn-reservations/{key}/retire   {exact_absence, detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/{key}/fail     {detail}
+POST /spawn-reservations/{key}/defer    {detail}
+POST /spawn-reservations/{key}/cold
 POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_detail?}
+POST /spawn-reservations/{key}/conclusion {conclusion_state, conclusion_detail, claim_token?}
+POST /spawn-reservations/{key}/conclusion/claim
+POST /spawn-reservations/{key}/conclusion/validate {cleanup_claim_token}
 POST /spawn-reservations/tasks/{task_id}/rearm {permitted, reason, min_failures}
 GET  /spawn-reservations                ?task_id&state&limit
 GET  /spawn-reservations/{key}
