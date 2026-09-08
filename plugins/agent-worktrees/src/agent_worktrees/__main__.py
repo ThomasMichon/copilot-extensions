@@ -153,11 +153,7 @@ def cmd_launch(argv: list[str]) -> int:
             passthrough.append(arg)
 
     launch_project = cfg.active_project()
-    launcher_args = (
-        ["--project", launch_project, *passthrough]
-        if launch_project
-        else passthrough
-    )
+    launcher_args = ["--project", launch_project, *passthrough] if launch_project else passthrough
 
     # Resolve launch support from the same validated runtime root that entered
     # this Python process. An explicit cell must never fall back to legacy.
@@ -214,8 +210,7 @@ def cmd_launch(argv: list[str]) -> int:
         if is_stdio or not ps1.exists():
             argv = ["cmd.exe", "/c", str(launch_script), *launcher_args]
         else:
-            argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File",
-                    str(ps1), *launcher_args]
+            argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(ps1), *launcher_args]
         # Popen + wait (never os.exec on Windows, which has no true exec and
         # would detach the child from the console): hold the console and catch
         # KeyboardInterrupt (Ctrl+C) so the child (launch-session.ps1) can finish
@@ -329,9 +324,7 @@ def _build_active_paths(
     """
     if session_ctx is None:
         session_ctx = sessions.scan_sessions_fast(records)
-    active = {
-        _normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids
-    }
+    active = {_normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids}
     for rec in records:
         if rec.worktree_path and _hosted_session_blocks_cleanup(rec):
             active.add(_normalize_path(rec.worktree_path))
@@ -339,8 +332,7 @@ def _build_active_paths(
     mux_sessions = sessions._list_mux_sessions()
     if mux_sessions is not None:
         for rec in records:
-            if rec.worktree_path and sessions.mux_session_name(
-                    rec.worktree_id) in mux_sessions:
+            if rec.worktree_path and sessions.mux_session_name(rec.worktree_id) in mux_sessions:
                 active.add(_normalize_path(rec.worktree_path))
     else:
         # Batch list unavailable (mux missing or blocked): prefer the #4057
@@ -501,7 +493,8 @@ def _classify_records(
     active_paths = _build_active_paths(records, session_ctx)
     return {
         rec.worktree_id: _classify_one_record(
-            rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx)
+            rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
+        )
         for rec in records
     }
 
@@ -521,9 +514,12 @@ def _classify_one_record(
     the caller (they are the same for every record)."""
     if rec.worktree_path and Path(rec.worktree_path).exists():
         info = git_ops.classify_worktree(
-            rec.worktree_path, rec.branch,
-            fetch=False, remote=repo.remote,
-            default_branch=repo.default_branch, active_paths=active_paths,
+            rec.worktree_path,
+            rec.branch,
+            fetch=False,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
+            active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
     elif rec.status == "finalized":
@@ -534,7 +530,8 @@ def _classify_one_record(
     # reports the same display state the tmux status bar does.
     if session_ctx is not None:
         turns = session_ctx.turn_count.get(
-            _normalize_path(rec.worktree_path), 0,
+            _normalize_path(rec.worktree_path),
+            0,
         )
         if turns:
             info = dataclasses.replace(
@@ -571,6 +568,7 @@ def _make_pr_lookup(config):
 # resolve -- JSON launch plan (Python exits before Copilot starts)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _emit_plan(plan: dict) -> None:
     """Write the JSON launch plan to the real stdout (not the swapped one).
 
@@ -583,9 +581,7 @@ def _emit_plan(plan: dict) -> None:
         plan.setdefault("project", project)
     if plan.get("action") == "exec":
         env = plan.setdefault("env", {})
-        env.setdefault(
-            "COPILOT_CUSTOM_INSTRUCTIONS_DIRS", str(cfg.project_dir())
-        )
+        env.setdefault("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", str(cfg.project_dir()))
     sys.__stdout__.write(json.dumps(plan) + "\n")
     sys.__stdout__.flush()
 
@@ -641,10 +637,7 @@ def _controller_metadata(
     rec: tracking.WorktreeRecord,
 ) -> list[dict[str, object]]:
     """Normalized controller relations shared by machine-readable surfaces."""
-    return [
-        tracking.controller_relation_to_dict(relation)
-        for relation in rec.controllers
-    ]
+    return [tracking.controller_relation_to_dict(relation) for relation in rec.controllers]
 
 
 def _controller_findings(
@@ -741,15 +734,11 @@ def _worktree_to_dict(
     # worktrees; follow_up is always present (a plain bool the picker reads).
     effort_state = None
     if rec.active_effort is not None:
-        effort_state = effort_focus.inspect_effort(
-            Path(rec.worktree_path), rec.active_effort
-        )
+        effort_state = effort_focus.inspect_effort(Path(rec.worktree_path), rec.active_effort)
         d["active_effort"] = effort_state.to_dict()
     d["follow_up"] = rec.follow_up or bool(effort_state and effort_state.active)
     effective_summary = (
-        effort_state.summary
-        if effort_state is not None and effort_state.active
-        else rec.summary
+        effort_state.summary if effort_state is not None and effort_state.active else rec.summary
     )
     if effective_summary:
         d["summary"] = effective_summary
@@ -805,8 +794,7 @@ def _worktree_to_dict(
         )
         if include_profile_assignment_history:
             d["profile_assignments"] = [
-                profile_assignment.metadata(assignment)
-                for assignment in rec.profile_assignments
+                profile_assignment.metadata(assignment) for assignment in rec.profile_assignments
             ]
             d["latest_profile_assignment"] = profile_assignment.metadata(
                 rec.profile_assignments[-1]
@@ -825,12 +813,16 @@ def _worktree_to_dict(
         # flag-independent; the executor still re-checks safety per worktree.
         _turns = (
             session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0)
-            if session_ctx is not None else 0
+            if session_ctx is not None
+            else 0
         )
         d["cleanup_bucket"] = prune.cleanup_disposition(
-            rec, state_info, turn_count=_turns,
+            rec,
+            state_info,
+            turn_count=_turns,
             claimant_alive=_local_claimant_alive,
-            paired_sibling_final=prune.default_paired_sibling_final).bucket
+            paired_sibling_final=prune.default_paired_sibling_final,
+        ).bucket
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
@@ -943,13 +935,9 @@ def cmd_session_backend(args) -> int:
         with tracking._RecordLock(yaml_path):
             initial_record = tracking.load_record(yaml_path)
         if not config.session_backend.is_ahp:
-            if (
-                initial_record.session_backend_opaque
-                or (
-                    initial_record.session_backend is not None
-                    and initial_record.session_backend.state
-                    in {"active", "unknown"}
-                )
+            if initial_record.session_backend_opaque or (
+                initial_record.session_backend is not None
+                and initial_record.session_backend.state in {"active", "unknown"}
             ):
                 raise ahp_backend.AhpBackendError(
                     "worktree has a live or unknown hosted-session binding while "
@@ -970,13 +958,11 @@ def cmd_session_backend(args) -> int:
             if binding is not None:
                 if binding.endpoint_url != config.session_backend.endpoint_url:
                     raise ahp_backend.AhpBackendError(
-                        "persisted AHP endpoint does not match current "
-                        "configuration"
+                        "persisted AHP endpoint does not match current configuration"
                     )
                 if binding.auth_account != configured_account:
                     raise ahp_backend.AhpBackendError(
-                        "persisted AHP account does not match current "
-                        "configuration"
+                        "persisted AHP account does not match current configuration"
                     )
         else:
             backend_lock_path = yaml_path.with_suffix(".session-backend.yaml")
@@ -992,9 +978,7 @@ def cmd_session_backend(args) -> int:
             ):
                 record = tracking.load_record(yaml_path)
                 repo = _repo_for_record(config, record) or config.default_repo
-                lifecycle_lock = fin.FinalizeLock(
-                    Path(repo.worktree_root) / ".finalize.lock"
-                )
+                lifecycle_lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock")
                 lifecycle_lock.acquire()
                 try:
                     if not yaml_path.exists():
@@ -1004,13 +988,9 @@ def cmd_session_backend(args) -> int:
                     record = tracking.load_record(yaml_path)
                     if record.session_backend_opaque:
                         raise ahp_backend.AhpBackendError(
-                            "worktree uses a newer unsupported "
-                            "session_backend schema"
+                            "worktree uses a newer unsupported session_backend schema"
                         )
-                    if (
-                        args.action == "ensure"
-                        and record.status in {"finalizing", "finalized"}
-                    ):
+                    if args.action == "ensure" and record.status in {"finalizing", "finalized"}:
                         raise ahp_backend.AhpBackendError(
                             "cannot activate a hosted session for a finalizing "
                             "or finalized worktree"
@@ -1027,13 +1007,9 @@ def cmd_session_backend(args) -> int:
                             record,
                         )
                         binding = record.session_backend
-                        event_name = (
-                            "ahp_session_disposed" if changed else ""
-                        )
+                        event_name = "ahp_session_disposed" if changed else ""
 
-                    if binding is not None and (
-                        args.action == "ensure" or changed
-                    ):
+                    if binding is not None and (args.action == "ensure" or changed):
                         with tracking._RecordLock(yaml_path):
                             latest = tracking.load_record(yaml_path)
                             latest.session_backend = binding
@@ -1053,25 +1029,29 @@ def cmd_session_backend(args) -> int:
         return _json_error(str(exc), exit_code=3)
 
     if binding is None:
-        _json_output({
+        _json_output(
+            {
+                "enabled": True,
+                "kind": "ahp",
+                "bound": False,
+                "endpoint_url": config.session_backend.endpoint_url,
+                "auth_account": configured_account,
+            }
+        )
+        return 0
+    _json_output(
+        {
             "enabled": True,
             "kind": "ahp",
-            "bound": False,
-            "endpoint_url": config.session_backend.endpoint_url,
-            "auth_account": configured_account,
-        })
-        return 0
-    _json_output({
-        "enabled": True,
-        "kind": "ahp",
-        "bound": binding.state == "active",
-        "endpoint_url": binding.endpoint_url,
-        "session_id": binding.session_id,
-        "protocol_version": binding.protocol_version,
-        "auth_account": binding.auth_account,
-        "state": binding.state,
-        "binding_revision": binding.binding_revision,
-    })
+            "bound": binding.state == "active",
+            "endpoint_url": binding.endpoint_url,
+            "session_id": binding.session_id,
+            "protocol_version": binding.protocol_version,
+            "auth_account": binding.auth_account,
+            "state": binding.state,
+            "binding_revision": binding.binding_revision,
+        }
+    )
     return 0
 
 
@@ -1138,13 +1118,9 @@ def _carve_paired_knowledge(
     knowledge_name = res.repo
     knowledge_anchor = res.path
     pair_id = f"{timestamp}-{suffix}"
-    harness_ref = tracking.format_claim_ref(
-        config.machine, config.repo_name or "?", harness_id
-    )
+    harness_ref = tracking.format_claim_ref(config.machine, config.repo_name or "?", harness_id)
     entry = repos_mod.find_repo(knowledge_name)
-    is_worktree_class = bool(entry) and repos_mod.normalize_class(
-        entry.repo_class
-    ) == "worktree"
+    is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) == "worktree"
     remote = git_ops.resolve_remote_name(
         (entry.remote or "origin") if entry else "origin",
         cwd=knowledge_anchor,
@@ -1161,9 +1137,9 @@ def _carve_paired_knowledge(
     if not is_worktree_class:
         # Non-worktree-class knowledge -> operate on the anchor (no 2nd carve).
         anchor_ref = tracking.format_claim_ref(
-            config.machine, knowledge_name, os.path.basename(
-                knowledge_anchor.rstrip("/\\")
-            ) or "anchor",
+            config.machine,
+            knowledge_name,
+            os.path.basename(knowledge_anchor.rstrip("/\\")) or "anchor",
         )
         print(
             f"Paired knowledge repo '{knowledge_name}' is not worktree-class; "
@@ -1195,9 +1171,7 @@ def _carve_paired_knowledge(
         prepared.start_point,
     )
 
-    knowledge_ref = tracking.format_claim_ref(
-        config.machine, knowledge_name, knowledge_id
-    )
+    knowledge_ref = tracking.format_claim_ref(config.machine, knowledge_name, knowledge_id)
     tracking.create_new_record(
         worktree_id=knowledge_id,
         branch=knowledge_branch,
@@ -1248,23 +1222,23 @@ def _stamp_and_compose_paired_knowledge(
     from . import knowledge_plugins
 
     try:
-        return knowledge_plugins.compose_from_pair(
-            cwd=worktree_path, config=config
-        )
+        return knowledge_plugins.compose_from_pair(cwd=worktree_path, config=config)
     except knowledge_plugins.KnowledgePluginError as exc:
         # The pair is already durable. Keep create's resource identity usable
         # and let the normal launcher retry its strict pre-Copilot preflight.
         print(
-            "paired-knowledge plugin composition failed; "
-            f"the launch preflight will retry: {exc}",
+            f"paired-knowledge plugin composition failed; the launch preflight will retry: {exc}",
             file=sys.stderr,
         )
         return {"action": "error", "error": str(exc)}
 
 
 def _journal_owner_reciprocal_claim(
-    config: cfg.Config, worktree_id: str, owner_ref: str | None,
-    *, owner_locked: bool = False,
+    config: cfg.Config,
+    worktree_id: str,
+    owner_ref: str | None,
+    *,
+    owner_locked: bool = False,
 ) -> bool:
     """Journal the reciprocal ``worktree`` claim onto an owner's ledger (Ph3c).
 
@@ -1288,24 +1262,31 @@ def _journal_owner_reciprocal_claim(
         return False
     try:
         owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(
-            owner_ref, config,
+            owner_ref,
+            config,
         )
         if owner_path is None or not owner_path.exists():
             return False
         child_ref = tracking.format_claim_ref(
-            config.machine, config.repo_name, worktree_id,
+            config.machine,
+            config.repo_name,
+            worktree_id,
         )
+
         def _write_claim() -> None:
             owner_rec = tracking.load_record(owner_path)
             tracking.add_resource_claim(
                 owner_rec,
                 tracking.ResourceClaim(
-                    kind="worktree", ref=child_ref,
-                    created_at=tracking._now_iso(), state=obligations.ACTIVE,
+                    kind="worktree",
+                    ref=child_ref,
+                    created_at=tracking._now_iso(),
+                    state=obligations.ACTIVE,
                 ),
                 save=False,
             )
             tracking.save_record(owner_rec, owner_path)
+
         if owner_locked:
             _write_claim()
         else:
@@ -1317,8 +1298,7 @@ def _journal_owner_reciprocal_claim(
         )
         return True
     except Exception as exc:  # never let journaling break the carve
-        print(f"owner-claim journaling failed (non-fatal): {exc}",
-              file=sys.stderr)
+        print(f"owner-claim journaling failed (non-fatal): {exc}", file=sys.stderr)
         return False
 
 
@@ -1346,8 +1326,7 @@ def _prepare_worktree_source(
         )
     if prepared.anchor.updated:
         print(
-            f"Fast-forwarded {label} anchor by "
-            f"{prepared.anchor.behind} commit(s).",
+            f"Fast-forwarded {label} anchor by {prepared.anchor.behind} commit(s).",
             file=sys.stderr,
         )
     elif prepared.anchor.reason in {
@@ -1359,8 +1338,7 @@ def _prepare_worktree_source(
         "ff-failed",
     }:
         print(
-            f"Note: {label} anchor is {prepared.anchor.reason}; "
-            "left untouched.",
+            f"Note: {label} anchor is {prepared.anchor.reason}; left untouched.",
             file=sys.stderr,
         )
     if prepared.start_point != f"{remote}/{default_branch}":
@@ -1434,8 +1412,7 @@ def _create_worktree_core(
         parsed_owner = tracking.parse_claim_ref(owner_ref)
         if parsed_owner is None or not parsed_owner.is_qualified:
             raise RuntimeError(
-                "--owner-ref must be qualified as "
-                f"machine/project/worktree_id (got {owner_ref!r})"
+                f"--owner-ref must be qualified as machine/project/worktree_id (got {owner_ref!r})"
             )
         if parsed_owner.machine != config.machine:
             raise RuntimeError(
@@ -1452,13 +1429,11 @@ def _create_worktree_core(
     fake_args = None
     if launches_copilot:
         fake_args = argparse.Namespace(
-            copilot_args=[], recovery=recovery, no_mux=no_mux,
+            copilot_args=[],
+            recovery=recovery,
+            no_mux=no_mux,
             no_resume=False,
-            profile=(
-                profile.name
-                if profile is not None and profile_is_explicit
-                else None
-            ),
+            profile=(profile.name if profile is not None and profile_is_explicit else None),
         )
         launch_preflight = launch_preflight or _preflight_launch(
             config,
@@ -1484,20 +1459,17 @@ def _create_worktree_core(
     # finalize cannot hand off/clean a not-yet-created child reference.
     owner_guard = None
     if owner_ref:
-        owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(
-            owner_ref, config)
+        owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(owner_ref, config)
         if owner_err or owner_path is None or not owner_path.exists():
-            raise RuntimeError(
-                owner_err or f"owner ledger is missing: {owner_ref}")
-        owner_guard = tracking._RecordLock(
-            owner_path, require_sidecar=True)
+            raise RuntimeError(owner_err or f"owner ledger is missing: {owner_ref}")
+        owner_guard = tracking._RecordLock(owner_path, require_sidecar=True)
         owner_guard.__enter__()
 
     try:
         if owner_guard is not None and not _journal_owner_reciprocal_claim(
-                config, worktree_id, owner_ref, owner_locked=True):
-            raise RuntimeError(
-                f"owner {owner_ref} cannot accept a new worktree obligation")
+            config, worktree_id, owner_ref, owner_locked=True
+        ):
+            raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
         print(f"Creating worktree on branch {branch}...", file=sys.stderr)
         git_ops.create_worktree(
             repo.anchor,
@@ -1582,12 +1554,9 @@ def _create_worktree_core(
                 plat_short=plat_short,
             )
         except Exception as exc:  # pragma: no cover - defensive
-            print(f"paired-knowledge carve failed (non-fatal): {exc}",
-                  file=sys.stderr)
+            print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
             pair_stamp = None
-        _stamp_and_compose_paired_knowledge(
-            config, record, worktree_path, pair_stamp
-        )
+        _stamp_and_compose_paired_knowledge(config, record, worktree_path, pair_stamp)
 
     # Copilot discovers repository settings before sessionStart. Seed the
     # worktree-local source overlay now so programmatic create callers and
@@ -1633,21 +1602,19 @@ def _create_worktree_core(
     )
     result["worktree"] = _worktree_to_dict(record)
     result["launch"] = {
-            "action": "exec",
-            "work_dir": worktree_path,
-            "cmd": launch_cmd,
-            "env": env,
-            "worktree_id": worktree_id,
-            "post_exit": True,
-            "no_mux": no_mux,
+        "action": "exec",
+        "work_dir": worktree_path,
+        "cmd": launch_cmd,
+        "env": env,
+        "worktree_id": worktree_id,
+        "post_exit": True,
+        "no_mux": no_mux,
     }
     project = cfg.active_project()
     if project:
         result["launch"]["project"] = project
     if selection.assignment is not None:
-        result["launch"]["profile_assignment"] = profile_assignment.metadata(
-            selection.assignment
-        )
+        result["launch"]["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     return result
 
 
@@ -1781,8 +1748,7 @@ class LaunchPreflight:
     def error(self) -> str | None:
         if self.config_root is not None and not self.config_root.path:
             return (
-                self.config_root.error
-                or "could not resolve the machine-local configuration root"
+                self.config_root.error or "could not resolve the machine-local configuration root"
             )
         return None
 
@@ -1806,11 +1772,7 @@ def _preflight_launch(
     plat_key = config.platform if config.platform != "wsl" else "linux"
     launch_map = repo.launch_recovery if recovery else repo.launch
     config_root = None
-    if (
-        not recovery
-        and plat_key not in launch_map
-        and repo.setup_hook.get(plat_key)
-    ):
+    if not recovery and plat_key not in launch_map and repo.setup_hook.get(plat_key):
         config_root = state_root_mod.resolve_config_root(
             config,
             cwd=work_dir,
@@ -1895,9 +1857,7 @@ def _build_launch_cmd(
             "repo_name": config.repo_name,
             "home": os.path.expanduser("~"),
         }
-        session_dirs = [
-            d.format(**variables) for d in repo.session_path.get(plat_key, [])
-        ]
+        session_dirs = [d.format(**variables) for d in repo.session_path.get(plat_key, [])]
         session_path_arg = os.pathsep.join(session_dirs) if session_dirs else ""
         hook_path = repo.setup_hook.get(plat_key)
         # env_script: resolve like setup_hook, but its captured environment is
@@ -1911,12 +1871,8 @@ def _build_launch_cmd(
             if not os.path.isabs(resolved_env_script):
                 resolved_env_script = str(Path(anchor) / resolved_env_script)
         copilot_path = repo.copilot_path.get(plat_key)
-        configured_copilot_path = (
-            copilot_path.format(**variables) if copilot_path else ""
-        )
-        resolved_copilot_path = (
-            configured_copilot_path or fallback_copilot_path or ""
-        )
+        configured_copilot_path = copilot_path.format(**variables) if copilot_path else ""
+        resolved_copilot_path = configured_copilot_path or fallback_copilot_path or ""
         if hook_path:
             # (1) Normalized launch via the default-setup launcher + repo hook.
             resolved_hook = hook_path.format(**variables)
@@ -1926,14 +1882,22 @@ def _build_launch_cmd(
             if is_windows:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
                 cmd = [
-                    "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
-                    launcher, "-Machine", config.machine,
-                    "-SetupHook", resolved_hook,
+                    "pwsh.exe",
+                    "-NoProfile",
+                    "-NoLogo",
+                    "-File",
+                    launcher,
+                    "-Machine",
+                    config.machine,
+                    "-SetupHook",
+                    resolved_hook,
                 ]
                 if config_root_path:
                     cmd += [
-                        "-ConfigRoot", config_root_path,
-                        "-RuntimePython", sys.executable,
+                        "-ConfigRoot",
+                        config_root_path,
+                        "-RuntimePython",
+                        sys.executable,
                     ]
                 if session_path_arg:
                     cmd += ["-SessionPath", session_path_arg]
@@ -1946,13 +1910,19 @@ def _build_launch_cmd(
             else:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.sh")
                 cmd = [
-                    "bash", launcher, "--machine", config.machine,
-                    "--setup-hook", resolved_hook,
+                    "bash",
+                    launcher,
+                    "--machine",
+                    config.machine,
+                    "--setup-hook",
+                    resolved_hook,
                 ]
                 if config_root_path:
                     cmd += [
-                        "--config-root", config_root_path,
-                        "--runtime-python", sys.executable,
+                        "--config-root",
+                        config_root_path,
+                        "--runtime-python",
+                        sys.executable,
                     ]
                 if session_path_arg:
                     cmd += ["--session-path", session_path_arg]
@@ -1972,8 +1942,13 @@ def _build_launch_cmd(
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = [
-                "pwsh.exe", "-NoProfile", "-NoLogo", "-File",
-                setup_path, "-Machine", config.machine,
+                "pwsh.exe",
+                "-NoProfile",
+                "-NoLogo",
+                "-File",
+                setup_path,
+                "-Machine",
+                config.machine,
             ]
             # session_path is only understood by the default-setup launcher;
             # never pass it to a legacy setup.ps1 (unknown params would leak
@@ -2021,9 +1996,7 @@ def _build_launch_cmd(
     passthrough = list(extra) + list(profile_args)
     is_acp = "--acp" in passthrough
     if not is_acp and not any(
-        a == flag
-        for a in passthrough
-        for flag in ("--allow-all-tools", "--allow-all", "--yolo")
+        a == flag for a in passthrough for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
         cmd.append("--allow-all")
 
@@ -2083,11 +2056,7 @@ def _wait_for_handoff_candidate(
         try:
             candidate_record = tracking.load_record(record_path)
             handoff = next(
-                (
-                    item
-                    for item in candidate_record.handoffs
-                    if item.token == token
-                ),
+                (item for item in candidate_record.handoffs if item.token == token),
                 None,
             )
         except (OSError, ValueError):
@@ -2100,178 +2069,16 @@ def _wait_for_handoff_candidate(
     return None, "session-association-timeout"
 
 
-def cmd_handoff_cutover(args: argparse.Namespace) -> int:
-    """Live-cutover handoff: spawn a seeded successor Copilot or retire a pane.
-
-    Two modes (JSON out on stdout either way):
-
-    * **spawn** (default; needs ``--seed``): reconstruct this worktree's launch
-      command (the same ``_build_launch_cmd`` the picker uses) for a **plain
-      interactive** Copilot, open + select a NEW window in the worktree's
-      ``wt-<id>`` mux session (cutting the operator over). The seed is encoded as
-      a space-free pane-wrapper control argument; the wrapper decodes it after
-      psmux's lossy argv reconstruction, appends native
-      ``-i <seed>``, and writes a receipt before the parent reports
-      success. Deliberately omits ``--resume``: a handoff wants a FRESH context
-      window seeded by the prompt, not the old transcript replayed. Returns the
-      OLD (pre-cutover) pane id so the successor-side handoff consumer can retire
-      it after pickup.
-    * **retire** (``--retire-pane <id>``): double-Ctrl-C that specific pane
-      (Copilot's native clean quit), hard-killing it only if it will not exit.
-      Then, when the predecessor ``--session-id`` is known, **verify its Copilot
-      process is gone** -- reaping an orphan by its ``inuse.<pid>.lock`` pid (the
-      successor is a different pid, untouched) -- so a hard-killed pane never
-      leaves a lingering parallel session that the mux later restores as a
-      reappearing pane. Success requires **both** the pane retired and the old
-      Copilot process gone.
-
-    The mux choreography lives here (agent-worktrees owns launch + mux); the
-    context-handoff extension is a thin trigger that shells out to this command.
-    """
-    # ── Retire mode ──────────────────────────────────────────────────────
-    retire_pane = getattr(args, "retire_pane", None)
-    if retire_pane:
-        raw_id = getattr(args, "worktree_id", None)
-        wt_id = _resolve_worktree_id(raw_id) if raw_id else None
-        session_id = getattr(args, "session_id", None)
-        expected_mux = getattr(args, "mux_session", None)
-        require_mux_identity = bool(
-            getattr(args, "require_mux_identity", False)
-        )
-        expected_copilot_pid = getattr(args, "expected_copilot_pid", None)
-        expected_copilot_start = getattr(
-            args, "expected_copilot_start_time", None
-        )
-        strict_process_identity = (
-            expected_copilot_pid is not None
-            or expected_copilot_start is not None
-        )
-        current_mux = (
-            sessions.mux_session_for_pane(retire_pane)
-            if expected_mux else None
-        )
-        pane_not_in_expected_mux = bool(
-            expected_mux and current_mux != expected_mux
-        )
-        binding = (
-            sessions.mux_binding_for_session(session_id)
-            if (
-                strict_process_identity
-                and session_id
-                and not pane_not_in_expected_mux
-            )
-            else None
-        )
-        process_identity_ok = True
-        process_identity_reason = None
-        if strict_process_identity and not pane_not_in_expected_mux:
-            if (
-                expected_copilot_pid is None
-                or not expected_copilot_start
-                or binding is None
-            ):
-                process_identity_ok = False
-                process_identity_reason = "process-identity-unavailable"
-            elif (
-                binding.get("pane_id") != retire_pane
-                or binding.get("copilot_pid") != expected_copilot_pid
-                or str(binding.get("copilot_start_time"))
-                != str(expected_copilot_start)
-            ):
-                process_identity_ok = False
-                process_identity_reason = "process-identity-mismatch"
-        if not process_identity_ok:
-            result = {
-                "ok": False,
-                "pane": retire_pane,
-                "gone": False,
-                "method": process_identity_reason,
-                "expected_copilot_pid": expected_copilot_pid,
-                "expected_copilot_start_time": expected_copilot_start,
-            }
-        elif require_mux_identity and not expected_mux:
-            result = {
-                "ok": bool(session_id),
-                "pane": retire_pane,
-                "gone": True,
-                "method": "identity-unavailable-skip",
-                "expected_mux_session": None,
-                "current_mux_session": None,
-            }
-        elif expected_mux and current_mux != expected_mux:
-            result = {
-                "ok": bool(session_id),
-                "pane": retire_pane,
-                "gone": True,
-                "method": (
-                    "identity-mismatch-skip"
-                    if current_mux
-                    else "identity-unresolved-skip"
-                ),
-                "expected_mux_session": expected_mux,
-                "current_mux_session": current_mux,
-            }
-        else:
-            result = sessions.mux_retire_pane(retire_pane)
-        # Pane death is NOT process death. A swallowed Ctrl-C or a hard kill-pane
-        # can leave the OLD Copilot running as an orphan, which the mux later
-        # restores as a reappearing pane -- a lingering parallel session after
-        # the cutover. When the predecessor session is known, authoritatively
-        # ensure its Copilot process is gone (reaping an orphan by its inuse-lock
-        # pid; the successor is a different pid, untouched) BEFORE declaring the
-        # retire a success. Skipped for the last-window guard, where the pane and
-        # its session are deliberately kept alive.
-        reap = {"checked": False}
-        identity_skip = result.get("method") in {
-            "process-identity-unavailable",
-            "process-identity-mismatch",
-        }
-        if (
-            session_id
-            and result.get("method") != "last-window-skip"
-            and not identity_skip
-        ):
-            if strict_process_identity:
-                reap = reclaim.ensure_session_copilot_reaped(
-                    session_id,
-                    expected_pid=expected_copilot_pid,
-                    expected_start_time=expected_copilot_start,
-                )
-            else:
-                reap = reclaim.ensure_session_copilot_reaped(session_id)
-            result["copilot"] = reap
-        proc_ok = (
-            ((not reap.get("checked")) or reap.get("survivors", 0) == 0)
-            and reap.get("identity_verified", True)
-        )
-        skipped_identity = result.get("method") == "identity-mismatch-skip"
-        overall_ok = bool(result.get("ok")) and proc_ok
-        result["ok"] = overall_ok
-        activity.log_event(
-            "handoff_predecessor_retire",
-            worktree_id=wt_id,
-            session_id=session_id,
-            source="python",
-            old_pane=retire_pane,
-            successor_verified=bool(getattr(args, "successor_verified", False)),
-            reason=getattr(args, "retire_reason", None),
-            method=result.get("method"),
-            outcome=(
-                "identity-mismatch"
-                if skipped_identity
-                else "gone" if (result.get("gone") and proc_ok) else "left-running"
-            ),
-            copilot_found=reap.get("found", 0),
-            copilot_reaped=reap.get("reaped", 0),
-            copilot_survivors=reap.get("survivors", 0),
-        )
-        _json_output(result)
-        return 0 if overall_ok else 1
-
-    # ── Spawn / cutover mode ─────────────────────────────────────────────
+def _handoff_cutover_spawn_result(
+    args: argparse.Namespace,
+) -> tuple[int, dict[str, object]]:
+    """Return the spawn-mode ``handoff-cutover`` result without printing JSON."""
     seed = getattr(args, "seed", None)
     if not seed:
-        return _json_error("handoff-cutover requires --seed (or --retire-pane)")
+        return 1, {
+            "ok": False,
+            "error": "handoff-cutover requires --seed (or --retire-pane)",
+        }
 
     raw_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
@@ -2298,22 +2105,28 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         if not wt_id:
             try:
                 config = cfg.load_config()
-            except Exception as e:
-                return _json_error(
-                    "could not resolve a worktree or adopted anchor from cwd; "
-                    "pass --worktree-id (or --session-id for a bare-resumed "
-                    f"worktree session). Project resolution failed: {e}",
-                    exit_code=2,
-                )
+            except Exception as exc:
+                return 2, {
+                    "ok": False,
+                    "error": (
+                        "could not resolve a worktree or adopted anchor from "
+                        "cwd; pass --worktree-id (or --session-id for a "
+                        "bare-resumed worktree session). Project resolution "
+                        f"failed: {exc}"
+                    ),
+                }
             if _cwd_is_inside_project(Path(config.default_repo.anchor)):
                 wt_id = tracking.ANCHOR_ID
             else:
-                return _json_error(
-                    "could not resolve a worktree or adopted anchor from cwd; "
-                    "run from the intended checkout, pass --worktree-id, or pass "
-                    "--session-id for a bare-resumed worktree session",
-                    exit_code=2,
-                )
+                return 2, {
+                    "ok": False,
+                    "error": (
+                        "could not resolve a worktree or adopted anchor from "
+                        "cwd; run from the intended checkout, pass "
+                        "--worktree-id, or pass --session-id for a "
+                        "bare-resumed worktree session"
+                    ),
+                }
 
     # A live cutover needs a mux session to cut into. Without one, the caller
     # (extension) must fall back to the store-task-and-reply flow.
@@ -2326,31 +2139,32 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         if config is None:
             try:
                 config = cfg.load_config()
-            except Exception as e:
-                return _json_error(str(e))
-        mux_session = sessions.current_mux_session(
-            getattr(args, "old_pane", None)
-        )
+            except Exception as exc:
+                return 1, {"ok": False, "error": str(exc)}
+        mux_session = sessions.current_mux_session(getattr(args, "old_pane", None))
         if not mux_session or not sessions.has_mux_session_named(mux_session):
-            return _json_error(
-                "adopted anchor is not inside a live mux session; the stored "
-                "handoff remains available for paste/resume",
-                exit_code=3,
-            )
+            return 3, {
+                "ok": False,
+                "error": (
+                    "adopted anchor is not inside a live mux session; the "
+                    "stored handoff remains available for paste/resume"
+                ),
+            }
         work_dir = config.default_repo.anchor
     else:
         if not sessions.has_mux_session(wt_id):
-            return _json_error(
-                f"no mux session wt-{wt_id}; not under mux", exit_code=3
-            )
+            return 3, {
+                "ok": False,
+                "error": f"no mux session wt-{wt_id}; not under mux",
+            }
         if config is None:
             try:
                 config = cfg.load_config()
-            except Exception as e:
-                return _json_error(str(e))
+            except Exception as exc:
+                return 1, {"ok": False, "error": str(exc)}
         record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         if not record_path.exists():
-            return _json_error(f"Worktree not found: {wt_id}")
+            return 1, {"ok": False, "error": f"Worktree not found: {wt_id}"}
         record = tracking.load_record(record_path)
         work_dir = record.worktree_path
 
@@ -2360,11 +2174,11 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         "handoff-cutover",
     )
     if backend_error:
-        return _json_error(backend_error, exit_code=3)
+        return 3, {"ok": False, "error": backend_error}
 
     launch_preflight = _preflight_launch(config, args, work_dir)
     if launch_preflight.error:
-        return _json_error(launch_preflight.error, exit_code=3)
+        return 3, {"ok": False, "error": launch_preflight.error}
     try:
         selection = _launch_profile_selection(
             config,
@@ -2376,7 +2190,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
             allocate_new=not getattr(args, "dry_run", False),
         )
     except profile_assignment.ProfileAssignmentError as exc:
-        return _json_error(str(exc), exit_code=3)
+        return 3, {"ok": False, "error": str(exc)}
     if record is not None:
         _reflect_assignment(record, selection)
     predecessor_binding = None
@@ -2389,13 +2203,8 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
             if anchor_mode and mux_session
             else sessions.mux_binding_for_session(session_id)
         )
-    expected_mux_session = (
-        mux_session if anchor_mode else sessions.mux_session_name(wt_id)
-    )
-    if (
-        predecessor_binding
-        and predecessor_binding.get("session_name") != expected_mux_session
-    ):
+    expected_mux_session = mux_session if anchor_mode else sessions.mux_session_name(wt_id)
+    if predecessor_binding and predecessor_binding.get("session_name") != expected_mux_session:
         predecessor_binding = None
     predecessor_copilot_path = None
     if predecessor_binding:
@@ -2405,10 +2214,8 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
             predecessor_copilot_path = procs.copilot_relaunch_path(
                 procs.process_executable_path(predecessor_pid)
             )
-            if (
-                not predecessor_copilot_path
-                or locks.process_start_time(predecessor_pid)
-                != str(predecessor_start)
+            if not predecessor_copilot_path or locks.process_start_time(predecessor_pid) != str(
+                predecessor_start
             ):
                 predecessor_copilot_path = None
     launch_cmd = _build_launch_cmd(
@@ -2456,18 +2263,18 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     )
 
     if getattr(args, "dry_run", False):
-        dry_result = {
-            "ok": True, "dry_run": True,
+        dry_result: dict[str, object] = {
+            "ok": True,
+            "dry_run": True,
             "session": mux_session or sessions.mux_session_name(wt_id),
-            "old_pane": old_pane, "work_dir": work_dir,
-            "cmd": list(launch_cmd), "seed_len": len(seed),
+            "old_pane": old_pane,
+            "work_dir": work_dir,
+            "cmd": list(launch_cmd),
+            "seed_len": len(seed),
         }
         if selection.assignment is not None:
-            dry_result["profile_assignment"] = profile_assignment.metadata(
-                selection.assignment
-            )
-        _json_output(dry_result)
-        return 0
+            dry_result["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+        return 0, dry_result
 
     result = sessions.mux_new_window(
         wt_id,
@@ -2479,11 +2286,9 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     )
     if not result.get("ok"):
         failure = dict(result)
-        failure["error"] = (
-            f"failed to open successor window: {result.get('error')}"
-        )
-        _json_output(failure)
-        return 4
+        failure["ok"] = False
+        failure["error"] = f"failed to open successor window: {result.get('error')}"
+        return 4, failure
 
     new_pane = result.get("new_pane")
     candidate_session = None
@@ -2500,22 +2305,24 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
                 process_tree,
             )
             failure = dict(result)
-            failure.update({
-                "ok": False,
-                "candidate_status": candidate_status,
-                "cleanup": cleanup,
-                "error": (
-                    "successor did not create a token-associated Copilot "
-                    f"session (status: {candidate_status})"
-                ),
-            })
-            _json_output(failure)
-            return 4
+            failure.update(
+                {
+                    "ok": False,
+                    "candidate_status": candidate_status,
+                    "cleanup": cleanup,
+                    "error": (
+                        "successor did not create a token-associated Copilot "
+                        f"session (status: {candidate_status})"
+                    ),
+                }
+            )
+            return 4, failure
     activity.log_event(
         "handoff_cutover_spawn",
         worktree_id=wt_id,
         session_id=session_id,
         source="python",
+        handoff_token=handoff_token,
         old_pane=old_pane,
         new_pane=new_pane,
         seeded=bool(result.get("prompt_received")),
@@ -2524,7 +2331,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         method="mux_new_window_interactive_argv",
     )
 
-    response = {
+    response: dict[str, object] = {
         "ok": True,
         "session": mux_session or sessions.mux_session_name(wt_id),
         "old_pane": old_pane,
@@ -2537,11 +2344,158 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     if candidate_session:
         response["candidate_session"] = candidate_session
     if selection.assignment is not None:
-        response["profile_assignment"] = profile_assignment.metadata(
-            selection.assignment
+        response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+    return 0, response
+
+
+def cmd_handoff_cutover(args: argparse.Namespace) -> int:
+    """Live-cutover handoff: spawn a seeded successor Copilot or retire a pane.
+
+    Two modes (JSON out on stdout either way):
+
+    * **spawn** (default; needs ``--seed``): reconstruct this worktree's launch
+      command (the same ``_build_launch_cmd`` the picker uses) for a **plain
+      interactive** Copilot, open + select a NEW window in the worktree's
+      ``wt-<id>`` mux session (cutting the operator over). The seed is encoded as
+      a space-free pane-wrapper control argument; the wrapper decodes it after
+      psmux's lossy argv reconstruction, appends native
+      ``-i <seed>``, and writes a receipt before the parent reports
+      success. Deliberately omits ``--resume``: a handoff wants a FRESH context
+      window seeded by the prompt, not the old transcript replayed. Returns the
+      OLD (pre-cutover) pane id so the successor-side handoff consumer can retire
+      it after pickup.
+    * **retire** (``--retire-pane <id>``): double-Ctrl-C that specific pane
+      (Copilot's native clean quit), hard-killing it only if it will not exit.
+      Then, when the predecessor ``--session-id`` is known, **verify its Copilot
+      process is gone** -- reaping an orphan by its ``inuse.<pid>.lock`` pid (the
+      successor is a different pid, untouched) -- so a hard-killed pane never
+      leaves a lingering parallel session that the mux later restores as a
+      reappearing pane. Success requires **both** the pane retired and the old
+      Copilot process gone.
+
+    The mux choreography lives here (agent-worktrees owns launch + mux); the
+    context-handoff extension is a thin trigger that shells out to this command.
+    """
+    # ── Retire mode ──────────────────────────────────────────────────────
+    retire_pane = getattr(args, "retire_pane", None)
+    if retire_pane:
+        raw_id = getattr(args, "worktree_id", None)
+        wt_id = _resolve_worktree_id(raw_id) if raw_id else None
+        session_id = getattr(args, "session_id", None)
+        expected_mux = getattr(args, "mux_session", None)
+        require_mux_identity = bool(getattr(args, "require_mux_identity", False))
+        expected_copilot_pid = getattr(args, "expected_copilot_pid", None)
+        expected_copilot_start = getattr(args, "expected_copilot_start_time", None)
+        strict_process_identity = (
+            expected_copilot_pid is not None or expected_copilot_start is not None
         )
+        current_mux = sessions.mux_session_for_pane(retire_pane) if expected_mux else None
+        pane_not_in_expected_mux = bool(expected_mux and current_mux != expected_mux)
+        binding = (
+            sessions.mux_binding_for_session(session_id)
+            if (strict_process_identity and session_id and not pane_not_in_expected_mux)
+            else None
+        )
+        process_identity_ok = True
+        process_identity_reason = None
+        if strict_process_identity and not pane_not_in_expected_mux:
+            if expected_copilot_pid is None or not expected_copilot_start or binding is None:
+                process_identity_ok = False
+                process_identity_reason = "process-identity-unavailable"
+            elif (
+                binding.get("pane_id") != retire_pane
+                or binding.get("copilot_pid") != expected_copilot_pid
+                or str(binding.get("copilot_start_time")) != str(expected_copilot_start)
+            ):
+                process_identity_ok = False
+                process_identity_reason = "process-identity-mismatch"
+        if not process_identity_ok:
+            result = {
+                "ok": False,
+                "pane": retire_pane,
+                "gone": False,
+                "method": process_identity_reason,
+                "expected_copilot_pid": expected_copilot_pid,
+                "expected_copilot_start_time": expected_copilot_start,
+            }
+        elif require_mux_identity and not expected_mux:
+            result = {
+                "ok": bool(session_id),
+                "pane": retire_pane,
+                "gone": True,
+                "method": "identity-unavailable-skip",
+                "expected_mux_session": None,
+                "current_mux_session": None,
+            }
+        elif expected_mux and current_mux != expected_mux:
+            result = {
+                "ok": bool(session_id),
+                "pane": retire_pane,
+                "gone": True,
+                "method": (
+                    "identity-mismatch-skip" if current_mux else "identity-unresolved-skip"
+                ),
+                "expected_mux_session": expected_mux,
+                "current_mux_session": current_mux,
+            }
+        else:
+            result = sessions.mux_retire_pane(retire_pane)
+        # Pane death is NOT process death. A swallowed Ctrl-C or a hard kill-pane
+        # can leave the OLD Copilot running as an orphan, which the mux later
+        # restores as a reappearing pane -- a lingering parallel session after
+        # the cutover. When the predecessor session is known, authoritatively
+        # ensure its Copilot process is gone (reaping an orphan by its inuse-lock
+        # pid; the successor is a different pid, untouched) BEFORE declaring the
+        # retire a success. Skipped for the last-window guard, where the pane and
+        # its session are deliberately kept alive.
+        reap = {"checked": False}
+        identity_skip = result.get("method") in {
+            "process-identity-unavailable",
+            "process-identity-mismatch",
+        }
+        if session_id and result.get("method") != "last-window-skip" and not identity_skip:
+            if strict_process_identity:
+                reap = reclaim.ensure_session_copilot_reaped(
+                    session_id,
+                    expected_pid=expected_copilot_pid,
+                    expected_start_time=expected_copilot_start,
+                )
+            else:
+                reap = reclaim.ensure_session_copilot_reaped(session_id)
+            result["copilot"] = reap
+        proc_ok = ((not reap.get("checked")) or reap.get("survivors", 0) == 0) and reap.get(
+            "identity_verified", True
+        )
+        skipped_identity = result.get("method") == "identity-mismatch-skip"
+        overall_ok = bool(result.get("ok")) and proc_ok
+        result["ok"] = overall_ok
+        activity.log_event(
+            "handoff_predecessor_retire",
+            worktree_id=wt_id,
+            session_id=session_id,
+            source="python",
+            old_pane=retire_pane,
+            successor_verified=bool(getattr(args, "successor_verified", False)),
+            reason=getattr(args, "retire_reason", None),
+            method=result.get("method"),
+            outcome=(
+                "identity-mismatch"
+                if skipped_identity
+                else "gone"
+                if (result.get("gone") and proc_ok)
+                else "left-running"
+            ),
+            copilot_found=reap.get("found", 0),
+            copilot_reaped=reap.get("reaped", 0),
+            copilot_survivors=reap.get("survivors", 0),
+        )
+        _json_output(result)
+        return 0 if overall_ok else 1
+
+    # ── Spawn / cutover mode ─────────────────────────────────────────────
+    rc, response = _handoff_cutover_spawn_result(args)
     _json_output(response)
-    return 0
+    return rc
 
 
 def cmd_embody(args: argparse.Namespace) -> int:
@@ -2627,9 +2581,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     selection = profile_assignment.LaunchProfileSelection(profile=None)
     if not already:
         try:
-            record = tracking.load_record(
-                cfg.tracking_dir() / f"{wt_id}.yaml"
-            )
+            record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except Exception:
             if not make_new:
                 return _json_error(f"Worktree record not found: {wt_id}")
@@ -2662,25 +2614,33 @@ def cmd_embody(args: argparse.Namespace) -> int:
             profile=selection.profile,
             preflight=launch_preflight,
         )
-        _json_output({
-            "ok": True, "dry_run": True, "worktree_id": wt_id,
-            "session": sessions.mux_session_name(wt_id), "work_dir": work_dir,
-            "would": "resume" if already else "create",
-            "cmd": list(launch_cmd), "seed_len": len(seed) if seed else 0,
-        })
+        _json_output(
+            {
+                "ok": True,
+                "dry_run": True,
+                "worktree_id": wt_id,
+                "session": sessions.mux_session_name(wt_id),
+                "work_dir": work_dir,
+                "would": "resume" if already else "create",
+                "cmd": list(launch_cmd),
+                "seed_len": len(seed) if seed else 0,
+            }
+        )
         return 0
 
     if already:
-        _json_output({
-            "ok": True, "worktree_id": wt_id,
-            "session": sessions.mux_session_name(wt_id),
-            "work_dir": work_dir, "created": False, "resumed": True,
-            "new_pane": (
-                sessions.mux_copilot_pane(wt_id)
-                or sessions.mux_active_pane(wt_id)
-            ),
-            "note": "a live mux session already embodies this worktree",
-        })
+        _json_output(
+            {
+                "ok": True,
+                "worktree_id": wt_id,
+                "session": sessions.mux_session_name(wt_id),
+                "work_dir": work_dir,
+                "created": False,
+                "resumed": True,
+                "new_pane": (sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)),
+                "note": "a live mux session already embodies this worktree",
+            }
+        )
         return 0
 
     launch_cmd = _build_launch_cmd(
@@ -2705,9 +2665,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         env["AGENT_BRIDGE_DRIVEN_BY"] = driver
     if record is None:
         try:
-            record = tracking.load_record(
-                cfg.tracking_dir() / f"{wt_id}.yaml"
-            )
+            record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except Exception:
             return _json_error(f"Worktree record not found: {wt_id}")
     repo = _repo_for_record(config, record)
@@ -2729,19 +2687,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         # A managed-GC pass may have completed while launch preflight ran.
         # Re-check under the shared lifecycle fence before creating a process.
         try:
-            launch_record = tracking.load_record(
-                cfg.tracking_dir() / f"{wt_id}.yaml"
-            )
+            launch_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except FileNotFoundError:
             return _json_error(
                 f"Worktree record disappeared before launch: {wt_id}",
                 exit_code=3,
             )
-        if (
-            getattr(launch_record, "kind", None) in tracking.MANAGED_KINDS
-            and getattr(launch_record, "status", None)
-            in {"complete", "completed", "finalized"}
-        ):
+        if getattr(launch_record, "kind", None) in tracking.MANAGED_KINDS and getattr(
+            launch_record, "status", None
+        ) in {"complete", "completed", "finalized"}:
             return _json_error(
                 f"Worktree {wt_id} is terminal and managed; refusing embodiment",
                 exit_code=3,
@@ -2751,13 +2705,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
             or getattr(launch_record, "worktree_path", work_dir) != work_dir
             or (
                 getattr(record, "branch", None) is not None
-                and getattr(launch_record, "branch", None)
-                != getattr(record, "branch", None)
+                and getattr(launch_record, "branch", None) != getattr(record, "branch", None)
             )
             or (
                 getattr(record, "repo", None) is not None
-                and getattr(launch_record, "repo", None)
-                != getattr(record, "repo", None)
+                and getattr(launch_record, "repo", None) != getattr(record, "repo", None)
             )
         ):
             return _json_error(
@@ -2765,19 +2717,20 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 exit_code=3,
             )
         if sessions.has_mux_session(wt_id):
-            _json_output({
-                "ok": True,
-                "worktree_id": wt_id,
-                "session": sessions.mux_session_name(wt_id),
-                "work_dir": work_dir,
-                "created": False,
-                "resumed": True,
-                "new_pane": (
-                    sessions.mux_copilot_pane(wt_id)
-                    or sessions.mux_active_pane(wt_id)
-                ),
-                "note": "a live mux session already embodies this worktree",
-            })
+            _json_output(
+                {
+                    "ok": True,
+                    "worktree_id": wt_id,
+                    "session": sessions.mux_session_name(wt_id),
+                    "work_dir": work_dir,
+                    "created": False,
+                    "resumed": True,
+                    "new_pane": (
+                        sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
+                    ),
+                    "note": "a live mux session already embodies this worktree",
+                }
+            )
             return 0
         result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     finally:
@@ -2797,7 +2750,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
     seed_ready_timeout = getattr(args, "seed_ready_timeout", None) or 180.0
     seed_result = (
         sessions.mux_seed_pane(new_pane, seed, ready_timeout=seed_ready_timeout)
-        if (new_pane and seed) else {}
+        if (new_pane and seed)
+        else {}
     )
 
     verified = None
@@ -2831,18 +2785,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
         ),
     }
     if selection.assignment is not None:
-        response["profile_assignment"] = profile_assignment.metadata(
-            selection.assignment
-        )
+        response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     _json_output(response)
     return 0
 
 
 def _restore_before_resume(record: tracking.WorktreeRecord) -> bool:
     """Prepare one unreachable bound session for a normal muxed resume."""
-    session_id = sessions.find_latest_session_id_fast(
-        record.worktree_path, record.sessions
-    )
+    session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
     result = _perform_remux(
         worktree_id=record.worktree_id,
         session_id=session_id,
@@ -2908,9 +2858,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         wt_id = getattr(args, "worktree_id", None)
         selectors = sum(bool(value) for value in (wt_id, use_new, use_base))
         if selectors != 1:
-            return _json_error(
-                "--json requires exactly one of --worktree-id, --new, or --base"
-            )
+            return _json_error("--json requires exactly one of --worktree-id, --new, or --base")
         if (
             getattr(args, "restore", False)
             and not requested_machine
@@ -2935,12 +2883,18 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     # handoff runs it over ``ssh -t`` (a TTY is present) and agent-bridge passes
     # ``--no-mux`` / ``--json`` (which force clean stdio).  Point the caller at
     # the programmatic command instead.
-    if (use_new and not use_json and not use_base
-            and not getattr(args, "no_mux", False)
-            and not sys.stdin.isatty()):
-        output.err("Refusing '--new' without a TTY: it launches an interactive "
-                   "tmux/psmux session that a non-interactive caller cannot "
-                   "attach to (and would leak a terminal + mux session).")
+    if (
+        use_new
+        and not use_json
+        and not use_base
+        and not getattr(args, "no_mux", False)
+        and not sys.stdin.isatty()
+    ):
+        output.err(
+            "Refusing '--new' without a TTY: it launches an interactive "
+            "tmux/psmux session that a non-interactive caller cannot "
+            "attach to (and would leak a terminal + mux session)."
+        )
         output.err("To create a worktree programmatically (no launch, no mux):")
         output.err("    agent-worktrees create --json")
         output.err("Then start Copilot in the returned path, or resume later:")
@@ -2961,13 +2915,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # monorepo) can still back an agent-bridge ACP agent without writing any
         # config into the repo. Any config/lookup failure falls through to the
         # normal worktree flow unchanged.
-        ordinary_picker = not any((
-            use_json,
-            use_base,
-            use_new,
-            requested_machine,
-            getattr(args, "worktree_id", None),
-        ))
+        ordinary_picker = not any(
+            (
+                use_json,
+                use_base,
+                use_new,
+                requested_machine,
+                getattr(args, "worktree_id", None),
+            )
+        )
         base_hint = cfg.peek_base_repo() if ordinary_picker else None
         if base_hint is False:
             _base_cfg, _is_base_repo = None, False
@@ -3037,14 +2993,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             )
             env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
 
-            _emit_plan({
-                "action": "exec",
-                "work_dir": work_dir,
-                "cmd": launch_cmd,
-                "env": env,
-                "post_exit": False,
-                "no_mux": True,
-            })
+            _emit_plan(
+                {
+                    "action": "exec",
+                    "work_dir": work_dir,
+                    "cmd": launch_cmd,
+                    "env": env,
+                    "post_exit": False,
+                    "no_mux": True,
+                }
+            )
             return 0
 
         if use_json:
@@ -3062,18 +3020,17 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 profile = _resolve_profile(config, args)
                 try:
                     result = _create_worktree_core(
-                        config, profile=profile, no_mux=True,
-                        kind="bridge" if getattr(args, "bridge", False)
-                        else "session",
+                        config,
+                        profile=profile,
+                        no_mux=True,
+                        kind="bridge" if getattr(args, "bridge", False) else "session",
                         parent_session=getattr(args, "parent_session", None),
                         caller_worktree=getattr(args, "caller_worktree", None),
                         owner_ref=getattr(args, "owner_ref", None),
                         recovery=getattr(args, "recovery", False),
                     )
                 except CoordinationReadinessFailure as exc:
-                    return _emit_coordination_rejection(
-                        exc.readiness, json_out=True
-                    )
+                    return _emit_coordination_rejection(exc.readiness, json_out=True)
                 except RuntimeError as e:
                     return _json_error(str(e))
                 _json_output(result)
@@ -3103,9 +3060,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     apply_windows=True,
                 )
                 if not restored.get("ok"):
-                    return _json_error(
-                        restored.get("reason", "could not restore the session")
-                    )
+                    return _json_error(restored.get("reason", "could not restore the session"))
             # Foreground RMW (#4547): reload + bump the resume stamp under the
             # blocking record lock so a concurrent Picker liveness sweep can't
             # clobber the increment (and vice versa). No I/O in the window.
@@ -3126,7 +3081,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             last_session = None
             if not no_resume:
                 last_session = sessions.find_latest_session_id_fast(
-                    record.worktree_path, record.sessions,
+                    record.worktree_path,
+                    record.sessions,
                 )
             explicit_profile = _resolve_profile(config, args)
             try:
@@ -3182,16 +3138,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 "no_mux": True,
             }
             if selection.assignment is not None:
-                launch["profile_assignment"] = profile_assignment.metadata(
-                    selection.assignment
-                )
+                launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
             project = cfg.active_project()
             if project:
                 launch["project"] = project
-            _json_output({
-                "worktree": _worktree_to_dict(record),
-                "launch": launch,
-            })
+            _json_output(
+                {
+                    "worktree": _worktree_to_dict(record),
+                    "launch": launch,
+                }
+            )
             return 0
 
         # Non-interactive: without a TTY the picker can't run. Steer
@@ -3199,8 +3155,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # ``--new`` (which launches a muxed interactive session).
         if not use_new and not sys.stdin.isatty():
             output.err("No TTY detected and no worktree specified.")
-            output.err("To create a worktree programmatically (no launch, no "
-                       "tmux/psmux session):")
+            output.err("To create a worktree programmatically (no launch, no tmux/psmux session):")
             output.err("    agent-worktrees create --json")
             output.err("To resume an existing worktree non-interactively:")
             output.err("    agent-worktrees resolve --json --worktree-id <id>")
@@ -3228,26 +3183,23 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 _validate_profile_assignment_config(config)
             except profile_assignment.ProfileAssignmentError as exc:
                 output.err(str(exc))
-                _emit_plan({
-                    "action": "error",
-                    "error": str(exc),
-                    "exit_code": 3,
-                })
+                _emit_plan(
+                    {
+                        "action": "error",
+                        "error": str(exc),
+                        "exit_code": 3,
+                    }
+                )
                 return 3
             plan_work_dir = (
                 os.path.expanduser("~")
                 if getattr(args, "bare_resume", False)
                 else record.worktree_path
             )
-            launch_preflight = _preflight_launch(
-                config, args, plan_work_dir
-            )
+            launch_preflight = _preflight_launch(config, args, plan_work_dir)
             if launch_preflight.error:
                 return _launch_preflight_error(launch_preflight)
-            if (
-                getattr(args, "restore", False)
-                and not _restore_before_resume(record)
-            ):
+            if getattr(args, "restore", False) and not _restore_before_resume(record):
                 return 1
             profile = _resolve_profile(config, args)
             return _resolve_resume(
@@ -3286,11 +3238,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # first frame (#1504). Heal in the background; config is loaded after
         # the operator picks (or immediately for the legacy ANSI fallback).
         if picker_tui.new_picker_enabled() and not _new_picker_blocked_by_ssh():
+
             def _heal_bg():
                 try:
                     _heal_stale_anchor_if_self_missing(cfg.load_config())
                 except Exception:
                     pass
+
             threading.Thread(target=_heal_bg, name="heal-anchor", daemon=True).start()
             picker_root = _start_picker_monitor_root()
             try:
@@ -3306,16 +3260,19 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
         # Picker loop -- re-enters after system menu actions
         while True:
-
             # Load active worktrees (include "complete" -- these are worktrees
             # where finalization failed or was skipped, e.g. terminal closed
             # before post-exit could run).  They still have local commits and
             # should be resumable in the picker.
             records = tracking.list_records(
-                tracking_path, status_filter="active", platform_filter=current_platform,
+                tracking_path,
+                status_filter="active",
+                platform_filter=current_platform,
             )
             complete_records = tracking.list_records(
-                tracking_path, status_filter="complete", platform_filter=current_platform,
+                tracking_path,
+                status_filter="complete",
+                platform_filter=current_platform,
             )
             # Revert ordinary stale "complete" records to "active" so they
             # remain resumable. Managed terminal records are teardown
@@ -3329,7 +3286,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # This happens when finalization skips removal because we're
             # running inside the worktree or a live session is detected.
             finalized_records = tracking.list_records(
-                tracking_path, status_filter="finalized", platform_filter=current_platform,
+                tracking_path,
+                status_filter="finalized",
+                platform_filter=current_platform,
             )
             finalized_still_present = [
                 r for r in finalized_records if Path(r.worktree_path).exists()
@@ -3344,15 +3303,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # as ACTIVE when a live session is detected; otherwise it falls
             # into the completed bucket like any other fully-upstream tree.
             pushed_records = tracking.list_records(
-                tracking_path, status_filter="pushed", platform_filter=current_platform,
+                tracking_path,
+                status_filter="pushed",
+                platform_filter=current_platform,
             )
-            pushed_still_present = [
-                r for r in pushed_records if Path(r.worktree_path).exists()
-            ]
+            pushed_still_present = [r for r in pushed_records if Path(r.worktree_path).exists()]
             records = records + pushed_still_present
 
             records = [
-                r for r in records
+                r
+                for r in records
                 if Path(r.worktree_path).exists()
                 and (Path(r.worktree_path) / ".git").exists()
                 and not r.is_picker_hidden  # tucked-away automation (origin-based)
@@ -3366,8 +3326,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             classified: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
             for rec in records:
                 info = git_ops.classify_worktree(
-                    rec.worktree_path, rec.branch,
-                    remote=repo.remote, default_branch=repo.default_branch,
+                    rec.worktree_path,
+                    rec.branch,
+                    remote=repo.remote,
+                    default_branch=repo.default_branch,
                     active_paths=active_paths,
                 )
                 info = _apply_tracking_override(rec, info)
@@ -3440,7 +3402,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
                 state_tag = (
                     f" [{info.state.value}]"
-                    if info.state in (
+                    if info.state
+                    in (
                         git_ops.WorktreeState.UNUSED,
                         git_ops.WorktreeState.COMPLETED,
                     )
@@ -3499,11 +3462,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 return meta_tag.strip() or None
 
             for rec, info in active_wts:
-                menu_items.append(MenuItem(
-                    label=_wt_label(rec, info, "🟢"),
-                    subtitle=_wt_subtitle(rec, info),
-                    kind=ItemKind.NORMAL, value=("worktree", rec),
-                ))
+                menu_items.append(
+                    MenuItem(
+                        label=_wt_label(rec, info, "🟢"),
+                        subtitle=_wt_subtitle(rec, info),
+                        kind=ItemKind.NORMAL,
+                        value=("worktree", rec),
+                    )
+                )
 
             if active_wts:
                 menu_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
@@ -3516,16 +3482,19 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # "Other machines" sub-menu entry (only if remotes exist)
             remote_machines = _load_remote_machines(config)
             if remote_machines:
-                menu_items.append(MenuItem(
-                    label="🖥 Other machines  ▸",
-                    kind=ItemKind.ACTION,
-                    value=("machines", None),
-                ))
+                menu_items.append(
+                    MenuItem(
+                        label="🖥 Other machines  ▸",
+                        kind=ItemKind.ACTION,
+                        value=("machines", None),
+                    )
+                )
 
             menu_items.append(
                 MenuItem(
                     label="📂 Base repo (no worktree)",
-                    kind=ItemKind.ACTION, value=("base", None),
+                    kind=ItemKind.ACTION,
+                    value=("base", None),
                 )
             )
 
@@ -3534,33 +3503,42 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     MenuItem(label="─── recent ─────────────────────", kind=ItemKind.SEPARATOR)
                 )
             for rec, info in recent_wts:
-                menu_items.append(MenuItem(
-                    label=_wt_label(rec, info, "🌳"),
-                    subtitle=_wt_subtitle(rec, info),
-                    kind=ItemKind.NORMAL, value=("worktree", rec),
-                ))
+                menu_items.append(
+                    MenuItem(
+                        label=_wt_label(rec, info, "🌳"),
+                        subtitle=_wt_subtitle(rec, info),
+                        kind=ItemKind.NORMAL,
+                        value=("worktree", rec),
+                    )
+                )
 
             if unused_wts:
                 menu_items.append(
                     MenuItem(label="─── unused ─────────────────────", kind=ItemKind.SEPARATOR)
                 )
                 for rec, info in unused_wts:
-                    menu_items.append(MenuItem(
-                        label=_wt_label(rec, info, "⬜"),
-                        subtitle=_wt_subtitle(rec, info),
-                        kind=ItemKind.DIMMED, value=("worktree", rec),
-                    ))
+                    menu_items.append(
+                        MenuItem(
+                            label=_wt_label(rec, info, "⬜"),
+                            subtitle=_wt_subtitle(rec, info),
+                            kind=ItemKind.DIMMED,
+                            value=("worktree", rec),
+                        )
+                    )
 
             if completed_wts:
                 menu_items.append(
                     MenuItem(label="─── completed ──────────────────", kind=ItemKind.SEPARATOR)
                 )
                 for rec, info in completed_wts:
-                    menu_items.append(MenuItem(
-                        label=_wt_label(rec, info, "✅"),
-                        subtitle=_wt_subtitle(rec, info),
-                        kind=ItemKind.DIMMED, value=("worktree", rec),
-                    ))
+                    menu_items.append(
+                        MenuItem(
+                            label=_wt_label(rec, info, "✅"),
+                            subtitle=_wt_subtitle(rec, info),
+                            kind=ItemKind.DIMMED,
+                            value=("worktree", rec),
+                        )
+                    )
 
             # System menu item
             menu_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
@@ -3637,13 +3615,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 ssh_alias = _resolve_ssh_alias(entry)
                 project = cfg.project_name()
                 print(f"   Connecting to {entry.display_name} via {ssh_alias}...")
-                _emit_plan({
-                    "action": "remote",
-                    "ssh_alias": ssh_alias,
-                    "remote_command": project,
-                    "machine": entry.key,
-                    "display_name": entry.display_name,
-                })
+                _emit_plan(
+                    {
+                        "action": "remote",
+                        "ssh_alias": ssh_alias,
+                        "remote_command": project,
+                        "machine": entry.key,
+                        "display_name": entry.display_name,
+                    }
+                )
                 return 0
 
             # --- Other machines sub-menu ---
@@ -3683,8 +3663,11 @@ def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None
         MenuItem(label="🧹 Cleanup worktrees", kind=ItemKind.ACTION, value="cleanup"),
         MenuItem(label="⬆ Update stale worktrees", kind=ItemKind.ACTION, value="update"),
         MenuItem(label="📊 Worktree status", kind=ItemKind.ACTION, value="status"),
-        MenuItem(label="🛠 System worktrees (daemon-owned)", kind=ItemKind.ACTION,
-                 value="system-worktrees"),
+        MenuItem(
+            label="🛠 System worktrees (daemon-owned)",
+            kind=ItemKind.ACTION,
+            value="system-worktrees",
+        ),
         MenuItem(label="", kind=ItemKind.SEPARATOR),
         MenuItem(label="↩ Back to picker", kind=ItemKind.ACTION, value="back"),
     ]
@@ -3740,35 +3723,42 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
             # Single environment -- show machine name only
             ssh_env = envs[0]
             subtitle = f"{entry.environment} -- {entry.role}" if entry.role else entry.environment
-            machine_items.append(MenuItem(
-                label=f"🖥 {entry.display_name}",
-                subtitle=subtitle,
-                kind=ItemKind.NORMAL,
-                value=len(machine_values),
-            ))
+            machine_items.append(
+                MenuItem(
+                    label=f"🖥 {entry.display_name}",
+                    subtitle=subtitle,
+                    kind=ItemKind.NORMAL,
+                    value=len(machine_values),
+                )
+            )
             machine_values.append((entry, ssh_env))
         else:
             # Multiple environments -- one entry per SSH env
             for ssh_env in envs:
                 env_label = ssh_env.name.upper() if ssh_env.name else ssh_env.alias
                 shell_tag = f" ({ssh_env.shell})" if ssh_env.shell else ""
-                machine_items.append(MenuItem(
-                    label=f"🖥 {entry.display_name} ({env_label})",
-                    subtitle=(
-                        f"{ssh_env.alias}{shell_tag} -- {entry.role}"
-                        if entry.role else ssh_env.alias + shell_tag
-                    ),
-                    kind=ItemKind.NORMAL,
-                    value=len(machine_values),
-                ))
+                machine_items.append(
+                    MenuItem(
+                        label=f"🖥 {entry.display_name} ({env_label})",
+                        subtitle=(
+                            f"{ssh_env.alias}{shell_tag} -- {entry.role}"
+                            if entry.role
+                            else ssh_env.alias + shell_tag
+                        ),
+                        kind=ItemKind.NORMAL,
+                        value=len(machine_values),
+                    )
+                )
                 machine_values.append((entry, ssh_env))
 
     machine_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
-    machine_items.append(MenuItem(
-        label="↩ Back to picker",
-        kind=ItemKind.ACTION,
-        value=-1,
-    ))
+    machine_items.append(
+        MenuItem(
+            label="↩ Back to picker",
+            kind=ItemKind.ACTION,
+            value=-1,
+        )
+    )
 
     result = pick(
         machine_items,
@@ -3787,13 +3777,15 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
     entry, ssh_env = machine_values[val]  # type: ignore[index]
     project = cfg.project_name()
     print(f"   Connecting to {entry.display_name} via {ssh_env.alias}...")
-    _emit_plan({
-        "action": "remote",
-        "ssh_alias": ssh_env.alias,
-        "remote_command": project,
-        "machine": entry.key,
-        "display_name": entry.display_name,
-    })
+    _emit_plan(
+        {
+            "action": "remote",
+            "ssh_alias": ssh_env.alias,
+            "remote_command": project,
+            "machine": entry.key,
+            "display_name": entry.display_name,
+        }
+    )
     return 0
 
 
@@ -3826,8 +3818,11 @@ def _system_cleanup(config: cfg.Config) -> int | None:
     for rec in records:
         if rec.worktree_path and Path(rec.worktree_path).exists():
             info = git_ops.classify_worktree(
-                rec.worktree_path, rec.branch,
-                fetch=False, remote=repo.remote, default_branch=repo.default_branch,
+                rec.worktree_path,
+                rec.branch,
+                fetch=False,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
                 active_paths=active_paths,
             )
             info = _apply_tracking_override(rec, info)
@@ -3843,9 +3838,14 @@ def _system_cleanup(config: cfg.Config) -> int | None:
             if not rec.has_live_pr():
                 cleanable.append((rec, info))
         elif info.state == git_ops.WorktreeState.GONE:
-            if not rec.has_live_pr() and (not rec.branch or git_ops.is_branch_merged(
-                rec.branch, upstream, cwd=repo.anchor,
-            )):
+            if not rec.has_live_pr() and (
+                not rec.branch
+                or git_ops.is_branch_merged(
+                    rec.branch,
+                    upstream,
+                    cwd=repo.anchor,
+                )
+            ):
                 cleanable.append((rec, info))
         elif info.state == git_ops.WorktreeState.UNUSED:
             unused.append((rec, info))
@@ -3858,18 +3858,24 @@ def _system_cleanup(config: cfg.Config) -> int | None:
     confirm_items: list[MenuItem] = []
 
     if cleanable:
-        confirm_items.append(MenuItem(
-            label=f"🧹 Clean {len(cleanable)} completed worktree(s)",
-            subtitle=", ".join(r.worktree_id[-4:] for r, _ in cleanable),
-            kind=ItemKind.ACTION, value="clean",
-        ))
+        confirm_items.append(
+            MenuItem(
+                label=f"🧹 Clean {len(cleanable)} completed worktree(s)",
+                subtitle=", ".join(r.worktree_id[-4:] for r, _ in cleanable),
+                kind=ItemKind.ACTION,
+                value="clean",
+            )
+        )
 
     if unused:
-        confirm_items.append(MenuItem(
-            label=f"🧹 Also clean {len(unused)} unused worktree(s) (empty)",
-            subtitle=", ".join(r.worktree_id[-4:] for r, _ in unused),
-            kind=ItemKind.ACTION, value="clean-all",
-        ))
+        confirm_items.append(
+            MenuItem(
+                label=f"🧹 Also clean {len(unused)} unused worktree(s) (empty)",
+                subtitle=", ".join(r.worktree_id[-4:] for r, _ in unused),
+                kind=ItemKind.ACTION,
+                value="clean-all",
+            )
+        )
 
     confirm_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
     confirm_items.append(MenuItem(label="↩ Cancel", kind=ItemKind.ACTION, value="cancel"))
@@ -3889,9 +3895,11 @@ def _system_cleanup(config: cfg.Config) -> int | None:
         return None
 
     # Execute cleanup
-    include_unused = (choice == "clean-all")
+    include_unused = choice == "clean-all"
     cleanup_args = argparse.Namespace(
-        clean=True, include_unused=include_unused, max_age_days=None,
+        clean=True,
+        include_unused=include_unused,
+        max_age_days=None,
     )
     cmd_cleanup(cleanup_args)
 
@@ -3911,7 +3919,8 @@ def _system_update(config: cfg.Config) -> int | None:
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
     records = tracking.list_records(
-        tracking_path, status_filter="active",
+        tracking_path,
+        status_filter="active",
         platform_filter=cfg.detect_platform(),
     )
     records = [r for r in records if r.worktree_path and Path(r.worktree_path).exists()]
@@ -3935,8 +3944,11 @@ def _system_update(config: cfg.Config) -> int | None:
     eligible: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
     for rec in records:
         info = git_ops.classify_worktree(
-            rec.worktree_path, rec.branch,
-            fetch=False, remote=repo.remote, default_branch=repo.default_branch,
+            rec.worktree_path,
+            rec.branch,
+            fetch=False,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
             active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
@@ -3955,18 +3967,22 @@ def _system_update(config: cfg.Config) -> int | None:
         update_items: list[MenuItem] = [
             MenuItem(
                 label=f"⬆ Update all ({len(eligible)} eligible)",
-                kind=ItemKind.ACTION, value="all",
+                kind=ItemKind.ACTION,
+                value="all",
             ),
             MenuItem(label="", kind=ItemKind.SEPARATOR),
         ]
         index_map: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo]] = []
         for rec, info in eligible:
             short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
-            update_items.append(MenuItem(
-                label=f"⬜ …{short_id}  ↓{info.behind}",
-                subtitle=_age_str(rec.started_at) + " old",
-                kind=ItemKind.NORMAL, value=len(index_map),
-            ))
+            update_items.append(
+                MenuItem(
+                    label=f"⬜ …{short_id}  ↓{info.behind}",
+                    subtitle=_age_str(rec.started_at) + " old",
+                    kind=ItemKind.NORMAL,
+                    value=len(index_map),
+                )
+            )
             index_map.append((rec, info))
 
         update_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
@@ -4034,14 +4050,22 @@ def _system_status(config: cfg.Config) -> int | None:
     # Build status as picker items (view-only)
     status_items: list[MenuItem] = []
     STATE_ICONS = {
-        "active": "🟢", "unused": "⬜", "completed": "✅",
-        "wip": "🌳", "dirty": "🔴", "gone": "💀", "orphan": "❓",
+        "active": "🟢",
+        "unused": "⬜",
+        "completed": "✅",
+        "wip": "🌳",
+        "dirty": "🔴",
+        "gone": "💀",
+        "orphan": "❓",
     }
 
     for rec in records:
         info = git_ops.classify_worktree(
-            rec.worktree_path, rec.branch,
-            fetch=True, remote=repo.remote, default_branch=repo.default_branch,
+            rec.worktree_path,
+            rec.branch,
+            fetch=True,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
             active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
@@ -4059,10 +4083,14 @@ def _system_status(config: cfg.Config) -> int | None:
             title = info.title
         subtitle = " ".join(title.split()) if title else None
 
-        status_items.append(MenuItem(
-            label=label, subtitle=subtitle,
-            kind=ItemKind.DIMMED, value=None,
-        ))
+        status_items.append(
+            MenuItem(
+                label=label,
+                subtitle=subtitle,
+                kind=ItemKind.DIMMED,
+                value=None,
+            )
+        )
 
     status_items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
     status_items.append(MenuItem(label="↩ Back", kind=ItemKind.ACTION, value="back"))
@@ -4092,8 +4120,7 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
     is flagged as likely leaked.
     """
     tracking_path = cfg.tracking_dir()
-    records = [r for r in tracking.list_records(tracking_path)
-               if r.is_picker_hidden]
+    records = [r for r in tracking.list_records(tracking_path) if r.is_picker_hidden]
     records = [r for r in records if r.repo == config.repo_name]
 
     if not records:
@@ -4104,7 +4131,8 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
 
     while True:
         records = [
-            r for r in tracking.list_records(tracking_path)
+            r
+            for r in tracking.list_records(tracking_path)
             if r.is_picker_hidden and r.repo == config.repo_name
         ]
         if not records:
@@ -4122,12 +4150,14 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
                 tag = "missing dir"
             else:
                 tag = "likely leaked"
-            items.append(MenuItem(
-                label=f"🛠 {owner} · {rec.worktree_id}",
-                subtitle=f"{tag} · {_age_str(rec.started_at)} · {rec.worktree_path}",
-                kind=ItemKind.DIMMED if live else ItemKind.NORMAL,
-                value=rec.worktree_id,
-            ))
+            items.append(
+                MenuItem(
+                    label=f"🛠 {owner} · {rec.worktree_id}",
+                    subtitle=f"{tag} · {_age_str(rec.started_at)} · {rec.worktree_path}",
+                    kind=ItemKind.DIMMED if live else ItemKind.NORMAL,
+                    value=rec.worktree_id,
+                )
+            )
         items.append(MenuItem(label="", kind=ItemKind.SEPARATOR))
         items.append(MenuItem(label="↩ Back", kind=ItemKind.ACTION, value="back"))
 
@@ -4149,13 +4179,16 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
             continue
         sel_live = _normalize_path(sel.worktree_path) in active_paths
         warn = (
-            "  ⚠ has a LIVE session -- removing may disrupt a running daemon"
-            if sel_live else ""
+            "  ⚠ has a LIVE session -- removing may disrupt a running daemon" if sel_live else ""
         )
         confirm = pick(
             [
-                MenuItem(label=f"🗑 Force-remove {sel.worktree_id}", kind=ItemKind.ACTION,
-                         value="yes", subtitle=warn or None),
+                MenuItem(
+                    label=f"🗑 Force-remove {sel.worktree_id}",
+                    kind=ItemKind.ACTION,
+                    value="yes",
+                    subtitle=warn or None,
+                ),
                 MenuItem(label="↩ Cancel", kind=ItemKind.ACTION, value="no"),
             ],
             title="Force-remove system worktree?",
@@ -4170,10 +4203,10 @@ def _system_worktrees_browse(config: cfg.Config) -> int | None:
         # loop re-lists remaining system worktrees
 
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Machine picker -- select target machine before worktree resolution
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _load_remote_machines(
     config: cfg.Config,
@@ -4208,10 +4241,7 @@ def _load_remote_machines(
 
         if key == local_key:
             # Local machine: only include other-platform environments
-            other_envs = [
-                e for e in entry.ssh_environments
-                if e.name != current_platform
-            ]
+            other_envs = [e for e in entry.ssh_environments if e.name != current_platform]
             if other_envs:
                 result.append((entry, other_envs))
         else:
@@ -4252,13 +4282,15 @@ def _try_machine_handoff(
 
     ssh_alias = _resolve_ssh_alias(entry)
     project = cfg.project_name()
-    _emit_plan({
-        "action": "remote",
-        "ssh_alias": ssh_alias,
-        "remote_command": project,
-        "machine": entry.key,
-        "display_name": entry.display_name,
-    })
+    _emit_plan(
+        {
+            "action": "remote",
+            "ssh_alias": ssh_alias,
+            "remote_command": project,
+            "machine": entry.key,
+            "display_name": entry.display_name,
+        }
+    )
     return 0
 
 
@@ -4374,13 +4406,15 @@ def _emit_remote_plan_for_env(
     # worktree ids and flags are shell-safe tokens, so a simple join is fine.
     remote_command = " ".join([project, *remote_args]) if remote_args else project
     display = f"{entry.display_name} {env_label}".strip()
-    _emit_plan({
-        "action": "remote",
-        "ssh_alias": ssh_alias,
-        "remote_command": remote_command,
-        "machine": entry.key,
-        "display_name": display,
-    })
+    _emit_plan(
+        {
+            "action": "remote",
+            "ssh_alias": ssh_alias,
+            "remote_command": remote_command,
+            "machine": entry.key,
+            "display_name": display,
+        }
+    )
     return 0
 
 
@@ -4432,9 +4466,7 @@ def _picker_profile_choice(
     """Return the ordinary picker profile and any manual authority override."""
     if assignment_armed and profile_idx == 0:
         return profiles[0], None
-    selected = profiles[
-        profile_idx - 1 if assignment_armed else profile_idx
-    ]
+    selected = profiles[profile_idx - 1 if assignment_armed else profile_idx]
     return selected, selected
 
 
@@ -4463,35 +4495,19 @@ def _launch_profile_selection(
     policy = getattr(config, "profile_assignment", None)
     _validate_profile_assignment_config(config)
     if explicit_profile is not None or getattr(args, "profile", None):
-        return profile_assignment.LaunchProfileSelection(
-            profile=explicit_profile
-        )
-    if (
-        getattr(args, "recovery", False)
-        or getattr(args, "emergency", False)
-    ):
-        return profile_assignment.LaunchProfileSelection(
-            profile=ordinary_profile
-        )
+        return profile_assignment.LaunchProfileSelection(profile=explicit_profile)
+    if getattr(args, "recovery", False) or getattr(args, "emergency", False):
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if record is None:
-        return profile_assignment.LaunchProfileSelection(
-            profile=ordinary_profile
-        )
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     copilot_args = getattr(args, "copilot_args", []) or []
-    if (
-        "--acp" in copilot_args
-        or getattr(record, "resolved_interface", "cli") != "cli"
-    ):
-        return profile_assignment.LaunchProfileSelection(
-            profile=ordinary_profile
-        )
+    if "--acp" in copilot_args or getattr(record, "resolved_interface", "cli") != "cli":
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if (
         getattr(record, "resolved_origin", "user") != "user"
         or getattr(record, "kind", "session") != "session"
     ):
-        return profile_assignment.LaunchProfileSelection(
-            profile=ordinary_profile
-        )
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if resume_session:
         return profile_assignment.replay(
             profile_assignment.assignment_for_session(record, resume_session),
@@ -4499,17 +4515,11 @@ def _launch_profile_selection(
             fallback_profile=ordinary_profile,
         )
     if not allocate_new:
-        return profile_assignment.LaunchProfileSelection(
-            profile=ordinary_profile
-        )
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if policy is None:
-        return profile_assignment.LaunchProfileSelection(
-            profile=ordinary_profile
-        )
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     if not policy.armed:
-        return profile_assignment.LaunchProfileSelection(
-            profile=ordinary_profile
-        )
+        return profile_assignment.LaunchProfileSelection(profile=ordinary_profile)
     return profile_assignment.allocate_best_effort(
         policy,
         getattr(config, "copilot_profiles", []),
@@ -4529,9 +4539,7 @@ def _apply_assignment_env(
     if not selection.launch_token:
         return env
     merged = dict(env)
-    merged[profile_assignment.ASSIGNMENT_TOKEN_ENV] = (
-        selection.launch_token
-    )
+    merged[profile_assignment.ASSIGNMENT_TOKEN_ENV] = selection.launch_token
     return merged
 
 
@@ -4557,7 +4565,8 @@ def _reflect_assignment(
             item.bag_generation,
             item.bag_position,
             item.assigned_at,
-        ) != identity
+        )
+        != identity
     ]
     record.profile_assignments.append(assignment)
 
@@ -4610,15 +4619,17 @@ def _resolve_base_repo(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
-    _emit_plan({
-        "action": "exec",
-        "work_dir": repo.anchor,
-        "cmd": launch_cmd,
-        "env": merged_env,
-        "worktree_id": None,
-        "post_exit": False,
-        "no_mux": getattr(args, "no_mux", False),
-    })
+    _emit_plan(
+        {
+            "action": "exec",
+            "work_dir": repo.anchor,
+            "cmd": launch_cmd,
+            "env": merged_env,
+            "worktree_id": None,
+            "post_exit": False,
+            "no_mux": getattr(args, "no_mux", False),
+        }
+    )
     return 0
 
 
@@ -4635,9 +4646,11 @@ def _machine_key_for_display(config: cfg.Config, name: str) -> str:
         return name
     nl = name.lower()
     for key, entry in entries.items():
-        if (key.lower() == nl
-                or (entry.alias and entry.alias.lower() == nl)
-                or entry.display_name.lower() == nl):
+        if (
+            key.lower() == nl
+            or (entry.alias and entry.alias.lower() == nl)
+            or entry.display_name.lower() == nl
+        ):
             return key
     return name
 
@@ -4736,17 +4749,13 @@ def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
         rc = _emit_remote_plan_for_env(config, machine, env_label, remote_args)
         if rc is not None:
             return rc
-        output.err(
-            f"Unknown or unreachable remote machine: {machine} {env_label}".strip()
-        )
+        output.err(f"Unknown or unreachable remote machine: {machine} {env_label}".strip())
         return 1
 
     if action in ("resume", "restore"):
         wt_id = decision.get("worktree_id")
         if not wt_id:
-            output.err(
-                f"Picker returned a {action} decision with no worktree id."
-            )
+            output.err(f"Picker returned a {action} decision with no worktree id.")
             return 1
         # The Open sub-menu's No-mux toggle (picker #1343) launches without the
         # PSMux/TMux wrapper.
@@ -4768,11 +4777,13 @@ def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
             _validate_profile_assignment_config(config)
         except profile_assignment.ProfileAssignmentError as exc:
             output.err(str(exc))
-            _emit_plan({
-                "action": "error",
-                "error": str(exc),
-                "exit_code": 3,
-            })
+            _emit_plan(
+                {
+                    "action": "error",
+                    "error": str(exc),
+                    "exit_code": 3,
+                }
+            )
             return 3
         plan_work_dir = (
             os.path.expanduser("~")
@@ -4813,7 +4824,8 @@ def _start_picker_monitor_root():
         from . import monitor_roots
 
         root = monitor_roots.PickerHeartbeat(
-            cfg.project_name(), ensure_monitor=_ensure_status_monitor)
+            cfg.project_name(), ensure_monitor=_ensure_status_monitor
+        )
         if not root.start():
             return None
         # The legacy picker has many direct return paths; process teardown is
@@ -4868,16 +4880,16 @@ def _resolve_resume(
         # the running session -- the "never fork a live worktree" invariant.
         if _verdict is not None and _verdict.mux_live:
             if getattr(args, "no_mux", False) or getattr(args, "bare_resume", False):
-                print("   ↻ Live mux session found -- reattaching it "
-                      "(overriding the requested launch mode).")
+                print(
+                    "   ↻ Live mux session found -- reattaching it "
+                    "(overriding the requested launch mode)."
+                )
             args.no_mux = False
             args.bare_resume = False
 
     bare_resume = getattr(args, "bare_resume", False)
     plan_work_dir = os.path.expanduser("~") if bare_resume else record.worktree_path
-    launch_preflight = launch_preflight or _preflight_launch(
-        config, args, plan_work_dir
-    )
+    launch_preflight = launch_preflight or _preflight_launch(config, args, plan_work_dir)
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
 
@@ -4902,11 +4914,10 @@ def _resolve_resume(
     # Persist the read-only liveness verdict only after launch preflight passes.
     if _verdict is not None:
         try:
-            tracking.stamp_mux_live(
-                record.worktree_id, _verdict.mux_live, refresh=True)
+            tracking.stamp_mux_live(record.worktree_id, _verdict.mux_live, refresh=True)
             tracking.stamp_bound_live(
-                record.worktree_id, bool(_verdict.live_session_ids),
-                refresh=True)
+                record.worktree_id, bool(_verdict.live_session_ids), refresh=True
+            )
         except Exception:
             pass
 
@@ -4952,10 +4963,7 @@ def _resolve_resume(
             ordinary_profile=profile,
             explicit_profile=profile if profile_is_explicit else None,
             resume_session=resume_target,
-            allocate_new=(
-                not args.dry_run
-                and not bool(_verdict and _verdict.mux_live)
-            ),
+            allocate_new=(not args.dry_run and not bool(_verdict and _verdict.mux_live)),
         )
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
@@ -5027,8 +5035,10 @@ def _resolve_resume(
     elif bare_resume:
         # Surface the id the operator will type: the resolved head session
         # (prefers the lifecycle head over pure mtime, and is stub-validated).
-        print(f"   Bare resume: launching Copilot in {plan_work_dir} "
-              f"(no auto-resume, dodges the worktree-cwd start bug).")
+        print(
+            f"   Bare resume: launching Copilot in {plan_work_dir} "
+            f"(no auto-resume, dodges the worktree-cwd start bug)."
+        )
         if resume_target:
             print(f"   Inside Copilot, run:  /resume {resume_target}")
 
@@ -5070,9 +5080,7 @@ def _resolve_resume(
         "no_mux": getattr(args, "no_mux", False),
     }
     if selection.assignment is not None:
-        plan["profile_assignment"] = profile_assignment.metadata(
-            selection.assignment
-        )
+        plan["profile_assignment"] = profile_assignment.metadata(selection.assignment)
     _emit_plan(plan)
     return 0
 
@@ -5124,7 +5132,8 @@ def _resolve_new(
             preflight=launch_preflight,
         )
         merged_env = _build_env(
-            profile, _repo_session_env(config, worktree_path),
+            profile,
+            _repo_session_env(config, worktree_path),
             work_dir=worktree_path,
         )
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
@@ -5150,27 +5159,32 @@ def _resolve_new(
         )
     except CoordinationReadinessFailure as exc:
         _emit_coordination_rejection(exc.readiness, json_out=False)
-        _emit_plan({
-            "action": "error",
-            "error": exc.readiness.error,
-            "code": exc.readiness.code,
-            "exit_code": 3,
-        })
+        _emit_plan(
+            {
+                "action": "error",
+                "error": exc.readiness.error,
+                "code": exc.readiness.code,
+                "exit_code": 3,
+            }
+        )
         return 3
     except profile_assignment.ProfileAssignmentError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
-    _emit_plan({
-        "action": "exec",
-        **result["launch"],
-    })
+    _emit_plan(
+        {
+            "action": "exec",
+            **result["launch"],
+        }
+    )
     return 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Worktree-ID inference -- shared by finalize, post-exit, mark-complete
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _infer_worktree_id(
     explicit: str | None,
@@ -5217,9 +5231,7 @@ def _worktree_id_from_git(cwd: Path) -> str | None:
     change (copilot-extensions#59).
     """
     try:
-        result = git_ops.git(
-            "rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10
-        )
+        result = git_ops.git("rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10)
     except Exception:
         return None
     if result.returncode != 0:
@@ -5243,8 +5255,11 @@ def _linked_worktree_root(cwd: str | Path) -> Path | None:
         return None
     try:
         result = git_ops.git(
-            "rev-parse", "--show-toplevel", cwd=str(candidate),
-            check=False, timeout=10,
+            "rev-parse",
+            "--show-toplevel",
+            cwd=str(candidate),
+            check=False,
+            timeout=10,
         )
     except Exception:
         return None
@@ -5281,11 +5296,9 @@ def _adopt_linked_worktree(cwd: str | Path) -> str | None:
         config = cfg.load_config()
         anchor = Path(config.default_repo.anchor).resolve()
         linked_anchor = git_ops.resolve_to_anchor(root).resolve()
-        if (
-            linked_anchor != anchor
-            or git_ops._normalize_wt_path(str(root))
-            == git_ops._normalize_wt_path(str(anchor))
-        ):
+        if linked_anchor != anchor or git_ops._normalize_wt_path(
+            str(root)
+        ) == git_ops._normalize_wt_path(str(anchor)):
             return None
         branch = git_ops.current_branch(root)
         if not branch:
@@ -5304,18 +5317,14 @@ def _adopt_linked_worktree(cwd: str | Path) -> str | None:
         )
     except Exception:
         return None
-    if (
-        record.repo != config.repo_name
-        or git_ops._normalize_wt_path(record.worktree_path)
-        != git_ops._normalize_wt_path(str(root))
-    ):
+    if record.repo != config.repo_name or git_ops._normalize_wt_path(
+        record.worktree_path
+    ) != git_ops._normalize_wt_path(str(root)):
         return None
     return worktree_id
 
 
-def _infer_worktree_id_from_worktree_root(
-    config: cfg.Config | None, cwd: Path
-) -> str | None:
+def _infer_worktree_id_from_worktree_root(config: cfg.Config | None, cwd: Path) -> str | None:
     """Legacy fallback: derive the ID from the first path component under the
     configured ``worktree_root``.
 
@@ -5409,8 +5418,9 @@ def _resolve_worktree_id(raw_id: str) -> str:
     given suffix.  Raises ``SystemExit`` on ambiguous or invalid IDs.
     """
     import re
+
     # Reject IDs with path-traversal or glob metacharacters
-    if re.search(r'[/\\]|\.\.', raw_id):
+    if re.search(r"[/\\]|\.\.", raw_id):
         output.err(f"Invalid worktree ID: {raw_id}")
         raise SystemExit(1)
 
@@ -5421,20 +5431,14 @@ def _resolve_worktree_id(raw_id: str) -> str:
         return raw_id
 
     # Suffix match: iterate tracking files whose stems end with raw_id
-    matches = [
-        p.stem for p in tdir.glob("*.yaml")
-        if p.stem.endswith(raw_id)
-    ]
+    matches = [p.stem for p in tdir.glob("*.yaml") if p.stem.endswith(raw_id)]
 
     if len(matches) == 1:
         return matches[0]
 
     if len(matches) > 1:
         short_list = ", ".join(sorted(m[-12:] for m in matches))
-        output.err(
-            f"Ambiguous short ID '{raw_id}' matches {len(matches)} "
-            f"worktrees: {short_list}"
-        )
+        output.err(f"Ambiguous short ID '{raw_id}' matches {len(matches)} worktrees: {short_list}")
         raise SystemExit(1)
 
     # No tracking match -- return as-is (caller will fail on missing YAML)
@@ -5444,6 +5448,7 @@ def _resolve_worktree_id(raw_id: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # post-exit -- finalization after Copilot exits
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _sweep_orphans_on_exit() -> None:
     """Best-effort idle-gated orphan-mux sweep at the *session-end* boundary
@@ -5463,10 +5468,7 @@ def _sweep_orphans_on_exit() -> None:
         payload = reap_orphan_mux_sessions()
         reaped = payload.get("reaped") or []
         if reaped:
-            output.ok(
-                f"Reaped {len(reaped)} idle orphan mux session(s): "
-                f"{', '.join(reaped)}"
-            )
+            output.ok(f"Reaped {len(reaped)} idle orphan mux session(s): {', '.join(reaped)}")
     except Exception:
         pass
     _sweep_managed_on_exit()
@@ -5586,8 +5588,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
     worktree_id = _infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         output.err(
-            "Could not determine worktree ID. Pass it explicitly "
-            "or run from inside a worktree."
+            "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         )
         return 1
     worktree_id = _resolve_worktree_id(worktree_id)
@@ -5629,8 +5630,7 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
         if success:
             return 0
         output.err(
-            f"Finalization failed for {worktree_id}. "
-            f"Run 'agent-worktrees finalize' to retry."
+            f"Finalization failed for {worktree_id}. Run 'agent-worktrees finalize' to retry."
         )
         return 1
 
@@ -5643,16 +5643,14 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
         return 0
 
     # status == "active" -- session wasn't marked complete
-    print(
-        f"Session {worktree_id} is still active (not pushed/completed). "
-        f"Skipping finalization."
-    )
+    print(f"Session {worktree_id} is still active (not pushed/completed). Skipping finalization.")
     return 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # finalize
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def cmd_finalize(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
@@ -5672,10 +5670,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         positional_id = getattr(args, "worktree_id", None)
         flagged_id = getattr(args, "worktree_id_flag", None)
         if positional_id and flagged_id and positional_id != flagged_id:
-            msg = (
-                "Conflicting worktree IDs: positional worktree-id and "
-                "--worktree-id must match."
-            )
+            msg = "Conflicting worktree IDs: positional worktree-id and --worktree-id must match."
             if use_json:
                 return _json_error(msg, 2)
             output.err(msg)
@@ -5710,8 +5705,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             output.err(msg)
             return 2
         success = fin.validate_and_finalize(
-            worktree_id, config, dry_run=args.dry_run,
-            abandon=abandon, handoff_to=handoff_to or None,
+            worktree_id,
+            config,
+            dry_run=args.dry_run,
+            abandon=abandon,
+            handoff_to=handoff_to or None,
         )
 
         if use_json:
@@ -5723,11 +5721,13 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                     final_status = rec.status
                 except Exception:
                     pass
-            _json_output({
-                "worktree_id": worktree_id,
-                "success": success,
-                "status": final_status,
-            })
+            _json_output(
+                {
+                    "worktree_id": worktree_id,
+                    "success": success,
+                    "status": final_status,
+                }
+            )
 
         return 0 if success else 1
     finally:
@@ -5738,6 +5738,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 # push-changes
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def cmd_push_changes(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
@@ -5790,14 +5791,17 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             return 0
 
         success = fin.push_changes(
-            worktree_id, config,
+            worktree_id,
+            config,
             title=args.title,
             dry_run=args.dry_run,
             allow_unsquashed=getattr(args, "allow_unsquashed", False),
         )
 
         _reminder = _pr_reminder_for(
-            config, "push-changes", ok=bool(success),
+            config,
+            "push-changes",
+            ok=bool(success),
         )
         if use_json:
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -5828,6 +5832,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 # create-pr
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def cmd_create_pr(args: argparse.Namespace) -> int:
     """Squash worktree commits, create + push a feature branch for a PR.
@@ -5872,7 +5877,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 return _json_error(msg) if use_json else (output.err(msg) or 1)
 
         result = pr_ops.create_pr(
-            worktree_id, config,
+            worktree_id,
+            config,
             title=args.title,
             branch=args.branch,
             target_repo=getattr(args, "repo", None),
@@ -5881,14 +5887,13 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             open_pr=(False if getattr(args, "no_open", False) else None),
             hold=getattr(args, "hold", False),
             draft=getattr(args, "draft", False),
-            attribution=(
-                False if getattr(args, "no_attribution", False) else None
-            ),
+            attribution=(False if getattr(args, "no_attribution", False) else None),
             dry_run=args.dry_run,
         )
 
         _reminder = _pr_reminder_for(
-            config, "create-pr",
+            config,
+            "create-pr",
             state=("created" if result.get("success") else ""),
             ok=bool(result.get("success")),
             reason=("" if result.get("success") else result.get("error", "")),
@@ -5920,8 +5925,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             )
             if result.get("pr_opened"):
                 output.ok(
-                    f"Opened PR #{result.get('number')} via '{provider}': "
-                    f"{result.get('url')}"
+                    f"Opened PR #{result.get('number')} via '{provider}': {result.get('url')}"
                 )
                 if result.get("draft"):
                     output.warn(
@@ -5936,10 +5940,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                         f"via the '{provider}' provider."
                     )
             elif result.get("pr_open_error"):
-                output.warn(
-                    f"Branch pushed, but auto-open failed: "
-                    f"{result.get('pr_open_error')}"
-                )
+                output.warn(f"Branch pushed, but auto-open failed: {result.get('pr_open_error')}")
                 print(
                     f"Open the PR via the '{provider}' provider, then record it:\n"
                     f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
@@ -5965,6 +5966,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
 # set-pr / pr-status
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def cmd_set_pr(args: argparse.Namespace) -> int:
     """Record PR metadata (URL/number/state/provider) from the sub-agent."""
     use_json = getattr(args, "json", False)
@@ -5976,8 +5978,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         raise
     worktree_id = _infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
-        msg = ("Could not determine worktree ID. Pass it explicitly "
-               "or run from inside a worktree.")
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return _json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = _resolve_worktree_id(worktree_id)
 
@@ -5998,12 +5999,11 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         and result.get("head_sha")
     ):
         try:
-            record = tracking.load_record(
-                cfg.tracking_dir() / f"{worktree_id}.yaml"
-            )
+            record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
             target_pr = next(
                 (
-                    pr for pr in record.prs
+                    pr
+                    for pr in record.prs
                     if pr.number == result.get("number")
                     and pr.branch == result.get("branch")
                     and pr.repo == result.get("repo")
@@ -6063,7 +6063,8 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
         worktree_id = _resolve_worktree_id(worktree_id)
 
         result = pr_ops.pr_ready(
-            worktree_id, config,
+            worktree_id,
+            config,
             target_repo=getattr(args, "repo", None),
             pr_number=getattr(args, "pr", None),
         )
@@ -6104,14 +6105,15 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         raise
     worktree_id = _infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
-        msg = ("Could not determine worktree ID. Pass it explicitly "
-               "or run from inside a worktree.")
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return _json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = _resolve_worktree_id(worktree_id)
 
     result = pr_ops.pr_status(
-        worktree_id, all_prs=getattr(args, "all", False),
-        live=not getattr(args, "no_live", False), config=config,
+        worktree_id,
+        all_prs=getattr(args, "all", False),
+        live=not getattr(args, "no_live", False),
+        config=config,
     )
     # Attach the repo's PR-flow profile so the caller can see, at a glance,
     # which flow this repo uses and whether the pr-* verbs apply here.
@@ -6127,6 +6129,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     # PR state from the live verdict/merge-state when present so the reminder is
     # situational. Carried as a JSON `reminder` node and printed in human mode.
     from . import pr_contract as pc
+
     _live = result.get("live") if isinstance(result.get("live"), dict) else {}
     if result.get("state") == "merged" or _live.get("merge_state") == "merged":
         _state = pc.PR_STATE_MERGED
@@ -6141,7 +6144,10 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     else:
         _state = ""
     _reminder = _pr_reminder_for(
-        config, "pr-status", state=_state, ok=not result.get("error"),
+        config,
+        "pr-status",
+        state=_state,
+        ok=not result.get("error"),
     )
     if _reminder is not None:
         result["reminder"] = _reminder.as_dict()
@@ -6150,7 +6156,8 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     want_threads = getattr(args, "threads", False) or getattr(args, "resolve_threads", False)
     if want_threads and result.get("has_pr"):
         result["thread_report"] = pr_ops.pr_threads(
-            worktree_id, resolve=getattr(args, "resolve_threads", False),
+            worktree_id,
+            resolve=getattr(args, "resolve_threads", False),
             config=config,
         )
     if use_json:
@@ -6186,8 +6193,11 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
             print(f"    held by:     {', '.join(live['held'])}")
         if live.get("wip"):
             print("    wip:         yes")
-        consent = ("present" if live.get("consent_present")
-                   else ("eligible" if live.get("eligible") else "not yet"))
+        consent = (
+            "present"
+            if live.get("consent_present")
+            else ("eligible" if live.get("eligible") else "not yet")
+        )
         print(f"    consent:     {consent}")
     if getattr(args, "all", False) and result.get("prs"):
         print(f"  all PRs ({count}):")
@@ -6205,8 +6215,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
             output.warn(f"  threads:  unavailable ({threads.get('reason', '')})")
         else:
             active = threads.get("active_count", 0)
-            print(f"  threads:  {len(threads.get('threads', []))} "
-                  f"({active} active)")
+            print(f"  threads:  {len(threads.get('threads', []))} ({active} active)")
             for t in threads.get("threads", []):
                 if not t.get("active"):
                     continue
@@ -6226,6 +6235,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
 # pr-complete
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def cmd_pr_complete(args: argparse.Namespace) -> int:
     """Reconcile the worktree onto the default branch after its PR merged.
 
@@ -6244,13 +6254,14 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
         raise
     worktree_id = _infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
-        msg = ("Could not determine worktree ID. Pass it explicitly "
-               "or run from inside a worktree.")
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return _json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = _resolve_worktree_id(worktree_id)
 
     result = pr_complete.complete_worktree(
-        worktree_id, config, dry_run=getattr(args, "dry_run", False),
+        worktree_id,
+        config,
+        dry_run=getattr(args, "dry_run", False),
     )
     if use_json:
         _json_output(result)
@@ -6258,8 +6269,9 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
     if result.get("success"):
         output.ok(result.get("message", f"pr-complete: {result.get('action')}"))
         if result.get("action") == "reset-past-squash" and result.get("backup_ref"):
-            print(f"  recover the pre-complete state with: "
-                  f"git reset --hard {result['backup_ref']}")
+            print(
+                f"  recover the pre-complete state with: git reset --hard {result['backup_ref']}"
+            )
     else:
         output.err(result.get("error", "pr-complete failed."))
     return 0 if result.get("success") else 1
@@ -6269,6 +6281,7 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
 # mark-complete
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def cmd_mark_complete(args: argparse.Namespace) -> int:
     """Manual recovery only -- set tracking status without pushing or finalizing."""
     config = cfg.load_config()
@@ -6276,8 +6289,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
 
     if not worktree_id:
         output.err(
-            "Could not determine worktree ID. Pass it explicitly "
-            "or run from inside a worktree."
+            "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         )
         return 1
     worktree_id = _resolve_worktree_id(worktree_id)
@@ -6341,8 +6353,12 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
 # status
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _cmd_status_write(
-    args: argparse.Namespace, *, summary: str | None, title: str | None = None,
+    args: argparse.Namespace,
+    *,
+    summary: str | None,
+    title: str | None = None,
     follow_up: bool | None = None,
 ) -> int:
     """Write mode of `status`: annotate THIS worktree's agent-asserted
@@ -6354,30 +6370,26 @@ def _cmd_status_write(
     worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
         output.err(
-            "Could not determine worktree ID. Run from inside a worktree "
-            "or pass --worktree-id."
+            "Could not determine worktree ID. Run from inside a worktree or pass --worktree-id."
         )
         return 1
     worktree_id = _resolve_worktree_id(worktree_id)
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        output.err(
-            f"Tracking file not found at {yaml_path}. "
-            "Cannot annotate an unknown worktree."
-        )
+        output.err(f"Tracking file not found at {yaml_path}. Cannot annotate an unknown worktree.")
         return 1
     # Foreground verb (#4547): the whole load -> set_disposition -> save is a
     # critical RMW held under the blocking record lock, so a concurrent Picker
     # best-effort sweep skips rather than clobbering the disposition overlay.
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
-        if (
-            record.kind in tracking.MANAGED_KINDS
-            and record.status in {"complete", "completed", "finalized"}
-        ):
+        if record.kind in tracking.MANAGED_KINDS and record.status in {
+            "complete",
+            "completed",
+            "finalized",
+        }:
             output.err(
-                f"Worktree {worktree_id} is terminal and managed; "
-                "refusing disposition changes."
+                f"Worktree {worktree_id} is terminal and managed; refusing disposition changes."
             )
             return 1
         if follow_up is False and record.active_effort is not None:
@@ -6389,9 +6401,13 @@ def _cmd_status_write(
         if follow_up is True and record.status == "finalized":
             tracking.update_status(record, "active", save=False)
         tracking.set_disposition(
-            record, summary=summary, title=title, follow_up=follow_up,
+            record,
+            summary=summary,
+            title=title,
+            follow_up=follow_up,
             session_id=(os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
-            save=False)
+            save=False,
+        )
         tracking.save_record(record)
     flag = "follow-ups pending" if record.follow_up else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
@@ -6411,8 +6427,7 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
     worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
         output.err(
-            "Could not determine worktree ID. Run from inside a worktree "
-            "or pass --worktree-id."
+            "Could not determine worktree ID. Run from inside a worktree or pass --worktree-id."
         )
         return 1
     worktree_id = _resolve_worktree_id(worktree_id)
@@ -6424,8 +6439,10 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
     if not entries:
         print(f"No disposition history for {worktree_id[-4:]}.")
         return 0
-    print(f"Disposition history for {worktree_id[-4:]} "
-          f"({len(entries)} entr{'y' if len(entries) == 1 else 'ies'}):")
+    print(
+        f"Disposition history for {worktree_id[-4:]} "
+        f"({len(entries)} entr{'y' if len(entries) == 1 else 'ies'}):"
+    )
     for e in entries:
         at = e.get("at") or "?"
         changed = ",".join(e.get("changed") or []) or "-"
@@ -6593,14 +6610,12 @@ def cmd_session_role(args: argparse.Namespace) -> int:
         session_id,
     )
     if not wt_id:
-        _json_output({"role": "untracked", "worktree_id": None,
-                      "session": session_id})
+        _json_output({"role": "untracked", "worktree_id": None, "session": session_id})
         return 0
     try:
         record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
     except Exception:
-        _json_output({"role": "untracked", "worktree_id": wt_id,
-                      "session": session_id})
+        _json_output({"role": "untracked", "worktree_id": wt_id, "session": session_id})
         return 0
     result = _session_role(record, session_id)
     result["worktree_id"] = wt_id
@@ -6621,6 +6636,7 @@ def cmd_history_digest(args: argparse.Namespace) -> int:
     the hook. Never a hard error.
     """
     from . import disposition_history
+
     # history-digest is a _NO_PROJECT_COMMANDS verb, so main() does NOT resolve a
     # project for it -- the command must resolve the worktree itself. Resolve via
     # explicit id -> cwd (activating project) -> the session->worktree binding, so
@@ -6651,13 +6667,9 @@ def cmd_history_digest(args: argparse.Namespace) -> int:
     separator = 2 * len(semantic)
     digest_budget = max(
         0,
-        disposition_history.DIGEST_MAX_CHARS
-        - sum(len(part) for part in semantic)
-        - separator,
+        disposition_history.DIGEST_MAX_CHARS - sum(len(part) for part in semantic) - separator,
     )
-    text = disposition_history.digest(
-        worktree_id, limit=limit, max_chars=digest_budget
-    )
+    text = disposition_history.digest(worktree_id, limit=limit, max_chars=digest_budget)
     combined = "\n\n".join([p for p in (text, *semantic) if p])
     if combined:
         print(combined)
@@ -6673,9 +6685,7 @@ def _effort_focus_output(
         "active_effort": inspection.to_dict() if inspection is not None else None,
         "follow_up": record.follow_up or bool(inspection and inspection.active),
         "summary": (
-            inspection.summary
-            if inspection is not None and inspection.active
-            else record.summary
+            inspection.summary if inspection is not None and inspection.active else record.summary
         ),
     }
 
@@ -6685,10 +6695,7 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
     config = cfg.load_config()
     worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
-        message = (
-            "Could not determine worktree ID. Run inside a worktree or pass "
-            "--worktree-id."
-        )
+        message = "Could not determine worktree ID. Run inside a worktree or pass --worktree-id."
         if args.json:
             return _json_error(message)
         output.err(message)
@@ -6768,14 +6775,9 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
         global_lock = cfg.tracking_dir() / ".effort-bindings.yaml"
         with tracking._RecordLock(global_lock, require_sidecar=True):
             records = tracking.list_records(cfg.tracking_dir())
-            conflict = effort_focus.duplicate_binding(
-                records, worktree_id, record.repo, ref
-            )
+            conflict = effort_focus.duplicate_binding(records, worktree_id, record.repo, ref)
             if conflict:
-                message = (
-                    "that effort participant/slice is already bound to worktree "
-                    f"{conflict}"
-                )
+                message = f"that effort participant/slice is already bound to worktree {conflict}"
                 if args.json:
                     return _json_error(message)
                 output.err(message)
@@ -6836,8 +6838,7 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
             return 1
         bound_ref = record.active_effort
         if completed and (
-            repo_root is None
-            or not effort_focus.completed_or_archived(repo_root, bound_ref)
+            repo_root is None or not effort_focus.completed_or_archived(repo_root, bound_ref)
         ):
             message = (
                 "the bound effort is still open or cannot be verified as Done/"
@@ -6865,8 +6866,7 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
                 output.err(message)
                 return 1
             if completed and (
-                repo_root is None
-                or not effort_focus.completed_or_archived(repo_root, bound_ref)
+                repo_root is None or not effort_focus.completed_or_archived(repo_root, bound_ref)
             ):
                 message = (
                     "the bound effort changed or no longer satisfies the "
@@ -6881,7 +6881,8 @@ def cmd_effort_focus(args: argparse.Namespace) -> int:
             slug = PurePosixPath(bound_ref.path).parent.name
             summary = (
                 f"Completed effort {slug}"
-                if completed else f"Transferred effort {slug} to {transfer}"
+                if completed
+                else f"Transferred effort {slug} to {transfer}"
             )
             tracking.set_disposition(
                 record,
@@ -6919,8 +6920,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
     _follow = True if _fu else (False if _res else None)
     if _summary is not None or _title is not None or _follow is not None:
-        return _cmd_status_write(
-            args, summary=_summary, title=_title, follow_up=_follow)
+        return _cmd_status_write(args, summary=_summary, title=_title, follow_up=_follow)
 
     # worktree-status-core: history read mode (per-worktree), orthogonal to the
     # fleet read below.
@@ -6954,13 +6954,18 @@ def cmd_status(args: argparse.Namespace) -> int:
     results: list[dict] = []
     for rec in records:
         info = git_ops.classify_worktree(
-            rec.worktree_path, rec.branch,
-            fetch=True, remote=repo.remote, default_branch=repo.default_branch,
+            rec.worktree_path,
+            rec.branch,
+            fetch=True,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
             active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
         result_entry = _worktree_to_dict(
-            rec, state_info=info, mux_info=mux_map.get(rec.worktree_id),
+            rec,
+            state_info=info,
+            mux_info=mux_map.get(rec.worktree_id),
             session_ctx=session_ctx,
         )
         # Add display helpers for table output
@@ -6981,21 +6986,27 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     # Table output
     STATE_COLORS = {
-        "active": "36", "unused": "2", "completed": "32", "wip": "33",
-        "dirty": "31", "gone": "31", "orphan": "35",
+        "active": "36",
+        "unused": "2",
+        "completed": "32",
+        "wip": "33",
+        "dirty": "31",
+        "gone": "31",
+        "orphan": "35",
     }
 
     print()
     print(f"🌳 {config.repo_name.replace('-', ' ').title()} -- Worktree Status")
     print()
     print(f"{'ID':<6} {'State':<11} {'Ahead':<7} {'Behind':<8} Title")
-    print(f"{'─'*5:<6} {'─'*10:<11} {'─'*6:<7} {'─'*7:<8} {'─'*30}")
+    print(f"{'─' * 5:<6} {'─' * 10:<11} {'─' * 6:<7} {'─' * 7:<8} {'─' * 30}")
 
     for r in results:
         color = STATE_COLORS.get(r.get("state", ""), "0")
         state_str = (
             f"\033[{color}m{r.get('state', ''):<11}\033[0m"
-            if output._COLOR else f"{r.get('state', ''):<11}"
+            if output._COLOR
+            else f"{r.get('state', ''):<11}"
         )
         print(
             f"{r['short_id']:<6} {state_str} {r.get('ahead', ''):<7} "
@@ -7032,15 +7043,15 @@ def cmd_status(args: argparse.Namespace) -> int:
 # UNUSED.  Both the status bar and `list --json --classify` resolve to this
 # same WorktreeState set.
 _SEGMENT_STYLE: dict[git_ops.WorktreeState, tuple[str, str]] = {
-    git_ops.WorktreeState.DIRTY:     ("colour160", "DIRTY"),   # red
-    git_ops.WorktreeState.WIP:       ("colour178", "WIP"),     # amber
-    git_ops.WorktreeState.COMPLETED: ("colour034", "FINAL"),   # green
-    git_ops.WorktreeState.UNUSED:    ("colour244", "UNUSED"),  # grey
-    git_ops.WorktreeState.CONVO:     ("colour037", "CONVO"),   # teal
-    git_ops.WorktreeState.ORPHAN:    ("colour129", "ORPHAN"),  # magenta
-    git_ops.WorktreeState.ACTIVE:    ("colour039", "ACTIVE"),  # blue
-    git_ops.WorktreeState.GONE:      ("colour238", "GONE"),    # dark grey
-    git_ops.WorktreeState.UNKNOWN:   ("colour238", "?"),       # dark grey
+    git_ops.WorktreeState.DIRTY: ("colour160", "DIRTY"),  # red
+    git_ops.WorktreeState.WIP: ("colour178", "WIP"),  # amber
+    git_ops.WorktreeState.COMPLETED: ("colour034", "FINAL"),  # green
+    git_ops.WorktreeState.UNUSED: ("colour244", "UNUSED"),  # grey
+    git_ops.WorktreeState.CONVO: ("colour037", "CONVO"),  # teal
+    git_ops.WorktreeState.ORPHAN: ("colour129", "ORPHAN"),  # magenta
+    git_ops.WorktreeState.ACTIVE: ("colour039", "ACTIVE"),  # blue
+    git_ops.WorktreeState.GONE: ("colour238", "GONE"),  # dark grey
+    git_ops.WorktreeState.UNKNOWN: ("colour238", "?"),  # dark grey
 }
 
 _SEGMENT_TITLE_MAX = 48
@@ -7082,23 +7093,23 @@ def _resolve_remote_default_branch(
     Network is used only when ``allow_remote=True`` (step 3), so hot/pollable
     callers stay cheap and offline by leaving it ``False``. See dotfiles#1046.
     """
+
     def _has(ref: str) -> bool:
-        r = git_ops.git("rev-parse", "--verify", "--quiet", ref,
-                        cwd=path, check=False)
+        r = git_ops.git("rev-parse", "--verify", "--quiet", ref, cwd=path, check=False)
         return r.returncode == 0
 
     if config_default and _has(f"{remote}/{config_default}"):
         return config_default
 
-    head = git_ops.git("symbolic-ref", f"refs/remotes/{remote}/HEAD",
-                        cwd=path, check=False)
+    head = git_ops.git("symbolic-ref", f"refs/remotes/{remote}/HEAD", cwd=path, check=False)
     if head.returncode == 0 and head.stdout.strip():
         return head.stdout.strip().rsplit("/", 1)[-1]
 
     if allow_remote:
         try:
-            ls = git_ops.git("ls-remote", "--symref", remote, "HEAD",
-                             cwd=path, check=False, timeout=10)
+            ls = git_ops.git(
+                "ls-remote", "--symref", remote, "HEAD", cwd=path, check=False, timeout=10
+            )
         except Exception:
             ls = None
         if ls is not None and ls.returncode == 0:
@@ -7106,7 +7117,7 @@ def _resolve_remote_default_branch(
                 # Format: "ref: refs/heads/<branch>\tHEAD"
                 line = line.strip()
                 if line.startswith("ref:") and "HEAD" in line:
-                    ref = line[len("ref:"):].split("\t", 1)[0].strip()
+                    ref = line[len("ref:") :].split("\t", 1)[0].strip()
                     if ref.startswith("refs/heads/"):
                         return ref.rsplit("/", 1)[-1]
 
@@ -7118,7 +7129,9 @@ def _resolve_remote_default_branch(
 
 
 def _detect_upstream_branch(
-    path: str, remote: str, config_default: str | None,
+    path: str,
+    remote: str,
+    config_default: str | None,
 ) -> str | None:
     """Detect the repo's upstream default branch (``main``/``master``/...).
 
@@ -7129,9 +7142,15 @@ def _detect_upstream_branch(
     the config default as a last-resort hint (may be stale) when nothing else
     resolves.
     """
-    return _resolve_remote_default_branch(
-        path, remote, config_default=config_default, allow_remote=False,
-    ) or config_default
+    return (
+        _resolve_remote_default_branch(
+            path,
+            remote,
+            config_default=config_default,
+            allow_remote=False,
+        )
+        or config_default
+    )
 
 
 def _resolve_segment_title(
@@ -7253,24 +7272,24 @@ def _render_status_segment(
     # (a `master` project binstub must still classify a `main` repo).
     remote, config_default = "origin", None
     try:
-        repo = cfg.load_config(
-            include_control_plane_related_pr=False
-        ).default_repo
+        repo = cfg.load_config(include_control_plane_related_pr=False).default_repo
         remote, config_default = repo.remote, repo.default_branch
     except Exception:
         pass
-    default_branch = _detect_upstream_branch(target, remote, config_default) \
-        or config_default or "master"
+    default_branch = (
+        _detect_upstream_branch(target, remote, config_default) or config_default or "master"
+    )
 
     rec = _find_record_for_path(target)
-    branch = rec.branch if rec else (
-        git_ops._get_current_branch_safe(target) or "HEAD"
-    )
+    branch = rec.branch if rec else (git_ops._get_current_branch_safe(target) or "HEAD")
 
     try:
         info = git_ops.classify_worktree(
-            target, branch, fetch=bool(fetch),
-            remote=remote, default_branch=default_branch,
+            target,
+            branch,
+            fetch=bool(fetch),
+            remote=remote,
+            default_branch=default_branch,
             active_paths=None,  # raw git disposition -- never ACTIVE
         )
     except Exception:
@@ -7302,9 +7321,7 @@ def _render_status_segment(
         bg, label = _SEGMENT_STYLE[state]
         tag = f" {turns}\U0001f4ac"  # turn count + speech-balloon glyph
     else:
-        bg, label = _SEGMENT_STYLE.get(
-            state, ("colour238", state.value.upper())
-        )
+        bg, label = _SEGMENT_STYLE.get(state, ("colour238", state.value.upper()))
         tag = sync
 
     if plain:
@@ -7326,8 +7343,10 @@ def _render_status_segment(
 def cmd_status_segment(args: argparse.Namespace) -> int:
     """Print the worktree status-bar segment (thin wrapper over the renderer)."""
     line = _render_status_segment(
-        args.path, fetch=bool(args.fetch),
-        plain=bool(args.plain), no_title=bool(args.no_title),
+        args.path,
+        fetch=bool(args.fetch),
+        plain=bool(args.plain),
+        no_title=bool(args.no_title),
     )
     if line:
         print(line)
@@ -7348,8 +7367,8 @@ def _platform_short(platform: str) -> str:
 # top stays readable).  Keyed on the short platform code from
 # ``_platform_short``; unknown environments fall back to dark grey.
 _ENV_BG: dict[str, str] = {
-    "win":   "colour025",  # Windows -- dark blue
-    "wsl":   "colour055",  # WSL -- purple
+    "win": "colour025",  # Windows -- dark blue
+    "wsl": "colour055",  # WSL -- purple
     "linux": "colour130",  # Linux -- dark orange
 }
 
@@ -7375,15 +7394,12 @@ def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     target = str(Path(path).resolve()) if path else os.getcwd()
     rec = _find_record_for_path(target)
 
-    machine = (rec.machine if rec and rec.machine else "") \
-        or cfg.detect_machine()
-    platform = (rec.platform if rec and rec.platform else "") \
-        or cfg.detect_platform()
+    machine = (rec.machine if rec and rec.machine else "") or cfg.detect_machine()
+    platform = (rec.platform if rec and rec.platform else "") or cfg.detect_platform()
     env = _platform_short(platform)
 
     repo = rec.repo if rec else ""
-    suffix = rec.worktree_id.rsplit("-", 1)[-1] if rec and rec.worktree_id \
-        else ""
+    suffix = rec.worktree_id.rsplit("-", 1)[-1] if rec and rec.worktree_id else ""
     locus = f"{repo}:{suffix}" if repo and suffix else (repo or "")
 
     fields = [f for f in (machine, env, locus) if f]
@@ -7497,11 +7513,7 @@ def _activate_project_for_worktree_id(worktree_id: str | None) -> str | None:
     matches = [
         str(project)
         for project in projects
-        if (
-            cfg.project_dir(str(project))
-            / "worktrees"
-            / f"{worktree_id}.yaml"
-        ).is_file()
+        if (cfg.project_dir(str(project)) / "worktrees" / f"{worktree_id}.yaml").is_file()
     ]
     if len(matches) != 1:
         return None
@@ -7520,6 +7532,7 @@ def _slot_superseded(active: str, mine: str, versions_root: str) -> bool:
     (``\\``, case-insensitive) and POSIX alike. Factored out (plain strings, no
     filesystem) so the decision is unit-testable without symlinked version trees.
     """
+
     def _norm(p: str) -> str:
         return os.path.normcase(os.path.normpath(p))
 
@@ -7533,9 +7546,7 @@ def _slot_superseded(active: str, mine: str, versions_root: str) -> bool:
     return mine != active
 
 
-def _runtime_superseded(
-    *, prefix: str | None = None, install_root: Path | None = None
-) -> bool:
+def _runtime_superseded(*, prefix: str | None = None, install_root: Path | None = None) -> bool:
     """True when a newer agent-worktrees runtime has superseded the one running
     this ``status-updater`` -- i.e. the active ``versions/<current-version>``
     slot (published by the marker) no longer resolves to this process's
@@ -7612,8 +7623,7 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         return False
     sess = sessions.mux_session_name(worktree_id)
     try:
-        mux = "psmux" if shutil.which("psmux") else (
-            "tmux" if shutil.which("tmux") else None)
+        mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
         if not mux:
             return False
         mux_bin = shutil.which(mux) or mux
@@ -7622,13 +7632,23 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         # immediately see "gone" is wasteful.
         r = subprocess.run(
             [mux_bin, "has-session", "-t", sess],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if r.returncode != 0:
             return False
 
-        argv = [sys.executable, "-m", "agent_worktrees", "status-updater",
-                "--session", sess, "--mux", mux]
+        argv = [
+            sys.executable,
+            "-m",
+            "agent_worktrees",
+            "status-updater",
+            "--session",
+            sess,
+            "--mux",
+            mux,
+        ]
         if path:
             argv += ["--path", path]
 
@@ -7706,7 +7726,9 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
         try:
             return subprocess.run(
                 [mux_bin, *a],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
         except Exception:
             return None
@@ -7758,15 +7780,15 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # updater) is replaced rather than deferred to, so the transition can't wedge
     # a dark bar.
     from . import update_stage as _upd
+
     _owner = _mux("display-message", "-t", sess, "-p", "#{@aw_updater}")
     if _owner is not None and _owner.returncode == 0:
         _tok = (_owner.stdout or "").strip()
-        if _tok.isdigit() and int(_tok) != os.getpid() and _upd._pid_alive(
-                int(_tok)):
-            _op = _mux(
-                "display-message", "-t", sess, "-p", "#{@aw_updater_prefix}")
-            _owner_prefix = (_op.stdout or "").strip() if (
-                _op is not None and _op.returncode == 0) else ""
+        if _tok.isdigit() and int(_tok) != os.getpid() and _upd._pid_alive(int(_tok)):
+            _op = _mux("display-message", "-t", sess, "-p", "#{@aw_updater_prefix}")
+            _owner_prefix = (
+                (_op.stdout or "").strip() if (_op is not None and _op.returncode == 0) else ""
+            )
             if _owner_prefix and not _runtime_superseded(prefix=_owner_prefix):
                 return 0
 
@@ -7825,7 +7847,10 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
             break
         try:
             seg = _render_status_segment(
-                path, fetch=False, plain=False, no_title=False,
+                path,
+                fetch=False,
+                plain=False,
+                no_title=False,
                 persist_title=True,
             )
         except Exception:
@@ -7863,7 +7888,11 @@ def _status_monitor_enabled() -> bool:
     self-retire opt-out convention.
     """
     return os.environ.get(_STATUS_MONITOR_ENV, "").strip().lower() not in (
-        "0", "false", "no", "off")
+        "0",
+        "false",
+        "no",
+        "off",
+    )
 
 
 def _aw_runtime_home() -> Path:
@@ -7888,8 +7917,12 @@ def _valid_monitor_session(sess: str) -> bool:
     (path traversal / absolute-path write). Every real session is
     ``wt-<worktree_id>``, so this allow-list costs nothing.
     """
-    return bool(sess) and sess.startswith("wt-") and ".." not in sess and all(
-        c.isalnum() or c in "-._" for c in sess)
+    return (
+        bool(sess)
+        and sess.startswith("wt-")
+        and ".." not in sess
+        and all(c.isalnum() or c in "-._" for c in sess)
+    )
 
 
 def _register_session_for_monitor(sess: str, path: str | None) -> bool:
@@ -7904,6 +7937,7 @@ def _register_session_for_monitor(sess: str, path: str | None) -> bool:
     if not path or not _valid_monitor_session(sess):
         return False
     import tempfile
+
     try:
         d = _monitor_registry_dir()
         d.mkdir(parents=True, exist_ok=True)
@@ -7921,8 +7955,7 @@ def _read_monitor_registry(reg_dir: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     try:
         for f in reg_dir.iterdir():
-            if f.is_file() and not f.name.endswith(".tmp") \
-                    and _valid_monitor_session(f.name):
+            if f.is_file() and not f.name.endswith(".tmp") and _valid_monitor_session(f.name):
                 try:
                     out[f.name] = f.read_text(encoding="utf-8").strip()
                 except OSError:
@@ -7994,19 +8027,19 @@ def _ensure_status_monitor() -> bool:
     current one is spawned to take over."""
     try:
         from . import locks as _locks
+
         data = _locks.read_lock(_monitor_lock_path())
         if _locks.lock_is_live(data) and isinstance(data, dict):
             other_prefix = data.get("prefix")
             if not other_prefix or not _runtime_superseded(prefix=other_prefix):
                 import shutil
-                caller_has_mux = bool(
-                    shutil.which("psmux") or shutil.which("tmux"))
+
+                caller_has_mux = bool(shutil.which("psmux") or shutil.which("tmux"))
                 if data.get("mux") is not False or not caller_has_mux:
                     return True
     except Exception:
         pass
-    return _spawn_detached(
-        [sys.executable, "-m", "agent_worktrees", "status-monitor"])
+    return _spawn_detached([sys.executable, "-m", "agent_worktrees", "status-monitor"])
 
 
 def _restart_status_monitor() -> dict:
@@ -8026,12 +8059,17 @@ def _restart_status_monitor() -> dict:
     (``AGENT_WORKTREES_STATUS_MONITOR=0``). Runs from the NEWLY-ACTIVATED slot's
     interpreter, so ``sys.executable`` / ``sys.prefix`` are the current runtime.
     """
-    result: dict = {"enabled": _status_monitor_enabled(), "reaped": None,
-                    "spawned": False, "already_current": False}
+    result: dict = {
+        "enabled": _status_monitor_enabled(),
+        "reaped": None,
+        "spawned": False,
+        "already_current": False,
+    }
     if not result["enabled"]:
         return result
     try:
         from . import locks as _locks
+
         lock = _monitor_lock_path()
         data = _locks.read_lock(lock)
         if _locks.lock_is_live(data) and isinstance(data, dict):
@@ -8045,6 +8083,7 @@ def _restart_status_monitor() -> dict:
                 # would otherwise linger up to a full tick) and clear its lock so
                 # the fresh monitor doesn't defer to a ghost owner.
                 from . import procs as _procs
+
                 if _procs.terminate_pid(pid):
                     result["reaped"] = pid
                 _locks.remove_lock(lock)
@@ -8059,7 +8098,8 @@ def _restart_status_monitor() -> dict:
     except Exception:
         pass
     result["spawned"] = _spawn_detached(
-        [sys.executable, "-m", "agent_worktrees", "status-monitor"])
+        [sys.executable, "-m", "agent_worktrees", "status-monitor"]
+    )
     return result
 
 
@@ -8078,8 +8118,7 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     bits = []
     if r.get("reaped"):
         bits.append(f"reaped superseded pid {r['reaped']}")
-    bits.append("spawned current monitor" if r.get("spawned")
-                else "spawn failed")
+    bits.append("spawned current monitor" if r.get("spawned") else "spawn failed")
     print("status-monitor: " + ", ".join(bits))
     return 0
 
@@ -8094,11 +8133,7 @@ def cmd_reconcile_sessions(args: argparse.Namespace) -> int:
         session_budget=args.session_budget,
         projection_budget=args.projection_budget,
     )
-    mux = (
-        "psmux"
-        if shutil.which("psmux")
-        else ("tmux" if shutil.which("tmux") else None)
-    )
+    mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
     mux_bin = (shutil.which(mux) or mux) if mux else None
     if mux_bin is None:
         reconciler.observe_mux(set())
@@ -8117,7 +8152,10 @@ def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> bool:
     try:
         result = subprocess.run(
             [mux_bin, "set-option", "-t", sess, opt, val],
-            capture_output=True, text=True, timeout=15)
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         return result.returncode == 0
     except Exception:
         return False
@@ -8138,10 +8176,16 @@ def _monitor_list_sessions(
     """
     try:
         r = subprocess.run(
-            [mux_bin, "list-sessions", "-F",
-             "#{session_name}:#{session_attached}:"
-             "#{session_id}:#{session_created}"],
-            capture_output=True, text=True, timeout=15)
+            [
+                mux_bin,
+                "list-sessions",
+                "-F",
+                "#{session_name}:#{session_attached}:#{session_id}:#{session_created}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
     except Exception:
         return None
     if r.returncode != 0:
@@ -8161,8 +8205,147 @@ def _monitor_list_sessions(
     return out
 
 
+def _monitor_session_state_handoff_path(
+    session_id: str | None,
+) -> Path | None:
+    """Return the session-state handoff request path for ``session_id``."""
+    if not session_id:
+        return None
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(session_id))[:160] or "unknown"
+    return Path.home() / ".copilot" / "session-state" / safe / "handoff-request.json"
+
+
+def _monitor_read_session_state_handoff(
+    path: str | os.PathLike[str] | None,
+) -> dict[str, object] | None:
+    """Read a context-handoff session-state request marker."""
+    if not path:
+        return None
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _monitor_pending_handoff_request(
+    record: tracking.WorktreeRecord,
+) -> dict[str, object] | None:
+    """Return one actionable pending handoff request for the monitor to pick up."""
+    if not _status_monitor_enabled():
+        return None
+    worktree_id = getattr(record, "worktree_id", None)
+    if not worktree_id:
+        return None
+    requested = {
+        str(event.get("handoff_id") or "").strip(): event
+        for event in activity.read_events(
+            worktree_id=worktree_id,
+            event="handoff_requested",
+            limit=64,
+        )
+        if str(event.get("handoff_id") or "").strip()
+    }
+    triggered = {
+        str(event.get("handoff_token") or "").strip()
+        for event in activity.read_events(
+            worktree_id=worktree_id,
+            event="handoff_cutover_spawn",
+            limit=64,
+        )
+        if str(event.get("handoff_token") or "").strip()
+    }
+    for handoff in reversed(record.pending_handoffs):
+        token = str(getattr(handoff, "token", "") or "").strip()
+        if (
+            not token
+            or token in triggered
+            or getattr(handoff, "candidate", None)
+            or getattr(handoff, "successor", None)
+        ):
+            continue
+        request_event = requested.get(token, {})
+        predecessor_session = str(
+            request_event.get("session_id") or getattr(handoff, "predecessor", "") or ""
+        ).strip()
+        if not predecessor_session:
+            continue
+        session_state = request_event.get("session_state")
+        if not session_state:
+            fallback = _monitor_session_state_handoff_path(predecessor_session)
+            session_state = str(fallback) if fallback is not None else None
+        request = _monitor_read_session_state_handoff(session_state)
+        if request is None or request.get("consumed"):
+            continue
+        request_token = str(request.get("handoffId") or "").strip()
+        if request_token and request_token != token:
+            continue
+        request_worktree = str(request.get("worktree") or "").strip()
+        if request_worktree and request_worktree != worktree_id:
+            continue
+        seed = str(request.get("seed") or "").strip()
+        if not seed:
+            continue
+        return {
+            "token": token,
+            "seed": seed,
+            "worktree_id": worktree_id,
+            "predecessor_session_id": predecessor_session,
+            "session_state_path": session_state,
+            "storage": str(request.get("storage") or request_event.get("storage") or "").strip()
+            or None,
+        }
+    return None
+
+
+def _monitor_trigger_handoff_cutover(
+    request: dict[str, object],
+) -> tuple[int, dict[str, object]]:
+    """Invoke the existing handoff-cutover spawn choreography in-process."""
+    predecessor_session = str(request.get("predecessor_session_id") or "").strip() or None
+    old_pane = None
+    if predecessor_session:
+        try:
+            binding = sessions.mux_binding_for_session(predecessor_session)
+        except Exception:
+            binding = None
+        if binding:
+            old_pane = binding.get("pane_id")
+    return _handoff_cutover_spawn_result(
+        argparse.Namespace(
+            seed=request.get("seed"),
+            worktree_id=request.get("worktree_id"),
+            session_id=predecessor_session,
+            handoff_token=request.get("token"),
+            mux_session=None,
+            require_mux_identity=False,
+            old_pane=old_pane,
+            retire_pane=None,
+            successor_verified=False,
+            retire_reason=None,
+            expected_copilot_pid=None,
+            expected_copilot_start_time=None,
+            dry_run=False,
+            json=True,
+        )
+    )
+
+
+def _monitor_maybe_trigger_handoff_cutover(path: str) -> None:
+    """Pick up one actionable pending handoff for ``path`` if the monitor owns it."""
+    record = _find_record_for_path(path)
+    if record is None:
+        return
+    request = _monitor_pending_handoff_request(record)
+    if request is None:
+        return
+    _monitor_trigger_handoff_cutover(request)
+
+
 def _monitor_sweep(
-    mux_bin: str | None, token: str, prefix: str, ctx_done: set[str],
+    mux_bin: str | None,
+    token: str,
+    prefix: str,
+    ctx_done: set[str],
     interval: float = 15,
     picker_projects: set[str] | None = None,
     catalog_observer=None,
@@ -8206,10 +8389,7 @@ def _monitor_sweep(
         if incarnations is not None:
             for sess in live_wt:
                 value = live.get(sess)
-                incarnation = (
-                    str(value[1])
-                    if isinstance(value, tuple) and len(value) > 1 else ""
-                )
+                incarnation = str(value[1]) if isinstance(value, tuple) and len(value) > 1 else ""
                 prior = incarnations.get(sess)
                 if prior is not None and prior != incarnation:
                     ctx_done.discard(sess)
@@ -8224,9 +8404,7 @@ def _monitor_sweep(
             if not path:
                 continue
             try:
-                registered_paths.add(
-                    os.path.normcase(os.path.realpath(path))
-                )
+                registered_paths.add(os.path.normcase(os.path.realpath(path)))
             except (OSError, ValueError):
                 continue
         for key in list(session_projects):
@@ -8241,17 +8419,10 @@ def _monitor_sweep(
         context_value = None
         segment_value = ""
         _wait_for_lifecycle_priority(lifecycle_priority)
-        with (
-            project_lock
-            if project_lock is not None
-            else contextlib.nullcontext()
-        ):
+        with project_lock if project_lock is not None else contextlib.nullcontext():
             try:
                 path_key = os.path.normcase(os.path.realpath(path))
-                project = (
-                    session_projects.get(path_key)
-                    if session_projects is not None else None
-                )
+                project = session_projects.get(path_key) if session_projects is not None else None
                 if project:
                     cfg.set_active_project(project)
                 else:
@@ -8272,10 +8443,16 @@ def _monitor_sweep(
                     segment_value = segment_cache.get(path)
                 else:
                     segment_value = _render_status_segment(
-                        path, fetch=False, plain=False, no_title=False,
-                        persist_title=True)
+                        path, fetch=False, plain=False, no_title=False, persist_title=True
+                    )
             except Exception:
                 pass
+            if mux_bin:
+                try:
+                    _monitor_maybe_trigger_handoff_cutover(path)
+                except Exception:
+                    pass
+
         # Win the single-instance election so any per-session updater retires,
         # publishing our current-runtime prefix so it defers to us (not to a
         # superseded owner) -- see cmd_status_updater's debounce.
@@ -8295,11 +8472,7 @@ def _monitor_sweep(
         _publish("@aw_seg", segment_value)
     for project in warm_projects:
         _wait_for_lifecycle_priority(lifecycle_priority)
-        with (
-            project_lock
-            if project_lock is not None
-            else contextlib.nullcontext()
-        ):
+        with project_lock if project_lock is not None else contextlib.nullcontext():
             try:
                 cfg.set_active_project(project)
                 _warm_list_cache_for_active_project(interval=interval)
@@ -8344,7 +8517,8 @@ class _StatusSegmentCache:
                 self._aliases[input_key] = key
                 return cached[1]
         value = _render_status_segment(
-            target, fetch=False, plain=False, no_title=False, persist_title=True)
+            target, fetch=False, plain=False, no_title=False, persist_title=True
+        )
         with self._lock:
             self._aliases[input_key] = key
             self._entries[key] = (time.monotonic(), value)
@@ -8378,15 +8552,36 @@ class _StatusSegmentCache:
             self._aliases.clear()
 
 
-_HOOK_WRITE_TOOLS = frozenset({
-    "create", "edit", "str_replace", "str_replace_editor",
-    "str_replace_based_edit_tool", "write", "write_file", "insert",
-    "apply_patch", "new_file", "multi_edit",
-})
-_HOOK_SHELL_TOOLS = frozenset({
-    "bash", "sh", "shell", "powershell", "pwsh", "cmd", "run",
-    "run_command", "execute", "exec", "terminal",
-})
+_HOOK_WRITE_TOOLS = frozenset(
+    {
+        "create",
+        "edit",
+        "str_replace",
+        "str_replace_editor",
+        "str_replace_based_edit_tool",
+        "write",
+        "write_file",
+        "insert",
+        "apply_patch",
+        "new_file",
+        "multi_edit",
+    }
+)
+_HOOK_SHELL_TOOLS = frozenset(
+    {
+        "bash",
+        "sh",
+        "shell",
+        "powershell",
+        "pwsh",
+        "cmd",
+        "run",
+        "run_command",
+        "execute",
+        "exec",
+        "terminal",
+    }
+)
 
 
 def _hook_payload_cwd(payload: dict) -> str:
@@ -8457,14 +8652,10 @@ def _write_session_lifecycle_snapshot(
     version, _environment = _session_lifecycle_metadata(payload)
     if not version:
         try:
-            version = (_aw_runtime_home() / "current-version").read_text(
-                encoding="utf-8"
-            ).strip()
+            version = (_aw_runtime_home() / "current-version").read_text(encoding="utf-8").strip()
         except (OSError, UnicodeError):
             version = ""
-    launch_key = _session_lifecycle_launch_key(
-        payload, version
-    )
+    launch_key = _session_lifecycle_launch_key(payload, version)
     if not launch_key:
         return
     root = _aw_runtime_home() / ".session-context"
@@ -8508,9 +8699,7 @@ def _registration_nudge_context(cwd: str) -> str:
         import hashlib
 
         marker_dir = _aw_runtime_home() / ".register-nudged"
-        marker = marker_dir / hashlib.sha1(
-            str(top).encode("utf-8")
-        ).hexdigest()
+        marker = marker_dir / hashlib.sha1(str(top).encode("utf-8")).hexdigest()
         if marker.exists():
             return ""
         marker_dir.mkdir(parents=True, exist_ok=True)
@@ -8536,18 +8725,16 @@ def _start_project_session_hook(
         project = cfg.project_name()
     except Exception:
         return None
-    script = cfg.project_dir(project) / "hooks" / (
-        "session-start.ps1" if os.name == "nt" else "session-start.sh"
+    script = (
+        cfg.project_dir(project)
+        / "hooks"
+        / ("session-start.ps1" if os.name == "nt" else "session-start.sh")
     )
     if not script.is_file():
         return None
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        argv = (
-            [shell, "-NoLogo", "-NoProfile", "-File", str(script)]
-            if shell
-            else []
-        )
+        argv = [shell, "-NoLogo", "-NoProfile", "-File", str(script)] if shell else []
     else:
         shell = shutil.which("bash")
         argv = [shell, str(script)] if shell else []
@@ -8559,7 +8746,9 @@ def _start_project_session_hook(
         if os.name == "posix"
         else {
             "creationflags": getattr(
-                subprocess, "CREATE_NEW_PROCESS_GROUP", 0  # headless-guard: allow: bounded hook process group plus the resident headless-child guard
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",  # headless-guard: allow bounded hook child in its own process group while stdout/stderr stay piped
+                0,  # headless-guard: allow: bounded hook process group plus the resident headless-child guard
             )
         }
     )
@@ -8583,11 +8772,7 @@ def _finish_project_session_hook(
 ) -> tuple[dict, str]:
     if process is None:
         return {}, ""
-    remaining = (
-        max(0.1, deadline - time.time() - 0.25)
-        if deadline is not None
-        else 10.0
-    )
+    remaining = max(0.1, deadline - time.time() - 0.25) if deadline is not None else 10.0
     try:
         stdout, stderr = process.communicate(timeout=remaining)
     except subprocess.TimeoutExpired:
@@ -8617,8 +8802,7 @@ def _finish_project_session_hook(
     diagnostic = stderr
     if process.returncode != 0:
         diagnostic += (
-            "[agent-worktrees] Project session-start hook exited "
-            f"{process.returncode}.\n"
+            f"[agent-worktrees] Project session-start hook exited {process.returncode}.\n"
         )
     return hook_result, diagnostic
 
@@ -8642,9 +8826,7 @@ def _anchor_hygiene_diagnostic(cwd: str) -> str:
             f"[agent-worktrees] Anchor repo has uncommitted work: {report.anchor_path}"
         )
     if report.stash_entries:
-        messages.append(
-            f"[agent-worktrees] Anchor repo has stash entries: {report.anchor_path}"
-        )
+        messages.append(f"[agent-worktrees] Anchor repo has stash entries: {report.anchor_path}")
     return "".join(f"{message}\n" for message in messages)
 
 
@@ -8662,18 +8844,18 @@ def _reconcile_marketplace_snapshot(payload: dict, cwd: str) -> None:
             )
             if summary.get("changed"):
                 path = summary.get("settings_local", "settings.local.json")
-                output_text = json.dumps({
-                    "additionalContext": (
-                        "Agent Worktrees updated local plugin marketplace "
-                        f"source overrides in {path}. Restart Copilot CLI for "
-                        "the new plugin sources to take effect."
-                    )
-                })
+                output_text = json.dumps(
+                    {
+                        "additionalContext": (
+                            "Agent Worktrees updated local plugin marketplace "
+                            f"source overrides in {path}. Restart Copilot CLI for "
+                            "the new plugin sources to take effect."
+                        )
+                    }
+                )
     except Exception:
         pass
-    _write_session_lifecycle_snapshot(
-        "marketplace-overrides", payload, output_text
-    )
+    _write_session_lifecycle_snapshot("marketplace-overrides", payload, output_text)
 
 
 def _provisioning_status_diagnostic(cwd: str) -> str:
@@ -8715,19 +8897,13 @@ def _start_provisioning_if_needed(
     ):
         return ""
     status = _aw_runtime_home() / "logs" / "provision-status.json"
-    diagnostic = (
-        _provisioning_status_diagnostic(cwd)
-        if include_status_diagnostic
-        else ""
-    )
+    diagnostic = _provisioning_status_diagnostic(cwd) if include_status_diagnostic else ""
     try:
         from . import reconcile
 
         plan = reconcile.build_plan(Path(cwd), save=False)
     except Exception as exc:
-        return diagnostic + (
-            f"[agent-worktrees] Runtime provisioning preview failed: {exc}\n"
-        )
+        return diagnostic + (f"[agent-worktrees] Runtime provisioning preview failed: {exc}\n")
     if plan.get("action") != "reconcile":
         return diagnostic
     services = ", ".join(
@@ -8761,9 +8937,7 @@ def _start_provisioning_if_needed(
         stdout = log.open("w", encoding="utf-8")
         stderr = log.with_suffix(".log.err").open("w", encoding="utf-8")
         try:
-            process = subprocess.Popen(
-                argv, stdout=stdout, stderr=stderr, **kwargs
-            )
+            process = subprocess.Popen(argv, stdout=stdout, stderr=stderr, **kwargs)
             if process_holder is not None:
                 process_holder.append(process)
         finally:
@@ -8773,14 +8947,9 @@ def _start_provisioning_if_needed(
     except Exception:
         spawned = False
     if not spawned:
-        diagnostic += (
-            "[agent-worktrees] Could not start background provisioning.\n"
-        )
+        diagnostic += "[agent-worktrees] Could not start background provisioning.\n"
     elif services:
-        diagnostic += (
-            "[agent-worktrees] Provisioning runtime(s) in background: "
-            f"{services}\n"
-        )
+        diagnostic += f"[agent-worktrees] Provisioning runtime(s) in background: {services}\n"
     return diagnostic
 
 
@@ -8819,17 +8988,12 @@ def _schedule_provisioning_if_needed(
                 process_holder=process_holder,
             )
             if worker_diagnostic:
-                log = (
-                    _aw_runtime_home()
-                    / "logs"
-                    / "provision-preview.log"
-                )
+                log = _aw_runtime_home() / "logs" / "provision-preview.log"
                 try:
                     log.parent.mkdir(parents=True, exist_ok=True)
                     with log.open("a", encoding="utf-8") as stream:
                         stream.write(
-                            f"{datetime.now(timezone.utc).isoformat()} "
-                            f"{cwd}\n{worker_diagnostic}"
+                            f"{datetime.now(timezone.utc).isoformat()} {cwd}\n{worker_diagnostic}"
                         )
                 except OSError:
                     pass
@@ -8849,8 +9013,7 @@ def _schedule_provisioning_if_needed(
         with _PROVISIONING_WORKERS_LOCK:
             _PROVISIONING_WORKERS.discard(key)
         diagnostic += (
-            "[agent-worktrees] Could not schedule background provisioning "
-            f"preview: {exc}\n"
+            f"[agent-worktrees] Could not schedule background provisioning preview: {exc}\n"
         )
     return diagnostic
 
@@ -8886,19 +9049,12 @@ def _run_session_lifecycle(
             cwd=cwd,
             stdin=False,
             pid=None,
-            pane=(
-                session_environment.get("TMUX_PANE")
-                or session_environment.get("PSMUX_PANE")
-            ),
+            pane=(session_environment.get("TMUX_PANE") or session_environment.get("PSMUX_PANE")),
             launch_id=session_environment.get("WORKTREE_LAUNCH_ID"),
-            assignment_token=session_environment.get(
-                profile_assignment.ASSIGNMENT_TOKEN_ENV
-            ),
+            assignment_token=session_environment.get(profile_assignment.ASSIGNMENT_TOKEN_ENV),
             emit_context=True,
             handoff_token=None,
-            handoff_candidate_token=session_environment.get(
-                _SESSION_HANDOFF_TOKEN
-            ),
+            handoff_candidate_token=session_environment.get(_SESSION_HANDOFF_TOKEN),
             result_holder=[],
             resident_environment=True,
             hook_payload=payload,
@@ -8909,21 +9065,15 @@ def _run_session_lifecycle(
         except Exception as exc:
             diagnostics += f"[agent-worktrees] Session registration failed: {exc}\n"
         registration_output = (
-            registration_args.result_holder[-1]
-            if registration_args.result_holder
-            else "{}"
+            registration_args.result_holder[-1] if registration_args.result_holder else "{}"
         )
-        _write_session_lifecycle_snapshot(
-            "register-session", payload, registration_output or "{}"
-        )
+        _write_session_lifecycle_snapshot("register-session", payload, registration_output or "{}")
 
         if deadline is None or time.time() < deadline - 1.0:
             diagnostics += _anchor_hygiene_diagnostic(cwd)
         if deadline is None or time.time() < deadline - 1.0:
             if provisioning_start_event is None:
-                diagnostics += _start_provisioning_if_needed(
-                    cwd, session_environment
-                )
+                diagnostics += _start_provisioning_if_needed(cwd, session_environment)
             else:
                 diagnostics += _schedule_provisioning_if_needed(
                     cwd,
@@ -8956,7 +9106,8 @@ def _load_hook_client_module():
         if not path.is_file():
             continue
         spec = importlib.util.spec_from_file_location(
-            "_agent_worktrees_resident_hook_client", path)
+            "_agent_worktrees_resident_hook_client", path
+        )
         if spec is None or spec.loader is None:
             continue
         module = importlib.util.module_from_spec(spec)
@@ -8971,8 +9122,7 @@ class _ResidentHookPolicy:
     def __init__(self, hook_client, ttl: float = 300.0):
         self.hook_client = hook_client
         self.ttl = ttl
-        self._anchors: tuple[float, tuple[int, int] | None, list[dict]] = (
-            0.0, None, [])
+        self._anchors: tuple[float, tuple[int, int] | None, list[dict]] = (0.0, None, [])
         self._guarded: dict[str, tuple[float, list[dict]]] = {}
         self._plugin_related_anchors: list[str] | None = None
 
@@ -8996,9 +9146,7 @@ class _ResidentHookPolicy:
         if self._plugin_related_anchors is None:
             from . import related
 
-            self._plugin_related_anchors = (
-                related.installed_plugin_related_anchors()
-            )
+            self._plugin_related_anchors = related.installed_plugin_related_anchors()
         return self._plugin_related_anchors
 
     def anchors(self) -> list[dict]:
@@ -9043,15 +9191,17 @@ class _ResidentHookPolicy:
                     continue
                 path = repos.resolve_path(entry.name)
                 if path:
-                    value.append({
-                        "name": entry.name,
-                        "delegate": entry.delegate,
-                        "path": path,
-                        "locus": {
-                            "preferred": entry.locus.preferred,
-                            "machines": list(entry.locus.machines),
-                        },
-                    })
+                    value.append(
+                        {
+                            "name": entry.name,
+                            "delegate": entry.delegate,
+                            "path": path,
+                            "locus": {
+                                "preferred": entry.locus.preferred,
+                                "machines": list(entry.locus.machines),
+                            },
+                        }
+                    )
         except Exception:
             value = []
         self._guarded[key] = (now, value)
@@ -9061,16 +9211,14 @@ class _ResidentHookPolicy:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
         may_write = tool in _HOOK_WRITE_TOOLS or tool in _HOOK_SHELL_TOOLS
         combined: dict = {}
-        for name in ("statelessness_guard.py", "cross_repo_guard.py",
-                     "anchor_write_guard.py"):
+        for name in ("statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py"):
             module = self._module(name)
             if module is None:
                 continue
             kwargs = {}
             if name == "cross_repo_guard.py":
                 kwargs["guarded_roots"] = (
-                    self.guarded_roots(_hook_payload_cwd(payload))
-                    if may_write else []
+                    self.guarded_roots(_hook_payload_cwd(payload)) if may_write else []
                 )
             elif name == "anchor_write_guard.py":
                 kwargs["anchors"] = self.anchors() if may_write else []
@@ -9079,8 +9227,7 @@ class _ResidentHookPolicy:
             except Exception:
                 continue
             if isinstance(decision, dict) and decision:
-                combined = self.hook_client._merge_pre_decisions(
-                    combined, decision)
+                combined = self.hook_client._merge_pre_decisions(combined, decision)
                 if combined.get("permissionDecision") == "deny":
                     break
         return combined
@@ -9101,8 +9248,8 @@ class _ResidentHookPolicy:
             pass
         try:
             text = module.decide(
-                payload, home=Path.home(), tracking_record=found,
-                deadline=deadline)
+                payload, home=Path.home(), tracking_record=found, deadline=deadline
+            )
         except Exception:
             return {}
         return {"additionalContext": text} if text else {}
@@ -9114,8 +9261,13 @@ class _ResidentHookPolicy:
             cwd = _hook_payload_cwd(payload)
             if isinstance(args, dict):
                 for key in (
-                    "path", "file_path", "filePath", "filename", "fileName",
-                    "target_file", "targetFile",
+                    "path",
+                    "file_path",
+                    "filePath",
+                    "filename",
+                    "fileName",
+                    "target_file",
+                    "targetFile",
                 ):
                     value = args.get(key)
                     if value:
@@ -9130,9 +9282,11 @@ class _ResidentHookPolicy:
         if not isinstance(args, dict):
             return []
         command = next(
-            (str(args.get(key) or "") for key in (
-                "command", "cmd", "script", "commandLine", "commandline", "input"
-            ) if args.get(key)),
+            (
+                str(args.get(key) or "")
+                for key in ("command", "cmd", "script", "commandLine", "commandline", "input")
+                if args.get(key)
+            ),
             "",
         )
         module = self._module("statelessness_guard.py")
@@ -9207,9 +9361,7 @@ def _claim_resident_lifecycle(
     now: float | None = None,
 ) -> tuple[str, bool]:
     current = time.monotonic() if now is None else now
-    for expired in [
-        key for key, deadline in claims.items() if deadline <= current
-    ]:
+    for expired in [key for key, deadline in claims.items() if deadline <= current]:
         claims.pop(expired, None)
     version, _environment = _session_lifecycle_metadata(payload)
     launch_key = _session_lifecycle_launch_key(payload, version)
@@ -9255,11 +9407,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import session_catalog
     from .hook_ipc import HookIpcServer, HookUnavailable
 
-    mux = ("psmux" if shutil.which("psmux") else
-           ("tmux" if shutil.which("tmux") else None))
+    mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
     mux_bin = (shutil.which(mux) or mux) if mux else None
-    interval = args.interval if getattr(args, "interval", None) \
-        and args.interval >= 2 else 15
+    interval = args.interval if getattr(args, "interval", None) and args.interval >= 2 else 15
 
     lock = _monitor_lock_path()
     my_prefix = os.path.realpath(sys.prefix)
@@ -9280,17 +9430,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # Single-active: stand down if a current monitor already owns the host.
     if _other_current_monitor():
         return 0
-    _locks.write_lock(
-        lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
+    _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
 
     ctx_done: set[str] = set()
     reconciler = session_catalog.ResidentSessionReconciler(
-        register_monitor_session=_register_session_for_monitor)
+        register_monitor_session=_register_session_for_monitor
+    )
     pane_reconciler = pane_reaper.ResidentPaneReconciler(
-        activate_project=_activate_project_for_path)
+        activate_project=_activate_project_for_path
+    )
     try:
-        cache_ttl = float(
-            os.environ.get("AGENT_WORKTREES_STATUS_CACHE_SECONDS", "60"))
+        cache_ttl = float(os.environ.get("AGENT_WORKTREES_STATUS_CACHE_SECONDS", "60"))
     except ValueError:
         cache_ttl = 60.0
     segment_cache = _StatusSegmentCache(cache_ttl)
@@ -9315,9 +9465,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         lifecycle_completed = False
         if is_lifecycle:
             with lifecycle_count_lock:
-                lifecycle_key, claimed = _claim_resident_lifecycle(
-                    payload, lifecycle_claims
-                )
+                lifecycle_key, claimed = _claim_resident_lifecycle(payload, lifecycle_claims)
                 if not claimed:
                     return {}
                 lifecycle_count += 1
@@ -9332,15 +9480,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             ):
                 raise HookUnavailable
             try:
-                if (
-                    is_lifecycle
-                    and deadline - time.time() < _RESIDENT_LIFECYCLE_RUNWAY_S
-                ):
+                if is_lifecycle and deadline - time.time() < _RESIDENT_LIFECYCLE_RUNWAY_S:
                     raise HookUnavailable
                 result = _resident_hook_decision(
-                    kind, payload, segment_cache=segment_cache,
-                    policy=hook_policy, deadline=deadline,
-                    provisioning_start_event=provisioning_start_event)
+                    kind,
+                    payload,
+                    segment_cache=segment_cache,
+                    policy=hook_policy,
+                    deadline=deadline,
+                    provisioning_start_event=provisioning_start_event,
+                )
                 lifecycle_completed = True
                 return result
             finally:
@@ -9388,14 +9537,21 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             demand_projects = list_cache.recent_demand_projects()
             external_projects = picker_projects | demand_projects
             served = _monitor_sweep(
-                mux_bin, token, my_prefix, ctx_done,
-                interval=interval, picker_projects=external_projects,
+                mux_bin,
+                token,
+                my_prefix,
+                ctx_done,
+                interval=interval,
+                picker_projects=external_projects,
                 catalog_observer=reconciler.observe_mux,
                 pane_observer=pane_reconciler.observe,
-                segment_cache=segment_cache, published=published,
-                incarnations=incarnations, session_projects=session_projects,
+                segment_cache=segment_cache,
+                published=published,
+                incarnations=incarnations,
+                session_projects=session_projects,
                 project_lock=state_lock,
-                lifecycle_priority=lifecycle_priority)
+                lifecycle_priority=lifecycle_priority,
+            )
             _wait_for_lifecycle_priority(lifecycle_priority)
             with state_lock:
                 try:
@@ -9409,24 +9565,23 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if served < 0:
                 time.sleep(interval)  # transient mux failure: hold, don't exit
                 continue
-            if (served == 0
-                    and not external_projects
-                    and not reconciler.has_live_worktree_mux):
+            if served == 0 and not external_projects and not reconciler.has_live_worktree_mux:
                 empty_strikes += 1
                 if empty_strikes >= _MAX_EMPTY_STRIKES:
                     # Close the root-vs-idle race: a Picker/list caller can
                     # register, or a wt-* mux can appear, after this sweep but
                     # before the break.
-                    retry_mux = (
-                        _monitor_list_sessions(mux_bin) if mux_bin else {})
+                    retry_mux = _monitor_list_sessions(mux_bin) if mux_bin else {}
                     retry_wt = bool(
-                        retry_mux is not None
-                        and any(name.startswith("wt-") for name in retry_mux))
+                        retry_mux is not None and any(name.startswith("wt-") for name in retry_mux)
+                    )
                     if retry_wt:
                         reconciler.observe_mux(set(retry_mux))
-                    if (retry_wt
-                            or monitor_roots.live_picker_projects()
-                            or list_cache.recent_demand_projects()):
+                    if (
+                        retry_wt
+                        or monitor_roots.live_picker_projects()
+                        or list_cache.recent_demand_projects()
+                    ):
                         empty_strikes = 0
                     else:
                         break
@@ -9446,6 +9601,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 # list -- lightweight inventory from tracking records
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _cmd_list_stream(args: argparse.Namespace, records) -> int:
     """Emit the worktree listing as newline-delimited JSON for the Picker's
@@ -9485,17 +9641,16 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
 
     def to_dict(rec, state_info):
         wt = _worktree_to_dict(
-            rec, mux_info=mux_map.get(rec.worktree_id),
-            session_ctx=session_ctx, state_info=state_info,
+            rec,
+            mux_info=mux_map.get(rec.worktree_id),
+            session_ctx=session_ctx,
+            state_info=state_info,
             bare_orphan_wts=bare_orphan_wts,
-            include_profile_assignment_history=getattr(
-                args, "profile_assignment_history", False
-            ),
+            include_profile_assignment_history=getattr(args, "profile_assignment_history", False),
         )
         title = wt.get("title")
         if not title or title == "null":
-            wt["title"] = session_ctx.latest_summary.get(
-                _normalize_path(rec.worktree_path))
+            wt["title"] = session_ctx.latest_summary.get(_normalize_path(rec.worktree_path))
         return wt
 
     emit({"type": "begin", "version": _JSON_SCHEMA_VERSION, "count": len(records)})
@@ -9515,10 +9670,11 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         repo = config.default_repo
         active_paths = _build_active_paths(records, session_ctx)
         from .picker_tui.data_local import _stamp_from_raw
+
         for rec in records:
             info = _classify_one_record(
-                rec, repo=repo, active_paths=active_paths,
-                session_ctx=session_ctx)
+                rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
+            )
             wt = to_dict(rec, info)
             # picker-cache-first-paint (dotfiles#948) remote write-back: warm
             # this machine's session-render cache so a future --cache-only fast
@@ -9599,7 +9755,8 @@ def _list_records_for_args(args: argparse.Namespace):
     # (matching the picker's behaviour).
     if not getattr(args, "all", False):
         records = [
-            r for r in records
+            r
+            for r in records
             if r.worktree_path
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
@@ -9615,10 +9772,7 @@ def _filter_list_worktree(records, raw_id: str):
     matches = [rec for rec in records if rec.worktree_id.endswith(raw_id)]
     if len(matches) > 1:
         ids = ", ".join(sorted(rec.worktree_id[-12:] for rec in matches))
-        raise ValueError(
-            f"Ambiguous short ID '{raw_id}' matches {len(matches)} "
-            f"worktrees: {ids}"
-        )
+        raise ValueError(f"Ambiguous short ID '{raw_id}' matches {len(matches)} worktrees: {ids}")
     return matches
 
 
@@ -9637,9 +9791,9 @@ def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
 
     try:
         bridge_live = rec.worktree_id in reclaim.live_bridge_worktrees()
-        bound_live = bool(
-            reclaim.resolve_bound_copilots(worktree_id=rec.worktree_id)
-        ) or bridge_live
+        bound_live = (
+            bool(reclaim.resolve_bound_copilots(worktree_id=rec.worktree_id)) or bridge_live
+        )
         mux_info = sessions.mux_status_many([rec.worktree_id]).get(rec.worktree_id)
         mux_live = bool(mux_info and mux_info.exists)
         now = datetime.now().isoformat(timespec="seconds")
@@ -9693,14 +9847,13 @@ def _build_list_json_payload(
             bridge_live_wts = None
     worktrees = [
         _worktree_to_dict(
-            rec, mux_info=mux_map.get(rec.worktree_id),
+            rec,
+            mux_info=mux_map.get(rec.worktree_id),
             session_ctx=session_ctx,
             state_info=state_map.get(rec.worktree_id),
             bare_orphan_wts=bare_orphan_wts,
             bridge_live_wts=bridge_live_wts,
-            include_profile_assignment_history=getattr(
-                args, "profile_assignment_history", False
-            ),
+            include_profile_assignment_history=getattr(args, "profile_assignment_history", False),
         )
         for rec in records
     ]
@@ -9716,6 +9869,7 @@ def _build_list_json_payload(
     # so a FUTURE --cache-only fast phase on THIS machine reads it directly.
     if getattr(args, "classify", False) and stamp_session_state:
         from .picker_tui.data_local import _stamp_from_raw
+
         for wt_dict, rec in zip(worktrees, records, strict=True):
             _stamp_from_raw(rec, wt_dict, session_ctx)
     return {"worktrees": worktrees}
@@ -9739,8 +9893,7 @@ def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
             **shape,
         )
         records = _list_records_for_args(args)
-        payload = _build_list_json_payload(
-            args, records, stamp_session_state=False)
+        payload = _build_list_json_payload(args, records, stamp_session_state=False)
         list_cache.write(
             demand["key"],
             payload,
@@ -9791,6 +9944,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         # events.jsonl or scans processes. Never-populated -> Unknown.
         if getattr(args, "cache_only", False):
             from .picker_tui.data_local import _overlay_cached_state
+
             worktrees = []
             for rec in records:
                 raw = _worktree_to_dict(
@@ -9799,8 +9953,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                         args, "profile_assignment_history", False
                     ),
                 )
-                if rec.session_summary and not (
-                        raw.get("title") and raw["title"] != "null"):
+                if rec.session_summary and not (raw.get("title") and raw["title"] != "null"):
                     raw["title"] = rec.session_summary
                 _overlay_cached_state(raw, rec)
                 worktrees.append(raw)
@@ -9818,8 +9971,8 @@ def cmd_list(args: argparse.Namespace) -> int:
             try:
                 _project = cfg.project_name()
                 _lc_key = list_cache.cache_key(
-                    args, project=_project,
-                    tracking_status=getattr(args, "tracking_status", "all"))
+                    args, project=_project, tracking_status=getattr(args, "tracking_status", "all")
+                )
             except Exception:
                 _lc_key = None
                 _project = None
@@ -9855,7 +10008,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     print()
     print(f"{'ID':<42} {'Status':<12} {'Platform':<8} Title")
-    print(f"{'─'*41:<42} {'─'*11:<12} {'─'*7:<8} {'─'*30}")
+    print(f"{'─' * 41:<42} {'─' * 11:<12} {'─' * 7:<8} {'─' * 30}")
     for rec in records:
         short_id = rec.worktree_id[-12:] if len(rec.worktree_id) > 12 else rec.worktree_id
         title = rec.title if (rec.title and rec.title != "null") else None
@@ -9874,6 +10027,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 # claims -- a worktree's full claim ledger (resource-claims legibility surface)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _inbound_claims(machine: str, worktree_id: str, cwd: str) -> dict:
     """Best-effort inbound tasks a worktree claims, via agent-dispatch.
 
@@ -9888,16 +10042,19 @@ def _inbound_claims(machine: str, worktree_id: str, cwd: str) -> dict:
         return {"available": False, "reason": "agent-dispatch not installed"}
     try:
         proc = subprocess.run(
-            [exe, "worktree-status", "--machine", machine,
-             "--worktree", worktree_id],
+            [exe, "worktree-status", "--machine", machine, "--worktree", worktree_id],
             cwd=cwd if cwd and Path(cwd).exists() else None,
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
     except (subprocess.SubprocessError, OSError) as e:
         return {"available": False, "reason": f"agent-dispatch call failed: {e}"}
     if proc.returncode != 0:
-        return {"available": False,
-                "reason": (proc.stderr or "").strip() or "agent-dispatch error"}
+        return {
+            "available": False,
+            "reason": (proc.stderr or "").strip() or "agent-dispatch error",
+        }
     try:
         data = json.loads(proc.stdout)
     except (ValueError, TypeError):
@@ -9922,24 +10079,24 @@ def cmd_claims(args: argparse.Namespace) -> int:
         if len(target) < 3:
             if args.json:
                 return _json_error("claims add: usage 'add <kind> <ref>'", 2)
-            output.err("claims add: usage 'add <kind> <ref>' "
-                       "(kind: worktree|codespace|container|ssh|workdir|pr)")
+            output.err(
+                "claims add: usage 'add <kind> <ref>' "
+                "(kind: worktree|codespace|container|ssh|workdir|pr)"
+            )
             return 2
         return _claims_add(args, target[1], target[2])
     if target and target[0] == "release":
         if len(target) < 2:
             if args.json:
                 return _json_error("claims release: missing <ref>", 2)
-            output.err('claims release: missing <ref>. '
-                       'Usage: claims release <ref> [--remove]')
+            output.err("claims release: missing <ref>. Usage: claims release <ref> [--remove]")
             return 2
         return _claims_release(args, target[1])
     if target and target[0] == "settle":
         if len(target) < 2:
             if args.json:
                 return _json_error("claims settle: missing <ref>", 2)
-            output.err('claims settle: missing <ref>. '
-                       'Usage: claims settle <ref> [--released]')
+            output.err("claims settle: missing <ref>. Usage: claims settle <ref> [--released]")
             return 2
         return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
@@ -9952,9 +10109,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
     return _claims_show(args, worktree_id)
 
 
-def _claim_handoff_actor(
-    config: cfg.Config, explicit_worktree: str | None
-) -> str:
+def _claim_handoff_actor(config: cfg.Config, explicit_worktree: str | None) -> str:
     worktree_id = _infer_worktree_id(explicit_worktree, config)
     if not worktree_id:
         raise claim_handoffs.ClaimHandoffError(
@@ -9981,11 +10136,13 @@ def _emit_coordination_rejection(
     json_out: bool,
 ) -> int:
     if json_out:
-        _json_output({
-            "error": readiness.error,
-            "code": readiness.code,
-            "coordination_readiness": readiness.as_dict(),
-        })
+        _json_output(
+            {
+                "error": readiness.error,
+                "code": readiness.code,
+                "coordination_readiness": readiness.as_dict(),
+            }
+        )
     else:
         output.err(f"{readiness.code}: {readiness.error}")
     return 3
@@ -10010,8 +10167,7 @@ def _coordination_readiness_for_owner_ref(
     parsed_owner = tracking.parse_claim_ref(owner_ref)
     if parsed_owner is None or not parsed_owner.is_qualified:
         raise ValueError(
-            "--owner-ref must be a qualified "
-            f"machine/project/worktree_id ref (got {owner_ref!r})"
+            f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})"
         )
     readiness_config = config
     if parsed_owner.machine == config.machine:
@@ -10049,10 +10205,7 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
         return 2
     action = target[0]
     if action not in {"offer", "show", "decline", "cancel"}:
-        msg = (
-            f"claims handoff: unknown action {action!r} "
-            "(expected offer|show|decline|cancel)"
-        )
+        msg = f"claims handoff: unknown action {action!r} (expected offer|show|decline|cancel)"
         if args.json:
             return _json_error(msg)
         output.err(msg)
@@ -10068,20 +10221,15 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
         else:
             config = cfg.load_config()
             if action == "offer":
-                blocked = _require_coordination_readiness(
-                    config, json_out=args.json
-                )
+                blocked = _require_coordination_readiness(config, json_out=args.json)
                 if blocked is not None:
                     return blocked
-            actor = _claim_handoff_actor(
-                config, getattr(args, "release_worktree", None)
-            )
+            actor = _claim_handoff_actor(config, getattr(args, "release_worktree", None))
             if action == "offer":
                 handoff_values = list(getattr(args, "handoff_to", None) or [])
                 if not handoff_values:
                     raise claim_handoffs.ClaimHandoffError(
-                        "claims handoff offer requires --to "
-                        "<machine/project/worktree>"
+                        "claims handoff offer requires --to <machine/project/worktree>"
                     )
                 consumer, *trailing_refs = handoff_values
                 bundle, created = claim_handoffs.offer(
@@ -10093,8 +10241,7 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
             elif action in {"decline", "cancel"}:
                 if len(target) != 2:
                     raise claim_handoffs.ClaimHandoffError(
-                        f"claims handoff {action}: usage "
-                        f"'{action} <bundle-id> --reason <text>'"
+                        f"claims handoff {action}: usage '{action} <bundle-id> --reason <text>'"
                     )
                 bundle = claim_handoffs.transition(
                     target[1],
@@ -10131,7 +10278,8 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
 
 
 def _resolve_owner_ref_record_path(
-    owner_ref: str, config: cfg.Config,
+    owner_ref: str,
+    config: cfg.Config,
 ) -> tuple[Path | None, str, str | None]:
     """Resolve a qualified owner-ref to a local tracking record path.
 
@@ -10148,8 +10296,11 @@ def _resolve_owner_ref_record_path(
     """
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None or not parsed.is_qualified:
-        return (None, "", f"--owner-ref must be a qualified "
-                          f"machine/project/worktree_id ref (got {owner_ref!r})")
+        return (
+            None,
+            "",
+            f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
+        )
     if parsed.machine != config.machine:
         return (None, parsed.worktree_id, None)  # cross-machine -> lease mirror
     path = cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
@@ -10173,8 +10324,9 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     """
     valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr"}
     if kind not in valid_kinds:
-        msg = (f"claims add: unknown kind {kind!r} "
-               f"(expected one of {', '.join(sorted(valid_kinds))})")
+        msg = (
+            f"claims add: unknown kind {kind!r} (expected one of {', '.join(sorted(valid_kinds))})"
+        )
         if args.json:
             return _json_error(msg, 2)
         output.err(msg)
@@ -10190,18 +10342,25 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             return 2
         readiness = _coordination_readiness_for_owner_ref(owner_ref, config)
         if not readiness.ready:
-            return _emit_coordination_rejection(
-                readiness, json_out=args.json
-            )
+            return _emit_coordination_rejection(readiness, json_out=args.json)
         if rec_path is None:
             # Cross-machine owner -- its ledger is remote; the lease mirror owns
             # the disposition. Not an error: a no-op locally, surfaced for the
             # caller (agent-codespaces) to mirror via the lease --disposition.
-            msg = (f"owner-ref {owner_ref} is on another machine -- claim "
-                   f"deferred to the lease mirror (no local ledger write)")
+            msg = (
+                f"owner-ref {owner_ref} is on another machine -- claim "
+                f"deferred to the lease mirror (no local ledger write)"
+            )
             if args.json:
-                _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref,
-                              "deferred": True, "reason": "cross-machine-owner"})
+                _json_output(
+                    {
+                        "worktree_id": wt_id,
+                        "kind": kind,
+                        "ref": ref,
+                        "deferred": True,
+                        "reason": "cross-machine-owner",
+                    }
+                )
                 return 0
             output.warn(msg)
             return 0
@@ -10230,14 +10389,16 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             output.err(msg)
             return 1
         claim = tracking.ResourceClaim(
-            kind=kind, ref=ref, created_at=tracking._now_iso(),
-            state=obligations.ACTIVE, note=getattr(args, "note", "") or "",
+            kind=kind,
+            ref=ref,
+            created_at=tracking._now_iso(),
+            state=obligations.ACTIVE,
+            note=getattr(args, "note", "") or "",
         )
         tracking.add_resource_claim(rec, claim, save=False)
         tracking.save_record(rec, rec_path)
     if args.json:
-        _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref,
-                      "state": obligations.ACTIVE})
+        _json_output({"worktree_id": wt_id, "kind": kind, "ref": ref, "state": obligations.ACTIVE})
         return 0
     print(f"added outbound claim {kind}:{ref} on {wt_id}")
     return 0
@@ -10322,12 +10483,19 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             # Cross-machine owner -- the lease disposition mirror owns it; a
             # no-op locally (surfaced for the caller to mirror via the lease).
             if args.json:
-                _json_output({"worktree_id": wt_id, "ref": ref,
-                              "deferred": True, "reason": "cross-machine-owner"})
+                _json_output(
+                    {
+                        "worktree_id": wt_id,
+                        "ref": ref,
+                        "deferred": True,
+                        "reason": "cross-machine-owner",
+                    }
+                )
                 return 0
             output.warn(
                 f"owner-ref {owner_ref} is on another machine -- settle deferred "
-                f"to the lease mirror (no local ledger write)")
+                f"to the lease mirror (no local ledger write)"
+            )
             return 0
     else:
         wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
@@ -10337,15 +10505,11 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    disposition = (
-        obligations.RELEASED if getattr(args, "released", False) else obligations.AT_REST
-    )
+    disposition = obligations.RELEASED if getattr(args, "released", False) else obligations.AT_REST
     with tracking._RecordLock(rec_path, require_sidecar=True):
         rec = tracking.load_record(rec_path)
         match = next((c for c in rec.resources if c.ref == ref), None)
-        reservation = (
-            tracking.claim_handoff_reservation(rec, match)
-            if match is not None else "")
+        reservation = tracking.claim_handoff_reservation(rec, match) if match is not None else ""
         if reservation:
             msg = (
                 f"claim {ref} is reserved by offered handoff bundle "
@@ -10355,8 +10519,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
                 return _json_error(msg)
             output.err(msg)
             return 1
-        settled = tracking.settle_resource_claim(
-            rec, ref, disposition, save=False)
+        settled = tracking.settle_resource_claim(rec, ref, disposition, save=False)
         if settled is not None:
             tracking.save_record(rec, rec_path)
     if settled is None:
@@ -10400,6 +10563,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
     from . import sweep as sweep_mod
+
     gone_of, safe_of = sweep_mod.make_resolvers(config)
 
     reclaimed: list[dict[str, str]] = []
@@ -10411,8 +10575,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
         # reload and apply only to the same still-active/unreserved refs.
         verdicts: dict[str, tuple[bool | None, bool | None]] = {}
         for claim in rec.resources:
-            if (not claim.is_unsettled
-                    or tracking.claim_handoff_reservation(rec, claim)):
+            if not claim.is_unsettled or tracking.claim_handoff_reservation(rec, claim):
                 continue
             try:
                 gone = gone_of(claim)
@@ -10436,18 +10599,23 @@ def _claims_sweep(args: argparse.Namespace) -> int:
             with tracking._RecordLock(rec_path, require_sidecar=True):
                 rec = tracking.load_record(rec_path)
                 flipped = tracking.sweep_abandoned_obligations(
-                    rec, gone_of=_gone, safe_of=_safe, save=False,
+                    rec,
+                    gone_of=_gone,
+                    safe_of=_safe,
+                    save=False,
                 )
                 if flipped:
                     tracking.save_record(rec, rec_path)
         else:
             before = {c.ref: c.state for c in rec.resources}
             flipped = tracking.sweep_abandoned_obligations(
-                rec, gone_of=_gone, safe_of=_safe, save=False,
+                rec,
+                gone_of=_gone,
+                safe_of=_safe,
+                save=False,
             )
         for c in flipped:
-            reclaimed.append({"owner": rec.worktree_id, "kind": c.kind,
-                              "ref": c.ref})
+            reclaimed.append({"owner": rec.worktree_id, "kind": c.kind, "ref": c.ref})
         if flipped and not apply:
             # dry-run: restore in-memory state we mutated (no save happened)
             for c in rec.resources:
@@ -10455,8 +10623,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                     c.state = before[c.ref]
 
     if args.json:
-        _json_output({"applied": apply, "reclaimed": reclaimed,
-                      "count": len(reclaimed)})
+        _json_output({"applied": apply, "reclaimed": reclaimed, "count": len(reclaimed)})
         return 0
     if not reclaimed:
         print("claims sweep: no abandonable obligations found.")
@@ -10484,28 +10651,38 @@ def _claims_cleanup(args: argparse.Namespace) -> int:
     target = list(getattr(args, "target", None) or [])
     selectors = set(target[1:])
     from . import cleanup as cleanup_mod
-    rows = cleanup_mod.cleanup_orphanage(
-        config, apply=apply, selectors=selectors or None)
+
+    rows = cleanup_mod.cleanup_orphanage(config, apply=apply, selectors=selectors or None)
 
     reclaimed = [r for r in rows if r["status"] == "reclaimed"]
     if args.json:
-        _json_output({"applied": apply, "results": rows,
-                      "selectors": sorted(selectors),
-                      "reclaimed": len(reclaimed), "count": len(rows)})
+        _json_output(
+            {
+                "applied": apply,
+                "results": rows,
+                "selectors": sorted(selectors),
+                "reclaimed": len(reclaimed),
+                "count": len(rows),
+            }
+        )
         return 0
     if not rows:
         if selectors:
-            print("claims cleanup: no re-homed obligations matched: "
-                  + ", ".join(sorted(selectors)))
+            print(
+                "claims cleanup: no re-homed obligations matched: " + ", ".join(sorted(selectors))
+            )
         else:
-            print("claims cleanup: no re-homed obligations to reclaim "
-                  "(the orphanage is empty).")
+            print("claims cleanup: no re-homed obligations to reclaim (the orphanage is empty).")
         return 0
     verb = "Reclaimed" if apply else "Would reclaim (dry-run; pass --apply)"
     print(f"claims cleanup -- {len(rows)} orphaned obligation(s):")
     for r in rows:
-        mark = {"reclaimed": "\u2713", "failed": "\u2717",
-                "skipped": "\u2013", "unsupported": "?"}.get(r["status"], "?")
+        mark = {
+            "reclaimed": "\u2713",
+            "failed": "\u2717",
+            "skipped": "\u2013",
+            "unsupported": "?",
+        }.get(r["status"], "?")
         line = f"  {mark} {r['kind']}: {r['ref']}  [{r['status']}]"
         if r["detail"]:
             line += f" -- {r['detail']}"
@@ -10528,16 +10705,19 @@ def _claims_orphans(args: argparse.Namespace) -> int:
         _json_output({"orphaned": orphans, "count": len(orphans)})
         return 0
     if not orphans:
-        print("claims orphans: no re-homed obligations "
-              "(nothing has been --abandon'd, or the registry is empty).")
+        print(
+            "claims orphans: no re-homed obligations "
+            "(nothing has been --abandon'd, or the registry is empty)."
+        )
         return 0
     print(f"Re-homed (abandoned) obligations -- {len(orphans)} pending cleanup:")
     for e in orphans:
         line = f"  · {e.get('kind')}: {e.get('ref')}"
         src = e.get("source_worktree")
         when = e.get("abandoned_at")
-        meta = ", ".join(x for x in (f"from {src}" if src else "",
-                                     f"@ {when}" if when else "") if x)
+        meta = ", ".join(
+            x for x in (f"from {src}" if src else "", f"@ {when}" if when else "") if x
+        )
         if meta:
             line += f"  ({meta})"
         if e.get("handoff_to"):
@@ -10580,8 +10760,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
         }
         for c in rec.resources
     ]
-    inbound = _inbound_claims(rec.machine or config.machine, wt_id,
-                              rec.worktree_path)
+    inbound = _inbound_claims(rec.machine or config.machine, wt_id, rec.worktree_path)
 
     ledger = {
         "worktree_id": wt_id,
@@ -10614,8 +10793,9 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     if not inbound.get("available"):
         print(f"    (unavailable: {inbound.get('reason', 'n/a')})")
     else:
-        rows = [("assigned", t) for t in inbound.get("assigned", [])] + \
-               [("owned", t) for t in inbound.get("owned", [])]
+        rows = [("assigned", t) for t in inbound.get("assigned", [])] + [
+            ("owned", t) for t in inbound.get("owned", [])
+        ]
         if rows:
             for kind, t in rows:
                 tid = t.get("id", "?") if isinstance(t, dict) else str(t)
@@ -10631,9 +10811,11 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
 # create -- non-interactive worktree creation
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _slugify(text: str) -> str:
     """Lowercase, keep alnum/dash, collapse the rest to single dashes."""
     import re
+
     s = re.sub(r"[^a-zA-Z0-9]+", "-", text).strip("-").lower()
     return s or "daemon"
 
@@ -10658,8 +10840,9 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         return 1
     rec = tracking.load_record(yaml_path)
     if rec.kind not in tracking.MANAGED_KINDS:
-        output.err(f"{wt_id} is not a managed (system/bridge) worktree "
-                   f"(kind={rec.kind}); refusing")
+        output.err(
+            f"{wt_id} is not a managed (system/bridge) worktree (kind={rec.kind}); refusing"
+        )
         return 1
 
     removed, warnings = _remove_managed_worktree(
@@ -10669,11 +10852,7 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         force=True,
     )
     if not removed:
-        location = (
-            f"; worktree path: {rec.worktree_path}"
-            if rec.worktree_path
-            else ""
-        )
+        location = f"; worktree path: {rec.worktree_path}" if rec.worktree_path else ""
         message = (
             f"failed to fully remove system worktree {wt_id}: "
             f"{'; '.join(warnings) or 'removal failed'}{location}; "
@@ -10711,10 +10890,14 @@ def cmd_create(args: argparse.Namespace) -> int:
     # --no-owner forces a deliberately top-level worktree; a system worktree is
     # never an outbound resource of another worktree.
     owner_ref = (
-        None if (is_system or no_owner)
-        else (getattr(args, "owner_ref", None)
-              or os.environ.get("AGENT_WORKTREES_OWNER_REF")
-              or _resolve_owner_ref() or None)
+        None
+        if (is_system or no_owner)
+        else (
+            getattr(args, "owner_ref", None)
+            or os.environ.get("AGENT_WORKTREES_OWNER_REF")
+            or _resolve_owner_ref()
+            or None
+        )
     )
     dispatch_fields = {
         "task_id": getattr(args, "dispatch_task_id", None),
@@ -10723,14 +10906,11 @@ def cmd_create(args: argparse.Namespace) -> int:
         "driver": getattr(args, "dispatch_driver", None),
         "supervisor": getattr(args, "dispatch_supervisor", None),
     }
-    present_dispatch_fields = {
-        key for key, value in dispatch_fields.items() if value is not None
-    }
+    present_dispatch_fields = {key for key, value in dispatch_fields.items() if value is not None}
     if present_dispatch_fields and len(present_dispatch_fields) != len(dispatch_fields):
         missing = sorted(set(dispatch_fields) - present_dispatch_fields)
-        message = (
-            "dispatch allocation provenance requires all fields; missing "
-            + ", ".join(missing)
+        message = "dispatch allocation provenance requires all fields; missing " + ", ".join(
+            missing
         )
         if args.json:
             return _json_error(message)
@@ -10754,8 +10934,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             )
             if not isinstance(dispatch_fields[key], str)
             or not dispatch_fields[key].strip()
-            or len(dispatch_fields[key].strip())
-            > tracking.DISPATCH_PROVENANCE_TEXT_MAX
+            or len(dispatch_fields[key].strip()) > tracking.DISPATCH_PROVENANCE_TEXT_MAX
         ]
         if invalid:
             message = (
@@ -10775,10 +10954,12 @@ def cmd_create(args: argparse.Namespace) -> int:
         try:
             config = cfg.load_config()
             result = _create_worktree_core(
-                config, no_mux=True,
+                config,
+                no_mux=True,
                 kind="system" if is_system else "session",
                 owner=(getattr(args, "owner", None) or getattr(args, "name", None))
-                if is_system else None,
+                if is_system
+                else None,
                 name=getattr(args, "name", None) if is_system else None,
                 interface=getattr(args, "interface", None),
                 origin=getattr(args, "origin", None),
@@ -10787,9 +10968,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 dispatch_attempt=dispatch_attempt,
             )
         except CoordinationReadinessFailure as exc:
-            return _emit_coordination_rejection(
-                exc.readiness, json_out=args.json
-            )
+            return _emit_coordination_rejection(exc.readiness, json_out=args.json)
         except Exception as e:
             if args.json:
                 return _json_error(str(e))
@@ -10838,6 +11017,7 @@ def _reconcile_marketplaces_for_checkout(
 # outbound claim on THIS (the calling) worktree (agent-fabric resource-claims)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _resolve_owner_ref() -> str | None:
     """Build this worktree's qualified owner ref from the current context.
 
@@ -10879,6 +11059,7 @@ def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
     """
     try:
         from . import repos as _repos
+
         project = cfg.project_name()
     except Exception:
         return None
@@ -10929,7 +11110,8 @@ def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
         project = wt.get("repo")
         if wid and machine:
             ref = tracking.format_claim_ref(
-                str(machine), str(project) if project else None, str(wid))
+                str(machine), str(project) if project else None, str(wid)
+            )
             return tracking.ResourceClaim(
                 kind="worktree",
                 ref=ref,
@@ -10952,7 +11134,8 @@ def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
 
 
 def _ensure_anchor_ledger(
-    parsed: tracking.ClaimRef, tracking_dir,
+    parsed: tracking.ClaimRef,
+    tracking_dir,
 ) -> tracking.WorktreeRecord | None:
     """Lazily materialize a singleton project's ``@anchor`` claim ledger.
 
@@ -10965,6 +11148,7 @@ def _ensure_anchor_ledger(
     """
     try:
         from . import repos as _repos
+
         config = cfg.load_config()
     except Exception:
         return None
@@ -10984,7 +11168,8 @@ def _ensure_anchor_ledger(
             return None
     try:
         return tracking.load_or_create_anchor_record(
-            anchor, project, config.machine, config.platform, tracking_dir)
+            anchor, project, config.machine, config.platform, tracking_dir
+        )
     except Exception:
         return None
 
@@ -11044,7 +11229,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         output.err(
             "run: could not resolve the calling worktree from the current "
             "directory. Refusing to create a resource without creator "
-            "ownership; run from a managed worktree or pass --owner-ref.")
+            "ownership; run from a managed worktree or pass --owner-ref."
+        )
         return 1
 
     try:
@@ -11086,25 +11272,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     if owner_ref:
         try:
             owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(
-                owner_ref, run_config)
+                owner_ref, run_config
+            )
             if owner_err:
                 raise RuntimeError(owner_err)
             if owner_path is not None and not owner_path.exists():
                 if parsed_owner and parsed_owner.is_anchor:
-                    _ensure_anchor_ledger(
-                        parsed_owner, owner_path.parent)
+                    _ensure_anchor_ledger(parsed_owner, owner_path.parent)
             if owner_path is not None and not owner_path.exists():
-                raise RuntimeError(
-                    f"same-machine owner ledger is missing: {owner_ref}")
+                raise RuntimeError(f"same-machine owner ledger is missing: {owner_ref}")
             if owner_path is not None:
                 pending_ref = f"pending-run:{secrets.token_hex(12)}"
-                with tracking._RecordLock(
-                        owner_path, require_sidecar=True):
+                with tracking._RecordLock(owner_path, require_sidecar=True):
                     owner_record = tracking.load_record(owner_path)
                     tracking.add_resource_claim(
                         owner_record,
                         tracking.ResourceClaim(
-                            kind="workdir", ref=pending_ref,
+                            kind="workdir",
+                            ref=pending_ref,
                             created_at=tracking._now_iso(),
                             state=obligations.ACTIVE,
                             note=f"pending resource creation: {cmd_str[:160]}",
@@ -11125,11 +11310,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             with tracking._RecordLock(owner_path, require_sidecar=True):
                 owner_record = tracking.load_record(owner_path)
                 owner_record.resources = [
-                    item for item in owner_record.resources
-                    if item.ref != pending_ref
+                    item for item in owner_record.resources if item.ref != pending_ref
                 ]
-                tracking.add_resource_claim(
-                    owner_record, claim, save=False)
+                tracking.add_resource_claim(owner_record, claim, save=False)
                 tracking.save_record(owner_record, owner_path)
             return True
         except Exception as exc:
@@ -11140,13 +11323,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     # through; re-emit stdout verbatim so callers/pipes see the child output.
     try:
         proc = subprocess.run(
-            cmd_str, shell=True, env=child_env,
-            stdout=subprocess.PIPE, text=True,
+            cmd_str,
+            shell=True,
+            env=child_env,
+            stdout=subprocess.PIPE,
+            text=True,
         )
     except Exception as e:
         output.err(
             f"run: failed to execute inner command: {e}; pending ownership "
-            f"{pending_ref or '(cross-machine)'} is retained")
+            f"{pending_ref or '(cross-machine)'} is retained"
+        )
         return 1
     child_stdout = proc.stdout or ""
     sys.stdout.write(child_stdout)
@@ -11157,12 +11344,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         output.err(
             f"run: resource command exited {proc.returncode} but no claim could "
             f"be parsed; "
-            f"pending ownership {pending_ref or '(cross-machine)'} is retained")
+            f"pending ownership {pending_ref or '(cross-machine)'} is retained"
+        )
         return proc.returncode or 1
     if not _finish_pending(claim):
         return 1
-    output.err(f"run: journaled outbound claim {claim.ref} "
-               f"({claim.kind}) on {owner_ref}")
+    output.err(f"run: journaled outbound claim {claim.ref} ({claim.kind}) on {owner_ref}")
     return proc.returncode
 
 
@@ -11186,6 +11373,7 @@ def cmd_claimant_liveness(args: argparse.Namespace) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 # cleanup
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _local_claimant_alive(owner_ref: str) -> bool | None:
     """Same-machine claimant-liveness probe (thin alias, resource-claims).
@@ -11235,8 +11423,7 @@ def _reap_worktree(
         except Exception:
             killed = []
         if killed:
-            names = ", ".join(
-                f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
+            names = ", ".join(f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
             if names:
                 warnings.append(f"Terminated lingering process(es): {names}")
             activity.log_event(
@@ -11246,8 +11433,7 @@ def _reap_worktree(
             )
 
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
-            warnings.append(
-                "Could not remove worktree via git -- forcing directory removal.")
+            warnings.append("Could not remove worktree via git -- forcing directory removal.")
         wt_dir = Path(rec.worktree_path)
         if wt_dir.exists():
             # Locks may release a beat after the holding process dies; retry the
@@ -11312,13 +11498,24 @@ def reap_one(
         return payload
 
     if not yaml_path.exists():
-        return _result({"ok": False, "removed": False, "skipped": False,
-                        "reason": f"worktree not found: {wt_id}"})
+        return _result(
+            {
+                "ok": False,
+                "removed": False,
+                "skipped": False,
+                "reason": f"worktree not found: {wt_id}",
+            }
+        )
     rec = tracking.load_record(yaml_path)
     if rec.kind in tracking.MANAGED_KINDS:
-        return _result({"ok": False, "removed": False, "skipped": True,
-                        "reason": f"agent-owned {rec.kind} worktree "
-                        "(use the System menu)"})
+        return _result(
+            {
+                "ok": False,
+                "removed": False,
+                "skipped": True,
+                "reason": f"agent-owned {rec.kind} worktree (use the System menu)",
+            }
+        )
 
     if git_ops.has_remote(repo.remote, cwd=repo.anchor):
         git_ops.fetch(repo.remote, cwd=repo.anchor)
@@ -11338,8 +11535,11 @@ def reap_one(
 
     if rec.worktree_path and Path(rec.worktree_path).exists():
         info = git_ops.classify_worktree(
-            rec.worktree_path, rec.branch, fetch=False,
-            remote=repo.remote, default_branch=repo.default_branch,
+            rec.worktree_path,
+            rec.branch,
+            fetch=False,
+            remote=repo.remote,
+            default_branch=repo.default_branch,
             active_paths=active_paths,
         )
         info = _apply_tracking_override(rec, info)
@@ -11350,52 +11550,89 @@ def reap_one(
 
     # An active session is never reaped, even with force.
     if info.state == git_ops.WorktreeState.ACTIVE:
-        return _result({"ok": False, "removed": False, "skipped": True,
-                        "reason": "active Copilot session in use",
-                        "bucket": "active"})
+        return _result(
+            {
+                "ok": False,
+                "removed": False,
+                "skipped": True,
+                "reason": "active Copilot session in use",
+                "bucket": "active",
+            }
+        )
     if not force:
         if info.state == git_ops.WorktreeState.GONE:
             if rec.branch and not git_ops.is_branch_merged(
-                rec.branch, upstream, cwd=repo.anchor,
+                rec.branch,
+                upstream,
+                cwd=repo.anchor,
             ):
-                return _result({"ok": False, "removed": False, "skipped": True,
-                                "reason": "branch has unmerged commits "
-                                "(worktree dir missing)"})
+                return _result(
+                    {
+                        "ok": False,
+                        "removed": False,
+                        "skipped": True,
+                        "reason": "branch has unmerged commits (worktree dir missing)",
+                    }
+                )
         else:
             disp = prune.cleanup_disposition(
-                rec, info, turn_count=turns,
+                rec,
+                info,
+                turn_count=turns,
                 include_unused=include_unused,
                 include_conversations=include_conversations,
                 claimant_alive=claimant_mod.resolve_claimant_alive,
                 paired_sibling_final=prune.default_paired_sibling_final,
             )
             if not disp.cleanable:
-                return _result({"ok": False, "removed": False, "skipped": True,
-                                "reason": disp.reason, "bucket": disp.bucket})
+                return _result(
+                    {
+                        "ok": False,
+                        "removed": False,
+                        "skipped": True,
+                        "reason": disp.reason,
+                        "bucket": disp.bucket,
+                    }
+                )
 
     lock = fin.FinalizeLock(Path(repo.worktree_root) / ".finalize.lock")
     try:
         lock.acquire()
     except TimeoutError:
-        return _result({"ok": False, "removed": False, "skipped": False,
-                        "reason": "timed out waiting for finalization lock"})
+        return _result(
+            {
+                "ok": False,
+                "removed": False,
+                "skipped": False,
+                "reason": "timed out waiting for finalization lock",
+            }
+        )
     try:
         latest = tracking.load_record(yaml_path)
         if _hosted_session_blocks_cleanup(latest):
-            return _result({
-                "ok": False,
-                "removed": False,
-                "skipped": True,
-                "reason": "active hosted Copilot session in use",
-                "bucket": "active",
-            })
+            return _result(
+                {
+                    "ok": False,
+                    "removed": False,
+                    "skipped": True,
+                    "reason": "active hosted Copilot session in use",
+                    "bucket": "active",
+                }
+            )
         failures, warnings = _reap_worktree(rec, info, repo, tracking_path)
         git_ops.prune_worktrees(cwd=repo.anchor)
     finally:
         lock.release()
 
-    return _result({"ok": failures == 0, "removed": True, "skipped": False,
-                    "state": info.state.value, "warnings": warnings})
+    return _result(
+        {
+            "ok": failures == 0,
+            "removed": True,
+            "skipped": False,
+            "state": info.state.value,
+            "warnings": warnings,
+        }
+    )
 
 
 def _iso_epoch(ts: str | None) -> float | None:
@@ -11415,10 +11652,13 @@ def _iso_epoch(ts: str | None) -> float | None:
 REAP_IDLE_GRACE_SECS = 6 * 3600
 
 
-def reap_orphan_mux_sessions(*, dry_run: bool = False,
-                             only_id: str | None = None,
-                             idle_grace_secs: float = REAP_IDLE_GRACE_SECS,
-                             now: float | None = None) -> dict:
+def reap_orphan_mux_sessions(
+    *,
+    dry_run: bool = False,
+    only_id: str | None = None,
+    idle_grace_secs: float = REAP_IDLE_GRACE_SECS,
+    now: float | None = None,
+) -> dict:
     """Reap leaked tmux/psmux sessions whose worktree is gone or done **and idle**.
 
     Enumerates live ``wt-<id>`` multiplexer sessions and kills those that no
@@ -11521,15 +11761,13 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
             # value change, so it always persists (no throttle needed).
             tracking.stamp_mux_live(wt_id, False, sync=True)
             try:
-                activity.log_event(
-                    "mux_session_reaped", worktree_id=wt_id, reason=reason)
+                activity.log_event("mux_session_reaped", worktree_id=wt_id, reason=reason)
             except Exception:
                 pass
         else:
             errors.append({"id": wt_id, "reason": f"kill failed ({reason})"})
 
-    return {"available": True, "reaped": reaped,
-            "skipped": skipped, "errors": errors}
+    return {"available": True, "reaped": reaped, "skipped": skipped, "errors": errors}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -11565,20 +11803,35 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
 REAP_SHELL_GRACE_SECS = 3600  # 1h: an orphaned launcher shell must be this old
 
 # Process image names this reaper is willing to consider (lowercased).
-_LAUNCHER_SHELL_NAMES = frozenset({
-    "pwsh.exe", "powershell.exe", "python.exe",
-    "pwsh", "powershell", "python", "python3",
-})
+_LAUNCHER_SHELL_NAMES = frozenset(
+    {
+        "pwsh.exe",
+        "powershell.exe",
+        "python.exe",
+        "pwsh",
+        "powershell",
+        "python",
+        "python3",
+    }
+)
 # Command-line substrings that POSITIVELY identify an agent-worktrees launcher
 # shell (lowercased match). Nothing is EVER reaped without one of these.
-_LAUNCHER_SIGNATURES = ("launch-session", "-m agent_worktrees",
-                        "agent_worktrees.__main__")
+_LAUNCHER_SIGNATURES = ("launch-session", "-m agent_worktrees", "agent_worktrees.__main__")
 # Command-line substrings that VETO a reap even when a launcher signature is
 # present -- services/daemons, ACP/stdio sessions, and the reaper's own verbs.
 _LAUNCHER_REAP_VETOES = (
-    "serve-service", "agent_dispatch", "agent-dispatch", "telemetry",
-    "status-updater", "status-monitor", "vault", "--acp", "--stdio",
-    "reap-shells", "reap_shells", "reap-sessions",
+    "serve-service",
+    "agent_dispatch",
+    "agent-dispatch",
+    "telemetry",
+    "status-updater",
+    "status-monitor",
+    "vault",
+    "--acp",
+    "--stdio",
+    "reap-shells",
+    "reap_shells",
+    "reap-sessions",
 )
 # Descendant image names that mark a LIVE session under a launcher shell ->
 # spare it. Deliberately broad: over-sparing is safe, over-reaping is not.
@@ -11592,14 +11845,26 @@ _LIVE_DESCENDANT_NAMES = ("copilot", "node", "tmux", "psmux")
 # session was reaped out from under its terminal -- killing the launcher shell
 # while its mux client kept rendering, leaving the pane painted but the console
 # handed back to the parent shell.
-_LIVE_DESCENDANT_IMAGES = frozenset({
-    "copilot.exe", "node.exe", "tmux.exe", "psmux.exe",
-    "copilot", "node", "tmux", "psmux",
-})
+_LIVE_DESCENDANT_IMAGES = frozenset(
+    {
+        "copilot.exe",
+        "node.exe",
+        "tmux.exe",
+        "psmux.exe",
+        "copilot",
+        "node",
+        "tmux",
+        "psmux",
+    }
+)
 
 
 def select_orphan_launcher_shells(
-    procs: list[dict], *, now: float, idle_grace_secs: float, self_pid: int,
+    procs: list[dict],
+    *,
+    now: float,
+    idle_grace_secs: float,
+    self_pid: int,
     pid_alive: Callable[[int], bool] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Pure predicate: partition launcher shells into (reap, skipped).
@@ -11677,8 +11942,9 @@ def select_orphan_launcher_shells(
             skipped.append({"pid": pid, "reason": "live-descendant"})  # (3)
             continue
         ppid = int(p.get("ppid", -1) or -1)
-        parent_alive = (ppid in by_pid if pid_alive is None
-                        else (ppid > 0 and bool(pid_alive(ppid))))
+        parent_alive = (
+            ppid in by_pid if pid_alive is None else (ppid > 0 and bool(pid_alive(ppid)))
+        )
         if ppid > 0 and parent_alive:
             skipped.append({"pid": pid, "reason": "parent-alive"})  # (5)
             continue
@@ -11708,12 +11974,13 @@ def _enumerate_launcher_shells() -> list[dict] | None:
 
 
 def _enumerate_launcher_shells_windows() -> list[dict] | None:
-    names = sorted(n for n in (_LAUNCHER_SHELL_NAMES | _LIVE_DESCENDANT_IMAGES)
-                   if n.endswith(".exe"))
+    names = sorted(
+        n for n in (_LAUNCHER_SHELL_NAMES | _LIVE_DESCENDANT_IMAGES) if n.endswith(".exe")
+    )
     where = " OR ".join(f"Name='{n}'" for n in names)
     ps = (
         "Get-CimInstance Win32_Process -Filter "
-        f"\"{where}\" | "
+        f'"{where}" | '
         "Select-Object ProcessId,ParentProcessId,Name,CommandLine,SessionId,"
         "@{n='Create';e={try{([DateTimeOffset]$_.CreationDate)"
         ".ToUnixTimeSeconds()}catch{$null}}} | ConvertTo-Json -Compress -Depth 3"
@@ -11721,7 +11988,9 @@ def _enumerate_launcher_shells_windows() -> list[dict] | None:
     try:
         out = subprocess.run(
             ["pwsh", "-NoProfile", "-NonInteractive", "-Command", ps],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -11737,15 +12006,16 @@ def _enumerate_launcher_shells_windows() -> list[dict] | None:
     procs: list[dict] = []
     for d in data:
         try:
-            procs.append({
-                "pid": int(d.get("ProcessId")),
-                "ppid": int(d.get("ParentProcessId") or -1),
-                "name": (d.get("Name") or "").lower(),
-                "cmdline": d.get("CommandLine") or "",
-                "create_epoch": (float(d["Create"]) if d.get("Create") is not None
-                                 else None),
-                "session_id": int(d.get("SessionId") or -1),
-            })
+            procs.append(
+                {
+                    "pid": int(d.get("ProcessId")),
+                    "ppid": int(d.get("ParentProcessId") or -1),
+                    "name": (d.get("Name") or "").lower(),
+                    "cmdline": d.get("CommandLine") or "",
+                    "create_epoch": (float(d["Create"]) if d.get("Create") is not None else None),
+                    "session_id": int(d.get("SessionId") or -1),
+                }
+            )
         except (TypeError, ValueError):
             continue
     return procs
@@ -11772,27 +12042,37 @@ def _enumerate_launcher_shells_posix() -> list[dict] | None:
         if comm not in _LAUNCHER_SHELL_NAMES and comm not in _LIVE_DESCENDANT_IMAGES:
             continue
         try:
-            cmdline = (entry / "cmdline").read_bytes().replace(b"\x00", b" ").decode(
-                errors="ignore").strip()
+            cmdline = (
+                (entry / "cmdline")
+                .read_bytes()
+                .replace(b"\x00", b" ")
+                .decode(errors="ignore")
+                .strip()
+            )
         except OSError:
             cmdline = ""
         ppid, sid, start_ticks = -1, -1, None
         try:
             stat = (entry / "stat").read_text(errors="ignore")
             rparen = stat.rfind(")")
-            rest = stat[rparen + 1:].split()
+            rest = stat[rparen + 1 :].split()
             # After comm: state(0) ppid(1) pgrp(2) session(3) ... starttime(19).
             ppid = int(rest[1])
             sid = int(rest[3])
             start_ticks = int(rest[19])
         except (OSError, IndexError, ValueError):
             pass
-        create_epoch = (boot + (start_ticks / clk)
-                        if (boot and start_ticks is not None) else None)
-        procs.append({
-            "pid": pid, "ppid": ppid, "name": comm, "cmdline": cmdline,
-            "create_epoch": create_epoch, "session_id": sid,
-        })
+        create_epoch = boot + (start_ticks / clk) if (boot and start_ticks is not None) else None
+        procs.append(
+            {
+                "pid": pid,
+                "ppid": ppid,
+                "name": comm,
+                "cmdline": cmdline,
+                "create_epoch": create_epoch,
+                "session_id": sid,
+            }
+        )
     return procs
 
 
@@ -11807,8 +12087,11 @@ def _proc_boot_time() -> float | None:
 
 
 def reap_orphan_launcher_shells(
-    *, dry_run: bool = True, idle_grace_secs: float = REAP_SHELL_GRACE_SECS,
-    now: float | None = None, processes: list[dict] | None = None,
+    *,
+    dry_run: bool = True,
+    idle_grace_secs: float = REAP_SHELL_GRACE_SECS,
+    now: float | None = None,
+    processes: list[dict] | None = None,
 ) -> dict:
     """Reap orphaned agent-worktrees launcher shells (pwsh/python).
 
@@ -11835,11 +12118,14 @@ def reap_orphan_launcher_shells(
     injected = processes is not None
     proc_list = processes if injected else _enumerate_launcher_shells()
     if proc_list is None:
-        return {"available": False, "reaped": [], "candidates": [],
-                "skipped": [], "errors": []}
+        return {"available": False, "reaped": [], "candidates": [], "skipped": [], "errors": []}
     reap, skipped = select_orphan_launcher_shells(
-        proc_list, now=now, idle_grace_secs=idle_grace_secs, self_pid=os.getpid(),
-        pid_alive=None if injected else locks.pid_alive)
+        proc_list,
+        now=now,
+        idle_grace_secs=idle_grace_secs,
+        self_pid=os.getpid(),
+        pid_alive=None if injected else locks.pid_alive,
+    )
     reaped: list[int] = []
     errors: list[dict] = []
     for p in reap:
@@ -11850,16 +12136,21 @@ def reap_orphan_launcher_shells(
         if procs.terminate_pid(pid):
             reaped.append(pid)
             try:
-                activity.log_event("launcher_shell_reaped", pid=pid,
-                                   cmdline=(p.get("cmdline") or "")[:200])
+                activity.log_event(
+                    "launcher_shell_reaped", pid=pid, cmdline=(p.get("cmdline") or "")[:200]
+                )
             except Exception:
                 pass
         else:
             errors.append({"pid": pid, "reason": "kill failed"})
-    candidates = [{"pid": int(p["pid"]), "cmdline": p.get("cmdline") or ""}
-                  for p in reap]
-    return {"available": True, "reaped": reaped, "candidates": candidates,
-            "skipped": skipped, "errors": errors}
+    candidates = [{"pid": int(p["pid"]), "cmdline": p.get("cmdline") or ""} for p in reap]
+    return {
+        "available": True,
+        "reaped": reaped,
+        "candidates": candidates,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 def cmd_reap_shells(args: argparse.Namespace) -> int:
@@ -11881,8 +12172,7 @@ def cmd_reap_shells(args: argparse.Namespace) -> int:
     dry = not getattr(args, "yes", False)
     verb = "Would reap" if dry else "Reaped"
     ids = payload["reaped"]
-    print(f"{verb} {len(ids)} orphaned launcher shell(s)"
-          + (":" if ids else "."))
+    print(f"{verb} {len(ids)} orphaned launcher shell(s)" + (":" if ids else "."))
     for c in payload["candidates"]:
         print(f"  pid {c['pid']}: {c['cmdline'][:100]}")
     for e in payload["errors"]:
@@ -11897,9 +12187,7 @@ def _repo_for_record(config, record):
     repos = getattr(config, "repos", {})
     record_repo = getattr(record, "repo", "")
     repo = repos.get(record_repo) if hasattr(repos, "get") else None
-    if repo is None and (
-        not record_repo or record_repo == getattr(config, "repo_name", None)
-    ):
+    if repo is None and (not record_repo or record_repo == getattr(config, "repo_name", None)):
         try:
             repo = config.default_repo
         except (AttributeError, KeyError, ValueError):
@@ -11931,11 +12219,7 @@ def _remove_managed_worktree(
         norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
         if norm and norm in context.active_sessions:
             return False, ["live session appeared before removal"]
-        if (
-            rec.branch
-            and rec.worktree_path
-            and Path(rec.worktree_path).exists()
-        ):
+        if rec.branch and rec.worktree_path and Path(rec.worktree_path).exists():
             current_branch = git_ops.current_branch(rec.worktree_path)
             if current_branch != rec.branch:
                 return False, ["branch changed before removal"]
@@ -11963,13 +12247,16 @@ def _remove_managed_worktree(
                     if force:
                         removed = False
                     else:
-                        removed = git_ops.git(
-                            "worktree",
-                            "remove",
-                            rec.worktree_path,
-                            cwd=repo.anchor,
-                            check=False,
-                        ).returncode == 0
+                        removed = (
+                            git_ops.git(
+                                "worktree",
+                                "remove",
+                                rec.worktree_path,
+                                cwd=repo.anchor,
+                                check=False,
+                            ).returncode
+                            == 0
+                        )
                     reason = "worktree remove failed"
                 else:
                     if not worktree_path.exists():
@@ -11985,9 +12272,7 @@ def _remove_managed_worktree(
                             reason = f"unregistered path {verdict.reason}"
                         else:
                             removed, detail = gc_mod.remove_tree(worktree_path)
-                            reason = (
-                                f"unregistered path removal failed: {detail}"
-                            )
+                            reason = f"unregistered path removal failed: {detail}"
             if not removed:
                 warns.append(reason)
         except Exception as exc:
@@ -12027,22 +12312,28 @@ def _remove_managed_worktree(
                         warns.append("branch gained local commits before removal")
                         return False, warns
                 if force:
-                    removed_branch = git_ops.git(
-                        "branch",
-                        "-D",
-                        rec.branch,
-                        cwd=repo.anchor,
-                        check=False,
-                    ).returncode == 0
+                    removed_branch = (
+                        git_ops.git(
+                            "branch",
+                            "-D",
+                            rec.branch,
+                            cwd=repo.anchor,
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
                 else:
-                    removed_branch = git_ops.git(
-                        "update-ref",
-                        "-d",
-                        branch_ref,
-                        expected_branch_oid,
-                        cwd=repo.anchor,
-                        check=False,
-                    ).returncode == 0
+                    removed_branch = (
+                        git_ops.git(
+                            "update-ref",
+                            "-d",
+                            branch_ref,
+                            expected_branch_oid,
+                            cwd=repo.anchor,
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
                 if not removed_branch:
                     warns.append("branch remove failed")
         except Exception as exc:
@@ -12101,9 +12392,7 @@ def sweep_managed_worktrees(
     for rec in managed:
         repo = _repo_for_record(config, rec)
         if repo is None:
-            result["skipped"].append(
-                {"id": rec.worktree_id, "reason": "repo-unresolved"}
-            )
+            result["skipped"].append({"id": rec.worktree_id, "reason": "repo-unresolved"})
             continue
         name = sessions.mux_session_name(rec.worktree_id)
         has_live_mux = name in mux
@@ -12113,8 +12402,11 @@ def sweep_managed_worktrees(
 
         if rec.worktree_path and Path(rec.worktree_path).exists():
             info = git_ops.classify_worktree(
-                rec.worktree_path, rec.branch, fetch=False,
-                remote=repo.remote, default_branch=repo.default_branch,
+                rec.worktree_path,
+                rec.branch,
+                fetch=False,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
                 active_paths=active_paths,
             )
             git_state = info.state.value
@@ -12129,10 +12421,15 @@ def sweep_managed_worktrees(
         idle_secs = None if last_active is None else (now - last_active)
 
         verdict = gc_mod.classify_managed_worktree(
-            worktree_id=rec.worktree_id, kind=rec.kind,
-            follow_up=rec.follow_up, status=rec.status, git_state=git_state,
-            has_live_mux=has_live_mux, attached=attached,
-            has_live_session=has_live_session, idle_secs=idle_secs,
+            worktree_id=rec.worktree_id,
+            kind=rec.kind,
+            follow_up=rec.follow_up,
+            status=rec.status,
+            git_state=git_state,
+            has_live_mux=has_live_mux,
+            attached=attached,
+            has_live_session=has_live_session,
+            idle_secs=idle_secs,
             min_idle_secs=min_idle_secs,
         )
         if verdict.action == "skip":
@@ -12140,7 +12437,8 @@ def sweep_managed_worktrees(
             continue
         if dry_run:
             result["removed"].append(
-                {"id": rec.worktree_id, "reason": f"would remove ({verdict.reason})"})
+                {"id": rec.worktree_id, "reason": f"would remove ({verdict.reason})"}
+            )
             continue
         lifecycle_lock = fin.FinalizeLock(
             Path(repo.worktree_root) / ".finalize.lock",
@@ -12150,44 +12448,31 @@ def sweep_managed_worktrees(
         try:
             lifecycle_lock.acquire()
         except TimeoutError:
-            result["skipped"].append(
-                {"id": rec.worktree_id, "reason": "lifecycle-busy"}
-            )
+            result["skipped"].append({"id": rec.worktree_id, "reason": "lifecycle-busy"})
             continue
         try:
             yaml_path = tracking_path / f"{rec.worktree_id}.yaml"
             if not yaml_path.is_file():
-                result["skipped"].append(
-                    {"id": rec.worktree_id, "reason": "record-missing"}
-                )
+                result["skipped"].append({"id": rec.worktree_id, "reason": "record-missing"})
                 continue
             try:
                 current = tracking.load_record(yaml_path)
             except FileNotFoundError:
-                result["skipped"].append(
-                    {"id": rec.worktree_id, "reason": "record-missing"}
-                )
+                result["skipped"].append({"id": rec.worktree_id, "reason": "record-missing"})
                 continue
             if current.kind not in tracking.MANAGED_KINDS:
-                result["skipped"].append(
-                    {"id": rec.worktree_id, "reason": "not-managed"}
-                )
+                result["skipped"].append({"id": rec.worktree_id, "reason": "not-managed"})
                 continue
 
             fresh_mux = sessions._list_mux_sessions() or {}
             fresh_name = sessions.mux_session_name(current.worktree_id)
             fresh_ctx = sessions.scan_sessions_fast([current])
             fresh_active_paths = _build_active_paths([current], fresh_ctx)
-            fresh_norm = (
-                _normalize_path(current.worktree_path)
-                if current.worktree_path
-                else ""
-            )
+            fresh_norm = _normalize_path(current.worktree_path) if current.worktree_path else ""
             if current.worktree_path and Path(current.worktree_path).exists():
                 if (
                     current.branch
-                    and git_ops.current_branch(current.worktree_path)
-                    != current.branch
+                    and git_ops.current_branch(current.worktree_path) != current.branch
                 ):
                     result["skipped"].append(
                         {
@@ -12211,13 +12496,10 @@ def sweep_managed_worktrees(
                 fresh_git_state = "gone"
             fresh_activity = sessions._mux_session_activity().get(fresh_name)
             if fresh_activity is None:
-                fresh_activity = (
-                    _iso_epoch(current.last_resumed_at)
-                    or _iso_epoch(current.started_at)
+                fresh_activity = _iso_epoch(current.last_resumed_at) or _iso_epoch(
+                    current.started_at
                 )
-            fresh_idle = (
-                None if fresh_activity is None else (now - fresh_activity)
-            )
+            fresh_idle = None if fresh_activity is None else (now - fresh_activity)
             fresh_verdict = gc_mod.classify_managed_worktree(
                 worktree_id=current.worktree_id,
                 kind=current.kind,
@@ -12257,10 +12539,7 @@ def sweep_managed_worktrees(
                         or latest.resolved_head_session is not None
                         or latest.worktree_path != current.worktree_path
                         or latest.branch != current.branch
-                        or any(
-                            pr.state in {"creating", "open"}
-                            for pr in latest.prs
-                        )
+                        or any(pr.state in {"creating", "open"} for pr in latest.prs)
                     ):
                         result["skipped"].append(
                             {
@@ -12270,14 +12549,10 @@ def sweep_managed_worktrees(
                         )
                         continue
             except FileNotFoundError:
-                result["skipped"].append(
-                    {"id": current.worktree_id, "reason": "record-missing"}
-                )
+                result["skipped"].append({"id": current.worktree_id, "reason": "record-missing"})
                 continue
             except TimeoutError:
-                result["skipped"].append(
-                    {"id": current.worktree_id, "reason": "record-lock-busy"}
-                )
+                result["skipped"].append({"id": current.worktree_id, "reason": "record-lock-busy"})
                 continue
             removed, warns = _remove_managed_worktree(
                 latest,
@@ -12295,14 +12570,12 @@ def sweep_managed_worktrees(
             )
             continue
         try:
-            activity.log_event("managed_worktree_gc",
-                               worktree_id=rec.worktree_id,
-                               reason=fresh_verdict.reason)
+            activity.log_event(
+                "managed_worktree_gc", worktree_id=rec.worktree_id, reason=fresh_verdict.reason
+            )
         except Exception:
             pass
-        result["removed"].append(
-            {"id": rec.worktree_id, "reason": fresh_verdict.reason}
-        )
+        result["removed"].append({"id": rec.worktree_id, "reason": fresh_verdict.reason})
 
     return result
 
@@ -12323,6 +12596,7 @@ def auto_clean_enabled() -> bool:
 def _auto_clean_grace_secs() -> float:
     """Resolve the finished-session idle-grace threshold (env override else default)."""
     from . import gc as gc_mod
+
     raw = os.environ.get(_AUTO_CLEAN_GRACE_ENV)
     if raw:
         try:
@@ -12334,9 +12608,9 @@ def _auto_clean_grace_secs() -> float:
     return float(gc_mod.SESSION_GC_GRACE_SECS)
 
 
-def sweep_finished_session_worktrees(*, dry_run: bool = False,
-                                     min_idle_secs: float | None = None,
-                                     now: float | None = None) -> dict:
+def sweep_finished_session_worktrees(
+    *, dry_run: bool = False, min_idle_secs: float | None = None, now: float | None = None
+) -> dict:
     """GC provably-safe **finished session** worktrees on the no-daemon cadence.
 
     The companion to :func:`sweep_managed_worktrees`: where that reaps leaked
@@ -12372,8 +12646,9 @@ def sweep_finished_session_worktrees(*, dry_run: bool = False,
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
-    records = [r for r in tracking.list_records(tracking_path)
-               if r.kind not in tracking.MANAGED_KINDS]
+    records = [
+        r for r in tracking.list_records(tracking_path) if r.kind not in tracking.MANAGED_KINDS
+    ]
     if not records:
         return result
 
@@ -12399,8 +12674,11 @@ def sweep_finished_session_worktrees(*, dry_run: bool = False,
 
         if rec.worktree_path and Path(rec.worktree_path).exists():
             info = git_ops.classify_worktree(
-                rec.worktree_path, rec.branch, fetch=False,
-                remote=repo.remote, default_branch=repo.default_branch,
+                rec.worktree_path,
+                rec.branch,
+                fetch=False,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
                 active_paths=active_paths,
             )
             info = _apply_tracking_override(rec, info)
@@ -12413,31 +12691,34 @@ def sweep_finished_session_worktrees(*, dry_run: bool = False,
         # the freshest of the mux activity, last resume, completion, or creation.
         last_active = activity_by_name.get(name)
         if last_active is None:
-            last_active = (_iso_epoch(rec.last_resumed_at)
-                           or _iso_epoch(rec.completed_at)
-                           or _iso_epoch(rec.started_at))
+            last_active = (
+                _iso_epoch(rec.last_resumed_at)
+                or _iso_epoch(rec.completed_at)
+                or _iso_epoch(rec.started_at)
+            )
         if last_active is not None and (now - last_active) < grace:
-            result["skipped"].append(
-                {"id": rec.worktree_id, "reason": "idle grace not elapsed"})
+            result["skipped"].append({"id": rec.worktree_id, "reason": "idle grace not elapsed"})
             continue
 
         # Collectability reuses the exact manual-cleanup safety (conservative).
         if info.state == git_ops.WorktreeState.GONE:
             # Dir already gone: only collect once the branch content is on master
             # (the check manual cleanup owns for GONE).
-            if rec.branch and not git_ops.is_branch_merged(
-                    rec.branch, upstream, cwd=repo.anchor):
+            if rec.branch and not git_ops.is_branch_merged(rec.branch, upstream, cwd=repo.anchor):
                 result["skipped"].append(
-                    {"id": rec.worktree_id,
-                     "reason": "branch unmerged (worktree dir missing)"})
+                    {"id": rec.worktree_id, "reason": "branch unmerged (worktree dir missing)"}
+                )
                 continue
             candidates.append((rec, info, "gone; branch merged"))
             continue
 
         turns = session_ctx.turn_count.get(norm, 0)
         disp = prune.cleanup_disposition(
-            rec, info, turn_count=turns,
-            include_unused=False, include_conversations=False,
+            rec,
+            info,
+            turn_count=turns,
+            include_unused=False,
+            include_conversations=False,
             claimant_alive=claimant_mod.resolve_claimant_alive,
             paired_sibling_final=prune.default_paired_sibling_final,
         )
@@ -12450,8 +12731,7 @@ def sweep_finished_session_worktrees(*, dry_run: bool = False,
         return result
     if dry_run:
         for rec, info, reason in candidates:
-            result["removed"].append(
-                {"id": rec.worktree_id, "reason": f"would remove ({reason})"})
+            result["removed"].append({"id": rec.worktree_id, "reason": f"would remove ({reason})"})
         return result
 
     # Pass 2: reap under the shared finalization lock. A short, non-blocking-ish
@@ -12466,8 +12746,9 @@ def sweep_finished_session_worktrees(*, dry_run: bool = False,
         for rec, info, reason in candidates:
             f, warns = _reap_worktree(rec, info, repo, tracking_path)
             try:
-                activity.log_event("session_worktree_autoclean",
-                                   worktree_id=rec.worktree_id, reason=reason)
+                activity.log_event(
+                    "session_worktree_autoclean", worktree_id=rec.worktree_id, reason=reason
+                )
             except Exception:
                 pass
             full = reason + (f"; {'; '.join(warns)}" if warns else "")
@@ -12499,8 +12780,7 @@ def cmd_reap_sessions(args: argparse.Namespace) -> int:
         return 0
     verb = "Would reap" if dry else "Reaped"
     ids = payload["reaped"]
-    print(f"{verb} {len(ids)} orphaned mux session(s): "
-          + (", ".join(ids) if ids else "(none)"))
+    print(f"{verb} {len(ids)} orphaned mux session(s): " + (", ".join(ids) if ids else "(none)"))
     for e in payload["errors"]:
         print(f"  ! {e['id']}: {e['reason']}")
     return 0
@@ -12547,12 +12827,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
 
     if raw_wt:
         wt_id = _resolve_worktree_id(raw_wt)
-        if (
-            as_json
-            and getattr(args, "yes", False)
-            and not session_id
-            and not want_all
-        ):
+        if as_json and getattr(args, "yes", False) and not session_id and not want_all:
             payload = reclaim_one(
                 wt_id,
                 bare_only=getattr(args, "bare_only", False),
@@ -12572,8 +12847,10 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
 
     table = reclaim.build_process_table()
     found = reclaim.resolve_bound_copilots(
-        session_id=session_id, worktree_id=wt_id,
-        worktree_path=wt_path, table=table,
+        session_id=session_id,
+        worktree_id=wt_id,
+        worktree_path=wt_path,
+        table=table,
     )
     if wt_id and not session_id:
         seen_pids = {item["pid"] for item in found}
@@ -12614,7 +12891,8 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     cleared: list[dict] = []
     if do_kill and (wt_id or wt_path):
         cleared = reclaim.clear_lock_residue(
-            worktree_id=wt_id, worktree_path=wt_path,
+            worktree_id=wt_id,
+            worktree_path=wt_path,
             force_pids={r["pid"] for r in reaped if r.get("killed")},
             table=table,
         )
@@ -12629,16 +12907,17 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         _killed = {r["pid"] for r in reaped if r.get("killed")}
         _killed_targets = [t for t in targets if t["pid"] in _killed]
         if _killed_targets:
-            mux_torn_down = reclaim.teardown_detached_mux(
-                _killed_targets, table=table)
+            mux_torn_down = reclaim.teardown_detached_mux(_killed_targets, table=table)
 
     ok = all(result.get("killed") for result in reaped) if reaped else True
     payload = {
         "ok": ok,
         "action": "reclaim" if do_kill else "dry-run",
         "filters": {
-            "session_id": session_id, "worktree_id": wt_id,
-            "all": want_all, "bare_only": getattr(args, "bare_only", False),
+            "session_id": session_id,
+            "worktree_id": wt_id,
+            "all": want_all,
+            "bare_only": getattr(args, "bare_only", False),
         },
         "targets": targets,
         "self_skipped": self_skipped,
@@ -12709,8 +12988,7 @@ def _perform_remux(
         return _fail("Windows remux requires a resolved worktree id")
     if sessions.has_mux_session(worktree_id):
         return _fail(
-            "the worktree already has a live mux session; attach with Open "
-            "instead of restoring it"
+            "the worktree already has a live mux session; attach with Open instead of restoring it"
         )
 
     table = reclaim.build_process_table()
@@ -12729,18 +13007,16 @@ def _perform_remux(
 
     me = os.getpid()
     targets = [
-        item for item in found
-        if me not in (
-            {item["pid"]} | reclaim.descendants_of(item["pid"], table)
-        )
+        item
+        for item in found
+        if me not in ({item["pid"]} | reclaim.descendants_of(item["pid"], table))
     ]
     if not targets:
         return _fail("no Stop-unreachable bound Copilot found for the target")
     if len(targets) > 1:
         pids = ", ".join(str(item["pid"]) for item in targets)
         return _fail(
-            f"multiple unreachable Copilots match ({pids}); narrow with "
-            "--session-id",
+            f"multiple unreachable Copilots match ({pids}); narrow with --session-id",
             targets=targets,
         )
 
@@ -12810,8 +13086,8 @@ def cmd_remux(args: argparse.Namespace) -> int:
         wt_id = _infer_worktree_id_from_cwd()
         if not wt_id:
             return _json_error(
-                "no --session-id/--worktree-id and cwd is not a worktree",
-                exit_code=2)
+                "no --session-id/--worktree-id and cwd is not a worktree", exit_code=2
+            )
         wt_path = _wt_path(wt_id)
 
     result = _perform_remux(
@@ -12841,12 +13117,16 @@ def cmd_remux(args: argparse.Namespace) -> int:
         return 0
     sess, pid = result.get("session"), result.get("pid")
     if result.get("verified"):
-        output.ok(f"Re-muxed pid {pid} into {sess} (pane {result.get('pane')}). "
-                  f"Attach:  tmux attach -t {sess}")
+        output.ok(
+            f"Re-muxed pid {pid} into {sess} (pane {result.get('pane')}). "
+            f"Attach:  tmux attach -t {sess}"
+        )
     else:
-        output.info(f"Opened a reptyr pane in {sess} for pid {pid} -- "
-                    f"{result.get('reason')}. Attach to check:  "
-                    f"tmux attach -t {sess}")
+        output.info(
+            f"Opened a reptyr pane in {sess} for pid {pid} -- "
+            f"{result.get('reason')}. Attach to check:  "
+            f"tmux attach -t {sess}"
+        )
     return 0
 
 
@@ -12895,8 +13175,7 @@ def reclaim_one(
         found = [item for item in found if item["pid"] in target_pids]
     me = os.getpid()
     targets = [
-        f for f in found
-        if me not in ({f["pid"]} | reclaim.descendants_of(f["pid"], table))
+        f for f in found if me not in ({f["pid"]} | reclaim.descendants_of(f["pid"], table))
     ]
     reaped = reclaim.reap_bound_copilots(targets, table=table) if targets else []
     ok = all(r["killed"] for r in reaped) if reaped else True
@@ -12915,7 +13194,9 @@ def reclaim_one(
     # on-exit lock cleanup, so unlink the now-dead bridge.lock too -- otherwise
     # the file-first bridge scan keeps reading the worktree ACTIVE.
     bridge_cleared = reclaim.clear_bridge_locks(
-        worktree_id, force_pids=killed_pids, table=table,
+        worktree_id,
+        force_pids=killed_pids,
+        table=table,
     )
     # A reaped mux-homed target in a DETACHED (Stop-unreachable) psmux server
     # leaves the server + its pane shell running; nothing else GCs it while the
@@ -12925,8 +13206,7 @@ def reclaim_one(
     # server, so its server must not be torn down.
     killed_targets = [t for t in targets if t["pid"] in killed_pids]
     mux_torn_down = (
-        reclaim.teardown_detached_mux(killed_targets, table=table)
-        if killed_targets else []
+        reclaim.teardown_detached_mux(killed_targets, table=table) if killed_targets else []
     )
     # Update the worktree's cached liveness authoritatively so the automatic
     # post-action refresh renders the TRUE post-reclaim state instead of
@@ -12944,23 +13224,28 @@ def reclaim_one(
     # outcome). Best-effort.
     try:
         remaining_bound = [
-            b for b in reclaim.resolve_bound_copilots(
-                worktree_id=worktree_id, table=table)
+            b
+            for b in reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
             if b["pid"] not in killed_pids
         ]
         remaining_bound += [
-            b for b in reclaim.resolve_bridge_bound(worktree_id, table=table)
+            b
+            for b in reclaim.resolve_bridge_bound(worktree_id, table=table)
             if b["pid"] not in killed_pids
         ]
         tracking.stamp_bound_live(worktree_id, bool(remaining_bound))
         tracking.stamp_mux_live(
-            worktree_id, sessions.has_mux_session(worktree_id), sync=True,
+            worktree_id,
+            sessions.has_mux_session(worktree_id),
+            sync=True,
         )
     except Exception:
         pass
     return {
-        "ok": ok, "worktree_id": worktree_id,
-        "targets": len(targets), "reaped": reaped,
+        "ok": ok,
+        "worktree_id": worktree_id,
+        "targets": len(targets),
+        "reaped": reaped,
         "locks_cleared": cleared,
         "bridge_locks_cleared": bridge_cleared,
         "mux_servers_torn_down": mux_torn_down,
@@ -13008,8 +13293,11 @@ def _cleanup_one(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         _json_output(payload)
     else:
-        tag = "removed" if payload.get("removed") else (
-            "skipped" if payload.get("skipped") else "error")
+        tag = (
+            "removed"
+            if payload.get("removed")
+            else ("skipped" if payload.get("skipped") else "error")
+        )
         line = f"{payload['worktree_id']}: {tag}"
         if payload.get("reason"):
             line += f" -- {payload['reason']}"
@@ -13049,7 +13337,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     print(f"🌳 {config.repo_name.replace('-', ' ').title()} -- Worktree Sessions")
     print()
     print(f"{'Worktree ID':<50} {'State':<12} {'Age':<12} Path")
-    print(f"{'─'*48:<50} {'─'*10:<12} {'─'*10:<12} {'─'*30}")
+    print(f"{'─' * 48:<50} {'─' * 10:<12} {'─' * 10:<12} {'─' * 30}")
 
     # Fetch once for accurate classification (skip gracefully if there is no
     # remote -- a local-only repo must not crash cleanup).
@@ -13068,8 +13356,11 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     for rec in records:
         if rec.worktree_path and Path(rec.worktree_path).exists():
             info = git_ops.classify_worktree(
-                rec.worktree_path, rec.branch,
-                fetch=False, remote=repo.remote, default_branch=repo.default_branch,
+                rec.worktree_path,
+                rec.branch,
+                fetch=False,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
                 active_paths=active_paths,
             )
             info = _apply_tracking_override(rec, info)
@@ -13097,8 +13388,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             # clobbered; skip on contention (self-heals next pass).
             prune.reconcile_and_persist_best_effort(rec, pr_lookup)
 
-        verdict = prune.assess(rec, info, turn_count=turns,
-                               claimant_alive=_local_claimant_alive)
+        verdict = prune.assess(rec, info, turn_count=turns, claimant_alive=_local_claimant_alive)
 
         # Annotate state with dirty indicator / turn count when relevant
         if info.dirty > 0 and info.state != git_ops.WorktreeState.DIRTY:
@@ -13117,14 +13407,18 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         if info.state == git_ops.WorktreeState.GONE:
             # Directory missing -- verify branch content is on master first.
             if rec.branch and not git_ops.is_branch_merged(
-                rec.branch, upstream, cwd=repo.anchor,
+                rec.branch,
+                upstream,
+                cwd=repo.anchor,
             ):
                 skip_reason = "branch has unmerged commits (worktree dir missing)"
             else:
                 cleanable = True
         else:
             disp = prune.cleanup_disposition(
-                rec, info, turn_count=turns,
+                rec,
+                info,
+                turn_count=turns,
                 include_unused=args.include_unused,
                 include_conversations=include_conversations,
                 claimant_alive=claimant_mod.resolve_claimant_alive,
@@ -13162,8 +13456,14 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             output.warn(f"Skipping {rec.worktree_id}: {reason}")
         print()
 
-    if (not to_clean and unused_count == 0 and conversation_count == 0
-            and dirty_count == 0 and wip_count == 0 and not skipped):
+    if (
+        not to_clean
+        and unused_count == 0
+        and conversation_count == 0
+        and dirty_count == 0
+        and wip_count == 0
+        and not skipped
+    ):
         print("Nothing to clean.")
         return 0
 
@@ -13214,8 +13514,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 latest = tracking.load_record(yaml_path)
                 if _hosted_session_blocks_cleanup(latest):
                     output.warn(
-                        f"Skipping {rec.worktree_id}: "
-                        "active hosted Copilot session in use"
+                        f"Skipping {rec.worktree_id}: active hosted Copilot session in use"
                     )
                     continue
             print(f"Cleaning {rec.worktree_id} ({info.state.value})...")
@@ -13232,9 +13531,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
     print()
     if failures:
-        output.warn(
-            f"Cleaned {cleaned_count} session(s) with {failures} warning(s)."
-        )
+        output.warn(f"Cleaned {cleaned_count} session(s) with {failures} warning(s).")
     else:
         output.ok(f"Cleaned {cleaned_count} session(s).")
     return 0
@@ -13256,11 +13553,9 @@ def _print_gc_orphans(report: dict, dry_run: bool) -> None:
         output.warn(f"  skipped: {item['path']}  ({item['reason']})")
     print()
     if dry_run:
-        print(f"{len(removed)} orphan dir(s) would be removed, "
-              f"{len(skipped)} skipped.")
+        print(f"{len(removed)} orphan dir(s) would be removed, {len(skipped)} skipped.")
     else:
-        output.ok(f"Removed {len(removed)} orphan dir(s); "
-                  f"{len(skipped)} skipped.")
+        output.ok(f"Removed {len(removed)} orphan dir(s); {len(skipped)} skipped.")
 
 
 def _print_gc_managed(report: dict, dry_run: bool) -> None:
@@ -13279,11 +13574,9 @@ def _print_gc_managed(report: dict, dry_run: bool) -> None:
         print(f"  · kept: {item['id']}  ({item['reason']})")
     print()
     if dry_run:
-        print(f"{len(removed)} managed worktree(s) would be reaped, "
-              f"{len(skipped)} kept.")
+        print(f"{len(removed)} managed worktree(s) would be reaped, {len(skipped)} kept.")
     else:
-        output.ok(f"Reaped {len(removed)} managed worktree(s); "
-                  f"{len(skipped)} kept.")
+        output.ok(f"Reaped {len(removed)} managed worktree(s); {len(skipped)} kept.")
 
 
 def _print_gc_shells(report: dict, dry_run: bool) -> None:
@@ -13354,13 +13647,18 @@ def cmd_gc(args: argparse.Namespace) -> int:
     # 1. Tracked reap -- reuse the cleanup verdict machinery (one fetch, full
     #    safety). Skipped in --json mode (its output is text) and --orphans-only.
     if not json_mode and not orphans_only:
-        cmd_cleanup(argparse.Namespace(
-            clean=not dry, worktree_id=None, force=False, json=False,
-            include_unused=getattr(args, "include_unused", False),
-            include_conversations=getattr(args, "include_conversations", False),
-            reconcile_prs=getattr(args, "reconcile_prs", False),
-            max_age_days=getattr(args, "max_age_days", 7),
-        ))
+        cmd_cleanup(
+            argparse.Namespace(
+                clean=not dry,
+                worktree_id=None,
+                force=False,
+                json=False,
+                include_unused=getattr(args, "include_unused", False),
+                include_conversations=getattr(args, "include_conversations", False),
+                reconcile_prs=getattr(args, "reconcile_prs", False),
+                max_age_days=getattr(args, "max_age_days", 7),
+            )
+        )
 
     # 2. Managed (system/bridge) leak sweep -- the daemon-owned kinds cleanup
     #    skips. Only provably-dead ones are reaped (#1069).
@@ -13368,8 +13666,9 @@ def cmd_gc(args: argparse.Namespace) -> int:
     managed_kwargs = {"dry_run": dry}
     if grace_hours is not None:
         managed_kwargs["min_idle_secs"] = float(grace_hours) * 3600
-    managed = sweep_managed_worktrees(**managed_kwargs) if do_managed \
-        else {"removed": [], "skipped": []}
+    managed = (
+        sweep_managed_worktrees(**managed_kwargs) if do_managed else {"removed": [], "skipped": []}
+    )
 
     # 3. Orphan-directory sweep (the GC-specific capability).
     orphans = gc_mod.sweep_orphans(repo, records, dry_run=dry)
@@ -13381,19 +13680,29 @@ def cmd_gc(args: argparse.Namespace) -> int:
     shell_kwargs = {"dry_run": dry}
     if shells_grace is not None:
         shell_kwargs["idle_grace_secs"] = float(shells_grace) * 3600
-    shells = reap_orphan_launcher_shells(**shell_kwargs) if do_shells \
-        else {"available": False, "reaped": [], "candidates": [],
-              "skipped": [], "errors": []}
+    shells = (
+        reap_orphan_launcher_shells(**shell_kwargs)
+        if do_shells
+        else {"available": False, "reaped": [], "candidates": [], "skipped": [], "errors": []}
+    )
 
     # 5. Prune stale worktree registrations.
     if not dry:
         git_ops.prune_worktrees(cwd=repo.anchor)
 
     if json_mode:
-        print(json.dumps(
-            {"dry_run": dry, "repo": config.repo_name,
-             "managed": managed, "orphans": orphans, "shells": shells},
-            indent=2))
+        print(
+            json.dumps(
+                {
+                    "dry_run": dry,
+                    "repo": config.repo_name,
+                    "managed": managed,
+                    "orphans": orphans,
+                    "shells": shells,
+                },
+                indent=2,
+            )
+        )
         return 0
     if do_managed:
         _print_gc_managed(managed, dry)
@@ -13406,6 +13715,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 # sync (fast-forward worktrees to the default branch)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _sync_one_record(
     rec: tracking.WorktreeRecord,
@@ -13420,23 +13730,35 @@ def _sync_one_record(
     when a live session owns the worktree.
     """
     if not (rec.worktree_path and Path(rec.worktree_path).exists()):
-        return {"worktree_id": rec.worktree_id, "updated": False,
-                "reason": "gone", "behind": 0}
+        return {"worktree_id": rec.worktree_id, "updated": False, "reason": "gone", "behind": 0}
     info = git_ops.classify_worktree(
-        rec.worktree_path, rec.branch, fetch=False,
-        remote=repo.remote, default_branch=repo.default_branch,
+        rec.worktree_path,
+        rec.branch,
+        fetch=False,
+        remote=repo.remote,
+        default_branch=repo.default_branch,
         active_paths=active_paths,
     )
     info = _apply_tracking_override(rec, info)
     if info.state == git_ops.WorktreeState.ACTIVE:
-        return {"worktree_id": rec.worktree_id, "updated": False,
-                "reason": "active", "behind": info.behind}
+        return {
+            "worktree_id": rec.worktree_id,
+            "updated": False,
+            "reason": "active",
+            "behind": info.behind,
+        }
     ff = git_ops.fast_forward_worktree(
-        rec.worktree_path, remote=repo.remote,
-        default_branch=repo.default_branch, do_fetch=False,
+        rec.worktree_path,
+        remote=repo.remote,
+        default_branch=repo.default_branch,
+        do_fetch=False,
     )
-    return {"worktree_id": rec.worktree_id, "updated": ff.updated,
-            "reason": ff.reason, "behind": ff.behind}
+    return {
+        "worktree_id": rec.worktree_id,
+        "updated": ff.updated,
+        "reason": ff.reason,
+        "behind": ff.behind,
+    }
 
 
 def sync_one(wt_id: str) -> dict:
@@ -13451,8 +13773,7 @@ def sync_one(wt_id: str) -> dict:
     wt_id = _resolve_worktree_id(wt_id)
     yaml_path = tracking_path / f"{wt_id}.yaml"
     if not yaml_path.exists():
-        return {"worktree_id": wt_id, "updated": False,
-                "reason": "not-found", "behind": 0}
+        return {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
     rec = tracking.load_record(yaml_path)
     if git_ops.has_remote(repo.remote, cwd=repo.anchor):
         try:
@@ -13483,16 +13804,24 @@ def finalize_one(wt_id: str) -> dict:
     try:
         config = cfg.load_config()
     except Exception as e:
-        return {"worktree_id": wt_id, "success": False, "ok": False,
-                "reason": str(e) or "config load failed"}
+        return {
+            "worktree_id": wt_id,
+            "success": False,
+            "ok": False,
+            "reason": str(e) or "config load failed",
+        }
     wt_id = _resolve_worktree_id(wt_id)
     sink = io.StringIO()
     try:
         with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
             success = fin.validate_and_finalize(wt_id, config)
     except Exception as e:
-        return {"worktree_id": wt_id, "success": False, "ok": False,
-                "reason": (str(e) or type(e).__name__)}
+        return {
+            "worktree_id": wt_id,
+            "success": False,
+            "ok": False,
+            "reason": (str(e) or type(e).__name__),
+        }
     status = "finalized"
     try:
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
@@ -13500,8 +13829,7 @@ def finalize_one(wt_id: str) -> dict:
             status = tracking.load_record(yaml_path).status
     except Exception:
         pass
-    return {"worktree_id": wt_id, "success": bool(success),
-            "ok": bool(success), "status": status}
+    return {"worktree_id": wt_id, "success": bool(success), "ok": bool(success), "status": status}
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
@@ -13523,8 +13851,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         wt_id = _resolve_worktree_id(single)
         yaml_path = tracking_path / f"{wt_id}.yaml"
         if not yaml_path.exists():
-            res = {"worktree_id": wt_id, "updated": False,
-                   "reason": "not-found", "behind": 0}
+            res = {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
             if as_json:
                 _json_output(res)
             else:
@@ -13533,13 +13860,16 @@ def cmd_sync(args: argparse.Namespace) -> int:
         records = [tracking.load_record(yaml_path)]
     else:
         records = tracking.list_records(
-            tracking_path, status_filter="active",
+            tracking_path,
+            status_filter="active",
             platform_filter=cfg.detect_platform(),
         )
         records = [
-            r for r in records
+            r
+            for r in records
             if r.kind not in tracking.MANAGED_KINDS
-            and r.worktree_path and Path(r.worktree_path).exists()
+            and r.worktree_path
+            and Path(r.worktree_path).exists()
         ]
 
     # One fetch refreshes the shared upstream ref for every worktree of this
@@ -13561,8 +13891,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         print("No worktrees to sync.")
     else:
         for r in results:
-            tag = f"updated ↑{r.get('behind', 0)}" if r.get("updated") \
-                else r.get("reason", "?")
+            tag = f"updated ↑{r.get('behind', 0)}" if r.get("updated") else r.get("reason", "?")
             print(f"{r['worktree_id']}: {tag}")
     return 0
 
@@ -13571,9 +13900,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
 # profiles (terminal-profile selection -- the Picker's Profiles grid column)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _profiles_host() -> tuple[str, str]:
     """This machine's (display_name, env_label) in roster vocabulary."""
     from .picker_tui import roster
+
     return roster.local_host()
 
 
@@ -13597,13 +13928,15 @@ def cmd_profiles(args: argparse.Namespace) -> int:
         managed = profiles_mod.has_selection(cfg_path)
         if managed:
             sels = profiles_mod.normalize_selection(
-                profiles_mod.load_selection(cfg_path), machine, env)
+                profiles_mod.load_selection(cfg_path), machine, env
+            )
         else:
             # Unmanaged -> report the DEFAULT column (minimal per-agent + bare
             # cross-machine), computed from the roster candidates. The Picker
             # keys off ``managed`` (False) and renders the default itself, so
             # these targets are for human/JSON legibility.
             from .picker_tui import roster
+
             candidates = [
                 profiles_mod.TargetSel(m, e, kind)
                 for (m, e) in roster.target_envs()
@@ -13619,13 +13952,14 @@ def cmd_profiles(args: argparse.Namespace) -> int:
         if as_json:
             _json_output(payload)
         else:
-            state = ("managed" if managed
-                     else "default (minimal + bare cross-machine)")
+            state = "managed" if managed else "default (minimal + bare cross-machine)"
             print(f"Terminal profiles for {machine} {env} [{state}]:")
             for s in sels:
-                lock = " (self, locked)" if (
-                    s.machine == machine and s.env == env and s.kind == "agent"
-                ) else ""
+                lock = (
+                    " (self, locked)"
+                    if (s.machine == machine and s.env == env and s.kind == "agent")
+                    else ""
+                )
                 print(f"  - {s.machine} {s.env} · {s.kind}{lock}")
         return 0
 
@@ -13660,10 +13994,10 @@ def cmd_profiles(args: argparse.Namespace) -> int:
             str(o.get("env", "")).strip(),
             str(o.get("kind", "agent")).strip().lower(),
         )
-        for o in parsed if isinstance(o, dict)
+        for o in parsed
+        if isinstance(o, dict)
     ]
-    written = profiles_mod.save_selection(
-        cfg_path, sels, self_machine=machine, self_env=env)
+    written = profiles_mod.save_selection(cfg_path, sels, self_machine=machine, self_env=env)
 
     mirrored = False
     if not getattr(args, "no_mirror", False):
@@ -13678,8 +14012,10 @@ def cmd_profiles(args: argparse.Namespace) -> int:
     if as_json:
         _json_output(payload)
     else:
-        output.ok(f"Saved {len(written)} terminal profile(s) for {machine} {env}"
-                  + (" · mirrored" if mirrored else ""))
+        output.ok(
+            f"Saved {len(written)} terminal profile(s) for {machine} {env}"
+            + (" · mirrored" if mirrored else "")
+        )
     return 0
 
 
@@ -13724,7 +14060,8 @@ def cmd_terminal_fragment(args: argparse.Namespace) -> int:
     if not machine:
         output.err(
             "Could not resolve this machine's key. Run from a managed repo or "
-            "pass --machine <key>.")
+            "pass --machine <key>."
+        )
         return 1
 
     try:
@@ -13748,12 +14085,15 @@ def cmd_terminal_fragment(args: argparse.Namespace) -> int:
     result = tf.preview_local(machine, current_project=current)
 
     if getattr(args, "explain", False):
-        print(f"Terminal fragment preview for '{machine}' "
-              f"({len(result.profiles)} profile(s) across "
-              f"{len(result.plans)} project(s)):\n")
+        print(
+            f"Terminal fragment preview for '{machine}' "
+            f"({len(result.profiles)} profile(s) across "
+            f"{len(result.plans)} project(s)):\n"
+        )
         for plan in result.plans:
-            state = ("unmanaged -> default column" if plan.unmanaged_default
-                     else "managed selection")
+            state = (
+                "unmanaged -> default column" if plan.unmanaged_default else "managed selection"
+            )
             agent = "agent-exposed" if plan.agent_exposed else "no-agent"
             print(f"- {plan.display} [{plan.name}]  ({state}; {agent})")
             if not plan.profiles:
@@ -13780,8 +14120,7 @@ def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
 
     diag = tf.diagnose_wt_state()
     if diag is None:
-        output.warn("Windows Terminal state unavailable "
-                    "(non-Windows, or WT not installed).")
+        output.warn("Windows Terminal state unavailable (non-Windows, or WT not installed).")
         return 0
 
     result = tf.preview_local(machine, current_project=current)
@@ -13793,25 +14132,37 @@ def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
     print(f"  generatedProfiles : {diag.generated_count}")
 
     if diag.hidden:
-        print(f"\n  HIDDEN -- in fragment + generatedProfiles but not in "
-              f"settings.json ({len(diag.hidden)}):")
+        print(
+            f"\n  HIDDEN -- in fragment + generatedProfiles but not in "
+            f"settings.json ({len(diag.hidden)}):"
+        )
         for g in diag.hidden:
             print(f"    - {frag_names.get(g, g)}  {g}")
-        print("    -> the next 'update' will prune these from generatedProfiles "
-              "so WT re-discovers them.")
+        print(
+            "    -> the next 'update' will prune these from generatedProfiles "
+            "so WT re-discovers them."
+        )
     if diag.orphans:
-        print(f"\n  ORPHANS -- generatedProfiles entries in no fragment and not "
-              f"materialized ({len(diag.orphans)}): accumulated cruft.")
+        print(
+            f"\n  ORPHANS -- generatedProfiles entries in no fragment and not "
+            f"materialized ({len(diag.orphans)}): accumulated cruft."
+        )
         if diag.reclaimable_orphans:
-            print(f"    - {len(diag.reclaimable_orphans)} reclaimable (ours) -> "
-                  f"the next 'update' prunes these automatically.")
+            print(
+                f"    - {len(diag.reclaimable_orphans)} reclaimable (ours) -> "
+                f"the next 'update' prunes these automatically."
+            )
         if diag.foreign_orphans:
-            print(f"    - {len(diag.foreign_orphans)} kept (v4/v5 GUIDs -- "
-                  f"WT built-in / random profiles; never auto-pruned).")
+            print(
+                f"    - {len(diag.foreign_orphans)} kept (v4/v5 GUIDs -- "
+                f"WT built-in / random profiles; never auto-pruned)."
+            )
     if diag.duplicate_names:
-        print("\n  DUPLICATE profile names in settings.json "
-              "(often a legacy stand-alone fragment colliding with the "
-              "generated one):")
+        print(
+            "\n  DUPLICATE profile names in settings.json "
+            "(often a legacy stand-alone fragment colliding with the "
+            "generated one):"
+        )
         for name, count in diag.duplicate_names:
             print(f"    - {name!r} x{count}")
 
@@ -13823,6 +14174,7 @@ def _terminal_fragment_doctor(machine: str, current: str | None) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 # picker -- persistent new-picker opt-in (machine-wide global config)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _set_global_config_key(key: str, value) -> Path:
     """Read-modify-write one top-level key into the global machine config.
@@ -13912,17 +14264,18 @@ def cmd_picker(args: argparse.Namespace) -> int:
         else:
             from .picker_tui import data_local as _source
         caps = _capture.capture(
-            _source, live=live, pivot=pivot, wait_pivot=wait_pivot,
+            _source,
+            live=live,
+            pivot=pivot,
+            wait_pivot=wait_pivot,
         )
         content = caps[fmt]
         if out:
             Path(out).write_text(content, encoding="utf-8")
             if as_json:
-                _json_output({"screenshot": out, "format": fmt,
-                              "bytes": len(content)})
+                _json_output({"screenshot": out, "format": fmt, "bytes": len(content)})
             else:
-                output.ok(f"picker {fmt} screenshot -> {out} "
-                          f"({len(content)} bytes)")
+                output.ok(f"picker {fmt} screenshot -> {out} ({len(content)} bytes)")
         else:
             _sys.stdout.write(content)
             if not content.endswith("\n"):
@@ -13937,6 +14290,7 @@ def cmd_picker(args: argparse.Namespace) -> int:
         # No project context -- read the global config directly (default True:
         # the picker is on unless a machine explicitly opted out).
         import yaml as _yaml
+
         gpath = cfg.global_config_path()
         if gpath.exists():
             try:
@@ -13946,26 +14300,29 @@ def cmd_picker(args: argparse.Namespace) -> int:
                     persisted = bool(raw.get("new_picker", True))
             except (OSError, _yaml.YAMLError):
                 persisted = None
-    effective = picker_tui.new_picker_enabled(
-        type("_C", (), {"new_picker": bool(persisted)})())
+    effective = picker_tui.new_picker_enabled(type("_C", (), {"new_picker": bool(persisted)})())
     env_override = None
     if os.environ.get("AGENT_WORKTREES_LEGACY_PICKER"):
         env_override = "AGENT_WORKTREES_LEGACY_PICKER"
     elif os.environ.get("AGENT_WORKTREES_NEW_PICKER"):
         env_override = "AGENT_WORKTREES_NEW_PICKER"
     if as_json:
-        _json_output({"new_picker": bool(persisted), "effective": effective,
-                      "env_override": env_override})
+        _json_output(
+            {"new_picker": bool(persisted), "effective": effective, "env_override": env_override}
+        )
     else:
         print(f"new_picker (persisted): {str(bool(persisted)).lower()}")
-        print(f"effective:              {str(effective).lower()}"
-              + (f"  (env override: {env_override})" if env_override else ""))
+        print(
+            f"effective:              {str(effective).lower()}"
+            + (f"  (env override: {env_override})" if env_override else "")
+        )
     return 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # validate
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def cmd_validate(args: argparse.Namespace) -> int:
     worktree_path = args.worktree_path or str(Path.cwd())
@@ -13982,7 +14339,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
         pass  # Fall back to legacy paths
 
     failures = val.validate_files(
-        worktree_path, files,
+        worktree_path,
+        files,
         default_branch=args.default_branch,
         dry_run=args.dry_run,
         validate_paths=validate_paths,
@@ -13998,8 +14356,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
 # install / uninstall / update / install-status
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def _validate_machine_registry(
-    repo_dir: Path, machine: str,
+    repo_dir: Path,
+    machine: str,
 ) -> cfg.MachineEntry | None:
     """Look up *machine* in machines.yaml by key or alias.  Returns the
     entry or prints an error and returns None."""
@@ -14023,7 +14383,7 @@ def _validate_machine_registry(
         output.info('      environment: "<OS and version>"')
         output.info(
             '      # alias: "<multi-machine system-name>"  '
-            '# colloquial name if different from hostname'
+            "# colloquial name if different from hostname"
         )
         return None
 
@@ -14108,7 +14468,8 @@ def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
 
 
 def _deploy_copilot_instructions(
-    proj_dir: Path, entry: cfg.MachineEntry,
+    proj_dir: Path,
+    entry: cfg.MachineEntry,
     project: str = "",
 ) -> None:
     """Retire migrated managed instruction files + clean up legacy artifacts.
@@ -14248,6 +14609,7 @@ def _ensure_ado_pr_cli(pr_cfg) -> None:
         if not (pr_cfg.enabled and pr_cfg.provider == "azure-devops"):
             return
         from .providers.azure_devops import ensure_cli_ready
+
         ok, msg = ensure_cli_ready()
         (output.ok if ok else output.warn)(f"Azure DevOps CLI: {msg}")
     except Exception as e:  # best-effort preflight -- never block install/adopt
@@ -14328,9 +14690,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     # Register repository identity before project state or its attributable
     # launcher, so every first-install receipt is stable.
     from . import repos as _repos
-    with inst.project_binstub_registration(
-        project, repo_dir=repo_dir
-    ) as binstub_registration:
+
+    with inst.project_binstub_registration(project, repo_dir=repo_dir) as binstub_registration:
         _entry = _repos.find_repo(project)
         _reg_class = (
             _entry.repo_class
@@ -14366,9 +14727,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         # classification (default ON) so reference-only repos stay hidden.
         _entry = _repos.find_repo(project)
         _expose_agent = _entry.agent if _entry else True
-        inst.register_project(
-            project, repo_dir=repo_dir, expose_agent=_expose_agent
-        )
+        inst.register_project(project, repo_dir=repo_dir, expose_agent=_expose_agent)
         binstub_registration.commit()
 
     # Project publication above owns its launcher; this call refreshes only the
@@ -14386,8 +14745,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         hook = config.default_repo.post_install_hook.get(plat)
         if hook:
             cmd = [
-                s.replace("{repo_dir}", str(repo_dir))
-                 .replace("{runtime_dir}", str(runtime_dir))
+                s.replace("{repo_dir}", str(repo_dir)).replace("{runtime_dir}", str(runtime_dir))
                 for s in hook
             ]
             result = subprocess.run(cmd, cwd=str(repo_dir))
@@ -14411,6 +14769,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         cfg_for_hooks = cfg.load_config(config_path)
         if cfg_for_hooks.default_repo.pr.enabled:
             from . import hooks as _hooks
+
             present, stale = _hooks.hook_health(repo_dir)
             if not present:
                 output.warn(
@@ -14480,9 +14839,7 @@ def _resolve_terminal_install_script() -> Path | None:
 
     # 3. the running module's own scripts dir (src/agent_worktrees -> plugin root)
     try:
-        candidates.append(
-            Path(__file__).resolve().parents[2] / "scripts" / "install.ps1"
-        )
+        candidates.append(Path(__file__).resolve().parents[2] / "scripts" / "install.ps1")
     except Exception:
         pass
 
@@ -14521,8 +14878,7 @@ def _refresh_terminal_profiles() -> bool:
         )
         return False
 
-    cmd = ["pwsh", "-NoProfile", "-File", str(install_script),
-           "refresh-profiles"]
+    cmd = ["pwsh", "-NoProfile", "-File", str(install_script), "refresh-profiles"]
     # Pass the active project explicitly so the installer regenerates the
     # fragment for the right context instead of relying on CWD/env inference in
     # the subprocess: the mirror often runs from a worktree dir whose basename
@@ -14548,7 +14904,10 @@ def _refresh_terminal_profiles() -> bool:
         # ``errors="replace"`` keeps the capture robust regardless of the child's
         # console codepage.
         result = subprocess.run(
-            cmd, capture_output=True, encoding="utf-8", errors="replace",
+            cmd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=180,
         )
     except Exception:
@@ -14557,8 +14916,7 @@ def _refresh_terminal_profiles() -> bool:
 
     if result.returncode != 0:
         output.warn(
-            "Could not refresh Windows Terminal profiles "
-            f"(installer exited {result.returncode})"
+            f"Could not refresh Windows Terminal profiles (installer exited {result.returncode})"
         )
         return False
     output.ok("Windows Terminal profiles refreshed")
@@ -14608,15 +14966,18 @@ def cmd_repair(args: argparse.Namespace) -> int:
             diag = tf.diagnose_wt_state()
             if diag is not None:
                 if diag.hidden:
-                    output.info(f"Will heal {len(diag.hidden)} hidden fragment "
-                                "profile(s)")
+                    output.info(f"Will heal {len(diag.hidden)} hidden fragment profile(s)")
                 if diag.reclaimable_orphans:
-                    output.info(f"Will reclaim {len(diag.reclaimable_orphans)} "
-                                "orphaned generatedProfiles GUID(s)")
+                    output.info(
+                        f"Will reclaim {len(diag.reclaimable_orphans)} "
+                        "orphaned generatedProfiles GUID(s)"
+                    )
                 for name, count in diag.duplicate_names:
-                    output.warn(f"Duplicate profile {name!r} x{count} in "
-                                "settings.json -- a separate stand-alone fragment "
-                                "shares the name; not auto-resolved here")
+                    output.warn(
+                        f"Duplicate profile {name!r} x{count} in "
+                        "settings.json -- a separate stand-alone fragment "
+                        "shares the name; not auto-resolved here"
+                    )
                 if diag.healthy and not diag.reclaimable_orphans:
                     output.ok("Windows Terminal state already clean")
             if not _refresh_terminal_profiles():
@@ -14624,8 +14985,10 @@ def cmd_repair(args: argparse.Namespace) -> int:
             elif diag is not None and (diag.hidden or diag.reclaimable_orphans):
                 # The installer's Sync-TerminalState logs the concrete counts and
                 # the WT-running caveat; surface the follow-through explicitly.
-                output.info("If Windows Terminal was open, close it fully and "
-                            "reopen for the healed profiles to appear.")
+                output.info(
+                    "If Windows Terminal was open, close it fully and "
+                    "reopen for the healed profiles to appear."
+                )
 
     return rc
 
@@ -14655,16 +15018,16 @@ def cmd_register(args: argparse.Namespace) -> int:
         try:
             r = subprocess.run(
                 ["git", "-C", str(Path.cwd()), "rev-parse", "--show-toplevel"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if r.returncode == 0 and r.stdout.strip():
                 # Normalize through resolve_to_anchor so that running from
                 # inside a linked worktree resolves back to the main checkout,
                 # matching _find_repo_dir()'s behavior. Without this, registering
                 # from an active worktree would anchor to the ephemeral path.
-                repo_dir = git_ops.resolve_to_anchor(
-                    Path(r.stdout.strip()).resolve()
-                )
+                repo_dir = git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
         except Exception:
             pass
         if not repo_dir:
@@ -14682,24 +15045,27 @@ def cmd_register(args: argparse.Namespace) -> int:
     # origin/HEAD was never set), else a main-first remote-ref probe.
     default_branch = getattr(args, "default_branch", None) or None
     if not default_branch:
-        default_branch = _resolve_remote_default_branch(
-            str(repo_dir), "origin", allow_remote=True)
+        default_branch = _resolve_remote_default_branch(str(repo_dir), "origin", allow_remote=True)
     if not default_branch:
         # No remote signal (remote-less or offline repo) -- probe LOCAL heads,
         # main-first. Never fall back to the current branch, which is often a
         # feature branch in worktree workflows and would record the wrong default.
         for candidate in ("main", "master"):
-            r = git_ops.git("rev-parse", "--verify", "--quiet",
-                            f"refs/heads/{candidate}",
-                            cwd=str(repo_dir), check=False)
+            r = git_ops.git(
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{candidate}",
+                cwd=str(repo_dir),
+                check=False,
+            )
             if r.returncode == 0:
                 default_branch = candidate
                 break
     if not default_branch:
         # Undeterminable -- ask explicitly rather than guessing.
         output.warn(
-            "Could not detect default branch "
-            "(no remote default, no local main or master branch)"
+            "Could not detect default branch (no remote default, no local main or master branch)"
         )
         branch_input = input("  Default branch name: ").strip()
         if branch_input:
@@ -14742,12 +15108,18 @@ def cmd_register(args: argparse.Namespace) -> int:
         expose_agent = True
     else:
         from . import repos as _repos
+
         _entry = _repos.find_repo(project)
         expose_agent = _entry.agent if _entry else True
 
     if not config_path.exists() or args.force:
         _write_config(
-            config_path, repo_dir, machine, plat, project, default_branch,
+            config_path,
+            repo_dir,
+            machine,
+            plat,
+            project,
+            default_branch,
             headless=getattr(args, "headless", False),
             no_terminal_profile=not expose_agent,
         )
@@ -14781,22 +15153,22 @@ def cmd_register(args: argparse.Namespace) -> int:
     # the CURRENT platform (so a WSL adoption is filed under 'wsl', not 'linux'),
     # merging into any existing entry and preserving a deliberate non-worktree
     # class (add_repo only upgrades away from the 'reference' default).
-    with inst.project_binstub_registration(
-        project, repo_dir=repo_dir
-    ) as binstub_registration:
+    with inst.project_binstub_registration(project, repo_dir=repo_dir) as binstub_registration:
         try:
             from . import repos as _repos_reg
+
             _existing_repo = _repos_reg.find_repo(project)
             _reg_class = (
                 _existing_repo.repo_class
-                if _existing_repo is not None
-                and _existing_repo.repo_class != "reference"
+                if _existing_repo is not None and _existing_repo.repo_class != "reference"
                 else "worktree"
             )
             _reg_remote_url = ""
             _rru = subprocess.run(
                 ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if _rru.returncode == 0:
                 _reg_remote_url = _rru.stdout.strip()
@@ -14837,12 +15209,15 @@ def cmd_register(args: argparse.Namespace) -> int:
         _reg_remote = ""
         _rr = subprocess.run(
             ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if _rr.returncode == 0:
             _reg_remote = _rr.stdout.strip()
         if _reg_remote:
             from . import repos as _repos_acct
+
             _explicit = ""
             _entry_acct = _repos_acct.find_repo(project)
             if _entry_acct is not None:
@@ -14860,6 +15235,7 @@ def cmd_register(args: argparse.Namespace) -> int:
         cfg_for_hooks = cfg.load_config(config_path)
         if cfg_for_hooks.default_repo.pr.enabled:
             from . import hooks as _hooks
+
             cleared = _hooks.clear_stale_hooks_path(repo_dir)
             if cleared:
                 output.changed(
@@ -14868,9 +15244,7 @@ def cmd_register(args: argparse.Namespace) -> int:
                 )
             installed_hooks = _hooks.install_hooks(repo_dir)
             if installed_hooks:
-                output.ok(
-                    f"PR-workflow git hooks installed ({', '.join(installed_hooks)})"
-                )
+                output.ok(f"PR-workflow git hooks installed ({', '.join(installed_hooks)})")
     except Exception as e:
         output.warn(f"Could not install git hooks: {e}")
 
@@ -14960,6 +15334,7 @@ def _resolve_copilot() -> str | None:
     see ``reconcile.resolve_copilot`` (dotfiles#990).
     """
     from . import reconcile as _rc
+
     return _rc.resolve_copilot()
 
 
@@ -15031,8 +15406,10 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     output.header("Updating Agent Worktrees")
 
     if getattr(args, "recreate_venv", False):
-        output.warn("--recreate-venv is not supported by the plugin-based "
-                     "update flow; use 'agent-worktrees install' instead")
+        output.warn(
+            "--recreate-venv is not supported by the plugin-based "
+            "update flow; use 'agent-worktrees install' instead"
+        )
 
     # Step 1 -- update the Copilot CLI plugin (pulls latest from marketplace)
     plugin_ref = "agent-worktrees@copilot-extensions"
@@ -15042,24 +15419,23 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     try:
         r = subprocess.run(
             [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
             cwd=update_context,
         )
         if r.returncode == 0:
             for line in r.stdout.strip().splitlines():
                 output.ok(line)
         else:
-            detail = "\n".join(
-                x for x in [r.stdout.strip(), r.stderr.strip()] if x
-            )
+            detail = "\n".join(x for x in [r.stdout.strip(), r.stderr.strip()] if x)
             output.warn(f"Plugin update returned non-zero:\n{detail}")
             payloads_ok = False
     except OSError:
         # FileNotFoundError (no `copilot` on PATH) or PermissionError /
         # ENOEXEC -- e.g. under WSL interop a bare `copilot` resolves to a
         # non-executable Windows entry (dotfiles#990). Skip, don't crash.
-        output.warn("'copilot' CLI not found or not executable -- "
-                    "skipping plugin update")
+        output.warn("'copilot' CLI not found or not executable -- skipping plugin update")
         payloads_ok = False
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
@@ -15081,8 +15457,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     plugin_dir = _find_installed_plugin_dir()
     if not plugin_dir:
         output.err("Cannot find installed plugin directory")
-        output.err("Expected at ~/.copilot/installed-plugins/copilot-extensions/"
-                    "agent-worktrees/")
+        output.err("Expected at ~/.copilot/installed-plugins/copilot-extensions/agent-worktrees/")
         return 1
 
     output.info(f"Plugin source: {plugin_dir}")
@@ -15099,23 +15474,17 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     plat = cfg.detect_platform()
     force = getattr(args, "force", False)
     try:
-        aw_runtime_env, aw_runtime_root = (
-            _reconcile.runtime_installer_environment(
-                "agent-worktrees",
-                plugin_dir,
-            )
+        aw_runtime_env, aw_runtime_root = _reconcile.runtime_installer_environment(
+            "agent-worktrees",
+            plugin_dir,
         )
     except ValueError as error:
         output.err(f"Installation context invalid: {error}")
         return 1
     aw_payload_ver = _reconcile.payload_version(plugin_dir)
     aw_context_selected = "COPILOT_EXTENSIONS_CONTEXT" in aw_runtime_env
-    aw_deployed_ver = _reconcile.runtime_deployed_version(
-        "agent-worktrees", root=aw_runtime_root
-    )
-    versions_equal = bool(
-        aw_payload_ver and aw_payload_ver == aw_deployed_ver
-    )
+    aw_deployed_ver = _reconcile.runtime_deployed_version("agent-worktrees", root=aw_runtime_root)
+    versions_equal = bool(aw_payload_ver and aw_payload_ver == aw_deployed_ver)
     version_match = (not force) and versions_equal
     # The bin/ hook shims deploy independently of the runtime version, so a
     # version match is NOT proof they are current -- a payload can add a new
@@ -15128,8 +15497,10 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
         and _reconcile.hook_shims_drifted(plugin_dir)
     )
     if version_match and not hooks_drifted:
-        output.ok(f"Runtime already at {aw_deployed_ver} -- skipping installer "
-                  "(use --force to re-deploy)")
+        output.ok(
+            f"Runtime already at {aw_deployed_ver} -- skipping installer "
+            "(use --force to re-deploy)"
+        )
         # The full installer is skipped, but LIVE Windows Terminal state drifts
         # independently of our version -- a fragment profile WT is hiding, or
         # accumulated generatedProfiles cruft. That reconciliation must NOT be
@@ -15144,16 +15515,25 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             output.warn(
                 f"Runtime already at {aw_deployed_ver}, but deployed hook shims "
                 "have drifted from the payload -- re-deploying (bin/ hook shims "
-                "deploy independently of the runtime version; dotfiles #1171)")
+                "deploy independently of the runtime version; dotfiles #1171)"
+            )
         if plat == "windows":
             installer = plugin_dir / "scripts" / "install.ps1"
             shell = shutil.which("pwsh") or shutil.which("powershell")
             if not shell:
                 output.err("PowerShell not found")
                 return 1
-            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-File", str(installer), "update",
-                    "-InstallDir", str(aw_runtime_root)]
+            argv = [
+                shell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(installer),
+                "update",
+                "-InstallDir",
+                str(aw_runtime_root),
+            ]
         else:
             installer = plugin_dir / "scripts" / "install.sh"
             argv = [
@@ -15191,13 +15571,16 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     # Step 4 -- update registered sibling modules (agent-bridge, etc.)
     skip_modules = getattr(args, "skip_modules", None)
     runtimes_ok = True
-    if _update_modules(
-        plugin_dir,
-        plat,
-        skip_modules,
-        force=force,
-        targets=registered_targets,
-    ) is False:
+    if (
+        _update_modules(
+            plugin_dir,
+            plat,
+            skip_modules,
+            force=force,
+            targets=registered_targets,
+        )
+        is False
+    ):
         runtimes_ok = False
 
     # Step 4.5 -- rebuild the RUNTIME for every other enabled plugin whose
@@ -15209,13 +15592,16 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     # leave it serving stale code under a mismatched version (dotfiles #1025).
     # This closes that gap: reconcile those runtimes here, version-keyed by
     # default and force-reinstalled under ``--force``.
-    if _reconcile_registered_runtimes(
-        plugin_dir,
-        plat,
-        skip_modules,
-        force=force,
-        targets=registered_targets,
-    ) is False:
+    if (
+        _reconcile_registered_runtimes(
+            plugin_dir,
+            plat,
+            skip_modules,
+            force=force,
+            targets=registered_targets,
+        )
+        is False
+    ):
         runtimes_ok = False
 
     # Step 5 -- fast-forward the managed repo anchor(s) so in-repo config
@@ -15270,7 +15656,9 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
     try:
         r = subprocess.run(
             [_resolve_copilot() or "copilot", "plugin", "marketplace", "update", marketplace],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
             cwd=cwd,
         )
         if r.returncode != 0:
@@ -15278,17 +15666,14 @@ def _refresh_marketplace(marketplace: str, *, cwd: Path | None = None) -> bool:
             return False
         return True
     except OSError:
-        output.warn("'copilot' CLI not found or not executable -- "
-                    "skipping marketplace refresh")
+        output.warn("'copilot' CLI not found or not executable -- skipping marketplace refresh")
         return False
     except subprocess.TimeoutExpired:
         output.warn("Marketplace refresh timed out -- continuing")
         return False
 
 
-def _browse_marketplace_plugins(
-    marketplace: str, *, cwd: Path | None = None
-) -> set[str] | None:
+def _browse_marketplace_plugins(marketplace: str, *, cwd: Path | None = None) -> set[str] | None:
     """Return the refreshed marketplace's plugin names, or ``None`` if unknown."""
     try:
         r = subprocess.run(
@@ -15305,20 +15690,14 @@ def _browse_marketplace_plugins(
             cwd=cwd,
         )
     except OSError:
-        output.warn(
-            "'copilot' CLI not found or not executable -- "
-            "skipping retired plugin purge"
-        )
+        output.warn("'copilot' CLI not found or not executable -- skipping retired plugin purge")
         return None
     except subprocess.TimeoutExpired:
         output.warn("Marketplace inventory timed out -- skipping retired plugin purge")
         return None
 
     if r.returncode != 0:
-        output.warn(
-            "Marketplace inventory returned non-zero -- "
-            "skipping retired plugin purge"
-        )
+        output.warn("Marketplace inventory returned non-zero -- skipping retired plugin purge")
         return None
 
     names: set[str] = set()
@@ -15331,16 +15710,13 @@ def _browse_marketplace_plugins(
             names.add(name)
     if not names:
         output.warn(
-            "Marketplace inventory contained no plugin names -- "
-            "skipping retired plugin purge"
+            "Marketplace inventory contained no plugin names -- skipping retired plugin purge"
         )
         return None
     return names
 
 
-def _uninstall_one_plugin_payload(
-    name: str, marketplace: str, *, cwd: Path | None = None
-) -> str:
+def _uninstall_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None = None) -> str:
     """Uninstall one confirmed-retired, inactive marketplace payload."""
     ref = f"{name}@{marketplace}"
     try:
@@ -15362,9 +15738,7 @@ def _uninstall_one_plugin_payload(
     return f"uninstall exited {r.returncode}"
 
 
-def _update_one_plugin_payload(
-    name: str, marketplace: str, *, cwd: Path | None = None
-) -> str:
+def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None = None) -> str:
     """Update (or install) a single copilot-extensions plugin payload.
 
     Idempotent and network-facing. Chooses ``update`` when the payload is
@@ -15401,8 +15775,7 @@ def _update_one_plugin_payload(
     try:
         r = _run(verb)
     except OSError:
-        output.warn("'copilot' CLI not found or not executable -- "
-                    "skipping plugin payload update")
+        output.warn("'copilot' CLI not found or not executable -- skipping plugin payload update")
         return "copilot CLI not found or not executable"
     except PluginStateError as exc:
         output.warn(f"Plugin state for {name} could not be preserved: {exc}")
@@ -15419,8 +15792,9 @@ def _update_one_plugin_payload(
     # Non-zero. If we tried to update but the plugin was not actually
     # installed, fall back to a fresh install.
     if installed:
-        output.warn(f"Plugin update for {name} returned non-zero "
-                    f"(continuing with installed version)")
+        output.warn(
+            f"Plugin update for {name} returned non-zero (continuing with installed version)"
+        )
         return f"update exited {r.returncode}"
 
     output.info(f"Plugin install for {name} returned non-zero -- retrying")
@@ -15522,10 +15896,7 @@ def _update_registered_plugins(
     if available is not None:
         for name in sorted(list(targets)):
             target = targets[name]
-            if (
-                target.activation is _PluginActivation.INACTIVE
-                and name not in available
-            ):
+            if target.activation is _PluginActivation.INACTIVE and name not in available:
                 status = _uninstall_one_plugin_payload(
                     name,
                     reconcile.MARKETPLACE,
@@ -15540,9 +15911,7 @@ def _update_registered_plugins(
         results.append(
             (
                 name,
-                _update_one_plugin_payload(
-                    name, reconcile.MARKETPLACE, cwd=target.context
-                ),
+                _update_one_plugin_payload(name, reconcile.MARKETPLACE, cwd=target.context),
                 target,
             )
         )
@@ -15560,18 +15929,14 @@ def _update_registered_plugins(
         if status.startswith("OK"):
             output.ok(name if status == "OK" else f"{name} ({status})")
         elif not target.required:
-            output.warn(
-                f"{name}: {status} (inactive installed inventory advisory)"
-            )
+            output.warn(f"{name}: {status} (inactive installed inventory advisory)")
         else:
             output.warn(f"{name}: {status}")
     payloads_ok = all(
-        status.startswith("OK") or not target.required
-        for _, status, target in results
+        status.startswith("OK") or not target.required for _, status, target in results
     )
     purges_ok = all(
-        status.startswith("OK") or not target.required
-        for _, status, target in purge_results
+        status.startswith("OK") or not target.required for _, status, target in purge_results
     )
     return payloads_ok and purges_ok
 
@@ -15592,9 +15957,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         if existing is None:
             targets[name] = _RegisteredPluginTarget(context, activation)
             return
-        preferred_context = (
-            existing.context if existing.context is not None else context
-        )
+        preferred_context = existing.context if existing.context is not None else context
         precedence = {
             _PluginActivation.INACTIVE: 0,
             _PluginActivation.UNKNOWN: 1,
@@ -15640,8 +16003,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
                 )
         except Exception as exc:
             record_activation_error(
-                "Could not read enabled plugins from invocation context "
-                f"{invocation_context}",
+                f"Could not read enabled plugins from invocation context {invocation_context}",
                 exc,
             )
 
@@ -15693,9 +16055,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         )
 
     inventory_activation = (
-        _PluginActivation.UNKNOWN
-        if activation_unknown
-        else _PluginActivation.INACTIVE
+        _PluginActivation.UNKNOWN if activation_unknown else _PluginActivation.INACTIVE
     )
     for name in installed_names:
         add(name, None, activation=inventory_activation)
@@ -15705,9 +16065,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
         output.warn(warning)
     remaining = len(activation_warnings) - warning_limit
     if remaining > 0:
-        output.warn(
-            f"{remaining} additional plugin activation read failure(s) omitted"
-        )
+        output.warn(f"{remaining} additional plugin activation read failure(s) omitted")
 
     return targets
 
@@ -15788,9 +16146,7 @@ def _reconcile_registered_runtimes(
 
     results: list[tuple[str, str]] = []
     for name in sorted(names):
-        results.append(
-            (name, _reconcile_one_runtime(name, platform, force=force))
-        )
+        results.append((name, _reconcile_one_runtime(name, platform, force=force)))
 
     acted = [(n, s) for n, s in results if s not in ("SKIPPED (current)", "payload-only")]
     if acted:
@@ -15801,8 +16157,7 @@ def _reconcile_registered_runtimes(
             else:
                 output.warn(f"{name}: {status}")
     return all(
-        status.startswith("OK")
-        or status in {"SKIPPED (current)", "payload-only"}
+        status.startswith("OK") or status in {"SKIPPED (current)", "payload-only"}
         for _, status in results
     )
 
@@ -15824,9 +16179,7 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
 
     pver = reconcile.payload_version(pdir)
     try:
-        child_environment, runtime_root = reconcile.runtime_installer_environment(
-            name, pdir
-        )
+        child_environment, runtime_root = reconcile.runtime_installer_environment(name, pdir)
     except ValueError as error:
         return f"installation context invalid: {error}"
     dver = reconcile.runtime_deployed_version(name, root=runtime_root)
@@ -15867,12 +16220,20 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
             return "powershell not found"
         installer = pdir / "scripts" / "install.ps1"
         if installer.exists():
-            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-File", str(installer), "update"]
+            argv = [
+                shell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(installer),
+                "update",
+            ]
         else:
             installer = pdir / "scripts" / "init.ps1"
-            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                    "-File", str(installer)] + (["-Force"] if force else [])
+            argv = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer)] + (
+                ["-Force"] if force else []
+            )
     else:
         installer = pdir / "scripts" / "install.sh"
         if installer.exists():
@@ -15888,8 +16249,7 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
     if context is None and not installer.exists():
         return "installer not found"
 
-    output.header(f"Reconciling Runtime: {name}"
-                  + (" (forced)" if force else ""))
+    output.header(f"Reconciling Runtime: {name}" + (" (forced)" if force else ""))
     try:
         r = subprocess.run(
             argv,
@@ -15951,9 +16311,7 @@ def _fast_forward_project_anchors() -> None:
             output.info(f"{anchor}: detached HEAD -- skipped")
             continue
         if current != repo.default_branch:
-            output.info(
-                f"{anchor}: on '{current}', not '{repo.default_branch}' -- skipped"
-            )
+            output.info(f"{anchor}: on '{current}', not '{repo.default_branch}' -- skipped")
             continue
 
         ff = git_ops.fast_forward_worktree(
@@ -16087,8 +16445,7 @@ def _update_modules(
         target = targets.get(name) if targets is not None else None
         if targets is not None and (target is None or not target.required):
             output.info(
-                f"Skipping inactive module runtime: {name} "
-                "(payload inventory remains advisory)"
+                f"Skipping inactive module runtime: {name} (payload inventory remains advisory)"
             )
             results.append((name, "SKIPPED (inactive inventory)"))
             continue
@@ -16104,20 +16461,24 @@ def _update_modules(
             try:
                 r = subprocess.run(
                     [_resolve_copilot() or "copilot", "plugin", "update", plugin_ref],
-                    capture_output=True, text=True, timeout=120,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                 )
                 if r.returncode == 0:
                     for line in r.stdout.strip().splitlines():
                         output.ok(line)
                 else:
-                    output.warn(f"Plugin update for {name} returned non-zero "
-                                f"(continuing with installed version)")
+                    output.warn(
+                        f"Plugin update for {name} returned non-zero "
+                        f"(continuing with installed version)"
+                    )
             except OSError:
-                output.warn("'copilot' CLI not found or not executable -- "
-                            "skipping plugin refresh")
+                output.warn("'copilot' CLI not found or not executable -- skipping plugin refresh")
             except subprocess.TimeoutExpired:
-                output.warn(f"Plugin update for {name} timed out -- "
-                            "continuing with installed version")
+                output.warn(
+                    f"Plugin update for {name} timed out -- continuing with installed version"
+                )
 
         if not module_dir.is_dir():
             output.warn(f"Module '{name}' source not found: {module_dir}")
@@ -16131,26 +16492,22 @@ def _update_modules(
         # version (no deploy-manifest) falls through and re-deploys. --force
         # always re-deploys.
         from . import reconcile as _reconcile
+
         try:
-            runtime_env, runtime_root = _reconcile.runtime_installer_environment(
-                name, module_dir
-            )
+            runtime_env, runtime_root = _reconcile.runtime_installer_environment(name, module_dir)
         except ValueError as error:
             output.warn(f"{name}: installation context invalid: {error}")
             results.append((name, "installation context invalid"))
             continue
         mod_payload_ver = _reconcile.payload_version(module_dir)
-        mod_deployed_ver = _reconcile.runtime_deployed_version(
-            name, root=runtime_root
-        )
+        mod_deployed_ver = _reconcile.runtime_deployed_version(name, root=runtime_root)
         if (
             not force
             and mod_payload_ver
             and mod_deployed_ver
             and mod_payload_ver == mod_deployed_ver
         ):
-            output.ok(f"{name} already at {mod_deployed_ver} -- "
-                      "skipping installer")
+            output.ok(f"{name} already at {mod_deployed_ver} -- skipping installer")
             results.append((name, "SKIPPED (current)"))
             continue
 
@@ -16172,8 +16529,14 @@ def _update_modules(
                 output.warn(f"Module '{name}': PowerShell not found")
                 results.append((name, "powershell not found"))
                 continue
-            shell_prefix = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass",
-                            "-File", str(installer)]
+            shell_prefix = [
+                shell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(installer),
+            ]
         else:
             shell_prefix = ["bash", str(installer)]
 
@@ -16193,13 +16556,16 @@ def _update_modules(
         update_args = ["update"]
         if platform == "windows":
             from . import reconcile as _reconcile
+
             if _reconcile._zero_downtime_update(module_dir):
                 update_args.append("-ZeroDowntime")
         output.header(f"Updating Module: {name}")
         try:
             r = subprocess.run(
                 [*shell_prefix, *update_args],
-                cwd=module_dir, timeout=300, env=runtime_env,
+                cwd=module_dir,
+                timeout=300,
+                env=runtime_env,
             )
             if r.returncode == 0:
                 results.append((name, "OK"))
@@ -16218,7 +16584,9 @@ def _update_modules(
         try:
             r = subprocess.run(
                 [*shell_prefix, "install"],
-                cwd=module_dir, timeout=300, env=runtime_env,
+                cwd=module_dir,
+                timeout=300,
+                env=runtime_env,
             )
             if r.returncode == 0:
                 results.append((name, "OK (installed)"))
@@ -16242,10 +16610,7 @@ def _update_modules(
                 output.info(f"{name} (skipped)")
             else:
                 output.warn(f"{name}: {status}")
-    return all(
-        status.startswith("OK") or status.startswith("SKIPPED")
-        for _, status in results
-    )
+    return all(status.startswith("OK") or status.startswith("SKIPPED") for _, status in results)
 
 
 def _find_installed_plugin_dir() -> Path | None:
@@ -16316,7 +16681,9 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
     proj_dir = cfg.project_dir(project)
     proj_dir.mkdir(parents=True, exist_ok=True)
     _deploy_copilot_instructions(
-        proj_dir, registry[machine], project=project,
+        proj_dir,
+        registry[machine],
+        project=project,
     )
     return 0
 
@@ -16392,28 +16759,28 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 
 
 _GET_KEYS: dict[str, str] = {
-    "repo-dir":      "Anchor repo directory",
-    "worktree-dir":  "Current worktree root (the worktree you are in; empty if not inside one)",
+    "repo-dir": "Anchor repo directory",
+    "worktree-dir": "Current worktree root (the worktree you are in; empty if not inside one)",
     "worktree-state-dir": "Per-worktree or adopted-anchor state directory outside the repo checkout",
     "worktrees-root": "Parent directory that holds all worktrees (formerly 'worktree-dir')",
-    "src-dir":       "Source root (parent of repos)",
-    "config-dir":    "Per-project config directory (~/.{project})",
-    "machine":       "Machine name from config",
-    "platform":      "Platform (win/wsl/linux)",
-    "project":       "Project name",
-    "owner-ref":     "This worktree's qualified claim ref "
-                     "(machine/project/worktree_id[#session]) -- the cross-machine "
-                     "holder identity for resource leases; empty if not in a worktree",
-    "repo-remote":   "Canonical remote URL of this repo (registry remote; falls "
-                     "back to git origin) -- the device-independent repo key",
-    "lease-origin":  "Resolved explicit/private Git-ref lease store origin URL "
-                     "-- the **harness identity** shared by every agent of this "
-                     "harness (the in-CodeSpace cross-harness fence key); empty "
-                     "if no store is configured",
-    "pr-enabled":    "Whether PR mode is enabled (true/false)",
-    "pr-required":   "Whether PRs are required, blocking direct-to-master (true/false)",
-    "pr-provider":   "PR provider (gitea|github|azure-devops) when PR mode is on",
-    "pr-profile":    "PR-flow profile: direct|pr-human-merge|pr-agent-merge (check first)",
+    "src-dir": "Source root (parent of repos)",
+    "config-dir": "Per-project config directory (~/.{project})",
+    "machine": "Machine name from config",
+    "platform": "Platform (win/wsl/linux)",
+    "project": "Project name",
+    "owner-ref": "This worktree's qualified claim ref "
+    "(machine/project/worktree_id[#session]) -- the cross-machine "
+    "holder identity for resource leases; empty if not in a worktree",
+    "repo-remote": "Canonical remote URL of this repo (registry remote; falls "
+    "back to git origin) -- the device-independent repo key",
+    "lease-origin": "Resolved explicit/private Git-ref lease store origin URL "
+    "-- the **harness identity** shared by every agent of this "
+    "harness (the in-CodeSpace cross-harness fence key); empty "
+    "if no store is configured",
+    "pr-enabled": "Whether PR mode is enabled (true/false)",
+    "pr-required": "Whether PRs are required, blocking direct-to-master (true/false)",
+    "pr-provider": "PR provider (gitea|github|azure-devops) when PR mode is on",
+    "pr-profile": "PR-flow profile: direct|pr-human-merge|pr-agent-merge (check first)",
 }
 
 
@@ -16426,6 +16793,7 @@ def _resolve_repo_remote(config: cfg.Config, repo: cfg.RepoConfig) -> str:
     not in the repos registry. Returns ``""`` when neither resolves.
     """
     from . import repos
+
     try:
         entry = repos.find_repo(config.repo_name)
         if entry and entry.remote:
@@ -16455,6 +16823,7 @@ def _resolve_lease_origin() -> str:
     """
     try:
         from . import lease_config
+
         return lease_config.load_lease_settings().origin
     except Exception:
         return ""
@@ -16489,7 +16858,12 @@ def _pr_flow_profile(repo: cfg.RepoConfig):
 
 
 def _pr_reminder_for(
-    config, verb: str, *, ok: bool = True, state: str = "", reason: str = "",
+    config,
+    verb: str,
+    *,
+    ok: bool = True,
+    state: str = "",
+    reason: str = "",
 ):
     """Build this repo's stay-on-rails PR reminder for ``verb`` (or ``None``).
 
@@ -16573,7 +16947,9 @@ def cmd_get(args: argparse.Namespace) -> int:
         wt_id = session_wt_id
     identity_cwd = session_cwd if session_cwd is not None else os.getcwd()
     current_worktree = _worktree_path_for_id(
-        config, wt_id, cwd=identity_cwd,
+        config,
+        wt_id,
+        cwd=identity_cwd,
     )
     state_scope_id = wt_id
     session_is_anchor = False
@@ -16587,16 +16963,12 @@ def cmd_get(args: argparse.Namespace) -> int:
                 env=git_ops.repository_identity_env(),
                 stdin=subprocess.DEVNULL,
             )
-            session_is_anchor = (
-                proc.returncode == 0
-                and git_ops._normalize_wt_path(proc.stdout.strip())
-                == git_ops._normalize_wt_path(str(repo.anchor))
-            )
+            session_is_anchor = proc.returncode == 0 and git_ops._normalize_wt_path(
+                proc.stdout.strip()
+            ) == git_ops._normalize_wt_path(str(repo.anchor))
         except Exception:
             session_is_anchor = False
-    if not state_scope_id and (
-        _cwd_is_inside_project(Path(repo.anchor)) or session_is_anchor
-    ):
+    if not state_scope_id and (_cwd_is_inside_project(Path(repo.anchor)) or session_is_anchor):
         # Adopted anchors have no linked-worktree id, but still need a stable,
         # machine-local state namespace for session continuity artifacts.  The
         # reserved @anchor segment is a directory namespace here, not a claim
@@ -16610,10 +16982,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         )
         return 1
 
-    state_dir = (
-        cfg.project_dir() / "worktrees" / state_scope_id
-        if state_scope_id else None
-    )
+    state_dir = cfg.project_dir() / "worktrees" / state_scope_id if state_scope_id else None
     if key == "worktree-state-dir" and state_dir is not None:
         try:
             state_dir.mkdir(parents=True, exist_ok=True)
@@ -16622,28 +16991,26 @@ def cmd_get(args: argparse.Namespace) -> int:
             return 1
 
     values = {
-        "repo-dir":     repo.anchor,
+        "repo-dir": repo.anchor,
         "worktree-dir": current_worktree,
-        "worktree-state-dir": (
-            str(state_dir) if state_dir is not None else ""
-        ),
+        "worktree-state-dir": (str(state_dir) if state_dir is not None else ""),
         "worktrees-root": repo.worktree_root,
-        "src-dir":      config.srcroot,
-        "config-dir":   str(cfg.project_dir()),
-        "machine":      config.machine,
-        "platform":     config.platform,
-        "project":      config.repo_name,
-        "owner-ref":    (
-            tracking.format_claim_ref(config.machine, config.repo_name, wt_id,
-                                      session_id)
-            if wt_id else ""
+        "src-dir": config.srcroot,
+        "config-dir": str(cfg.project_dir()),
+        "machine": config.machine,
+        "platform": config.platform,
+        "project": config.repo_name,
+        "owner-ref": (
+            tracking.format_claim_ref(config.machine, config.repo_name, wt_id, session_id)
+            if wt_id
+            else ""
         ),
-        "repo-remote":  _resolve_repo_remote(config, repo),
+        "repo-remote": _resolve_repo_remote(config, repo),
         "lease-origin": _resolve_lease_origin(),
-        "pr-enabled":    "true" if repo.pr.enabled else "false",
-        "pr-required":   "true" if repo.pr.required else "false",
-        "pr-provider":   repo.pr.provider if repo.pr.enabled else "",
-        "pr-profile":    _pr_flow_profile(repo).profile,
+        "pr-enabled": "true" if repo.pr.enabled else "false",
+        "pr-required": "true" if repo.pr.required else "false",
+        "pr-provider": repo.pr.provider if repo.pr.enabled else "",
+        "pr-profile": _pr_flow_profile(repo).profile,
     }
 
     if key not in values:
@@ -16755,19 +17122,22 @@ def _worktree_usage() -> None:
     print("  create [--json]        Create a worktree; print id + dir (no launch)", file=out)
     print(
         "  create --system --name N [--owner O]  "
-        "Create a daemon-owned worktree (hidden from Picker)", file=out)
-    print(
-        "  remove-system <id> [--json]  "
-        "Tear down a system worktree by id", file=out)
+        "Create a daemon-owned worktree (hidden from Picker)",
+        file=out,
+    )
+    print("  remove-system <id> [--json]  Tear down a system worktree by id", file=out)
     print(
         "  conclude-disposable --worktree ID --policy disposable-cli --owner NAME  "
-        "Prime an exact dead CLI worker for managed GC", file=out)
+        "Prime an exact dead CLI worker for managed GC",
+        file=out,
+    )
     print("  list [--json]          List this project's worktrees", file=out)
     print("  status <id>            Show a worktree's git status", file=out)
     print("  push <id> [--title T]  Squash, rebase, and push to the default branch", file=out)
     print(
-        "  create-pr [id] [--title T] [--branch B]  "
-        "PR mode: squash + push a feature branch", file=out)
+        "  create-pr [id] [--title T] [--branch B]  PR mode: squash + push a feature branch",
+        file=out,
+    )
     print("  pr-ready [id]          Move a PR out of draft (ready-for-review)", file=out)
     print("  finalize [id]          Validate content on upstream and clean up", file=out)
     print("  cleanup                List and remove orphaned/finalized worktrees", file=out)
@@ -16852,7 +17222,8 @@ def _cmd_services_list(json_output: bool = False) -> int:
 
     env = _resolve_environment(config)
     services = svc.discover_services(
-        repo_dir, env,
+        repo_dir,
+        env,
         service_paths=config.default_repo.service_paths or None,
     )
 
@@ -16903,7 +17274,8 @@ def _cmd_services_status(json_output: bool = False) -> int:
 
     env = _resolve_environment(config)
     services = svc.discover_services(
-        repo_dir, env,
+        repo_dir,
+        env,
         service_paths=config.default_repo.service_paths or None,
     )
 
@@ -16911,17 +17283,19 @@ def _cmd_services_status(json_output: bool = False) -> int:
         data = []
         for s in services:
             st = svc.get_service_status(s, repo_dir)
-            data.append({
-                "name": st.service.name,
-                "display_name": st.service.display_name,
-                "staleness": st.staleness,
-                "deployed_commit": st.deployed_commit,
-                "deployed_at": st.deployed_at,
-                "deployed_branch": st.deployed_branch,
-                "dirty": st.dirty,
-                "install_dir": st.service.install_dir,
-                "source_paths": st.source_paths,
-            })
+            data.append(
+                {
+                    "name": st.service.name,
+                    "display_name": st.service.display_name,
+                    "staleness": st.staleness,
+                    "deployed_commit": st.deployed_commit,
+                    "deployed_at": st.deployed_at,
+                    "deployed_branch": st.deployed_branch,
+                    "dirty": st.dirty,
+                    "install_dir": st.service.install_dir,
+                    "source_paths": st.source_paths,
+                }
+            )
         print(json.dumps(data, indent=2))
         return 0
 
@@ -16991,8 +17365,11 @@ def _ensure_repo_current(repo_dir: Path, config: cfg.Config) -> None:
     try:
         git_ops.fetch(remote, cwd=repo_dir)
         result = git_ops.git(
-            "merge", "--ff-only", f"{remote}/{branch}",
-            cwd=repo_dir, check=False,
+            "merge",
+            "--ff-only",
+            f"{remote}/{branch}",
+            cwd=repo_dir,
+            check=False,
         )
         if result.returncode != 0:
             output.warn(
@@ -17015,9 +17392,7 @@ def _is_copilot_plugin_name(name: str) -> bool:
         root = Path.home() / ".copilot" / "installed-plugins"
         if not root.is_dir():
             return False
-        return any(
-            (mkt / name).is_dir() for mkt in root.iterdir() if mkt.is_dir()
-        )
+        return any((mkt / name).is_dir() for mkt in root.iterdir() if mkt.is_dir())
     except OSError:
         return False
 
@@ -17059,7 +17434,8 @@ def _cmd_service_passthrough(name: str, action_args: list[str]) -> int:
 
     env = _resolve_environment(config)
     services = svc.discover_services(
-        repo_dir, env,
+        repo_dir,
+        env,
         service_paths=config.default_repo.service_paths or None,
     )
 
@@ -17121,7 +17497,8 @@ def _cmd_services_batch(action: str, flags: list[str]) -> int:
 
     env = _resolve_environment(config)
     services = svc.discover_services(
-        repo_dir, env,
+        repo_dir,
+        env,
         service_paths=config.default_repo.service_paths or None,
     )
 
@@ -17250,7 +17627,9 @@ def _repos_usage() -> None:
     print("  account-for [owner|owner/name]      Print the resolved gh login (exit 1 if none)")
     print("  gh [owner|owner/name] [--] <args>   Run gh under that repo's account (token-inject)")
     print("  allow-edits <repo> --reason <why>   Break-glass: temporarily allow direct edits")
-    print("     [--minutes N] | --list | <repo> --revoke   to a guarded repo (default 10m, max 60m)")
+    print(
+        "     [--minutes N] | --list | <repo> --revoke   to a guarded repo (default 10m, max 60m)"
+    )
     print()
     print("Repo classes:")
     print("  reference   read-only; resolve/clone/index only; never edited")
@@ -17266,7 +17645,9 @@ def _repos_usage() -> None:
 
 
 def _clarify_registration_account(
-    remote: str, name: str, explicit_account: str = "",
+    remote: str,
+    name: str,
+    explicit_account: str = "",
 ) -> None:
     """Ensure a repo's gh account is unambiguous at register/adopt/add time.
 
@@ -17316,9 +17697,7 @@ def _clarify_registration_account(
     except EOFError:
         choice = ""
     if not choice:
-        output.warn(
-            f"Skipped -- set later with: repos account set {owner} <login>"
-        )
+        output.warn(f"Skipped -- set later with: repos account set {owner} <login>")
         return
     if choice.isdigit() and accounts:
         idx = int(choice) - 1
@@ -17354,23 +17733,25 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         json_out = "--json" in rest
         entries = repos.list_repos(class_filter=class_filter)
         if json_out:
-            _json_output({
-                "repos": [
-                    {
-                        "name": e.name,
-                        "class": e.repo_class,
-                        "remote": e.remote,
-                        "default_branch": e.default_branch,
-                        "tags": e.tags,
-                        "contributing": e.contributing,
-                        "account": e.account,
-                        "resolved_account": repos.resolve_account(e),
-                        "agent": e.agent,
-                        "paths": e.paths,
-                    }
-                    for e in entries
-                ],
-            })
+            _json_output(
+                {
+                    "repos": [
+                        {
+                            "name": e.name,
+                            "class": e.repo_class,
+                            "remote": e.remote,
+                            "default_branch": e.default_branch,
+                            "tags": e.tags,
+                            "contributing": e.contributing,
+                            "account": e.account,
+                            "resolved_account": repos.resolve_account(e),
+                            "agent": e.agent,
+                            "paths": e.paths,
+                        }
+                        for e in entries
+                    ],
+                }
+            )
         elif not entries:
             print("No repos registered.")
             print("Add one with: repos add <name> <path> --class <class>")
@@ -17454,7 +17835,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             agent_flag = True
 
         repos.add_repo(
-            name, path,
+            name,
+            path,
             repo_class=rclass,
             remote=remote,
             default_branch=default_branch,
@@ -17528,10 +17910,12 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         migrated, skipped = repos.migrate_git_repos(default_class=default_class)
         if migrated == 0 and skipped == 0:
             return 1
-        output.ok(f"Migrated {migrated} repo(s) from ~/.git-repos "
-                  f"({skipped} skipped) into repos.yaml")
-        output.info("~/.git-repos was left in place; remove it once you have "
-                    "verified the migration.")
+        output.ok(
+            f"Migrated {migrated} repo(s) from ~/.git-repos ({skipped} skipped) into repos.yaml"
+        )
+        output.info(
+            "~/.git-repos was left in place; remove it once you have verified the migration."
+        )
         return 0
 
     if sub == "status":
@@ -17549,17 +17933,24 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         json_out = "--json" in rest
         statuses = repos.status_all(tag=tag, class_filter=class_filter)
         if json_out:
-            _json_output({
-                "repos": [
-                    {
-                        "name": s.name, "class": s.repo_class,
-                        "present": s.present, "branch": s.branch,
-                        "dirty": s.dirty, "ahead": s.ahead,
-                        "behind": s.behind, "path": s.path, "error": s.error,
-                    }
-                    for s in statuses
-                ],
-            })
+            _json_output(
+                {
+                    "repos": [
+                        {
+                            "name": s.name,
+                            "class": s.repo_class,
+                            "present": s.present,
+                            "branch": s.branch,
+                            "dirty": s.dirty,
+                            "ahead": s.ahead,
+                            "behind": s.behind,
+                            "path": s.path,
+                            "error": s.error,
+                        }
+                        for s in statuses
+                    ],
+                }
+            )
             return 0
         if not statuses:
             print("No repos registered.")
@@ -17610,31 +18001,32 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     if sub == "doctor":
         from . import doctor
+
         do_fix = "--fix" in rest
         json_out = "--json" in rest
         findings = doctor.reconcile(fix=do_fix)
         if json_out:
-            _json_output({
-                "fixed": do_fix,
-                "findings": [
-                    {
-                        "repo": f.repo,
-                        "kind": f.kind,
-                        "severity": f.severity,
-                        "detail": f.detail,
-                        "fixable": f.fixable,
-                        "fix_detail": f.fix_detail,
-                        "fixed": f.fixed,
-                    }
-                    for f in findings
-                ],
-            })
+            _json_output(
+                {
+                    "fixed": do_fix,
+                    "findings": [
+                        {
+                            "repo": f.repo,
+                            "kind": f.kind,
+                            "severity": f.severity,
+                            "detail": f.detail,
+                            "fixable": f.fixable,
+                            "fix_detail": f.fix_detail,
+                            "fixed": f.fixed,
+                        }
+                        for f in findings
+                    ],
+                }
+            )
         else:
             doctor.render(findings, fixed_mode=do_fix)
         # Unresolved errors -> non-zero exit so callers/CI can gate on it.
-        unresolved = [
-            f for f in findings if f.severity == doctor.SEV_ERROR and not f.fixed
-        ]
+        unresolved = [f for f in findings if f.severity == doctor.SEV_ERROR and not f.fixed]
         return 1 if unresolved else 0
 
     if sub == "account-for":
@@ -17648,8 +18040,10 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if not target:
             target = _infer_active_repo_slug(cfg.load_config())
         if not target:
-            output.err("Usage: repos account-for [owner|owner/name]  "
-                       "(inferred from the active project when omitted)")
+            output.err(
+                "Usage: repos account-for [owner|owner/name]  "
+                "(inferred from the active project when omitted)"
+            )
             return 1
         login = repos.account_for_github_slug(target)
         # Suppress the bare-owner echo: when the owner isn't a github owner or
@@ -17687,17 +18081,17 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if target is None:
             target = _infer_active_repo_slug(cfg.load_config())
         if not target or not gh_args:
-            output.err("Usage: repos gh [owner|owner/name] [--] <gh args...>  "
-                       "(repo inferred from the active project when omitted)")
+            output.err(
+                "Usage: repos gh [owner|owner/name] [--] <gh args...>  "
+                "(repo inferred from the active project when omitted)"
+            )
             return 1
         if shutil.which("gh") is None:
             output.err("gh CLI not found on PATH")
             return 1
         env, login, injected = _gh_env_for_repo(target)
         if login and not injected:
-            output.warn(
-                f"could not mint a gh token for '{login}'; using ambient auth"
-            )
+            output.warn(f"could not mint a gh token for '{login}'; using ambient auth")
         return subprocess.run(["gh", *gh_args], env=env).returncode
 
     if sub == "account":
@@ -17766,12 +18160,21 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if do_list:
             grants = allow_edits.list_active()
             if json_out:
-                _json_output({"grants": [
-                    {"repo": g.repo, "expires_at_ms": g.expires_at_ms,
-                     "remaining_seconds": g.remaining_seconds, "minutes": g.minutes,
-                     "reason": g.reason, "session": g.session}
-                    for g in grants
-                ]})
+                _json_output(
+                    {
+                        "grants": [
+                            {
+                                "repo": g.repo,
+                                "expires_at_ms": g.expires_at_ms,
+                                "remaining_seconds": g.remaining_seconds,
+                                "minutes": g.minutes,
+                                "reason": g.reason,
+                                "session": g.session,
+                            }
+                            for g in grants
+                        ]
+                    }
+                )
             elif not grants:
                 print("No active edit grants.")
             else:
@@ -17785,7 +18188,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if not repo:
             output.err(
                 "Usage: repos allow-edits <repo> --reason <why> [--minutes N] "
-                "| --list | <repo> --revoke")
+                "| --list | <repo> --revoke"
+            )
             return 1
 
         # --revoke <repo>
@@ -17801,26 +18205,39 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
         # grant: requires a real reason
         if not reason or len(reason.strip()) < allow_edits.MIN_REASON_LEN:
-            msg = (f"repos allow-edits requires --reason (>= {allow_edits.MIN_REASON_LEN} chars) "
-                   "explaining why delegation cannot be used.")
+            msg = (
+                f"repos allow-edits requires --reason (>= {allow_edits.MIN_REASON_LEN} chars) "
+                "explaining why delegation cannot be used."
+            )
             return _json_error(msg) if json_out else (output.err(msg) or 1)
 
         entry = repos.find_repo(repo)
         g = allow_edits.grant(repo, reason.strip(), minutes)
-        note = "" if entry else (
-            f" (note: '{repo}' is not in the repos registry — nothing may be guarding it)")
+        note = (
+            ""
+            if entry
+            else (f" (note: '{repo}' is not in the repos registry — nothing may be guarding it)")
+        )
         if json_out:
-            _json_output({"repo": repo, "expires_at_ms": g.expires_at_ms,
-                          "minutes": g.minutes, "reason": g.reason,
-                          "known": entry is not None})
+            _json_output(
+                {
+                    "repo": repo,
+                    "expires_at_ms": g.expires_at_ms,
+                    "minutes": g.minutes,
+                    "reason": g.reason,
+                    "known": entry is not None,
+                }
+            )
         else:
             output.warn(
                 f"BREAK-GLASS: direct edits to '{repo}' allowed for "
-                f"{g.minutes}m — reason: {g.reason}")
+                f"{g.minutes}m — reason: {g.reason}"
+            )
             expires = datetime.fromtimestamp(g.expires_at_ms / 1000).strftime("%H:%M:%S")
             output.info(
                 f"Grant expires at {expires}. Prefer delegation for anything "
-                f"the repo's own agent could do.{note}")
+                f"the repo's own agent could do.{note}"
+            )
         return 0
 
     output.err(f"Unknown repos subcommand: {sub}")
@@ -17876,10 +18293,20 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
     if sub == "list":
         entries = accounts.list_accounts()
         if "--json" in rest:
-            _json_output({"accounts": [
-                {"login": e.login, "host": e.host, "scopes": e.scopes,
-                 "login_flow": e.login_flow, "notes": e.notes}
-                for e in entries]})
+            _json_output(
+                {
+                    "accounts": [
+                        {
+                            "login": e.login,
+                            "host": e.host,
+                            "scopes": e.scopes,
+                            "login_flow": e.login_flow,
+                            "notes": e.notes,
+                        }
+                        for e in entries
+                    ]
+                }
+            )
             return 0
         if not entries:
             print("No accounts catalogued.")
@@ -17902,8 +18329,15 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
             output.err(f"No account '{rest[0]}' in accounts.yaml")
             return 1
         if "--json" in rest:
-            _json_output({"login": e.login, "host": e.host, "scopes": e.scopes,
-                          "login_flow": e.login_flow, "notes": e.notes})
+            _json_output(
+                {
+                    "login": e.login,
+                    "host": e.host,
+                    "scopes": e.scopes,
+                    "login_flow": e.login_flow,
+                    "notes": e.notes,
+                }
+            )
             return 0
         output.header(f"Account: {e.login}")
         print(f"  host:       {e.host}")
@@ -17915,14 +18349,17 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
 
     if sub == "set":
         if not rest or rest[0].startswith("-"):
-            output.err("Usage: accounts set <login> [--host H] [--scopes a,b] "
-                       "[--login-flow CMD] [--notes T]")
+            output.err(
+                "Usage: accounts set <login> [--host H] [--scopes a,b] "
+                "[--login-flow CMD] [--notes T]"
+            )
             return 1
         login = rest[0]
         raw_scopes = _opt("--scopes")
         scopes = (
             [s.strip() for s in raw_scopes.split(",") if s.strip()]
-            if raw_scopes is not None else None
+            if raw_scopes is not None
+            else None
         )
         accounts.set_account(
             login,
@@ -17977,16 +18414,20 @@ def _related_usage() -> None:
     print("  resolve [<name>]                    How to work on it from here (locus plan)")
     print("  classify [<name>|--all] [--overwrite]   Derive ownership from gh accounts +")
     print("                                      remote and persist (unset entries only)")
-    print("  owners [--json]                     List wholly-owned targets "
-          "(ownership=owned) from the control-plane index")
+    print(
+        "  owners [--json]                     List wholly-owned targets "
+        "(ownership=owned) from the control-plane index"
+    )
     print()
     print("Any command takes [--repo PATH] to target a specific checkout")
     print("(default: the git repo containing the current directory).")
     print()
     print("Locus (where work happens): local | machine:<key> | codespace | container")
     print("Delegate (how to hand off): agent-bridge | agent-codespaces | agent-containers | none")
-    print("Ownership (attribution posture): owned | internal | external "
-          "(derived once at registration, then authoritative)")
+    print(
+        "Ownership (attribution posture): owned | internal | external "
+        "(derived once at registration, then authoritative)"
+    )
 
 
 def _related_opt(rest: list[str], flag: str, default: str | None = None) -> str | None:
@@ -18006,7 +18447,9 @@ def _related_anchor(rest: list[str]) -> str | None:
     try:
         cp = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if cp.returncode == 0 and cp.stdout.strip():
             return cp.stdout.strip()
@@ -18076,18 +18519,14 @@ def _related_config_source_anchors(
             base_anchor=base_anchor,
         )
         anchors = [
-            _related_mod.config_contribution_anchor(s.anchor, s.origin)
-            for s in srcs
-            if s.anchor
+            _related_mod.config_contribution_anchor(s.anchor, s.origin) for s in srcs if s.anchor
         ]
     except Exception:
         anchors = []
     if not anchors:
         anchors = [_related_mod.config_contribution_anchor(base_anchor, "harness")]
     elif os.path.abspath(anchors[0]) != os.path.abspath(base_anchor):
-        anchors.insert(
-            0, _related_mod.config_contribution_anchor(base_anchor, "harness")
-        )
+        anchors.insert(0, _related_mod.config_contribution_anchor(base_anchor, "harness"))
     # Installed-plugin config-graft: plugins that ship
     # ``.agent-worktrees/related.yaml`` are the LOWEST-precedence layer, so they
     # go ahead of the base/knowledge anchors (later anchors overlay earlier ones).
@@ -18100,18 +18539,16 @@ def _related_config_source_anchors(
             if installed_anchors is None
             else installed_anchors
         )
-        plugin_anchors = [
-            p
-            for p in discovered
-            if _related_mod._anchor_key(p) not in existing
-        ]
+        plugin_anchors = [p for p in discovered if _related_mod._anchor_key(p) not in existing]
     except Exception:
         return anchors
     return [*plugin_anchors, *anchors]
 
 
 def _related_lookup_anchors(
-    rest: list[str], anchor: str, name: str,
+    rest: list[str],
+    anchor: str,
+    name: str,
 ) -> tuple[list[str], bool]:
     """Config-source anchors to read ``name`` from for a read-only lookup.
 
@@ -18129,6 +18566,7 @@ def _related_lookup_anchors(
     the control plane leaves the base anchors unchanged.
     """
     from . import related
+
     anchors = _related_config_source_anchors(anchor)
     if _related_opt(rest, "--repo"):
         return anchors, False
@@ -18183,29 +18621,34 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
         ),
     )
     p.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
         help="Emit the full resolution as JSON (state_root/source/repo/"
-             "stateless/bound/error) instead of the bare path.",
+        "stateless/bound/error) instead of the bare path.",
     )
     p.add_argument(
-        "--repo", default=None, metavar="NAME",
+        "--repo",
+        default=None,
+        metavar="NAME",
         help="Explicit override: resolve this registered repo's checkout "
-             "(target the harness itself or a product repo, ignoring the "
-             "stateless binding).",
+        "(target the harness itself or a product repo, ignoring the "
+        "stateless binding).",
     )
     p.add_argument(
-        "--pair", action="store_true",
+        "--pair",
+        action="store_true",
         help="Resolve the PAIRED worktree (the citadel -harness/-knowledge "
-             "sibling of the current worktree): print the sibling's checkout "
-             "path, or JSON (pair_id/role/sibling id/role/path/kind) with "
-             "--json. Exit 3 when the current worktree is unpaired/untracked.",
+        "sibling of the current worktree): print the sibling's checkout "
+        "path, or JSON (pair_id/role/sibling id/role/path/kind) with "
+        "--json. Exit 3 when the current worktree is unpaired/untracked.",
     )
     p.add_argument(
-        "--conduct", action="store_true",
-        help="Emit the sessionStart \"the user's state repo\" definition "
-             "(Markdown) binding the term to the resolved checkout, for the "
-             "session-conduct hook. Always exits 0 (prints an unbound notice "
-             "when no state repo is bound).",
+        "--conduct",
+        action="store_true",
+        help='Emit the sessionStart "the user\'s state repo" definition '
+        "(Markdown) binding the term to the resolved checkout, for the "
+        "session-conduct hook. Always exits 0 (prints an unbound notice "
+        "when no state repo is bound).",
     )
     try:
         args = p.parse_args(argv)
@@ -18250,8 +18693,7 @@ def cmd_coordination_readiness_dispatch(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
         prog="agent-worktrees coordination-readiness",
         description=(
-            "Report whether resource-claim coordination has a usable durable "
-            "state root."
+            "Report whether resource-claim coordination has a usable durable state root."
         ),
     )
     try:
@@ -18377,9 +18819,7 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
 
     try:
         if args.harness_path:
-            summary = knowledge_plugins.compose(
-                args.harness_path, args.knowledge_path
-            )
+            summary = knowledge_plugins.compose(args.harness_path, args.knowledge_path)
         else:
             _activate_project_for_path(args.cwd)
             summary = knowledge_plugins.compose_from_pair(cwd=args.cwd)
@@ -18417,10 +18857,7 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
                     file=sys.stderr,
                 )
         elif outcome == "retired":
-            print(
-                "Retired stale knowledge plugin overlay: "
-                f"{summary['settings_local']}"
-            )
+            print(f"Retired stale knowledge plugin overlay: {summary['settings_local']}")
             print(f"  pair error: {summary['pair_error']}")
         else:
             print(f"Knowledge plugin preflight: no-op ({summary['pair_error']})")
@@ -18469,15 +18906,9 @@ def cmd_reconcile_marketplaces(args: argparse.Namespace) -> int:
             if not args.session_start:
                 try:
                     project = _reverse_lookup_project(repo)
-                    config_path = (
-                        cfg.project_dir(project) / "config.yaml"
-                        if project
-                        else None
-                    )
+                    config_path = cfg.project_dir(project) / "config.yaml" if project else None
                     fast_forward_repositories = (
-                        cfg.load_config(config_path).auto_fast_forward
-                        if config_path
-                        else True
+                        cfg.load_config(config_path).auto_fast_forward if config_path else True
                     )
                 except Exception:
                     fast_forward_repositories = True
@@ -18534,6 +18965,7 @@ def _hunt_checkout(name: str) -> str | None:
     """
     try:
         from . import repos as _repos
+
         registry = _repos.read_registry()
     except Exception:
         return None
@@ -18620,22 +19052,29 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
             if found:
                 f.candidate_path = found
                 f.suggested_actions.insert(
-                    0, f"register the checkout found here: `repos add {f.name} "
-                       f"{found} --class <class>`")
+                    0,
+                    f"register the checkout found here: `repos add {f.name} "
+                    f"{found} --class <class>`",
+                )
 
     if json_out:
-        _json_output({
-            "current_machine": current_machine,
-            "machines_yaml_available": machines_known_available,
-            "findings": [
-                {
-                    "name": f.name, "kind": f.kind, "severity": f.severity,
-                    "detail": f.detail, "suggested_actions": f.suggested_actions,
-                    "candidate_path": f.candidate_path,
-                }
-                for f in findings
-            ],
-        })
+        _json_output(
+            {
+                "current_machine": current_machine,
+                "machines_yaml_available": machines_known_available,
+                "findings": [
+                    {
+                        "name": f.name,
+                        "kind": f.kind,
+                        "severity": f.severity,
+                        "detail": f.detail,
+                        "suggested_actions": f.suggested_actions,
+                        "candidate_path": f.candidate_path,
+                    }
+                    for f in findings
+                ],
+            }
+        )
     else:
         _render_related_findings(findings, current_machine)
 
@@ -18648,14 +19087,13 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
 def _render_related_findings(findings: list, current_machine: str) -> None:
     """Human render for `related doctor` (grouped by severity)."""
     from . import related
+
     output.header(f"related doctor  (machine: {current_machine or '?'})")
     if not findings:
-        output.ok("All related entries validate: repos exist, machines and "
-                  "venues are valid.")
+        output.ok("All related entries validate: repos exist, machines and venues are valid.")
         return
     order = {related.SEV_ERROR: 0, related.SEV_WARNING: 1, related.SEV_INFO: 2}
-    icon = {related.SEV_ERROR: "✗", related.SEV_WARNING: "⚠️ ",
-            related.SEV_INFO: "•"}
+    icon = {related.SEV_ERROR: "✗", related.SEV_WARNING: "⚠️ ", related.SEV_INFO: "•"}
     for f in sorted(findings, key=lambda x: (order.get(x.severity, 9), x.name)):
         print(f"  {icon.get(f.severity, '-')} [{f.kind}] {f.detail}")
         if f.candidate_path:
@@ -18668,9 +19106,11 @@ def _render_related_findings(findings: list, current_machine: str) -> None:
     infos = sum(1 for f in findings if f.severity == related.SEV_INFO)
     print(f"  {errs} error(s), {warns} warning(s), {infos} info.")
     if warns or errs:
-        output.info("Report-only: `related doctor` never edits related.yaml. "
-                    "Resolve each with the user (locate / provide URL / clone / "
-                    "register), and remove an entry only with their approval.")
+        output.info(
+            "Report-only: `related doctor` never edits related.yaml. "
+            "Resolve each with the user (locate / provide URL / clone / "
+            "register), and remove an entry only with their approval."
+        )
 
 
 def _related_conduct(anchor: str) -> int:
@@ -18714,8 +19154,7 @@ def _related_conduct(anchor: str) -> int:
     if related_count:
         lines.insert(
             -2,
-            f"- {related_count} directional related entries: "
-            "`agent-worktrees related list`.",
+            f"- {related_count} directional related entries: `agent-worktrees related list`.",
         )
     print("\n".join(lines))
     return 0
@@ -18747,12 +19186,14 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             cp = related.find_control_plane_anchor()
         except Exception:
             cp = None
-        base = cp or _related_anchor(rest)   # fall back to cwd if no control plane
-        owners = (related.owned_targets_grafted(_related_config_source_anchors(base))
-                  if base else [])
+        base = cp or _related_anchor(rest)  # fall back to cwd if no control plane
+        owners = (
+            related.owned_targets_grafted(_related_config_source_anchors(base)) if base else []
+        )
         if json_out:
-            _json_output({"owned": owners, "count": len(owners),
-                          "source": "control-plane" if cp else "cwd"})
+            _json_output(
+                {"owned": owners, "count": len(owners), "source": "control-plane" if cp else "cwd"}
+            )
         elif not owners:
             print("No wholly-owned related targets (ownership=owned).")
         else:
@@ -18773,17 +19214,12 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             if project:
                 cfg.set_active_project(project)
     if "--require-managed" in rest and not cfg.active_project():
-        output.err(
-            "The current repo is not an adopted agent-worktrees project."
-        )
+        output.err("The current repo is not an adopted agent-worktrees project.")
         return 1
 
     anchor = _related_anchor(rest)
     if not anchor:
-        output.err(
-            "Could not resolve the current repo. Run inside a repo, or pass "
-            "--repo <path>."
-        )
+        output.err("Could not resolve the current repo. Run inside a repo, or pass --repo <path>.")
         return 1
 
     if sub == "--conduct":
@@ -18797,25 +19233,30 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         entries = related.list_related_grafted(anchors, role=role)
         primary = related.get_primary_grafted(anchors)
         if json_out:
-            _json_output({
-                "primary": primary,
-                "related": [
-                    {
-                        "name": e.name, "role": e.role, "summary": e.summary,
-                        "doc": related.public_doc(e), "delegate": e.delegate,
-                        "ownership": related.effective_ownership(e),
-                        "owner": e.owner,
-                        "provenance": related.entry_provenance(e),
-                        "locus": {
-                            "preferred": e.locus.preferred,
-                            "machines": e.locus.machines,
-                            "codespace": e.locus.codespace,
-                            "container": e.locus.container,
-                        },
-                    }
-                    for e in entries
-                ],
-            })
+            _json_output(
+                {
+                    "primary": primary,
+                    "related": [
+                        {
+                            "name": e.name,
+                            "role": e.role,
+                            "summary": e.summary,
+                            "doc": related.public_doc(e),
+                            "delegate": e.delegate,
+                            "ownership": related.effective_ownership(e),
+                            "owner": e.owner,
+                            "provenance": related.entry_provenance(e),
+                            "locus": {
+                                "preferred": e.locus.preferred,
+                                "machines": e.locus.machines,
+                                "codespace": e.locus.codespace,
+                                "container": e.locus.container,
+                            },
+                        }
+                        for e in entries
+                    ],
+                }
+            )
         elif not entries:
             print("No related repos linked.")
             print(f"Link one with: {cfg.active_project() or 'agent-worktrees'} related add <name>")
@@ -18842,24 +19283,32 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             return 1
         reg = repos.find_repo(name)
         if json_out:
-            _json_output({
-                "name": e.name, "role": e.role, "summary": e.summary,
-                "doc": related.public_doc(e), "delegate": e.delegate,
-                "ownership": related.effective_ownership(e),
-                "ownership_explicit": e.ownership,
-                "owner": e.owner,
-                "provenance": related.entry_provenance(e),
-                "locus": {
-                    "preferred": e.locus.preferred,
-                    "machines": e.locus.machines,
-                    "codespace": e.locus.codespace,
-                    "container": e.locus.container,
-                },
-                "registry": None if reg is None else {
-                    "class": reg.repo_class, "remote": reg.remote,
-                    "path": reg.local_path(),
-                },
-            })
+            _json_output(
+                {
+                    "name": e.name,
+                    "role": e.role,
+                    "summary": e.summary,
+                    "doc": related.public_doc(e),
+                    "delegate": e.delegate,
+                    "ownership": related.effective_ownership(e),
+                    "ownership_explicit": e.ownership,
+                    "owner": e.owner,
+                    "provenance": related.entry_provenance(e),
+                    "locus": {
+                        "preferred": e.locus.preferred,
+                        "machines": e.locus.machines,
+                        "codespace": e.locus.codespace,
+                        "container": e.locus.container,
+                    },
+                    "registry": None
+                    if reg is None
+                    else {
+                        "class": reg.repo_class,
+                        "remote": reg.remote,
+                        "path": reg.local_path(),
+                    },
+                }
+            )
             return 0
         output.header(f"Related: {e.name}")
         print(f"  role:     {e.role or '-'}")
@@ -18867,12 +19316,13 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         _own = related.effective_ownership(e)
         if _own:
             _osrc = "explicit" if e.ownership else "derived"
-            print(f"  ownership: {_own} ({_osrc})"
-                  + (f"  owner={e.owner}" if e.owner else ""))
-        print(f"  locus:    {e.locus.preferred or '-'}"
-              + (f"  machines={e.locus.machines}" if e.locus.machines else "")
-              + (f"  codespace={e.locus.codespace}" if e.locus.codespace else "")
-              + (f"  container={e.locus.container}" if e.locus.container else ""))
+            print(f"  ownership: {_own} ({_osrc})" + (f"  owner={e.owner}" if e.owner else ""))
+        print(
+            f"  locus:    {e.locus.preferred or '-'}"
+            + (f"  machines={e.locus.machines}" if e.locus.machines else "")
+            + (f"  codespace={e.locus.codespace}" if e.locus.codespace else "")
+            + (f"  container={e.locus.container}" if e.locus.container else "")
+        )
         print(f"  delegate: {e.delegate or '-'}")
         provenance = related.entry_provenance(e)
         source = provenance["layer"]
@@ -18886,8 +19336,10 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         )
         print(f"  doc:      {doc}")
         if reg is None:
-            output.warn(f"'{name}' is not in the repos registry "
-                        f"(add it with: repos add {name} <path> --class <class>)")
+            output.warn(
+                f"'{name}' is not in the repos registry "
+                f"(add it with: repos add {name} <path> --class <class>)"
+            )
         else:
             print(f"  registry: [{reg.repo_class}] {reg.local_path() or '(no local path)'}")
             if reg.remote:
@@ -18902,15 +19354,20 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         machines_csv = _related_opt(rest, "--machines", "") or ""
         machines = [m.strip() for m in machines_csv.split(",") if m.strip()]
         codespace: dict = {}
-        for flag, key in (("--cs-repo", "repo"), ("--cs-machine", "machine"),
-                          ("--cs-location", "location"),
-                          ("--cs-workspace", "workspace_folder")):
+        for flag, key in (
+            ("--cs-repo", "repo"),
+            ("--cs-machine", "machine"),
+            ("--cs-location", "location"),
+            ("--cs-workspace", "workspace_folder"),
+        ):
             v = _related_opt(rest, flag)
             if v:
                 codespace[key] = v
         container: dict = {}
-        for flag, key in (("--container-repo", "repo"),
-                          ("--container-workspace", "workspace_folder")):
+        for flag, key in (
+            ("--container-repo", "repo"),
+            ("--container-workspace", "workspace_folder"),
+        ):
             v = _related_opt(rest, flag)
             if v:
                 container[key] = v
@@ -18980,8 +19437,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         anchors, _via_cp = _related_lookup_anchors(rest, anchor, name)
         e = related.get_related_grafted(anchors, name)
         if e is None:
-            output.err(f"'{name}' is not a related repo. Link it first: "
-                       f"related add {name}")
+            output.err(f"'{name}' is not a related repo. Link it first: related add {name}")
             return 1
         path, created = related.scaffold_doc(anchor, e)
         print(path)
@@ -18992,23 +19448,18 @@ def cmd_related_dispatch(argv: list[str]) -> int:
     if sub == "primary":
         if rest and not rest[0].startswith("-"):
             name = rest[0]
-            if related.get_related_grafted(
-                _related_config_source_anchors(anchor), name
-            ) is None:
+            if related.get_related_grafted(_related_config_source_anchors(anchor), name) is None:
                 output.err(f"'{name}' is not a related repo. Link it first.")
                 return 1
             related.set_primary(anchor, name)
             output.ok(f"primary = {name}")
         else:
-            print(
-                related.get_primary_grafted(
-                    _related_config_source_anchors(anchor)
-                ) or "(unset)"
-            )
+            print(related.get_primary_grafted(_related_config_source_anchors(anchor)) or "(unset)")
         return 0
 
     if sub == "resolve":
         from . import doctor
+
         explicit_name = rest[0] if rest and not rest[0].startswith("-") else None
         anchors = _related_config_source_anchors(anchor)
         name = explicit_name or related.get_primary_grafted(anchors)
@@ -19048,35 +19499,40 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             base_repo=base_repo,
         )
         if json_out:
-            _json_output({
-                "name": resn.name,
-                "locus_kind": resn.locus_kind,
-                "target_machine": resn.target_machine,
-                "available_here": resn.available_here,
-                "editing_model": resn.editing_model,
-                "base_repo": base_repo,
-                "account": repos.resolve_account(reg),
-                "ownership": related.effective_ownership(entry),
-                "owner": entry.owner,
-                "delegate_via": resn.delegate_via,
-                "current_machine": current_machine,
-                "steps": resn.steps,
-                "notes": resn.notes,
-                "explore": resn.explore,
-                "via_control_plane": via_cp,
-            })
+            _json_output(
+                {
+                    "name": resn.name,
+                    "locus_kind": resn.locus_kind,
+                    "target_machine": resn.target_machine,
+                    "available_here": resn.available_here,
+                    "editing_model": resn.editing_model,
+                    "base_repo": base_repo,
+                    "account": repos.resolve_account(reg),
+                    "ownership": related.effective_ownership(entry),
+                    "owner": entry.owner,
+                    "delegate_via": resn.delegate_via,
+                    "current_machine": current_machine,
+                    "steps": resn.steps,
+                    "notes": resn.notes,
+                    "explore": resn.explore,
+                    "via_control_plane": via_cp,
+                }
+            )
             return 0
         output.header(f"Resolve: {resn.name}")
         if via_cp:
             output.info(
                 "(resolved via the control-plane index -- this repo's own "
-                "related.yaml does not list it)")
+                "related.yaml does not list it)"
+            )
         if entry.summary:
             print(f"  {entry.summary}")
         avail = "" if resn.available_here else "  (not available here)"
         print(f"  locus:    {entry.locus.preferred or 'local'}{avail}")
-        print(f"  class:    {reg.repo_class if reg else '(not in registry)'}"
-              + (f"  [{resn.editing_model}]" if resn.editing_model else ""))
+        print(
+            f"  class:    {reg.repo_class if reg else '(not in registry)'}"
+            + (f"  [{resn.editing_model}]" if resn.editing_model else "")
+        )
         if reg and reg.local_path():
             print(f"  path:     {reg.local_path()}")
         _acct = repos.resolve_account(reg)
@@ -19110,45 +19566,64 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 return 1
             if existing.ownership and not overwrite:
                 if json_out:
-                    _json_output({"name": target, "ownership": existing.ownership,
-                                  "owner": existing.owner, "changed": False,
-                                  "reason": "already set (use --overwrite)"})
+                    _json_output(
+                        {
+                            "name": target,
+                            "ownership": existing.ownership,
+                            "owner": existing.owner,
+                            "changed": False,
+                            "reason": "already set (use --overwrite)",
+                        }
+                    )
                 else:
-                    output.info(f"'{target}' ownership already set to "
-                                f"'{existing.ownership}' (use --overwrite to re-derive).")
+                    output.info(
+                        f"'{target}' ownership already set to "
+                        f"'{existing.ownership}' (use --overwrite to re-derive)."
+                    )
                 return 0
             if not derived:
                 if json_out:
-                    _json_output({"name": target, "ownership": "", "changed": False,
-                                  "reason": "underivable -- set explicitly with --ownership"})
+                    _json_output(
+                        {
+                            "name": target,
+                            "ownership": "",
+                            "changed": False,
+                            "reason": "underivable -- set explicitly with --ownership",
+                        }
+                    )
                 else:
-                    output.warn(f"Could not derive ownership for '{target}' from its "
-                                f"remote -- set it explicitly with "
-                                f"`related add {target} --ownership <owned|internal|external>`.")
+                    output.warn(
+                        f"Could not derive ownership for '{target}' from its "
+                        f"remote -- set it explicitly with "
+                        f"`related add {target} --ownership <owned|internal|external>`."
+                    )
                 return 0
-            related.upsert_related(anchor, related.RelatedEntry(
-                name=target, ownership=derived, owner=owner))
+            related.upsert_related(
+                anchor, related.RelatedEntry(name=target, ownership=derived, owner=owner)
+            )
             if json_out:
-                _json_output({"name": target, "ownership": derived, "owner": owner,
-                              "changed": True})
+                _json_output(
+                    {"name": target, "ownership": derived, "owner": owner, "changed": True}
+                )
             else:
-                output.ok(f"'{target}' ownership = {derived}"
-                          + (f" (owner {owner})" if owner else ""))
+                output.ok(
+                    f"'{target}' ownership = {derived}" + (f" (owner {owner})" if owner else "")
+                )
             return 0
         # --all (or bare): backfill every entry.
         changed = related.classify_all(anchor, overwrite=overwrite)
         if json_out:
             _json_output({"changed": changed, "count": len(changed)})
         elif not changed:
-            output.info("No ownership changes (all entries classified, or "
-                        "underivable). Pass --overwrite to re-derive explicit ones.")
+            output.info(
+                "No ownership changes (all entries classified, or "
+                "underivable). Pass --overwrite to re-derive explicit ones."
+            )
         else:
             output.header("Ownership classified")
             for c in changed:
                 print(f"  {c['name']:<24} {c['before']} -> {c['after']}")
         return 0
-
-
 
     output.err(f"Unknown related subcommand: {sub}")
     _related_usage()
@@ -19187,7 +19662,8 @@ def plan_pre_launch() -> dict:
 
     env = _resolve_environment(config)
     all_services = svc.discover_services(
-        repo_dir, env,
+        repo_dir,
+        env,
         service_paths=config.default_repo.service_paths or None,
     )
 
@@ -19204,37 +19680,41 @@ def plan_pre_launch() -> dict:
         try:
             explicit_context = _reconcile._explicit_context_target()
         except ValueError as error:
-            diagnostics.append({
-                "service": "agent-worktrees",
-                "reason": "installation-context-invalid",
-                "message": str(error),
-            })
+            diagnostics.append(
+                {
+                    "service": "agent-worktrees",
+                    "reason": "installation-context-invalid",
+                    "message": str(error),
+                }
+            )
         else:
             if explicit_context is not None:
-                diagnostics.append({
-                    "service": "agent-worktrees",
-                    "reason": "installation-context-payload-missing",
-                    "message": (
-                        "selected context cannot be validated because the "
-                        "agent-worktrees payload is not installed"
-                    ),
-                })
+                diagnostics.append(
+                    {
+                        "service": "agent-worktrees",
+                        "reason": "installation-context-payload-missing",
+                        "message": (
+                            "selected context cannot be validated because the "
+                            "agent-worktrees payload is not installed"
+                        ),
+                    }
+                )
     else:
         try:
-            aw_environment, aw_runtime_root = (
-                _reconcile.runtime_installer_environment(
-                    "agent-worktrees",
-                    aw_plugin_dir,
-                    base={},
-                )
+            aw_environment, aw_runtime_root = _reconcile.runtime_installer_environment(
+                "agent-worktrees",
+                aw_plugin_dir,
+                base={},
             )
         except ValueError as error:
             aw_resolution_failed = True
-            diagnostics.append({
-                "service": "agent-worktrees",
-                "reason": "installation-context-invalid",
-                "message": str(error),
-            })
+            diagnostics.append(
+                {
+                    "service": "agent-worktrees",
+                    "reason": "installation-context-invalid",
+                    "message": str(error),
+                }
+            )
 
     # Agent-worktrees is always checked against the structured authoritative
     # root, even when service discovery also knows about it.
@@ -19281,15 +19761,17 @@ def plan_pre_launch() -> dict:
             )
             if result is not None:
                 cmd, cmd_argv = result
-                updates: list[dict] = [{
-                    "service": "agent-worktrees",
-                    "staleness": staleness,
-                    "command": cmd,
-                    "argv": cmd_argv,
-                    "environment": aw_environment,
-                    "unset_environment": list(_reconcile._RUNTIME_ENV_UNSET),
-                    "runtime_root": str(aw_runtime_root),
-                }]
+                updates: list[dict] = [
+                    {
+                        "service": "agent-worktrees",
+                        "staleness": staleness,
+                        "command": cmd,
+                        "argv": cmd_argv,
+                        "environment": aw_environment,
+                        "unset_environment": list(_reconcile._RUNTIME_ENV_UNSET),
+                        "runtime_root": str(aw_runtime_root),
+                    }
+                ]
                 # Check discovered bootstrap services too
                 for s in bootstrap.values():
                     _append_update_if_stale(s, repo_dir, updates)
@@ -19372,12 +19854,14 @@ def _append_update_if_stale(
     if not result:
         return
     cmd, argv = result
-    updates.append({
-        "service": service.name,
-        "staleness": st.staleness,
-        "command": cmd,
-        "argv": argv,
-    })
+    updates.append(
+        {
+            "service": service.name,
+            "staleness": st.staleness,
+            "command": cmd,
+            "argv": argv,
+        }
+    )
 
 
 def _find_repo_dir() -> Path | None:
@@ -19419,7 +19903,9 @@ def _find_repo_dir() -> Path | None:
     try:
         r = subprocess.run(
             ["git", "-C", str(Path.cwd()), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if r.returncode == 0:
             return git_ops.resolve_to_anchor(Path(r.stdout.strip()))
@@ -19440,7 +19926,9 @@ def _find_repo_dir() -> Path | None:
 
 
 def _write_global_config(
-    machine: str, plat: str, srcroot: Path | str,
+    machine: str,
+    plat: str,
+    srcroot: Path | str,
 ) -> None:
     """Scaffold the global machine-wide config (~/.agent-worktrees/config.yaml).
 
@@ -19479,8 +19967,14 @@ platform: {plat}
 
 
 def _write_config(
-    path: Path, repo_dir: Path, machine: str, plat: str,
-    project: str, default_branch: str = "master", *, headless: bool = False,
+    path: Path,
+    repo_dir: Path,
+    machine: str,
+    plat: str,
+    project: str,
+    default_branch: str = "master",
+    *,
+    headless: bool = False,
     no_terminal_profile: bool = False,
 ) -> None:
     """Write the machine-local per-project config YAML.
@@ -19514,7 +20008,8 @@ def _write_config(
         "\n# No Windows Terminal profile for this project (--no-agent adoption):\n"
         "# an empty selection suppresses generation (absent applies the default).\n"
         "terminal_profiles: []\n"
-        if no_terminal_profile else ""
+        if no_terminal_profile
+        else ""
     )
     content = f"""# ~/.{project}/config.yaml
 # Machine-local config for {project} (overrides + machine paths only).
@@ -19566,59 +20061,98 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--recovery", action="store_true")
-    p.add_argument("--no-resume", action="store_true",
-                   help="Don't auto-resume the last Copilot session")
-    p.add_argument("--bare-resume", action="store_true",
-                   help="Two-step restore: create the worktree's mux, but launch "
-                        "Copilot in the HOME dir with no --resume (dodges a CLI "
-                        "bug that fails to start Copilot inside a repo/worktree "
-                        "cwd). Finish with a manual '/resume <id>' inside.")
-    p.add_argument("--restore", action="store_true",
-                   help="Before resuming, restore a Stop-unreachable bound "
-                        "Copilot through the platform remux path")
-    p.add_argument("--no-mux", action="store_true",
-                   help="Bypass tmux/psmux multiplexer (launch directly)")
-    p.add_argument("--no-fast-forward", action="store_true",
-                   help="Don't auto-fast-forward a stale clean worktree on resume")
-    p.add_argument("--json", action="store_true",
-                   help="Non-interactive JSON mode (requires --worktree-id)")
-    p.add_argument("--worktree-id", default=None,
-                   help="Worktree ID to resolve (required with --json)")
-    p.add_argument("--base", action="store_true",
-                   help="Resolve for the anchor repo (no picker, no worktree)")
-    p.add_argument("--auto", action="store_true",
-                   help=argparse.SUPPRESS)  # deprecated alias for --new
-    p.add_argument("--new", action="store_true", dest="new_worktree",
-                   help="Create a worktree AND launch an interactive (muxed) "
-                        "session in it -- for humans and TTY handoffs (refused "
-                        "without a TTY). Agents/daemons should use "
-                        "'agent-worktrees create --json' instead (no launch, no mux).")
-    p.add_argument("--bridge", action="store_true",
-                   help="With --new: mark the worktree as agent-bridge-owned "
-                        "(kind=bridge: hidden from the Picker by default, exempt "
-                        "from routine cleanup)")
+    p.add_argument(
+        "--no-resume", action="store_true", help="Don't auto-resume the last Copilot session"
+    )
+    p.add_argument(
+        "--bare-resume",
+        action="store_true",
+        help="Two-step restore: create the worktree's mux, but launch "
+        "Copilot in the HOME dir with no --resume (dodges a CLI "
+        "bug that fails to start Copilot inside a repo/worktree "
+        "cwd). Finish with a manual '/resume <id>' inside.",
+    )
+    p.add_argument(
+        "--restore",
+        action="store_true",
+        help="Before resuming, restore a Stop-unreachable bound "
+        "Copilot through the platform remux path",
+    )
+    p.add_argument(
+        "--no-mux", action="store_true", help="Bypass tmux/psmux multiplexer (launch directly)"
+    )
+    p.add_argument(
+        "--no-fast-forward",
+        action="store_true",
+        help="Don't auto-fast-forward a stale clean worktree on resume",
+    )
+    p.add_argument(
+        "--json", action="store_true", help="Non-interactive JSON mode (requires --worktree-id)"
+    )
+    p.add_argument(
+        "--worktree-id", default=None, help="Worktree ID to resolve (required with --json)"
+    )
+    p.add_argument(
+        "--base", action="store_true", help="Resolve for the anchor repo (no picker, no worktree)"
+    )
+    p.add_argument(
+        "--auto", action="store_true", help=argparse.SUPPRESS
+    )  # deprecated alias for --new
+    p.add_argument(
+        "--new",
+        action="store_true",
+        dest="new_worktree",
+        help="Create a worktree AND launch an interactive (muxed) "
+        "session in it -- for humans and TTY handoffs (refused "
+        "without a TTY). Agents/daemons should use "
+        "'agent-worktrees create --json' instead (no launch, no mux).",
+    )
+    p.add_argument(
+        "--bridge",
+        action="store_true",
+        help="With --new: mark the worktree as agent-bridge-owned "
+        "(kind=bridge: hidden from the Picker by default, exempt "
+        "from routine cleanup)",
+    )
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
-    p.add_argument("--machine", default=None,
-                   help="Target machine name (bypasses machine picker)")
-    p.add_argument("--environment", default=None,
-                   help="With --machine: target environment label (Win/WSL/Linux)")
-    p.add_argument("--target-no-mux", action="store_true",
-                   help="With --json --machine: request a direct remote launch")
-    p.add_argument("--parent-session", default=None, dest="parent_session",
-                   help="With --new: session id that originated this worktree's "
-                        "work, recorded so a later resume restores context (#1029). "
-                        "Defaults to $COPILOT_AGENT_SESSION_ID.")
-    p.add_argument("--caller-worktree", default=None, dest="caller_worktree",
-                   help="With --new: the caller worktree id that requested this "
-                        "(bridge) worktree, recorded so the Picker can jump back "
-                        "to it (#2178).")
-    p.add_argument("--owner-ref", default=None, dest="owner_ref",
-                   help="With --new: qualified ref "
-                        "(machine/project/worktree_id[#session]) of the worktree "
-                        "that owns this one as an outbound resource -- stamps the "
-                        "new worktree's owner_ref so its finalize settles the "
-                        "owner's claim (resource-obligation-settlement). For a "
-                        "bridge spawn, the dispatching (caller) worktree's ref.")
+    p.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
+    p.add_argument(
+        "--environment",
+        default=None,
+        help="With --machine: target environment label (Win/WSL/Linux)",
+    )
+    p.add_argument(
+        "--target-no-mux",
+        action="store_true",
+        help="With --json --machine: request a direct remote launch",
+    )
+    p.add_argument(
+        "--parent-session",
+        default=None,
+        dest="parent_session",
+        help="With --new: session id that originated this worktree's "
+        "work, recorded so a later resume restores context (#1029). "
+        "Defaults to $COPILOT_AGENT_SESSION_ID.",
+    )
+    p.add_argument(
+        "--caller-worktree",
+        default=None,
+        dest="caller_worktree",
+        help="With --new: the caller worktree id that requested this "
+        "(bridge) worktree, recorded so the Picker can jump back "
+        "to it (#2178).",
+    )
+    p.add_argument(
+        "--owner-ref",
+        default=None,
+        dest="owner_ref",
+        help="With --new: qualified ref "
+        "(machine/project/worktree_id[#session]) of the worktree "
+        "that owns this one as an outbound resource -- stamps the "
+        "new worktree's owner_ref so its finalize settles the "
+        "owner's claim (resource-obligation-settlement). For a "
+        "bridge spawn, the dispatching (caller) worktree's ref.",
+    )
     p.add_argument("copilot_args", nargs="*", default=[])
 
     p = sub.add_parser(
@@ -19637,20 +20171,29 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "session-lock",
         help="Write/remove a session-state lattice lock -- a provable-liveness "
-             "marker beside Copilot's inuse lock, so the picker reads a "
-             "bridge/mux session's liveness file-first",
+        "marker beside Copilot's inuse lock, so the picker reads a "
+        "bridge/mux session's liveness file-first",
     )
     p.add_argument("action", choices=["write", "remove"])
-    p.add_argument("--session", required=True,
-                   help="Copilot session id (the session-state dir name)")
-    p.add_argument("--worktree", default=None,
-                   help="Worktree id this session is bound to (recorded in the "
-                        "lock for cwd-independent attribution)")
-    p.add_argument("--pid", type=int, default=None,
-                   help="Owner process pid whose liveness the lock proves "
-                        "(e.g. the bridge-owned Copilot child); default: caller")
-    p.add_argument("--kind", default="bridge", choices=["bridge"],
-                   help="Lattice layer (default: bridge)")
+    p.add_argument(
+        "--session", required=True, help="Copilot session id (the session-state dir name)"
+    )
+    p.add_argument(
+        "--worktree",
+        default=None,
+        help="Worktree id this session is bound to (recorded in the "
+        "lock for cwd-independent attribution)",
+    )
+    p.add_argument(
+        "--pid",
+        type=int,
+        default=None,
+        help="Owner process pid whose liveness the lock proves "
+        "(e.g. the bridge-owned Copilot child); default: caller",
+    )
+    p.add_argument(
+        "--kind", default="bridge", choices=["bridge"], help="Lattice layer (default: bridge)"
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode")
 
     # finalize
@@ -19659,34 +20202,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate the branch's content is on upstream; prune the worktree only when idle",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
-    p.add_argument("--worktree-id", dest="worktree_id_flag", default=None,
-                   help="Worktree ID to finalize (explicit automation form)")
+    p.add_argument(
+        "--worktree-id",
+        dest="worktree_id_flag",
+        default=None,
+        help="Worktree ID to finalize (explicit automation form)",
+    )
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--abandon", action="store_true",
-                   help="Finalize past the obligation gate even when the worktree "
-                        "still owns unsettled outbound resources; requires an "
-                        "operator-directed --handoff-to recipient/flow.")
-    p.add_argument("--handoff-to", default=None,
-                   help="With --abandon, affirmative recipient or cleanup flow "
-                        "that accepts responsibility for every re-homed resource")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument(
+        "--abandon",
+        action="store_true",
+        help="Finalize past the obligation gate even when the worktree "
+        "still owns unsettled outbound resources; requires an "
+        "operator-directed --handoff-to recipient/flow.",
+    )
+    p.add_argument(
+        "--handoff-to",
+        default=None,
+        help="With --abandon, affirmative recipient or cleanup flow "
+        "that accepts responsibility for every re-homed resource",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
     # push-changes
     p = sub.add_parser("push-changes", help="Push worktree changes to remote default branch")
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None, help="Set worktree title")
-    p.add_argument("--title-only", action="store_true",
-                   help="Set title without pushing (worktree stays active)")
+    p.add_argument(
+        "--title-only",
+        action="store_true",
+        help="Set title without pushing (worktree stays active)",
+    )
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--allow-unsquashed", action="store_true",
-                   help="If the pre-squash step fails, push the individual "
-                        "commits instead of aborting. Off by default -- a "
-                        "squash failure must never silently push every commit "
-                        "to the shared default branch (issue #783).")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument(
+        "--allow-unsquashed",
+        action="store_true",
+        help="If the pre-squash step fails, push the individual "
+        "commits instead of aborting. Off by default -- a "
+        "squash failure must never silently push every commit "
+        "to the shared default branch (issue #783).",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
     # create-pr (PR-workflow: squash, create + push feature branch)
@@ -19694,37 +20251,58 @@ def build_parser() -> argparse.ArgumentParser:
         "create-pr",
         aliases=["pr-create"],
         help="Squash worktree commits, create + push a feature branch for a PR "
-             "(pr-create is the pr-* family alias)",
+        "(pr-create is the pr-* family alias)",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
-    p.add_argument("--title", default=None,
-                   help="Title for the squashed commit / PR slug")
-    p.add_argument("--branch", default=None,
-                   help="Override the generated feature branch name")
-    p.add_argument("--repo", default=None,
-                   help="Target repo 'owner/name' for the PR (default: the worktree repo)")
-    p.add_argument("--new", action="store_true",
-                   help="Force a brand-new PR (fresh branch) even if a live PR is open")
-    p.add_argument("--body", default=None,
-                   help="PR body text (the repo may append source attribution "
-                        "when pr.source_attribution is enabled)")
-    p.add_argument("--body-file", default=None, dest="body_file",
-                   help="Read the PR body from a file")
-    p.add_argument("--no-open", action="store_true", dest="no_open",
-                   help="Push the branch only; do not auto-open the PR via the provider")
-    p.add_argument("--draft", action="store_true",
-                   help="Open the PR as a native DRAFT (not yet ready for "
-                        "review). 'pr-ready' moves it out of draft. Lets you "
-                        "iterate on the open PR before requesting review.")
-    p.add_argument("--hold", action="store_true", dest="hold",
-                   help="Deprecated alias for --draft (the old do-not-merge "
-                        "label hold is retired in favour of native draft state).")
-    p.add_argument("--no-attribution", action="store_true", dest="no_attribution",
-                   help="Omit source-worktree attribution even when the repo "
-                        "enables pr.source_attribution")
+    p.add_argument("--title", default=None, help="Title for the squashed commit / PR slug")
+    p.add_argument("--branch", default=None, help="Override the generated feature branch name")
+    p.add_argument(
+        "--repo",
+        default=None,
+        help="Target repo 'owner/name' for the PR (default: the worktree repo)",
+    )
+    p.add_argument(
+        "--new",
+        action="store_true",
+        help="Force a brand-new PR (fresh branch) even if a live PR is open",
+    )
+    p.add_argument(
+        "--body",
+        default=None,
+        help="PR body text (the repo may append source attribution "
+        "when pr.source_attribution is enabled)",
+    )
+    p.add_argument(
+        "--body-file", default=None, dest="body_file", help="Read the PR body from a file"
+    )
+    p.add_argument(
+        "--no-open",
+        action="store_true",
+        dest="no_open",
+        help="Push the branch only; do not auto-open the PR via the provider",
+    )
+    p.add_argument(
+        "--draft",
+        action="store_true",
+        help="Open the PR as a native DRAFT (not yet ready for "
+        "review). 'pr-ready' moves it out of draft. Lets you "
+        "iterate on the open PR before requesting review.",
+    )
+    p.add_argument(
+        "--hold",
+        action="store_true",
+        dest="hold",
+        help="Deprecated alias for --draft (the old do-not-merge "
+        "label hold is retired in favour of native draft state).",
+    )
+    p.add_argument(
+        "--no-attribution",
+        action="store_true",
+        dest="no_attribution",
+        help="Omit source-worktree attribution even when the repo enables pr.source_attribution",
+    )
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
     # set-pr (record PR metadata from the provider sub-agent)
@@ -19732,15 +20310,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--url", default=None, help="PR URL")
     p.add_argument("--number", type=int, default=None, help="PR number")
-    p.add_argument("--state", default=None,
-                   choices=["creating", "open", "merged", "closed"],
-                   help="PR lifecycle state")
+    p.add_argument(
+        "--state",
+        default=None,
+        choices=["creating", "open", "merged", "closed"],
+        help="PR lifecycle state",
+    )
     p.add_argument("--provider", default=None, help="PR provider (gitea|github|azure-devops)")
     p.add_argument("--branch", default=None, help="Feature branch name (if not already recorded)")
-    p.add_argument("--pr", type=int, default=None,
-                   help="Select which tracked PR to update by number (default: the active PR)")
-    p.add_argument("--select-branch", default=None, dest="select_branch",
-                   help="Select which tracked PR to update by feature branch")
+    p.add_argument(
+        "--pr",
+        type=int,
+        default=None,
+        help="Select which tracked PR to update by number (default: the active PR)",
+    )
+    p.add_argument(
+        "--select-branch",
+        default=None,
+        dest="select_branch",
+        help="Select which tracked PR to update by feature branch",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
@@ -19748,13 +20337,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "pr-ready",
         help="Move a PR out of draft (draft -> ready-for-review). Does NOT "
-             "grant merge consent -- use pr-merge for that.",
+        "grant merge consent -- use pr-merge for that.",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
-    p.add_argument("--repo", default=None,
-                   help="Target repo 'owner/name' for the PR (default: tracked repo)")
-    p.add_argument("--pr", type=int, default=None,
-                   help="Select which tracked PR to release by number")
+    p.add_argument(
+        "--repo", default=None, help="Target repo 'owner/name' for the PR (default: tracked repo)"
+    )
+    p.add_argument(
+        "--pr", type=int, default=None, help="Select which tracked PR to release by number"
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
@@ -19762,18 +20353,28 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "pr-status",
         help="Show tracked PR metadata + live verdict/conflict/merge state "
-             "(reconciles against the provider; recommends pull-forward when "
-             "the active PR has merged)",
+        "(reconciles against the provider; recommends pull-forward when "
+        "the active PR has merged)",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
-    p.add_argument("--all", action="store_true",
-                   help="List every tracked PR, not just the active one")
-    p.add_argument("--no-live", action="store_true", dest="no_live",
-                   help="Skip the live provider read (tracked metadata only)")
-    p.add_argument("--threads", action="store_true",
-                   help="Also list the PR's review comment threads")
-    p.add_argument("--resolve-threads", action="store_true", dest="resolve_threads",
-                   help="Mark active comment threads resolved (implies --threads)")
+    p.add_argument(
+        "--all", action="store_true", help="List every tracked PR, not just the active one"
+    )
+    p.add_argument(
+        "--no-live",
+        action="store_true",
+        dest="no_live",
+        help="Skip the live provider read (tracked metadata only)",
+    )
+    p.add_argument(
+        "--threads", action="store_true", help="Also list the PR's review comment threads"
+    )
+    p.add_argument(
+        "--resolve-threads",
+        action="store_true",
+        dest="resolve_threads",
+        help="Mark active comment threads resolved (implies --threads)",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
@@ -19781,11 +20382,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "pr-complete",
         help="Reconcile the worktree after its PR merged (fast-forward past the "
-             "squash-merge, or rebase to preserve new work). Distinct from finalize.",
+        "squash-merge, or rebase to preserve new work). Distinct from finalize.",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
-    p.add_argument("--dry-run", action="store_true", dest="dry_run",
-                   help="Report the action that would be taken; change nothing")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Report the action that would be taken; change nothing",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
@@ -19799,35 +20404,63 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title-only", action="store_true")
 
     # status
-    p = sub.add_parser("status", help="Show worktree git status (read); "
-                       "annotate this worktree's disposition (write)")
+    p = sub.add_parser(
+        "status",
+        help="Show worktree git status (read); annotate this worktree's disposition (write)",
+    )
     p.add_argument("--json", action="store_true")
-    p.add_argument("--mux-details", action="store_true",
-                   help="Include mux session attached/detached status (JSON only)")
+    p.add_argument(
+        "--mux-details",
+        action="store_true",
+        help="Include mux session attached/detached status (JSON only)",
+    )
     # worktree-status-core: write mode -- annotate THIS worktree's agent-asserted
     # disposition. Any of these switches the command from the fleet read to a
     # per-worktree write (resolved from CWD, or --worktree-id).
-    p.add_argument("--summary", default=None,
-                   help="Set this worktree's one-line disposition summary (write mode)")
-    p.add_argument("--title", default=None,
-                   help="Set this worktree's title -- the Picker's headline label "
-                        "(write mode). Use when the worktree's focus changes. Keep "
-                        "it short (<=30 chars; longer is truncated) so it fits the "
-                        "status bar / Picker rows -- put detail in --summary.")
-    p.add_argument("--follow-up", dest="follow_up", action="store_true",
-                   help="Flag this worktree as having actionable follow-ups (write mode)")
-    p.add_argument("--resolved", action="store_true",
-                   help="Clear the follow-up flag -- this worktree is resolved (write mode)")
-    p.add_argument("--worktree-id", default=None,
-                   help="Target worktree id for write mode (default: inferred from CWD)")
+    p.add_argument(
+        "--summary",
+        default=None,
+        help="Set this worktree's one-line disposition summary (write mode)",
+    )
+    p.add_argument(
+        "--title",
+        default=None,
+        help="Set this worktree's title -- the Picker's headline label "
+        "(write mode). Use when the worktree's focus changes. Keep "
+        "it short (<=30 chars; longer is truncated) so it fits the "
+        "status bar / Picker rows -- put detail in --summary.",
+    )
+    p.add_argument(
+        "--follow-up",
+        dest="follow_up",
+        action="store_true",
+        help="Flag this worktree as having actionable follow-ups (write mode)",
+    )
+    p.add_argument(
+        "--resolved",
+        action="store_true",
+        help="Clear the follow-up flag -- this worktree is resolved (write mode)",
+    )
+    p.add_argument(
+        "--worktree-id",
+        default=None,
+        help="Target worktree id for write mode (default: inferred from CWD)",
+    )
     # worktree-status-core: history read mode -- print THIS worktree's durable
     # disposition trajectory (summary/title/follow-up over time) so an agent can
     # grok "what was this worktree doing". A read, orthogonal to the write flags.
-    p.add_argument("--history", action="store_true",
-                   help="Show this worktree's disposition history (summary/title "
-                        "changes over time); read mode, honors --json / --limit")
-    p.add_argument("--limit", type=int, default=None,
-                   help="With --history, show only the most recent N entries")
+    p.add_argument(
+        "--history",
+        action="store_true",
+        help="Show this worktree's disposition history (summary/title "
+        "changes over time); read mode, honors --json / --limit",
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="With --history, show only the most recent N entries",
+    )
 
     # effort-focus -- one canonical effort/slice bound to this worktree.
     p = sub.add_parser(
@@ -19835,20 +20468,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bind, inspect, replace, or release this worktree's active effort",
     )
     p.add_argument("action", choices=("bind", "show", "release"))
-    p.add_argument("path", nargs="?", default=None,
-                   help="Repository-relative effort README path (bind)")
-    p.add_argument("--participant", default=None,
-                   help="Declared participant identity (bind)")
-    p.add_argument("--slice", dest="effort_slice", default=None,
-                   help="Declared Plan/Coordination slice (bind)")
-    p.add_argument("--replace", action="store_true",
-                   help="Explicitly replace an existing binding (bind)")
-    p.add_argument("--completed", action="store_true",
-                   help="Release only after the effort is verified Done/archived")
-    p.add_argument("--transfer", default=None, metavar="TARGET",
-                   help="Release by naming the tracked objective receiving responsibility")
-    p.add_argument("--worktree-id", default=None,
-                   help="Target worktree id (default: inferred from cwd)")
+    p.add_argument(
+        "path", nargs="?", default=None, help="Repository-relative effort README path (bind)"
+    )
+    p.add_argument("--participant", default=None, help="Declared participant identity (bind)")
+    p.add_argument(
+        "--slice",
+        dest="effort_slice",
+        default=None,
+        help="Declared Plan/Coordination slice (bind)",
+    )
+    p.add_argument(
+        "--replace", action="store_true", help="Explicitly replace an existing binding (bind)"
+    )
+    p.add_argument(
+        "--completed",
+        action="store_true",
+        help="Release only after the effort is verified Done/archived",
+    )
+    p.add_argument(
+        "--transfer",
+        default=None,
+        metavar="TARGET",
+        help="Release by naming the tracked objective receiving responsibility",
+    )
+    p.add_argument(
+        "--worktree-id", default=None, help="Target worktree id (default: inferred from cwd)"
+    )
     p.add_argument("--json", action="store_true")
 
     # status-segment (one styled line for a tmux/psmux status bar)
@@ -19856,48 +20502,62 @@ def build_parser() -> argparse.ArgumentParser:
         "status-segment",
         help="Print a tmux/psmux status-bar segment for the worktree at cwd",
     )
-    p.add_argument("--path", default=None,
-                   help="Worktree path to classify (default: current directory)")
-    p.add_argument("--fetch", action="store_true",
-                   help="Fetch before classifying (refreshes behind-counts; slower)")
-    p.add_argument("--plain", action="store_true",
-                   help="Plain text without tmux #[style] directives")
-    p.add_argument("--no-title", action="store_true",
-                   help="Omit the worktree title; show only the state block")
+    p.add_argument(
+        "--path", default=None, help="Worktree path to classify (default: current directory)"
+    )
+    p.add_argument(
+        "--fetch",
+        action="store_true",
+        help="Fetch before classifying (refreshes behind-counts; slower)",
+    )
+    p.add_argument(
+        "--plain", action="store_true", help="Plain text without tmux #[style] directives"
+    )
+    p.add_argument(
+        "--no-title",
+        action="store_true",
+        help="Omit the worktree title; show only the state block",
+    )
 
     # status-context (left status-bar segment: machine / env / repo:id)
     p = sub.add_parser(
         "status-context",
         help="Print a tmux/psmux left status segment (machine, env, repo:id)",
     )
-    p.add_argument("--path", default=None,
-                   help="Worktree path to describe (default: current directory)")
-    p.add_argument("--plain", action="store_true",
-                   help="Plain text without tmux #[style] directives")
+    p.add_argument(
+        "--path", default=None, help="Worktree path to describe (default: current directory)"
+    )
+    p.add_argument(
+        "--plain", action="store_true", help="Plain text without tmux #[style] directives"
+    )
 
     # status-updater (background loop: refresh @aw_ctx/@aw_seg off the paint path)
     p = sub.add_parser(
         "status-updater",
         help="Background loop: keep a session's @aw_ctx/@aw_seg status vars "
-             "fresh (no per-render binstub spawns)",
+        "fresh (no per-render binstub spawns)",
     )
-    p.add_argument("--session", required=True,
-                   help="Mux session name to update (e.g. wt-<id>)")
-    p.add_argument("--mux", default=None, choices=["psmux", "tmux"],
-                   help="Multiplexer binary (default: auto-detect)")
-    p.add_argument("--path", default=None,
-                   help="Worktree path to classify (default: current directory)")
-    p.add_argument("--interval", type=int, default=15,
-                   help="Disposition refresh cadence in seconds (min 2)")
+    p.add_argument("--session", required=True, help="Mux session name to update (e.g. wt-<id>)")
+    p.add_argument(
+        "--mux",
+        default=None,
+        choices=["psmux", "tmux"],
+        help="Multiplexer binary (default: auto-detect)",
+    )
+    p.add_argument(
+        "--path", default=None, help="Worktree path to classify (default: current directory)"
+    )
+    p.add_argument(
+        "--interval", type=int, default=15, help="Disposition refresh cadence in seconds (min 2)"
+    )
     # status-monitor (one resident coalescing tracker for ALL wt-* sessions)
     p = sub.add_parser(
         "status-monitor",
         help="Resident, coalescing status tracker for every wt-* session "
-             "(one process instead of one per session; default-on, opt out via "
-             "AGENT_WORKTREES_STATUS_MONITOR=0)",
+        "(one process instead of one per session; default-on, opt out via "
+        "AGENT_WORKTREES_STATUS_MONITOR=0)",
     )
-    p.add_argument("--interval", type=int, default=15,
-                   help="Sweep cadence in seconds (min 2)")
+    p.add_argument("--interval", type=int, default=15, help="Sweep cadence in seconds (min 2)")
     p = sub.add_parser(
         "reconcile-sessions",
         help="Run one bounded record/session/projection reconciliation pass",
@@ -19909,535 +20569,828 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "status-monitor-restart",
         help="Reap a superseded status-monitor and spawn the current-runtime "
-             "one (invoked by the auto-update cutover so a deploy never leaves "
-             "live sessions' status bars frozen)",
+        "one (invoked by the auto-update cutover so a deploy never leaves "
+        "live sessions' status bars frozen)",
     )
     # handoff-cutover (live-cutover handoff: seeded successor window + pane retire)
     p = sub.add_parser(
         "handoff-cutover",
         help="Live handoff: spawn a seeded successor Copilot in a new mux "
-             "window (cut over to it), or retire an old pane",
+        "window (cut over to it), or retire an old pane",
     )
-    p.add_argument("--seed", default=None,
-                   help="Seed prompt for the successor's first interactive "
-                        "turn (copilot -i). Required in spawn mode.")
-    p.add_argument("--worktree-id", dest="worktree_id", default=None,
-                   help="Target worktree (default: infer from cwd)")
-    p.add_argument("--session-id", dest="session_id", default=None,
-                   help="Resumed session id -- authoritative worktree fallback "
-                        "when cwd is HOME (bare resume); resolves the worktree "
-                        "from the session registry")
-    p.add_argument("--handoff-token", default=None,
-                   help="Pending handoff token to associate with the successor "
-                        "after its initial prompt creates a real session")
-    p.add_argument("--mux-session", dest="mux_session", default=None,
-                   help="Retire mode: expected mux session containing the pane; "
-                        "a mismatch is treated as predecessor already gone")
-    p.add_argument("--require-mux-identity", action="store_true",
-                   help="Retire mode: never signal a pane unless --mux-session "
-                        "was recorded and still matches; reap by session id only")
-    p.add_argument("--old-pane", dest="old_pane", default=None,
-                   help="Explicit pane id to report as the old pane "
-                        "(default: the session's active pane)")
-    p.add_argument("--retire-pane", dest="retire_pane", default=None,
-                   help="Retire mode: double-Ctrl-C this pane id (Copilot's "
-                        "clean quit) and report whether it exited")
-    p.add_argument("--successor-verified", action="store_true",
-                   help="Retire mode: record that the successor invoked the "
-                        "handoff consumer before retiring the old pane")
-    p.add_argument("--retire-reason", default=None,
-                   help="Retire mode: high-level reason for activity logging")
-    p.add_argument("--expected-copilot-pid", type=int, default=None,
-                   help="Retire mode: recorded predecessor Copilot pid")
-    p.add_argument("--expected-copilot-start-time", default=None,
-                   help="Retire mode: recorded predecessor process creation identity")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Print the resolved plan without opening a window")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only; always on)")
+    p.add_argument(
+        "--seed",
+        default=None,
+        help="Seed prompt for the successor's first interactive "
+        "turn (copilot -i). Required in spawn mode.",
+    )
+    p.add_argument(
+        "--worktree-id",
+        dest="worktree_id",
+        default=None,
+        help="Target worktree (default: infer from cwd)",
+    )
+    p.add_argument(
+        "--session-id",
+        dest="session_id",
+        default=None,
+        help="Resumed session id -- authoritative worktree fallback "
+        "when cwd is HOME (bare resume); resolves the worktree "
+        "from the session registry",
+    )
+    p.add_argument(
+        "--handoff-token",
+        default=None,
+        help="Pending handoff token to associate with the successor "
+        "after its initial prompt creates a real session",
+    )
+    p.add_argument(
+        "--mux-session",
+        dest="mux_session",
+        default=None,
+        help="Retire mode: expected mux session containing the pane; "
+        "a mismatch is treated as predecessor already gone",
+    )
+    p.add_argument(
+        "--require-mux-identity",
+        action="store_true",
+        help="Retire mode: never signal a pane unless --mux-session "
+        "was recorded and still matches; reap by session id only",
+    )
+    p.add_argument(
+        "--old-pane",
+        dest="old_pane",
+        default=None,
+        help="Explicit pane id to report as the old pane (default: the session's active pane)",
+    )
+    p.add_argument(
+        "--retire-pane",
+        dest="retire_pane",
+        default=None,
+        help="Retire mode: double-Ctrl-C this pane id (Copilot's "
+        "clean quit) and report whether it exited",
+    )
+    p.add_argument(
+        "--successor-verified",
+        action="store_true",
+        help="Retire mode: record that the successor invoked the "
+        "handoff consumer before retiring the old pane",
+    )
+    p.add_argument(
+        "--retire-reason", default=None, help="Retire mode: high-level reason for activity logging"
+    )
+    p.add_argument(
+        "--expected-copilot-pid",
+        type=int,
+        default=None,
+        help="Retire mode: recorded predecessor Copilot pid",
+    )
+    p.add_argument(
+        "--expected-copilot-start-time",
+        default=None,
+        help="Retire mode: recorded predecessor process creation identity",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="Print the resolved plan without opening a window"
+    )
+    p.add_argument(
+        "--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)"
+    )
     # embody (D5: agent-initiated CLI embodiment -- detached mux+Copilot spawn)
     p = sub.add_parser(
         "embody",
         help="Create or resume a DETACHED mux+Copilot CLI session in a worktree "
-             "(the agent-facing embodiment verb; auto-registers with the bridge)",
+        "(the agent-facing embodiment verb; auto-registers with the bridge)",
     )
     g = p.add_mutually_exclusive_group()
-    g.add_argument("--worktree-id", dest="worktree_id", default=None,
-                   help="Embody in this existing worktree")
-    g.add_argument("--new", action="store_true",
-                   help="Create a fresh worktree first, then embody in it")
-    p.add_argument("--seed", default=None,
-                   help="Seed prompt injected as the session's first "
-                        "interactive turn once Copilot is ready")
-    p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout",
-                   type=float, default=180.0, metavar="SECONDS",
-                   help="How long to wait for Copilot's input prompt before "
-                        "typing the --seed (default 180). A fresh MCP/skill-heavy "
-                        "autopilot can take much longer than the fast handoff "
-                        "default to become ready; if this is too short the seed "
-                        "is never delivered and the session idles at an empty "
-                        "prompt")
-    p.add_argument("--driver", default=None,
-                   help="Label of the agent steering this session; stamps the "
-                        "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so "
-                        "a human taking over in Neuron Forge sees who's at the "
-                        "wheel")
-    p.add_argument("--verify-timeout", dest="verify_timeout", type=float,
-                   default=0.0, metavar="SECONDS",
-                   help="Wait up to N seconds for the mux session to come up "
-                        "before returning (default 0: don't wait)")
-    p.add_argument("--recovery", action="store_true",
-                   help="Use the repo's recovery launch command")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Print the resolved plan without spawning anything")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only; always on)")
+    g.add_argument(
+        "--worktree-id", dest="worktree_id", default=None, help="Embody in this existing worktree"
+    )
+    g.add_argument(
+        "--new", action="store_true", help="Create a fresh worktree first, then embody in it"
+    )
+    p.add_argument(
+        "--seed",
+        default=None,
+        help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
+    )
+    p.add_argument(
+        "--seed-ready-timeout",
+        dest="seed_ready_timeout",
+        type=float,
+        default=180.0,
+        metavar="SECONDS",
+        help="How long to wait for Copilot's input prompt before "
+        "typing the --seed (default 180). A fresh MCP/skill-heavy "
+        "autopilot can take much longer than the fast handoff "
+        "default to become ready; if this is too short the seed "
+        "is never delivered and the session idles at an empty "
+        "prompt",
+    )
+    p.add_argument(
+        "--driver",
+        default=None,
+        help="Label of the agent steering this session; stamps the "
+        "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so "
+        "a human taking over in Neuron Forge sees who's at the "
+        "wheel",
+    )
+    p.add_argument(
+        "--verify-timeout",
+        dest="verify_timeout",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Wait up to N seconds for the mux session to come up "
+        "before returning (default 0: don't wait)",
+    )
+    p.add_argument(
+        "--recovery", action="store_true", help="Use the repo's recovery launch command"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="Print the resolved plan without spawning anything"
+    )
+    p.add_argument(
+        "--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)"
+    )
 
     p = sub.add_parser("list", help="List worktrees from tracking records")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
-    p.add_argument("--mux-details", action="store_true",
-                   help="Include mux session attached/detached status (JSON only)")
-    p.add_argument("--tracking-status", default="all",
-                   choices=["active", "complete", "finalized", "orphaned", "all"],
-                   help="Filter by tracking status (default: all)")
-    p.add_argument("--all", action="store_true",
-                   help="Include worktrees whose directories no longer exist on disk")
-    p.add_argument("--include-other-platforms", action="store_true",
-                   help="Include worktrees from other platforms (e.g. Windows when on Linux)")
-    p.add_argument("--classify", action="store_true",
-                   help="Include git state classification (state/ahead/behind/"
-                        "dirty; JSON only). Slower: ~5 git calls per worktree.")
-    p.add_argument("--cache-only", action="store_true",
-                   help="Cache-only fast paint (picker-cache-first-paint, "
-                        "dotfiles#948): build JSON rows from ONLY the cached "
-                        "session-render fields in each tracking record -- no "
-                        "events.jsonl scan, no process/mux scan, no git "
-                        "classify. Never-populated worktrees render Unknown. "
-                        "Used by the Picker's SSH fast phase; a --classify "
-                        "populate later fills + writes the cache back.")
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
+    p.add_argument(
+        "--mux-details",
+        action="store_true",
+        help="Include mux session attached/detached status (JSON only)",
+    )
+    p.add_argument(
+        "--tracking-status",
+        default="all",
+        choices=["active", "complete", "finalized", "orphaned", "all"],
+        help="Filter by tracking status (default: all)",
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="Include worktrees whose directories no longer exist on disk",
+    )
+    p.add_argument(
+        "--include-other-platforms",
+        action="store_true",
+        help="Include worktrees from other platforms (e.g. Windows when on Linux)",
+    )
+    p.add_argument(
+        "--classify",
+        action="store_true",
+        help="Include git state classification (state/ahead/behind/"
+        "dirty; JSON only). Slower: ~5 git calls per worktree.",
+    )
+    p.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="Cache-only fast paint (picker-cache-first-paint, "
+        "dotfiles#948): build JSON rows from ONLY the cached "
+        "session-render fields in each tracking record -- no "
+        "events.jsonl scan, no process/mux scan, no git "
+        "classify. Never-populated worktrees render Unknown. "
+        "Used by the Picker's SSH fast phase; a --classify "
+        "populate later fills + writes the cache back.",
+    )
     p.add_argument(
         "--profile-assignment-history",
         action="store_true",
         help="Include bounded profile_assignments history and the latest "
-             "assignment in each JSON worktree row. Ordinary and cache-polled "
-             "rows include only current_profile_assignment.",
+        "assignment in each JSON worktree row. Ordinary and cache-polled "
+        "rows include only current_profile_assignment.",
     )
-    p.add_argument("--stream", action="store_true",
-                   help="Emit newline-delimited JSON (one worktree per line, "
-                        "flushed) for the Picker's streaming SSH consumer: a "
-                        "begin frame, fast (unclassified) rows, then classified "
-                        "rows (with --classify), then a done frame. Implies "
-                        "--json.")
-    p.add_argument("--fresh", action="store_true",
-                   help="Bypass the coalescing result cache (list-coalescing, "
-                        "cx#918) and force a live scan, refreshing the cache. "
-                        "Use when exactness matters; normal polling reads a "
-                        "short-TTL cache so concurrent/repeated calls coalesce "
-                        "onto one scan (tune via AGENT_WORKTREES_LIST_CACHE_TTL, "
-                        "0 disables).")
-    p.add_argument("--worktree-id",
-                   help="Restrict the listing to one exact or unique-suffix ID")
-    p.add_argument("--refresh", action="store_true",
-                   help="Before listing one --worktree-id, repair its missing "
-                        "session registry and refresh bound/mux liveness")
-    p.add_argument("--glance", action="store_true",
-                   help="Compact, agent-digestible 'at a glance' digest of "
-                        "ACTIVE worktrees: one line each (id, disposition age, "
-                        "title -- summary), ranked by recency, with "
-                        "no-disposition worktrees named rather than hidden. For "
-                        "situational awareness / sub-agent consumption -- far "
-                        "cheaper to read than --json.")
+    p.add_argument(
+        "--stream",
+        action="store_true",
+        help="Emit newline-delimited JSON (one worktree per line, "
+        "flushed) for the Picker's streaming SSH consumer: a "
+        "begin frame, fast (unclassified) rows, then classified "
+        "rows (with --classify), then a done frame. Implies "
+        "--json.",
+    )
+    p.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Bypass the coalescing result cache (list-coalescing, "
+        "cx#918) and force a live scan, refreshing the cache. "
+        "Use when exactness matters; normal polling reads a "
+        "short-TTL cache so concurrent/repeated calls coalesce "
+        "onto one scan (tune via AGENT_WORKTREES_LIST_CACHE_TTL, "
+        "0 disables).",
+    )
+    p.add_argument("--worktree-id", help="Restrict the listing to one exact or unique-suffix ID")
+    p.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Before listing one --worktree-id, repair its missing "
+        "session registry and refresh bound/mux liveness",
+    )
+    p.add_argument(
+        "--glance",
+        action="store_true",
+        help="Compact, agent-digestible 'at a glance' digest of "
+        "ACTIVE worktrees: one line each (id, disposition age, "
+        "title -- summary), ranked by recency, with "
+        "no-disposition worktrees named rather than hidden. For "
+        "situational awareness / sub-agent consumption -- far "
+        "cheaper to read than --json.",
+    )
 
     # claims (a worktree's full claim ledger: outbound resources + inbound tasks)
     p = sub.add_parser(
         "claims",
         help="Show a worktree's full claim ledger (outbound resources + its "
-             "owner + inbound tasks; best-effort via agent-dispatch). Defaults "
-             "to the current worktree; pass an id for another. "
-             "`claims release <ref>` retires one outbound claim.",
+        "owner + inbound tasks; best-effort via agent-dispatch). Defaults "
+        "to the current worktree; pass an id for another. "
+        "`claims release <ref>` retires one outbound claim.",
     )
-    p.add_argument("target", nargs="*", default=None,
-                   help="[worktree_id] to show, OR 'add <kind> <ref>' to journal "
-                        "a new outbound claim, OR 'release <ref>' to retire one, "
-                        "OR 'settle <ref>' to mark it at-rest (settled) / released, "
-                        "OR 'sweep' to reclaim provably-gone+safe obligations "
-                        "(never-wedge), OR 'orphans' to list obligations re-homed "
-                        "by an --abandon finalize (pending cleanup), OR 'cleanup "
-                        "[<ref-or-source-worktree> ...]' to reclaim matching "
-                        "re-homed obligations (no selector = all; --apply to act)")
-    p.add_argument("--remove", action="store_true",
-                   help="with release: drop the claim entry entirely instead of "
-                        "marking it released")
-    p.add_argument("--apply", action="store_true",
-                   help="with sweep/cleanup: write the abandonments / reclaim the "
-                        "orphaned resources (default: dry-run preview only)")
-    p.add_argument("--note", default="",
-                   help="with add: an optional human label for the claim")
-    p.add_argument("--released", action="store_true",
-                   help="with settle: mark the claim released rather than at-rest")
-    p.add_argument("--worktree", default=None, dest="release_worktree",
-                   help="with release/settle: the owner worktree (default: current)")
-    p.add_argument("--owner-ref", default=None, dest="claim_owner_ref",
-                   help="with add/settle: journal/settle onto the owner named by "
-                        "this qualified ref (machine/project/worktree_id) instead "
-                        "of the current project's cwd-inferred worktree -- resolves "
-                        "cross-project on THIS machine (a cross-machine owner is "
-                        "deferred to the lease mirror). For a call-site (e.g. "
-                        "agent-codespaces on CodeSpace borrow/disconnect) whose cwd "
-                        "is not the borrowing worktree.")
-    p.add_argument("--to", nargs="+", default=None, dest="handoff_to",
-                   metavar="VALUE",
-                   help="with handoff offer: qualified consumer "
-                        "machine/project/worktree_id followed by claim refs; "
-                        "values end at the next option")
-    p.add_argument("--reason", default="",
-                   help="with handoff decline/cancel: required explanation")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument(
+        "target",
+        nargs="*",
+        default=None,
+        help="[worktree_id] to show, OR 'add <kind> <ref>' to journal "
+        "a new outbound claim, OR 'release <ref>' to retire one, "
+        "OR 'settle <ref>' to mark it at-rest (settled) / released, "
+        "OR 'sweep' to reclaim provably-gone+safe obligations "
+        "(never-wedge), OR 'orphans' to list obligations re-homed "
+        "by an --abandon finalize (pending cleanup), OR 'cleanup "
+        "[<ref-or-source-worktree> ...]' to reclaim matching "
+        "re-homed obligations (no selector = all; --apply to act)",
+    )
+    p.add_argument(
+        "--remove",
+        action="store_true",
+        help="with release: drop the claim entry entirely instead of marking it released",
+    )
+    p.add_argument(
+        "--apply",
+        action="store_true",
+        help="with sweep/cleanup: write the abandonments / reclaim the "
+        "orphaned resources (default: dry-run preview only)",
+    )
+    p.add_argument("--note", default="", help="with add: an optional human label for the claim")
+    p.add_argument(
+        "--released",
+        action="store_true",
+        help="with settle: mark the claim released rather than at-rest",
+    )
+    p.add_argument(
+        "--worktree",
+        default=None,
+        dest="release_worktree",
+        help="with release/settle: the owner worktree (default: current)",
+    )
+    p.add_argument(
+        "--owner-ref",
+        default=None,
+        dest="claim_owner_ref",
+        help="with add/settle: journal/settle onto the owner named by "
+        "this qualified ref (machine/project/worktree_id) instead "
+        "of the current project's cwd-inferred worktree -- resolves "
+        "cross-project on THIS machine (a cross-machine owner is "
+        "deferred to the lease mirror). For a call-site (e.g. "
+        "agent-codespaces on CodeSpace borrow/disconnect) whose cwd "
+        "is not the borrowing worktree.",
+    )
+    p.add_argument(
+        "--to",
+        nargs="+",
+        default=None,
+        dest="handoff_to",
+        metavar="VALUE",
+        help="with handoff offer: qualified consumer "
+        "machine/project/worktree_id followed by claim refs; "
+        "values end at the next option",
+    )
+    p.add_argument(
+        "--reason", default="", help="with handoff decline/cancel: required explanation"
+    )
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # claimant-liveness (SSH endpoint for cross-machine reap-safety: report
     # whether an owner_ref's worktree is alive ON THIS machine)
     p = sub.add_parser(
         "claimant-liveness",
         help="Report same-machine liveness of an owner_ref "
-             "(machine/project/worktree_id) as a tri-state alive/gone/unknown. "
-             "The endpoint the reaper's cross-machine claimant probe calls over "
-             "SSH; not typically run by hand.",
+        "(machine/project/worktree_id) as a tri-state alive/gone/unknown. "
+        "The endpoint the reaper's cross-machine claimant probe calls over "
+        "SSH; not typically run by hand.",
     )
-    p.add_argument("owner_ref",
-                   help="Qualified owner ref (machine/project/worktree_id[#session])")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument("owner_ref", help="Qualified owner ref (machine/project/worktree_id[#session])")
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # create (non-interactive worktree creation; --system for daemon-owned)
     p = sub.add_parser(
         "create",
         help="Create a worktree programmatically (no launch, no mux) -- the "
-             "path for agents/daemons; prints id + dir (add --json for a plan)",
+        "path for agents/daemons; prints id + dir (add --json for a plan)",
     )
-    p.add_argument("--system", action="store_true",
-                   help="Create a daemon-owned worktree (hidden from Picker, "
-                        "cleanup-exempt; tear down with remove-system)")
-    p.add_argument("--name", default=None,
-                   help="With --system: short slug for the worktree id (e.g. the service name)")
-    p.add_argument("--owner", default=None,
-                   help="With --system: owning service name (recorded for the browse view)")
-    p.add_argument("--interface", default=None, choices=["cli", "acp"],
-                   help="Stamp the worktree's interface mark (cli|acp). Default: "
-                        "derived from kind (bridge=acp, else cli). See #2668.")
-    p.add_argument("--origin", default=None, choices=["user", "system", "delegate"],
-                   help="Stamp who kicked the work off (user|system|delegate). "
-                        "user = operator (NF/Picker), delegate = agent-spawned, "
-                        "system = background/daemon. Default: derived from kind + "
-                        "caller. Governs Picker/cockpit visibility. See #2668.")
-    p.add_argument("--dispatch-task-id", default=None,
-                   help="Task id for a dispatch-created attempt worktree")
-    p.add_argument("--dispatch-reservation-key", default=None,
-                   help="Exact spawn reservation that created this worktree")
-    p.add_argument("--dispatch-attempt", type=int, default=None,
-                   help="Positive dispatch spawn-attempt ordinal")
-    p.add_argument("--dispatch-driver", default=None,
-                   help="Dispatch lifecycle driver that owns this allocation")
-    p.add_argument("--dispatch-supervisor", default=None,
-                   help="Exact supervisor process provenance for this allocation")
-    p.add_argument("--owner-ref", default=None, dest="owner_ref",
-                   help="Qualified ref (machine/project/worktree_id[#session]) of "
-                        "the worktree that owns this one as an outbound resource. "
-                        "Usually injected by `run` via AGENT_WORKTREES_OWNER_REF; "
-                        "the flag is the low-level primitive for scripts/tools "
-                        "that already know both sides.")
-    p.add_argument("--no-owner", action="store_true", dest="no_owner",
-                   help="Create a deliberately top-level worktree: do NOT inherit "
-                        "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, or a "
-                        "parent session from COPILOT_AGENT_SESSION_ID, so no parent's "
-                        "finalize or terminal-cleanup gate is held on it (Ph6).")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument(
+        "--system",
+        action="store_true",
+        help="Create a daemon-owned worktree (hidden from Picker, "
+        "cleanup-exempt; tear down with remove-system)",
+    )
+    p.add_argument(
+        "--name",
+        default=None,
+        help="With --system: short slug for the worktree id (e.g. the service name)",
+    )
+    p.add_argument(
+        "--owner",
+        default=None,
+        help="With --system: owning service name (recorded for the browse view)",
+    )
+    p.add_argument(
+        "--interface",
+        default=None,
+        choices=["cli", "acp"],
+        help="Stamp the worktree's interface mark (cli|acp). Default: "
+        "derived from kind (bridge=acp, else cli). See #2668.",
+    )
+    p.add_argument(
+        "--origin",
+        default=None,
+        choices=["user", "system", "delegate"],
+        help="Stamp who kicked the work off (user|system|delegate). "
+        "user = operator (NF/Picker), delegate = agent-spawned, "
+        "system = background/daemon. Default: derived from kind + "
+        "caller. Governs Picker/cockpit visibility. See #2668.",
+    )
+    p.add_argument(
+        "--dispatch-task-id", default=None, help="Task id for a dispatch-created attempt worktree"
+    )
+    p.add_argument(
+        "--dispatch-reservation-key",
+        default=None,
+        help="Exact spawn reservation that created this worktree",
+    )
+    p.add_argument(
+        "--dispatch-attempt",
+        type=int,
+        default=None,
+        help="Positive dispatch spawn-attempt ordinal",
+    )
+    p.add_argument(
+        "--dispatch-driver",
+        default=None,
+        help="Dispatch lifecycle driver that owns this allocation",
+    )
+    p.add_argument(
+        "--dispatch-supervisor",
+        default=None,
+        help="Exact supervisor process provenance for this allocation",
+    )
+    p.add_argument(
+        "--owner-ref",
+        default=None,
+        dest="owner_ref",
+        help="Qualified ref (machine/project/worktree_id[#session]) of "
+        "the worktree that owns this one as an outbound resource. "
+        "Usually injected by `run` via AGENT_WORKTREES_OWNER_REF; "
+        "the flag is the low-level primitive for scripts/tools "
+        "that already know both sides.",
+    )
+    p.add_argument(
+        "--no-owner",
+        action="store_true",
+        dest="no_owner",
+        help="Create a deliberately top-level worktree: do NOT inherit "
+        "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, or a "
+        "parent session from COPILOT_AGENT_SESSION_ID, so no parent's "
+        "finalize or terminal-cleanup gate is held on it (Ph6).",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # run (execute an inner subcommand; journal the resource it produces as an
     # outbound claim on THIS worktree -- resource-claims)
     p = sub.add_parser(
         "run",
         help="Run an inner (possibly cross-repo) subcommand and journal the "
-             "resource it produces as an outbound claim on THIS worktree "
-             '(e.g. run "<other-project> create --json")',
+        "resource it produces as an outbound claim on THIS worktree "
+        '(e.g. run "<other-project> create --json")',
     )
-    p.add_argument("--owner-ref", default=None, dest="owner_ref",
-                   help="Override the auto-resolved owner ref "
-                        "(machine/project/worktree_id[#session]) for the calling "
-                        "worktree. Default: resolved from the current directory.")
-    p.add_argument("inner_command", nargs=argparse.REMAINDER,
-                   help='The inner subcommand to run, as a quoted string or '
-                        'trailing tokens (e.g. "copilot-extensions create --json")')
+    p.add_argument(
+        "--owner-ref",
+        default=None,
+        dest="owner_ref",
+        help="Override the auto-resolved owner ref "
+        "(machine/project/worktree_id[#session]) for the calling "
+        "worktree. Default: resolved from the current directory.",
+    )
+    p.add_argument(
+        "inner_command",
+        nargs=argparse.REMAINDER,
+        help="The inner subcommand to run, as a quoted string or "
+        'trailing tokens (e.g. "copilot-extensions create --json")',
+    )
     p = sub.add_parser("remove-system", help="Remove a system worktree by id")
     p.add_argument("worktree_id", help="Worktree id to remove")
-    p.add_argument("--json", action="store_true",
-                   help="JSON output mode (stdout is JSON only)")
+    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     # cleanup
     p = sub.add_parser("cleanup", help="List and clean orphaned worktrees")
     p.add_argument("--clean", action="store_true")
-    p.add_argument("--worktree-id", default=None,
-                   help="Clean a single worktree by ID (non-interactive, "
-                        "re-checks prune-safety; pair with --json for the "
-                        "picker's per-item progress)")
-    p.add_argument("--force", action="store_true",
-                   help="With --worktree-id: reap even if prune-safety would "
-                        "skip it (still refuses an active session)")
-    p.add_argument("--json", action="store_true",
-                   help="With --worktree-id: emit a single JSON result object")
-    p.add_argument("--include-unused", action="store_true",
-                   help="Also clean truly-empty worktrees (no commits, "
-                        "zero conversation turns)")
-    p.add_argument("--include-conversations", action="store_true",
-                   help="Also clean conversation-only worktrees (no commits "
-                        "but the session held turns); implies --include-unused")
-    p.add_argument("--reconcile-prs", action="store_true",
-                   help="Refresh tracked PR state from the provider before "
-                        "deciding (heals stale 'open' PRs merged externally); "
-                        "requires network + provider credentials")
+    p.add_argument(
+        "--worktree-id",
+        default=None,
+        help="Clean a single worktree by ID (non-interactive, "
+        "re-checks prune-safety; pair with --json for the "
+        "picker's per-item progress)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="With --worktree-id: reap even if prune-safety would "
+        "skip it (still refuses an active session)",
+    )
+    p.add_argument(
+        "--json", action="store_true", help="With --worktree-id: emit a single JSON result object"
+    )
+    p.add_argument(
+        "--include-unused",
+        action="store_true",
+        help="Also clean truly-empty worktrees (no commits, zero conversation turns)",
+    )
+    p.add_argument(
+        "--include-conversations",
+        action="store_true",
+        help="Also clean conversation-only worktrees (no commits "
+        "but the session held turns); implies --include-unused",
+    )
+    p.add_argument(
+        "--reconcile-prs",
+        action="store_true",
+        help="Refresh tracked PR state from the provider before "
+        "deciding (heals stale 'open' PRs merged externally); "
+        "requires network + provider credentials",
+    )
     p.add_argument("--max-age-days", type=int, default=7)
 
     # gc (garbage-collect worktrees: tracked reap + orphan-directory sweep)
     p = sub.add_parser(
         "gc",
         help="Garbage-collect worktrees: tracked reap (cleanup verdict) + "
-             "on-disk orphan-directory sweep + git worktree prune")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Report what would be removed without removing anything")
-    p.add_argument("--json", action="store_true",
-                   help="Emit the orphan-sweep report as JSON (the tracked reap "
-                        "runs in text mode)")
-    p.add_argument("--orphans-only", action="store_true",
-                   help="Only sweep orphan directories; skip the tracked reap "
-                        "and the managed (system/bridge) sweep")
-    p.add_argument("--no-managed", action="store_true",
-                   help="Skip the managed (system/bridge) leak sweep")
-    p.add_argument("--no-reap-shells", action="store_true",
-                   help="Skip the orphaned launcher-shell reap (pwsh/python "
-                        "scaffolding stranded by a force-closed terminal)")
-    p.add_argument("--reap-shells-grace-hours", type=float, default=None,
-                   help="Idle window before an orphaned launcher shell is "
-                        "eligible (default 1h); a fresh one is always spared")
-    p.add_argument("--managed-grace-hours", type=float, default=None,
-                   help="Idle window before a dead managed worktree is reaped "
-                        "(default 1h); a still-fresh one is always spared")
-    p.add_argument("--include-unused", action="store_true",
-                   help="Also reap truly-empty tracked worktrees (no commits, "
-                        "zero conversation turns)")
-    p.add_argument("--include-conversations", action="store_true",
-                   help="Also reap conversation-only worktrees (no commits but "
-                        "the session held turns); implies --include-unused")
-    p.add_argument("--reconcile-prs", action="store_true",
-                   help="Refresh tracked PR state from the provider before "
-                        "deciding (heals stale 'open' PRs merged externally)")
+        "on-disk orphan-directory sweep + git worktree prune",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be removed without removing anything",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the orphan-sweep report as JSON (the tracked reap runs in text mode)",
+    )
+    p.add_argument(
+        "--orphans-only",
+        action="store_true",
+        help="Only sweep orphan directories; skip the tracked reap "
+        "and the managed (system/bridge) sweep",
+    )
+    p.add_argument(
+        "--no-managed", action="store_true", help="Skip the managed (system/bridge) leak sweep"
+    )
+    p.add_argument(
+        "--no-reap-shells",
+        action="store_true",
+        help="Skip the orphaned launcher-shell reap (pwsh/python "
+        "scaffolding stranded by a force-closed terminal)",
+    )
+    p.add_argument(
+        "--reap-shells-grace-hours",
+        type=float,
+        default=None,
+        help="Idle window before an orphaned launcher shell is "
+        "eligible (default 1h); a fresh one is always spared",
+    )
+    p.add_argument(
+        "--managed-grace-hours",
+        type=float,
+        default=None,
+        help="Idle window before a dead managed worktree is reaped "
+        "(default 1h); a still-fresh one is always spared",
+    )
+    p.add_argument(
+        "--include-unused",
+        action="store_true",
+        help="Also reap truly-empty tracked worktrees (no commits, zero conversation turns)",
+    )
+    p.add_argument(
+        "--include-conversations",
+        action="store_true",
+        help="Also reap conversation-only worktrees (no commits but "
+        "the session held turns); implies --include-unused",
+    )
+    p.add_argument(
+        "--reconcile-prs",
+        action="store_true",
+        help="Refresh tracked PR state from the provider before "
+        "deciding (heals stale 'open' PRs merged externally)",
+    )
     p.add_argument("--max-age-days", type=int, default=7)
 
     # reap-sessions (GC orphaned tmux/psmux sessions -- issue #713)
     p = sub.add_parser(
         "reap-sessions",
         help="Reap leaked tmux/psmux sessions whose worktree is finalized, "
-             "gone, or untracked AND has been idle past the grace window "
-             "(never touches attached, active, or busy sessions)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Report what would be reaped without killing anything")
-    p.add_argument("--id", default=None,
-                   help="Target a single worktree id; same spare-attached/"
-                        "active/busy predicate as the full sweep")
-    p.add_argument("--grace-hours", type=float, default=None,
-                   help="Idle window before a finalized/idle session is "
-                        "eligible (default 6h); a busy session is never reaped")
-    p.add_argument("--json", action="store_true",
-                   help="Emit a single JSON result object")
+        "gone, or untracked AND has been idle past the grace window "
+        "(never touches attached, active, or busy sessions)",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be reaped without killing anything",
+    )
+    p.add_argument(
+        "--id",
+        default=None,
+        help="Target a single worktree id; same spare-attached/"
+        "active/busy predicate as the full sweep",
+    )
+    p.add_argument(
+        "--grace-hours",
+        type=float,
+        default=None,
+        help="Idle window before a finalized/idle session is "
+        "eligible (default 6h); a busy session is never reaped",
+    )
+    p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
 
     # reap-shells (GC orphaned launcher shells -- copilot-extensions #102)
     p = sub.add_parser(
         "reap-shells",
         help="Reap orphaned agent-worktrees launcher shells (pwsh/python left "
-             "by a force-closed terminal). Reports candidates by default; only "
-             "kills with --yes. Positive-signature + service-safe + idle-gated.")
-    p.add_argument("--yes", action="store_true",
-                   help="Actually terminate the shells (default is a dry-run "
-                        "report -- nothing is killed without this flag)")
-    p.add_argument("--grace-hours", type=float, default=None,
-                   help="Minimum age before an orphaned shell is eligible "
-                        "(default 1h)")
-    p.add_argument("--json", action="store_true",
-                   help="Emit a single JSON result object")
+        "by a force-closed terminal). Reports candidates by default; only "
+        "kills with --yes. Positive-signature + service-safe + idle-gated.",
+    )
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Actually terminate the shells (default is a dry-run "
+        "report -- nothing is killed without this flag)",
+    )
+    p.add_argument(
+        "--grace-hours",
+        type=float,
+        default=None,
+        help="Minimum age before an orphaned shell is eligible (default 1h)",
+    )
+    p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
 
     # restart (terminate a worktree's interactive Copilot, keep the worktree)
     p = sub.add_parser(
         "restart",
         help="Stop a worktree's interactive Copilot (graceful double Ctrl-C, "
-             "then mux kill-session) -- keeps the worktree on disk. The shared "
-             "primitive behind the Picker 'Stop' action and NF 'Take over'; "
-             "relaunch/ACP-resume is performed by the caller.")
+        "then mux kill-session) -- keeps the worktree on disk. The shared "
+        "primitive behind the Picker 'Stop' action and NF 'Take over'; "
+        "relaunch/ACP-resume is performed by the caller.",
+    )
     p.add_argument("worktree_id", help="Worktree id whose Copilot to stop")
-    p.add_argument("--no-graceful", action="store_true",
-                   help="Skip the graceful double-Ctrl-C quit; hard-kill the "
-                        "mux session immediately")
-    p.add_argument("--settle-timeout", type=float, default=6.0,
-                   help="Seconds to wait for a graceful quit before hard-killing "
-                        "(default: 6.0)")
-    p.add_argument("--json", action="store_true",
-                   help="Emit a single JSON result object")
+    p.add_argument(
+        "--no-graceful",
+        action="store_true",
+        help="Skip the graceful double-Ctrl-C quit; hard-kill the mux session immediately",
+    )
+    p.add_argument(
+        "--settle-timeout",
+        type=float,
+        default=6.0,
+        help="Seconds to wait for a graceful quit before hard-killing (default: 6.0)",
+    )
+    p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
 
     # reclaim (free the exact Copilot process bound to a session/worktree)
     p = sub.add_parser(
         "reclaim",
         help="Free the exact Copilot process(es) bound to a session/worktree, "
-             "resolved from Copilot's own inuse.<pid>.lock claim -- precise, "
-             "never splashing onto a sibling session or a worktree that merely "
-             "shares a cwd. The primitive for BARE orphans (a Copilot launched "
-             "straight in a terminal, invisible to the wt-<id> mux fleet view). "
-             "Dry-run by default; pass --yes to terminate. Freeing an idle "
-             "orphan loses nothing -- the session stays resumable.")
-    p.add_argument("--session-id", default=None,
-                   help="Target one session (exact dir name or unambiguous "
-                        "prefix)")
-    p.add_argument("--worktree-id", default=None,
-                   help="Target every session bound to this worktree id "
-                        "(default: infer from cwd)")
-    p.add_argument("--all", action="store_true",
-                   help="Target every bound Copilot on the machine")
-    p.add_argument("--bare-only", action="store_true",
-                   help="Restrict to bound Copilots Stop cannot reach (homing "
-                        "bare or unclassifiable, OR homed in a mux whose wt-<id> "
-                        "session is unreachable -- a detached psmux server) -- "
-                        "the common intent; leaves only live, Stop-able muxed "
-                        "sessions to restart/reap")
-    p.add_argument("--yes", action="store_true",
-                   help="Actually terminate the matched processes (without it, "
-                        "the command is a dry run that kills nothing)")
-    p.add_argument("--json", action="store_true",
-                   help="Emit a single JSON result object")
+        "resolved from Copilot's own inuse.<pid>.lock claim -- precise, "
+        "never splashing onto a sibling session or a worktree that merely "
+        "shares a cwd. The primitive for BARE orphans (a Copilot launched "
+        "straight in a terminal, invisible to the wt-<id> mux fleet view). "
+        "Dry-run by default; pass --yes to terminate. Freeing an idle "
+        "orphan loses nothing -- the session stays resumable.",
+    )
+    p.add_argument(
+        "--session-id",
+        default=None,
+        help="Target one session (exact dir name or unambiguous prefix)",
+    )
+    p.add_argument(
+        "--worktree-id",
+        default=None,
+        help="Target every session bound to this worktree id (default: infer from cwd)",
+    )
+    p.add_argument("--all", action="store_true", help="Target every bound Copilot on the machine")
+    p.add_argument(
+        "--bare-only",
+        action="store_true",
+        help="Restrict to bound Copilots Stop cannot reach (homing "
+        "bare or unclassifiable, OR homed in a mux whose wt-<id> "
+        "session is unreachable -- a detached psmux server) -- "
+        "the common intent; leaves only live, Stop-able muxed "
+        "sessions to restart/reap",
+    )
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Actually terminate the matched processes (without it, "
+        "the command is a dry run that kills nothing)",
+    )
+    p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
 
     # remux (adopt on Linux/WSL; guarded reclaim-before-resume on Windows)
     p = sub.add_parser(
         "remux",
         help="Restore a running BARE (un-muxed) Copilot to the mux fleet. "
-             "Linux/WSL reparents it into tmux via reptyr. Windows cannot "
-             "reparent a live ConPTY process, so --yes precisely reclaims the "
-             "Stop-unreachable owner and returns a resume-next result.")
-    p.add_argument("--session-id", default=None,
-                   help="Target one session (exact dir name or unambiguous "
-                        "prefix)")
-    p.add_argument("--worktree-id", default=None,
-                   help="Target the bare Copilot bound to this worktree id "
-                        "(default: infer from cwd)")
-    p.add_argument("--sudo", dest="force_sudo",
-                   action=argparse.BooleanOptionalAction, default=None,
-                   help="Force (--sudo) or forbid (--no-sudo) running reptyr "
-                        "under sudo -A. Needed when the yama ptrace_scope "
-                        "forbids attaching a non-descendant; auto-detected by "
-                        "default.")
-    p.add_argument("--yes", action="store_true",
-                   help="Windows only: reclaim the confirmed unreachable owner "
-                        "(without it, report the recovery plan)")
-    p.add_argument("--json", action="store_true",
-                   help="Emit a single JSON result object")
+        "Linux/WSL reparents it into tmux via reptyr. Windows cannot "
+        "reparent a live ConPTY process, so --yes precisely reclaims the "
+        "Stop-unreachable owner and returns a resume-next result.",
+    )
+    p.add_argument(
+        "--session-id",
+        default=None,
+        help="Target one session (exact dir name or unambiguous prefix)",
+    )
+    p.add_argument(
+        "--worktree-id",
+        default=None,
+        help="Target the bare Copilot bound to this worktree id (default: infer from cwd)",
+    )
+    p.add_argument(
+        "--sudo",
+        dest="force_sudo",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Force (--sudo) or forbid (--no-sudo) running reptyr "
+        "under sudo -A. Needed when the yama ptrace_scope "
+        "forbids attaching a non-descendant; auto-detected by "
+        "default.",
+    )
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Windows only: reclaim the confirmed unreachable owner "
+        "(without it, report the recovery plan)",
+    )
+    p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
 
     # sync (fast-forward worktrees to the default branch, FF-only)
     p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
-    p.add_argument("--worktree-id", default=None,
-                   help="Sync a single worktree by ID (default: all active "
-                        "worktrees on this machine)")
-    p.add_argument("--all", action="store_true",
-                   help="Sync every active worktree (the default when no "
-                        "--worktree-id is given)")
-    p.add_argument("--json", action="store_true",
-                   help="Emit JSON results (a single object with --worktree-id, "
-                        "else {\"results\": [...]})")
+    p.add_argument(
+        "--worktree-id",
+        default=None,
+        help="Sync a single worktree by ID (default: all active worktrees on this machine)",
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="Sync every active worktree (the default when no --worktree-id is given)",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help='Emit JSON results (a single object with --worktree-id, else {"results": [...]})',
+    )
 
     # profiles (terminal-profile selection -- the Picker's Profiles grid column)
-    p = sub.add_parser("profiles",
-                       help="Read or write this machine's terminal-profile "
-                            "selection (the Picker's Profiles column)")
-    p.add_argument("profiles_action", choices=["get", "apply"],
-                   help="get: emit this host's selected launch targets; "
-                        "apply: persist a new selection (--set) and mirror it")
-    p.add_argument("--set", default=None,
-                   help="With apply: a JSON array of {machine, env, kind} "
-                        "objects -- the new column for this host (the locked "
-                        "self·agent target is always included)")
-    p.add_argument("--no-mirror", action="store_true",
-                   help="With apply: persist the selection but skip "
-                        "regenerating the terminal profiles")
-    p.add_argument("--json", action="store_true",
-                   help="Emit a JSON result object")
+    p = sub.add_parser(
+        "profiles",
+        help="Read or write this machine's terminal-profile "
+        "selection (the Picker's Profiles column)",
+    )
+    p.add_argument(
+        "profiles_action",
+        choices=["get", "apply"],
+        help="get: emit this host's selected launch targets; "
+        "apply: persist a new selection (--set) and mirror it",
+    )
+    p.add_argument(
+        "--set",
+        default=None,
+        help="With apply: a JSON array of {machine, env, kind} "
+        "objects -- the new column for this host (the locked "
+        "self·agent target is always included)",
+    )
+    p.add_argument(
+        "--no-mirror",
+        action="store_true",
+        help="With apply: persist the selection but skip regenerating the terminal profiles",
+    )
+    p.add_argument("--json", action="store_true", help="Emit a JSON result object")
 
     # terminal-fragment (preview the generated Windows Terminal fragment)
     p = sub.add_parser(
         "terminal-fragment",
-        help="Preview the Windows Terminal fragment this machine's config "
-             "would emit (no deploy)")
-    p.add_argument("--machine", default=None,
-                   help="Machine key to preview as (default: this machine "
-                        "from config)")
-    p.add_argument("--explain", action="store_true",
-                   help="Per-project decision trace instead of the raw "
-                        "fragment JSON")
-    p.add_argument("--doctor", action="store_true",
-                   help="Read-only report of live Windows Terminal state drift "
-                        "(hidden/orphaned/duplicate profiles); no mutation")
-    p.add_argument("--migrate-selections", action="store_true",
-                   help="Rewrite every local project's terminal_profiles "
-                        "selection from the legacy display_name vocabulary to "
-                        "the canonical machine key (full name); prints a "
-                        "summary and does not emit the fragment JSON")
+        help="Preview the Windows Terminal fragment this machine's config would emit (no deploy)",
+    )
+    p.add_argument(
+        "--machine",
+        default=None,
+        help="Machine key to preview as (default: this machine from config)",
+    )
+    p.add_argument(
+        "--explain",
+        action="store_true",
+        help="Per-project decision trace instead of the raw fragment JSON",
+    )
+    p.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Read-only report of live Windows Terminal state drift "
+        "(hidden/orphaned/duplicate profiles); no mutation",
+    )
+    p.add_argument(
+        "--migrate-selections",
+        action="store_true",
+        help="Rewrite every local project's terminal_profiles "
+        "selection from the legacy display_name vocabulary to "
+        "the canonical machine key (full name); prints a "
+        "summary and does not emit the fragment JSON",
+    )
 
     # repair (reconcile local deployed state: terminal profiles + binstubs)
     p = sub.add_parser(
         "repair",
         help="Repair local integration in place -- regenerate Windows Terminal "
-             "profiles (heal hidden + reclaim orphans) and redeploy project "
-             "binstubs. Version-independent (unlike 'update').")
-    p.add_argument("--terminal", action="store_true",
-                   help="Repair only Windows Terminal profiles (default: both "
-                        "terminal and binstubs)")
-    p.add_argument("--binstubs", action="store_true",
-                   help="Repair only project binstubs (default: both terminal "
-                        "and binstubs)")
+        "profiles (heal hidden + reclaim orphans) and redeploy project "
+        "binstubs. Version-independent (unlike 'update').",
+    )
+    p.add_argument(
+        "--terminal",
+        action="store_true",
+        help="Repair only Windows Terminal profiles (default: both terminal and binstubs)",
+    )
+    p.add_argument(
+        "--binstubs",
+        action="store_true",
+        help="Repair only project binstubs (default: both terminal and binstubs)",
+    )
 
     # picker (Textual picker is default everywhere; disable = machine opt-out)
-    p = sub.add_parser("picker",
-                       help="Inspect / opt out of the Textual worktree picker "
-                            "(the default) for this machine")
-    p.add_argument("picker_action",
-                   choices=["enable", "disable", "status", "mock", "screenshot"],
-                   nargs="?", default="status",
-                   help="the Textual picker is the default everywhere; "
-                        "disable writes new_picker:false to opt this machine out "
-                        "to the legacy picker, enable restores the default "
-                        "(~/.agent-worktrees/config.yaml); status (default) "
-                        "reports the effective value; mock launches the picker "
-                        "in the mock dev sandbox (real data, simulated actions, "
-                        "no side effects); screenshot renders the picker "
-                        "headlessly and captures it for auditing")
+    p = sub.add_parser(
+        "picker",
+        help="Inspect / opt out of the Textual worktree picker (the default) for this machine",
+    )
+    p.add_argument(
+        "picker_action",
+        choices=["enable", "disable", "status", "mock", "screenshot"],
+        nargs="?",
+        default="status",
+        help="the Textual picker is the default everywhere; "
+        "disable writes new_picker:false to opt this machine out "
+        "to the legacy picker, enable restores the default "
+        "(~/.agent-worktrees/config.yaml); status (default) "
+        "reports the effective value; mock launches the picker "
+        "in the mock dev sandbox (real data, simulated actions, "
+        "no side effects); screenshot renders the picker "
+        "headlessly and captures it for auditing",
+    )
     p.add_argument("--json", action="store_true", help="Emit a JSON result")
-    p.add_argument("--out", default=None,
-                   help="screenshot: write the capture to this file "
-                        "(default: stdout)")
-    p.add_argument("--format", dest="picker_format",
-                   choices=["svg", "text", "ansi"], default="svg",
-                   help="screenshot format: svg (audit screenshot), text (plain "
-                        "character grid), ansi (colour-aware grid)")
-    p.add_argument("--live", action="store_true",
-                   help="screenshot: render the multi-machine SSH source "
-                        "instead of the local-only source")
-    p.add_argument("--pivot", dest="picker_pivot", default=None,
-                   help="screenshot: switch to this pivot (top tab) before "
-                        "capturing, e.g. 'CodeSpaces' (case-insensitive; "
-                        "unknown labels capture the default Worktrees tab)")
-    p.add_argument("--wait", dest="picker_wait", type=float, default=0.0,
-                   help="screenshot: with --pivot, seconds to wait for a "
-                        "registered pivot's background list to finish loading "
-                        "so the capture shows real rows (default: 0 = no wait)")
-    p.add_argument("--local", dest="picker_local", action="store_true",
-                   help="mock: force the local-only source (data_local) instead "
-                        "of the multi-machine SSH source -- for an isolated "
-                        "sandbox preview with no resolvable mesh repo/roster")
+    p.add_argument(
+        "--out", default=None, help="screenshot: write the capture to this file (default: stdout)"
+    )
+    p.add_argument(
+        "--format",
+        dest="picker_format",
+        choices=["svg", "text", "ansi"],
+        default="svg",
+        help="screenshot format: svg (audit screenshot), text (plain "
+        "character grid), ansi (colour-aware grid)",
+    )
+    p.add_argument(
+        "--live",
+        action="store_true",
+        help="screenshot: render the multi-machine SSH source instead of the local-only source",
+    )
+    p.add_argument(
+        "--pivot",
+        dest="picker_pivot",
+        default=None,
+        help="screenshot: switch to this pivot (top tab) before "
+        "capturing, e.g. 'CodeSpaces' (case-insensitive; "
+        "unknown labels capture the default Worktrees tab)",
+    )
+    p.add_argument(
+        "--wait",
+        dest="picker_wait",
+        type=float,
+        default=0.0,
+        help="screenshot: with --pivot, seconds to wait for a "
+        "registered pivot's background list to finish loading "
+        "so the capture shows real rows (default: 0 = no wait)",
+    )
+    p.add_argument(
+        "--local",
+        dest="picker_local",
+        action="store_true",
+        help="mock: force the local-only source (data_local) instead "
+        "of the multi-machine SSH source -- for an isolated "
+        "sandbox preview with no resolvable mesh repo/roster",
+    )
 
     # validate
     p = sub.add_parser("validate", help="Validate core infrastructure files")
@@ -20473,34 +21426,57 @@ def build_parser() -> argparse.ArgumentParser:
             "<path> --class worktree`)."
         ),
     )
-    p.add_argument("project_name",
-                   help="Project LABEL (e.g. 'my-project') -- NOT a repo locator; "
-                        "the path comes from cwd (or --repo-dir)")
-    p.add_argument("--repo-dir", default=None,
-                   help="Explicit repo path to adopt (overrides cwd detection); "
-                        "use this to register a repo you are not standing in")
-    p.add_argument("--default-branch", default=None,
-                   help="Default branch (auto-detected from origin/HEAD if omitted)")
+    p.add_argument(
+        "project_name",
+        help="Project LABEL (e.g. 'my-project') -- NOT a repo locator; "
+        "the path comes from cwd (or --repo-dir)",
+    )
+    p.add_argument(
+        "--repo-dir",
+        default=None,
+        help="Explicit repo path to adopt (overrides cwd detection); "
+        "use this to register a repo you are not standing in",
+    )
+    p.add_argument(
+        "--default-branch",
+        default=None,
+        help="Default branch (auto-detected from origin/HEAD if omitted)",
+    )
     p.add_argument("--force", action="store_true")
     p.add_argument("--machine", default=None)
-    p.add_argument("--headless", action="store_true",
-                   help="Adopt as a CLI-only project: the bare binstub lists "
-                        "worktrees instead of launching an interactive session")
-    p.add_argument("--no-agent", action="store_true",
-                   help="Adopt without an agent-bridge agent (reference-style: "
-                        "worktree-managed but no agent). Default is to expose one.")
-    p.add_argument("--agent", action="store_true",
-                   help="Force exposing an agent-bridge agent (overrides a "
-                        "repos.yaml agent:false classification).")
-    p.add_argument("--base-repo", action="store_true",
-                   help="Adopt in base-repo (no-worktree) mode: the anchor "
-                        "checkout is used directly and no worktree is created. "
-                        "For repos that can't support worktrees (e.g. an "
-                        "enlistment monorepo). Also set repos.<name>.base_repo "
-                        "in the user-local ~/.<project>/config.yaml.")
-    p.add_argument("--elevated", action="store_true",
-                   help="Record that agent-bridge should run this project's "
-                        "agent in an elevated (admin) context.")
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Adopt as a CLI-only project: the bare binstub lists "
+        "worktrees instead of launching an interactive session",
+    )
+    p.add_argument(
+        "--no-agent",
+        action="store_true",
+        help="Adopt without an agent-bridge agent (reference-style: "
+        "worktree-managed but no agent). Default is to expose one.",
+    )
+    p.add_argument(
+        "--agent",
+        action="store_true",
+        help="Force exposing an agent-bridge agent (overrides a "
+        "repos.yaml agent:false classification).",
+    )
+    p.add_argument(
+        "--base-repo",
+        action="store_true",
+        help="Adopt in base-repo (no-worktree) mode: the anchor "
+        "checkout is used directly and no worktree is created. "
+        "For repos that can't support worktrees (e.g. an "
+        "enlistment monorepo). Also set repos.<name>.base_repo "
+        "in the user-local ~/.<project>/config.yaml.",
+    )
+    p.add_argument(
+        "--elevated",
+        action="store_true",
+        help="Record that agent-bridge should run this project's "
+        "agent in an elevated (admin) context.",
+    )
 
     # uninstall
     p = sub.add_parser("uninstall", help="Remove worktree manager")
@@ -20508,21 +21484,37 @@ def build_parser() -> argparse.ArgumentParser:
 
     # update
     p = sub.add_parser("update", help="Re-deploy from repo")
-    p.add_argument("--recreate-venv", action="store_true",
-                   help="Force full venv recreation (cannot run from managed venv)")
-    p.add_argument("--skip-modules", nargs="*", default=None,
-                   metavar="MODULE",
-                   help="Skip module updates (all if no names given, or named modules)")
-    p.add_argument("--no-anchor-sync", action="store_true",
-                   help="Skip fast-forwarding the managed repo anchor(s) after update")
-    p.add_argument("--force", action="store_true",
-                   help="Re-deploy every runtime installer even when the "
-                        "deployed version already matches the payload "
-                        "(default: skip already-current runtimes for speed)")
-    p.add_argument("--no-manager", action="store_true",
-                   help="Run the in-plugin update directly, bypassing the "
-                        "Worktree Manager seam (the escape hatch the Manager "
-                        "itself re-enters through, and the DQ8 fallback)")
+    p.add_argument(
+        "--recreate-venv",
+        action="store_true",
+        help="Force full venv recreation (cannot run from managed venv)",
+    )
+    p.add_argument(
+        "--skip-modules",
+        nargs="*",
+        default=None,
+        metavar="MODULE",
+        help="Skip module updates (all if no names given, or named modules)",
+    )
+    p.add_argument(
+        "--no-anchor-sync",
+        action="store_true",
+        help="Skip fast-forwarding the managed repo anchor(s) after update",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-deploy every runtime installer even when the "
+        "deployed version already matches the payload "
+        "(default: skip already-current runtimes for speed)",
+    )
+    p.add_argument(
+        "--no-manager",
+        action="store_true",
+        help="Run the in-plugin update directly, bypassing the "
+        "Worktree Manager seam (the escape hatch the Manager "
+        "itself re-enters through, and the DQ8 fallback)",
+    )
 
     # install-status
     sub.add_parser("install-status", help="Show installation status")
@@ -20532,22 +21524,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # deploy-instructions
-    p = sub.add_parser("deploy-instructions",
-                       help="Retire migrated managed instruction files (machine identity now via the session-machine hook)")
-    p.add_argument("--machine", default=None,
-                   help="Machine name (auto-detected from config if omitted)")
+    p = sub.add_parser(
+        "deploy-instructions",
+        help="Retire migrated managed instruction files (machine identity now via the session-machine hook)",
+    )
+    p.add_argument(
+        "--machine", default=None, help="Machine name (auto-detected from config if omitted)"
+    )
 
     # machine-context (sessionStart hook: emit machine identity as additionalContext)
-    sub.add_parser("machine-context",
-                   help="Emit machine identity as sessionStart additionalContext (hook entrypoint; cwd-gated)")
+    sub.add_parser(
+        "machine-context",
+        help="Emit machine identity as sessionStart additionalContext (hook entrypoint; cwd-gated)",
+    )
 
     # get (query project paths and config values)
     p = sub.add_parser("get", help="Query project paths and config values")
     p.add_argument("key", help="Key to query (use 'keys' to list available keys)")
-    p.add_argument("--session-id", dest="session_id", default=None,
-                   help="Resolve worktree-scoped keys (worktree-dir) from this "
-                        "session when cwd is HOME (bare resume) -- binding-first, "
-                        "not cwd inference")
+    p.add_argument(
+        "--session-id",
+        dest="session_id",
+        default=None,
+        help="Resolve worktree-scoped keys (worktree-dir) from this "
+        "session when cwd is HOME (bare resume) -- binding-first, "
+        "not cwd inference",
+    )
 
     # services -- dispatched pre-argparse (see cmd_services_dispatch)
     # Stub entry for --help visibility only
@@ -20566,11 +21567,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "state-root",
         help="Resolve where efforts/visions/logs are written (stateless-harness "
-             "aware; --json / --repo NAME)")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit the full resolution as JSON")
-    sp.add_argument("--repo", default=None, metavar="NAME",
-                    help="Explicit override: resolve this registered repo")
+        "aware; --json / --repo NAME)",
+    )
+    sp.add_argument("--json", action="store_true", help="Emit the full resolution as JSON")
+    sp.add_argument(
+        "--repo",
+        default=None,
+        metavar="NAME",
+        help="Explicit override: resolve this registered repo",
+    )
 
     # coordination-readiness -- dispatched pre-argparse.
     sub.add_parser(
@@ -20597,12 +21602,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # pr-watch / pr -- dispatched pre-argparse (see cmd_pr_watch_dispatch /
     # cmd_pr_dispatch). Registered here only so they surface in --help.
-    sub.add_parser("pr-watch",
-                   help="Block until a PR moves (run 'pr-watch' for usage)")
-    sub.add_parser("pr-merge",
-                   help="Signal merge consent on an approved PR (run 'pr-merge' for usage)")
-    sub.add_parser("pr-research",
-                   help="Inspect a repo's provider settings -> policy matrix (read-only)")
+    sub.add_parser("pr-watch", help="Block until a PR moves (run 'pr-watch' for usage)")
+    sub.add_parser(
+        "pr-merge", help="Signal merge consent on an approved PR (run 'pr-merge' for usage)"
+    )
+    sub.add_parser(
+        "pr-research", help="Inspect a repo's provider settings -> policy matrix (read-only)"
+    )
     sub.add_parser("pr", help="Author-side PR command family (run 'pr' for usage)")
 
     # pre-launch (two-pass self-update protocol)
@@ -20613,52 +21619,75 @@ def build_parser() -> argparse.ArgumentParser:
         "reconcile-marketplaces",
         help="Prefer exact-name registered local plugin marketplace checkouts",
     )
-    sp.add_argument("--cwd", default=None,
-                    help="Path inside the target checkout (defaults to cwd)")
-    sp.add_argument("--stdin", action="store_true",
-                    help="Read a sessionStart payload and use its cwd")
-    sp.add_argument("--session-start", action="store_true",
-                    help="Emit sessionStart JSON and request restart when changed")
-    sp.add_argument("--ensure-ignored", action="store_true",
-                    help="Add the local settings path to Git info/exclude if needed")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit the reconciliation summary as JSON")
+    sp.add_argument(
+        "--cwd", default=None, help="Path inside the target checkout (defaults to cwd)"
+    )
+    sp.add_argument(
+        "--stdin", action="store_true", help="Read a sessionStart payload and use its cwd"
+    )
+    sp.add_argument(
+        "--session-start",
+        action="store_true",
+        help="Emit sessionStart JSON and request restart when changed",
+    )
+    sp.add_argument(
+        "--ensure-ignored",
+        action="store_true",
+        help="Add the local settings path to Git info/exclude if needed",
+    )
+    sp.add_argument("--json", action="store_true", help="Emit the reconciliation summary as JSON")
 
     # stage-update (background marketplace download; #1430 stage-then-join)
     sp = sub.add_parser(
-        "stage-update",
-        help="Background-stage the plugin marketplace update (JSON status)")
-    sp.add_argument("--status", default=None,
-                    help="Status file path (defaults to ~/.agent-worktrees/updater-status.json)")
+        "stage-update", help="Background-stage the plugin marketplace update (JSON status)"
+    )
+    sp.add_argument(
+        "--status",
+        default=None,
+        help="Status file path (defaults to ~/.agent-worktrees/updater-status.json)",
+    )
     sp.add_argument("--json", action="store_true", help="Echo the status dict to stdout")
 
     # reconcile-plugins (repo-configured plugin payload + runtime reconcile)
     sp = sub.add_parser(
-        "reconcile-plugins",
-        help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)")
-    sp.add_argument("--machine", default=None,
-                    help="Machine name (auto-detected from hostname if omitted)")
-    sp.add_argument("--repo", default=None,
-                    help="Repo path to reconcile (defaults to the resolved anchor)")
-    sp.add_argument("--status", default=None,
-                    help="Write detached provisioning status JSON to this path")
-    sp.add_argument("--apply", action="store_true",
-                    help="Execute the plan in-process (2-pass) instead of printing "
-                         "it. Used by the provision-check sessionStart shim.")
-    sp.add_argument("--peek", action="store_true",
-                    help="Print the plan WITHOUT persisting the reconcile cache "
-                         "(read-only preview; no throttle side effects).")
-    sp.add_argument("--with-payload-refresh", action="store_true",
-                    help="Include marketplace payload install/refresh phases "
-                         "(`copilot plugin install/update`). OFF by default: the "
-                         "programmatic path is runtime-only + pull-free. Only the "
-                         "Picker/operator update flow opts in (#1393).")
+        "reconcile-plugins", help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)"
+    )
+    sp.add_argument(
+        "--machine", default=None, help="Machine name (auto-detected from hostname if omitted)"
+    )
+    sp.add_argument(
+        "--repo", default=None, help="Repo path to reconcile (defaults to the resolved anchor)"
+    )
+    sp.add_argument(
+        "--status", default=None, help="Write detached provisioning status JSON to this path"
+    )
+    sp.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute the plan in-process (2-pass) instead of printing "
+        "it. Used by the provision-check sessionStart shim.",
+    )
+    sp.add_argument(
+        "--peek",
+        action="store_true",
+        help="Print the plan WITHOUT persisting the reconcile cache "
+        "(read-only preview; no throttle side effects).",
+    )
+    sp.add_argument(
+        "--with-payload-refresh",
+        action="store_true",
+        help="Include marketplace payload install/refresh phases "
+        "(`copilot plugin install/update`). OFF by default: the "
+        "programmatic path is runtime-only + pull-free. Only the "
+        "Picker/operator update flow opts in (#1393).",
+    )
 
     # reconcile-binstubs (project launchers in ~/.local/bin vs projects.yaml)
     reconcile_binstubs_parser = sub.add_parser(
         "reconcile-binstubs",
         help="Reconcile ~/.local/bin project binstubs against projects.yaml "
-             "(add for every registered project, remove deregistered ones)")
+        "(add for every registered project, remove deregistered ones)",
+    )
     ownership_action = reconcile_binstubs_parser.add_mutually_exclusive_group()
     ownership_action.add_argument(
         "--transfer",
@@ -20676,64 +21705,112 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "register-project-entry",
         help="Write a lean projects.yaml entry (installer-invoked; the single "
-             "Python owner of the registry write)")
+        "Python owner of the registry write)",
+    )
     # Positional (NOT --project): main() pre-pops a global --project/-p flag as
     # the active-project selector, so a --project flag here would be swallowed
     # before argparse dispatches to this subparser.
     sp.add_argument("project", help="Project name")
-    sp.add_argument("--repo-dir", default=None,
-                    help="Anchor dir used to register repository identity")
-    sp.add_argument("--display-name", default=None,
-                    help="Harness display casing override")
+    sp.add_argument(
+        "--repo-dir", default=None, help="Anchor dir used to register repository identity"
+    )
+    sp.add_argument("--display-name", default=None, help="Harness display casing override")
     _ea = sp.add_mutually_exclusive_group()
-    _ea.add_argument("--expose-agent", dest="expose_agent",
-                     action="store_true", default=None,
-                     help="Force agent exposure on (default: from repos.yaml)")
-    _ea.add_argument("--no-expose-agent", dest="expose_agent",
-                     action="store_false",
-                     help="Force reference-only (no agent)")
-    sp.add_argument("--base-repo", dest="base_repo", action="store_true",
-                    default=None, help="Mark base-repo (no-worktree) adoption")
-    sp.add_argument("--elevated", dest="elevated", action="store_true",
-                    default=None, help="Mark elevated agent context")
-    sp.add_argument("--wsl-state", default=None,
-                    choices=["adopted", "bootstrap"], help="WSL adoption state")
+    _ea.add_argument(
+        "--expose-agent",
+        dest="expose_agent",
+        action="store_true",
+        default=None,
+        help="Force agent exposure on (default: from repos.yaml)",
+    )
+    _ea.add_argument(
+        "--no-expose-agent",
+        dest="expose_agent",
+        action="store_false",
+        help="Force reference-only (no agent)",
+    )
+    sp.add_argument(
+        "--base-repo",
+        dest="base_repo",
+        action="store_true",
+        default=None,
+        help="Mark base-repo (no-worktree) adoption",
+    )
+    sp.add_argument(
+        "--elevated",
+        dest="elevated",
+        action="store_true",
+        default=None,
+        help="Mark elevated agent context",
+    )
+    sp.add_argument(
+        "--wsl-state", default=None, choices=["adopted", "bootstrap"], help="WSL adoption state"
+    )
     sp.add_argument("--wsl-distro", default=None, help="WSL distro name")
     sp.add_argument("--wsl-path", default=None, help="Repo anchor path in WSL")
 
     # dev (repo development tooling)
     sp = sub.add_parser("dev", help="Dev venv and test runner")
-    sp.add_argument("dev_action", nargs="?", default="status",
-                    choices=["setup", "test", "status"],
-                    help="Action: setup, test, or status")
+    sp.add_argument(
+        "dev_action",
+        nargs="?",
+        default="status",
+        choices=["setup", "test", "status"],
+        help="Action: setup, test, or status",
+    )
 
     # register-session / deregister-session (called from hooks)
-    sp = sub.add_parser("register-session",
-                        help="Register a Copilot session against a worktree")
-    sp.add_argument("--worktree-id", default=None,
-                    help="Worktree ID (resolved from --cwd when omitted)")
-    sp.add_argument("--session-id", default=None,
-                    help="Copilot session ID (read from --stdin payload when omitted)")
-    sp.add_argument("--cwd", default=None,
-                    help="Session cwd, used to resolve the worktree when --worktree-id is absent")
-    sp.add_argument("--stdin", action="store_true",
-                    help="Read the Copilot sessionStart JSON payload from stdin")
-    sp.add_argument("--pid", type=int, default=None,
-                    help="PID of the Copilot process (diagnostic only)")
-    sp.add_argument("--pane", default=None,
-                    help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
-    sp.add_argument("--launch-id", dest="launch_id", default=None,
-                    help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
-    sp.add_argument("--assignment-token", dest="assignment_token", default=None,
-                    help="Profile-assignment launch token (normally from the "
-                         "session environment)")
-    sp.add_argument("--emit-context", action="store_true",
-                    help="Emit sessionStart additionalContext for the recovered binding")
-    sp.add_argument("--handoff-token", default=None,
-                    help="Exact pending handoff token this session is consuming")
-    sp.add_argument("--handoff-candidate-token", default=None,
-                    help="Pending token this newly-created session is a "
-                         "candidate to consume; associates without takeover")
+    sp = sub.add_parser("register-session", help="Register a Copilot session against a worktree")
+    sp.add_argument(
+        "--worktree-id", default=None, help="Worktree ID (resolved from --cwd when omitted)"
+    )
+    sp.add_argument(
+        "--session-id",
+        default=None,
+        help="Copilot session ID (read from --stdin payload when omitted)",
+    )
+    sp.add_argument(
+        "--cwd",
+        default=None,
+        help="Session cwd, used to resolve the worktree when --worktree-id is absent",
+    )
+    sp.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read the Copilot sessionStart JSON payload from stdin",
+    )
+    sp.add_argument(
+        "--pid", type=int, default=None, help="PID of the Copilot process (diagnostic only)"
+    )
+    sp.add_argument("--pane", default=None, help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
+    sp.add_argument(
+        "--launch-id",
+        dest="launch_id",
+        default=None,
+        help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)",
+    )
+    sp.add_argument(
+        "--assignment-token",
+        dest="assignment_token",
+        default=None,
+        help="Profile-assignment launch token (normally from the session environment)",
+    )
+    sp.add_argument(
+        "--emit-context",
+        action="store_true",
+        help="Emit sessionStart additionalContext for the recovered binding",
+    )
+    sp.add_argument(
+        "--handoff-token",
+        default=None,
+        help="Exact pending handoff token this session is consuming",
+    )
+    sp.add_argument(
+        "--handoff-candidate-token",
+        default=None,
+        help="Pending token this newly-created session is a "
+        "candidate to consume; associates without takeover",
+    )
 
     sp = sub.add_parser(
         "session-lifecycle",
@@ -20751,110 +21828,155 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bound the combined lifecycle before the outer hook deadline",
     )
 
-    sp = sub.add_parser("deregister-session",
-                        help="Mark a Copilot session as ended on a worktree")
-    sp.add_argument("--worktree-id", default=None,
-                    help="Worktree ID (resolved from cwd or launch binding when omitted)")
-    sp.add_argument("--session-id", default=None,
-                    help="Copilot session ID (read from --stdin payload when omitted)")
-    sp.add_argument("--cwd", default=None,
-                    help="Session cwd from the sessionEnd payload")
-    sp.add_argument("--stdin", action="store_true",
-                    help="Read the Copilot sessionEnd JSON payload from stdin")
-    sp.add_argument("--launch-id", dest="launch_id", default=None,
-                    help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
+    sp = sub.add_parser("deregister-session", help="Mark a Copilot session as ended on a worktree")
+    sp.add_argument(
+        "--worktree-id",
+        default=None,
+        help="Worktree ID (resolved from cwd or launch binding when omitted)",
+    )
+    sp.add_argument(
+        "--session-id",
+        default=None,
+        help="Copilot session ID (read from --stdin payload when omitted)",
+    )
+    sp.add_argument("--cwd", default=None, help="Session cwd from the sessionEnd payload")
+    sp.add_argument(
+        "--stdin", action="store_true", help="Read the Copilot sessionEnd JSON payload from stdin"
+    )
+    sp.add_argument(
+        "--launch-id",
+        dest="launch_id",
+        default=None,
+        help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)",
+    )
 
     sp = sub.add_parser(
         "session-binding",
         help="Resolve one live session's authoritative mux/process binding",
     )
-    sp.add_argument("--session-id", required=True,
-                    help="Exact Copilot session id")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (the default; accepted for consistency)")
+    sp.add_argument("--session-id", required=True, help="Exact Copilot session id")
+    sp.add_argument(
+        "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
+    )
 
     sp = sub.add_parser(
         "session-recovery",
         help="Inspect one exact session projection for validated recovery guidance",
     )
-    sp.add_argument("--session-id", default=None,
-                    help="Exact Copilot session id (read from --stdin or "
-                         "COPILOT_AGENT_SESSION_ID when omitted)")
-    sp.add_argument("--cwd", default=None,
-                    help="Current session cwd for bound-here comparison")
-    sp.add_argument("--stdin", action="store_true",
-                    help="Read the Copilot sessionStart JSON payload from stdin")
-    sp.add_argument("--emit-context", action="store_true",
-                    help="Emit bounded sessionStart additionalContext")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (the default; accepted for consistency)")
+    sp.add_argument(
+        "--session-id",
+        default=None,
+        help="Exact Copilot session id (read from --stdin or "
+        "COPILOT_AGENT_SESSION_ID when omitted)",
+    )
+    sp.add_argument("--cwd", default=None, help="Current session cwd for bound-here comparison")
+    sp.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read the Copilot sessionStart JSON payload from stdin",
+    )
+    sp.add_argument(
+        "--emit-context", action="store_true", help="Emit bounded sessionStart additionalContext"
+    )
+    sp.add_argument(
+        "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
+    )
 
     sp = sub.add_parser(
         "session-lineage",
         help="Show one exact session's bounded reciprocal lineage graph (JSON)",
     )
-    sp.add_argument("--session-id", required=True,
-                    help="Exact Copilot session id")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (the default; accepted for consistency)")
+    sp.add_argument("--session-id", required=True, help="Exact Copilot session id")
+    sp.add_argument(
+        "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
+    )
 
     # bind-session -- the agent explicitly declares its worktree (self-identifying)
     sp = sub.add_parser(
         "bind-session",
         help="Explicitly bind the current Copilot session to a worktree it declares",
     )
-    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
-                    help="The worktree checkout dir the session is in (default: cwd)")
-    sp.add_argument("--worktree-id", default=None,
-                    help="Worktree ID (alternative to --worktree-dir)")
-    sp.add_argument("--session-id", default=None,
-                    help="Copilot session ID (default: COPILOT_AGENT_SESSION_ID)")
-    sp.add_argument("--pane", default=None,
-                    help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
-    sp.add_argument("--pid", type=int, default=None,
-                    help="PID of the Copilot process (diagnostic only)")
-    sp.add_argument("--handoff-token", default=None,
-                    help="Exact pending handoff token this successor consumes")
-    sp.add_argument("--assignment-token", dest="assignment_token", default=None,
-                    help="Profile-assignment launch token (normally from the "
-                         "session environment)")
+    sp.add_argument(
+        "--worktree-dir",
+        dest="worktree_dir",
+        default=None,
+        help="The worktree checkout dir the session is in (default: cwd)",
+    )
+    sp.add_argument(
+        "--worktree-id", default=None, help="Worktree ID (alternative to --worktree-dir)"
+    )
+    sp.add_argument(
+        "--session-id", default=None, help="Copilot session ID (default: COPILOT_AGENT_SESSION_ID)"
+    )
+    sp.add_argument("--pane", default=None, help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
+    sp.add_argument(
+        "--pid", type=int, default=None, help="PID of the Copilot process (diagnostic only)"
+    )
+    sp.add_argument(
+        "--handoff-token", default=None, help="Exact pending handoff token this successor consumes"
+    )
+    sp.add_argument(
+        "--assignment-token",
+        dest="assignment_token",
+        default=None,
+        help="Profile-assignment launch token (normally from the session environment)",
+    )
 
     # bind-nudge -- postToolUse hook: nudge an unbound-but-active session to bind
     sp = sub.add_parser(
         "bind-nudge",
         help="Hook: emit an additionalContext nudge when an active worktree is unbound",
     )
-    sp.add_argument("--cwd", default=None,
-                    help="The session's working directory (default: process cwd)")
-    sp.add_argument("--stdin", action="store_true",
-                    help="Read the Copilot postToolUse JSON payload from stdin (for workingDirectory)")
+    sp.add_argument(
+        "--cwd", default=None, help="The session's working directory (default: process cwd)"
+    )
+    sp.add_argument(
+        "--stdin",
+        action="store_true",
+        help="Read the Copilot postToolUse JSON payload from stdin (for workingDirectory)",
+    )
 
     # history-digest -- compact recovery digest of this worktree's history
     sp = sub.add_parser(
         "history-digest",
         help="Print a compact recovery digest of this worktree's recent history",
     )
-    sp.add_argument("--worktree-id", default=None,
-                    help="Worktree ID (default: resolved from cwd / session id)")
-    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
-                    help="The worktree checkout dir (default: cwd)")
-    sp.add_argument("--session-id", default=None,
-                    help="Session id for the session->worktree binding fallback "
-                         "(default: COPILOT_AGENT_SESSION_ID)")
-    sp.add_argument("--limit", type=int, default=8,
-                    help="Max recent entries to include (default: 8)")
+    sp.add_argument(
+        "--worktree-id", default=None, help="Worktree ID (default: resolved from cwd / session id)"
+    )
+    sp.add_argument(
+        "--worktree-dir",
+        dest="worktree_dir",
+        default=None,
+        help="The worktree checkout dir (default: cwd)",
+    )
+    sp.add_argument(
+        "--session-id",
+        default=None,
+        help="Session id for the session->worktree binding fallback "
+        "(default: COPILOT_AGENT_SESSION_ID)",
+    )
+    sp.add_argument(
+        "--limit", type=int, default=8, help="Max recent entries to include (default: 8)"
+    )
 
     # session-role -- this session's role vs the worktree head (drive vs assist)
     sp = sub.add_parser(
         "session-role",
         help="Report this session's role vs the worktree head (head/superseded/...)",
     )
-    sp.add_argument("--session-id", default=None,
-                    help="Session id (default: COPILOT_AGENT_SESSION_ID)")
-    sp.add_argument("--worktree-id", default=None,
-                    help="Worktree ID (default: resolved from cwd / session id)")
-    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
-                    help="The worktree checkout dir (default: cwd)")
+    sp.add_argument(
+        "--session-id", default=None, help="Session id (default: COPILOT_AGENT_SESSION_ID)"
+    )
+    sp.add_argument(
+        "--worktree-id", default=None, help="Worktree ID (default: resolved from cwd / session id)"
+    )
+    sp.add_argument(
+        "--worktree-dir",
+        dest="worktree_dir",
+        default=None,
+        help="The worktree checkout dir (default: cwd)",
+    )
     sp.add_argument(
         "--json",
         action="store_true",
@@ -20866,16 +21988,26 @@ def build_parser() -> argparse.ArgumentParser:
         "note-handoff",
         help="Append a handoff reference to this worktree's history (record-first recovery)",
     )
-    sp.add_argument("--task", default=None,
-                    help="The agent-dispatch handoff task id (the pointer to the full brief)")
-    sp.add_argument("--title", default=None,
-                    help="A one-line topic for the handoff")
-    sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
-                    help="The worktree checkout dir (default: cwd)")
-    sp.add_argument("--worktree-id", default=None,
-                    help="Worktree ID (alternative to --worktree-dir)")
-    sp.add_argument("--session-id", default=None,
-                    help="Predecessor session ID (default: COPILOT_AGENT_SESSION_ID)")
+    sp.add_argument(
+        "--task",
+        default=None,
+        help="The agent-dispatch handoff task id (the pointer to the full brief)",
+    )
+    sp.add_argument("--title", default=None, help="A one-line topic for the handoff")
+    sp.add_argument(
+        "--worktree-dir",
+        dest="worktree_dir",
+        default=None,
+        help="The worktree checkout dir (default: cwd)",
+    )
+    sp.add_argument(
+        "--worktree-id", default=None, help="Worktree ID (alternative to --worktree-dir)"
+    )
+    sp.add_argument(
+        "--session-id",
+        default=None,
+        help="Predecessor session ID (default: COPILOT_AGENT_SESSION_ID)",
+    )
     sp = sub.add_parser(
         "backfill-sessions",
         help="Populate session registries and reciprocal metadata from records",
@@ -20892,52 +22024,89 @@ def build_parser() -> argparse.ArgumentParser:
         "list-sessions",
         help="List a worktree's Copilot sessions with metadata (JSON)",
     )
-    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id", default=None,
-                    help="Worktree ID to scope to (default: all worktrees)")
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        default=None,
+        help="Worktree ID to scope to (default: all worktrees)",
+    )
     sp.add_argument(
         "--all-projects",
         action="store_true",
         help="Enumerate sessions across every adopted project",
     )
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (default; accepted for caller compatibility)")
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (default; accepted for caller compatibility)",
+    )
 
     # head-session -- a worktree's asserted head session + lifecycle state (JSON)
     sp = sub.add_parser(
         "head-session",
         help="Show a worktree's asserted head (current) session + state (JSON)",
     )
-    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
-                    required=True, help="Worktree ID (full or 4-char suffix)")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (default; accepted for caller compatibility)")
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        required=True,
+        help="Worktree ID (full or 4-char suffix)",
+    )
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (default; accepted for caller compatibility)",
+    )
 
     sp = sub.add_parser(
         "worktree-lineage",
         help="Show one worktree's authoritative bounded lineage graph (JSON)",
     )
-    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
-                    required=True, help="Worktree ID (full or unique suffix)")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (the default; accepted for consistency)")
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        required=True,
+        help="Worktree ID (full or unique suffix)",
+    )
+    sp.add_argument(
+        "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
+    )
 
     # conclude-session -- assert a session's conclusion (handed-off | concluded)
     sp = sub.add_parser(
         "conclude-session",
         help="Assert a session concluded (handed-off|concluded); clears it as "
-             "head (JSON) without guessing a successor",
+        "head (JSON) without guessing a successor",
     )
-    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
-                    required=True, help="Worktree ID (full or 4-char suffix)")
-    sp.add_argument("--session", "--session-id", dest="session_id",
-                    required=True, help="Copilot session ID to conclude")
-    sp.add_argument("--state", choices=["handed-off", "concluded"],
-                    default="handed-off",
-                    help="Conclusion kind (default: handed-off)")
-    sp.add_argument("--handoff-token", default=None,
-                    help="Stable token for the pending handoff")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (default; accepted for caller compatibility)")
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        required=True,
+        help="Worktree ID (full or 4-char suffix)",
+    )
+    sp.add_argument(
+        "--session",
+        "--session-id",
+        dest="session_id",
+        required=True,
+        help="Copilot session ID to conclude",
+    )
+    sp.add_argument(
+        "--state",
+        choices=["handed-off", "concluded"],
+        default="handed-off",
+        help="Conclusion kind (default: handed-off)",
+    )
+    sp.add_argument("--handoff-token", default=None, help="Stable token for the pending handoff")
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (default; accepted for caller compatibility)",
+    )
 
     # conclude-disposable -- safely conclude an exact disposable CLI worker
     sp = sub.add_parser(
@@ -20982,7 +22151,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--remove",
         action="store_true",
         help="After a successful safety verdict, immediately run exact-ID "
-             "managed teardown with fresh lifecycle and liveness checks",
+        "managed teardown with fresh lifecycle and liveness checks",
     )
     sp.add_argument(
         "--json",
@@ -20994,21 +22163,32 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "link-succession",
         help="Write the two-way predecessor<->successor link, conclude the "
-             "predecessor, and move the head to the successor (JSON)",
+        "predecessor, and move the head to the successor (JSON)",
     )
-    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
-                    required=True, help="Worktree ID (full or 4-char suffix)")
-    sp.add_argument("--predecessor", required=True,
-                    help="The outgoing session ID (marked handed-off)")
-    sp.add_argument("--successor", required=True,
-                    help="The incoming session ID (the new head)")
-    sp.add_argument("--predecessor-state", dest="predecessor_state",
-                    choices=["handed-off", "concluded"], default="handed-off",
-                    help="Predecessor conclusion kind (default: handed-off)")
-    sp.add_argument("--handoff-token", default=None,
-                    help="Stable token for this succession link")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (default; accepted for caller compatibility)")
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        required=True,
+        help="Worktree ID (full or 4-char suffix)",
+    )
+    sp.add_argument(
+        "--predecessor", required=True, help="The outgoing session ID (marked handed-off)"
+    )
+    sp.add_argument("--successor", required=True, help="The incoming session ID (the new head)")
+    sp.add_argument(
+        "--predecessor-state",
+        dest="predecessor_state",
+        choices=["handed-off", "concluded"],
+        default="handed-off",
+        help="Predecessor conclusion kind (default: handed-off)",
+    )
+    sp.add_argument("--handoff-token", default=None, help="Stable token for this succession link")
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (default; accepted for caller compatibility)",
+    )
 
     # session-transcript -- emit a session's renderable events as JSON
     sp = sub.add_parser(
@@ -21016,56 +22196,75 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit a Copilot session's renderable transcript events (JSON)",
     )
     sp.add_argument("session_id", help="Copilot session ID")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (default; accepted for caller compatibility)")
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (default; accepted for caller compatibility)",
+    )
 
     # recent-messages -- a worktree's latest session's last N conversation turns
     sp = sub.add_parser(
         "recent-messages",
         help="Show a worktree's latest session's last N conversation messages "
-             "(JSON) -- the read-side companion to the disposition summary",
+        "(JSON) -- the read-side companion to the disposition summary",
     )
-    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
-                    required=True, help="Worktree ID (full or 4-char suffix)")
-    sp.add_argument("--limit", type=int, default=3,
-                    help="How many of the most recent messages to return "
-                         "(default: 3)")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit JSON (default; accepted for caller compatibility)")
+    sp.add_argument(
+        "--worktree",
+        "--worktree-id",
+        dest="worktree_id",
+        required=True,
+        help="Worktree ID (full or 4-char suffix)",
+    )
+    sp.add_argument(
+        "--limit",
+        type=int,
+        default=3,
+        help="How many of the most recent messages to return (default: 3)",
+    )
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (default; accepted for caller compatibility)",
+    )
 
     # anchor-check (anchor repo hygiene)
-    sp = sub.add_parser("anchor-check",
-                        help="Check anchor repo for uncommitted work and stash entries")
-    sp.add_argument("--json", action="store_true",
-                    help="JSON output mode (stdout is JSON only)")
-    sp.add_argument("--quiet", action="store_true",
-                    help="Only print if issues are found")
-    sp.add_argument("--strict", action="store_true",
-                    help="Exit nonzero if anchor is not clean")
-    sp.add_argument("--fetch", action="store_true",
-                    help="Refresh the upstream ref before the behind-count "
-                         "(slower; unneeded post pre-launch fetch)")
-    sp.add_argument("--repo-path", default=None,
-                    help="Path inside a repo (defaults to cwd)")
+    sp = sub.add_parser(
+        "anchor-check", help="Check anchor repo for uncommitted work and stash entries"
+    )
+    sp.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
+    sp.add_argument("--quiet", action="store_true", help="Only print if issues are found")
+    sp.add_argument("--strict", action="store_true", help="Exit nonzero if anchor is not clean")
+    sp.add_argument(
+        "--fetch",
+        action="store_true",
+        help="Refresh the upstream ref before the behind-count "
+        "(slower; unneeded post pre-launch fetch)",
+    )
+    sp.add_argument("--repo-path", default=None, help="Path inside a repo (defaults to cwd)")
 
     # activity -- view the high-level worktree lifecycle log
     sp = sub.add_parser(
         "activity",
         help="View the worktree/session lifecycle activity log",
     )
-    sp.add_argument("--since", default=None,
-                    help="Only show events newer than this (e.g. 2d, 12h, "
-                         "30m, or an ISO date). Default: all retained.")
-    sp.add_argument("--worktree-id", default=None,
-                    help="Filter to a single worktree id")
-    sp.add_argument("--launch-id", dest="launch_id", default=None,
-                    help="Filter to a single launch flow (correlation id)")
-    sp.add_argument("--event", default=None,
-                    help="Filter to a single event type")
-    sp.add_argument("--lines", type=int, default=None,
-                    help="Show only the most recent N events")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit one JSON object per line instead of a table")
+    sp.add_argument(
+        "--since",
+        default=None,
+        help="Only show events newer than this (e.g. 2d, 12h, "
+        "30m, or an ISO date). Default: all retained.",
+    )
+    sp.add_argument("--worktree-id", default=None, help="Filter to a single worktree id")
+    sp.add_argument(
+        "--launch-id",
+        dest="launch_id",
+        default=None,
+        help="Filter to a single launch flow (correlation id)",
+    )
+    sp.add_argument("--event", default=None, help="Filter to a single event type")
+    sp.add_argument("--lines", type=int, default=None, help="Show only the most recent N events")
+    sp.add_argument(
+        "--json", action="store_true", help="Emit one JSON object per line instead of a table"
+    )
 
     # activity-log -- append a single event (launcher/hook hook-invoked)
     sp = sub.add_parser(
@@ -21075,31 +22274,39 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("event", help="Event name")
     sp.add_argument("--worktree-id", default=None)
     sp.add_argument("--session-id", default=None)
-    sp.add_argument("--launch-id", dest="launch_id", default=None,
-                    help="Launch-flow correlation id")
+    sp.add_argument(
+        "--launch-id", dest="launch_id", default=None, help="Launch-flow correlation id"
+    )
     sp.add_argument("--source", default="launcher")
-    sp.add_argument("--field", action="append", default=[],
-                    help="Extra context as key=value (repeatable)")
+    sp.add_argument(
+        "--field", action="append", default=[], help="Extra context as key=value (repeatable)"
+    )
 
     # doctor -- diagnose (and with --fix) repair worktree/session health
     sp = sub.add_parser(
         "doctor",
         help="Diagnose (and with --fix, repair) worktree/session health: "
-             "corrupt tracking records, empty session registries, stale "
-             "status, orphaned empty session shells, cwd/path misalignment, "
-             "and drop-in registry hygiene.",
+        "corrupt tracking records, empty session registries, stale "
+        "status, orphaned empty session shells, cwd/path misalignment, "
+        "and drop-in registry hygiene.",
     )
-    sp.add_argument("--fix", action="store_true",
-                    help="Apply non-destructive repairs (YAML integrity, "
-                         "registry/title backfill, stale status). Default: "
-                         "report only.")
-    sp.add_argument("--gc-sessions", action="store_true", dest="gc_sessions",
-                    help="With --fix, also delete empty (0-user-message) "
-                         "session-state shells and purge their session-store "
-                         "rows (destructive; guarded by age/lock/current/"
-                         "registered).")
-    sp.add_argument("--json", action="store_true",
-                    help="Emit the health report as JSON.")
+    sp.add_argument(
+        "--fix",
+        action="store_true",
+        help="Apply non-destructive repairs (YAML integrity, "
+        "registry/title backfill, stale status). Default: "
+        "report only.",
+    )
+    sp.add_argument(
+        "--gc-sessions",
+        action="store_true",
+        dest="gc_sessions",
+        help="With --fix, also delete empty (0-user-message) "
+        "session-state shells and purge their session-store "
+        "rows (destructive; guarded by age/lock/current/"
+        "registered).",
+    )
+    sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
     sp.add_argument(
         "--projection-budget",
         type=int,
@@ -21125,6 +22332,7 @@ def cmd_dev(args: argparse.Namespace) -> int:
             output.err(f"Dev script not found: {script}")
             return 1
         import subprocess
+
         result = subprocess.run(
             ["pwsh", "-NoProfile", "-File", str(script), dev_action],
             cwd=str(repo_dir),
@@ -21173,16 +22381,16 @@ def _hook_event_timestamp(payload: dict | None) -> str | None:
         if seconds > 10_000_000_000:
             seconds /= 1000
         try:
-            return datetime.fromtimestamp(
-                seconds, tz=timezone.utc
-            ).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+            return (
+                datetime.fromtimestamp(seconds, tz=timezone.utc)
+                .replace(tzinfo=None)
+                .strftime("%Y-%m-%dT%H:%M:%S")
+            )
         except (OSError, OverflowError, ValueError):
             return None
     if isinstance(value, str) and value.strip():
         try:
-            parsed = datetime.fromisoformat(
-                value.strip().replace("Z", "+00:00")
-            )
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
             if parsed.tzinfo is not None:
                 parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
             return parsed.strftime("%Y-%m-%dT%H:%M:%S")
@@ -21222,11 +22430,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     resident_environment = getattr(args, "resident_environment", False)
     pane_id = getattr(args, "pane", None)
     if not pane_id and not resident_environment:
-        pane_id = (
-            os.environ.get("TMUX_PANE")
-            or os.environ.get("PSMUX_PANE")
-            or None
-        )
+        pane_id = os.environ.get("TMUX_PANE") or os.environ.get("PSMUX_PANE") or None
     if isinstance(pane_id, str):
         pane_id = pane_id.strip() or None
 
@@ -21318,11 +22522,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
 
     candidate_token = (
         getattr(args, "handoff_candidate_token", None)
-        or (
-            None
-            if resident_environment
-            else os.environ.get(_SESSION_HANDOFF_TOKEN)
-        )
+        or (None if resident_environment else os.environ.get(_SESSION_HANDOFF_TOKEN))
         or None
     )
     candidate_associated = False
@@ -21370,11 +22570,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         session_id=session_id,
         launch_id=(
             getattr(args, "launch_id", None)
-            or (
-                None
-                if resident_environment
-                else os.environ.get("WORKTREE_LAUNCH_ID")
-            )
+            or (None if resident_environment else os.environ.get("WORKTREE_LAUNCH_ID"))
         ),
     )
     # Re-seed the status-bar updater for this session's mux (best-effort, no-op
@@ -21398,14 +22594,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     upd_path = cwd
     if record is not None:
         root = os.path.normcase(os.path.normpath(record.worktree_path))
-        candidate = (
-            os.path.normcase(os.path.normpath(cwd)) if cwd else ""
-        )
+        candidate = os.path.normcase(os.path.normpath(cwd)) if cwd else ""
         try:
-            inside = (
-                bool(candidate)
-                and os.path.commonpath([candidate, root]) == root
-            )
+            inside = bool(candidate) and os.path.commonpath([candidate, root]) == root
         except ValueError:
             inside = False
         if not inside:
@@ -21413,33 +22604,20 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     _spawn_status_updater(wt_id, upd_path)
 
     if getattr(args, "emit_context", False):
-        target_cwd = (
-            record.worktree_path if record is not None else cwd or "<unknown>"
-        )
+        target_cwd = record.worktree_path if record is not None else cwd or "<unknown>"
         message = ""
         if record is not None:
             try:
-                context_config = cfg.load_config(
-                    include_control_plane_related_pr=False
-                )
+                context_config = cfg.load_config(include_control_plane_related_pr=False)
                 registry_context = session_context_mod.render_registry_context(
                     context_config,
                     record,
                     cwd=target_cwd,
                     pane_id=pane_id,
-                    mux_session=(
-                        recovered_mux.get("session_name")
-                        if recovered_mux
-                        else None
-                    ),
-                    plugin_related_anchors=getattr(
-                        args, "plugin_related_anchors", None
-                    ),
+                    mux_session=(recovered_mux.get("session_name") if recovered_mux else None),
+                    plugin_related_anchors=getattr(args, "plugin_related_anchors", None),
                 )
-                message = (
-                    "[agent-worktrees] This Copilot session is bound.\n"
-                    f"{registry_context}"
-                )
+                message = f"[agent-worktrees] This Copilot session is bound.\n{registry_context}"
             except Exception:
                 message = ""
         if not message and recovered_mux:
@@ -21477,9 +22655,7 @@ def cmd_session_lifecycle(args: argparse.Namespace) -> int:
     """Run one combined session-start lifecycle pass."""
     payload = _read_hook_stdin() if getattr(args, "stdin", False) else {}
     timeout = max(0.1, float(getattr(args, "timeout_seconds", 10.0)))
-    result = _run_session_lifecycle(
-        payload or {}, deadline=time.time() + timeout
-    )
+    result = _run_session_lifecycle(payload or {}, deadline=time.time() + timeout)
     diagnostic = result.pop("_stderr", None)
     if diagnostic:
         print(str(diagnostic), file=sys.stderr, end="")
@@ -21500,9 +22676,7 @@ def cmd_session_binding(args: argparse.Namespace) -> int:
         "pane_pid": binding.get("pane_pid") if binding else None,
         "pane_start_time": binding.get("pane_start_time") if binding else None,
         "copilot_pid": binding.get("copilot_pid") if binding else None,
-        "copilot_start_time": (
-            binding.get("copilot_start_time") if binding else None
-        ),
+        "copilot_start_time": (binding.get("copilot_start_time") if binding else None),
     }
     _json_output(result)
     return 0
@@ -21590,13 +22764,9 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
     wt_id = getattr(args, "worktree_id", None)
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
-        if (
-            not cfg.active_project()
-            and not _activate_project_for_worktree_id(wt_id)
-        ):
+        if not cfg.active_project() and not _activate_project_for_worktree_id(wt_id):
             return _json_error(
-                f"could not find the adopted project that owns worktree "
-                f"'{wt_id}'",
+                f"could not find the adopted project that owns worktree '{wt_id}'",
                 exit_code=3,
             )
         try:
@@ -21623,14 +22793,9 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
     candidate_before_ack = None
     if handoff_token:
         try:
-            before_record = tracking.load_record(
-                cfg.tracking_dir() / f"{wt_id}.yaml"
-            )
+            before_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
             pending = next(
-                (
-                    item for item in before_record.handoffs
-                    if item.token == handoff_token
-                ),
+                (item for item in before_record.handoffs if item.token == handoff_token),
                 None,
             )
             candidate_before_ack = pending.candidate if pending else None
@@ -21639,7 +22804,8 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
 
     try:
         tracking.register_session(
-            wt_id, session_id,
+            wt_id,
+            session_id,
             pid=getattr(args, "pid", None),
             pane_id=pane_id,
             source="bind",
@@ -21666,6 +22832,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
     # entry, so the history shows WHEN a session declared ownership (and a
     # successor/operator reading the digest sees the binding event). Best-effort.
     from . import disposition_history
+
     disposition_history.append(
         wt_id,
         at=tracking._now_iso(),
@@ -21693,18 +22860,18 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         head = record.resolved_head_session
     except Exception:
         head = None
-    _json_output({
-        "worktree_id": wt_id,
-        "session": session_id,
-        "pane": pane_id,
-        "bound": True,
-        "head_session": head,
-        "handoff_token": handoff_token,
-        "candidate_before_ack": candidate_before_ack,
-        "candidate_acknowledged": bool(
-            handoff_token and candidate_before_ack == session_id
-        ),
-    })
+    _json_output(
+        {
+            "worktree_id": wt_id,
+            "session": session_id,
+            "pane": pane_id,
+            "bound": True,
+            "head_session": head,
+            "handoff_token": handoff_token,
+            "candidate_before_ack": candidate_before_ack,
+            "candidate_acknowledged": bool(handoff_token and candidate_before_ack == session_id),
+        }
+    )
     return 0
 
 
@@ -21751,6 +22918,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
     never broken by a history hiccup.
     """
     from . import disposition_history
+
     session_id = getattr(args, "session_id", None) or (
         os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     )
@@ -21785,7 +22953,9 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
             existing = tracking.load_record(yaml_path)
             if existing.session_entry(session_id) is None:
                 tracking.register_session(
-                    wt_id, session_id, source="handoff",
+                    wt_id,
+                    session_id,
+                    source="handoff",
                 )
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
@@ -21812,19 +22982,19 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
         kind="handoff",
         session_id=session_id,
     )
-    _json_output({
-        "noted": True,
-        "worktree_id": wt_id,
-        "session": session_id,
-        "task": task or None,
-        "handoff_ordinal": handoff_ordinal,
-    })
+    _json_output(
+        {
+            "noted": True,
+            "worktree_id": wt_id,
+            "session": session_id,
+            "task": task or None,
+            "handoff_ordinal": handoff_ordinal,
+        }
+    )
     return 0
 
 
-def _bind_nudge_decision(
-    cwd: str, *, deadline: float | None = None
-) -> dict:
+def _bind_nudge_decision(cwd: str, *, deadline: float | None = None) -> dict:
     """Return the advisory bind reminder without importing a CLI subprocess."""
     import time as _time
 
@@ -21882,6 +23052,7 @@ def cmd_bind_nudge(args: argparse.Namespace) -> int:
     ``bind-session`` call does the binding.
     """
     import json as _json
+
     def _emit(obj) -> int:
         try:
             sys.stdout.write(_json.dumps(obj))
@@ -22065,13 +23236,15 @@ def _run_reciprocal_backfill(
         try:
             candidates = tracking.derive_legacy_controller_relations(record)
         except tracking.ControllerRelationError as exc:
-            controller_items.append({
-                "worktree_id": record.worktree_id,
-                "status": "blocked",
-                "detail": str(exc),
-                "relations": 0,
-                "repaired": False,
-            })
+            controller_items.append(
+                {
+                    "worktree_id": record.worktree_id,
+                    "status": "blocked",
+                    "detail": str(exc),
+                    "relations": 0,
+                    "repaired": False,
+                }
+            )
             continue
         if not candidates:
             continue
@@ -22084,25 +23257,31 @@ def _run_reciprocal_backfill(
                 status = "repaired" if repaired else "current"
             except tracking.ControllerRelationError as exc:
                 status = "blocked"
-                controller_items.append({
-                    "worktree_id": record.worktree_id,
-                    "status": status,
-                    "detail": str(exc),
-                    "relations": len(candidates),
-                    "repaired": False,
-                })
+                controller_items.append(
+                    {
+                        "worktree_id": record.worktree_id,
+                        "status": status,
+                        "detail": str(exc),
+                        "relations": len(candidates),
+                        "repaired": False,
+                    }
+                )
                 continue
-        controller_items.append({
-            "worktree_id": record.worktree_id,
-            "status": status,
-            "relations": len(candidates),
-            "controller_session_ids": sorted({
-                relation.controller_session_id
-                for relation in candidates
-                if relation.controller_session_id
-            }),
-            "repaired": repaired,
-        })
+        controller_items.append(
+            {
+                "worktree_id": record.worktree_id,
+                "status": status,
+                "relations": len(candidates),
+                "controller_session_ids": sorted(
+                    {
+                        relation.controller_session_id
+                        for relation in candidates
+                        if relation.controller_session_id
+                    }
+                ),
+                "repaired": repaired,
+            }
+        )
 
     projections = session_projection.backfill_relations(
         records,
@@ -22146,10 +23325,7 @@ def _run_backfill(
                     sess_updated += 1
                 continue
 
-            rec.sessions = [
-                tracking.SessionEntry(session_id=sid, started_at="")
-                for sid in sids
-            ]
+            rec.sessions = [tracking.SessionEntry(session_id=sid, started_at="") for sid in sids]
             tracking.save_record(rec)
             sess_updated += 1
 
@@ -22163,8 +23339,7 @@ def _run_backfill(
     if title_targets:
         tctx = sessions.scan_sessions_fast(title_targets)
         for rec in title_targets:
-            summary = tctx.latest_summary.get(
-                _normalize_path(rec.worktree_path), "")
+            summary = tctx.latest_summary.get(_normalize_path(rec.worktree_path), "")
             if summary and summary != "null":
                 rec.title = summary
                 tracking.save_record(rec)
@@ -22254,15 +23429,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         proj_name = ""
     project_names = sorted(
         str(name)
-        for name in (
-            (inst.read_projects_registry().get("projects") or {}).keys()
-        )
+        for name in ((inst.read_projects_registry().get("projects") or {}).keys())
         if isinstance(name, str) and cfg._PROJECT_NAME_RE.fullmatch(name)
     )
     if not proj_name:
-        discovered = health.find_record_by_cwd_across_projects(
-            os.getcwd(), project_names
-        )
+        discovered = health.find_record_by_cwd_across_projects(os.getcwd(), project_names)
         if discovered is not None:
             proj_name = discovered.repo
             cfg.set_active_project(proj_name)
@@ -22333,9 +23504,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 "sessions": sum(len(v) for v in disc.values()),
                 "worktrees": len(disc),
                 "registry": len(disc),
-                "titles": len(
-                    [r for r in recs if not (r.title and r.title != "null")]
-                ),
+                "titles": len([r for r in recs if not (r.title and r.title != "null")]),
             }
             reciprocal = _run_reciprocal_backfill(
                 recs,
@@ -22363,12 +23532,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
         # 5. Empty session-state shells.
         exclude = health.registered_session_ids(records) | _current_session_ids()
-        shells = health.find_empty_session_shells(
-            session_dir, exclude_ids=frozenset(exclude)
-        )
-        gc_result = health.gc_empty_shells(
-            session_dir, store_db, shells, apply=(apply and do_gc)
-        )
+        shells = health.find_empty_session_shells(session_dir, exclude_ids=frozenset(exclude))
+        gc_result = health.gc_empty_shells(session_dir, store_db, shells, apply=(apply and do_gc))
 
         # 6. Alignment audit (report-only)
         misaligned = health.audit_alignment(records, session_dir)
@@ -22381,7 +23546,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 if entry is not None and entry.state == "handed-off":
                     entry.state = "active"
                     tracking.set_head_session(
-                        o.record, o.session_id, save=False,
+                        o.record,
+                        o.session_id,
+                        save=False,
                     )
                     tracking.save_record(o.record)
                     o.reactivated = True
@@ -22428,8 +23595,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "repairable": sum(1 for f in yaml_findings if f.repairable),
             "repaired": sum(1 for f in yaml_findings if f.repaired),
             "files": [
-                {"file": f.path.name, "error": f.error,
-                 "repairable": f.repairable, "repaired": f.repaired}
+                {
+                    "file": f.path.name,
+                    "error": f.error,
+                    "repairable": f.repairable,
+                    "repaired": f.repaired,
+                }
                 for f in yaml_findings
             ],
         },
@@ -22446,16 +23617,23 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "fixed": stale_heads_fixed,
             "ids": stale_heads,
         },
-        "stale_status": {"found": len(stale), "fixed": stale_fixed,
-                         "ids": [r.worktree_id for r in stale]},
+        "stale_status": {
+            "found": len(stale),
+            "fixed": stale_fixed,
+            "ids": [r.worktree_id for r in stale],
+        },
         "empty_sessions": gc_result,
         "misaligned": {"count": len(misaligned), "worktrees": misaligned},
         "orphaned_handoffs": {
             "found": len(orphaned),
             "reactivated": orphaned_fixed,
             "items": [
-                {"worktree_id": o.worktree_id, "session_id": o.session_id,
-                 "age_h": round(o.age_h, 1), "reactivated": o.reactivated}
+                {
+                    "worktree_id": o.worktree_id,
+                    "session_id": o.session_id,
+                    "age_h": round(o.age_h, 1),
+                    "reactivated": o.reactivated,
+                }
                 for o in orphaned
             ],
         },
@@ -22481,24 +23659,26 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
 
     yi = report["yaml_integrity"]
     if yi["bad"]:
-        tail = f", {yi['repaired']} repaired" if applied else \
-            f", {yi['repairable']} repairable"
+        tail = f", {yi['repaired']} repaired" if applied else f", {yi['repairable']} repairable"
         print(f"  ! Corrupt tracking records: {yi['bad']}{tail}")
         for f in yi["files"]:
-            mark = "fixed" if f["repaired"] else (
-                "repairable" if f["repairable"] else "manual")
+            mark = "fixed" if f["repaired"] else ("repairable" if f["repairable"] else "manual")
             print(f"      - {f['file']} [{mark}] {f['error']}")
     else:
         print("  \u2713 Tracking records parse cleanly")
 
     bf = report["backfill"]
     if applied:
-        print(f"  \u2713 Backfill: {bf['registry']} registry + "
-              f"{bf['titles']} title record(s) updated "
-              f"({bf['sessions']} session(s))")
+        print(
+            f"  \u2713 Backfill: {bf['registry']} registry + "
+            f"{bf['titles']} title record(s) updated "
+            f"({bf['sessions']} session(s))"
+        )
     else:
-        print(f"  \u2022 Backfill candidates: {bf['worktrees']} worktree(s) "
-              f"w/ discoverable sessions, {bf['titles']} missing title(s)")
+        print(
+            f"  \u2022 Backfill candidates: {bf['worktrees']} worktree(s) "
+            f"w/ discoverable sessions, {bf['titles']} missing title(s)"
+        )
 
     reciprocal = report.get("reciprocal_metadata", {})
     controllers = reciprocal.get("legacy_controllers", {})
@@ -22524,8 +23704,7 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
         )
     if projection_remaining:
         print(
-            f"      {projection_remaining} projection relation(s) remain "
-            "outside this run's budget"
+            f"      {projection_remaining} projection relation(s) remain outside this run's budget"
         )
 
     pairs = report.get(
@@ -22540,86 +23719,102 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
             f"{'repaired' if applied else 'repairable'}"
         )
         for item in pairs["items"][:8]:
-            mark = "fixed" if item["repaired"] else (
-                "needs --fix" if item["repairable"] else "manual"
+            mark = (
+                "fixed"
+                if item["repaired"]
+                else ("needs --fix" if item["repairable"] else "manual")
             )
-            print(
-                f"      - {item['worktree_id']} [{mark}] {item['detail']}"
-            )
+            print(f"      - {item['worktree_id']} [{mark}] {item['detail']}")
     else:
         print(f"  {chk} Pair records are stored in their owning project registries")
 
     hc = report.get("head_cache", {"found": 0, "fixed": 0, "ids": []})
     if hc["found"]:
-        print(f"  {chk if applied else '!'} Stale head cache: {hc['found']} "
-              f"{'fixed' if applied else 'found'} -> "
-              f"{', '.join(hc['ids'][:8])}")
+        print(
+            f"  {chk if applied else '!'} Stale head cache: {hc['found']} "
+            f"{'fixed' if applied else 'found'} -> "
+            f"{', '.join(hc['ids'][:8])}"
+        )
     else:
         print(f"  {chk} Head caches match the transition ledger")
 
     ss = report["stale_status"]
     if ss["found"]:
-        print(f"  {chk if applied else '!'} Stale status "
-              f"(active + completed_at): {ss['found']} "
-              f"{'fixed' if applied else 'found'} -> {', '.join(ss['ids'][:8])}")
+        print(
+            f"  {chk if applied else '!'} Stale status "
+            f"(active + completed_at): {ss['found']} "
+            f"{'fixed' if applied else 'found'} -> {', '.join(ss['ids'][:8])}"
+        )
     else:
         print(f"  {chk} No stale statuses")
 
     es = report["empty_sessions"]
     if es["count"]:
         if gc_applied:
-            print(f"  \u2713 Empty session shells: removed {es['removed_dirs']} "
-                  f"dir(s), purged {es['removed_rows']} store row(s)")
+            print(
+                f"  \u2713 Empty session shells: removed {es['removed_dirs']} "
+                f"dir(s), purged {es['removed_rows']} store row(s)"
+            )
         else:
             hint = "" if applied else " (needs --fix --gc-sessions)"
-            print(f"  \u2022 Empty session shells: {es['count']} "
-                  f"candidate(s){hint}")
+            print(f"  \u2022 Empty session shells: {es['count']} candidate(s){hint}")
     else:
         print("  \u2713 No orphaned empty session shells")
 
     mis = report["misaligned"]
     if mis["count"]:
-        print(f"  \u2022 Alignment audit: {mis['count']} session-less "
-              f"worktree(s) point at a foreign parent cwd "
-              f"(resume handled by Fix; informational)")
+        print(
+            f"  \u2022 Alignment audit: {mis['count']} session-less "
+            f"worktree(s) point at a foreign parent cwd "
+            f"(resume handled by Fix; informational)"
+        )
     else:
         print("  \u2713 No worktree/path misalignment")
 
     oh = report.get("orphaned_handoffs", {"found": 0, "items": []})
     if oh["found"]:
         verb = "re-activated" if applied else "found"
-        print(f"  {chk if applied else '!'} Orphaned handoffs "
-              f"(head lost to a failed cutover): {oh['found']} {verb}")
+        print(
+            f"  {chk if applied else '!'} Orphaned handoffs "
+            f"(head lost to a failed cutover): {oh['found']} {verb}"
+        )
         for o in oh["items"][:8]:
-            mark = "fixed" if o.get("reactivated") else (
-                "re-activate" if applied else "needs --fix")
-            print(f"      - {o['worktree_id']}  <- {o['session_id'][:8]} "
-                  f"(idle {o['age_h']}h) [{mark}]")
+            mark = (
+                "fixed" if o.get("reactivated") else ("re-activate" if applied else "needs --fix")
+            )
+            print(
+                f"      - {o['worktree_id']}  <- {o['session_id'][:8]} "
+                f"(idle {o['age_h']}h) [{mark}]"
+            )
     else:
         print(f"  {chk} No orphaned handoffs")
 
     bo = report.get("bare_orphans", {"count": 0, "items": []})
     if bo["count"]:
-        print(f"  \u2022 Bare (un-muxed) Copilot orphan(s): {bo['count']} "
-              f"machine-wide (invisible to the mux fleet view)")
+        print(
+            f"  \u2022 Bare (un-muxed) Copilot orphan(s): {bo['count']} "
+            f"machine-wide (invisible to the mux fleet view)"
+        )
         for o in bo["items"][:8]:
             wt = o.get("worktree_id") or "?"
             print(f"      - {o['session_id'][:8]}  pid {o['pid']:<6} {wt}")
-        print("      reclaim: agent-worktrees reclaim --worktree-id <id> "
-              "--bare-only  (or --all)")
+        print("      reclaim: agent-worktrees reclaim --worktree-id <id> --bare-only  (or --all)")
     else:
         print("  \u2713 No bare (un-muxed) Copilot orphans")
 
     lag = report.get("runtime_lag") or []
     if lag:
-        print(f"  ! Runtime version lag: {len(lag)} service(s) serving older "
-              f"code than installed")
+        print(f"  ! Runtime version lag: {len(lag)} service(s) serving older code than installed")
         for entry in lag:
-            print(f"      - {entry['service']}: running {entry['running']} but "
-                  f"{entry['payload']} installed -> "
-                  f"{entry['service']} service restart")
-        print("      (a new launch heals this automatically; restart to "
-              "converge this running session sooner)")
+            print(
+                f"      - {entry['service']}: running {entry['running']} but "
+                f"{entry['payload']} installed -> "
+                f"{entry['service']} service restart"
+            )
+        print(
+            "      (a new launch heals this automatically; restart to "
+            "converge this running session sooner)"
+        )
     else:
         print("  \u2713 Runtime services match installed payload")
 
@@ -22641,10 +23836,7 @@ def _render_dropin_registry_report(label: str, report: dict) -> None:
     )
     for finding in findings:
         target = f" target={finding['target']}" if finding.get("target") else ""
-        print(
-            f"      - {finding.get('entry', '?')}: "
-            f"{finding.get('reason', 'unknown')}{target}"
-        )
+        print(f"      - {finding.get('entry', '?')}: {finding.get('reason', 'unknown')}{target}")
         if finding.get("remedy"):
             print(f"        -> {finding['remedy']}")
 
@@ -22691,13 +23883,9 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
             session_id = row.get("id")
             if not isinstance(session_id, str) or not session_id:
                 continue
-            assignment = profile_assignment.assignment_for_session(
-                rec, session_id
-            )
+            assignment = profile_assignment.assignment_for_session(rec, session_id)
             if assignment is not None:
-                row["profile_assignment"] = profile_assignment.metadata(
-                    assignment
-                )
+                row["profile_assignment"] = profile_assignment.metadata(assignment)
             existing = by_session.get(session_id)
             if existing is None:
                 by_session[session_id] = row
@@ -22727,22 +23915,22 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
         head_session = records[0].resolved_head_session
         transition = records[0].replayed_head_transition
         head_revision = transition.revision if transition is not None else 0
-        handoffs = [
-            dataclasses.asdict(handoff) for handoff in records[0].handoffs
-        ]
+        handoffs = [dataclasses.asdict(handoff) for handoff in records[0].handoffs]
         controller_revision = records[0].controller_revision
         controllers = _controller_metadata(records[0])
         controller_findings = _controller_findings(records[0])
 
-    _json_output({
-        "sessions": list(by_session.values()),
-        "head_session": head_session,
-        "head_revision": head_revision,
-        "handoffs": handoffs,
-        "controller_revision": controller_revision,
-        "controllers": controllers,
-        "controller_findings": controller_findings,
-    })
+    _json_output(
+        {
+            "sessions": list(by_session.values()),
+            "head_session": head_session,
+            "head_revision": head_revision,
+            "handoffs": handoffs,
+            "controller_revision": controller_revision,
+            "controllers": controllers,
+            "controller_findings": controller_findings,
+        }
+    )
     return 0
 
 
@@ -22788,6 +23976,7 @@ def _find_tracking_file(raw_id: str) -> Path | None:
     then treats the worktree as untracked (fail-open), never guessing.
     """
     import re
+
     if re.search(r"[/\\]|\.\.", raw_id):
         return None
     tdirs = _all_tracking_dirs()
@@ -22850,19 +24039,21 @@ def cmd_head_session(args: argparse.Namespace) -> int:
     raw = args.worktree_id
     yaml_path = _find_tracking_file(raw)
     if yaml_path is None:
-        _json_output({
-            "worktree_id": raw,
-            "tracked": False,
-            "head_session": None,
-            "active": False,
-            "occupied": False,
-            "state": None,
-            "head_revision": 0,
-            "pending_handoffs": [],
-            "controller_revision": 0,
-            "controllers": [],
-            "controller_findings": [],
-        })
+        _json_output(
+            {
+                "worktree_id": raw,
+                "tracked": False,
+                "head_session": None,
+                "active": False,
+                "occupied": False,
+                "state": None,
+                "head_revision": 0,
+                "pending_handoffs": [],
+                "controller_revision": 0,
+                "controllers": [],
+                "controller_findings": [],
+            }
+        )
         return 0
     record = tracking.load_record(yaml_path)
     head = record.resolved_head_session
@@ -22879,19 +24070,21 @@ def cmd_head_session(args: argparse.Namespace) -> int:
         }
         for handoff in record.pending_handoffs
     ]
-    _json_output({
-        "worktree_id": record.worktree_id or raw,
-        "tracked": True,
-        "head_session": head,
-        "active": head is not None,
-        "occupied": head is not None or bool(pending),
-        "state": (entry.state if entry is not None else None),
-        "head_revision": transition.revision if transition is not None else 0,
-        "pending_handoffs": pending,
-        "controller_revision": record.controller_revision,
-        "controllers": _controller_metadata(record),
-        "controller_findings": _controller_findings(record),
-    })
+    _json_output(
+        {
+            "worktree_id": record.worktree_id or raw,
+            "tracked": True,
+            "head_session": head,
+            "active": head is not None,
+            "occupied": head is not None or bool(pending),
+            "state": (entry.state if entry is not None else None),
+            "head_revision": transition.revision if transition is not None else 0,
+            "pending_handoffs": pending,
+            "controller_revision": record.controller_revision,
+            "controllers": _controller_metadata(record),
+            "controller_findings": _controller_findings(record),
+        }
+    )
     return 0
 
 
@@ -22946,16 +24139,18 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
         tracking.save_record(record, yaml_path)
     record = tracking.load_record(yaml_path)
     entry = record.session_entry(args.session_id)
-    _json_output({
-        "worktree_id": record.worktree_id or raw,
-        "session": args.session_id,
-        "state": (entry.state if entry is not None else None),
-        "head_session": record.resolved_head_session,
-        "head_revision": record.head_revision,
-        "pending_handoffs": [
-            dataclasses.asdict(handoff) for handoff in record.pending_handoffs
-        ],
-    })
+    _json_output(
+        {
+            "worktree_id": record.worktree_id or raw,
+            "session": args.session_id,
+            "state": (entry.state if entry is not None else None),
+            "head_session": record.resolved_head_session,
+            "head_revision": record.head_revision,
+            "pending_handoffs": [
+                dataclasses.asdict(handoff) for handoff in record.pending_handoffs
+            ],
+        }
+    )
     return 0
 
 
@@ -22970,9 +24165,7 @@ def _find_tracking_file_exact(raw_id: str) -> Path | None:
             matches.append(path)
     unique = list(dict.fromkeys(path.resolve() for path in matches))
     if len(unique) > 1:
-        raise RuntimeError(
-            f"Worktree id is ambiguous across projects: {raw_id}"
-        )
+        raise RuntimeError(f"Worktree id is ambiguous across projects: {raw_id}")
     return unique[0] if unique else None
 
 
@@ -23034,9 +24227,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 return 0
             raise
         if record.worktree_id != raw or record.worktree_id != yaml_path.stem:
-            return _json_error(
-                f"Tracking record identity mismatch for exact id: {raw}"
-            )
+            return _json_error(f"Tracking record identity mismatch for exact id: {raw}")
         repo = _repo_for_record(config, record)
         if repo is None:
             _json_output(
@@ -23076,11 +24267,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 worktree_ids={record.worktree_id},
             )
             removed = next(
-                (
-                    entry
-                    for entry in report["removed"]
-                    if entry.get("id") == record.worktree_id
-                ),
+                (entry for entry in report["removed"] if entry.get("id") == record.worktree_id),
                 None,
             )
             if removed is None:
@@ -23137,9 +24324,10 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
         record = tracking.load_record(yaml_path)
         try:
             tracking.link_succession(
-                record, args.predecessor, args.successor,
-                predecessor_state=getattr(
-                    args, "predecessor_state", "handed-off"),
+                record,
+                args.predecessor,
+                args.successor,
+                predecessor_state=getattr(args, "predecessor_state", "handed-off"),
                 handoff_token=getattr(args, "handoff_token", None),
                 save=False,
             )
@@ -23150,14 +24338,16 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
         tracking.save_record(record, yaml_path)
     record = tracking.load_record(yaml_path)
     pred = record.session_entry(args.predecessor)
-    _json_output({
-        "worktree_id": record.worktree_id or raw,
-        "predecessor": args.predecessor,
-        "successor": args.successor,
-        "predecessor_state": (pred.state if pred is not None else None),
-        "head_session": record.resolved_head_session,
-        "head_revision": record.head_revision,
-    })
+    _json_output(
+        {
+            "worktree_id": record.worktree_id or raw,
+            "predecessor": args.predecessor,
+            "successor": args.successor,
+            "predecessor_state": (pred.state if pred is not None else None),
+            "head_session": record.resolved_head_session,
+            "head_revision": record.head_revision,
+        }
+    )
     return 0
 
 
@@ -23251,33 +24441,37 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
 
         try:
             summary = reconcile.apply_plan(
-                Path(repo_dir), machine=machine,
-                include_payload_refresh=with_payload, log=_log,
+                Path(repo_dir),
+                machine=machine,
+                include_payload_refresh=with_payload,
+                log=_log,
             )
         except Exception as e:  # never raise from a background provision
             print(f"provision: error: {e}", file=sys.stderr)
-            _write_status({
-                "ok": False,
-                "repo": str(Path(repo_dir).resolve()),
-                "reason": str(e),
-                "failed": [],
-            })
+            _write_status(
+                {
+                    "ok": False,
+                    "repo": str(Path(repo_dir).resolve()),
+                    "reason": str(e),
+                    "failed": [],
+                }
+            )
             return 1
-        failed = [
-            item for item in summary.get("executed", [])
-            if not item.get("ok", False)
-        ]
-        _write_status({
-            "ok": not failed,
-            "repo": str(Path(repo_dir).resolve()),
-            "failed": failed,
-        })
+        failed = [item for item in summary.get("executed", []) if not item.get("ok", False)]
+        _write_status(
+            {
+                "ok": not failed,
+                "repo": str(Path(repo_dir).resolve()),
+                "failed": failed,
+            }
+        )
         print(json.dumps(summary))
         return 1 if failed else 0
 
     try:
         plan = reconcile.build_plan(
-            Path(repo_dir), machine=machine,
+            Path(repo_dir),
+            machine=machine,
             include_payload_refresh=with_payload,
             save=not getattr(args, "peek", False),
         )
@@ -23319,9 +24513,7 @@ def cmd_register_project_entry(args: argparse.Namespace) -> int:
     if inst.is_reserved_project_command(project):
         output.skipped(f"'{project}' is the runtime itself, not a project")
         return 0
-    with inst.project_binstub_registration(
-        project, repo_dir=repo_dir
-    ) as binstub_registration:
+    with inst.project_binstub_registration(project, repo_dir=repo_dir) as binstub_registration:
         if repo_dir:
             try:
                 from . import repos as _repos
@@ -23329,8 +24521,7 @@ def cmd_register_project_entry(args: argparse.Namespace) -> int:
                 existing_repo = _repos.find_repo(project)
                 repo_class = (
                     existing_repo.repo_class
-                    if existing_repo is not None
-                    and existing_repo.repo_class != "reference"
+                    if existing_repo is not None and existing_repo.repo_class != "reference"
                     else "worktree"
                 )
                 remote = ""
@@ -23359,14 +24550,13 @@ def cmd_register_project_entry(args: argparse.Namespace) -> int:
                     plat=cfg.detect_platform(),
                 )
             except Exception as exc:
-                output.err(
-                    f"Could not record repository identity for {project}: {exc}"
-                )
+                output.err(f"Could not record repository identity for {project}: {exc}")
                 return 1
         expose = getattr(args, "expose_agent", None)
         if expose is None:
             try:
                 from . import repos as _repos
+
                 entry = _repos.find_repo(project)
                 if entry is not None:
                     expose = entry.agent
@@ -23465,8 +24655,7 @@ def cmd_session_lock(args: argparse.Namespace) -> int:
     if args.action == "remove":
         locks.remove_lock(lock_path)
         if getattr(args, "json", False):
-            print(json.dumps({"ok": True, "action": "remove",
-                              "path": str(lock_path)}))
+            print(json.dumps({"ok": True, "action": "remove", "path": str(lock_path)}))
         return 0
     # write
     extra: dict = {"kind": args.kind, "session_id": args.session}
@@ -23474,8 +24663,17 @@ def cmd_session_lock(args: argparse.Namespace) -> int:
         extra["worktree_id"] = args.worktree
     ok = locks.write_lock(lock_path, pid=args.pid, extra=extra)
     if getattr(args, "json", False):
-        print(json.dumps({"ok": ok, "action": "write", "path": str(lock_path),
-                          "worktree_id": args.worktree, "pid": args.pid}))
+        print(
+            json.dumps(
+                {
+                    "ok": ok,
+                    "action": "write",
+                    "path": str(lock_path),
+                    "worktree_id": args.worktree,
+                    "pid": args.pid,
+                }
+            )
+        )
     elif not ok:
         print(f"session-lock: failed to write {lock_path}", file=sys.stderr)
     return 0 if ok else 1
@@ -23578,9 +24776,13 @@ def _print_boot_provenance() -> None:
     # 1. Runtime package identity
     pkg_dir = install / "lib" / "agent_worktrees"
     has_new = pkg_dir.is_dir()
-    checks.append(("runtime", has_new,
-                    f"agent_worktrees at {pkg_dir}" if has_new
-                    else "agent_worktrees package NOT FOUND"))
+    checks.append(
+        (
+            "runtime",
+            has_new,
+            f"agent_worktrees at {pkg_dir}" if has_new else "agent_worktrees package NOT FOUND",
+        )
+    )
 
     # 2. Old worktree_manager remnants
     old_pkg = install / "lib" / "worktree_manager"
@@ -23600,9 +24802,15 @@ def _print_boot_provenance() -> None:
         if old_venv_pkg is None:
             old_venv_pkg = old_venv / "lib" / "python3" / "site-packages" / "worktree_manager"
     has_old = old_pkg.is_dir() or old_venv_pkg.is_dir()
-    checks.append(("no-legacy-pkg", not has_old,
-                    "no worktree_manager remnants" if not has_old
-                    else f"OLD package found: {old_pkg if old_pkg.is_dir() else old_venv_pkg}"))
+    checks.append(
+        (
+            "no-legacy-pkg",
+            not has_old,
+            "no worktree_manager remnants"
+            if not has_old
+            else f"OLD package found: {old_pkg if old_pkg.is_dir() else old_venv_pkg}",
+        )
+    )
 
     # 3. Plugin hook wired
     hook_found = False
@@ -23622,9 +24830,15 @@ def _print_boot_provenance() -> None:
                             break
             except Exception:
                 pass
-    checks.append(("session-hook", hook_found,
-                    "bootstrap-check wired in sessionStart" if hook_found
-                    else "sessionStart hook NOT FOUND"))
+    checks.append(
+        (
+            "session-hook",
+            hook_found,
+            "bootstrap-check wired in sessionStart"
+            if hook_found
+            else "sessionStart hook NOT FOUND",
+        )
+    )
 
     # 4. Binstub resolution
     binstub_ok = False
@@ -23655,6 +24869,7 @@ def _print_boot_provenance() -> None:
             m_commit = ((m.get("source") or {}).get("commit") or m.get("commit") or "")[:10]
             try:
                 from ._build_info import BUILD_INFO
+
                 b_commit = (BUILD_INFO.get("commit") or "")[:10]
             except ImportError:
                 b_commit = ""
@@ -23718,10 +24933,19 @@ def _extract_project_flag(args_list: list[str]) -> tuple[list[str], str | None]:
 # names a routable slug -- and is NOT a real worktrees verb (the collision guard)
 # -- is dispatched to that sibling plugin. `worktrees` folds back into this
 # binstub so `<repo> worktrees <verb>` == the bare `<repo> <verb>` alias.
-_CORE_SLUGS = frozenset({
-    "worktrees", "bridge", "ssh", "dispatch",
-    "codespaces", "containers", "logger", "vault", "mcp",
-})
+_CORE_SLUGS = frozenset(
+    {
+        "worktrees",
+        "bridge",
+        "ssh",
+        "dispatch",
+        "codespaces",
+        "containers",
+        "logger",
+        "vault",
+        "mcp",
+    }
+)
 
 # Slugs whose sibling plugin consumes a top-level ``--project`` (bridge overrides
 # its remote-resolve target project; codespaces chdir's to the project checkout).
@@ -23764,8 +24988,7 @@ def _worktrees_verbs() -> set[str]:
 
         try:
             parser = build_parser()
-            subs = [a for a in parser._actions
-                    if isinstance(a, argparse._SubParsersAction)]
+            subs = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
             _WORKTREES_VERBS = set(subs[0].choices) if subs else set()
         except Exception:
             _WORKTREES_VERBS = set()
@@ -23795,13 +25018,11 @@ def _sibling_binstub(slug: str) -> Path | None:
     """Locate the ``agent-<slug>`` binstub in ~/.local/bin (it runs in its own
     venv, so the router shells out to it rather than importing it)."""
     lb = inst.local_bin()
-    cand = lb / (f"agent-{slug}.ps1" if platform.system() == "Windows"
-                 else f"agent-{slug}")
+    cand = lb / (f"agent-{slug}.ps1" if platform.system() == "Windows" else f"agent-{slug}")
     return cand if cand.exists() else None
 
 
-def _route_to_sibling_plugin(slug: str, project: str | None,
-                             rest: list[str]) -> int:
+def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) -> int:
     """Re-dispatch ``<repo> <slug> …`` to the ``agent-<slug>`` binstub,
     project-pinned when a project is known. Returns the child's exit code."""
     stub = _sibling_binstub(slug)
@@ -23867,7 +25088,9 @@ def _git_toplevel(path: Path | None) -> Path | None:
     try:
         r = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
             env=git_ops.repository_identity_env(),
             stdin=subprocess.DEVNULL,
         )
@@ -23892,11 +25115,30 @@ def _git_toplevel(path: Path | None) -> Path | None:
 # now it resolves from CWD, or from the ``--project`` a project binstub injects,
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
-    "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
-    "register", "hook", "knowledge", "reconcile-marketplaces",
-    "picker", "doctor", "reap-shells", "status-updater", "status-monitor",
-    "reconcile-sessions", "status-monitor-restart", "restart",
-    "register-session", "session-lifecycle", "deregister-session", "session-binding",
+    "--version",
+    "-V",
+    "--help",
+    "-h",
+    "repos",
+    "accounts",
+    "related",
+    "install",
+    "register",
+    "hook",
+    "knowledge",
+    "reconcile-marketplaces",
+    "picker",
+    "doctor",
+    "reap-shells",
+    "status-updater",
+    "status-monitor",
+    "reconcile-sessions",
+    "status-monitor-restart",
+    "restart",
+    "register-session",
+    "session-lifecycle",
+    "deregister-session",
+    "session-binding",
     "session-recovery",
     "session-lineage",
     "installer-readiness",
@@ -23905,10 +25147,17 @@ _NO_PROJECT_COMMANDS = {
     "history-digest",
     "note-handoff",
     "session-role",
-    "head-session", "worktree-lineage", "conclude-session", "conclude-disposable",
-    "link-succession", "config-migrate",
-    "session-lock", "machine-context", "reconcile-binstubs",
-    "register-project-entry", "terminal-fragment",
+    "head-session",
+    "worktree-lineage",
+    "conclude-session",
+    "conclude-disposable",
+    "link-succession",
+    "config-migrate",
+    "session-lock",
+    "machine-context",
+    "reconcile-binstubs",
+    "register-project-entry",
+    "terminal-fragment",
 }
 
 
@@ -23922,8 +25171,7 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     if command == "list-sessions" and "--all-projects" in args_list[1:]:
         return True
     return command == "config-root" and any(
-        arg == "--destination" or arg.startswith("--destination=")
-        for arg in args_list[1:]
+        arg == "--destination" or arg.startswith("--destination=") for arg in args_list[1:]
     )
 
 
@@ -23944,9 +25192,17 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
 # the guard is a *soft, non-fatal note*, fired only when the project name is
 # unregistered (a real binstub always injects a REGISTERED project, so normal
 # ``<repo> repos`` etc. never warn -- no binstub/env cooperation required).
-_PROJECT_IRRELEVANT_COMMANDS = frozenset({
-    "repos", "accounts", "picker", "--version", "-V", "--help", "-h",
-})
+_PROJECT_IRRELEVANT_COMMANDS = frozenset(
+    {
+        "repos",
+        "accounts",
+        "picker",
+        "--version",
+        "-V",
+        "--help",
+        "-h",
+    }
+)
 
 
 def _is_registered_project(name: str) -> bool:
@@ -23964,6 +25220,7 @@ def _is_registered_project(name: str) -> bool:
         pass
     try:
         from . import repos as _repos
+
         if name in _repos.read_registry().repos:
             return True
     except Exception:
@@ -23971,8 +25228,7 @@ def _is_registered_project(name: str) -> bool:
     return False
 
 
-def _guard_project_scope(project_override: str | None,
-                         command: str | None) -> None:
+def _guard_project_scope(project_override: str | None, command: str | None) -> None:
     """Softly note a likely-mistaken ``--project`` on a machine-global verb.
 
     ``--project`` has no effect on a machine-global verb
@@ -24124,10 +25380,11 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
 
     print("Commands:", file=out)
     groups = [
-        ("Worktree lifecycle",
-         "worktree, create, list, status, push-changes, finalize, cleanup"),
-        ("Project / install",
-         "register, install, uninstall, update, install-status, get, validate"),
+        ("Worktree lifecycle", "worktree, create, list, status, push-changes, finalize, cleanup"),
+        (
+            "Project / install",
+            "register, install, uninstall, update, install-status, get, validate",
+        ),
         ("Namespaces", "services ..., repos ..."),
         ("Diagnostics", "activity"),
         ("Info", "--version, --help"),
@@ -24255,20 +25512,25 @@ def _usable_worktree_manager() -> str | None:
         return None
     try:
         proc = subprocess.run(
-            [mgr, "--version"], capture_output=True, text=True, timeout=15,
+            [mgr, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
             env={**os.environ, "PYTHONUTF8": "1"},
         )
     except (OSError, subprocess.SubprocessError):
         output.err(
             f"Ignoring an unusable '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
-            "it could not be run. Falling back to the bundled picker.")
+            "it could not be run. Falling back to the bundled picker."
+        )
         return None
     if proc.returncode != 0:
         output.err(
             f"Ignoring a broken '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): it "
             f"failed a --version health check (exit {proc.returncode}). This is "
             "usually a stale binstub from an old install; reinstall or remove "
-            "it. Falling back to the bundled picker.")
+            "it. Falling back to the bundled picker."
+        )
         return None
     match = re.search(
         r"\b(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?\b",
@@ -24293,8 +25555,9 @@ def _usable_worktree_manager() -> str | None:
     return mgr
 
 
-def _exec_worktree_manager(mgr: str, project: str | None,
-                           *, subcommand: list[str] | None = None) -> int:
+def _exec_worktree_manager(
+    mgr: str, project: str | None, *, subcommand: list[str] | None = None
+) -> int:
     """Hand an invocation off to the Worktree Manager (the seam).
 
     ``subcommand`` is the Manager verb + args to run (e.g. ``["update"]``); when
@@ -24312,9 +25575,7 @@ def _exec_worktree_manager(mgr: str, project: str | None,
         argv += ["--project", project]
     env = {
         **os.environ,
-        _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps(
-            [sys.executable, "-m", "agent_worktrees"]
-        ),
+        _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps([sys.executable, "-m", "agent_worktrees"]),
     }
     if platform.system() == "Windows":
         proc = subprocess.Popen(argv, env=env)
@@ -24341,6 +25602,7 @@ def _bundled_picker_available() -> bool:
     automatically the moment the Picker is gone -- no dispatch change needed.
     """
     import importlib.util
+
     try:
         return importlib.util.find_spec("agent_worktrees.picker_tui") is not None
     except Exception:
@@ -24362,8 +25624,7 @@ def cmd_manager_install_trigger(project: str | None) -> int:
     out = sys.stderr
     name = project or "agent-worktrees"
     is_windows = platform.system() == "Windows"
-    install_cmd = (_WORKTREE_MANAGER_INSTALL_PS1 if is_windows
-                   else _WORKTREE_MANAGER_INSTALL_SH)
+    install_cmd = _WORKTREE_MANAGER_INSTALL_PS1 if is_windows else _WORKTREE_MANAGER_INSTALL_SH
 
     output.header(f"{name} -- the interactive front-end has moved")
     print(
@@ -24414,14 +25675,17 @@ def cmd_headless_bare() -> int:
     print(file=sys.stderr)
     rc = cmd_worktree_dispatch(["list"])
     print(file=sys.stderr)
-    print(f"Manage it with: {project} worktree <create|status|push|finalize|cleanup>",
-          file=sys.stderr)
+    print(
+        f"Manage it with: {project} worktree <create|status|push|finalize|cleanup>",
+        file=sys.stderr,
+    )
     return rc
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # git -- collaboration primitives (sync / feature-branch / merge-to-feature)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def _git_usage() -> None:
     output.header("agent-worktrees git -- collaboration primitives")
@@ -24468,10 +25732,7 @@ def _git_resolve_target(rest: list[str], use_json: bool):
         raise
     worktree_id = _infer_worktree_id(worktree_id_arg, config)
     if not worktree_id:
-        msg = (
-            "Could not determine worktree ID. Pass --worktree-id or run from "
-            "inside a worktree."
-        )
+        msg = "Could not determine worktree ID. Pass --worktree-id or run from inside a worktree."
         if use_json:
             return None, _json_error(msg)
         output.err(msg)
@@ -24551,7 +25812,12 @@ def cmd_git_feature_branch(rest: list[str]) -> int:
         if config is None:
             return wid
         ok = git_collab.manage_feature_branch(
-            wid, config, name, push=push, sync=sync, dry_run=dry_run,
+            wid,
+            config,
+            name,
+            push=push,
+            sync=sync,
+            dry_run=dry_run,
         )
         if use_json:
             _json_output({"worktree_id": wid, "feature": name, "ok": ok})
@@ -24678,9 +25944,7 @@ def _tracked_pr_head_evidence(
 ) -> tuple[str, str]:
     """Return locally recorded publication evidence for one PR's current head."""
     try:
-        authority_endpoint = providers.get_provider(
-            provider
-        ).authority_endpoint(api_base)
+        authority_endpoint = providers.get_provider(provider).authority_endpoint(api_base)
     except (providers.ProviderError, ValueError, AttributeError):
         return "", ""
     worktree_id = _infer_worktree_id_from_cwd(config)
@@ -24758,20 +26022,30 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         return 1
 
     p = argparse.ArgumentParser(prog=f"pr-watch {verb}", add_help=True)
-    p.add_argument("repo", type=_pr_parse_repo, nargs="?", default=None,
-                   help="repo slug -- owner/name or ADO project/repo (optional; "
-                        "inferred from the active project)")
+    p.add_argument(
+        "repo",
+        type=_pr_parse_repo,
+        nargs="?",
+        default=None,
+        help="repo slug -- owner/name or ADO project/repo (optional; "
+        "inferred from the active project)",
+    )
     p.add_argument("pr", type=int, help="PR number")
-    p.add_argument("--host", default="",
-                   help="API base URL override (else the binding's api_base)")
+    p.add_argument(
+        "--host", default="", help="API base URL override (else the binding's api_base)"
+    )
     p.add_argument("--token", default=None, help="Provider token override (else the binding)")
     p.add_argument("--config", default=None)
     if verb == "wait":
-        p.add_argument("--until", default=",".join(pc.DEFAULT_UNTIL),
-                       help="comma-list of transitions or 'any'")
+        p.add_argument(
+            "--until",
+            default=",".join(pc.DEFAULT_UNTIL),
+            help="comma-list of transitions or 'any'",
+        )
         p.add_argument("--since", default=None, help="baseline cursor (omit to auto-baseline)")
-        p.add_argument("--timeout", type=float, default=3600.0,
-                       help="max seconds to block (0 = no limit)")
+        p.add_argument(
+            "--timeout", type=float, default=3600.0, help="max seconds to block (0 = no limit)"
+        )
         p.add_argument("--interval", type=float, default=20.0, help="poll interval seconds")
         p.add_argument("--json", action="store_true", help="emit only the result JSON")
     try:
@@ -24788,8 +26062,10 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             until = [v.strip() for v in args.until.split(",") if v.strip()]
             bad = [v for v in until if v not in pc.ALL_TRANSITIONS]
             if bad:
-                output.err(f"unknown transition(s) {bad}; choose from "
-                           f"{', '.join(pc.ALL_TRANSITIONS)} or 'any'")
+                output.err(
+                    f"unknown transition(s) {bad}; choose from "
+                    f"{', '.join(pc.ALL_TRANSITIONS)} or 'any'"
+                )
                 return 2
         if args.timeout < 0:
             output.err("--timeout must be >= 0 (0 = no limit)")
@@ -24804,11 +26080,12 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         if args.repo is None:
             args.repo = _infer_active_repo_slug(config)
             if not args.repo:
-                output.err("pr-watch: could not infer the repo from the active "
-                           "project; pass an explicit repo slug")
+                output.err(
+                    "pr-watch: could not infer the repo from the active "
+                    "project; pass an explicit repo slug"
+                )
                 return 2
-        fetch = prw.build_fetch(prcfg, args.repo, args.pr,
-                                api_base=args.host, token=args.token)
+        fetch = prw.build_fetch(prcfg, args.repo, args.pr, api_base=args.host, token=args.token)
         if verb == "cursor":
             snap = fetch()
             print(pc.Baseline.from_snapshot(snap).to_cursor())
@@ -24824,23 +26101,27 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         )
         if not args.json:
             mode = f"since {args.since}" if args.since else "auto-baseline"
-            print(f"pr-watch: watching {args.repo}#{args.pr} for [{', '.join(until)}] "
-                  f"({mode}, every {args.interval:g}s, timeout {args.timeout:g}s)",
-                  file=sys.stderr)
+            print(
+                f"pr-watch: watching {args.repo}#{args.pr} for [{', '.join(until)}] "
+                f"({mode}, every {args.interval:g}s, timeout {args.timeout:g}s)",
+                file=sys.stderr,
+            )
         result = prw.run_wait(
-            repo=args.repo, pr=args.pr, until=until, baseline=baseline,
-            fetch=fetch, timeout=args.timeout, interval=args.interval,
+            repo=args.repo,
+            pr=args.pr,
+            until=until,
+            baseline=baseline,
+            fetch=fetch,
+            timeout=args.timeout,
+            interval=args.interval,
             automerge_label=getattr(prcfg, "automerge_label", "") or "",
             hold_labels=tuple(getattr(prcfg, "hold_labels", ()) or ()),
             wip_title_prefixes=tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
             approval_required=bool(getattr(prcfg, "approval_required", True)),
-            allow_stale_approval=bool(
-                getattr(prcfg, "allow_stale_approval", False)
-            ),
+            allow_stale_approval=bool(getattr(prcfg, "allow_stale_approval", False)),
             stale_approval_head_sha=tracked_head_sha,
             stale_approval_head_observed_at=head_observed_at,
-            on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}",
-                                     file=sys.stderr),
+            on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}", file=sys.stderr),
         )
         if not result.matched:
             # #3486: a timeout still carries the current-state snapshot (verdict
@@ -24866,24 +26147,32 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     )
                     print(
                         "pr-watch: (this is a one-shot read; `pr-status` gives "
-                        "the same live state without waiting)", file=sys.stderr,
+                        "the same live state without waiting)",
+                        file=sys.stderr,
                     )
             return 124
         print(_json.dumps(result.payload))
         if not args.json:
-            print(f"pr-watch: {args.repo}#{args.pr} -> "
-                  f"{', '.join(result.payload['transitions'])}", file=sys.stderr)
+            print(
+                f"pr-watch: {args.repo}#{args.pr} -> {', '.join(result.payload['transitions'])}",
+                file=sys.stderr,
+            )
             # Surface the next action so a woken caller doesn't assume "approved
             # == done": an approved+unblocked PR still needs merge consent.
             merge = result.payload.get("merge") or {}
             if merge.get("needs_consent"):
                 label = merge.get("consent_label") or "the merge-consent label"
-                print(f"pr-watch: NEXT -> grant merge consent (add label "
-                      f"'{label}') -- the PR will not merge until you do "
-                      f"({merge.get('reason', '')})", file=sys.stderr)
+                print(
+                    f"pr-watch: NEXT -> grant merge consent (add label "
+                    f"'{label}') -- the PR will not merge until you do "
+                    f"({merge.get('reason', '')})",
+                    file=sys.stderr,
+                )
             elif merge.get("consent_action") == "already":
-                print("pr-watch: merge consent already granted; the merge gate "
-                      "will proceed", file=sys.stderr)
+                print(
+                    "pr-watch: merge consent already granted; the merge gate will proceed",
+                    file=sys.stderr,
+                )
         return 0
     except ProviderError as exc:
         output.err(f"pr-watch: {exc}")
@@ -24900,7 +26189,10 @@ def _pr_merge_usage() -> None:
     print(file=out)
     print("Signal merge consent on an APPROVED PR by applying the repo's", file=out)
     print("merge-consent label (the .agent-worktrees/config.yaml binding", file=out)
-    print("automerge_label; multi-machine system: auto-merge). Applies by default; it never", file=out)
+    print(
+        "automerge_label; multi-machine system: auto-merge). Applies by default; it never",
+        file=out,
+    )
     print("merges -- the review gate still decides. Only eligible PRs are", file=out)
     print("touched (approved at head, mergeable, not draft/WIP, no hold label,", file=out)
     print("targeting the default branch).", file=out)
@@ -24920,8 +26212,10 @@ def _pr_merge_usage() -> None:
 
 def _pr_merge_print_human(summary: dict) -> None:
     mode = "APPLY" if summary["apply"] else "preview (dry-run)"
-    output_line = (f"pr-merge [{mode}] {summary['repo']}: {summary['open']} open, "
-                   f"{summary['eligible']} eligible for auto-merge")
+    output_line = (
+        f"pr-merge [{mode}] {summary['repo']}: {summary['open']} open, "
+        f"{summary['eligible']} eligible for auto-merge"
+    )
     print(output_line, file=sys.stderr)
     for d in summary["decisions"]:
         if d["action"] == "apply":
@@ -24971,12 +26265,19 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
         )
         rem = pc.pr_reminder(flow, "pr-merge", ok=False, reason=reason)
         if args.json:
-            print(_json.dumps({
-                "repo": args.repo, "pr": args.pr,
-                "error": "--now not applicable to this repo's flow",
-                "flow_profile": flow.profile, "merge_mode": flow.merge_mode,
-                "applied": False, "reminder": rem.as_dict(),
-            }))
+            print(
+                _json.dumps(
+                    {
+                        "repo": args.repo,
+                        "pr": args.pr,
+                        "error": "--now not applicable to this repo's flow",
+                        "flow_profile": flow.profile,
+                        "merge_mode": flow.merge_mode,
+                        "applied": False,
+                        "reminder": rem.as_dict(),
+                    }
+                )
+            )
         else:
             output.err(f"pr-merge --now: {reason}. Nothing merged.")
             print(rem.text(), file=sys.stderr)
@@ -24990,15 +26291,24 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
         rem = pc.pr_reminder(flow, "pr-merge", ok=True)
         would = (
             "request CI-gated native auto-merge (fallback: direct squash-merge)"
-            if prefer_auto else "squash-merge directly (submitter-direct)"
+            if prefer_auto
+            else "squash-merge directly (submitter-direct)"
         )
         if args.json:
-            print(_json.dumps({
-                "repo": args.repo, "pr": args.pr, "action": "dry-run",
-                "would": would, "prefer_auto_merge": prefer_auto,
-                "flow_profile": flow.profile, "applied": False,
-                "reminder": rem.as_dict(),
-            }))
+            print(
+                _json.dumps(
+                    {
+                        "repo": args.repo,
+                        "pr": args.pr,
+                        "action": "dry-run",
+                        "would": would,
+                        "prefer_auto_merge": prefer_auto,
+                        "flow_profile": flow.profile,
+                        "applied": False,
+                        "reminder": rem.as_dict(),
+                    }
+                )
+            )
         else:
             output.ok(
                 f"pr-merge --now (dry-run): would {would} for PR #{args.pr} in "
@@ -25020,9 +26330,7 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
                 token=tok,
                 automerge_label=getattr(prcfg, "automerge_label", ""),
                 squash=getattr(prcfg, "squash", True),
-                delete_source_branch=getattr(
-                    prcfg, "delete_source_branch", True
-                ),
+                delete_source_branch=getattr(prcfg, "delete_source_branch", True),
                 bypass_policy=getattr(prcfg, "bypass_policy", False),
                 bypass_reason=getattr(prcfg, "bypass_reason", ""),
             )
@@ -25030,29 +26338,46 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
             err = str(exc)
         if err:
             rem = pc.pr_reminder(
-                flow, "pr-merge", ok=False,
+                flow,
+                "pr-merge",
+                ok=False,
                 reason="the Azure DevOps completion request failed",
             )
             if args.json:
-                print(_json.dumps({
-                    "repo": args.repo, "pr": args.pr, "action": "auto-complete",
-                    "applied": False, "error": err,
-                    "flow_profile": flow.profile, "reminder": rem.as_dict(),
-                }))
+                print(
+                    _json.dumps(
+                        {
+                            "repo": args.repo,
+                            "pr": args.pr,
+                            "action": "auto-complete",
+                            "applied": False,
+                            "error": err,
+                            "flow_profile": flow.profile,
+                            "reminder": rem.as_dict(),
+                        }
+                    )
+                )
             else:
                 output.err(
-                    f"pr-merge --now: failed to complete PR #{args.pr} in "
-                    f"{args.repo}: {err}"
+                    f"pr-merge --now: failed to complete PR #{args.pr} in {args.repo}: {err}"
                 )
                 print(rem.text(), file=sys.stderr)
             return 1
         rem = pc.pr_reminder(flow, "pr-watch", ok=True)
         if args.json:
-            print(_json.dumps({
-                "repo": args.repo, "pr": args.pr, "action": "auto-complete",
-                "applied": True, "merged": False,
-                "flow_profile": flow.profile, "reminder": rem.as_dict(),
-            }))
+            print(
+                _json.dumps(
+                    {
+                        "repo": args.repo,
+                        "pr": args.pr,
+                        "action": "auto-complete",
+                        "applied": True,
+                        "merged": False,
+                        "flow_profile": flow.profile,
+                        "reminder": rem.as_dict(),
+                    }
+                )
+            )
         else:
             output.ok(
                 f"pr-merge --now: requested Azure DevOps completion for PR "
@@ -25068,7 +26393,11 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     if prefer_auto:
         try:
             auto_err = provider.enable_auto_merge(
-                args.repo, args.pr, squash=True, api_base=base, token=tok,
+                args.repo,
+                args.pr,
+                squash=True,
+                api_base=base,
+                token=tok,
             )
         except ProviderError as exc:
             auto_err = str(exc)
@@ -25079,11 +26408,19 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
         # pass. Steer the agent to watch for the merge, not to finalize.
         rem = pc.pr_reminder(flow, "pr-watch", ok=True)
         if args.json:
-            print(_json.dumps({
-                "repo": args.repo, "pr": args.pr, "action": "auto-merge",
-                "applied": True, "merged": False, "flow_profile": flow.profile,
-                "reminder": rem.as_dict(),
-            }))
+            print(
+                _json.dumps(
+                    {
+                        "repo": args.repo,
+                        "pr": args.pr,
+                        "action": "auto-merge",
+                        "applied": True,
+                        "merged": False,
+                        "flow_profile": flow.profile,
+                        "reminder": rem.as_dict(),
+                    }
+                )
+            )
         else:
             output.ok(
                 f"pr-merge --now: armed CI-gated auto-merge on PR #{args.pr} in "
@@ -25106,28 +26443,42 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
         err = str(exc)
 
     if err:
-        rem = pc.pr_reminder(flow, "pr-merge", ok=False,
-                             reason="the direct merge did not complete")
+        rem = pc.pr_reminder(
+            flow, "pr-merge", ok=False, reason="the direct merge did not complete"
+        )
         if args.json:
-            print(_json.dumps({
-                "repo": args.repo, "pr": args.pr, "action": "merge",
-                "applied": False, "error": err, "flow_profile": flow.profile,
-                "reminder": rem.as_dict(),
-            }))
-        else:
-            output.err(
-                f"pr-merge --now: failed to merge PR #{args.pr} in {args.repo}: {err}"
+            print(
+                _json.dumps(
+                    {
+                        "repo": args.repo,
+                        "pr": args.pr,
+                        "action": "merge",
+                        "applied": False,
+                        "error": err,
+                        "flow_profile": flow.profile,
+                        "reminder": rem.as_dict(),
+                    }
+                )
             )
+        else:
+            output.err(f"pr-merge --now: failed to merge PR #{args.pr} in {args.repo}: {err}")
             print(rem.text(), file=sys.stderr)
         return 1
 
     rem = pc.pr_reminder(flow, "pr-merge", state=pc.PR_STATE_MERGED, ok=True)
     if args.json:
-        print(_json.dumps({
-            "repo": args.repo, "pr": args.pr, "action": "merge",
-            "applied": True, "flow_profile": flow.profile,
-            "reminder": rem.as_dict(),
-        }))
+        print(
+            _json.dumps(
+                {
+                    "repo": args.repo,
+                    "pr": args.pr,
+                    "action": "merge",
+                    "applied": True,
+                    "flow_profile": flow.profile,
+                    "reminder": rem.as_dict(),
+                }
+            )
+        )
     else:
         output.ok(
             f"pr-merge --now: squash-merged PR #{args.pr} in {args.repo} "
@@ -25156,23 +26507,36 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         return 0
 
     p = argparse.ArgumentParser(prog="pr-merge", add_help=True)
-    p.add_argument("operands", nargs="*", metavar="[repo] [pr]",
-                   help="repo slug -- owner/name or ADO project/repo (optional; "
-                        "inferred from the active project) -- and/or PR number, "
-                        "in any order")
-    p.add_argument("--all", action="store_true", dest="sweep",
-                   help="sweep every open PR (transition-helper mode)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="preview classification only; apply nothing")
-    p.add_argument("--loop", action="store_true",
-                   help="(sweep) repeat until no PR remains eligible")
+    p.add_argument(
+        "operands",
+        nargs="*",
+        metavar="[repo] [pr]",
+        help="repo slug -- owner/name or ADO project/repo (optional; "
+        "inferred from the active project) -- and/or PR number, "
+        "in any order",
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        dest="sweep",
+        help="sweep every open PR (transition-helper mode)",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="preview classification only; apply nothing"
+    )
+    p.add_argument(
+        "--loop", action="store_true", help="(sweep) repeat until no PR remains eligible"
+    )
     p.add_argument("--interval", type=float, default=30.0)
     p.add_argument("--max-passes", type=int, default=0, dest="max_passes")
     p.add_argument("--host", default="", help="API base URL override")
     p.add_argument("--token", default=None, help="Provider token override")
-    p.add_argument("--now", action="store_true",
-                   help="(submitter-self-merge repos) merge the PR directly now "
-                        "(squash); refused where the submitter does not self-merge")
+    p.add_argument(
+        "--now",
+        action="store_true",
+        help="(submitter-self-merge repos) merge the PR directly now "
+        "(squash); refused where the submitter does not self-merge",
+    )
     p.add_argument("--json", action="store_true", help="emit the result JSON")
     p.add_argument("--config", default=None)
     try:
@@ -25202,8 +26566,10 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         if args.repo is None:
             args.repo = _infer_active_repo_slug(config)
             if not args.repo:
-                output.err("pr-merge: could not infer the repo from the active "
-                           "project; pass an explicit repo slug")
+                output.err(
+                    "pr-merge: could not infer the repo from the active "
+                    "project; pass an explicit repo slug"
+                )
                 return 2
         repo_cfg = config.default_repo
         prcfg = repo_cfg.pr
@@ -25219,20 +26585,26 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         # verb (handled above), NOT the human-merge/stale-anchor path below.
         if flow.profile == pc.PROFILE_PR_SELF_MERGE:
             rem = pc.pr_reminder(
-                flow, "pr-merge", ok=False,
+                flow,
+                "pr-merge",
+                ok=False,
                 reason="this repo merges directly (self-merge); bare pr-merge does nothing",
             )
             if args.json:
-                print(_json.dumps({
-                    "repo": args.repo,
-                    "error": "self-merge repo: use pr-merge --now",
-                    "flow_profile": flow.profile,
-                    "merge_mode": flow.merge_mode,
-                    "applies": False,
-                    "hint": "submitter-self-merge repo: merge directly with "
+                print(
+                    _json.dumps(
+                        {
+                            "repo": args.repo,
+                            "error": "self-merge repo: use pr-merge --now",
+                            "flow_profile": flow.profile,
+                            "merge_mode": flow.merge_mode,
+                            "applies": False,
+                            "hint": "submitter-self-merge repo: merge directly with "
                             "`pr-merge <#> --now`",
-                    "reminder": rem.as_dict(),
-                }))
+                            "reminder": rem.as_dict(),
+                        }
+                    )
+                )
             else:
                 output.err(
                     "pr-merge: this repo's PR-flow profile is 'pr-self-merge' -- "
@@ -25269,24 +26641,34 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                 "escalate to an admin. Nothing applied."
             )
             if args.json:
-                print(_json.dumps({
-                    "repo": args.repo,
-                    "error": "no automerge_label binding",
-                    "flow_profile": flow.profile,
-                    "merge_mode": flow.merge_mode,
-                    "applies": False,
-                    "hint": ("human-merge repo: a human merges (pr-merge N/A); "
-                             "OR stale anchor if an auto-merge label was "
-                             "expected -- update the anchor and retry"),
-                    "reminder": pc.pr_reminder(
-                        flow, "pr-merge", ok=False,
-                        reason="no merge-consent label bound",
-                    ).as_dict(),
-                }))
+                print(
+                    _json.dumps(
+                        {
+                            "repo": args.repo,
+                            "error": "no automerge_label binding",
+                            "flow_profile": flow.profile,
+                            "merge_mode": flow.merge_mode,
+                            "applies": False,
+                            "hint": (
+                                "human-merge repo: a human merges (pr-merge N/A); "
+                                "OR stale anchor if an auto-merge label was "
+                                "expected -- update the anchor and retry"
+                            ),
+                            "reminder": pc.pr_reminder(
+                                flow,
+                                "pr-merge",
+                                ok=False,
+                                reason="no merge-consent label bound",
+                            ).as_dict(),
+                        }
+                    )
+                )
             else:
                 output.err(msg)
                 _rem = pc.pr_reminder(
-                    flow, "pr-merge", ok=False,
+                    flow,
+                    "pr-merge",
+                    ok=False,
                     reason="no merge-consent label bound",
                 )
                 print(_rem.text(), file=sys.stderr)
@@ -25294,8 +26676,14 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
 
         if args.sweep:
             summary = pm.run_sweep(
-                prcfg, args.repo, api_base=args.host, token=args.token, apply=apply,
-                loop=args.loop, interval=args.interval, max_passes=args.max_passes,
+                prcfg,
+                args.repo,
+                api_base=args.host,
+                token=args.token,
+                apply=apply,
+                loop=args.loop,
+                interval=args.interval,
+                max_passes=args.max_passes,
                 default_branch=default_branch,
             )
         else:
@@ -25307,8 +26695,13 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                 args.host or prcfg.api_base,
             )
             row = pm.merge_one(
-                prcfg, args.repo, args.pr, api_base=args.host, token=args.token,
-                apply=apply, default_branch=default_branch,
+                prcfg,
+                args.repo,
+                args.pr,
+                api_base=args.host,
+                token=args.token,
+                apply=apply,
+                default_branch=default_branch,
                 tracked_head_sha=tracked_head_sha,
                 head_observed_at=head_observed_at,
             )
@@ -25316,8 +26709,12 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
             applied = 1 if row.get("applied") else 0
             failed = 1 if (row["action"] == "apply" and apply and not row.get("applied")) else 0
             summary = {
-                "repo": args.repo, "open": 1, "eligible": eligible,
-                "applied": applied, "failed": failed, "apply": apply,
+                "repo": args.repo,
+                "open": 1,
+                "eligible": eligible,
+                "applied": applied,
+                "failed": failed,
+                "apply": apply,
                 "decisions": [row],
             }
 
@@ -25385,8 +26782,10 @@ def _pr_usage() -> None:
     print("  status   Read tracked PR metadata (= pr-status)", file=out)
     print("  complete Reconcile the worktree after merge (= pr-complete)", file=out)
     print("  ready    Move a PR out of draft, ready-for-review (= pr-ready)", file=out)
-    print("  research Inspect the repo's provider settings -> policy matrix "
-          "(= pr-research)", file=out)
+    print(
+        "  research Inspect the repo's provider settings -> policy matrix (= pr-research)",
+        file=out,
+    )
 
 
 def cmd_pr_research_dispatch(argv: list[str]) -> int:
@@ -25401,24 +26800,43 @@ def cmd_pr_research_dispatch(argv: list[str]) -> int:
     from .providers import ProviderError, account_token_for_slug, get_provider
 
     if argv and argv[0] in ("--help", "-h", "help"):
-        print("Usage: <project> pr-research [repo] [--default-branch B] "
-              "[--host URL] [--token T] [--json]", file=sys.stderr)
+        print(
+            "Usage: <project> pr-research [repo] [--default-branch B] "
+            "[--host URL] [--token T] [--json]",
+            file=sys.stderr,
+        )
         print(file=sys.stderr)
-        print("Read the repo's live provider settings (allowed merge methods, "
-              "native auto-merge,", file=sys.stderr)
-        print("delete-branch-on-merge, required reviews/checks) and derive the "
-              "repo-overridable", file=sys.stderr)
-        print("`pr:` policy matrix to match. Read-only -- prints a suggestion; "
-              "writes nothing. The repo is inferred from the active project when "
-              "omitted.", file=sys.stderr)
+        print(
+            "Read the repo's live provider settings (allowed merge methods, native auto-merge,",
+            file=sys.stderr,
+        )
+        print(
+            "delete-branch-on-merge, required reviews/checks) and derive the repo-overridable",
+            file=sys.stderr,
+        )
+        print(
+            "`pr:` policy matrix to match. Read-only -- prints a suggestion; "
+            "writes nothing. The repo is inferred from the active project when "
+            "omitted.",
+            file=sys.stderr,
+        )
         return 0
 
     p = argparse.ArgumentParser(prog="pr-research", add_help=True)
-    p.add_argument("repo", type=_pr_parse_repo, nargs="?", default=None,
-                   help="repo slug -- owner/name or ADO project/repo (optional; "
-                        "inferred from the active project)")
-    p.add_argument("--default-branch", default="", dest="default_branch",
-                   help="branch to read protection from (defaults to repo config)")
+    p.add_argument(
+        "repo",
+        type=_pr_parse_repo,
+        nargs="?",
+        default=None,
+        help="repo slug -- owner/name or ADO project/repo (optional; "
+        "inferred from the active project)",
+    )
+    p.add_argument(
+        "--default-branch",
+        default="",
+        dest="default_branch",
+        help="branch to read protection from (defaults to repo config)",
+    )
     p.add_argument("--host", default="", help="API base URL override")
     p.add_argument("--token", default=None, help="Provider token override")
     p.add_argument("--json", action="store_true", help="emit the result JSON")
@@ -25433,17 +26851,18 @@ def cmd_pr_research_dispatch(argv: list[str]) -> int:
         if args.repo is None:
             args.repo = _infer_active_repo_slug(config)
             if not args.repo:
-                raise ValueError("could not infer the repo from the active "
-                                 "project; pass an explicit repo slug")
+                raise ValueError(
+                    "could not infer the repo from the active project; pass an explicit repo slug"
+                )
         repo_cfg = config.default_repo
         prcfg = repo_cfg.pr
         provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
         base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
         branch = args.default_branch or repo_cfg.default_branch or ""
-        tok = args.token if args.token is not None else \
-            account_token_for_slug(args.repo, prcfg)
+        tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
         policy = provider.get_repo_policy(
-            args.repo, default_branch=branch, api_base=base, token=tok)
+            args.repo, default_branch=branch, api_base=base, token=tok
+        )
     except ProviderError as exc:
         output.err(f"pr-research: {exc}")
         return 1
@@ -25463,11 +26882,18 @@ def cmd_pr_research_dispatch(argv: list[str]) -> int:
         "has_required_status_checks": policy.has_required_status_checks,
     }
     if args.json:
-        print(_json.dumps({
-            "repo": args.repo, "provider": getattr(prcfg, "provider", ""),
-            "supported": policy.supported, "error": policy.error,
-            "settings": settings, "suggested_matrix": matrix,
-        }))
+        print(
+            _json.dumps(
+                {
+                    "repo": args.repo,
+                    "provider": getattr(prcfg, "provider", ""),
+                    "supported": policy.supported,
+                    "error": policy.error,
+                    "settings": settings,
+                    "suggested_matrix": matrix,
+                }
+            )
+        )
         return 0 if policy.supported else 1
 
     if not policy.supported:
@@ -25526,7 +26952,6 @@ def cmd_pr_dispatch(argv: list[str]) -> int:
     return handler(args)
 
 
-
 def main(argv: list[str] | None = None) -> int:
     global _INVOCATION_CWD
     try:
@@ -25570,8 +26995,7 @@ def main(argv: list[str] | None = None) -> int:
     # alias. `worktrees` (and `worktree`) folds back into this binstub. See the
     # command-surface effort.
     if args_list:
-        _canon = (None if args_list[0] in _worktrees_verbs()
-                  else _canonical_slug(args_list[0]))
+        _canon = None if args_list[0] in _worktrees_verbs() else _canonical_slug(args_list[0])
         if _canon == "worktrees":
             args_list = args_list[1:]
         elif _canon is not None:
@@ -25589,9 +27013,7 @@ def main(argv: list[str] | None = None) -> int:
     # subprocess for global no-project commands and bare flags).
     _needs_project = not _is_no_project_invocation(args_list)
     _optional_project = (
-        bool(args_list)
-        and args_list[0] == "config-root"
-        and _is_no_project_invocation(args_list)
+        bool(args_list) and args_list[0] == "config-root" and _is_no_project_invocation(args_list)
     )
 
     if _proj:
@@ -25654,8 +27076,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from ._build_info import BUILD_INFO
         except ImportError:
-            BUILD_INFO = {"version": "?.?.?", "commit": "unknown",
-                          "build_timestamp": "unknown"}
+            BUILD_INFO = {"version": "?.?.?", "commit": "unknown", "build_timestamp": "unknown"}
         v = BUILD_INFO.get("version", "?.?.?")
         c = BUILD_INFO.get("commit", "unknown")[:10]
         ts = BUILD_INFO.get("build_timestamp", "unknown")
@@ -25808,6 +27229,7 @@ def main(argv: list[str] | None = None) -> int:
     # inspect/list) with resource kind+key positionals.
     if args_list[0] == "lease":
         from . import lease_cli
+
         try:
             return lease_cli.run_lease(args_list[1:])
         except KeyboardInterrupt:
@@ -25817,6 +27239,7 @@ def main(argv: list[str] | None = None) -> int:
     # Hook guardrails (manual dispatch: hook name + git passthrough args).
     if args_list[0] == "hook":
         from . import hooks as _hooks
+
         name = args_list[1] if len(args_list) > 1 else ""
         return _hooks.run_hook(name, args_list[2:])
 
