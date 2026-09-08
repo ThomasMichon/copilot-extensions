@@ -267,6 +267,59 @@ def test_cmd_send_rejects_new_flag():
     assert ei.value.code == 2
 
 
+class _ReadRenderer:
+    def render_events(self, _events):
+        return ""
+
+
+class _ReadLiveClient:
+    def __init__(self):
+        self.resolve_calls: list[str] = []
+        self.cursor_calls: list[str] = []
+        self.range_calls: list[tuple[str, int, int | None]] = []
+        self.ack_calls: list[tuple[str, int]] = []
+
+    def resolve_live_session(self, handle):
+        self.resolve_calls.append(handle)
+        return {"session_id": "live-sess-1"} if handle == "wt-target" else {}
+
+    def get_cursor(self, session_id, *, caller_id=None):
+        self.cursor_calls.append(session_id)
+        return 0
+
+    def read_range(self, session_id, *, start=0, end=None):
+        self.range_calls.append((session_id, start, end))
+        return [{"id": 1, "event": "agent_message", "data": {"text": "ok"}}]
+
+    def ack_cursor(self, session_id, last_id, *, caller_id=None):
+        self.ack_calls.append((session_id, last_id))
+        return last_id
+
+
+def test_cmd_read_resolves_worktree_handle_to_live_session(monkeypatch, capsys):
+    client = _ReadLiveClient()
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_caller_id_for", lambda _args: None)
+    monkeypatch.setattr(m, "_make_renderer", lambda _args: _ReadRenderer())
+    args = argparse.Namespace(
+        session_id="wt-target",
+        no_follow=True,
+        range=None,
+        event=None,
+        tail=None,
+        since=None,
+        json=False,
+    )
+
+    m._cmd_read(args)
+
+    assert client.resolve_calls == ["wt-target"]
+    assert client.cursor_calls == ["live-sess-1"]
+    assert client.range_calls == [("live-sess-1", 1, None)]
+    assert client.ack_calls == [("live-sess-1", 1)]
+    assert "(caught up -- nothing new)" not in capsys.readouterr().out
+
+
 # -- D3: worktree-handle addressing + reply-to ------------------------------
 
 
