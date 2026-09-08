@@ -280,6 +280,18 @@ def test_resolve_plugin_bridge_no_infix(tmp_path, monkeypatch):
     assert resolve_config_path("vei") == p
 
 
+def test_selected_marketplace_root_scopes_duplicate_plugin_bridges(
+    tmp_path, monkeypatch
+):
+    market_a = tmp_path / "market-a"
+    market_b = tmp_path / "market-b"
+    expected = _make_plugin_bridge(market_a, ".", "plug-a", "demo.mcp.yaml")
+    _make_plugin_bridge(market_b, ".", "plug-b", "demo.mcp.yaml")
+    monkeypatch.setenv("AGENT_MCP_MARKETPLACE_ROOT", str(market_a))
+    monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(tmp_path))
+    assert resolve_config_path("demo") == expected
+
+
 def test_user_bridge_wins_over_plugin(tmp_path, monkeypatch):
     # User-space bridges/ takes precedence over a plugin-shipped one.
     bridges = tmp_path / "bridges"
