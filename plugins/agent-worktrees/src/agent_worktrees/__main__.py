@@ -5382,7 +5382,14 @@ def _infer_worktree_id_from_cwd(
     only a last resort):
       1. **git's own identity** -- ``git rev-parse --git-dir`` under a linked
          worktree is ``.../.git/worktrees/<name>``; ``<name>`` is the tracking
-         ID. Authoritative even when the tracking YAML is briefly absent.
+         ID. Authoritative even when the tracking YAML is briefly absent. When
+         no tracking YAML exists at all (a worktree `git worktree add`-ed by an
+         external host -- a GitHub-App/coding-agent session, a hand-run git
+         command, or any environment where agent-worktrees' own sessionStart
+         hook never ran), auto-adopts it on the spot (:func:`_adopt_linked_worktree`)
+         so every caller -- not just the hook -- can bind ownership on first
+         use. A worktree is never "unadoptable" merely because a prior session
+         in a different environment created it without our tooling's help.
       2. **tracked-path match** -- match CWD against each record's recorded
          ``worktree_path`` (:func:`tracking.find_worktree_id_by_cwd`,
          deepest-match wins).
@@ -5397,6 +5404,19 @@ def _infer_worktree_id_from_cwd(
     if git_id:
         if (tdir / f"{git_id}.yaml").exists():
             return git_id
+        # Tracking YAML missing: this may be a linked worktree that was never
+        # created through `agent-worktrees create` -- e.g. a GitHub-App/coding
+        # -agent session, or any external host that ran `git worktree add`
+        # directly. Auto-adopt it now (best-effort) so every caller of this
+        # shared inference (create-pr, pr-status, finalize, push-changes, ...)
+        # can bind ownership on first use, rather than depending on the
+        # sessionStart hook having already run in that environment -- which it
+        # never will when agent-worktrees isn't even installed there. Falls
+        # through to the pre-existing path-match-or-git_id behavior when
+        # adoption isn't possible (no active project, foreign anchor, etc.).
+        adopted_id = _adopt_linked_worktree(cwd)
+        if adopted_id:
+            return adopted_id
         # Tracking YAML briefly missing: prefer a path match if one exists,
         # else trust git's authoritative identity.
         return tracking.find_worktree_id_by_cwd(str(cwd)) or git_id

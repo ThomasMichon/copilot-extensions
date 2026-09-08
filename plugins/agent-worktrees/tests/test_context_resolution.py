@@ -249,6 +249,29 @@ def test_worktree_id_resolves_under_foreign_worktree_root(adopted_repo, monkeypa
     assert m._infer_worktree_id(None, bad_conf) == wt_id
 
 
+def test_worktree_id_auto_adopts_untracked_linked_worktree(adopted_repo, active_myproj, monkeypatch):
+    """A linked worktree that `git worktree add`-ed directly -- never through
+    `agent-worktrees create` -- must still resolve AND get a tracking record
+    written on first use, not just report git's raw identity. This is what lets
+    a worktree created by an external host (a GitHub-App/coding-agent session,
+    a hand-run git command, any environment without our sessionStart hook)
+    still bind PR ownership on a *later* `create-pr`/`pr-status`/`finalize` call
+    from a machine that DOES have agent-worktrees, instead of staying
+    permanently "detached" from tracking."""
+    _anchor, _wt_root, wt_path, wt_id, conf = adopted_repo
+    tdir = Path(cfg.tracking_dir())
+    yaml_path = tdir / f"{wt_id}.yaml"
+    assert yaml_path.exists()  # fixture pre-seeds it
+    yaml_path.unlink()  # simulate: never registered via agent-worktrees create
+
+    monkeypatch.chdir(wt_path)
+    assert not yaml_path.exists()
+    assert m._infer_worktree_id(None, conf) == wt_id
+    # The call must have created a real tracking record, not merely returned
+    # git's raw id without persisting anything.
+    assert yaml_path.exists()
+
+
 def test_project_override_yields_no_worktree_id_at_anchor(adopted_repo, monkeypatch):
     anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
     # After main() chdir's to the anchor for a cross-project --project call, the
