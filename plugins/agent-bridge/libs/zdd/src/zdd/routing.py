@@ -60,6 +60,19 @@ _PROCESS_ROUTING_LOCK = threading.RLock()
 _PROBE_TIMEOUT_S = 0.25
 
 
+def format_authority(host: str, port: int) -> str:
+    """Format a ``host:port`` authority for a URL, bracketing IPv6 hosts.
+
+    ``http://{host}:{port}`` is only valid when ``host`` has no embedded
+    colons; an IPv6 literal (e.g. ``::1``) must be wrapped in brackets per
+    RFC 3986 (``http://[::1]:1234``) or urlparse/http clients mis-split it on
+    the host's own colons. IPv4 and hostnames pass through unchanged.
+    """
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
 @dataclass(frozen=True)
 class Endpoint:
     """A resolved daemon endpoint recorded in the routing table."""
@@ -81,7 +94,8 @@ class Endpoint:
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.client_host}:{self.port}"
+        return f"http://{format_authority(self.client_host, self.port)}"
+
 
     def to_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None or k == "pid"}
