@@ -16,6 +16,13 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 
+def _runtime_root() -> Path:
+    selected = os.environ.get("AGENT_SSH_HOME")
+    if selected:
+        return Path(selected).expanduser().resolve()
+    return (Path.home() / ".agent-ssh").resolve()
+
+
 def _payload_manifest(path: Path) -> dict[str, Any] | None:
     try:
         manifest = json.loads((path / "plugin.json").read_text(encoding="utf-8"))
@@ -27,12 +34,15 @@ def _payload_manifest(path: Path) -> dict[str, Any] | None:
 
 
 def _payload_root() -> Path:
-    configured = os.environ.get("COPILOT_PLUGIN_ROOT")
+    configured = os.environ.get("AGENT_SSH_PAYLOAD_ROOT") or os.environ.get(
+        "COPILOT_PLUGIN_ROOT"
+    )
     if configured:
         return Path(configured).expanduser().resolve()
 
+    runtime_root = _runtime_root()
     home = Path.home()
-    marker = home / ".agent-ssh" / "payload-dir"
+    marker = runtime_root / "payload-dir"
     marker_payload = None
     marker_manifest = None
     try:
@@ -43,7 +53,7 @@ def _payload_root() -> Path:
     except OSError:
         pass
 
-    deploy_manifest = home / ".agent-ssh" / "deploy-manifest.json"
+    deploy_manifest = runtime_root / "deploy-manifest.json"
     try:
         deployed = json.loads(deploy_manifest.read_text(encoding="utf-8"))
         source = deployed.get("source", {})

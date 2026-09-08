@@ -410,6 +410,25 @@ def test_payload_root_uses_runtime_marker(tmp_path, monkeypatch):
     assert host_restore._payload_root() == payload.resolve()
 
 
+def test_payload_root_uses_selected_runtime_root(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    payload = tmp_path / "cell-a" / "payload"
+    payload.mkdir(parents=True)
+    (payload / "plugin.json").write_text(
+        '{"name": "agent-ssh"}',
+        encoding="utf-8",
+    )
+    runtime_root = tmp_path / "cell-a" / "plugins" / "agent-ssh"
+    runtime_root.mkdir(parents=True)
+    (runtime_root / "payload-dir").write_text(str(payload), encoding="utf-8")
+    monkeypatch.setenv("AGENT_SSH_HOME", str(runtime_root))
+    monkeypatch.delenv("AGENT_SSH_PAYLOAD_ROOT", raising=False)
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(host_restore.Path, "home", lambda: home)
+
+    assert host_restore._payload_root() == payload.resolve()
+
+
 def test_payload_root_prefers_current_marketplace_over_stale_marker(
     tmp_path, monkeypatch
 ):
