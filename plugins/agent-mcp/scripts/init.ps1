@@ -682,9 +682,18 @@ if ($VersionedRuntime) {
 # (a pre-feature daemon with no control channel, a failed cutover, or a
 # leaked/orphaned bridge tree that was never a `serve` daemon at all).
 # Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
+# The CLI's own defaults (60s health / 300s drain) are tuned for a human
+# operator explicitly watching a manual `agent-mcp cutover`; an unattended
+# activation pass must not silently block for up to ~6 minutes on a lightly-
+# used bridge, so this uses much shorter install-appropriate defaults
+# (still overridable, e.g. for a host with slow-starting upstream MCP
+# servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
 if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
+    $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
+    $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
     try {
-        $cutoverJson = & $VenvPython -I -X utf8 -m agent_mcp cutover --require-live --force --json 2>$null
+        $cutoverJson = & $VenvPython -I -X utf8 -m agent_mcp cutover --require-live --force --json `
+            --health-timeout $cutoverHealthTimeout --drain-timeout $cutoverDrainTimeout 2>$null
         $cutoverArg = (($cutoverJson | Out-String).Trim())
         if ($cutoverArg) {
             $cutoverResult = $cutoverArg | ConvertFrom-Json

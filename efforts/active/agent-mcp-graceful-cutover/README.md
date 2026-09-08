@@ -129,6 +129,11 @@ handoff first".
       anything the cutover step didn't handle (a failed cutover, a pre-feature
       daemon, or a leaked process that was never a `serve` daemon at all).
       Best-effort (never fails the install); opt out with `AGENT_MCP_NO_CUTOVER`.
+      Uses short, install-appropriate health/drain timeouts (15s/30s, both
+      overridable via `AGENT_MCP_CUTOVER_HEALTH_TIMEOUT`/
+      `AGENT_MCP_CUTOVER_DRAIN_TIMEOUT`) rather than the CLI's own
+      manual-operator defaults (60s/300s) -- an unattended activation pass
+      must not silently block for minutes on a lightly-used bridge.
 - [x] Tests: `require_live_daemon` skip-on-cold-start, skip-on-already-current-
       version, and still-reports-genuine-mismatch (the pre-feature-daemon
       case) added to `test_cutover.py`.

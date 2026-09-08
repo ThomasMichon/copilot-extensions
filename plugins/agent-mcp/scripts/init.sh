@@ -486,9 +486,19 @@ fi
 # (a pre-feature daemon with no control channel, a failed cutover, or a
 # leaked/orphaned bridge tree that was never a `serve` daemon at all).
 # Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
+# The CLI's own defaults (60s health / 300s drain) are tuned for a human
+# operator explicitly watching a manual `agent-mcp cutover`; an unattended
+# activation pass must not silently block for up to ~6 minutes on a lightly-
+# used bridge, so this uses much shorter install-appropriate defaults
+# (still overridable, e.g. for a host with slow-starting upstream MCP
+# servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
 if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
+    _cutover_health_timeout="${AGENT_MCP_CUTOVER_HEALTH_TIMEOUT:-15}"
+    _cutover_drain_timeout="${AGENT_MCP_CUTOVER_DRAIN_TIMEOUT:-30}"
     _cutover_json="$("$VENV_PYTHON" -I -X utf8 -m agent_mcp cutover \
-        --require-live --force --json 2>/dev/null || true)"
+        --require-live --force --json \
+        --health-timeout "$_cutover_health_timeout" \
+        --drain-timeout "$_cutover_drain_timeout" 2>/dev/null || true)"
     if [[ -n "$_cutover_json" ]]; then
         _cutover_parsed="$("$VENV_PYTHON" -I -X utf8 -c 'import sys,json
 try:
