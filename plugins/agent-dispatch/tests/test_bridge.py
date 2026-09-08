@@ -143,9 +143,44 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     )
     assert result.returncode == 0
     cmd = calls["cmd"]
-    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "task-worker"]
-    assert "task42" in cmd[3]  # the prompt carries the task id
+    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "--caller"]
+    assert cmd[3] == "agent-dispatch:task42"
+    assert cmd[4] == "task-worker"
+    assert "task42" in cmd[5]  # the prompt carries the task id
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
+
+
+def test_spawn_worker_records_delegated_worktree_contract(monkeypatch):
+    """The caller passed at the bridge seam yields a hidden delegate record.
+
+    ``agent-bridge`` persists this caller as ``caller_worktree`` and the
+    worktree tracker derives ``origin=delegate``/``picker_hidden=true`` from
+    that field. Keep the resulting record fields in this regression test so a
+    future argv refactor cannot silently restore operator-owned classification.
+    """
+    recorded = {}
+
+    def fake_run(cmd, **kwargs):
+        caller = cmd[cmd.index("--caller") + 1]
+        recorded.update(
+            caller_worktree=caller,
+            origin="delegate" if caller else "user",
+            picker_hidden=bool(caller),
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    bridge.spawn_worker("task42", agent="task-worker", worker_id="w1")
+
+    assert recorded == {
+        "caller_worktree": "agent-dispatch:task42",
+        "origin": "delegate",
+        "picker_hidden": True,
+    }
 
 
 def test_spawn_worker_passes_no_window_kwargs(monkeypatch):

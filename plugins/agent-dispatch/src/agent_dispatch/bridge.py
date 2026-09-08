@@ -124,9 +124,13 @@ def spawn_worker(
 ) -> subprocess.CompletedProcess:
     """Spawn a worker agent via agent-bridge to claim + execute ``task_id``.
 
-    Runs ``agent-bridge [--json] create <agent> "<prompt>" [--no-wait]``. Raises
-    :class:`BridgeUnavailable` if the agent-bridge CLI is not on PATH; the caller
-    degrades by leaving the task queued.
+    Runs ``agent-bridge [--json] create --caller <task identity> <agent>
+    "<prompt>" [--no-wait]``. The task-scoped caller identity lets
+    ``agent-bridge`` stamp ``caller_worktree`` on the created target, which the
+    worktree tracker resolves as a delegated (Picker-hidden) worker instead of
+    an operator-owned worktree. Raises :class:`BridgeUnavailable` if the
+    agent-bridge CLI is not on PATH; the caller degrades by leaving the task
+    queued.
 
     ``prompt`` overrides the default worker seed (:func:`worker_prompt`). A caller
     embodying a task headlessly with richer semantics -- e.g. the supervisor's
@@ -155,6 +159,11 @@ def spawn_worker(
         cmd += ["--target-dir", target_dir]
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
+    # The supervisor is not itself running inside the worker checkout, so
+    # agent-bridge cannot derive a useful caller from the process CWD. A task
+    # identity is stable across the worker's spawn lifecycle and is sufficient
+    # for agent-bridge/agent-worktrees to record delegated ownership.
+    cmd += ["--caller", f"agent-dispatch:{task_id}"]
     cmd += [agent, prompt]
     if not wait:
         cmd.append("--no-wait")

@@ -831,7 +831,8 @@ def spawn_fleet_headless_worker(
     """Spawn a **headless agent-bridge ACP** body on a remote pool ``host``.
 
     The headless-fleet embodiment (Model C, headless variant). Runs
-    ``agent-bridge create <agent> "<fleet seed>" --no-wait`` **on** ``host`` (its
+    ``agent-bridge create --caller <owner> <agent> "<fleet seed>" --no-wait``
+    **on** ``host`` (its
     SSH alias) through the local Bridge carrier, with bounded SSH fallback only
     when that capability is absent. This spawns a headless ACP session in that
     host's own persistent agent-bridge service, seeded
@@ -897,7 +898,10 @@ def spawn_fleet_headless_worker(
     # emit the created session_id as JSON, so the caller can record a recovery
     # handle (the pool host's agent-bridge session id) for liveness-gated
     # re-embody -- see parse_fleet_body_session / fleet_body_verdict.
-    remote_argv = ["agent-bridge", "--json", "create", agent, seed, "--no-wait"]
+    remote_argv = [
+        "agent-bridge", "--json", "create", "--caller", owner, agent, seed,
+        "--no-wait",
+    ]
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
     # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.

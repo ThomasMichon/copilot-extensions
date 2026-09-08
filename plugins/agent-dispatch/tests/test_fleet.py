@@ -364,8 +364,11 @@ def test_spawn_fleet_headless_worker_builds_ssh_agent_bridge_argv(monkeypatch):
     remote = cmd[4]
     # a headless ACP body via the pool host's agent-bridge, fire-and-forget, with
     # --json (global) so the created session_id rides stdout for the recovery handle
-    assert remote.startswith("agent-bridge --json create review-worker ")
+    assert remote.startswith(
+        "agent-bridge --json create --caller fleet-t7-xyz review-worker "
+    )
     assert "--no-wait" in remote
+    assert "--caller fleet-t7-xyz" in remote
     # the SAME fleet seed as the CLI body rides inside the remote command
     assert "ssh brain agent-dispatch claim --task t7 --worker fleet-t7-xyz" in remote
     assert "ssh brain agent-dispatch complete t7 fleet-t7-xyz --result-ref" in remote
