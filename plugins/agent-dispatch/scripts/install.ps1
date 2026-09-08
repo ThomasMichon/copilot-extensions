@@ -58,7 +58,16 @@ param(
     [switch]$NoSupervisor,
     [switch]$Interactive,
     [switch]$Purge,
-    [switch]$Force
+    [switch]$Force,
+
+    # DEPRECATED / no-op (Thread B): the graceful zdd cutover
+    # (Invoke-CoordinatorCutover) is already the DEFAULT on `update` whenever a
+    # live, routed coordinator is running -- activation always cuts over
+    # automatically, so this opt-in is not required. The switch is still
+    # ACCEPTED (so a caller such as the launch-path reconciler, which appends
+    # it whenever a plugin declares `"zeroDowntimeUpdate": true`, doesn't
+    # break) but has no effect.
+    [switch]$ZeroDowntime
 )
 
 Set-StrictMode -Version 2.0
