@@ -1180,3 +1180,33 @@ See [`design.md`](design.md).
   once inventory confirmed its managed OpenSSH fragments, dtssh companion,
   dispatch registrar drop-ins, and remote host restoration carry transport
   identity across remote boundaries.
+
+### 2026-09-08 — Agent-ssh transport-boundary increment
+
+- Merged [#2229](https://github.com/ThomasMichon/copilot-extensions/pull/2229)
+  at `a3d4df15be23833972b204d405ea293caa4ca95d`, landing the `agent-ssh`
+  portion of `#1107`.
+- `agent-ssh` now vendors the shared installation-context primitive and routes
+  its payload-local entry points through Windows and POSIX runtime gates that
+  validate the selected installation context before launch or first-use
+  provisioning. Namespaced operation binds host restoration and managed-fragment
+  warning state to the selected runtime root while preserving exact legacy
+  behavior when no explicit context is active.
+- The same increment hardened the public guard surface that the landing needed:
+  `check-agent-bridge-contracts.py` now hydrates `origin/main` history in
+  shallow CI clones before validating historical evidence, the Agent Bridge
+  contract provenance now points at main-history commits, and the shared
+  versioned-runtime bootstrap family now stands down under explicit installation
+  context across `agent-codespaces`, `agent-containers`, `agent-dispatch`,
+  `agent-logger`, and `agent-vault`.
+- Validation:
+  full native Windows suites passed for `agent-bridge` (`2210 passed,
+  14 skipped`) and `agent-ssh` (`139 passed, 15 skipped`); focused WSL
+  `agent-ssh` transport/context coverage passed (`72 passed, 5 skipped`);
+  `tools/test_check_agent_bridge_contracts.py` passed (`16 passed`); and
+  install-contract, version-consistency, vendored-lib, installation-context,
+  payload-invocation, installer-readiness, marketplace-isolation, and
+  changed-file ruff guards passed.
+- `#1107` remains open for the unlanded `agent-codespaces`,
+  `agent-containers`, and machine-provider transport paths. The Phase 4 plan
+  line stays unchecked until those remote-venue slices merge.
