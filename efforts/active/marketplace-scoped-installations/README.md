@@ -283,7 +283,7 @@ because they provide tools or services.
     agent-ssh's managed OpenSSH fragments, dtssh companion, dispatch registrar
     drop-ins, and remote host restoration are transport-boundary work rather
     than low-risk service-free runtime state.
-- [ ] Convert remote venue and transport plugins, carrying installation identity
+- [x] Convert remote venue and transport plugins, carrying installation identity
   through SSH, CodeSpace, container, and staged-plugin boundaries
   ([#1107](https://github.com/ThomasMichon/copilot-extensions/issues/1107)).
 - [ ] Convert service-bearing plugins, qualifying service, lease, endpoint,
@@ -1210,3 +1210,39 @@ See [`design.md`](design.md).
 - `#1107` remains open for the unlanded `agent-codespaces`,
   `agent-containers`, and machine-provider transport paths. The Phase 4 plan
   line stays unchecked until those remote-venue slices merge.
+
+### 2026-09-08 — Remote venue and transport closure
+
+- Merged [#2234](https://github.com/ThomasMichon/copilot-extensions/pull/2234)
+  at `d850384eeaaf245c26e4faf27bc79c80ded60e16`, closing `#1107`.
+- `agent-codespaces` and `agent-containers` now vendor the shared
+  installation-context bootstrap, route payload-local commands through
+  installation-context runtime gates on Windows and POSIX, and bind their
+  agent-bridge/provider entry points to the exact payload-local shim that owns
+  the selected installation cell instead of a mutable machine-global command.
+- CodeSpace dispatch now persists its remote launch through the payload-local
+  transport shim and stages related-repo plugins into source-qualified
+  destination roots, so same-named staged payloads from different marketplaces
+  do not collide. Container trusted-session and restricted provider-exec paths
+  now carry the same installation root through wrapper, state, and SSH-profile
+  commands.
+- Audit note:
+  the `agent-machines` machine-provider leg was already satisfied by its
+  source-qualified payload-command invocation path, so closing `#1107` did not
+  require additional `agent-machines` code changes.
+- Validation:
+  changed-surface native Windows contained runs passed for `agent-codespaces`
+  (`74 passed, 8 skipped`) and `agent-containers` (`59 passed, 2 skipped`);
+  focused WSL/POSIX coverage passed for `agent-codespaces` (`75 passed,
+  7 skipped`) and `agent-containers` (`58 passed, 3 skipped`); install-contract,
+  version-consistency, vendored-lib, installation-context, payload-invocation,
+  installer-readiness, marketplace-isolation, and changed-file ruff guards
+  passed; and PR CI passed `guards + lint`, `agent-codespaces`,
+  `agent-containers`, `Git hooks (Windows)`, both test-runner jobs, and the
+  out-of-plugin Worktree Manager lane.
+- Native full contained suite attempts still reproduced unrelated baseline
+  failures outside this change surface in `agent-codespaces`
+  (`tests/test_lease.py`, `tests/test_relay_shim.py`) and `agent-containers`
+  (`tests/test_private_state.py`, `tests/test_rescue.py`), so the landed
+  validation evidence remains the focused changed-surface runs plus green PR
+  CI.
