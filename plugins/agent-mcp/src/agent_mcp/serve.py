@@ -545,12 +545,21 @@ class Server:
                 self._write_endpoint(port, self._token)
                 log.info("serving on tcp:%s:%d (handle %s)", _TCP_HOST, port,
                          self.socket_path)
-            await self._start_control_listener()
-            sweeper = asyncio.create_task(self._sweep_loop())
+            # Once the data-plane server above is bound, EVERYTHING from here
+            # (the control listener, the sweep loop, the wait) is wrapped in
+            # one try/finally that always tears down every resource this
+            # daemon acquired -- including a failure raised by
+            # _start_control_listener() itself, before the sweep loop or the
+            # stop-wait ever start. `_stop_control_listener()` is a safe no-op
+            # if the control listener never finished binding.
             try:
-                await self._stop.wait()
+                await self._start_control_listener()
+                sweeper = asyncio.create_task(self._sweep_loop())
+                try:
+                    await self._stop.wait()
+                finally:
+                    sweeper.cancel()
             finally:
-                sweeper.cancel()
                 self._server.close()
                 await self._server.wait_closed()
                 await self._stop_control_listener()

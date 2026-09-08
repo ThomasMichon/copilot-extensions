@@ -297,6 +297,25 @@ def test_control_token_path_is_keyed_by_pid(tmp_path):
     assert p2.read_text(encoding="utf-8") == "token-for-222"
 
 
+def test_run_cutover_treats_empty_token_file_as_missing(tmp_path, monkeypatch):
+    """Regression test: an empty/whitespace-only token sidecar (a torn write,
+    a truncated file) must be treated exactly like a missing one -- not as a
+    valid empty-string token. Otherwise run_cutover() bypasses the intended
+    bootstrap-boundary check and would go on to send an unauthorized drain/
+    shutdown, a failure mode that's much harder to diagnose than the clear
+    "predates the cutover feature" error this path is supposed to give."""
+    from zdd import routing
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=12345, pid=999999,
+                           version="0.0.0")
+    _control_token_path(tmp_path, 999999).write_text("   \n", encoding="utf-8")
+
+    result = _cutover.run_cutover()
+    assert result["ok"] is False
+    assert "predates the cutover feature" in result["error"]
+
+
 # ── flip_data_handle ───────────────────────────────────────────────────────
 
 
@@ -361,9 +380,14 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
     monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
     env = dict(os.environ)
 
+    # Redirect to a log file, not subprocess.PIPE: nothing in this test ever
+    # reads from a PIPE, so enough child output to fill the OS pipe buffer
+    # would block the child's write() -- and the test waiting on it -- in a
+    # real deadlock.
+    log_path = tmp_path / "old.log"
     old = subprocess.Popen(
         [sys.executable, "-m", "agent_mcp", "serve", "--idle-timeout", "0"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        env=env, stdout=open(log_path, "ab"), stderr=subprocess.STDOUT,
     )
     try:
         deadline = time.monotonic() + 10

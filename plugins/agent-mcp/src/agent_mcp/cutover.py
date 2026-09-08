@@ -279,6 +279,13 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
                 data_root, current.pid).read_text(encoding="utf-8").strip()
         except OSError:
             old_token = None
+        if not old_token:
+            # An empty/whitespace-only sidecar (a torn write, a truncated
+            # file) is not a usable token -- treat it exactly like "missing"
+            # so it correctly falls into the bootstrap-boundary check below,
+            # instead of silently attempting an unauthorized drain/shutdown
+            # later that's much harder to diagnose.
+            old_token = None
 
     ctx = _CutoverContext(
         data_root=data_root,
