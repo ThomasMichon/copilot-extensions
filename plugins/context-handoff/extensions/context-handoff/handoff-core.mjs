@@ -395,15 +395,20 @@ export function handoffDirFor(cwd, sid, get = agentWorktreesGet) {
   return stateDir ? join(stateDir, "handoff") : null;
 }
 
-function currentPlatformRepoPath(paths = {}) {
-  const platform = process.platform === "win32"
-    ? "windows"
-    : (process.env.WSL_DISTRO_NAME ? "wsl" : "linux");
-  const raw = paths?.[platform];
+function normalizeRegisteredRepoPath(raw) {
   if (!raw || typeof raw !== "string") return null;
   if (!raw.startsWith("~")) return raw;
   const suffix = raw.slice(1).replace(/^[\\/]+/, "");
   return suffix ? join(homedir(), suffix) : homedir();
+}
+
+function registeredRepoPaths(paths = {}) {
+  const candidates = [];
+  for (const raw of Object.values(paths || {})) {
+    const candidate = normalizeRegisteredRepoPath(raw);
+    if (candidate && existsSync(candidate)) candidates.push(candidate);
+  }
+  return candidates;
 }
 
 function knownHandoffSearchRoots(cwd, execute = runCli) {
@@ -421,23 +426,23 @@ function knownHandoffSearchRoots(cwd, execute = runCli) {
   }
   const roots = new Set();
   for (const repo of reposJson?.repos || []) {
-    const anchorPath = currentPlatformRepoPath(repo?.paths);
-    if (!anchorPath) continue;
-    roots.add(anchorPath);
-    try {
-      const listed = cliJson(
-        "agent-worktrees",
-        ["list", "--all", "--json"],
-        anchorPath,
-        AGENT_WORKTREES_QUERY_TIMEOUT_MS,
-        execute,
-      );
-      for (const worktree of listed?.worktrees || []) {
-        if (worktree?.path) roots.add(worktree.path);
+    for (const anchorPath of registeredRepoPaths(repo?.paths)) {
+      roots.add(anchorPath);
+      try {
+        const listed = cliJson(
+          "agent-worktrees",
+          ["list", "--all", "--json"],
+          anchorPath,
+          AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+          execute,
+        );
+        for (const worktree of listed?.worktrees || []) {
+          if (worktree?.path) roots.add(worktree.path);
+        }
+      } catch {
+        // Best-effort enumeration: the anchor namespace still covers adopted
+        // anchors even when the per-project worktree listing is unavailable.
       }
-    } catch {
-      // Best-effort enumeration: the anchor namespace still covers adopted
-      // anchors even when the per-project worktree listing is unavailable.
     }
   }
   return [...roots];

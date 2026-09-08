@@ -29,10 +29,6 @@ import {
   markSessionStateHandoffConsumed,
 } from "../extensions/context-handoff/handoff-core.mjs";
 
-const PLATFORM_KEY = process.platform === "win32"
-  ? "windows"
-  : (process.env.WSL_DISTRO_NAME ? "wsl" : "linux");
-
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-home-"));
   const oldHome = process.env.HOME;
@@ -51,9 +47,10 @@ function withTempHome(fn) {
 }
 
 function makeLocatorLookupSeams({
-  anchorPath,
+  anchorPath = null,
   worktrees = [],
   stateDirs = {},
+  repoPaths = null,
 }) {
   return {
     get: (key, cwd) => {
@@ -69,7 +66,10 @@ function makeLocatorLookupSeams({
         && argv.includes("--json")
       ) {
         return JSON.stringify({
-          repos: [{ name: "wt-repo", paths: { [PLATFORM_KEY]: anchorPath } }],
+          repos: [{
+            name: "wt-repo",
+            paths: repoPaths || (anchorPath ? { windows: anchorPath } : {}),
+          }],
         });
       }
       if (
@@ -217,6 +217,45 @@ test("file-backed consume marks the predecessor session-state request consumed",
     const stateRecord = readSessionStateHandoff("predecessor-1");
     assert.equal(stateRecord.record.consumed, true);
     assert.equal(stateRecord.record.consumedBySession, "successor-1");
+  });
+});
+
+test("file-backed locator consume uses registered repo paths even when the key does not match the local platform guess", () => {
+  withTempHome((home) => {
+    const anchorPath = join(home, "wt-repo");
+    const resumeCwd = join(home, "resume-home");
+    const stateDir = join(home, "wt-state");
+    const handoffPath = join(stateDir, "handoff", "handoff-predecessor-wsl.json");
+    mkdirSync(anchorPath, { recursive: true });
+    mkdirSync(resumeCwd, { recursive: true });
+    mkdirSync(join(stateDir, "handoff"), { recursive: true });
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-predecessor-wsl",
+      storage: "file",
+      sessionId: "predecessor-wsl",
+      cwd: anchorPath,
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+
+    const consumed = consumeFileHandoff(
+      resumeCwd,
+      "successor-wsl",
+      "handoff-predecessor-wsl",
+      null,
+      makeLocatorLookupSeams({
+        anchorPath,
+        repoPaths: { wsl: anchorPath },
+        stateDirs: { [anchorPath]: stateDir },
+      }),
+    );
+    assert.equal(consumed.ok, true);
+    assert.equal(consumed.path, handoffPath);
   });
 });
 
