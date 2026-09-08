@@ -59,6 +59,12 @@ function makeLocatorLookupSeams({
     },
     execute: (_bin, argv, opts = {}) => {
       if (
+        argv[0] === "get"
+        && argv[1] === "worktree-state-dir"
+      ) {
+        return stateDirs[opts.cwd] || "";
+      }
+      if (
         argv[0] === "repos"
         && argv[1] === "list"
         && argv.includes("--class")
@@ -223,6 +229,9 @@ test("file-backed consume marks the predecessor session-state request consumed",
 test("file-backed locator consume uses registered repo paths even when the key does not match the local platform guess", () => {
   withTempHome((home) => {
     const anchorPath = join(home, "wt-repo");
+    const foreignPath = process.platform === "win32"
+      ? "/tmp/context-handoff-foreign-repo"
+      : "Z:\\context-handoff-foreign-repo";
     const resumeCwd = join(home, "resume-home");
     const stateDir = join(home, "wt-state");
     const handoffPath = join(stateDir, "handoff", "handoff-predecessor-wsl.json");
@@ -250,7 +259,9 @@ test("file-backed locator consume uses registered repo paths even when the key d
       null,
       makeLocatorLookupSeams({
         anchorPath,
-        repoPaths: { wsl: anchorPath },
+        repoPaths: process.platform === "win32"
+          ? { linux: foreignPath, wsl: anchorPath }
+          : { windows: foreignPath, wsl: anchorPath },
         stateDirs: { [anchorPath]: stateDir },
       }),
     );
