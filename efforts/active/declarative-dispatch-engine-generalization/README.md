@@ -448,3 +448,40 @@ other phases actually land in.
   self-retire's already-validated default-on stance) and closing the
   `install.ps1 -ZeroDowntime` gap noted above.
 
+### 2026-09-07 (cont. 3) - Corrected a stale claim; wired the `-ZeroDowntime` reconciler flag
+
+- The operator asked to continue the `-ZeroDowntime` follow-up and pointedly
+  asked "shouldn't ZeroDowntime be the default? No one is going to manually
+  request that." Reading `install.ps1`'s actual `Invoke-Update` (and
+  `install.sh`'s `_coordinator_cutover`) before touching anything showed the
+  operator was right, and more: **the graceful cutover is already the
+  unconditional default** on both platforms whenever a live, routed
+  coordinator is running (`Invoke-CoordinatorCutover` / `_coordinator_cutover`,
+  "Thread B") -- it always cuts over automatically, falling back to
+  stop-and-swap only for a pre-Thread-B coordinator or a failed cutover.
+  Neither script even has a `-ZeroDowntime`/flag gate on this behavior. My
+  own claim in the prior journal entry and in
+  `docs/patterns/graceful-daemon-cutover.md` ("`install.ps1 update` itself is
+  not yet wired... still does a kill-and-reinstall") was **wrong** -- I had
+  inferred it from the doc's own stale per-plugin table instead of reading
+  the actual `Invoke-Update`/`_coordinator_cutover` functions first. Corrected
+  the doc's agent-dispatch row to reflect this.
+- The only genuinely missing piece was narrower than I'd thought: the
+  **launch-time reconciler** (`agent_worktrees.reconcile.runtime_installer_argv`)
+  only appends `-ZeroDowntime` to the Windows `install.ps1 update` invocation
+  when the plugin declares `"zeroDowntimeUpdate": true` in `plugin.json` --
+  agent-dispatch's didn't, and `install.ps1` had no such parameter at all (an
+  unrecognized switch would have made the reconciler's invocation error).
+  Fixed both, mirroring agent-bridge's already-established pattern exactly:
+  added a deprecated/no-op `[switch]$ZeroDowntime` parameter to
+  `install.ps1` (accepted for backward compatibility, no effect -- the
+  cutover already runs unconditionally regardless), and set
+  `"zeroDowntimeUpdate": true` in `plugin.json`. `install.sh`'s reconcile path
+  never appended the flag in the first place, so POSIX needed no change.
+- Validated: `install.ps1` still parses cleanly (`Parser]::ParseFile`, no
+  errors), `plugin.json` is valid JSON, and the repo's own
+  `check-install-contract.py` / `check-version-consistency.py` /
+  `check-docs-consistency.py` all pass. Bumped `agent-dispatch` to
+  `0.1.2-dev41` across the three version surfaces.
+
+
