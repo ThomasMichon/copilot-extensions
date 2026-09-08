@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1038,3 +1039,62 @@ def test_apply_model_config_emits_loud_fallback_when_unoffered(monkeypatch) -> N
     assert fb["fallbacks"][0]["config"] == "model"
     assert fb["fallbacks"][0]["reason"] == "not-offered"
     assert fb["fallbacks"][0]["requested"] == "gpt-9-imaginary"
+
+
+def test_new_session_reports_substep_timings(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8"},
+    )
+    client = _apply_client()
+    client._connection.new_session = AsyncMock(
+        return_value=SimpleNamespace(
+            session_id="sess-new",
+            config_options=_model_config_options(),
+        )
+    )
+    timings: list[tuple[str, float]] = []
+
+    sid = asyncio.run(
+        client.new_session(
+            cwd="/tmp/repo",
+            timing_callback=lambda label, elapsed: timings.append((label, elapsed)),
+        )
+    )
+
+    assert sid == "sess-new"
+    labels = [label for label, _elapsed in timings]
+    assert labels == [
+        "session_new_mcp_build",
+        "session_new_rpc",
+        "session_new_model_config",
+    ]
+    assert all(elapsed >= 0 for _label, elapsed in timings)
+
+
+def test_load_session_reports_substep_timings(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "claude-opus-4.8"},
+    )
+    client = _apply_client()
+    client._connection.load_session = AsyncMock(
+        return_value=SimpleNamespace(config_options=_model_config_options())
+    )
+    timings: list[tuple[str, float]] = []
+
+    asyncio.run(
+        client.load_session(
+            cwd="/tmp/repo",
+            session_id="sess-load",
+            timing_callback=lambda label, elapsed: timings.append((label, elapsed)),
+        )
+    )
+
+    labels = [label for label, _elapsed in timings]
+    assert labels == [
+        "session_load_mcp_build",
+        "session_load_rpc",
+        "session_load_model_config",
+    ]
+    assert all(elapsed >= 0 for _label, elapsed in timings)

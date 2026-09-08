@@ -2382,6 +2382,28 @@ class Database:
         )
         return [r["id"] for r in rows]
 
+    def gc_status_summary(self, statuses: list[str]) -> dict[str, float | int | None]:
+        """Summarize the retained population for the configured GC statuses."""
+        if not statuses:
+            return {
+                "count": 0,
+                "oldest_updated_at": None,
+                "newest_updated_at": None,
+            }
+        placeholders = ",".join("?" for _ in statuses)
+        rows = self.execute_read(
+            f"SELECT COUNT(*) AS n, MIN(updated_at) AS oldest_updated_at, "
+            f"MAX(updated_at) AS newest_updated_at FROM sessions "
+            f"WHERE status IN ({placeholders})",
+            tuple(statuses),
+        )
+        row = rows[0] if rows else None
+        return {
+            "count": int(row["n"]) if row and row["n"] is not None else 0,
+            "oldest_updated_at": row["oldest_updated_at"] if row else None,
+            "newest_updated_at": row["newest_updated_at"] if row else None,
+        }
+
     def db_size_info(self) -> dict[str, int]:
         """Return page/byte stats for the DB file (drives the VACUUM decision)."""
         conn = self._get_conn()

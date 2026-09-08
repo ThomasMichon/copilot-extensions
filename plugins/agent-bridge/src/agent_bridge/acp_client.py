@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import time
 import signal
 import sys
 import uuid
@@ -723,7 +724,10 @@ class AcpClient:
         )
 
     async def new_session(
-        self, cwd: str, mcp_servers: list[dict[str, Any]] | None = None,
+        self,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        timing_callback: Callable[[str, float], None] | None = None,
     ) -> str:
         """Create a new ACP session. Returns the ACP session ID.
 
@@ -732,14 +736,24 @@ class AcpClient:
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
+        started = time.monotonic()
+        servers = build_mcp_servers(mcp_servers)
+        if timing_callback is not None:
+            timing_callback("session_new_mcp_build", time.monotonic() - started)
+        started = time.monotonic()
         result = await self._connection.new_session(
-            cwd=cwd, mcp_servers=build_mcp_servers(mcp_servers),
+            cwd=cwd, mcp_servers=servers,
         )
+        if timing_callback is not None:
+            timing_callback("session_new_rpc", time.monotonic() - started)
         self._acp_session_id = result.session_id
         # Set the session's model/effort now that it exists (dotfiles#790):
         # copilot ignores the ``--model`` launch flag in ``--acp`` mode, so the
         # model is chosen here against the advertised select options.
+        started = time.monotonic()
         await self._apply_model_config(getattr(result, "config_options", None))
+        if timing_callback is not None:
+            timing_callback("session_new_model_config", time.monotonic() - started)
         return result.session_id
 
     def adopt_session(self, acp_session_id: str) -> None:
@@ -765,6 +779,7 @@ class AcpClient:
         session_id: str,
         suppress_replay: bool = True,
         mcp_servers: list[dict[str, Any]] | None = None,
+        timing_callback: Callable[[str, float], None] | None = None,
     ) -> None:
         """Reload a previously persisted ACP session (for resume).
 
@@ -789,17 +804,27 @@ class AcpClient:
         self._suppress_replay = suppress_replay
         result = None
         try:
+            started = time.monotonic()
+            servers = build_mcp_servers(mcp_servers)
+            if timing_callback is not None:
+                timing_callback("session_load_mcp_build", time.monotonic() - started)
+            started = time.monotonic()
             result = await self._connection.load_session(
                 cwd=cwd, session_id=session_id,
-                mcp_servers=build_mcp_servers(mcp_servers),
+                mcp_servers=servers,
             )
+            if timing_callback is not None:
+                timing_callback("session_load_rpc", time.monotonic() - started)
         finally:
             self._loading_session = False
             self._suppress_replay = True
         self._acp_session_id = session_id
         # Re-assert the model/effort on resume: a reloaded session may report
         # the agent's default in its config options (dotfiles#790).
+        started = time.monotonic()
         await self._apply_model_config(getattr(result, "config_options", None))
+        if timing_callback is not None:
+            timing_callback("session_load_model_config", time.monotonic() - started)
 
     async def _apply_model_config(self, config_options: Any) -> None:
         """Set the session's ``model`` / ``reasoning_effort`` via ACP.
