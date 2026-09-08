@@ -712,6 +712,38 @@ def test_fleet_spawn_threads_project_before_embody(monkeypatch):
     assert remote_cmd.index("--project") < remote_cmd.index("embody")
 
 
+def test_fleet_headless_ssh_fallback_passes_caller(monkeypatch):
+    """copilot-extensions#2202: the SSH fallback (no local carrier capability)
+    must still stamp --caller, mirroring the primary LocalBridgeRemoteClient
+    path's caller_id=owner just above it -- otherwise a headless fleet body
+    spawned this way has no caller identity for agent-worktrees to classify
+    its worktree (if any) as delegate-owned rather than Picker-visible user."""
+    from agent_dispatch import bridge_remote
+
+    class _UnavailableClient:
+        def create_session(self, *args, **kwargs):
+            raise bridge_remote.RemoteBridgeUnavailable("no local carrier")
+
+    monkeypatch.setattr(
+        embody.bridge_remote, "LocalBridgeRemoteClient", _UnavailableClient
+    )
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    captured = {}
+    monkeypatch.setattr(
+        embody, "run_ssh_command",
+        lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
+                           or subprocess.CompletedProcess(cmd, 0, "", "")),
+    )
+
+    embody.spawn_fleet_headless_worker(
+        "pool-a", "t1", origin="coord", owner="fleet-t1-abc",
+        worker_id="fleet-t1-abc",
+    )
+
+    remote_cmd = captured["cmd"][-1]
+    assert "--caller fleet-t1-abc" in remote_cmd
+
+
 def test_spawn_worker_for_uses_embody_backend(monkeypatch):
     """`create --spawn --spawn-backend embody` routes to the embody backend."""
     from agent_dispatch import __main__ as m
