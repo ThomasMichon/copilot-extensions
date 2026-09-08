@@ -208,6 +208,17 @@ def test_windows_update_rebinds_existing_sync_task_runtime() -> None:
     assert "Update-SyncTaskBinding" in update_action
 
 
+def test_installers_scope_sync_supervision_by_install_root() -> None:
+    install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
+    install_sh = _INSTALL_SH.read_text(encoding="utf-8")
+
+    assert 'TIMER_NAME="agent-logger-sync${SERVICE_SUFFIX:+-$SERVICE_SUFFIX}"' in install_sh
+    assert "Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}" in install_sh
+    assert "Agent Logger Session Sync - $serviceSuffix" in install_ps1
+    assert "$TaskLauncher = Join-Path (Join-Path $InstallDir 'bin') 'session-sync-task.ps1'" in install_ps1
+    assert "$env:AGENT_LOGGER_HOME = $_root" in install_ps1
+
+
 def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
     install_sh = _INSTALL_SH.read_text(encoding="utf-8")
     publisher = install_sh.split("publish_payload_snapshot() {", 1)[1].split(
@@ -313,3 +324,75 @@ def test_provision_publishes_durable_compatibility_wrappers(
     )
     assert delegated.returncode != 127
     assert "owning payload shim not found" not in delegated.stderr
+
+
+def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> None:
+    payload = tmp_path / "payload"
+    shutil.copytree(
+        _PLUGIN_ROOT,
+        payload,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            "__pycache__",
+            ".pytest_cache",
+            "tests",
+        ),
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    install_dir = (
+        home
+        / ".copilot-extensions"
+        / "marketplaces"
+        / "example--1234"
+        / "plugins"
+        / "agent-logger"
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
+        }
+    )
+    if os.name == "nt":
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        assert powershell is not None
+        command = [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(payload / "scripts" / "install.ps1"),
+            "stamp",
+            "-InstallDir",
+            str(install_dir),
+        ]
+    else:
+        command = [
+            "bash",
+            str(payload / "scripts" / "install.sh"),
+            "stamp",
+            "--install-dir",
+            str(install_dir),
+        ]
+    result = subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (install_dir / "payload-dir").is_file()
+    local_bin = home / ".local" / "bin"
+    for command_name in _COMMANDS:
+        assert not (local_bin / command_name).exists()
+        assert not (local_bin / f"{command_name}.ps1").exists()
+        assert not (local_bin / f"{command_name}.cmd").exists()

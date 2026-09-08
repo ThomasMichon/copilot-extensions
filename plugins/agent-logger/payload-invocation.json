@@ -1,9 +1,15 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "plugin": "agent-logger",
-  "runtimeRoot": ".agent-logger",
+  "legacyRuntimeRoot": ".agent-logger",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_LOGGER_NO_SELFPROVISION",
+  "payloadRootEnv": "AGENT_LOGGER_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  },
   "commands": [
     {
       "command": "agent-logger",

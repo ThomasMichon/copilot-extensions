@@ -34,8 +34,30 @@ def test_payload_manifest_covers_every_runtime_command() -> None:
         (PLUGIN / "payload-invocation.json").read_text(encoding="utf-8")
     )
 
+    assert manifest["version"] == 2
     assert manifest["plugin"] == "agent-logger"
+    assert manifest["legacyRuntimeRoot"] == ".agent-logger"
+    assert manifest["installationContext"] == "required"
+    assert manifest["payloadRootEnv"] == "AGENT_LOGGER_PAYLOAD_ROOT"
+    assert manifest["payloadDispatcher"] == {
+        "posix": "scripts/runtime-gate.sh",
+        "windows": "scripts/runtime-gate.ps1",
+    }
     assert {command["command"] for command in manifest["commands"]} == EXPECTED_COMMANDS
+
+    posix = (PLUGIN / "bin" / "collate-session").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "bin" / "collate-session.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "runtime-gate.sh" in posix
+    assert "payload-dir" not in posix
+    assert 'COPILOT_EXTENSIONS_PAYLOAD_MODULE="agent_logger.segmenter.collate"' in posix
+    assert r"runtime-gate.ps1" in powershell
+    assert "payload-dir" not in powershell
+    assert (
+        "$env:COPILOT_EXTENSIONS_PAYLOAD_MODULE = 'agent_logger.segmenter.collate'"
+        in powershell
+    )
 
 
 def test_session_start_emits_payload_catalog_after_bootstrap() -> None:
