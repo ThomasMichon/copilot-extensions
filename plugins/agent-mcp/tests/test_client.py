@@ -7,6 +7,7 @@ exercised over an actual transport, not a mock.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 
 import pytest
@@ -221,4 +222,62 @@ async def test_oneshot_tears_down_transport_when_init_fails():
             pass
     assert stuck.started
     assert stuck.closed  # __aexit__ is skipped on __aenter__ failure; we clean up anyway
+
+
+async def test_oneshot_bounds_a_transport_start_that_never_returns():
+    """Regression test for aperture-labs#6673.
+
+    ``_negotiate`` already bounds each individual JSON-RPC request via
+    ``cfg.timeout`` (see ``test_oneshot_times_out_on_silent_upstream`` above),
+    but ``transport.start()`` itself -- subprocess spawn, the auth injector's
+    command, pipe setup -- previously had no bound at all. A transport whose
+    ``start()`` never returns (observed live as a hung upstream launch) left
+    ``__aenter__`` suspended forever. Because a resident ``serve`` daemon opens
+    sessions while holding a per-bridge ``asyncio.Lock`` (WarmPool), that one
+    hang didn't just fail a single call -- it wedged *every* subsequent call to
+    that bridge permanently, with no way to recover short of restarting the
+    daemon. ``__aenter__`` must bound the whole connect+negotiate sequence, not
+    just the negotiate half.
+    """
+    import time
+
+    from agent_mcp.transports.base import Transport
+
+    class _NeverStartsTransport(Transport):
+        def __init__(self) -> None:
+            self.started = False
+            self.closed = False
+
+        async def start(self) -> None:
+            # Never returns -- simulates a spawn that hangs before the child
+            # even forks (the exact shape observed live: zero child processes
+            # ever appeared under the serve daemon during the hang).
+            await asyncio.Event().wait()
+            self.started = True  # unreachable
+
+        async def send(self, msg: dict) -> None:
+            pass
+
+        async def end_input(self) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    cfg = parse_config({
+        "server": {"type": "stdio", "command": [sys.executable, "-c", SILENT_CHILD]},
+        "auth": {"kind": "none"},
+        "timeout": 0.2,
+    })
+    stuck = _NeverStartsTransport()
+    start = time.monotonic()
+    with pytest.raises(UpstreamError, match="did not start"):
+        async with OneShotSession(cfg, transport=stuck):
+            pass
+    elapsed = time.monotonic() - start
+    # Bounded by cfg.timeout (0.2s), not hanging forever; generous slack for
+    # scheduling jitter under a loaded test runner.
+    assert elapsed < 5.0
+    assert stuck.closed  # cleaned up even though it never finished starting
+
 
