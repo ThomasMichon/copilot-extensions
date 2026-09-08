@@ -42,10 +42,14 @@ def clean_env(monkeypatch, tmp_path):
     for var in (
         "AGENT_VAULT_ENDPOINT",
         "AGENT_VAULT_PORT",
+        "AGENT_VAULT_HOME",
+        "AGENT_VAULT_INSTALLATION_ID",
         "AGENT_VAULT_HOST",
         "AGENT_VAULT",
         "KPDB",
         "VAULT_GROUP",
+        "AGENT_VAULT_CORE_RUN_DIR",
+        "AGENT_VAULT_CACHE_DIR",
         "AGENT_VAULT_WINDOWS_RUN_DIR",
         "AGENT_VAULT_WINDOWS_MOUNT",
     ):
@@ -77,6 +81,15 @@ def _write_tcp(directory, port, host="127.0.0.1"):
 def _write_pipe_with_tcp_alt(directory, port, pipe=r"\\.\pipe\agent-vault", host="127.0.0.1"):
     return rendezvous.write_endpoint(
         directory, "pipe", pipe, alt=[("tcp", f"{host}:{port}")]
+    )
+
+
+def _write_scoped_tcp(directory, port, installation_id: str):
+    return rendezvous.write_endpoint(
+        directory,
+        "tcp",
+        f"127.0.0.1:{port}",
+        installation_id=installation_id,
     )
 
 
@@ -162,6 +175,20 @@ def test_discover_prefers_env_override(run_dir, monkeypatch):
     assert ep.transport == "tcp"
     assert ep.tcp_host_port == ("127.0.0.1", 12321)
     assert ep.source == "env"
+
+
+def test_discover_rejects_foreign_installation_endpoint(run_dir, monkeypatch):
+    monkeypatch.setattr(cli, "IS_WSL", False)
+    server = _EchoServer({"ok": True})
+    try:
+        _write_scoped_tcp(run_dir, server.port, "other-marketplace/agent-vault")
+        monkeypatch.setenv(
+            "AGENT_VAULT_INSTALLATION_ID",
+            "expected-marketplace/agent-vault",
+        )
+        assert cli._discover_endpoint(config.resolve_context()) is None
+    finally:
+        server.close()
 
 
 # ---------------------------------------------------------------------------

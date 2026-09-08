@@ -28,7 +28,7 @@ import os
 import time
 from pathlib import Path
 
-from .config import IS_WINDOWS, default_config_path
+from .config import IS_WINDOWS, default_config_path, home_dir
 
 # Enablement / location env vars.
 CACHE_ENABLE_ENV = "AGENT_VAULT_CACHE"
@@ -42,7 +42,14 @@ def _truthy(value: str | None) -> bool:
 
 
 def default_cache_dir() -> Path:
-    """Return the default cache directory (alongside the config file)."""
+    """Return the default cache directory.
+
+    Legacy mode keeps the cache alongside the global config file. Namespaced
+    mode keeps it under the selected runtime root so two installation cells do
+    not share persistent cached credentials.
+    """
+    if "AGENT_VAULT_HOME" in os.environ:
+        return home_dir() / "cache"
     return default_config_path().parent / "cache"
 
 

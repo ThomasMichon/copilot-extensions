@@ -148,6 +148,7 @@ class Endpoint:
     address: str
     pid: int | None = None
     started_at: str | None = None
+    installation_id: str | None = None
     source: str = "file"
     alt: tuple[Endpoint, ...] = ()
 
@@ -219,6 +220,8 @@ class Endpoint:
             "pid": self.pid,
             "started_at": self.started_at,
         }
+        if self.installation_id:
+            rec["installation_id"] = self.installation_id
         if self.alt:
             rec["alt"] = [{"transport": e.transport, "endpoint": e.address} for e in self.alt]
         return rec
@@ -239,6 +242,9 @@ class Endpoint:
             address=str(data["endpoint"]),
             pid=int(data["pid"]) if data.get("pid") is not None else None,
             started_at=(str(data["started_at"]) if data.get("started_at") is not None else None),
+            installation_id=(
+                value if (value := str(data["installation_id"]).strip()) else None
+            ) if data.get("installation_id") is not None else None,
             source=source,
             alt=alt,
         )
@@ -272,6 +278,11 @@ def _endpoint_from_record_strict(data: dict) -> Endpoint:
     started_at = data.get("started_at")
     if started_at is not None and not isinstance(started_at, str):
         raise TypeError("started_at must be a string or null")
+    installation_id = data.get("installation_id")
+    if installation_id is not None and (
+        not isinstance(installation_id, str) or not installation_id.strip()
+    ):
+        raise TypeError("installation_id must be a non-empty string or null")
 
     raw_alt = data.get("alt", [])
     if not isinstance(raw_alt, list):
@@ -304,6 +315,7 @@ def _endpoint_from_record_strict(data: dict) -> Endpoint:
         address=address,
         pid=pid,
         started_at=started_at,
+        installation_id=installation_id.strip() if isinstance(installation_id, str) else None,
         source="file",
         alt=tuple(alternatives),
     )
@@ -328,6 +340,7 @@ def write_endpoint(
     *,
     pid: int | None = None,
     started_at: str | None = None,
+    installation_id: str | None = None,
     alt: Iterable[tuple[str, str]] | None = None,
 ) -> Path:
     """Advertise a bound endpoint by writing the rendezvous file **atomically**.
@@ -344,6 +357,7 @@ def write_endpoint(
         address=address,
         pid=pid if pid is not None else os.getpid(),
         started_at=started_at or utc_now_iso(),
+        installation_id=installation_id.strip() if installation_id else None,
         alt=tuple(Endpoint(transport=t, address=a) for t, a in (alt or ())),
     )
     d = Path(runtime_dir)

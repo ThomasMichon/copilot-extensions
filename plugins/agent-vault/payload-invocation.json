@@ -1,12 +1,18 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-vault",
   "module": "agent_vault",
-  "runtimeRoot": ".agent-vault",
+  "legacyRuntimeRoot": ".agent-vault",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
   "purpose": "Fetch and manage machine-local vault credentials",
   "installer": "install",
   "windowsCatalogShim": "cmd",
-  "provisionMode": "direct"
+  "provisionMode": "direct",
+  "payloadRootEnv": "AGENT_VAULT_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  }
 }
