@@ -81,6 +81,12 @@ def test_read_current_version_empty_file_returns_none(tmp_path):
     assert read_current_version(tmp_path) is None
 
 
+def test_read_current_version_non_utf8_content_returns_none(tmp_path):
+    # A torn/binary-corrupt marker write must fail safe, not raise.
+    (tmp_path / "current-version").write_bytes(b"\xff\xfe\x00\x01")
+    assert read_current_version(tmp_path) is None
+
+
 def test_slot_python_missing_slot_returns_none(tmp_path):
     assert slot_python(tmp_path, "0.1.2-dev40") is None
 

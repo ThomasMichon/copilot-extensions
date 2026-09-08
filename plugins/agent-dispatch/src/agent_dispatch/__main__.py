@@ -488,6 +488,27 @@ def _reap_superseded_coordinators(result: Any) -> None:
             pass
 
 
+def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
+    """Flags shared by the ``deploy`` and ``_cutover`` subparsers.
+
+    Both route to :func:`_cmd_cutover`; keeping their flag definitions in one
+    place means there is exactly one shape for a cutover invocation to drift
+    out of sync.
+    """
+    p.add_argument("--health-timeout", type=float, default=60.0,
+                    help="seconds to wait for the new coordinator's /health to "
+                         "report ready before rolling back")
+    p.add_argument("--drain-timeout", type=float, default=300.0,
+                    help="seconds to wait for the old coordinator's in-flight "
+                         "claim to settle before giving up on a graceful drain")
+    p.add_argument("--force", action="store_true",
+                    help="flip and retire even if the drain timeout elapses")
+    p.add_argument("--recover", action="store_true",
+                    help="only heal a prior aborted cutover left in a drained "
+                         "state, then exit (does not start a new cutover)")
+    p.add_argument("--json", action="store_true", help="emit JSON.")
+
+
 def _cmd_cutover(args: argparse.Namespace) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``.
 
@@ -4917,13 +4938,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=_cmd_serve)
 
-    # Internal graceful-cutover seam (installer-driven, not an operator command).
+    # Internal graceful-cutover seam (installer-driven, not an operator command)
+    # and the public `deploy` verb share one flag set -- see
+    # `_add_cutover_flags` -- so there is exactly one place that defines what a
+    # cutover invocation accepts.
     p = sub.add_parser("_cutover", help=argparse.SUPPRESS)
-    p.add_argument("--health-timeout", type=float, default=60.0)
-    p.add_argument("--drain-timeout", type=float, default=300.0)
-    p.add_argument("--force", action="store_true")
-    p.add_argument("--recover", action="store_true")
-    p.add_argument("--json", action="store_true")
+    _add_cutover_flags(p)
     p.set_defaults(func=_cmd_cutover)
 
     p = sub.add_parser(
@@ -4940,18 +4960,7 @@ def build_parser() -> argparse.ArgumentParser:
             "published (opt-in via AGENT_DISPATCH_SELF_UPDATE=1)."
         ),
     )
-    p.add_argument("--health-timeout", type=float, default=60.0,
-                    help="seconds to wait for the new coordinator's /health to "
-                         "report ready before rolling back")
-    p.add_argument("--drain-timeout", type=float, default=300.0,
-                    help="seconds to wait for the old coordinator's in-flight "
-                         "claim to settle before giving up on a graceful drain")
-    p.add_argument("--force", action="store_true",
-                    help="flip and retire even if the drain timeout elapses")
-    p.add_argument("--recover", action="store_true",
-                    help="only heal a prior aborted cutover left in a drained "
-                         "state, then exit (does not start a new cutover)")
-    p.add_argument("--json", action="store_true", help="emit JSON.")
+    _add_cutover_flags(p)
     p.set_defaults(func=_cmd_cutover)
 
     # Internal Windows service-generation retirement seam (installer-driven).

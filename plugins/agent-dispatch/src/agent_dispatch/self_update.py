@@ -42,7 +42,9 @@ def read_current_version(root: Path) -> str | None:
     """
     try:
         text = (root / CURRENT_VERSION_FILE).read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError covers UnicodeDecodeError -- a torn/binary-corrupt marker
+        # write must fail safe exactly like a missing file, not raise.
         return None
     return text or None
 
