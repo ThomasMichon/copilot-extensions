@@ -1,9 +1,15 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-codespaces",
   "module": "agent_codespaces",
-  "runtimeRoot": ".agent-codespaces",
+  "legacyRuntimeRoot": ".agent-codespaces",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_CODESPACES_NO_SELFPROVISION",
-  "purpose": "Manage GitHub Codespaces lifecycle transport and dispatch"
+  "purpose": "Manage GitHub Codespaces lifecycle transport and dispatch",
+  "payloadRootEnv": "AGENT_CODESPACES_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  }
 }

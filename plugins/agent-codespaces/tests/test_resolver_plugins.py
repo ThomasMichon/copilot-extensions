@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ def test_build_spawn_command_no_plugins():
     assert "--stage-plugin" not in cmd
     # The payload is routed through a durable file, not an inline string.
     assert cmd[-2] == "--remote-cmd-file"
+    assert Path(cmd[0]).name in {"agent-codespaces", "agent-codespaces.cmd"}
     assert Path(cmd[-1]).read_text(encoding="utf-8") == "cd /w && copilot --acp --stdio"
 
 
@@ -35,6 +37,21 @@ def test_build_spawn_command_with_stage_plugins():
     i = cmd.index("--stage-plugin")
     assert cmd[i:i + 4] == ["--stage-plugin", "a@m", "--stage-plugin", "b@m"]
     assert cmd[-2] == "--remote-cmd-file"
+
+
+def test_build_spawn_command_is_payload_local_not_global_binstub(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "agent_codespaces._invoke._payload_root",
+        lambda: tmp_path / "marketplace" / "agent-codespaces",
+    )
+    payload_bin = tmp_path / "marketplace" / "agent-codespaces" / "bin"
+    payload_bin.mkdir(parents=True)
+    name = "agent-codespaces.cmd" if os.name == "nt" else "agent-codespaces"
+    (payload_bin / name).write_text("", encoding="utf-8")
+
+    cmd = _build_spawn_command("cs-1", "cd /w && copilot --acp --stdio")
+
+    assert Path(cmd[0]) == payload_bin / name
 
 
 @pytest.mark.asyncio

@@ -57,9 +57,13 @@ def test_parse_source():
 
 
 def test_dest_dir_sanitizes_and_roots():
-    assert ps.dest_dir("example-web@mkt") == "$HOME/.acp-staged-plugins/example-web"
+    assert ps.dest_dir("example-web@mkt") == "$HOME/.acp-staged-plugins/example-web_mkt"
     assert ps.dest_dir("weird/../name@m").startswith("$HOME/.acp-staged-plugins/")
     assert "/" not in ps.dest_dir("weird/../name@m").rsplit("/", 1)[1]
+
+
+def test_dest_dir_keeps_same_named_marketplaces_distinct():
+    assert ps.dest_dir("example-web@market-a") != ps.dest_dir("example-web@market-b")
 
 
 def test_host_payload_dir_direct(tmp_path: Path):

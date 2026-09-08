@@ -1,24 +1,39 @@
-"""Resolve a cmd.exe-free way to invoke this plugin as a module.
-
-On Windows, agent-bridge spawns provider commands via ``cmd.exe /d /s /c``
-whenever the executable is a ``.cmd`` (see
-``agent_bridge.transport._wrap_batch_for_windows``). ``cmd.exe`` expands
-``%VAR%`` tokens in the forwarded arguments -- e.g. inside the wrapped ACP
-command -- which mangles them before the Python CLI ever sees ``argv``. To
-avoid that layer entirely, callers invoke the venv interpreter directly
-with ``-m agent_containers`` rather than the
-``~/.local/bin/agent-containers.cmd`` binstub. ``CreateProcess`` runs the
-signed ``python.exe`` directly (no cmd.exe), so arguments are parsed with
-the same MSVCRT rules the caller used to quote them -- verbatim.
-"""
+"""Resolve payload-local and module launch paths for agent-containers."""
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 _PACKAGE = "agent_containers"
-_ROOT = Path.home() / ".agent-containers"
+
+
+def runtime_root() -> Path:
+    override = os.environ.get("AGENT_CONTAINERS_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".agent-containers"
+
+
+def payload_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def payload_binstub() -> Path | None:
+    name = "agent-containers.cmd" if sys.platform == "win32" else "agent-containers"
+    shim = payload_root() / "bin" / name
+    return shim if shim.is_file() else None
+
+
+def payload_command_argv() -> list[str]:
+    shim = payload_binstub()
+    if shim is not None:
+        return [str(shim)]
+    return module_argv()
+
+
+_ROOT = runtime_root()
 #: Legacy single-venv layout (pre versioned-runtime). Kept only as a last-resort
 #: fallback -- the versioned-runtime migration stopped updating it, so it goes
 #: stale and must NOT be preferred over the active runtime (dotfiles #1631).

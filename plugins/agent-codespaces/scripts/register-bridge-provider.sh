@@ -5,13 +5,12 @@
 #
 # Generic + self-locating: byte-identical across provider plugins. The plugin
 # ships its own `references/bridge-provider.json` template (namespace /
-# restricted / description); this hook resolves the plugin's ABSOLUTE binstub
-# and injects it as the manifest `command`, so the agent-bridge daemon -- which
-# cannot import the provider nor see its binstub on PATH -- can still drive it
-# over a process boundary.
+# restricted / description); this hook resolves the payload-local shim and
+# injects it as the manifest `command`, so the agent-bridge daemon can drive the
+# exact same payload and installation context the current session loaded.
 #
-# Safe + best-effort: if the binstub isn't provisioned yet (fresh install), exit
-# 0 and let a later session drop it. Never blocks the session; never raises.
+# Safe + best-effort: if the payload-local shim is absent, exit 0 and let a
+# later session drop it. Never blocks the session; never raises.
 set -uo pipefail
 session_start_json_emitted=0
 emit_session_start_json() {
@@ -35,8 +34,10 @@ name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",
 template="$PluginDir/references/bridge-provider.json"
 [ -f "$template" ] || exit 0
 
-# Binstub location is a fixed agent-* runtime convention ($HOME/.local/bin/<name>).
-binstub="$HOME/.local/bin/$name"
+# Use the payload-local shim, not the mutable machine-global compatibility
+# binstub, so providers stay bound to the exact payload root the current
+# installation context selected.
+binstub="$PluginDir/bin/$name"
 [ -x "$binstub" ] || exit 0
 
 # Resolve providers.d honoring agent-bridge's config-dir contract.

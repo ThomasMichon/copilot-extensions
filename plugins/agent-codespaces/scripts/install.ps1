@@ -25,6 +25,8 @@ param(
     [ValidateSet('install', 'uninstall', 'status', 'update', 'stamp', 'provision')]
     [string]$Action = 'status',
 
+    [string]$InstallDir,
+
     [switch]$Force
 )
 
@@ -239,7 +241,9 @@ if ($hasServiceUtils) {
 # -- Metadata -------------------------------------------------------------
 
 $ServiceName     = 'Agent Codespaces'
-$InstallDir      = Join-Path $env:USERPROFILE '.agent-codespaces'
+if (-not $InstallDir) {
+    $InstallDir = Join-Path $env:USERPROFILE '.agent-codespaces'
+}
 $LocalBin        = Join-Path $env:USERPROFILE '.local\bin'
 $ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir       = (Resolve-Path (Join-Path $ScriptDir '..')).Path

@@ -11,6 +11,7 @@
 #   bash plugins/agent-codespaces/scripts/install.sh install
 #   bash plugins/agent-codespaces/scripts/install.sh stamp      # cheap: binstub only, defer runtime to first use
 #   bash plugins/agent-codespaces/scripts/install.sh provision  # heavy: build the runtime venv (what the binstub calls on first use)
+#   bash plugins/agent-codespaces/scripts/install.sh provision --install-dir DIR
 #   bash plugins/agent-codespaces/scripts/install.sh status
 #   bash plugins/agent-codespaces/scripts/install.sh update
 # =============================================================================
@@ -167,9 +168,11 @@ ACTION="${1:-status}"
 shift || true
 
 FORCE=false
+INSTALL_DIR=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         --force) FORCE=true; shift ;;
         *)       echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -178,7 +181,7 @@ done
 # -- Metadata --------------------------------------------------------------
 
 SERVICE_NAME="Agent Codespaces"
-INSTALL_DIR="$HOME/.agent-codespaces"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-codespaces}"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_DIR="$INSTALL_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
