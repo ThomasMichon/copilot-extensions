@@ -93,17 +93,53 @@ invent, since agent-mcp serves two very different request shapes):
 - [x] Add agent-mcp to `docs/patterns/graceful-daemon-cutover.md`'s adoption
       table.
 
-### Phase 2 — Installer-driven automatic cutover (follow-up)
+### Phase 2 — Installer-driven automatic cutover (this PR)
 Per the pattern doc's binding invariant 1 ("no externally-driven `deploy`
 command"), the end state is that agent-mcp's own runtime update/activation path
 detects a live `serve` daemon and invokes `cutover` in-process automatically —
 `agent-mcp cutover` should become an internal seam, not something an operator
-or the facility's `<repo> update` flow has to remember to call. Not done here:
-agent-mcp currently has no install/activation script of its own to wire this
-into (unlike agent-bridge/agent-dispatch's `install.ps1`/`install.sh`) — this
-is deferred as a named follow-up, not a silent gap. Until it lands, replacing a
-live `agent-mcp serve` daemon without an outage window requires explicitly
-running `agent-mcp cutover`.
+or the facility's `<repo> update` flow has to remember to call.
+
+agent-mcp has no `install.ps1`/`install.sh` matching agent-bridge/agent-dispatch's
+naming convention (its installer is named `init.ps1`/`init.sh`) -- but it
+already had everything else that convention implies: versioned runtime slots,
+an active-version marker, a deploy manifest, and (after Phase 1) the `zdd`
+cutover primitive itself. It also already had a **reap step** (`reap_versions.py`)
+that runs on every activation and hard-kills any process (including a live
+`serve` daemon) still running from a stale slot -- so the real gap was not
+"no update path exists", it was "the existing update path's only response to
+a live stale-version `serve` daemon was to kill it outright, with no graceful
+handoff first".
+
+- [x] `run_cutover()` gained a `require_live_daemon: bool` kwarg (and the CLI a
+      matching `--require-live` flag): with it set, a call that would otherwise
+      take the "cold start" path (no live daemon at all) or would cut over a
+      daemon already on the exact target version instead returns
+      `{"ok": True, "skipped": "<reason>"}` without spawning anything. This is
+      what makes it safe to invoke unconditionally from an installer/reconcile
+      pass -- `serve` stays optional, on-demand warmth, never auto-promoted to
+      an always-running daemon by an install/update pass that happens to run
+      while nothing was serving.
+- [x] `init.ps1`/`init.sh`: added a step, right before the existing
+      `reap_versions.py` call, that invokes
+      `<new-slot-python> -m agent_mcp cutover --require-live --force --json`.
+      A live daemon on a genuinely different (or pre-feature) version still
+      gets a real graceful cutover (or the existing bootstrap-boundary error);
+      the unchanged reap step immediately after remains the safety net for
+      anything the cutover step didn't handle (a failed cutover, a pre-feature
+      daemon, or a leaked process that was never a `serve` daemon at all).
+      Best-effort (never fails the install); opt out with `AGENT_MCP_NO_CUTOVER`.
+- [x] Tests: `require_live_daemon` skip-on-cold-start, skip-on-already-current-
+      version, and still-reports-genuine-mismatch (the pre-feature-daemon
+      case) added to `test_cutover.py`.
+- Note: `plugin.json`'s `"zeroDowntimeUpdate": true` flag (set on
+  agent-bridge/agent-dispatch/agent-index) is **not** applicable here yet --
+  the launch-time reconciler (`agent_worktrees.reconcile`) only ever passes
+  `-ZeroDowntime` to a script named `install.ps1`; a plugin with only
+  `init.ps1` never receives it regardless of what the manifest declares, so
+  setting the flag on agent-mcp today would be inert/misleading. Revisit if
+  agent-mcp's installer is ever renamed to converge with that naming
+  convention.
 
 ### Phase 3 — Generation self-retire backstop (follow-up)
 The pattern doc's "generation self-retire" watchdog (a demoted daemon notices

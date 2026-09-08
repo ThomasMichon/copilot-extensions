@@ -670,6 +670,35 @@ if ($VersionedRuntime) {
 }
 # === end install-contract:v3 versioned-venv activate ===
 
+# agent-mcp-specific (Phase 2, agent-mcp-graceful-cutover): before the hard
+# reap below, give a live `serve` daemon on a stale (non-current) version a
+# graceful zero-downtime handoff instead of just killing it. `--require-live`
+# makes this call safe to run unconditionally on every activation: it never
+# starts a resident daemon where none was running (serve is optional,
+# on-demand warmth, not a registered service), and no-ops if the live daemon
+# is already on this exact version. Only a genuinely live, differently-
+# versioned daemon actually cuts over here; the reap step right after this
+# still runs unchanged as the safety net for anything cutover didn't handle
+# (a pre-feature daemon with no control channel, a failed cutover, or a
+# leaked/orphaned bridge tree that was never a `serve` daemon at all).
+# Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
+if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
+    try {
+        $cutoverJson = & $VenvPython -I -X utf8 -m agent_mcp cutover --require-live --force --json 2>$null
+        $cutoverArg = (($cutoverJson | Out-String).Trim())
+        if ($cutoverArg) {
+            $cutoverResult = $cutoverArg | ConvertFrom-Json
+            if ($cutoverResult.skipped) {
+                Write-Skip "Cutover skipped: $($cutoverResult.skipped)"
+            } elseif ($cutoverResult.ok) {
+                Write-Ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
+            } else {
+                Write-Warn "Cutover attempted -- $($cutoverResult.error)"
+            }
+        }
+    } catch { Write-Skip "Cutover skipped ($($_.Exception.Message))" }
+}
+
 # agent-mcp-specific (NOT part of the byte-identical activate block above): reap
 # processes still running from a now-stale (non-current) slot -- leaked/orphaned
 # bridge trees or a warmth daemon from the prior version -- so an upgrade never

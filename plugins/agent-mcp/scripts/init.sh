@@ -474,6 +474,44 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
 fi
 # === end install-contract:v3 versioned-venv activate ===
 
+# agent-mcp-specific (Phase 2, agent-mcp-graceful-cutover): before the hard
+# reap below, give a live `serve` daemon on a stale (non-current) version a
+# graceful zero-downtime handoff instead of just killing it. --require-live
+# makes this call safe to run unconditionally on every activation: it never
+# starts a resident daemon where none was running (serve is optional,
+# on-demand warmth, not a registered service), and no-ops if the live daemon
+# is already on this exact version. Only a genuinely live, differently-
+# versioned daemon actually cuts over here; the reap step right after this
+# still runs unchanged as the safety net for anything cutover didn't handle
+# (a pre-feature daemon with no control channel, a failed cutover, or a
+# leaked/orphaned bridge tree that was never a `serve` daemon at all).
+# Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
+if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
+    _cutover_json="$("$VENV_PYTHON" -I -X utf8 -m agent_mcp cutover \
+        --require-live --force --json 2>/dev/null || true)"
+    if [[ -n "$_cutover_json" ]]; then
+        _cutover_skipped="$("$VENV_PYTHON" -c 'import sys,json
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    d = {}
+print(d.get("skipped") or "")' "$_cutover_json" 2>/dev/null || true)"
+        _cutover_ok="$("$VENV_PYTHON" -c 'import sys,json
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    d = {}
+print("1" if d.get("ok") else "0")' "$_cutover_json" 2>/dev/null || echo 0)"
+        if [[ -n "$_cutover_skipped" ]]; then
+            _skip "Cutover skipped: $_cutover_skipped"
+        elif [[ "$_cutover_ok" == "1" ]]; then
+            _ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
+        else
+            _step "Cutover attempted -- not fully successful (see reap step below)"
+        fi
+    fi
+fi
+
 # agent-mcp-specific (NOT part of the byte-identical activate block above): reap
 # processes still running from a now-stale (non-current) slot -- leaked/orphaned
 # bridge trees or a warmth daemon from the prior version -- so an upgrade never
