@@ -76,6 +76,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "conditional_idle_end": "CONDITIONAL_IDLE_END_PROTOCOL_VERSION",
 }
 _FETCH_RECOVERY_ATTEMPTED = False
+_MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
 
 
 def _clean_git_environment() -> dict[str, str]:
@@ -174,9 +175,9 @@ def _ensure_commit_available(commit: str) -> bool:
         return False
     _FETCH_RECOVERY_ATTEMPTED = True
     for fetch_args in (
-        ("fetch", "--quiet", "--depth=512", "origin", "main"),
-        ("fetch", "--quiet", "--unshallow", "origin"),
-        ("fetch", "--quiet", "origin", "main"),
+        ("fetch", "--quiet", "--depth=512", "origin", _MAIN_REFSPEC),
+        ("fetch", "--quiet", "--unshallow", "origin", _MAIN_REFSPEC),
+        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
     ):
         _git(*fetch_args)
         if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:

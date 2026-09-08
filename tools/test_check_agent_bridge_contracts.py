@@ -309,12 +309,18 @@ def test_missing_provenance_commit_recovers_history_once(
         calls.append(args)
         if args[:2] == ("cat-file", "-e"):
             return subprocess.CompletedProcess(args, 0 if state["available"] else 1, "", "")
-        if args == ("fetch", "--quiet", "--depth=512", "origin", "main"):
+        if args == (
+            "fetch",
+            "--quiet",
+            "--depth=512",
+            "origin",
+            checker._MAIN_REFSPEC,
+        ):
             state["available"] = True
             return subprocess.CompletedProcess(args, 0, "", "")
         if args in {
-            ("fetch", "--quiet", "--unshallow", "origin"),
-            ("fetch", "--quiet", "origin", "main"),
+            ("fetch", "--quiet", "--unshallow", "origin", checker._MAIN_REFSPEC),
+            ("fetch", "--quiet", "origin", checker._MAIN_REFSPEC),
         }:
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(f"unexpected git call: {args}")
@@ -324,7 +330,9 @@ def test_missing_provenance_commit_recovers_history_once(
 
     assert checker._ensure_commit_available(commit) is True
     assert checker._ensure_commit_available(commit) is True
-    assert calls.count(("fetch", "--quiet", "--depth=512", "origin", "main")) == 1
+    assert calls.count(
+        ("fetch", "--quiet", "--depth=512", "origin", checker._MAIN_REFSPEC)
+    ) == 1
 
 
 @pytest.mark.parametrize(
