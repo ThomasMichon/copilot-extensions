@@ -3503,6 +3503,137 @@ def _mark_resume_if_behind(
     return True
 
 
+def _resolve_read_target(
+    client, target: str
+) -> tuple[str | None, str | None]:
+    """Resolve ``read``'s target to a concrete session id when possible.
+
+    ``read`` follows **bridge-managed** worktree sessions, not the separate
+    represented interactive ``live-sessions`` registry. Resolution order keeps
+    literal session-id semantics intact:
+
+    1. exact bridge-managed session id;
+    2. otherwise, a **worktree handle** resolved against ``list_sessions()``,
+       preferring the current live/starting owned session for that worktree and
+       falling back to its most recent session when nothing is live.
+
+    Returns ``(session_id, follow_handle)``:
+
+    - ``session_id`` is the currently-readable session when one is known;
+    - ``follow_handle`` is the durable worktree handle to keep re-resolving
+      across session-id churn, or None for literal session ids.
+    """
+    from .client import BridgeClientError
+
+    get_session = getattr(client, "get_session", None)
+    if get_session is not None:
+        try:
+            session = get_session(target)
+        except BridgeClientError as exc:
+            if exc.status != 404:
+                raise
+        else:
+            if session:
+                return target, None
+
+    worktree_session_id = _resolve_read_worktree_session(client, target)
+    if worktree_session_id:
+        return worktree_session_id, target
+
+    return target, None
+
+
+def _session_status_name(session: dict[str, Any]) -> str:
+    """Normalize a session-info status to its lowercase public string."""
+    status = session.get("status")
+    if hasattr(status, "value"):
+        status = status.value
+    return str(status or "").lower()
+
+
+def _resolve_read_worktree_session(
+    client,
+    worktree_id: str,
+    *,
+    exclude_session_id: str | None = None,
+) -> str | None:
+    """Resolve a worktree handle against bridge-managed sessions.
+
+    ``list_sessions()`` is already newest-first. Prefer an active/current owned
+    session (running/idle/starting/created) for the worktree; when nothing is
+    live, fall back to the newest remaining match so read-only history access
+    still works for a dormant worktree. ``exclude_session_id`` lets a follower
+    ignore the predecessor and pick up a successor after handoff.
+    """
+    list_sessions = getattr(client, "list_sessions", None)
+    if list_sessions is None:
+        return None
+    try:
+        sessions = list_sessions()
+    except Exception:
+        return None
+
+    fallback: str | None = None
+    for session in sessions:
+        session_id = str(session.get("session_id") or "")
+        if not session_id or session.get("worktree_id") != worktree_id:
+            continue
+        if exclude_session_id and session_id == exclude_session_id:
+            continue
+        if _session_status_name(session) in {
+            "created", "starting", "running", "idle",
+        }:
+            return session_id
+        if fallback is None:
+            fallback = session_id
+    return fallback
+
+
+def _wait_for_worktree_read_target(
+    client,
+    target: str,
+    *,
+    prior_session_id: str | None = None,
+    require_successor: bool = False,
+    grace_s: float | None = None,
+) -> str | None:
+    """Retry worktree-target resolution for a bridge-managed ``read`` target.
+
+    Used both when a worktree handle is momentarily unregistered during initial
+    attach, and mid-follow when a handoff or restart temporarily removes the
+    current session before its replacement is visible. When
+    ``require_successor`` is True, the returned live session must differ from
+    ``prior_session_id``.
+    """
+    import time
+
+    if grace_s is None:
+        grace_s = _STREAM_404_GRACE_S
+    deadline = time.monotonic() + max(0.0, grace_s)
+    while True:
+        session_id = _resolve_read_worktree_session(
+            client,
+            target,
+            exclude_session_id=(prior_session_id if require_successor else None),
+        )
+        if session_id:
+            return session_id
+        if time.monotonic() >= deadline:
+            return None
+        client.refresh_endpoint()
+        time.sleep(_RECONNECT_BACKOFF)
+
+
+def _report_unavailable_read_target(target: str) -> None:
+    """Report that a durable ``read`` target is still unavailable after retry."""
+    print(
+        f"\n[RETRY] Session {target} is not currently registered (the bridge "
+        "may be mid-restart); if it exists it is preserved and resumable -- "
+        "re-run shortly.",
+        file=sys.stderr,
+    )
+
+
 def _worktrees_get(key: str) -> str | None:
     """Query ``agent-worktrees get <key>`` in the current working directory.
 
@@ -4063,6 +4194,7 @@ def _stream_feed(
     command_timeout: float = 0.0,
     attention_reasons: list[str] | None = None,
     attention_position: str | None = None,
+    follow_handle: str | None = None,
 ) -> str | dict[str, Any]:
     """Stream the remote conversation as a collapsed live feed.
 
@@ -4102,6 +4234,7 @@ def _stream_feed(
     # is reported (dotfiles#1713).
     first_404_at: float | None = None
     attention_result: dict[str, Any] | None = None
+    follow_successor_pending = False
 
     def _probe_attention() -> dict[str, Any] | None:
         if not attention_reasons:
@@ -4120,6 +4253,30 @@ def _stream_feed(
             client.ack_cursor(session_id, up_to, caller_id=caller_id)
         except Exception:
             pass
+
+    def _follow_successor(*, require_successor: bool) -> bool:
+        nonlocal session_id, cursor, turn_complete_seen, first_404_at
+        new_session_id = _wait_for_worktree_read_target(
+            client,
+            follow_handle or "",
+            prior_session_id=session_id,
+            require_successor=require_successor,
+        )
+        if not new_session_id:
+            return False
+        if new_session_id != session_id:
+            print(
+                f"\n[>] Session handed off -> {new_session_id}; continuing to follow.",
+                file=sys.stderr,
+            )
+            session_id = new_session_id
+            try:
+                cursor = client.get_cursor(session_id, caller_id=caller_id)
+            except Exception:
+                cursor = 0
+        turn_complete_seen = False
+        first_404_at = None
+        return True
 
     for _attempt in range(max_attempts):
         stream = None
@@ -4153,6 +4310,12 @@ def _stream_feed(
                         )
                         return "timeout"
                     if _turn_settled(client, session_id, cursor):
+                        if follow_handle and follow_successor_pending:
+                            if _follow_successor(require_successor=True):
+                                follow_successor_pending = False
+                                break
+                            _report_unavailable_read_target(follow_handle)
+                            return "error"
                         return "complete"
                     continue
 
@@ -4172,6 +4335,12 @@ def _stream_feed(
                         )
                         return "timeout"
                     if _turn_settled(client, session_id, cursor):
+                        if follow_handle and follow_successor_pending:
+                            if _follow_successor(require_successor=True):
+                                follow_successor_pending = False
+                                break
+                            _report_unavailable_read_target(follow_handle)
+                            return "error"
                         return "complete"
                     continue
 
@@ -4187,6 +4356,16 @@ def _stream_feed(
                     sys.stdout.write(text)
                     sys.stdout.flush()
                 last_activity = now
+                if etype == "session_handoff":
+                    data = evt.get("data", {})
+                    rolled_to = data.get("rolled_to") or data.get("successor_id")
+                    if (
+                        follow_handle
+                        and isinstance(rolled_to, str)
+                        and rolled_to
+                        and rolled_to != session_id
+                    ):
+                        follow_successor_pending = True
 
                 if new_id > cursor:
                     cursor = new_id
@@ -4211,6 +4390,12 @@ def _stream_feed(
                 if etype == "turn_complete":
                     turn_complete_seen = True
                     if _turn_settled(client, session_id, cursor):
+                        if follow_handle and follow_successor_pending:
+                            if _follow_successor(require_successor=True):
+                                follow_successor_pending = False
+                                break
+                            _report_unavailable_read_target(follow_handle)
+                            return "error"
                         return "complete"
 
                 if etype == "error":
@@ -4237,6 +4422,14 @@ def _stream_feed(
             client.refresh_endpoint()
         except BridgeClientError as exc:
             if exc.status == 404:
+                if follow_handle:
+                    if _follow_successor(
+                        require_successor=follow_successor_pending
+                    ):
+                        follow_successor_pending = False
+                        continue
+                    _report_unavailable_read_target(follow_handle)
+                    return "error"
                 # A mid-stream session-404: the daemon bounced and has not
                 # re-registered the session yet. Follow any port cutover and
                 # retry within the grace window rather than declaring the session
@@ -4265,6 +4458,12 @@ def _stream_feed(
         if deadline and now > deadline:
             return "timeout"
         if _turn_settled(client, session_id, cursor):
+            if follow_handle and follow_successor_pending:
+                if _follow_successor(require_successor=True):
+                    follow_successor_pending = False
+                    continue
+                _report_unavailable_read_target(follow_handle)
+                return "error"
             return "complete"
         time.sleep(_RECONNECT_BACKOFF)
 
@@ -4488,10 +4687,19 @@ def _cmd_read(args: argparse.Namespace) -> None:
     id. Does NOT move the delivery cursor -- the only way to re-read
     already-consumed content.
     """
+    from .client import BridgeClientError
+
     client = _get_client()
     caller_id = _caller_id_for(args)
-    session_id = args.session_id
+    target = args.session_id
     renderer = _make_renderer(args)
+    session_id, follow_handle = _resolve_read_target(client, target)
+    if follow_handle and session_id is None:
+        session_id = _wait_for_worktree_read_target(client, follow_handle)
+        if not session_id:
+            _report_unavailable_read_target(follow_handle)
+            sys.exit(1)
+    session_id = session_id or target
 
     # Random-access historical read (does not touch the cursor). Supports
     # --event N, --tail N, --since ID, and --range A:B (precedence in that
@@ -4505,9 +4713,13 @@ def _cmd_read(args: argparse.Namespace) -> None:
         if evt is not None:
             start_id, end_id = evt, evt
         elif tail is not None:
-            head = client.get_cursor_info(
-                session_id, caller_id=caller_id
-            ).get("head_id", 0)
+            try:
+                head = client.get_cursor_info(
+                    session_id, caller_id=caller_id
+                ).get("head_id", 0)
+            except BridgeClientError as exc:
+                print(f"[FAIL] {exc.detail}", file=sys.stderr)
+                sys.exit(1)
             start_id, end_id = max(1, head - tail + 1), head
         elif since is not None:
             start_id, end_id = since + 1, None
@@ -4519,7 +4731,11 @@ def _cmd_read(args: argparse.Namespace) -> None:
             except ValueError:
                 print(f"[FAIL] Invalid --range '{rng}' (use A:B)", file=sys.stderr)
                 sys.exit(1)
-        events = client.read_range(session_id, start=start_id, end=end_id)
+        try:
+            events = client.read_range(session_id, start=start_id, end=end_id)
+        except BridgeClientError as exc:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+            sys.exit(1)
         if args.json:
             _json_out({"session_id": session_id, "events": events})
             return
@@ -4533,8 +4749,12 @@ def _cmd_read(args: argparse.Namespace) -> None:
 
     # Non-follow: drain everything pending since the cursor, advance, exit.
     if getattr(args, "no_follow", False):
-        start_id = client.get_cursor(session_id, caller_id=caller_id)
-        events = client.read_range(session_id, start=start_id + 1)
+        try:
+            start_id = client.get_cursor(session_id, caller_id=caller_id)
+            events = client.read_range(session_id, start=start_id + 1)
+        except BridgeClientError as exc:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+            sys.exit(1)
         if args.json:
             _json_out({"session_id": session_id, "events": events})
             return
@@ -4556,6 +4776,7 @@ def _cmd_read(args: argparse.Namespace) -> None:
         caller_id=caller_id,
         renderer=renderer,
         command_timeout=timeouts.command,
+        follow_handle=follow_handle,
     )
 
 
@@ -5881,7 +6102,10 @@ def build_parser() -> argparse.ArgumentParser:
         "read",
         help="Read/resume a session's conversation from the delivery cursor",
     )
-    read_p.add_argument("session_id", help="Session ID")
+    read_p.add_argument(
+        "session_id",
+        help="Session ID or a live session's worktree handle",
+    )
     read_p.add_argument(
         "--no-follow", action="store_true",
         help="Deliver everything pending since the cursor, then exit "

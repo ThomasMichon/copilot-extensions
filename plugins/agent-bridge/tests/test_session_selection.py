@@ -267,6 +267,84 @@ def test_cmd_send_rejects_new_flag():
     assert ei.value.code == 2
 
 
+class _ReadRenderer:
+    def render_events(self, _events):
+        return ""
+
+
+class _ReadLiveClient:
+    def __init__(self):
+        self.list_calls = 0
+        self.cursor_calls: list[str] = []
+        self.range_calls: list[tuple[str, int, int | None]] = []
+        self.ack_calls: list[tuple[str, int]] = []
+
+    def get_session(self, session_id):
+        raise BridgeClientError(404, f"Session {session_id} not found")
+
+    def list_sessions(self, *, status=None):
+        self.list_calls += 1
+        return [
+            {
+                "session_id": "live-sess-1",
+                "worktree_id": "wt-target",
+                "status": "idle",
+            }
+        ]
+
+    def get_cursor(self, session_id, *, caller_id=None):
+        self.cursor_calls.append(session_id)
+        return 0
+
+    def read_range(self, session_id, *, start=0, end=None):
+        self.range_calls.append((session_id, start, end))
+        return [{"id": 1, "event": "agent_message", "data": {"text": "ok"}}]
+
+    def ack_cursor(self, session_id, last_id, *, caller_id=None):
+        self.ack_calls.append((session_id, last_id))
+        return last_id
+
+
+def test_cmd_read_resolves_worktree_handle_to_live_session(monkeypatch, capsys):
+    client = _ReadLiveClient()
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_caller_id_for", lambda _args: None)
+    monkeypatch.setattr(m, "_make_renderer", lambda _args: _ReadRenderer())
+    args = argparse.Namespace(
+        session_id="wt-target",
+        no_follow=True,
+        range=None,
+        event=None,
+        tail=None,
+        since=None,
+        json=False,
+    )
+
+    m._cmd_read(args)
+
+    assert client.list_calls >= 1
+    assert client.cursor_calls == ["live-sess-1"]
+    assert client.range_calls == [("live-sess-1", 1, None)]
+    assert client.ack_calls == [("live-sess-1", 1)]
+    assert "(caught up -- nothing new)" not in capsys.readouterr().out
+
+
+def test_resolve_read_target_prefers_live_owned_worktree_session():
+    class _Client:
+        def get_session(self, session_id):
+            raise BridgeClientError(404, "not found")
+
+        def list_sessions(self, *, status=None):
+            return [
+                {"session_id": "pred", "worktree_id": "wt-1", "status": "stopped"},
+                {"session_id": "succ", "worktree_id": "wt-1", "status": "idle"},
+            ]
+
+    session_id, follow_handle = m._resolve_read_target(_Client(), "wt-1")
+    assert session_id == "succ"
+    assert follow_handle == "wt-1"
+
+
 # -- D3: worktree-handle addressing + reply-to ------------------------------
 
 
