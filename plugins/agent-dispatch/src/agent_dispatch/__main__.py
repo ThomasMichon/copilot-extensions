@@ -488,8 +488,29 @@ def _reap_superseded_coordinators(result: Any) -> None:
             pass
 
 
+def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
+    """Flags shared by the ``deploy`` and ``_cutover`` subparsers.
+
+    Both route to :func:`_cmd_cutover`; keeping their flag definitions in one
+    place means there is exactly one shape for a cutover invocation to drift
+    out of sync.
+    """
+    p.add_argument("--health-timeout", type=float, default=60.0,
+                    help="seconds to wait for the new coordinator's /health to "
+                         "report ready before rolling back")
+    p.add_argument("--drain-timeout", type=float, default=300.0,
+                    help="seconds to wait for the old coordinator's in-flight "
+                         "claim to settle before giving up on a graceful drain")
+    p.add_argument("--force", action="store_true",
+                    help="flip and retire even if the drain timeout elapses")
+    p.add_argument("--recover", action="store_true",
+                    help="only heal a prior aborted cutover left in a drained "
+                         "state, then exit (does not start a new cutover)")
+    p.add_argument("--json", action="store_true", help="emit JSON.")
+
+
 def _cmd_cutover(args: argparse.Namespace) -> int:
-    """Internal graceful-cutover seam -- driven by the installer, not operators.
+    """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``.
 
     Stands the freshly-installed coordinator slot up PASSIVE on a fresh port,
     health-gates it, flips the zdd routing table, drains the old coordinator at
@@ -497,7 +518,14 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     update never kills in-flight work. The supervisor + spawned workers outlive
     the swap and re-adopt the new coordinator via the durable queue DB + routing
     table. Rolls back before the commit point; commits forward after. See
-    docs/patterns/graceful-daemon-cutover.md. NOT an operator command.
+    docs/patterns/graceful-daemon-cutover.md.
+
+    ``deploy`` is the public, operator-facing name (run it after installing new
+    code in this interpreter's venv, mirroring ``agent-bridge deploy``); a
+    coordinator's own self-update loop (see ``coordinator._spawn_self_deploy``)
+    also invokes it, spawned from the newly-installed version's interpreter.
+    ``_cutover`` is kept as a hidden back-compat alias for any existing
+    installer script that already calls it by that name -- both route here.
     """
     import json as _json
     import socket as _socket
@@ -4910,13 +4938,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=_cmd_serve)
 
-    # Internal graceful-cutover seam (installer-driven, not an operator command).
+    # Internal graceful-cutover seam (installer-driven, not an operator command)
+    # and the public `deploy` verb share one flag set -- see
+    # `_add_cutover_flags` -- so there is exactly one place that defines what a
+    # cutover invocation accepts.
     p = sub.add_parser("_cutover", help=argparse.SUPPRESS)
-    p.add_argument("--health-timeout", type=float, default=60.0)
-    p.add_argument("--drain-timeout", type=float, default=300.0)
-    p.add_argument("--force", action="store_true")
-    p.add_argument("--recover", action="store_true")
-    p.add_argument("--json", action="store_true")
+    _add_cutover_flags(p)
+    p.set_defaults(func=_cmd_cutover)
+
+    p = sub.add_parser(
+        "deploy",
+        help="zero-downtime redeploy to the currently installed code",
+        description=(
+            "Cut over to the code installed in this interpreter's venv: spawns "
+            "a new coordinator on a fresh port, waits for it to report healthy, "
+            "flips the routing table so clients follow it, drains the old "
+            "coordinator's in-flight claim, then retires it. Run this after "
+            "installing new code (e.g. `install.ps1 update` on Windows / "
+            "`install.sh update` on POSIX) -- either by hand, "
+            "or it is invoked automatically by a running coordinator's own "
+            "self-update loop once it notices a newer version has been "
+            "published (opt-in via AGENT_DISPATCH_SELF_UPDATE=1)."
+        ),
+    )
+    _add_cutover_flags(p)
     p.set_defaults(func=_cmd_cutover)
 
     # Internal Windows service-generation retirement seam (installer-driven).
