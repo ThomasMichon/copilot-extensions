@@ -55,6 +55,11 @@ agent-dispatch = "agent_dispatch.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# Built-in named worker identities (agent_dispatch.worker_identities); must be
+# shipped in the wheel, not just present in an editable/dev checkout.
+agent_dispatch = ["identities/*.identity.md"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 99
