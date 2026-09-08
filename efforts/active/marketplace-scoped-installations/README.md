@@ -1069,3 +1069,31 @@ See [`design.md`](design.md).
   47 skips; the final WSL portfolio passed 3,974 tests with 37 skips after one
   corrected POSIX legacy assertion. All publication guards passed, and the
   report-only marketplace-isolation inventory fell to 718 findings.
+
+### 2026-09-07 — Cell-global runtime state and project-command arbitration
+
+- Made the runtime/state root returned by `config.install_dir()` follow the
+  validated installation context. Runtime manifests, version slots, wrapper
+  support, activity logs, pivots, monitor state, and other plugin-global
+  mutable artifacts now stay inside the selected cell; default/legacy behavior
+  remains `~/.agent-worktrees`.
+- Synchronized all three project-binstub generators. Python, Bash, and
+  PowerShell installers now route every project invocation through the exact
+  owning payload, including zero arguments, and no longer write a pre-context
+  machine-global launch trace or embed a legacy runtime fallback.
+- Kept the singleton project-command ledger intentionally shared with
+  `~/.local/bin`, but rooted its receipts and locks in the same canonical home
+  regardless of `AGENT_HOME`. Ownership now includes the validated
+  marketplace ID and install receipt, preventing a replaced source at the same
+  cache path or two cells with separate locks from silently taking the command.
+- The full WSL portfolio passed 3,976 tests with 37 skips. On Windows, the
+  consolidated changed-surface portfolio passed 1,028 tests with 22 skips and
+  all individually timed-out modules passed independently; repeated full
+  portfolios accumulated subprocess-creation stalls in varying unrelated
+  tests, tracked separately by
+  [#2214](https://github.com/ThomasMichon/copilot-extensions/issues/2214).
+  All publication guards passed and the report-only marketplace-isolation
+  inventory fell to 704 findings.
+- Kept [#1105](https://github.com/ThomasMichon/copilot-extensions/issues/1105)
+  open for cell-qualified distributed lease/resource identity and the remaining
+  explicit disposition of host-owned session databases and service identity.

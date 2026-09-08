@@ -136,8 +136,8 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
         content = (lb / name).read_text()
         assert "bin\\payload\\agent-worktrees" in content
         assert "AGENT_WORKTREES_LAUNCH_ID" in content
-        assert "picker-launches.jsonl" in content
-        assert "binstub_start" in content
+        assert "picker-launches.jsonl" not in content
+        assert "binstub_start" not in content
         assert "timestamp_local" not in content
         assert "launch-session" not in content
         assert "--project" in content
@@ -237,7 +237,7 @@ def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     assert "--project 'demoproj'" in content
 
 
-def test_posix_binstub_launch_trace_uses_portable_date(monkeypatch, tmp_path: Path):
+def test_posix_binstub_has_no_pre_context_trace(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
 
@@ -245,9 +245,9 @@ def test_posix_binstub_launch_trace_uses_portable_date(monkeypatch, tmp_path: Pa
 
     assert len(specs) == 1
     content = specs[0][1]
-    assert "picker-launches.jsonl" in content
+    assert "picker-launches.jsonl" not in content
     assert "$RANDOM-$(date +%s)" in content
-    assert "date -u +%Y-%m-%dT%H:%M:%SZ" in content
+    assert "binstub_start" not in content
     assert "if [[ $# -eq 0 ]]" not in content
     assert "bin/payload/agent-worktrees" in content.replace("\\", "/")
     assert "%N" not in content
@@ -804,6 +804,46 @@ def test_project_binstubs_never_launch_through_legacy_runtime(
         normalized = content.replace("\\", "/")
         assert ".agent-worktrees/bin/launch-session" not in normalized
         assert "bin/payload/agent-worktrees" in normalized
+
+
+def test_binstub_arbitration_lock_is_shared_across_cells(
+    monkeypatch, tmp_path
+):
+    shared_home = tmp_path / "home"
+    shared = shared_home / ".agent-worktrees"
+    cells = [tmp_path / "cell-a", tmp_path / "cell-b"]
+    monkeypatch.setattr(inst.platform, "system", lambda: "Windows")
+    monkeypatch.setenv("USERPROFILE", str(shared_home))
+
+    for cell in cells:
+        monkeypatch.setenv("AGENT_HOME", str(cell))
+        monkeypatch.setattr(inst, "install_dir", lambda cell=cell: cell)
+        for key in ("example", "__registries__"):
+            with inst._binstub_lock(key):
+                lock_name = key.casefold() if platform.system() == "Windows" else key
+                assert (
+                    shared / "binstub-receipts" / f".{lock_name}.lock"
+                ).exists()
+                assert not (cell / "binstub-receipts").exists()
+
+
+def test_native_installers_generate_payload_pinned_project_binstubs() -> None:
+    plugin = Path(__file__).resolve().parents[1]
+    posix = (plugin / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (plugin / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    posix_binstub = posix.split("deploy_binstub() {", 1)[1].split(
+        "deploy_global_config() {", 1
+    )[0]
+    powershell_binstub = powershell.split("function Deploy-Binstub {", 1)[1].split(
+        "function Deploy-GlobalBinstub {", 1
+    )[0]
+
+    assert "bin/payload/agent-worktrees" in posix_binstub
+    assert ".agent-worktrees/bin/launch-session" not in posix_binstub
+    assert "_root=" not in posix_binstub
+    assert "bin\\payload\\agent-worktrees" in powershell_binstub
+    assert ".agent-worktrees\\bin\\launch-session" not in powershell_binstub
+    assert "resolve-runtime.ps1" not in powershell_binstub
 
 
 def test_hook_deployment_includes_registry_root_helper() -> None:

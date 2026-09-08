@@ -139,7 +139,7 @@ def run_migrations(install_dir: Path | None = None) -> list[Any]:
     if install_dir is None:
         from . import config, registry_paths
 
-        install_dir = registry_paths.registry_root(config.install_dir())
+        install_dir = registry_paths.registry_root(config.legacy_install_dir())
     return _run(managed_files(Path(install_dir)), REGISTRY)
 
 

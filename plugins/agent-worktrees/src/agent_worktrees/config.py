@@ -797,9 +797,14 @@ def project_name() -> str:
     return name
 
 
-def install_dir() -> Path:
-    """Shared runtime root (``~/.agent-worktrees/``)."""
+def legacy_install_dir() -> Path:
+    """Legacy shared runtime root (``~/.agent-worktrees/``)."""
     return _home() / ".agent-worktrees"
+
+
+def install_dir() -> Path:
+    """Selected legacy or installation-cell runtime/state root."""
+    return registry_paths.registry_root(legacy_install_dir())
 
 
 def project_dir(name: str | None = None) -> Path:
@@ -817,7 +822,7 @@ def default_config_path() -> Path:
 def global_config_path() -> Path:
     """Return the global, machine-wide config path (lowest config tier)."""
     return registry_paths.registry_path(
-        GLOBAL_CONFIG_FILENAME, legacy_root=install_dir()
+        GLOBAL_CONFIG_FILENAME, legacy_root=legacy_install_dir()
     )
 
 
@@ -1016,7 +1021,7 @@ def load_config(
         raise ValueError(
             f"No repo could be resolved for project {repo_name or '?'!r}.\n"
             f"Checked machine-local config ({path}) and the repos registry "
-            f"({registry_paths.registry_path('repos.yaml', legacy_root=install_dir())}).\n"
+            f"({registry_paths.registry_path('repos.yaml', legacy_root=legacy_install_dir())}).\n"
             "Run the installer / register the repo first:\n"
             "  pwsh -File <repo>/plugins/agent-worktrees/scripts/install.ps1 install"
         )

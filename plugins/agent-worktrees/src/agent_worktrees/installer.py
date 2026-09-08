@@ -476,6 +476,14 @@ def _write_binstub_if_changed(dst: Path, content: str) -> bool:
 _RESERVED_BINSTUB_NAMES = frozenset({"agent-worktrees"})
 _BINSTUB_RECEIPT_SCHEMA = "agent-worktrees.project-binstub-ownership"
 _BINSTUB_RECEIPT_VERSION = 1
+_OWNER_IDENTITY_FIELDS = (
+    "marketplace_id",
+    "install_receipt",
+    "marketplace",
+    "plugin",
+    "payload_root",
+    "repository",
+)
 
 
 class BinstubOwnershipError(RuntimeError):
@@ -538,13 +546,24 @@ def _binstub_owner(repo_dir: str | Path | None = None) -> dict[str, str]:
         r"/\.copilot/installed-plugins/([^/]+)/agent-worktrees(?:/|$)",
         normalized,
     )
-    return {
+    owner = {
+        "marketplace_id": "",
+        "install_receipt": "",
         "marketplace": match.group(1) if match else "local",
         "plugin": str(manifest.get("name") or "agent-worktrees"),
         "payload_root": normalized,
         "repository": str(manifest.get("repository") or ""),
         "plugin_version": str(manifest.get("version") or ""),
     }
+    context = registry_paths.installation_context()
+    if context is not None:
+        owner["marketplace_id"] = str(context.get("marketplaceId") or "")
+        owner["install_receipt"] = str(context.get("installReceipt") or "")
+        if not owner["marketplace_id"] or not owner["install_receipt"]:
+            raise BinstubOwnershipError(
+                "validated installation context omitted command ownership identity"
+            )
+    return owner
 
 
 def _project_identity(project: str, repo_dir: str | Path | None = None) -> dict[str, str]:
@@ -578,9 +597,24 @@ def _project_identity(project: str, repo_dir: str | Path | None = None) -> dict[
     return {"name": name, "remote": remote, "path": path}
 
 
+def _command_arbitration_dir() -> Path:
+    """Shared command ledger rooted beside the real global bin directory.
+
+    Deliberately ignores ``AGENT_HOME``: that override isolates harness state,
+    while every cell still arbitrates the same real ``~/.local/bin`` commands.
+    """
+    if platform.system() == "Windows":
+        home = Path(os.environ.get("USERPROFILE", str(Path.home())))
+    else:
+        home = Path.home()
+    return (
+        home / ".agent-worktrees" / "binstub-receipts"
+    )  # marketplace-isolation: allow globally arbitrated project command
+
+
 def _receipt_path(project: str) -> Path:
     key = project.casefold() if platform.system() == "Windows" else project
-    return install_dir() / "binstub-receipts" / f"{key}.json"
+    return _command_arbitration_dir() / f"{key}.json"
 
 
 def _read_receipt(project: str) -> dict | None:
@@ -652,7 +686,7 @@ def _file_sha256(path: Path) -> str:
 @contextmanager
 def _binstub_lock(project: str):
     key = project.casefold() if platform.system() == "Windows" else project
-    path = install_dir() / "binstub-receipts" / f".{key}.lock"
+    path = _command_arbitration_dir() / f".{key}.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
         if stream.tell() == 0:
@@ -761,10 +795,6 @@ def _project_binstub_specs(
             "rem agent-worktrees project binstub",
             'set "PYTHONUTF8=1"',
             f'set "AGENT_WORKTREES_LAUNCH_ID={project}-%RANDOM%-%RANDOM%"',
-            'set "AGENT_WORKTREES_BINSTUB_STARTED=%DATE% %TIME%"',
-            'set "AGENT_WORKTREES_LAUNCH_TRACE=%USERPROFILE%\\.agent-worktrees\\logs\\picker-launches.jsonl"',
-            'if not exist "%USERPROFILE%\\.agent-worktrees\\logs" mkdir "%USERPROFILE%\\.agent-worktrees\\logs" >nul 2>&1',
-            f'(>>"%AGENT_WORKTREES_LAUNCH_TRACE%" echo {{"event":"binstub_start","timestamp":"%AGENT_WORKTREES_BINSTUB_STARTED%","launch_id":"%AGENT_WORKTREES_LAUNCH_ID%","project":"{project}"}}) 2>nul',
             "rem This attributable project entry point is pinned to its owning payload.",
             f'"{cmd_path}" --project {project} %*',
             "exit /b %ERRORLEVEL%",
@@ -773,14 +803,6 @@ def _project_binstub_specs(
             "# agent-worktrees project binstub",
             "$env:PYTHONUTF8 = '1'",
             f"$env:AGENT_WORKTREES_LAUNCH_ID = '{ps1_project}-' + [guid]::NewGuid().ToString('N')",
-            "$env:AGENT_WORKTREES_BINSTUB_STARTED = [DateTime]::UtcNow.ToString('o')",
-            "$_awTraceDir = Join-Path $env:USERPROFILE '.agent-worktrees\\logs'",
-            "$env:AGENT_WORKTREES_LAUNCH_TRACE = Join-Path $_awTraceDir 'picker-launches.jsonl'",
-            "try {",
-            "    [IO.Directory]::CreateDirectory($_awTraceDir) | Out-Null",
-            f"    $_awEvent = [ordered]@{{ event = 'binstub_start'; timestamp = $env:AGENT_WORKTREES_BINSTUB_STARTED; launch_id = $env:AGENT_WORKTREES_LAUNCH_ID; project = '{ps1_project}' }}",
-            "    [IO.File]::AppendAllText($env:AGENT_WORKTREES_LAUNCH_TRACE, ($_awEvent | ConvertTo-Json -Compress) + [Environment]::NewLine)",
-            "} catch {}",
             "# This attributable project entry point is pinned to its owning payload.",
             f"& '{ps1_path}' --project '{ps1_project}' @args",
             "exit $LASTEXITCODE",
@@ -795,10 +817,6 @@ def _project_binstub_specs(
         "# agent-worktrees project binstub\n"
         "export PYTHONUTF8=1\n"
         f"export AGENT_WORKTREES_LAUNCH_ID={shlex.quote(project)}-$$-$RANDOM-$(date +%s)\n"
-        "export AGENT_WORKTREES_BINSTUB_STARTED=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\n"
-        "export AGENT_WORKTREES_LAUNCH_TRACE=\"$HOME/.agent-worktrees/logs/picker-launches.jsonl\"\n"
-        "mkdir -p \"$(dirname \"$AGENT_WORKTREES_LAUNCH_TRACE\")\" 2>/dev/null || true\n"
-        f"printf '%s\\n' '{{\"event\":\"binstub_start\",\"timestamp\":\"'\"$AGENT_WORKTREES_BINSTUB_STARTED\"'\",\"launch_id\":\"'\"$AGENT_WORKTREES_LAUNCH_ID\"'\",\"project\":\"{project}\"}}' >>\"$AGENT_WORKTREES_LAUNCH_TRACE\" 2>/dev/null || true\n"
         "# This attributable project entry point is pinned to its owning payload.\n"
         f"exec {shlex.quote(str(payload_cmd))} --project "
         f"{shlex.quote(project)} \"$@\"\n"
@@ -847,7 +865,7 @@ def _project_binstub_context(
         if not _same_identity(
             receipt.get("owner", {}),
             owner,
-            ("marketplace", "plugin", "payload_root", "repository"),
+            _OWNER_IDENTITY_FIELDS,
         ) or not _same_identity(
             receipt.get("project", {}),
             project_identity,
@@ -1081,7 +1099,7 @@ def _reconcile_binstubs_unlocked() -> dict:
             if receipt is None or not _same_identity(
                 receipt.get("owner", {}),
                 _binstub_owner(),
-                ("marketplace", "plugin", "payload_root", "repository"),
+                _OWNER_IDENTITY_FIELDS,
             ):
                 preserved.append(name)
                 output.warn(
@@ -1162,7 +1180,7 @@ def remove_project_binstub(project: str) -> list[Path]:
         if receipt is None or not _same_identity(
             receipt.get("owner", {}),
             _binstub_owner(),
-            ("marketplace", "plugin", "payload_root", "repository"),
+            _OWNER_IDENTITY_FIELDS,
         ):
             raise BinstubOwnershipError(
                 f"refusing to remove unowned project command for {project}"

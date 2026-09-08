@@ -15,6 +15,7 @@ import yaml
 
 from agent_worktrees import (
     __main__ as m,
+    activity,
     config,
     config_migrations,
     doctor,
@@ -128,9 +129,18 @@ def test_explicit_context_selects_all_three_registry_files(monkeypatch, tmp_path
     _select(monkeypatch, context, payload)
 
     assert config.global_config_path() == plugin_root / "config.yaml"
+    assert config.install_dir() == plugin_root
+    assert activity.log_path() == plugin_root / "logs" / "activity.jsonl"
     assert installer.projects_yaml_path() == plugin_root / "projects.yaml"
     assert repos._repos_yaml_path() == plugin_root / "repos.yaml"
     assert doctor._projects_path() == plugin_root / "projects.yaml"
+    assert installer._receipt_path("example").is_relative_to(
+        config.legacy_install_dir()
+    )
+    owner = installer._binstub_owner()
+    resolved_context = registry_paths.installation_context()
+    assert owner["marketplace_id"] == resolved_context["marketplaceId"]
+    assert owner["install_receipt"] == resolved_context["installReceipt"]
 
 
 def test_two_cells_do_not_share_registry_writes(monkeypatch, tmp_path):
