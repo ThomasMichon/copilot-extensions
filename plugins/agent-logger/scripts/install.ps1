@@ -3,13 +3,15 @@
     Agent Logger -- session-sync installer (Windows).
 
 .DESCRIPTION
-    Creates a venv at ~/.agent-logger, installs the agent-logger package, and
+    Installs the agent-logger runtime into the selected install root (default:
+    ~/.agent-logger, or -InstallDir for an explicit scoped root), then
     registers a Scheduled Task that runs `session-sync run --prune` every 4
-    hours. Windows-first by design: the runtime is the venv's python invoked
-    as `python -m agent_logger.sync.engine` (the console-script .exe is not
-    relied upon, matching the other plugins' Smart App Control posture). The
-    scheduled task runs under the windowless pythonw.exe host so the sync flow
-    never flashes a console window.
+    hours for that install. Windows-first by design: the runtime is the venv's
+    python invoked as `python -m agent_logger.sync.engine` (the console-script
+    .exe is not relied upon, matching the other plugins' Smart App Control
+    posture). The scheduled task runs through a durable PowerShell launcher so
+    the sync flow keeps the scoped runtime home and never flashes a console
+    window.
 
     Run from the repo root:
       pwsh -File plugins\agent-logger\scripts\install.ps1 install
@@ -17,6 +19,9 @@
 
 .PARAMETER Action
     Lifecycle action: install | update | uninstall | status.
+
+.PARAMETER InstallDir
+    Override the runtime install directory (default: ~/.agent-logger).
 #>
 [CmdletBinding()]
 param(
