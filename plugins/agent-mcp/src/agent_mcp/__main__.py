@@ -491,11 +491,14 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     from . import cutover as _cutover
     result = _cutover.run_cutover(
         health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
-        force=args.force,
+        force=args.force, require_live_daemon=args.require_live,
     )
     if args.json:
         print(json.dumps(result))
         return 0 if result.get("ok") else 1
+    if result.get("skipped"):
+        print(f"agent-mcp cutover: skipped ({result['skipped']})")
+        return 0
     if result.get("ok"):
         print(f"agent-mcp cutover: committed -> {result.get('data_socket')}")
         return 0
@@ -617,6 +620,13 @@ def build_parser() -> argparse.ArgumentParser:
                            help="retire the old generation even if it never "
                                 "finished draining (attached sessions are "
                                 "cut off; only after the timeout)")
+    p_cutover.add_argument("--require-live", action="store_true",
+                           help="installer-safe mode: never start a resident "
+                                "daemon that wasn't already running, and skip "
+                                "as a no-op if one is already on this exact "
+                                "version -- only cuts over a live daemon that "
+                                "is genuinely on a different version. Safe to "
+                                "call unconditionally on every activation")
     p_cutover.add_argument("--json", action="store_true",
                            help="print the result as JSON")
     p_cutover.set_defaults(func=_cmd_cutover)

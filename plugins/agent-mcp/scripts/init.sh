@@ -474,6 +474,51 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
 fi
 # === end install-contract:v3 versioned-venv activate ===
 
+# agent-mcp-specific (Phase 2, agent-mcp-graceful-cutover): before the hard
+# reap below, give a live `serve` daemon on a stale (non-current) version a
+# graceful zero-downtime handoff instead of just killing it. --require-live
+# makes this call safe to run unconditionally on every activation: it never
+# starts a resident daemon where none was running (serve is optional,
+# on-demand warmth, not a registered service), and no-ops if the live daemon
+# is already on this exact version. Only a genuinely live, differently-
+# versioned daemon actually cuts over here; the reap step right after this
+# still runs unchanged as the safety net for anything cutover didn't handle
+# (a pre-feature daemon with no control channel, a failed cutover, or a
+# leaked/orphaned bridge tree that was never a `serve` daemon at all).
+# Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
+# The CLI's own defaults (60s health / 300s drain) are tuned for a human
+# operator explicitly watching a manual `agent-mcp cutover`; an unattended
+# activation pass must not silently block for up to ~6 minutes on a lightly-
+# used bridge, so this uses much shorter install-appropriate defaults
+# (still overridable, e.g. for a host with slow-starting upstream MCP
+# servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
+if [[ "$VERSIONED_RUNTIME" -eq 1 && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
+    _cutover_health_timeout="${AGENT_MCP_CUTOVER_HEALTH_TIMEOUT:-15}"
+    _cutover_drain_timeout="${AGENT_MCP_CUTOVER_DRAIN_TIMEOUT:-30}"
+    _cutover_json="$("$VENV_PYTHON" -I -X utf8 -m agent_mcp cutover \
+        --require-live --force --json \
+        --health-timeout "$_cutover_health_timeout" \
+        --drain-timeout "$_cutover_drain_timeout" 2>/dev/null || true)"
+    if [[ -n "$_cutover_json" ]]; then
+        _cutover_parsed="$("$VENV_PYTHON" -I -X utf8 -c 'import sys,json
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    d = {}
+print(d.get("skipped") or "")
+print("1" if d.get("ok") else "0")' "$_cutover_json" 2>/dev/null || printf '\n0\n')"
+        _cutover_skipped="$(printf '%s\n' "$_cutover_parsed" | sed -n '1p')"
+        _cutover_ok="$(printf '%s\n' "$_cutover_parsed" | sed -n '2p')"
+        if [[ -n "$_cutover_skipped" ]]; then
+            _skip "Cutover skipped: $_cutover_skipped"
+        elif [[ "$_cutover_ok" == "1" ]]; then
+            _ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
+        else
+            _step "Cutover attempted -- not fully successful (see reap step below)"
+        fi
+    fi
+fi
+
 # agent-mcp-specific (NOT part of the byte-identical activate block above): reap
 # processes still running from a now-stale (non-current) slot -- leaked/orphaned
 # bridge trees or a warmth daemon from the prior version -- so an upgrade never

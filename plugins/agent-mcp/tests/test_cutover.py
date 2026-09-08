@@ -536,6 +536,70 @@ def test_run_cutover_proceeds_cold_start_when_fixed_socket_truly_absent(
     assert _cutover._fixed_handle_has_live_listener(tmp_path) is False
 
 
+# ── require_live_daemon (Phase 2: installer-safe mode) ─────────────────────
+
+
+def test_run_cutover_require_live_skips_cold_start(tmp_path, monkeypatch):
+    """The whole point of require_live_daemon: an installer/reconcile pass
+    can call `cutover --require-live` unconditionally on every activation
+    without ever being the thing that starts a resident daemon where none
+    was running -- `serve` stays optional, on-demand warmth."""
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    result = _cutover.run_cutover(require_live_daemon=True)
+    assert result == {"ok": True, "skipped": "no live daemon to cut over"}
+
+
+def test_run_cutover_require_live_skips_when_already_current_version(
+    tmp_path, monkeypatch,
+):
+    """A live daemon already on this exact version is a no-op repeat (e.g. a
+    reconcile pass with no actual version bump) -- must not spawn a
+    needless same-version passive."""
+    import socket as _socket
+
+    from agent_mcp import __version__
+    from zdd import routing
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    try:
+        port = listener.getsockname()[1]
+        routing.publish_active(
+            tmp_path, bind="127.0.0.1", port=port, pid=os.getpid(),
+            version=__version__,
+        )
+        result = _cutover.run_cutover(require_live_daemon=True)
+        assert result == {"ok": True, "skipped": "already on this version"}
+    finally:
+        listener.close()
+
+
+def test_run_cutover_require_live_still_reports_pre_feature_daemon(
+    tmp_path, monkeypatch,
+):
+    """require_live_daemon must NOT swallow the genuine bootstrap-boundary
+    error -- only the unconditional-spawn and no-op-repeat cases are
+    suppressed. A live, differently-versioned (or pre-feature) daemon still
+    needs an operator to notice and act."""
+    import socket as _socket
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    if not _HAS_AF_UNIX:
+        pytest.skip("AF_UNIX fixed-handle probe")
+    fixed = tmp_path / "serve.sock"
+    listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    listener.bind(str(fixed))
+    listener.listen(1)
+    try:
+        result = _cutover.run_cutover(require_live_daemon=True)
+        assert result["ok"] is False
+        assert "predates the cutover feature" in result["error"]
+    finally:
+        listener.close()
+
+
 # ── flip_data_handle ───────────────────────────────────────────────────────
 
 
