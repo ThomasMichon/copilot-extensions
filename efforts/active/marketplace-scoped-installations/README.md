@@ -1246,3 +1246,35 @@ See [`design.md`](design.md).
   (`tests/test_private_state.py`, `tests/test_rescue.py`), so the landed
   validation evidence remains the focused changed-surface runs plus green PR
   CI.
+
+### 2026-09-08 — Agent-vault service-boundary increment
+
+- Merged [#2246](https://github.com/ThomasMichon/copilot-extensions/pull/2246)
+  at `83535bb0c4c4e2cda954b184eec23d1f7703d158`, landing the `agent-vault`
+  portion of `#1108`.
+- `agent-vault` now vendors the shared installation-context runtime gate and
+  validates the selected cell before launch or first-use provisioning. When an
+  explicit active installation context is present, the vault now scopes its
+  cache, local/core rendezvous state, log, pid, socket, and named-pipe
+  artifacts to the selected installation root instead of sharing machine-global
+  service state.
+- The same increment qualifies the service's discovery and supervision
+  boundaries: rendezvous records now carry installation identity and reject
+  cross-cell discovery mismatches, while the Windows Scheduled Task and POSIX
+  systemd unit derive installation-scoped lifecycle identities so concurrent
+  same-named cells do not share service ownership. Legacy behavior with no
+  explicit context remains unchanged.
+- Validation:
+  the full native Windows `agent-vault` suite passed (`233 passed,
+  9 skipped`); focused WSL/POSIX payload and discovery coverage passed
+  (`27 passed, 5 skipped`); install-contract, version-consistency,
+  vendored-lib, installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, and changed-file ruff guards passed locally; and the
+  PR's scoped `agent-vault` lane passed.
+- Audit note:
+  the PR's broad `guards + lint` job reproduced unrelated pre-existing
+  `context-handoff` locator test failures, now tracked by
+  [#2250](https://github.com/ThomasMichon/copilot-extensions/issues/2250), so
+  `#1108` remains open only for the unlanded `agent-logger`, `agent-dispatch`,
+  `agent-bridge`, and deferred `agent-worktrees` Worktree Manager supervision
+  slices.
