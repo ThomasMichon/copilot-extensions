@@ -66,7 +66,19 @@ class BridgeSession:
         self._client.on_unsolicited(self._write)
         ctx = BridgeContext(new_id=self._client.new_id, emit_to_client=self._write)
         self._pipeline = Pipeline(build_decorators(self.cfg, ctx), self._client.request)
-        await self._transport.start()
+        # Bound the upstream spawn/connect the same way OneShotSession does
+        # (see aperture-labs#6673): an unbounded ``transport.start()`` here
+        # doesn't wedge a shared lock the way a WarmPool entry-open would, but
+        # it still leaves one caller (the ``agent-mcp bridge`` stdio process,
+        # or one ``serve`` attach connection) hanging forever with no
+        # diagnostic, holding an fd/subprocess slot open indefinitely.
+        try:
+            await asyncio.wait_for(self._transport.start(), timeout=self.cfg.timeout)
+        except (TimeoutError, asyncio.TimeoutError) as exc:
+            raise RuntimeError(
+                f"upstream transport did not start within {self.cfg.timeout}s"
+            ) from exc
+
 
     async def _dispatch(self, msg: dict) -> None:
         assert self._pipeline is not None

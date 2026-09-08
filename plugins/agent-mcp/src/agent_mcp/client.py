@@ -117,13 +117,32 @@ class OneShotSession:
         self._client = client
         self._ctx = BridgeContext(new_id=client.new_id, emit_to_client=lambda _m: None)
 
-        await transport.start()
         try:
+            # ``_negotiate`` already bounds each individual JSON-RPC request via
+            # ``_request``'s ``cfg.timeout`` -- but ``transport.start()`` itself
+            # (subprocess spawn, auth-injector command, pipe setup) had no bound
+            # at all. A hung/slow spawn there (observed live: an upstream launch
+            # that never even forked a child) left __aenter__ suspended forever.
+            # Since a resident ``serve`` daemon opens sessions while holding a
+            # per-bridge lock (WarmPool), one such hang doesn't just fail one
+            # call -- it wedges every subsequent call to that bridge
+            # permanently, with no way to recover short of restarting the
+            # daemon (see aperture-labs#6673). Bound just this step under the
+            # same ``cfg.timeout`` already used for individual requests --
+            # deliberately *not* wrapping ``_negotiate()`` here too, since that
+            # would race the outer bound against the inner per-request bound
+            # ``_negotiate`` already applies and could swallow its more
+            # specific "did not respond" error under a generic one.
+            await asyncio.wait_for(transport.start(), timeout=self.cfg.timeout)
             await self._negotiate()
-        except BaseException:
+        except BaseException as exc:
             # __aexit__ is not called when __aenter__ raises, so tear the
             # transport down here or a spawned upstream child would leak.
             await self._teardown()
+            if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+                raise UpstreamError(
+                    f"upstream transport did not start within {self.cfg.timeout}s"
+                ) from exc
             raise
         return self
 
