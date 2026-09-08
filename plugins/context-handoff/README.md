@@ -13,7 +13,7 @@ This plugin ships four cooperating payload pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **continuity guidance hooks** | Declarative `sessionStart` hooks | Write the full owner-marked continuity contract to the exact session folder through a side-effect-only hook and retain a concise `additionalContext` kernel as a best-effort supplement |
+| **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
 | **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, and task/file consume. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
@@ -58,8 +58,7 @@ hook surface a plugin normally uses cannot replicate it:
 So token monitoring and idle-boundary nudges require the extension payload.
 The ambient continuity contract does not: it is delivered independently through
 the plugin's static instruction pointer plus a declarative `sessionStart` file
-writer. A second contributor hook retains the concise `additionalContext`
-kernel as a best-effort supplement.
+writer.
 
 ## How the extension is delivered
 
@@ -82,9 +81,7 @@ A session where the plugin hooks loaded receives the full owner-marked
 continuity contract in
 `instructions/context-handoff/session-guidance.instructions.md` beneath its
 exact session folder. The checked-in static pointer instructs the agent to read
-that file if present. The separate `continuity-guidance` contributor also emits
-the compact owner-marked kernel through `additionalContext` as a best-effort
-supplement.
+that file if present. The hook itself emits only `{}`.
 
 A loaded extension exposes `generate_handoff_prompt`, `save_handoff_prompt`,
 `consume_handoff`, and `trigger_handoff`, plus `/handoff-continue` and

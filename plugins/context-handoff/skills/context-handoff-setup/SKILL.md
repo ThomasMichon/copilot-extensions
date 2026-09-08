@@ -24,8 +24,7 @@ install step:
 
 - A declarative `sessionStart` hook writes the full owner-marked continuity
   contract to the exact session folder, where a static pointer instructs the
-  agent to read it. A separate contributor retains the concise
-  `additionalContext` kernel as a best-effort supplement.
+  agent to read it. The hook emits only `{}`.
 - The **context-handoff extension** provides the live context-window monitor:
   token tracking + percentage-based 55%/70% defaults with optional repository
   config + `generate_handoff_prompt` / `save_handoff_prompt` /
@@ -43,9 +42,8 @@ When `context-handoff@copilot-extensions` is enabled, the CLI reads the
 plugin-declared `hooks.json`. One hook invokes the full `emit-guidance`
 producer with `--own-only` and atomically writes its result beneath the exact
 session's `instructions/context-handoff/` folder. The projected static pointer
-directs the agent to that file. The existing authority-aware contributor
-continues to emit the compact `--aggregate` kernel through `additionalContext`
-as a best-effort supplementary channel.
+directs the agent to that file. No cross-plugin authority or competing startup
+output is involved.
 
 Separately, the CLI scans
 `~/.copilot/installed-plugins/copilot-extensions/context-handoff/extensions/`
