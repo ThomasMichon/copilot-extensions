@@ -36,17 +36,24 @@ def test_agent_worktrees_capture_bypasses_cmd_with_no_window_console_tree(
     (runtime / "current-version").write_text("1.5.3-dev9")
     captured = {}
 
-    def fake_run(cmd, **kwargs):
+    class FakeProc:
+        returncode = 0
+
+        def communicate(self, *, timeout):
+            return "host-a\n", ""
+
+    def fake_popen(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
-        return subprocess.CompletedProcess(cmd, 0, "host-a\n", "")
+        return FakeProc()
 
     monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(procutil.os, "name", "nt")
+    monkeypatch.setattr(procutil.sys, "platform", "win32")
     monkeypatch.setattr(
         procutil.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.CMD"
     )
-    monkeypatch.setattr(procutil.subprocess, "run", fake_run)
+    monkeypatch.setattr(procutil.subprocess, "Popen", fake_popen)
     result = procutil.run_agent_worktrees_capture("get", "machine", timeout=15)
 
     assert result is not None and result.stdout == "host-a\n"
@@ -57,7 +64,8 @@ def test_agent_worktrees_capture_bypasses_cmd_with_no_window_console_tree(
     flags = captured["kwargs"]["creationflags"]
     assert flags == getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     assert not (flags & 0x00000008)  # DETACHED_PROCESS would free descendants
-    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["stdout"] is subprocess.PIPE
+    assert captured["kwargs"]["stderr"] is subprocess.PIPE
     assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
 
 
@@ -73,32 +81,58 @@ def test_agent_worktrees_launch_has_no_windows_path_fallback(tmp_path, monkeypat
 def test_agent_worktrees_capture_preserves_posix_process_semantics(monkeypatch):
     captured = {}
 
-    def fake_run(cmd, **kwargs):
+    class FakeProc:
+        returncode = 0
+
+        def communicate(self, *, timeout):
+            return "host-a\n", ""
+
+    def fake_popen(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
-        return subprocess.CompletedProcess(cmd, 0, "host-a\n", "")
+        return FakeProc()
 
     monkeypatch.setattr(procutil.os, "name", "posix")
+    monkeypatch.setattr(procutil.sys, "platform", "linux")
     monkeypatch.setattr(
         procutil, "agent_worktrees_launch_prefix",
         lambda: ["/usr/bin/agent-worktrees"],
     )
-    monkeypatch.setattr(procutil.subprocess, "run", fake_run)
+    monkeypatch.setattr(procutil.subprocess, "Popen", fake_popen)
 
     procutil.run_agent_worktrees_capture("get", "machine", timeout=15)
 
     assert captured["cmd"] == ["/usr/bin/agent-worktrees", "get", "machine"]
     assert "creationflags" not in captured["kwargs"]
-    assert "start_new_session" not in captured["kwargs"]
+    # Deliberate: a new session is required so a stalled probe's whole tree
+    # (not just the immediate child) can be reaped via os.killpg on timeout --
+    # see terminate_process_tree.
+    assert captured["kwargs"]["start_new_session"] is True
 
 
-def test_background_capture_preserves_timeout_failure(monkeypatch):
+def test_background_capture_reaps_tree_on_timeout(monkeypatch):
+    class FakeProc:
+        returncode = None
+
+        def communicate(self, *, timeout):
+            raise subprocess.TimeoutExpired("probe", timeout)
+
+    fake_proc = FakeProc()
+    reaped = []
+    monkeypatch.setattr(procutil.subprocess, "Popen", lambda *_a, **_k: fake_proc)
+    monkeypatch.setattr(
+        procutil, "terminate_process_tree", lambda proc: reaped.append(proc)
+    )
+
+    assert procutil.run_background_capture(["probe"], timeout=3) is None
+    assert reaped == [fake_proc]
+
+
+def test_background_capture_returns_none_when_spawn_fails(monkeypatch):
     monkeypatch.setattr(
         procutil.subprocess,
-        "run",
-        lambda *_a, **_k: (_ for _ in ()).throw(
-            subprocess.TimeoutExpired("probe", 3)
-        ),
+        "Popen",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("spawn failed")),
     )
     assert procutil.run_background_capture(["probe"], timeout=3) is None
 

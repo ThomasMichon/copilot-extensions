@@ -16,7 +16,7 @@ import secrets
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from threading import Condition
 from typing import Annotated, Any
 
@@ -282,6 +282,134 @@ class DrainRequest(BaseModel):
     force: bool = False
 
 
+@dataclass
+class LoopHealth:
+    """Live status + backoff state for one periodic background loop.
+
+    Every polling daemon in the coordinator (currently the liveness GC and the
+    orphan-pin reaper) records its status here, exposed at ``GET /health`` under
+    ``loops.<name>`` -- the single place an operator or an incident diagnosis
+    checks *where a stuck poller got stuck*, instead of inferring it from an
+    accumulating process census. See visions/plugin-services
+    §hooks-and-callbacks-are-transient and
+    §process-count-scales-with-services-not-sessions.
+
+    Single-flight is structural, not a separate lock: each loop is one
+    sequential coroutine (``while True: sleep; run one cycle``), so a new cycle
+    can only start after the previous one's :func:`_run_supervised_cycle` call
+    returns -- there is no path for two cycles of the same loop to run
+    concurrently, even if one cycle stalls past its own nominal interval.
+
+    Backoff: ``current_interval`` grows geometrically with
+    ``consecutive_failures`` (a failure and a timeout both count), capped at
+    ``max_interval``, and resets to ``base_interval`` on the next clean cycle --
+    so a persistently unhealthy dependency (e.g. a wedged CLI probe) is polled
+    less and less often instead of thrashing CPU/IO at a fixed cadence.
+    """
+
+    name: str
+    base_interval: float
+    max_interval: float = 3600.0
+    backoff_multiplier: float = 2.0
+    current_interval: float = field(init=False)
+    in_progress: bool = False
+    last_started_at: float | None = None
+    last_finished_at: float | None = None
+    last_duration_s: float | None = None
+    last_error: str | None = None
+    last_timed_out: bool = False
+    consecutive_failures: int = 0
+    total_runs: int = 0
+    total_timeouts: int = 0
+
+    def __post_init__(self) -> None:
+        self.current_interval = self.base_interval
+
+    def record_backoff(self) -> None:
+        """Recompute ``current_interval`` from ``consecutive_failures``."""
+        if self.consecutive_failures:
+            self.current_interval = min(
+                self.max_interval,
+                self.base_interval
+                * (self.backoff_multiplier**self.consecutive_failures),
+            )
+        else:
+            self.current_interval = self.base_interval
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "base_interval": self.base_interval,
+            "current_interval": self.current_interval,
+            "in_progress": self.in_progress,
+            "last_started_at": self.last_started_at,
+            "last_finished_at": self.last_finished_at,
+            "last_duration_s": self.last_duration_s,
+            "last_error": self.last_error,
+            "last_timed_out": self.last_timed_out,
+            "consecutive_failures": self.consecutive_failures,
+            "total_runs": self.total_runs,
+            "total_timeouts": self.total_timeouts,
+        }
+
+
+async def _run_supervised_cycle(
+    health: LoopHealth,
+    work: Callable[[], Any],
+    *,
+    cycle_timeout: float,
+) -> Any | None:
+    """Run one cycle of a periodic loop's blocking ``work``, bounded and recorded.
+
+    Bounds the cycle with :func:`asyncio.wait_for` so a stalled ``work`` call
+    cannot wedge the owning loop past ``cycle_timeout`` -- it degrades by
+    recording the stall (``last_timed_out``, ``consecutive_failures``,
+    backoff) and letting the loop move on to its next scheduled cycle, rather
+    than blocking forever. Note the underlying OS-level work (a subprocess
+    probe) is expected to be reaped by its own tree-kill on timeout (see
+    :func:`agent_dispatch.procutil.terminate_process_tree`) -- this wrapper
+    cannot forcibly cancel a plain Python thread, so it relies on that lower
+    layer to actually free the resources; what it guarantees is that THIS loop
+    is never blocked waiting on one indefinitely.
+    """
+    health.in_progress = True
+    health.last_started_at = time.time()
+    result = None
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(work), timeout=cycle_timeout
+        )
+    except (TimeoutError, asyncio.TimeoutError):
+        health.last_timed_out = True
+        health.last_error = f"cycle exceeded {cycle_timeout}s"
+        health.consecutive_failures += 1
+        health.total_timeouts += 1
+        log.warning(
+            "%s pass timed out after %.1fs (consecutive failures: %d)",
+            health.name,
+            cycle_timeout,
+            health.consecutive_failures,
+        )
+    except Exception as exc:  # pragma: no cover -- never let the loop die on a blip
+        health.last_timed_out = False
+        health.last_error = str(exc)
+        health.consecutive_failures += 1
+        log.exception("%s pass failed", health.name)
+    else:
+        health.last_timed_out = False
+        health.last_error = None
+        health.consecutive_failures = 0
+    finally:
+        health.in_progress = False
+        health.last_finished_at = time.time()
+        health.last_duration_s = health.last_finished_at - (
+            health.last_started_at or health.last_finished_at
+        )
+        health.total_runs += 1
+        health.record_backoff()
+    return result
+
+
 def _resolve_owner_session_id(worker_id: str | None) -> str | None:
     """Best-effort: resolve a worker's (``machine/worktree``) current live-session
     id, captured on ``start`` as the task's owner identity for liveness GC.
@@ -333,6 +461,9 @@ async def _gc_loop(
     queue: TaskQueue,
     interval: float,
     bus: EventBus,
+    *,
+    health: LoopHealth,
+    cycle_timeout: float | None = None,
 ) -> None:
     """Periodically garbage-collect tasks by **liveness**.
 
@@ -340,14 +471,19 @@ async def _gc_loop(
     *confirmed gone* (not on elapsed time), so long-running live work is never
     disturbed and a bridge blip leaves a task alone. Orphaned-pin reaping runs
     in its own loop so a slow worktree probe cannot delay this correctness pass.
+
+    Each cycle runs through :func:`_run_supervised_cycle`, which bounds it,
+    records it in ``health`` (queryable at ``GET /health``), and backs off the
+    sleep interval on repeated failure/timeout -- see :class:`LoopHealth`.
     """
     while True:
-        await asyncio.sleep(interval)
-        try:
-            counts = await asyncio.to_thread(queue.reconcile_liveness)
-        except Exception:  # pragma: no cover -- never let the loop die on a blip
-            log.exception("liveness GC pass failed")
-            counts = {}
+        await asyncio.sleep(health.current_interval)
+        counts = await _run_supervised_cycle(
+            health,
+            queue.reconcile_liveness,
+            cycle_timeout=cycle_timeout or min(interval, 120.0),
+        )
+        counts = counts or {}
         requeued = counts.get("requeued", 0)
         if requeued:
             log.info(
@@ -364,23 +500,29 @@ async def _orphan_reap_loop(
     bus: EventBus,
     *,
     orphan_grace: float,
+    health: LoopHealth,
+    cycle_timeout: float | None = None,
 ) -> None:
-    """Reap orphaned target pins without blocking held-task liveness GC."""
+    """Reap orphaned target pins without blocking held-task liveness GC.
+
+    See :func:`_gc_loop` for the supervised-cycle contract (bounded, recorded,
+    backed off) this loop shares.
+    """
     while True:
-        await asyncio.sleep(interval)
-        try:
-            reaped = await asyncio.to_thread(
-                _reap_orphans, queue, orphan_grace
-            )
-        except Exception:  # pragma: no cover -- never let the loop die on a blip
-            log.exception("orphan reap pass failed")
-            reaped = 0
+        await asyncio.sleep(health.current_interval)
+        reaped = await _run_supervised_cycle(
+            health,
+            lambda: _reap_orphans(queue, orphan_grace),
+            cycle_timeout=cycle_timeout or min(interval, 60.0),
+        )
+        reaped = reaped or 0
         if reaped:
             log.info(
                 "liveness GC reaped %d orphaned task(s) (target worktree gone)",
                 reaped,
             )
             bus.publish({"type": "task.reaped", "reaped": reaped})
+
 
 
 class ProducerScopeBody(BaseModel):
@@ -880,8 +1022,16 @@ def create_app(
             if wake_interval > 0
             else None
         )
+        sweeper_health = LoopHealth(name="liveness_gc", base_interval=sweep_interval or 0.0)
+        orphan_health = LoopHealth(name="orphan_reap", base_interval=sweep_interval or 0.0)
+        _app.state.loop_health = {
+            sweeper_health.name: sweeper_health,
+            orphan_health.name: orphan_health,
+        }
         sweeper = (
-            asyncio.create_task(_gc_loop(queue, sweep_interval, bus))
+            asyncio.create_task(
+                _gc_loop(queue, sweep_interval, bus, health=sweeper_health)
+            )
             if sweep_interval and sweep_interval > 0
             else None
         )
@@ -892,6 +1042,7 @@ def create_app(
                     sweep_interval,
                     bus,
                     orphan_grace=orphan_grace,
+                    health=orphan_health,
                 )
             )
             if sweep_interval and sweep_interval > 0
@@ -1200,6 +1351,9 @@ def create_app(
     @app.get("/health")
     def health(request: Request, repo: str | None = None) -> dict:
         gate: DrainGate = request.app.state.drain_gate
+        loop_health: dict[str, LoopHealth] = getattr(
+            request.app.state, "loop_health", {}
+        )
         return {
             "status": "draining" if gate.draining else "ok",
             "version": __version__,
@@ -1207,6 +1361,9 @@ def create_app(
             "subscribers": bus.subscriber_count,
             "backlog": queue.backlog_health(repo=repo),
             "wakes": queue.wake_metrics(),
+            "loops": {
+                name: health.to_dict() for name, health in loop_health.items()
+            },
         }
 
     @app.get("/events")

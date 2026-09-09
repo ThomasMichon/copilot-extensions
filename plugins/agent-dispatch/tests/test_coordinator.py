@@ -232,6 +232,12 @@ def test_health(api):
     assert r.json()["status"] == "ok"
 
 
+def test_health_loops_empty_when_sweep_disabled(api):
+    # The `api` fixture's create_app has no sweep_interval -> no GC/reap loops,
+    # but the field must still be present (an empty dict, never a KeyError).
+    assert api.get("/health").json()["loops"] == {}
+
+
 def test_create_and_get(api):
     r = api.post(
         "/tasks",
@@ -922,6 +928,42 @@ def test_gc_disabled_by_default(tmp_path, monkeypatch):
         assert c.get(tid)["status"] == Status.CLAIMED
         assert c.recover()["recovered"] == 1  # manual recover still works
         assert c.get(tid)["status"] == Status.QUEUED
+        c.close()
+    finally:
+        stop()
+
+
+def test_health_loops_report_liveness_gc_and_orphan_reap(tmp_path, monkeypatch):
+    """The two coordinator polling loops record live status at ``GET /health``
+    once sweep_interval is enabled -- the diagnosis surface requested for
+    'where a stuck poller got stuck' rather than inferring it from an
+    accumulating process census."""
+    from agent_dispatch.coordinator import create_app
+
+    monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "unknown")
+    monkeypatch.setattr(
+        "agent_dispatch.identity.resolve_machine", lambda: None
+    )  # degrade-safe no-op for the orphan reaper
+    q = TaskQueue(tmp_path / "tasks.db")
+    url, stop = _boot(create_app(q, sweep_interval=0.2, enable_mcp=False))
+    try:
+        c = DispatchClient(url)
+        deadline = time.time() + 5
+        loops = {}
+        while time.time() < deadline:
+            loops = httpx.get(f"{url}/health", timeout=5).json()["loops"]
+            if (
+                loops.get("liveness_gc", {}).get("total_runs", 0) >= 1
+                and loops.get("orphan_reap", {}).get("total_runs", 0) >= 1
+            ):
+                break
+            time.sleep(0.1)
+        assert loops["liveness_gc"]["total_runs"] >= 1
+        assert loops["liveness_gc"]["in_progress"] is False
+        assert loops["liveness_gc"]["last_error"] is None
+        assert loops["liveness_gc"]["consecutive_failures"] == 0
+        assert loops["orphan_reap"]["total_runs"] >= 1
+        assert loops["orphan_reap"]["in_progress"] is False
         c.close()
     finally:
         stop()
