@@ -78,6 +78,12 @@ session glossary rather than ambient `PATH`.
 runtime roots are still unqualified; repo/project binstubs remain the intended
 machine-global command surface.
 
+Agent Machines' Windows shim delegates to its plugin-owned payload runtime
+dispatcher. That dispatcher owns first-use installer output and result
+forwarding; the resolved-runtime path invokes the command directly. Its
+[Windows provisioning diagnostics contract](install-contract.md#agent-machines-windows-first-use-diagnostics)
+describes stream handling, encoding, and process/cleanup responsibilities.
+
 The repository now also carries the non-operative
 `libs/installer-readiness/` foundation for a later out-of-plugin configurator.
 It defines plugin-owned installer/readiness metadata, joins enabled settings to

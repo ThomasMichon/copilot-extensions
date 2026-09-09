@@ -1239,6 +1239,47 @@ default; `<=0` disables. Secondary: `UV_HTTP_TIMEOUT` bounds each uv request so 
 download degrades to "failed + retryable" rather than wedging. Backstop:
 `bootstrap-check`'s single-flight + stale-reap.
 
+### Agent Machines Windows first-use diagnostics
+
+The [Agent Machines Windows dispatcher](../plugins/agent-machines/scripts/invoke-payload-runtime.ps1)
+implements the [self-provisioning runtime intent](../visions/plugin-services/README.md#self-provisioning-runtime)
+for an unresolved runtime. It invokes the owning installer's legacy
+`stamp`/snapshot `provision` or active-cell `cell-provision` path. Commands with
+an already-resolved runtime bypass this installer-output path.
+
+The dispatcher launches the current PowerShell executable with text-format
+output and separate file-backed stdout/stderr capture. This keeps nested
+installer output outside PowerShell's native CLIXML/error-record parser. Both
+streams are forwarded to **stderr**, leaving command stdout available for the
+runtime's result. Complete CR/LF-terminated records are forwarded while the
+installer runs; final unterminated text is emitted after exit and draining.
+There is no line-count truncation. Order is preserved within each stream;
+chronological ordering across the two streams is not guaranteed.
+
+Incremental byte reads use a persistent decoder per stream. The inherited
+console encoding is the default; a BOM selects UTF-8, UTF-16, or UTF-32 with its
+byte order. Partial BOMs and multibyte characters survive a growing file's
+temporary EOF. Decoders flush only after installer exit and complete draining.
+Read-buffer size controls transfer granularity, not output retention. Capture
+files are deleted during cleanup and their on-disk size is not capped; they
+are temporary transport rather than an archival log.
+
+The dispatcher retains the process handle for PowerShell 5.1 exit-code reporting
+and waits on the direct installer, rather than using a whole-descendant-tree
+wait. The installer's existing self-stage/watchdog owns staged-child deadlines
+and exit `124`. If capture fails while the owned installer is still running,
+the dispatcher attempts PID-scoped tree termination. Resource disposal and
+capture-file deletion are attempted independently; secondary cleanup failures
+are reported without replacing the installer result or original exception.
+
+The [dispatcher regressions](../plugins/agent-machines/tests/test_payload_provisioning_powershell.py)
+cover live/full output, argument forwarding, encoding, retry, and warm-runtime
+behavior. The [lifecycle regressions](../plugins/agent-machines/tests/test_payload_installer_lifecycle_powershell.py)
+cover cleanup-failure outcomes, split decoding, direct-child waiting, and real
+installer self-staging/watchdog behavior through its offline smoke seam.
+These suites do not establish a full network/package installation or every
+cancellation and descendant-termination race.
+
 ### Completion marker — no corpse reuse, clean retry
 
 Completion was inferred only from the runtime-root `deploy-manifest.json` /
