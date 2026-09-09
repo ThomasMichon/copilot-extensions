@@ -1,0 +1,20 @@
+{
+  "name": "plugin-process-hygiene-convergence",
+  "description": "Tier-P F1 scenario: an adversarial mock harness validating the transient-hook-client contract (visions/plugin-services 'process-count-scales-with-services-not-sessions' and 'hooks-and-callbacks-are-transient' Behaviors, PR #2300) against a synthetic mock daemon -- NOT a real plugin runtime, so it runs fast, dependency-free (stdlib only), and identically on every OS. Six adversarial scenarios (each a real-OS-process flood, never threads/asyncio): a concurrent flood against a live daemon (all served, exactly one daemon process survives); a flood against an absent daemon (all degrade to inline/no-op, zero self-promoted daemons); a daemon appearing mid-flood (both sides of the transition behave); a daemon dying mid-packet (every in-flight client degrades cleanly within a bounded budget, none hang); a concurrent daemon-election race (exactly one contender wins the single-instance lease, the rest stand down); and a repeated-flood process-count invariant (process count returns to baseline after every round, with zero leftovers). Real per-plugin conformance against this validated contract is issue #2301's own audit, cited against this harness's evidence rather than re-validated here. Design doc: efforts/active/plugin-process-hygiene/adversarial-convergence-mock.md. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["python3"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "validates": "plugin-services (process-count-scales-with-services-not-sessions, hooks-and-callbacks-are-transient)",
+  "config": {
+    "CR_PPC_SCENARIOS": "comma-separated subset of: flood-against-live-daemon,flood-against-absent-daemon,daemon-appears-mid-flood,daemon-dies-mid-packet,concurrent-daemon-race,process-count-invariant-under-repeated-floods",
+    "CR_PPC_FLOOD_N": "concurrent clients per flood (default 50)",
+    "CR_PPC_ROUNDS": "rounds for the repeated-flood invariant (default 5)"
+  },
+  "expected_artifacts": [],
+  "stages": [
+    { "n": 0, "title": "environment (no plugin install needed)" },
+    { "n": 1, "title": "adversarial convergence battery (six scenarios)" }
+  ]
+}
