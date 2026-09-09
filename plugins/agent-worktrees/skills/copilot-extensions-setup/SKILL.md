@@ -410,7 +410,8 @@ profile** in `~/.agent-bridge/config.yaml` pointing to the same
 | machines.yaml | canonical `{repo}/.agent-worktrees/machines.yaml`, with legacy `{repo}/machines.yaml` fallback where supported |
 
 > `acp-agents.json` is **retired** — the roster is derived from `machines.yaml`
-> (+ `.agent-worktrees/related.yaml`). An explicit `--agents-config` is still
+> (+ `.copilot-extensions/agent-worktrees/related.yaml`, with legacy
+> `.agent-worktrees/related.yaml` fallback). An explicit `--agents-config` is still
 > honored as a deprecated override but is no longer auto-discovered.
 
 ### If the repo has no machines.yaml

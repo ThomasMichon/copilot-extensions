@@ -61,8 +61,8 @@ def test_doctor_reports_mixed_layout_as_error(tmp_path):
 
 
 def test_doctor_reports_malformed_canonical_layout(tmp_path):
-    root = tmp_path / ".agent-machines"
-    root.mkdir()
+    root = tmp_path / ".copilot-extensions" / "agent-machines"
+    root.mkdir(parents=True)
     (root / "flat.yaml").write_text(
         "schema_version: 1\npackage: acme/flat\n",
         encoding="utf-8",
@@ -84,7 +84,7 @@ def test_migrate_dry_run_preserves_legacy_files(tmp_path):
     assert result.status == "would-migrate"
     assert result.dry_run and result.changed
     assert source.exists()
-    assert not (tmp_path / ".agent-machines").exists()
+    assert not (tmp_path / ".copilot-extensions" / "agent-machines").exists()
 
 
 def test_migrate_apply_moves_yaml_and_readme_byte_for_byte(tmp_path):
@@ -100,10 +100,10 @@ def test_migrate_apply_moves_yaml_and_readme_byte_for_byte(tmp_path):
 
     result = migrate_repo_layout(tmp_path, "acme", apply=True)
 
-    target = tmp_path / ".agent-machines" / "all" / "defaults.yaml"
+    target = tmp_path / ".copilot-extensions" / "agent-machines" / "all" / "defaults.yaml"
     assert result.status == "migrated"
     assert target.read_bytes() == original
-    assert (tmp_path / ".agent-machines" / "README.md").read_text(
+    assert (tmp_path / ".copilot-extensions" / "agent-machines" / "README.md").read_text(
         encoding="utf-8"
     ) == "# Legacy notes\n"
     assert not (tmp_path / ".github" / "machine-state").exists()
@@ -117,7 +117,7 @@ def test_migrate_refuses_unknown_legacy_entries(tmp_path):
     (legacy / "notes.txt").write_text("keep", encoding="utf-8")
     with pytest.raises(ManifestError, match="unsupported legacy entry"):
         migrate_repo_layout(tmp_path, "acme")
-    assert not (tmp_path / ".agent-machines").exists()
+    assert not (tmp_path / ".copilot-extensions" / "agent-machines").exists()
 
 
 def test_doctor_keeps_nonmigratable_legacy_layout_advisory(tmp_path):
@@ -202,7 +202,7 @@ def test_migrate_rolls_back_partial_move_and_created_dirs(tmp_path, monkeypatch)
     with pytest.raises(ManifestError, match="synthetic move failure"):
         migrate_repo_layout(tmp_path, "acme", apply=True)
     assert first.exists() and second.exists()
-    assert not (tmp_path / ".agent-machines").exists()
+    assert not (tmp_path / ".copilot-extensions" / "agent-machines").exists()
 
 
 def test_migrate_rolls_back_when_legacy_directory_removal_fails(tmp_path, monkeypatch):
@@ -224,11 +224,12 @@ def test_migrate_rolls_back_when_legacy_directory_removal_fails(tmp_path, monkey
     with pytest.raises(ManifestError, match="synthetic rmdir failure"):
         migrate_repo_layout(tmp_path, "acme", apply=True)
     assert source.exists()
-    assert not (tmp_path / ".agent-machines").exists()
+    assert not (tmp_path / ".copilot-extensions" / "agent-machines").exists()
 
 
 def test_doctor_reports_layout_path_type_collisions(tmp_path):
-    root = tmp_path / ".agent-machines"
+    root = tmp_path / ".copilot-extensions" / "agent-machines"
+    root.parent.mkdir(parents=True, exist_ok=True)
     root.write_text("not a directory", encoding="utf-8")
     report = inspect_repo_layout(tmp_path, "acme", "box-1")
     assert not report.ok
@@ -237,7 +238,9 @@ def test_doctor_reports_layout_path_type_collisions(tmp_path):
 
 
 def test_migrate_rejects_canonical_root_file(tmp_path):
-    (tmp_path / ".agent-machines").write_text("not a directory", encoding="utf-8")
+    root = tmp_path / ".copilot-extensions" / "agent-machines"
+    root.parent.mkdir(parents=True, exist_ok=True)
+    root.write_text("not a directory", encoding="utf-8")
     with pytest.raises(ManifestError, match="canonical package path is not a directory"):
         migrate_repo_layout(tmp_path, "acme")
 
@@ -262,7 +265,7 @@ def test_migrate_empty_legacy_layout_is_noop(tmp_path):
     assert result.status == "no-layout"
     assert not result.changed
     assert legacy.exists()
-    assert not (tmp_path / ".agent-machines").exists()
+    assert not (tmp_path / ".copilot-extensions" / "agent-machines").exists()
 
 
 def test_resolve_repo_prefers_adopted_name_over_cwd_directory(tmp_path, monkeypatch):
@@ -486,7 +489,9 @@ def test_doctor_cli_json(tmp_path, capsys):
 
 
 def test_doctor_cli_returns_one_for_malformed_layout(tmp_path, capsys):
-    (tmp_path / ".agent-machines").write_text("bad", encoding="utf-8")
+    root = tmp_path / ".copilot-extensions" / "agent-machines"
+    root.parent.mkdir(parents=True, exist_ok=True)
+    root.write_text("bad", encoding="utf-8")
     rc = cli.main([
         "doctor",
         "--machine",
@@ -496,6 +501,49 @@ def test_doctor_cli_returns_one_for_malformed_layout(tmp_path, capsys):
     ])
     assert rc == 1
     assert "[malformed]" in capsys.readouterr().out
+
+
+def test_doctor_reports_repo_legacy_layout_with_migration_command(tmp_path):
+    write_package(tmp_path, "defaults.yaml", base_package(gate=["*"]), repo_legacy=True)
+    report = inspect_repo_layout(tmp_path, "acme", "box-1")
+    assert report.ok
+    assert report.status == "legacy"
+    assert report.package_count == 1
+    assert report.findings[0].code == "legacy-layout"
+
+
+def test_migrate_apply_moves_repo_legacy_tree(tmp_path):
+    shared = write_package(
+        tmp_path,
+        "shared.yaml",
+        base_package(name="acme/shared", gate=["*"]),
+        repo_legacy=True,
+    )
+    shared_bytes = shared.read_bytes()
+    specific = write_package(
+        tmp_path,
+        "specific.yaml",
+        base_package(name="acme/specific", gate=["*"]),
+        machine="box-1",
+        repo_legacy=True,
+    )
+    specific_bytes = specific.read_bytes()
+
+    result = migrate_repo_layout(tmp_path, "acme", apply=True)
+
+    assert result.status == "migrated"
+    assert (
+        tmp_path / ".copilot-extensions" / "agent-machines" / "all" / "shared.yaml"
+    ).read_bytes() == shared_bytes
+    assert (
+        tmp_path
+        / ".copilot-extensions"
+        / "agent-machines"
+        / "machines"
+        / "box-1"
+        / "specific.yaml"
+    ).read_bytes() == specific_bytes
+    assert not (tmp_path / ".agent-machines").exists()
 
 
 def test_migrate_cli_is_dry_run_by_default(tmp_path, capsys):

@@ -22,7 +22,7 @@ Copilot session database remains outside this path.
 |------------|--------|------|-------|-----------|
 | **Highest** | **Machine-local** | legacy `~/.{project}/config.yaml`; namespaced `<cell>/repos/<repository-id>/agent-worktrees/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
 | *(conditional)* | **Knowledge overlay** | bound knowledge repo's config | For a **stateless harness** bound to a knowledge repo, portable operator-preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`, `new_picker`). Machine-specifics and the binding never graft. | Yes |
-| **Middle** | **In-repo** | `<anchor>/.agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. | Yes |
+| **Middle** | **In-repo** | `<anchor>/.copilot-extensions/agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. Legacy `<anchor>/.agent-worktrees/config.yaml` and `<anchor>/.agent-worktrees.yaml` remain readable. | Yes |
 | **Lowest** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles`, `session_backend`. | No |
 
 **A repo designed for this system needs no machine-local file.** Its anchor
@@ -48,12 +48,12 @@ that carries no in-repo config.
 - A missing or malformed file at any tier is skipped safely — config loading
   never breaks the CLI on a bad file.
 
-> **Version note:** the in-repo **directory form**
-> (`<anchor>/.agent-worktrees/config.yaml`) and the global tier are read by
+> **Version note:** the in-repo canonical path
+> (`<anchor>/.copilot-extensions/agent-worktrees/config.yaml`) and the global tier are read by
 > **agent-worktrees ≥ v1.5.3-dev34**. Older plugins read only the machine-local
-> file plus a legacy single-file `<anchor>/.agent-worktrees.yaml` (which carried
-> just a `pr:` block) — still honored as a back-compat fallback when the
-> directory form is absent.
+> file plus legacy `<anchor>/.agent-worktrees/config.yaml` and
+> `<anchor>/.agent-worktrees.yaml` compatibility paths — still honored as
+> back-compat fallbacks when the canonical file is absent.
 
 ---
 
@@ -443,7 +443,7 @@ See the `worktree` skill § PR Workflow for the end-to-end flow
 
 ---
 
-## In-repo config — `<anchor>/.agent-worktrees/config.yaml`
+## In-repo config — `<anchor>/.copilot-extensions/agent-worktrees/config.yaml`
 
 A committed file carrying the repo's **own repo-level settings** — the base
 layer, identical on every machine that checks out the repo. The schema is
@@ -452,7 +452,7 @@ layer, identical on every machine that checks out the repo. The schema is
 map. Any of these may appear:
 
 ```yaml
-# <repo-root>/.agent-worktrees/config.yaml
+# <repo-root>/.copilot-extensions/agent-worktrees/config.yaml
 default_branch: main
 remote: origin
 validate_paths: [src, tests]
@@ -482,11 +482,14 @@ profile_assignment:
   launch side effects.
 - Omitting `pr:` leaves PR mode **off** (direct-push finalization) — appropriate
   for a repo with no automated reviewer.
-- **Location:** the directory form `<anchor>/.agent-worktrees/config.yaml`
-  (constant `INREPO_CONFIG_DIRNAME` + `config.yaml`) is canonical. The legacy
-  single-file `<anchor>/.agent-worktrees.yaml` (`INREPO_CONFIG_FILENAME`, `pr:`
-  only) is still read as a fallback when the directory form is absent; the
-  directory form wins when both exist.
+- **Location:** the canonical path is
+  `<anchor>/.copilot-extensions/agent-worktrees/config.yaml`. Legacy
+  `<anchor>/.agent-worktrees/config.yaml` and the older single-file
+  `<anchor>/.agent-worktrees.yaml` (`INREPO_CONFIG_FILENAME`, `pr:` only) are
+  still read as fallbacks when the canonical file is absent. An explicit
+  marketplace-specific overlay may further merge
+  `<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/config.yaml`
+  on top.
 - A missing or malformed file safely degrades to "no in-repo settings" — the
   machine-local + global tiers still resolve the repo.
 
@@ -540,7 +543,7 @@ its settings in the in-repo config, and machine defaults here needs **no**
 
 ---
 
-## Related repos -- `<anchor>/.agent-worktrees/related.yaml`
+## Related repos -- `<anchor>/.copilot-extensions/agent-worktrees/related.yaml`
 
 A separate **committed, in-repo** file (a sibling of the in-repo `config.yaml`)
 that records, **from this repo's point of view**, the OTHER repos relevant to
@@ -553,13 +556,13 @@ Managed by `agent-worktrees related ...`; see the **`agent-worktrees-related`**
 skill (authoring the index) and **`working-cross-repo`** skill (using it).
 
 ```yaml
-# <anchor>/.agent-worktrees/related.yaml
+# <anchor>/.copilot-extensions/agent-worktrees/related.yaml
 primary: example-web                  # the default/primary related repo
 related:
   example-web:
     role: product                  # product|dependency|consumer|tooling|docs|sibling
     summary: "Primary product monorepo we ship changes to."
-    doc: related/example-web.md       # narrative, relative to .agent-worktrees/
+    doc: related/example-web.md       # narrative, relative to the selected related-config root
     locus:
       preferred: codespace         # local | machine:<key> | codespace | container
       machines: [dev6]             # boxes a *local* checkout is available on (optional)
@@ -577,7 +580,7 @@ related:
 | `related.<name>` | map | One related repo, keyed by its **global-registry** name. |
 | `related.<name>.role` | string | `product` \| `dependency` \| `consumer` \| `tooling` \| `docs` \| `sibling` (free-form; stored verbatim). |
 | `related.<name>.summary` | string | One line: why the repo matters to this one. |
-| `related.<name>.doc` | string | Narrative-doc path, relative to `.agent-worktrees/` (default `related/<name>.md`). |
+| `related.<name>.doc` | string | Narrative-doc path, relative to the selected related-config root (default `related/<name>.md`). |
 | `related.<name>.locus.preferred` | string | Where work happens: `local` \| `machine:<key>` \| `codespace` \| `container`. |
 | `related.<name>.locus.machines` | list | Machine keys a *local* checkout is available on (per-machine availability the per-platform registry can't express). |
 | `related.<name>.locus.codespace` | map | GitHub CodeSpace hints: `repo` / `machine` / `location` / `workspace_folder`. Cloud venue -- usable from any machine. |
@@ -585,8 +588,12 @@ related:
 | `related.<name>.delegate.via` | string | How to hand off work: `agent-bridge` \| `agent-codespaces` \| `agent-containers` \| `none`. |
 
 Reads degrade safely (a missing/malformed file yields an empty index); a bare
-`name:` is a valid minimal link. Writes emit only non-empty fields, keeping the
-committed file minimal.
+`name:` is a valid minimal link. The canonical base file is
+`<anchor>/.copilot-extensions/agent-worktrees/related.yaml`, with legacy
+`<anchor>/.agent-worktrees/related.yaml` fallback and an explicit marketplace
+overlay at
+`<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/related.yaml`.
+Writes emit only non-empty fields, keeping the committed file minimal.
 
 An active plugin may contribute a lowest-precedence related-repo fragment by
 shipping `.agent-worktrees/related.yaml` in its payload. The active corpus is

@@ -16533,7 +16533,7 @@ def _fast_forward_project_anchors() -> None:
 
     ``update`` refreshes the plugin payload from the marketplace, but the repo
     **anchor checkout** -- the source of truth for in-repo
-    ``.agent-worktrees/config.yaml`` bindings -- is otherwise only synced on the
+    ``.copilot-extensions/agent-worktrees/config.yaml`` bindings -- is otherwise only synced on the
     next picker launch or a manual ``git pull``. That lag lets a freshly-rolled
     command silently no-op on a machine whose anchor still predates a new config
     binding. Closing it here makes in-repo config deploy alongside the plugin.
@@ -18654,7 +18654,8 @@ def _related_usage() -> None:
     print(f"Usage: {project} related <command> | related --conduct")
     print()
     print("Per-project, directional 'related repos' index (this repo's POV),")
-    print("committed at <repo>/.agent-worktrees/related.yaml. Keys reference the")
+    print("committed at <repo>/.copilot-extensions/agent-worktrees/related.yaml.")
+    print("Legacy <repo>/.agent-worktrees/related.yaml remains readable. Keys reference the")
     print("global repos registry; entries add role + locus + delegate + a narrative.")
     print()
     print("Commands:")
@@ -26452,7 +26453,7 @@ def _pr_merge_usage() -> None:
     print("       <project> pr-merge <owner/name> --all [options]", file=out)
     print(file=out)
     print("Signal merge consent on an APPROVED PR by applying the repo's", file=out)
-    print("merge-consent label (the .agent-worktrees/config.yaml binding", file=out)
+    print("merge-consent label (the .copilot-extensions/agent-worktrees/config.yaml binding", file=out)
     print(
         "automerge_label; multi-machine system: auto-merge). Applies by default; it never",
         file=out,
@@ -26892,7 +26893,7 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
             # (pr-self-merge repos are handled above; this path is human-merge.)
             msg = (
                 "pr-merge: no merge-consent label (pr.automerge_label) is bound "
-                f"in this repo's .agent-worktrees/config.yaml on this machine. "
+                f"in this repo's .copilot-extensions/agent-worktrees/config.yaml on this machine. "
                 f"This repo's PR-flow profile is '{flow.profile}'. Two cases:\n"
                 "  - Human-merge repo (expected): PR-gated but a HUMAN approves "
                 "and merges -- pr-merge does not apply. Open the PR (create-pr), "
@@ -27169,7 +27170,7 @@ def cmd_pr_research_dispatch(argv: list[str]) -> int:
         if k == "supported":
             continue
         print(f"    {k}: {v}")
-    print("  Suggested pr: policy (drop into .agent-worktrees/config.yaml):")
+    print("  Suggested pr: policy (drop into .copilot-extensions/agent-worktrees/config.yaml):")
     if matrix:
         for k, v in matrix.items():
             print(f"    {k}: {str(v).lower() if isinstance(v, bool) else v}")

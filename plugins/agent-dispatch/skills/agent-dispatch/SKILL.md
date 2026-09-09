@@ -996,9 +996,9 @@ from every other author.
 
 ```bash
 <agent-dispatch catalog argv[0]> repository-issue-loop discover \
-  .agent-dispatch/registrar/issues.yaml
+  .copilot-extensions/agent-dispatch/registrar/issues.yaml
 <agent-dispatch catalog argv[0]> repository-issue-loop doctor \
-  .agent-dispatch/registrar/issues.yaml
+  .copilot-extensions/agent-dispatch/registrar/issues.yaml
 ```
 
 Use `setup|inspect|status|doctor|disable|enable` for lifecycle controls.

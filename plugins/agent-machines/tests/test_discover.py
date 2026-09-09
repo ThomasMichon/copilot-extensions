@@ -169,9 +169,56 @@ def test_canonical_root_suppresses_legacy_layout(tmp_path):
     assert [pkg.name for pkg in found[0].packages] == ["acme/current"]
 
 
+def test_repo_legacy_root_is_fallback_when_canonical_root_absent(tmp_path):
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(
+        repo,
+        "legacy.yaml",
+        base_package(name="acme/legacy", gate=["*"]),
+        repo_legacy=True,
+    )
+    reg = _registry(srcroot, acme={"class": "worktree"})
+    found = discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))
+    assert [pkg.name for pkg in found[0].packages] == ["acme/legacy"]
+
+
+def test_marketplace_overlay_replaces_base_package(tmp_path, monkeypatch):
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(
+        repo,
+        "base.yaml",
+        base_package(name="acme/shared", gate=["*"], manage={"copilot.settings": {"values": {"model": "base"}}}),
+    )
+    overlay = (
+        repo
+        / ".copilot-extensions"
+        / "agent-machines"
+        / "marketplaces"
+        / "mp-test"
+        / "all"
+    )
+    overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / "overlay.yaml").write_text(
+        yaml.safe_dump(
+            base_package(
+                name="acme/shared",
+                gate=["*"],
+                manage={"copilot.settings": {"values": {"model": "overlay"}}},
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", '{"marketplaceId":"mp-test"}')
+    packages = discover.packages_in_repo(repo, "acme", "box-1")
+    assert [pkg.name for pkg in packages] == ["acme/shared"]
+    assert packages[0].manage["copilot.settings"]["values"]["model"] == "overlay"
+
+
 def test_flat_package_under_canonical_root_fails_closed(tmp_path):
     repo = tmp_path / "acme"
-    path = repo / ".agent-machines" / "defaults.yaml"
+    path = repo / ".copilot-extensions" / "agent-machines" / "defaults.yaml"
     path.parent.mkdir(parents=True)
     path.write_text("schema_version: 1\npackage: acme/defaults\n", encoding="utf-8")
     with pytest.raises(ManifestError, match="packages belong directly under all/"):
@@ -180,7 +227,7 @@ def test_flat_package_under_canonical_root_fails_closed(tmp_path):
 
 def test_nested_package_under_all_fails_closed(tmp_path):
     repo = tmp_path / "acme"
-    path = repo / ".agent-machines" / "all" / "nested" / "defaults.yaml"
+    path = repo / ".copilot-extensions" / "agent-machines" / "all" / "nested" / "defaults.yaml"
     path.parent.mkdir(parents=True)
     path.write_text("schema_version: 1\npackage: acme/defaults\n", encoding="utf-8")
     with pytest.raises(ManifestError, match="must be direct children"):
@@ -256,6 +303,35 @@ def test_discover_grafts_bound_supplemental_repo(tmp_path):
         "harness",
         "knowledge",
     ]
+
+
+def test_discover_grafts_bound_supplemental_repo_from_canonical_worktrees_config(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    knowledge = srcroot / "knowledge"
+    write_package(harness, "harness.yaml", base_package(name="harness/base", gate=["*"]))
+    config = harness / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("stateless: true\n", encoding="utf-8")
+    write_package(
+        knowledge,
+        "knowledge.yaml",
+        base_package(name="knowledge/preferences", gate=["*"]),
+    )
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+    )
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+        }
+    }
+
+    found = discover.discover(machine="box-1", registry=reg, projects=projects)
+
+    assert [repo.name for repo in found] == ["harness", "knowledge"]
 
 
 def test_project_scope_resolves_only_direct_bound_supplement(tmp_path):

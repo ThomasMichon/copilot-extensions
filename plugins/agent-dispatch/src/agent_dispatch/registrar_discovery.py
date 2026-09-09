@@ -7,9 +7,10 @@ layer** that finds and reads declaration *documents*:
 * a cache-populate-style **pointer registry** -- a system, service, or repo records
   a lightweight *pointer* to a directory of declarations in its own footprint, and
   the supervisor aggregates every pointer (vision: *declarative-discovered-registrar*);
-* the **in-repo ``.agent-dispatch/registrar/``** convention -- a repo carries its
-  supervised work with its code, so it lights up on repo-sync and winds down when the
-  repo (or declaration) is gone;
+* the **in-repo** convention -- a repo carries its supervised work with its
+  code under ``.copilot-extensions/agent-dispatch/registrar/`` (with legacy
+  ``.agent-dispatch/registrar/`` fallback), so it lights up on repo-sync and
+  winds down when the repo (or declaration) is gone;
 * the **aggregation** that reads every pointed location into the declared profile set
   the singleton supervisor reconciles.
 
@@ -35,14 +36,16 @@ from dropin_registry import Finding, ScanAuthority, WarningTracker
 from plugin_activation import ActivationReport
 
 from .install_paths import install_dir as dispatch_install_dir
+from . import repo_config
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
 
 if TYPE_CHECKING:
     from .registrar_registry import CombinedRegistrarReport, RegistrarCandidate
 
-#: The in-repo convention: a repo declares its supervised work here, discovered on
-#: sync. Relative to the repo root.
-INREPO_SUBDIR = ".agent-dispatch/registrar"
+#: The in-repo convention: a repo declares its supervised work here, discovered
+#: on sync. Relative to the repo root.
+INREPO_SUBDIR = str(repo_config.CANONICAL_REPO_CONFIG_DIR / "registrar")
+LEGACY_INREPO_SUBDIR = str(repo_config.LEGACY_REPO_CONFIG_DIR / "registrar")
 
 #: Declaration document suffixes, in precedence order (YAML-primary, JSON accepted).
 _DECL_SUFFIXES = (".yaml", ".yml", ".json")
@@ -96,11 +99,15 @@ class Pointer:
     def resolved_location(self) -> Path:
         """The directory to scan for declaration documents.
 
-        For a ``repo`` pointer that is the repo root's ``.agent-dispatch/registrar``;
-        for a ``dir`` pointer it is the location itself.
+        For a ``repo`` pointer that is the repo root's canonical
+        ``.copilot-extensions/agent-dispatch/registrar`` directory with legacy
+        ``.agent-dispatch/registrar`` fallback; for a ``dir`` pointer it is the
+        location itself.
         """
         base = Path(self.location).expanduser()
-        return base / INREPO_SUBDIR if self.kind == "repo" else base
+        if self.kind == "repo":
+            return repo_config.selected_repo_surface_dir(base, "registrar")
+        return base
 
     def effective_owner(self) -> str:
         """Provenance token for declarations read here (explicit owner, else derived)."""
@@ -137,7 +144,7 @@ class Pointer:
 def repo_pointer(
     repo_root: str | Path, *, name: str | None = None, owner: str | None = None
 ) -> Pointer:
-    """Build the in-repo pointer for ``repo_root`` (its ``.agent-dispatch/registrar``)."""
+    """Build the in-repo pointer for ``repo_root``."""
     root = Path(repo_root).expanduser()
     return Pointer(name=name or root.name, location=str(root), kind="repo", owner=owner)
 
@@ -397,6 +404,29 @@ def read_location(location: str | Path, *, owner: str | None = None) -> list[Pro
     return out
 
 
+def read_repo_location_layers(
+    repo_root: str | Path, *, owner: str | None = None
+) -> list[ProfileDeclaration]:
+    """Read the effective declaration set for one repo root.
+
+    Base declarations come from the canonical repo surface with legacy fallback.
+    An explicit marketplace overlay directory may then replace or add
+    declarations by logical name.
+    """
+    merged: dict[str, ProfileDeclaration] = {}
+    for location in repo_config.layered_repo_surface_dirs(repo_root, "registrar"):
+        layer: dict[str, ProfileDeclaration] = {}
+        for declaration in read_location(location, owner=owner):
+            if declaration.name in layer:
+                raise RegistrarError(
+                    f"duplicate profile name {declaration.name!r}: declared more than once "
+                    f"under {location} -- names must be unique within one repo layer"
+                )
+            layer[declaration.name] = declaration
+        merged.update(layer)
+    return [merged[name] for name in sorted(merged)]
+
+
 def discover_trusted(
     pointers: Iterable[Pointer] | None = None,
     *,
@@ -416,7 +446,12 @@ def discover_trusted(
     by_name: dict[str, tuple[str, ProfileDeclaration]] = {}
     for pointer in pts:
         owner = pointer.effective_owner()
-        for decl in read_location(pointer.resolved_location(), owner=owner):
+        declarations = (
+            read_repo_location_layers(pointer.location, owner=owner)
+            if pointer.kind == "repo"
+            else read_location(pointer.resolved_location(), owner=owner)
+        )
+        for decl in declarations:
             if decl.name in by_name:
                 prior_owner = by_name[decl.name][0]
                 raise RegistrarError(
@@ -440,13 +475,16 @@ def discover(
 
 
 def discover_repo(repo_root: str | Path, *, owner: str | None = None) -> list[ProfileDeclaration]:
-    """Convenience: read a single repo's in-repo ``.agent-dispatch/registrar`` declarations.
+    """Convenience: read a single repo's in-repo declarations.
 
     The repo-sync discovery unit -- given a synced repo root, read what it declares
     without touching the persisted pointer registry.
     """
-    pointer = repo_pointer(repo_root, owner=owner)
-    return discover([pointer])
+    root = Path(repo_root).expanduser()
+    return read_repo_location_layers(
+        root,
+        owner=owner or f"repo:{root.name}",
+    )
 
 
 # -- Legacy env-profile back-compat bridge (Phase 4 migration) ----------------
