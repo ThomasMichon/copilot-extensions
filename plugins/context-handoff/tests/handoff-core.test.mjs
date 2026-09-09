@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import {
-  mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync,
+  mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -440,8 +440,73 @@ test("file-backed locator preserves consume-once semantics across cwd-independen
     );
     assert.equal(second.ok, false);
     assert.equal(second.alreadyConsumed, true);
+    assert.equal(second.claimedBySession, "successor-3");
     assert.match(second.message, /already consumed/);
+    assert.match(second.message, /successor-3/);
   });
+});
+
+test("a second consume racing a live in-progress lock reports the lock owner's session id", () => {
+  withTempHome((home) => {
+    const anchorPath = join(home, "wt-repo");
+    const stateDir = join(home, "wt-state");
+    const handoffPath = join(stateDir, "handoff", "handoff-predecessor-lock.json");
+    mkdirSync(join(stateDir, "handoff"), { recursive: true });
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-predecessor-lock",
+      storage: "file",
+      sessionId: "predecessor-lock",
+      cwd: anchorPath,
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+    // Simulate another session's in-progress consume by holding the lock file
+    // with a live pid (this test process) and its session id, exactly as
+    // consumeFileHandoffOnce itself writes it.
+    writeFileSync(`${handoffPath}.consume.lock`, JSON.stringify({
+      pid: process.pid,
+      sessionId: "in-progress-consumer",
+      createdAt: new Date().toISOString(),
+    }), "utf-8");
+    try {
+      const result = consumeFileHandoff(
+        anchorPath,
+        "racing-session",
+        "handoff-predecessor-lock",
+        handoffPath,
+      );
+      assert.equal(result.ok, false);
+      assert.equal(result.busy, true);
+      assert.equal(result.claimedBySession, "in-progress-consumer");
+      assert.match(result.message, /in-progress-consumer/);
+    } finally {
+      try { unlinkSync(`${handoffPath}.consume.lock`); } catch { /* best-effort */ }
+    }
+  });
+});
+
+test("formatConsumeResult surfaces the claimant session id and offers to file a bug", () => {
+  const text = formatConsumeResult({
+    ok: false,
+    alreadyConsumed: true,
+    claimedBySession: "some-other-session",
+    message: "Handoff X was already consumed by session `some-other-session`.",
+  });
+  assert.match(text, /some-other-session/);
+  assert.match(text, /offer to file a bug/i);
+});
+
+test("formatConsumeResult without a known claimant does not fabricate a bug offer", () => {
+  const text = formatConsumeResult({
+    ok: false,
+    message: "File-backed handoff was not found.",
+  });
+  assert.doesNotMatch(text, /offer to file a bug/i);
 });
 
 test("task-backed consume checkpoints payload before one-time consume and survives same-session retry", () => {
