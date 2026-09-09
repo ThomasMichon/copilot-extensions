@@ -91,11 +91,14 @@ and the parent agent-dispatch vision:
   Extracted verbatim into the packaged built-in identity, now shipped from
   `plugins/agent-dispatch/src/agent_dispatch/identities/odsp-web-harness-backlog.identity.md`
   (see 2026-09-07 journal entry below for why it moved there).
-  The packaging fix landed on `main` via PR #2204. **Still not yet applied to
-  the live `dotfiles` declaration** -- that requires the running
-  agent-dispatch daemon to have this fix deployed first (an
-  older daemon would reject `worker_identity` as an unknown key and break the
-  live loop); see Gotchas.
+  The packaging fix landed on `main` via PR #2204. **Now applied to the live
+  `dotfiles` declaration** -- switched via `tmichon_microsoft/dotfiles#2080`
+  (merged 2026-09-08), gated on confirming the installed agent-dispatch slot
+  (`0.1.2-dev49`) resolves `worker_identity: odsp-web-harness-backlog` first.
+  Verified end-to-end post-merge: `repository_issue_loops.validate_config`
+  against the merged `origin/main` declaration resolves `worker_guidance`
+  from the packaged identity, byte-for-byte identical to
+  `worker_identities.load_worker_identity("odsp-web-harness-backlog").rules`.
 - [ ] Assess whether a named identity's structural boundaries (permitted
   tools/mutations) can enforce the reviewer vision's never-supersede rule
   more robustly than prose alone -- closing the Phase-6 open question in
@@ -620,5 +623,34 @@ other phases actually land in.
   were **not** audited for the same anti-pattern this leg -- flagged as a
   worthwhile follow-up given each vendors its own `procutil.py` copy with
   the same `resolve_runtime_python()` primitive already available.
+
+### 2026-09-08 (cont. 2) - Switched the live `dotfiles` declaration to `worker_identity`
+
+- Re-verified the daemon-version gate before touching the live declaration:
+  the currently installed/running agent-dispatch slot is `0.1.2-dev49`
+  (confirmed via `agent-dispatch health`), and
+  `worker_identities.load_worker_identity("odsp-web-harness-backlog")`
+  resolves cleanly against that slot's installed package (packaged identity
+  path under `...\0.1.2-dev49\Lib\site-packages\agent_dispatch\identities\`)
+  -- the packaging fix from PR #2204 is present, so this switch is safe.
+- Applied the previously-staged edit (from the prior handoff leg) to
+  `dotfiles`'s `.agent-dispatch/registrar/odsp-web-harness-issue-loop.json`:
+  replaced the inlined `worker_guidance` prose with
+  `"worker_identity": "odsp-web-harness-backlog"`. Landed via
+  `tmichon_microsoft/dotfiles#2080` (self-merged, squash), worktree
+  finalized.
+- Verified end-to-end post-merge (not just pre-merge): fetched
+  `origin/main`'s merged declaration content and ran
+  `repository_issue_loops.validate_config` against it directly -- it
+  resolves `worker_identity` into `worker_guidance`, and the resolved value
+  is byte-for-byte identical to
+  `worker_identities.load_worker_identity("odsp-web-harness-backlog").rules`.
+  `registrar discover`/`registrar doctor` against the merged content also
+  show no errors. Phase 2's second bullet is now fully closed.
+- Also filed `gim-home/odsp-web-harness#238` (unrelated, harness-side): the
+  mux window that resumed this handoff spawned multiple Copilot sessions
+  racing to claim the same `context-handoff` task; only one won via the
+  exactly-once claim. No data corruption, but the duplicate spawn itself is
+  a harness bug worth a follow-up fix.
 
 
