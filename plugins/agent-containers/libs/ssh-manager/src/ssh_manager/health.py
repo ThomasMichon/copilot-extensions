@@ -9,7 +9,8 @@ from typing import Literal
 
 from .config_sources import ConfigSource
 from .manager import ConnectionManager
-from .process import ssh_subprocess_kwargs, terminate_ssh_process_tree
+from .process import terminate_ssh_process_tree
+from .proxy import create_ssh_subprocess
 
 log = logging.getLogger("ssh-manager")
 
@@ -76,12 +77,12 @@ async def check_health(manager: ConnectionManager, host: str) -> HealthStatus:
     ])
 
     try:
-        proc = await asyncio.create_subprocess_exec(
+        proc = await create_ssh_subprocess(
             *args,
+            config=info.config,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
-            **ssh_subprocess_kwargs(),
         )
         _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=10.0)
         stderr = stderr_bytes.decode(errors="replace").rstrip()

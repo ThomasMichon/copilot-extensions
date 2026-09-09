@@ -1820,10 +1820,9 @@ function Invoke-Install {
         # a clean rebuild: --reinstall-package drops the installed dist and
         # --refresh-package busts uv's *build cache* (else uv serves a stale
         # cached wheel for the same version and new modules never land -- the
-        # #186 CodespaceConfigSource regression). NOTE the dist name is
-        # `ssh-manager` (renamed from the old `agent-ssh-manager`); using the old
-        # name here silently no-ops the reinstall. #177/#186
-        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --reinstall-package ssh-manager --refresh-package ssh-manager --quiet 2>&1
+        # #186 CodespaceConfigSource regression). Both selectors must name the
+        # `agent-ssh-manager` distribution declared by the vendored pyproject.
+        $sshOut = & uv pip install --python $VenvPython "$SshManagerDir" --reinstall-package agent-ssh-manager --refresh-package agent-ssh-manager --quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "ssh-manager install failed (exit $LASTEXITCODE)"
@@ -2515,9 +2514,9 @@ function Invoke-Update {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         if ($SshManagerDir) {
-            # Dist renamed agent-ssh-manager -> ssh-manager; --refresh-package
-            # busts uv's build cache so a same-version source change lands (#186).
-            $sshOut = & uv pip install --python $VenvPython --reinstall-package ssh-manager --refresh-package ssh-manager `
+            # Refresh the vendored agent-ssh-manager distribution's build cache
+            # so a same-version source change lands (#186).
+            $sshOut = & uv pip install --python $VenvPython --reinstall-package agent-ssh-manager --refresh-package agent-ssh-manager `
                 "$SshManagerDir" --quiet 2>&1
             if ($LASTEXITCODE -ne 0) {
                 $ErrorActionPreference = $prevEAP

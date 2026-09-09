@@ -15,6 +15,7 @@ remote/local ports and a ``kind`` tag.
 from __future__ import annotations
 
 import asyncio
+import logging
 import shlex
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
@@ -25,6 +26,10 @@ from ssh_manager import (
     SupervisedRelayForward,
     build_remote_exec_args,
 )
+from ssh_manager.process import terminate_ssh_process_tree
+from ssh_manager.proxy import create_ssh_subprocess
+
+log = logging.getLogger("agent-bridge.session-host.endpoints")
 
 
 class CredentialRelayReadinessError(RuntimeError):
@@ -218,8 +223,9 @@ def endpoint_serving_probe_factory(
 
     Each probe execs a one-shot far-side relay-protocol round-trip check (see
     :func:`build_relay_ping_probe_command`) on the CodeSpace-side relay listen
-    port over a **fresh** SSH connection (no live transport is available on the
-    daemon-restart reconstruction path). A ``False`` result means the ``-R``
+    port over a **fresh** SSH connection through the shared SSH launcher (no live
+    transport is available on the daemon-restart reconstruction path). A ``False``
+    result means the ``-R``
     process is alive but the far side is not actually answering as a live
     relay -- e.g. a remote bind that **silently failed** because a stale
     listener from the pre-restart ``-R`` had not been released yet (dotfiles
@@ -228,7 +234,8 @@ def endpoint_serving_probe_factory(
     Transport failures return ``True`` (a health hint, never a reason to churn
     a possibly-fine relay on a transient SSH failure). Set ``fail_open=False``
     for a launch or resume readiness gate where an inconclusive probe must
-    block ACP delivery. Mirrors
+    block ACP delivery. Failed or cancelled probes reap their owned SSH tree
+    before returning; cancellation is never a healthy hint. Mirrors
     ``spawner._serving_probe_for_port`` for the restart path.
     """
     config = ssh_config_from_endpoint(endpoint)
@@ -238,16 +245,23 @@ def endpoint_serving_probe_factory(
         argv = build_remote_exec_args(config, f"bash -lc {shlex.quote(probe)}")
 
         async def _probe() -> bool:
+            proc = None
             try:
-                proc = await asyncio.create_subprocess_exec(
+                proc = await create_ssh_subprocess(
                     *argv,
+                    config=config,
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-            except Exception:
-                if fail_open:
+            except BaseException as exc:
+                if proc is not None:
+                    try:
+                        await asyncio.shield(terminate_ssh_process_tree(proc))
+                    except Exception:
+                        log.warning("SSH probe cleanup failed", exc_info=True)
+                if fail_open and isinstance(exc, Exception):
                     return True
                 raise
             return proc.returncode == 0 and b"OK" in (out or b"")
