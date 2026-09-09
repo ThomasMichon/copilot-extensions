@@ -5192,6 +5192,47 @@ def register_session(
         save_record(record)
 
 
+def _record_has_open_session(record: WorktreeRecord) -> bool:
+    """True when some session on *record* is still open.
+
+    ``entry.ended_at`` is the authoritative open/closed flag kept in sync by
+    :func:`_start_session_activation` / :func:`_end_session_activation` (set to
+    ``None`` on (re)start, stamped on end) -- checking it directly (rather than
+    the ``activations`` history) also covers legacy entries that predate
+    per-activation history.
+    """
+    return any(
+        entry.ended_at is None for entry in record.sessions or []
+    )
+
+
+def _stop_fsmonitor_daemon(worktree_path: str) -> None:
+    """Best-effort ``git fsmonitor--daemon stop`` for an idled-out worktree.
+
+    ``core.fsmonitor`` is commonly enabled repo-wide, so the first git command
+    run in *any* worktree auto-starts a persistent background daemon for it.
+    Nothing previously stopped that daemon once the worktree's last session
+    ended, so it (and its Windows conhost) leaked indefinitely across the
+    fleet -- including past ``finalize``, which deliberately leaves the
+    directory and its process state alone for audit/handoff. This runs right
+    after the worktree goes fully session-less, which is the correct trigger:
+    unlike ``finalize`` it doesn't require (or imply) the worktree is done.
+    Never raises -- a missing git, a missing daemon, or a removed directory
+    are all silently fine outcomes here.
+    """
+    from . import git_ops
+
+    if not worktree_path or not os.path.isdir(worktree_path):
+        return
+    try:
+        git_ops.git(
+            "fsmonitor--daemon", "stop",
+            cwd=worktree_path, check=False, capture=True, timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def deregister_session(
     worktree_id: str,
     session_id: str,
@@ -5221,4 +5262,6 @@ def deregister_session(
                 if changed:
                     _next_lifecycle_revision(record, session_id)
                     save_record(record)
+                    if not _record_has_open_session(record):
+                        _stop_fsmonitor_daemon(record.worktree_path)
                 return
