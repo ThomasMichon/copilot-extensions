@@ -166,6 +166,8 @@ cross-checked against a live host running ~7 concurrent sessions) found:
   daemon-death, and daemon-election scenarios) **before** any per-plugin code
   change — full design in
   [`adversarial-convergence-mock.md`](adversarial-convergence-mock.md).
+  **Landed**: `tools/clean-room/scenarios/plugin-process-hygiene-convergence/`
+  (6/6 scenarios PASS locally).
 - Feed the mock's evidence, plus #2301's per-plugin audit citations, into a
   scoped decision on which plugin (if any) needs an actual code change versus
   already conforming (agent-worktrees post-#918/#1788 is the reference
@@ -437,4 +439,32 @@ Landed independently of this effort's own PR sequence, then reconciled into it:
   harness as its own PR per the review gate, then use its evidence plus a
   narrowed #2301 (comment reconciling the above) to scope any remaining
   per-plugin work.
+
+### 2026-09-09 (later) — Adversarial mock harness landed
+
+- Built `tools/clean-room/scenarios/plugin-process-hygiene-convergence/`: a
+  Tier-P, stdlib-only, plugin-agnostic clean-room scenario implementing the
+  design's six scenarios against a synthetic mock daemon (no real plugin
+  install, no Copilot/gh auth needed). All 6/6 PASS locally, with zero
+  leftover processes verified by an OS process census before/after.
+- Two real bugs found and fixed **in the harness itself** (not the contract)
+  while getting the process-count assertions right:
+  - The Windows process-counting helper's own PowerShell query embedded the
+    search tag literally in its `-Command` string, so the querying process's
+    own command line self-matched the filter, inflating every count. Fixed by
+    passing the tag through an environment variable instead of string
+    interpolation.
+  - PowerShell auto-unwraps a single-element pipeline result to a bare
+    scalar object, which has no `.Count` property -- silently printing
+    nothing (coerced to 0 by the Python side) whenever *exactly one* process
+    matched. Fixed by wrapping the query in `@(...)` to force an array
+    regardless of match count. This one is worth remembering generally: any
+    future PowerShell-based process census in this suite should force-array
+    its `Where-Object` result before reading `.Count`.
+- Confirms the contract from the design doc requires no changes; the harness
+  needed fixing, not the shape it validates.
+- Next: this PR is the mock harness landing per the plan's own checklist;
+  #2301's per-plugin audit (citing #737/#738/#739/the Phase 4b measurement as
+  already-conforming evidence, and scoping what's genuinely still open) is
+  the remaining work this effort's Phase 4b(ii) hands off to.
 
