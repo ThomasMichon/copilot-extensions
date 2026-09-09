@@ -2130,3 +2130,70 @@ def test_provenance_blocked_cli_retains_plugin_id(
     assert value["desiredMode"] is None
     assert value["actualMode"] is None
     assert value["runtimeRoot"] is None
+
+
+def _bsd_userland_path(tmp_path: Path) -> str:
+    """PATH whose ``realpath``/``readlink`` cannot canonicalize at all.
+
+    A BSD userland (macOS) ships a ``realpath`` without ``-m`` and a
+    ``readlink -f`` that refuses a leaf that does not exist yet, so the shell
+    adapter must canonicalize a not-yet-created cell path on its own. Shadowing
+    both tools with always-failing stubs reproduces that on any platform.
+    """
+    tool_dir = tmp_path / "bsd-bin"
+    tool_dir.mkdir()
+    for name in ("realpath", "readlink"):
+        stub = tool_dir / name
+        stub.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        stub.chmod(0o755)
+    return os.pathsep.join([str(tool_dir), os.environ.get("PATH", "")])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX adapter only")
+def test_posix_status_resolves_when_userland_cannot_canonicalize_missing_paths(
+    tmp_path: Path,
+) -> None:
+    """Legacy mode derives a cell path that does not exist; canonicalizing it
+    must not need GNU coreutils, or every payload invocation on macOS aborts."""
+    if BASH is None:
+        pytest.skip("Bash runner is unavailable")
+    vector = _source_vector()
+    payload = tmp_path / "payload" / PLUGIN_ID
+    legacy = tmp_path / "legacy"
+    payload.mkdir(parents=True)
+    legacy.mkdir()
+    arguments = [
+        "status",
+        "--payload-root",
+        str(payload),
+        "--plugin-id",
+        PLUGIN_ID,
+        "--source-json",
+        json.dumps(vector["descriptor"], separators=(",", ":")),
+        "--marketplace-key",
+        str(vector["marketplaceKey"]),
+        "--durable-home",
+        str(tmp_path / "durable"),
+        "--legacy-root",
+        str(legacy),
+        "--policy-path",
+        str(tmp_path / "missing-policy.json"),
+    ]
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+    environment["PATH"] = _bsd_userland_path(tmp_path)
+    result = subprocess.run(
+        _runner_command("posix", arguments),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Cannot resolve path" not in result.stderr
+    value = json.loads(result.stdout)
+    assert value["marketplaceId"] == vector["marketplaceId"]
+    assert value["actualMode"] == "legacy"
+    assert value["runtimeRoot"] == str(legacy)

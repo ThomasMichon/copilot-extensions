@@ -444,25 +444,64 @@ is_absolute() {
     [[ "$1" == /* ]]
 }
 
+# Canonicalize the nearest existing ancestor of a path whose leaf does not exist
+# yet, then re-append the unresolved remainder lexically. This reproduces GNU
+# `realpath -m` semantics on a BSD userland, where `realpath` has no `-m` and
+# `readlink -f` refuses a missing leaf. Directory symlinks are still resolved
+# physically via `cd -P`; only components that do not exist stay lexical.
+canonical_missing_path() {
+    local value="$1" base tail="" segment resolved out part
+    base="$value"
+    [[ "$base" == /* ]] || base="$PWD/$base"
+    while [[ "$base" != "/" && ! -d "$base" ]]; do
+        segment="${base##*/}"
+        base="${base%/*}"
+        [[ -n "$base" ]] || base="/"
+        case "$segment" in
+            "" | ".") ;;
+            *) tail="$segment${tail:+/$tail}" ;;
+        esac
+    done
+    resolved="$(cd -P -- "$base" 2>/dev/null && pwd -P)" ||
+        fail "Cannot resolve path: $value"
+    [[ -n "$resolved" ]] || fail "Cannot resolve path: $value"
+    out="$resolved"
+    [[ "$out" != "/" ]] || out=""
+    local IFS=/
+    for part in $tail; do
+        case "$part" in
+            "" | ".") ;;
+            "..") out="${out%/*}" ;;
+            *) out="$out/$part" ;;
+        esac
+    done
+    printf '%s' "${out:-/}"
+}
+
 canonical_path() {
-    local value="$1" must_exist="${2:-false}" result
+    local value="$1" must_exist="${2:-false}" result have_tool=false
     [[ -n "${value//[[:space:]]/}" ]] || fail "A required path is empty."
     value="${value/#\~/$HOME}"
     if [[ "$must_exist" == true && ! -e "$value" ]]; then
         fail "Path does not exist: $value"
     fi
     if command -v realpath >/dev/null 2>&1; then
+        have_tool=true
         if result="$(realpath -m -- "$value" 2>/dev/null)"; then
             printf '%s' "$result"
             return
         fi
     fi
     if command -v readlink >/dev/null 2>&1; then
-        result="$(readlink -f -- "$value")" || fail "Cannot resolve path: $value"
-    else
-        fail "Cannot canonicalize paths: realpath or readlink is required."
+        have_tool=true
+        if result="$(readlink -f -- "$value" 2>/dev/null)"; then
+            printf '%s' "$result"
+            return
+        fi
     fi
-    printf '%s' "$result"
+    [[ "$have_tool" == true ]] ||
+        fail "Cannot canonicalize paths: realpath or readlink is required."
+    canonical_missing_path "$value"
 }
 
 paths_equal() {

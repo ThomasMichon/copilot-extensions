@@ -1,5 +1,9 @@
 #!/bin/sh
-[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
+# Re-exec under a real bash. Testing BASH_VERSION is not enough: on a BSD host
+# /bin/sh IS bash in sh mode, which sets BASH_VERSION but disables the process
+# substitution this hook uses. Gate on an explicit marker instead.
+[ -n "${COPILOT_EXTENSIONS_HOOK_BASH:-}" ] ||
+    COPILOT_EXTENSIONS_HOOK_BASH=1 exec bash "$0" "$@"
 # pre-push hook: enforce the install contract and the internal-identifier guard
 # before pushing.
 # Enable with:  git config core.hooksPath tools/hooks
