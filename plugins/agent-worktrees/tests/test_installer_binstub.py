@@ -853,9 +853,9 @@ def test_hook_deployment_includes_registry_root_helper() -> None:
         PLUGIN / "src" / "agent_worktrees" / "installer.py"
     ).read_text(encoding="utf-8")
 
-    assert "anchor_write_guard.py registry_root.py" in posix
-    assert "'anchor_write_guard.py', 'registry_root.py'" in powershell
-    assert '"anchor_write_guard.py", "registry_root.py"' in python
+    assert "anchor_write_guard.py pr_supersede_guard.py registry_root.py" in posix
+    assert "'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py'" in powershell
+    assert '"anchor_write_guard.py", "pr_supersede_guard.py", "registry_root.py"' in python
 
 
 def test_project_binstub_rejects_invalid_command_name(

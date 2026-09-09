@@ -9392,6 +9392,7 @@ class _ResidentHookPolicy:
                 "statelessness_guard.py",
                 "cross_repo_guard.py",
                 "anchor_write_guard.py",
+                "pr_supersede_guard.py",
                 "nudge_status.py",
             )
         )
@@ -9465,7 +9466,7 @@ class _ResidentHookPolicy:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
         may_write = tool in _HOOK_WRITE_TOOLS or tool in _HOOK_SHELL_TOOLS
         combined: dict = {}
-        for name in ("statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py"):
+        for name in ("statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py"):
             module = self._module(name)
             if module is None:
                 continue
