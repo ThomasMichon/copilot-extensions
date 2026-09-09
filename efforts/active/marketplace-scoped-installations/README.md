@@ -1432,3 +1432,37 @@ See [`design.md`](design.md).
 - `#1108` is now complete and closed. Phase 4 complete; Phase 5 (Repository
   configuration and adoption state, [#1109](https://github.com/ThomasMichon/copilot-extensions/issues/1109))
   is next.
+
+### 2026-09-09 — Agent-codespaces repository configuration and adoption increment
+
+- Merged [#2291](https://github.com/ThomasMichon/copilot-extensions/pull/2291)
+  at `cf5a4ce7bb5a8b705185e98a203e96ebfbb38ad3`, landing the
+  `agent-codespaces` portion of `#1109`.
+- `agent-codespaces` now reads repository policy from
+  `.copilot-extensions/agent-codespaces/config.yaml` first, falls back to the
+  legacy `.agent-codespaces/config.yaml` and repo-root `codespaces.yaml`
+  locations, and accepts an explicit
+  `.copilot-extensions/agent-codespaces/marketplaces/<marketplace-id>/config.yaml`
+  overlay for marketplace-specific behavior without changing the neutral base
+  policy file.
+- The same increment moves namespaced machine-local adoption state under the
+  owning installation cell's `repos/<stable-repo-id>/agent-codespaces/`
+  subtree, keyed by normalized remote identity. Legacy
+  `~/.agent-codespaces/adopted-repos.yaml` remains a bounded fallback until a
+  repo is explicitly adopted into a cell, and install/update continues to leave
+  committed repository configuration untouched.
+- Validation:
+  `python tools/run-plugin-tests.py agent-codespaces` reproduced the unchanged
+  native-Windows failures tracked by
+  [#2240](https://github.com/ThomasMichon/copilot-extensions/issues/2240)
+  after the changed-surface files passed, so the landed evidence is the green
+  changed-surface suite
+  (`19 passed, 995 deselected`) plus focused WSL/POSIX coverage
+  (`18 passed, 996 deselected`);
+  install-contract, version-consistency, vendored-lib,
+  installation-context, payload-invocation, installer-readiness,
+  marketplace-isolation, docs-consistency, diff-check, and changed-file ruff
+  guards all passed.
+- `#1109` remains open for the remaining repository-configuration readers and
+  adoption surfaces outside `agent-codespaces`, so Phase 5 is still in
+  progress and all three plan checkboxes remain open.
