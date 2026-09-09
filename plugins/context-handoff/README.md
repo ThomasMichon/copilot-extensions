@@ -188,6 +188,16 @@ A handoff is **never** auto-loaded.
 For a natural-language "resume from handoff" request, sweep the current
 worktree's own state first rather than doing a global search.
 
+### Already-claimed handoffs
+
+A consume attempt that fails because the handoff was already consumed (or is
+currently being consumed elsewhere) always reports the claimant's session id,
+via `result.claimedBySession` and inline in the message text -- for both the
+file-backed and agent-dispatch task-backed stores. When this happens, state
+the claimant session id to the user and offer to file a bug (do not file one
+automatically): repeated or racing consumption of the same handoff is
+typically a sign of a real defect upstream, not routine behavior.
+
 ## Payload-local CLI fallback
 
 When the extension does not resolve or fails to load, the plugin's payload

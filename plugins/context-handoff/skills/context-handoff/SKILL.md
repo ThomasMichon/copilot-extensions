@@ -159,6 +159,20 @@ Its contract is:
 If the user says "resume from handoff" without pasting an exact id or prompt,
 sweep the current worktree's state first rather than doing a global search.
 
+### When consume fails because the handoff is already claimed
+
+`consume_handoff` always reports the claimant's session id when a handoff was
+already consumed, or is currently being consumed, by another session
+(`result.claimedBySession` / the message text). When this happens:
+
+1. **State the claimant session id to the user.** Never silently treat this
+   as "nothing to do" or reconstruct a different objective from session
+   history.
+2. **Offer to file a bug**, but do not file one automatically. A racing or
+   duplicate consumption attempt is usually a sign of a real defect (e.g. a
+   control system spawning more than one successor for the same handoff) --
+   ask the user first, then file it if they say yes.
+
 ## CLI fallback
 
 When the extension is absent, invoke the payload-local CLI by exact verified

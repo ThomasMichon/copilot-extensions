@@ -586,9 +586,12 @@ export function consumeFileHandoffOnce(
         };
       }
       let ownerPid = null;
+      let ownerSessionId = null;
       let lockAgeMs = 0;
       try {
-        ownerPid = JSON.parse(readFileSync(lockPath, "utf-8")).pid;
+        const lockInfo = JSON.parse(readFileSync(lockPath, "utf-8"));
+        ownerPid = lockInfo.pid;
+        ownerSessionId = lockInfo.sessionId || null;
       } catch { /* incomplete lock from a crashed writer */ }
       try {
         lockAgeMs = Date.now() - statSync(lockPath).mtimeMs;
@@ -669,8 +672,10 @@ export function consumeFileHandoffOnce(
       return {
         ok: false,
         busy: true,
+        claimedBySession: ownerSessionId,
         message:
-          `Handoff ${found.record.id || found.path} is already being consumed. ` +
+          `Handoff ${found.record.id || found.path} is already being consumed ` +
+          `by session \`${ownerSessionId || "unknown"}\`. ` +
           "Do not replay it; retry only after the active consumer finishes.",
       };
     }
@@ -695,8 +700,10 @@ export function consumeFileHandoffOnce(
         ok: false,
         alreadyConsumed: true,
         id: current.record.id,
+        claimedBySession: current.record.consumedBySession || null,
         message:
-          `Handoff ${current.record.id || current.path} was already consumed at ` +
+          `Handoff ${current.record.id || current.path} was already consumed by ` +
+          `session \`${current.record.consumedBySession || "unknown"}\` at ` +
           `${current.record.consumedAt || "an unknown time"}. Do not replay it.`,
       };
     }
@@ -1168,10 +1175,19 @@ export function consumeDispatchHandoffTask(
       checkpoint.metadata = decoded.metadata;
       checkpointStep(checkpoint, "taskConsumed");
     } catch (error) {
+      const predecessorSessionId = decoded.metadata?.sessionId || checkpoint.predecessorSession || null;
+      const priorState = predecessorSessionId
+        ? readSessionStateHandoff(predecessorSessionId)
+        : null;
+      const claimedBySession = priorState?.record?.consumedBySession || null;
+      const cliMessage = describeCliError(error) || "Could not consume handoff task.";
       return {
         ok: false,
         id: taskId,
-        message: describeCliError(error) || "Could not consume handoff task.",
+        claimedBySession,
+        message: claimedBySession
+          ? `${cliMessage}\n\nAlready consumed by session \`${claimedBySession}\`.`
+          : cliMessage,
       };
     }
   }
@@ -1220,10 +1236,18 @@ export function formatConsumeResult(
   result, { deferComplete = false } = {},
 ) {
   if (!result?.ok) {
+    const claimant = result?.claimedBySession;
     return (
       `${result?.message || "Handoff could not be consumed."}\n\n` +
       "Handoff consumption is blocked. Do not treat the missing brief as " +
-      "completion or reconstruct a different objective from session history."
+      "completion or reconstruct a different objective from session history." +
+      (claimant
+        ? `\n\nClaimant session: \`${claimant}\`. If this handoff was not ` +
+          "expected to already be claimed (e.g. it looks like a duplicate " +
+          "or racing consumption attempt), tell the user and offer to file " +
+          "a bug referencing this session id -- do not file one " +
+          "automatically without asking."
+        : "")
     );
   }
   return [
