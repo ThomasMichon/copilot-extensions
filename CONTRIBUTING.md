@@ -568,6 +568,32 @@ Review requires evidence at the real divergence seam, not only a mocked
 Keep this live Windows check focused; the required CI guard remains static and
 fast.
 
+### Ephemeral Process Reaping
+
+Launching a background/detached process invisibly (the section above) is only
+half the contract. Any change that adds or modifies a detached process, a
+per-worktree/per-task helper, or anything else that must outlive its parent
+invocation must also state **how it gets reaped** — classify it against
+[`ephemeral-process-reaping`](docs/patterns/ephemeral-process-reaping.md) and
+answer, in the PR description or a code comment at the reap site:
+
+1. What is the real liveness signal for the unit this process serves (a
+   worktree's mux + PID liveness, a service's lease file, ...) — not "a hook
+   fired"?
+2. Where is the polling-based reap that requires no cooperation from the
+   dying process — a hook-only reap is a fast path, never the only path.
+   Reuse an existing bounded sweep (e.g. `session_catalog.py`'s resident
+   reconciler) rather than adding a new poller.
+3. Is the reap idempotent and silent on an already-dead target?
+4. Confirm it is **not** implemented inside a preservation-oriented lifecycle
+   command (`finalize`/`cleanup`) — those must not also own process teardown.
+
+A detached process with a described launch path but no described reap path is
+an incomplete change, not a follow-up: #2265 and #2269/#2270 are what an
+"it'll get cleaned up somehow" assumption costs in practice (a machine-wide
+process/window leak discovered only once it made a laptop's fans and keyboard
+noticeably hot).
+
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:
 

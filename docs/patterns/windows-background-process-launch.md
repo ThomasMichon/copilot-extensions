@@ -89,4 +89,6 @@ the static guard and unit contract remain the portable CI gate.
 
 - [cross-platform-parity](cross-platform-parity.md)
 - [service-lifecycle-supervision](service-lifecycle-supervision.md)
+- [ephemeral-process-reaping](ephemeral-process-reaping.md) — this pattern
+  gets a process invisibly launched; that one gets it reliably reaped
 - [`windows-launch-hardening` effort](../../efforts/active/windows-launch-hardening/README.md)

@@ -159,3 +159,5 @@ about every plugin service identically.
 - Intent: [`visions/plugin-services/`](../../visions/plugin-services/README.md)
 - Hub: [`docs/patterns/`](README.md) · Deploy contract:
   [`install-contract.md`](../install-contract.md)
+- Teardown of unregistered, per-unit-of-work helper processes (not a
+  supervised service): [`ephemeral-process-reaping`](ephemeral-process-reaping.md)
